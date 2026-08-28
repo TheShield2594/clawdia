@@ -55,6 +55,10 @@ const MAX_LIST_PAGES = 10;
 // thing — rather than failed, so the list methods read this as an empty list.
 const METHOD_NOT_FOUND = -32601;
 
+// JSON-RPC's "it went wrong on my side", which is what a client answers a
+// server request it accepted and then could not carry out.
+const INTERNAL_ERROR = -32603;
+
 // The shared servers — DeepWiki, Context7 without a key — rate-limit, and a
 // 429 that says "try again in two seconds" is worth waiting out rather than
 // reporting to a Discord channel as a failure. Only once, and only for a wait
@@ -120,8 +124,15 @@ function jsonRpcResult(message) {
  * ellipsis wants to know — and everything else is skipped. The stream is
  * dropped as soon as the answer arrives: the server is allowed to hold it open
  * afterwards, and waiting that out would stall the turn.
+ *
+ * A stream can also carry a *request* from the server — an `elicitation/create`
+ * asking the person for something the tool needs (#838). Those have both an id
+ * and a method, which is what tells them from the two kinds of message that
+ * have only one, and they go to `onServerRequest`. It is called and not
+ * awaited: answering means asking a human, the reply comes back as a separate
+ * POST, and the tool result is still coming down this stream in the meantime.
  */
-async function readEventStream(stream, id, onNotification = null) {
+async function readEventStream(stream, id, onNotification = null, onServerRequest = null) {
     let buffer = '';
     let data = [];
 
@@ -130,8 +141,8 @@ async function readEventStream(stream, id, onNotification = null) {
      *
      * A notification is delivered on the way past and reported as "not it", so
      * the loop keeps reading. A JSON-RPC notification is a message with a
-     * method and no id, which is also what tells it apart from a response to
-     * some other request on the same stream.
+     * method and no id; a server-initiated request has both; a response to
+     * some other request on the same stream has only an id, and is skipped.
      */
     const finish = () => {
         if (!data.length) return undefined;
@@ -148,14 +159,18 @@ async function readEventStream(stream, id, onNotification = null) {
         if (!message || typeof message !== 'object') return undefined;
         if (message.id === id) return message;
 
-        if (onNotification && message.id === undefined && typeof message.method === 'string') {
-            try {
-                onNotification(message);
-            } catch (err) {
-                // A listener that throws is a bug in whoever is watching, not a
-                // reason to lose the tool result still coming down this stream.
-                console.warn(`[MCP] notification listener failed: ${err.message}`);
-            }
+        if (typeof message.method !== 'string') return undefined;
+
+        const listener = message.id === undefined ? onNotification : onServerRequest;
+        try {
+            // A server request with no handler is answered by the caller's own
+            // "method not found", which is `post`'s business rather than this
+            // reader's; here there is simply nobody to hand it to.
+            if (listener) listener(message);
+        } catch (err) {
+            // A listener that throws is a bug in whoever is watching, not a
+            // reason to lose the tool result still coming down this stream.
+            console.warn(`[MCP] ${message.id === undefined ? 'notification' : 'request'} listener failed: ${err.message}`);
         }
         return undefined;
     };
@@ -269,7 +284,7 @@ async function readWithDeadline(read, stream, deadline) {
         return await Promise.race([
             read,
             new Promise((_, reject) => {
-                timer = setTimeout(() => {
+                const abort = () => {
                     // The read is about to lose the race; whatever destroying
                     // the stream makes it throw has nowhere to go and must not
                     // surface as an unhandled rejection.
@@ -279,11 +294,25 @@ async function readWithDeadline(read, stream, deadline) {
                         'the server sent response headers but no answer before the deadline',
                         { code: 'ETIMEDOUT' }
                     ));
-                }, Math.max(1, deadline - Date.now()));
-                timer.unref?.();
+                };
+
+                // Re-aimed rather than re-armed. The deadline moves when an
+                // elicitation puts the exchange in front of a person (#838),
+                // and the two ways to handle that are a timer that fires only
+                // to discover it should not have, or the extension moving the
+                // timer. The second is one `clearTimeout` per extension
+                // instead of one wakeup per deadline, and it keeps this a
+                // one-shot timer rather than a self-rescheduling one.
+                deadline.reschedule = () => {
+                    clearTimeout(timer);
+                    timer = setTimeout(abort, Math.max(1, deadline.at - Date.now()));
+                    timer.unref?.();
+                };
+                deadline.reschedule();
             })
         ]);
     } finally {
+        deadline.reschedule = null;
         clearTimeout(timer);
     }
 }
@@ -337,8 +366,25 @@ class McpHttpClient {
      *        `notifications/tools/list_changed` arrives on — a message about the
      *        connection rather than about any one request, and one no caller is
      *        in a position to be waiting for.
+     * @param {boolean} [options.elicitation] whether to tell servers this
+     *        client can put a question to a person (#838). A declaration rather
+     *        than a handler, because the handler is per *request*: this client
+     *        is pooled by (url, credential), so one instance is shared by every
+     *        guild pointed at that server, and a person to ask belongs to one
+     *        Discord message rather than to the connection. The question
+     *        arrives on the stream of the tool call that caused it, which is
+     *        exactly the scope that knows whose channel to ask in — see
+     *        `callTool`'s `onElicit`. A request with nobody behind it is
+     *        answered `cancel`, which is the spec's "no choice was made".
      */
-    constructor({ url, authorizationToken = null, label = 'MCP server', getAccessToken = null, onNotification = null }) {
+    constructor({
+        url,
+        authorizationToken = null,
+        label = 'MCP server',
+        getAccessToken = null,
+        onNotification = null,
+        elicitation = false,
+    }) {
         // Throws for anything that is not a plain http(s) URL, and for a literal
         // private address — the one destination that is knowable before DNS.
         this.url = assertPublicHttpUrl(url, `${label} URL`).toString();
@@ -348,6 +394,7 @@ class McpHttpClient {
             : null;
         this.getAccessToken = typeof getAccessToken === 'function' ? getAccessToken : null;
         this.onNotification = typeof onNotification === 'function' ? onNotification : null;
+        this.elicitation = Boolean(elicitation);
         this.sessionId = null;
         this.protocolVersion = null;
         this.serverInfo = null;
@@ -422,13 +469,16 @@ class McpHttpClient {
         };
     }
 
-    async post(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true, authRetried = false, onNotification = null } = {}) {
+    async post(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true, authRetried = false, onNotification = null, onServerRequest = null } = {}) {
         await this.authorize();
 
         // One deadline for the whole exchange, headers and body alike. The
         // axios timeout below only bounds the wait for headers; every body
         // read after it gets whatever is left of the same budget.
-        const deadline = Date.now() + timeout;
+        // An object rather than a number, because an elicitation moves it: the
+        // time a person spends answering the server's question is not time the
+        // server spent failing to answer ours.
+        const deadline = { at: Date.now() + timeout, reschedule: null };
         let response;
         try {
             response = await axios.post(this.url, payload, {
@@ -453,7 +503,7 @@ class McpHttpClient {
             if (wait !== null) {
                 response.data?.destroy?.();
                 await new Promise(resolve => setTimeout(resolve, wait));
-                return this.post(payload, { id, timeout, retryable: false, authRetried, onNotification });
+                return this.post(payload, { id, timeout, retryable: false, authRetried, onNotification, onServerRequest });
             }
         }
 
@@ -471,7 +521,7 @@ class McpHttpClient {
             // token: retrying with the same credential is the same request again.
             if (response.status === 401 && this.getAccessToken && !authRetried
                 && await this.authorize({ force: true })) {
-                return this.post(payload, { id, timeout, retryable, authRetried: true, onNotification });
+                return this.post(payload, { id, timeout, retryable, authRetried: true, onNotification, onServerRequest });
             }
 
             throw httpError(response.status, body, challenge);
@@ -488,9 +538,68 @@ class McpHttpClient {
 
         const contentType = String(response.headers['content-type'] || '');
         const read = contentType.includes('text/event-stream')
-            ? readEventStream(response.data, id, this.notificationSink(onNotification))
+            ? readEventStream(
+                response.data,
+                id,
+                this.notificationSink(onNotification),
+                request => this.answerServerRequest(request, onServerRequest, deadline)
+            )
             : collectText(response.data).then(text => parseJsonBody(text, id));
         return readWithDeadline(read, response.data, deadline);
+    }
+
+    /**
+     * Answer a request the *server* sent us, on a POST of its own.
+     *
+     * The transport has no way to write back up the stream a request arrived
+     * on, so the answer is an ordinary POST carrying a JSON-RPC response with
+     * the server's id on it. Nothing waits for it here: the tool result is
+     * still coming down the original stream, and answering an elicitation
+     * means asking a person, which takes as long as a person takes.
+     *
+     * The deadline is pushed out for exactly that reason. Sixty seconds of
+     * somebody reading a question is not sixty seconds of the server failing to
+     * answer, and without this the tool call the elicitation belongs to would
+     * be killed underneath the prompt still sitting in the channel — and the
+     * server left holding a request nobody will ever answer.
+     *
+     * A method this client does not serve is refused with JSON-RPC's own "no
+     * such method" rather than ignored, because a server that gets no answer
+     * waits for one: an unanswered `sampling/createMessage` is a tool call that
+     * hangs until its own deadline instead of failing in a sentence.
+     */
+    async answerServerRequest(request, onElicit, deadline) {
+        const reply = body => this.post({ jsonrpc: '2.0', id: request.id, ...body })
+            .catch(err => console.warn(`[MCP] could not answer "${this.label}"'s ${request.method}: ${err.message}`));
+
+        if (request.method !== 'elicitation/create') {
+            return reply({ error: { code: METHOD_NOT_FOUND, message: `${request.method} is not supported by this client` } });
+        }
+        if (typeof onElicit !== 'function') {
+            // The capability is the connection's and the person is the
+            // request's, so a scheduled task or a command parsing the reply as
+            // JSON reaches here with nobody to ask. `cancel` is the spec's
+            // "no choice was made", which is exactly true.
+            return reply({ result: { action: 'cancel' } });
+        }
+
+        try {
+            const result = await onElicit(request.params ?? {}, {
+                // Handed to the handler rather than applied around it: only the
+                // handler knows how long it is about to be, and a fixed
+                // extension would be either too short for a person or long
+                // enough to hold a Discord reply open on a server that asked
+                // and then went away.
+                extendDeadline: ms => {
+                    deadline.at = Math.max(deadline.at, Date.now() + ms);
+                    deadline.reschedule?.();
+                }
+            });
+            return reply({ result });
+        } catch (err) {
+            console.warn(`[MCP] "${this.label}" asked for ${request.method} and it failed: ${err.message}`);
+            return reply({ error: { code: INTERNAL_ERROR, message: err.message || 'the client could not answer' } });
+        }
     }
 
     /**
@@ -501,8 +610,11 @@ class McpHttpClient {
      * so a caller with nothing to show is not sent updates it would throw away.
      * The request id doubles as the token — it is already unique per connection,
      * which is what the spec asks of it.
+     *
+     * `onElicit` is opt-in for a different reason: it is a person, and a
+     * request is the smallest scope that knows which one (#838).
      */
-    async request(method, params, { timeout, onProgress } = {}) {
+    async request(method, params, { timeout, onProgress, onElicit } = {}) {
         const id = ++this.nextId;
         const wantsProgress = typeof onProgress === 'function';
         const body = wantsProgress
@@ -511,7 +623,12 @@ class McpHttpClient {
 
         const message = await this.post(
             { jsonrpc: '2.0', id, method, params: body },
-            { id, timeout, onNotification: wantsProgress ? progressReader(id, onProgress) : null }
+            {
+                id,
+                timeout,
+                onNotification: wantsProgress ? progressReader(id, onProgress) : null,
+                onServerRequest: onElicit,
+            }
         );
         return jsonRpcResult(message);
     }
@@ -540,9 +657,7 @@ class McpHttpClient {
     async handshakeOnce() {
         const result = await this.request('initialize', {
             protocolVersion: PROTOCOL_VERSION,
-            // Empty on purpose: this client answers no server-initiated
-            // requests, so it claims no capability that would invite one.
-            capabilities: {},
+            capabilities: this.clientCapabilities(),
             clientInfo: { name: 'clawdia', version: CLAWDIA_VERSION }
         });
 
@@ -560,6 +675,31 @@ class McpHttpClient {
 
         await this.notify('notifications/initialized');
         return this;
+    }
+
+    /**
+     * What this client tells a server it will answer.
+     *
+     * Read off the handlers it was actually given, because a capability is a
+     * promise: a server that is told `elicitation` and then gets "no such
+     * method" has been sent down a path that ends in a tool call hanging until
+     * its deadline. Declaring nothing is the honest answer for a caller with no
+     * person to ask — a scheduled task, a command parsing the reply as JSON —
+     * and it is also what this client did in every case before (#838).
+     *
+     * `roots` stays absent on purpose rather than by omission. It is the
+     * client offering a filesystem for a server to work inside, and this client
+     * is a Discord bot: there is no project directory a guild's question is
+     * being asked about, and the honest answer to "what are your roots" is that
+     * there are none. `sampling` is absent for a different reason — it is a
+     * server asking to spend the guild's model budget, which wants the same
+     * ledger and confirmation the tool loop already has, and that is more than
+     * a capability declaration.
+     */
+    clientCapabilities() {
+        const capabilities = {};
+        if (this.elicitation) capabilities.elicitation = {};
+        return capabilities;
     }
 
     /**
@@ -686,7 +826,7 @@ class McpHttpClient {
      * thrown: "that repository does not exist" is an answer the model should see
      * and work around, not a reason to abandon the reply.
      */
-    async callTool(name, args, { onProgress, timeout } = {}) {
+    async callTool(name, args, { onProgress, timeout, onElicit } = {}) {
         await this.initialize();
         // A caller with a deadline of its own can ask for less than the call
         // timeout, never more: a tool that answers in forty seconds is still a
@@ -699,7 +839,10 @@ class McpHttpClient {
         const result = await this.request(
             'tools/call',
             { name, arguments: args && typeof args === 'object' ? args : {} },
-            { timeout: limit, onProgress }
+            // `onElicit` rides with the call rather than with the connection:
+            // a question this tool raises belongs to the message that asked for
+            // it, and the pooled client is shared by every guild on this URL.
+            { timeout: limit, onProgress, onElicit }
         );
         return {
             content: Array.isArray(result.content) ? result.content : [],
@@ -732,6 +875,7 @@ class McpHttpClient {
 module.exports = {
     McpHttpClient,
     McpError,
+    INTERNAL_ERROR,
     retryAfterMs,
     progressReader,
     MAX_RETRY_AFTER_MS,

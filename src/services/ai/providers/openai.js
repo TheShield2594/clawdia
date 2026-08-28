@@ -231,8 +231,8 @@ async function runToolCalls({ toolkit, messages, calls, content }) {
     });
 }
 
-async function* stream({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
+async function* stream({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     // What `noStreamOptions` is keyed on. `baseURL` is undefined for OpenAI
@@ -293,8 +293,8 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, images, t
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
+async function complete({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = buildMessages({ systemPrompt, history, prompt, images, model, visionCapable });

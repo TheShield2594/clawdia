@@ -131,13 +131,14 @@ function entryFor(server) {
  * particular is easy to add in one place and forget in the other, which shows
  * up as a connection that works in a channel and 401s in the panel.
  */
-function mcpClientFor(server, { onNotification = null } = {}) {
+function mcpClientFor(server, { onNotification = null, elicitation = false } = {}) {
     const grant = server.connection.oauth;
     return new McpHttpClient({
         url: server.connection.url,
         authorizationToken: server.connection.authorizationToken,
         label: server.name,
         onNotification,
+        elicitation,
         // Required lazily: the store reaches the Guild model, and this module is
         // loaded by the config layer the model's own schema sits under. A static
         // token connection never touches it.
@@ -149,7 +150,22 @@ function mcpClientFor(server, { onNotification = null } = {}) {
 
 function clientFor(entry, server) {
     if (!entry.client) {
-        entry.client = mcpClientFor(server, { onNotification: notificationListener(entry, server.name) });
+        entry.client = mcpClientFor(server, {
+            onNotification: notificationListener(entry, server.name),
+            // Declared on every pooled client, and answered per call (#838).
+            // The declaration has to be the connection's — it is made once, in
+            // a handshake shared by every guild on this URL — while the person
+            // to ask belongs to one Discord message, so the handler rides with
+            // the tool call instead. A call with nobody behind it answers
+            // "cancel", which is the spec's "no choice was made" and true.
+            //
+            // The alternative was to declare it only for connections a chat
+            // turn opens, which would mean a second pool keyed on who is
+            // asking: a scheduled digest and a channel message would stop
+            // sharing a session with the same server, for a capability the
+            // digest declines in one line anyway.
+            elicitation: true,
+        });
     }
     return entry.client;
 }

@@ -117,8 +117,10 @@ describe('a connection that answers', () => {
             label: 'github',
             getAccessToken: null,
             // A one-off probe belongs to no pooled entry, so there is no
-            // cached list for a `list_changed` to invalidate (#838).
-            onNotification: null
+            // cached list for a `list_changed` to invalidate, and no channel
+            // to put a question to (#838).
+            onNotification: null,
+            elicitation: false
         }]);
     });
 

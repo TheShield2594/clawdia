@@ -90,7 +90,11 @@ describe('discovery', () => {
             getAccessToken: null,
             // The pool's own listener, which drops a cached list when the
             // server says it changed (#838).
-            onNotification: expect.any(Function)
+            onNotification: expect.any(Function),
+            // Declared once per pooled connection; the handler that answers it
+            // rides with each tool call, because the person to ask belongs to
+            // one Discord message and this client is shared.
+            elicitation: true
         }]);
     });
 
@@ -651,5 +655,46 @@ describe('confirmation', () => {
 
         await toolkit.call('github__search', {});
         expect(confirmTool).toHaveBeenCalled();
+    });
+});
+
+/**
+ * #838. The client is pooled by (url, credential) and shared by every guild
+ * pointed at that server, so a handler living on it would answer one guild's
+ * question in another guild's channel. A tool call belongs to exactly one
+ * message, which is the scope that knows whose channel to ask in.
+ */
+describe('a question a tool call raises', () => {
+    test('rides with the call rather than with the connection', async () => {
+        const toolkit = await prepareMcpToolkit([GITHUB], { elicit: jest.fn() });
+        await toolkit.call('github__search_repositories', {});
+
+        expect(mockCallTool).toHaveBeenCalledWith(
+            'search_repositories', {},
+            expect.objectContaining({ onElicit: expect.any(Function) }),
+        );
+    });
+
+    // The prompt has to say which server is asking, and the call site is where
+    // that is known.
+    test('and arrives at the handler naming the server it came from', async () => {
+        const elicit = jest.fn(async () => ({ action: 'decline' }));
+        const toolkit = await prepareMcpToolkit([GITHUB], { elicit });
+        await toolkit.call('github__search_repositories', {});
+
+        const { onElicit } = mockCallTool.mock.calls[0][2];
+        await onElicit({ message: 'which one?' }, { extendDeadline: () => {} });
+
+        expect(elicit).toHaveBeenCalledWith('github', { message: 'which one?' }, expect.any(Object));
+    });
+
+    // A scheduled task or a command parsing the reply as JSON has nobody to
+    // ask, and passes no handler at all; the client answers those "cancel"
+    // rather than being handed an undefined to call.
+    test('a turn with nobody to ask passes no handler', async () => {
+        const toolkit = await prepareMcpToolkit([GITHUB]);
+        await toolkit.call('github__search_repositories', {});
+
+        expect(mockCallTool.mock.calls[0][2].onElicit).toBeUndefined();
     });
 });

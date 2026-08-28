@@ -467,6 +467,12 @@ function renderResult(
  *        An optional `toolBudget.peek()` reports the same without spending, so
  *        a call waiting on a person's approval can be refused early and charged
  *        late (#826)
+ * @param {Function} [options.elicit] `(server, params, ctx) => result` for a
+ *        server that asks the user a question mid-call (#838). Per turn, and
+ *        passed down to the call rather than held on the pooled client, because
+ *        the client is shared by every guild on that URL and the person to ask
+ *        belongs to one message. Absent — a scheduled task, a command parsing
+ *        the reply as JSON — means questions are answered "no choice made"
  * @param {Array} [options.botTools] tools the bot owns rather than a server —
  *        the in-channel actions (#832). Each carries the same fields a
  *        discovered tool does plus `run(args)`, which is called instead of a
@@ -478,6 +484,7 @@ async function prepareMcpToolkit(guildServers = [], {
     onToolEvent,
     confirmMode = DEFAULT_CONFIRM_MODE,
     confirmTool,
+    elicit,
     toolBudget,
     botTools = [],
     // Both default to the chat numbers, so every existing caller gets exactly
@@ -933,6 +940,15 @@ async function prepareMcpToolkit(guildServers = [], {
         const onProgress = ({ progress, total, message }) =>
             emit({ ...describe, type: 'progress', progress, total, message });
 
+        // A question this call raises, put to the person who asked for the
+        // reply. Bound to the server name here because that is what the prompt
+        // has to say out loud — "the github server is asking you" — and the
+        // handler itself belongs to the turn rather than to any one call, so
+        // its per-turn ceiling counts every server's questions together.
+        const onElicit = typeof elicit === 'function'
+            ? (params, ctx) => elicit(server, params, ctx)
+            : undefined;
+
         try {
             // Queued behind this server's other calls rather than the round's:
             // six calls at one server is a burst that server sees as one client
@@ -949,7 +965,7 @@ async function prepareMcpToolkit(guildServers = [], {
                 // after it. Below the call timeout this is the tighter of the
                 // two; above it, the call timeout still wins.
                 return withSession(target.entry, target.server, client =>
-                    client.callTool(target.toolName, args, { onProgress, timeout: remaining }));
+                    client.callTool(target.toolName, args, { onProgress, timeout: remaining, onElicit }));
             });
 
             if (!result) {
@@ -1045,11 +1061,11 @@ async function prewarmMcpServers(guildServers = [], { concurrency = 4, only = nu
  * `useMcp` is the caller's switch — commands that parse the reply as JSON pass
  * it false — and is checked here so no provider has to remember to.
  */
-async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs } = {}) {
+async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs } = {}) {
     if (useMcp === false) return null;
     try {
         return await prepareMcpToolkit(mcpServers, {
-            onToolEvent, confirmMode: mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs
+            onToolEvent, confirmMode: mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs
         });
     } catch (err) {
         // Discovery is best-effort in every direction: an unreadable config or
