@@ -323,6 +323,19 @@ const guildSchema = new Schema({
         rateLimitPerUser: { type: Number, default: 20 },
         rateLimitPerChannel: { type: Number, default: 0 },
         rateLimitWindowMin: { type: Number, default: 10 },
+        // A ceiling on what this guild may spend in a calendar month, read back
+        // from the AIUsage ledger at the same chokepoint the sliding windows are
+        // applied (#831). The per-user and per-channel windows bound one person;
+        // neither bounds a server in aggregate, and neither applies at all to
+        // the scheduled runs, which have nobody to attribute them to.
+        //
+        // Both are optional and 0 means unbounded — an operator who thinks in
+        // dollars sets one, an operator who thinks in tokens sets the other, and
+        // either one reaching its limit refuses. Cost is estimated from the
+        // provider pricing tables, so a model with no pricing row counts toward
+        // the token ceiling and not the cost one.
+        monthlyTokenLimit: { type: Number, default: 0, min: 0 },
+        monthlyCostLimit: { type: Number, default: 0, min: 0 },
         // Per-channel personas: each entry overrides systemPrompt for that channel
         channelPersonas: {
             type: [{
@@ -444,6 +457,13 @@ const guildSchema = new Schema({
         },
         // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)
         actionsEnabled: { type: Boolean, default: false },
+        // Whether `/ai task` is available on this server (#835). Off by default
+        // and per guild, because a task turn is a much larger unit of spend than
+        // a chat message — three times the tool rounds and five times the wall
+        // clock — and it runs detached, so the bot keeps working after the
+        // person who asked has walked away. Guarded further by an allowance of
+        // its own in services/ai/rateLimit.js.
+        taskModeEnabled: { type: Boolean, default: false },
         dailyDigest: {
             enabled:          { type: Boolean, default: false },
             channelId:        { type: String, default: null },

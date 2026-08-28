@@ -93,9 +93,17 @@
                             <div><label class="field-label" for="ai-rate-channel">Rate limit (requests / channel)</label><input type="number" id="ai-rate-channel" min="0" value="<%= settings.ai.rateLimitPerChannel ?? 0 %>"><small>0 disables</small></div>
                             <div><label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label><input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>"></div>
                         </div>
+                        <div class="field field-pair">
+                            <div><label class="field-label" for="ai-monthly-tokens">Monthly token budget</label><input type="number" id="ai-monthly-tokens" min="0" step="1000" value="<%= settings.ai.monthlyTokenLimit ?? 0 %>"><small>0 disables. Counts every AI call this server makes, scheduled ones included</small></div>
+                            <div><label class="field-label" for="ai-monthly-cost">Monthly cost budget (USD)</label><input type="number" id="ai-monthly-cost" min="0" step="0.5" value="<%= settings.ai.monthlyCostLimit ?? 0 %>"><small>0 disables. Estimated from provider pricing; resets on the 1st (UTC)</small></div>
+                        </div>
                         <label class="toggle">
-                            <span class="toggle-text"><strong>Enable AI actions</strong><span>Let the AI create polls, set reminders, and suggest mod actions</span></span>
+                            <span class="toggle-text"><strong>Enable AI actions</strong><span>Let the AI create polls, set reminders, schedule tasks, and suggest mod actions</span></span>
                             <span class="switch"><input type="checkbox" id="ai-actions-enabled" <%= settings.ai.actionsEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable deep tasks</strong><span>Allow <code>/ai task</code> — multi-step work with a bigger tool budget, posted when it finishes. Costs much more per run than a chat message.</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-task-mode" <%= settings.ai.taskModeEnabled ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
                         <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
                         <div class="actions-row">
@@ -108,6 +116,7 @@
                                 <h3>📊 Token usage</h3>
                                 <span class="muted" id="ai-usage-status">Loading…</span>
                             </div>
+                            <div id="ai-usage-budget"></div>
                             <div class="ai-usage-stats">
                                 <div class="ai-usage-stat">
                                     <div class="ai-usage-stat-label">Today</div>

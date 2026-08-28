@@ -1,4 +1,5 @@
 const { BoundedRateLimiter } = require('../../utils/boundedRateLimiter');
+const { peekMonthlyUsage, monthlyBudget } = require('./usage');
 
 // Sliding-window AI rate limiting, per user and per channel.
 //
@@ -31,10 +32,39 @@ const toolCallLimits = new BoundedRateLimiter(AI_RL_MAX_KEYS);
 // far short of what four rounds of six parallel calls could ask for every time.
 const TOOL_CALLS_PER_MESSAGE = 8;
 
+// And the same bound for the calls nobody sent.
+//
+// A scheduled run — a digest, a newspaper, a recurring task — has no user to
+// charge, and `toolCallBudget` used to answer that by returning null, which the
+// toolkit reads as unbounded. So the one class of request that runs on a timer,
+// with nobody watching and nobody to notice, was the only one that could fan
+// out without limit: four rounds of six parallel calls, every hour, against
+// somebody else's server in this bot's name.
+//
+// The budget is per guild rather than per job, because the guild is what pays,
+// and the window is an hour because that is the cadence the scheduled work
+// actually runs on — a job that fires hourly gets its full allowance each time,
+// and a guild that has stacked up several of them shares one.
+const SCHEDULED_TOOL_CALLS_PER_HOUR = 24;
+const SCHEDULED_WINDOW_MS = 60 * 60 * 1000;
+
+// And an allowance of its own for deep task mode (#835).
+//
+// A task turn is attributed to whoever ran it, so the guild's ordinary message
+// and tool windows already apply to it. This is the extra one, because a task
+// is not an ordinary message: three times the rounds and five times the wall
+// clock, running detached from the interaction with the bot free to keep
+// working after the person has walked away. A guild that allows twenty messages
+// an hour did not thereby allow twenty of those.
+const deepTaskLimits = new BoundedRateLimiter(AI_RL_MAX_KEYS);
+const DEEP_TASKS_PER_WINDOW = 3;
+const DEEP_TASK_WINDOW_MS = 60 * 60 * 1000;
+
 setInterval(() => {
     rateLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
     channelRateLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
     toolCallLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
+    deepTaskLimits.cleanup(DEEP_TASK_WINDOW_MS);
 }, 15 * 60 * 1000).unref();
 
 /**
@@ -53,6 +83,75 @@ class AiRateLimitError extends Error {
         this.scope = scope;
         this.limit = limit;
         this.windowMin = windowMin;
+    }
+}
+
+/**
+ * Thrown when a guild has spent its configured monthly AI allowance.
+ *
+ * A sibling of AiRateLimitError rather than a subclass of it: both are refusals
+ * no retry loop should re-attempt (`rateLimited`), and every transport already
+ * shows `err.message` for one — but the two say different things to the person
+ * reading. A rate limit clears in minutes and the wording says "shortly"; this
+ * one clears on the first of the month, and telling somebody to try again in a
+ * moment would be a lie.
+ */
+class AiBudgetError extends Error {
+    constructor({ usedTokens, limitTokens, usedCost, limitCost, exceeded }) {
+        super(exceeded === 'cost'
+            ? `This server has reached its monthly AI budget ($${limitCost.toFixed(2)}). It resets at the start of next month.`
+            : `This server has reached its monthly AI budget (${limitTokens.toLocaleString()} tokens). It resets at the start of next month.`);
+        this.name = 'AiBudgetError';
+        this.rateLimited = true;
+        this.scope = 'guild';
+        this.exceeded = exceeded;
+        this.usedTokens = usedTokens;
+        this.limitTokens = limitTokens;
+        this.usedCost = usedCost;
+        this.limitCost = limitCost;
+    }
+}
+
+/**
+ * What is left of a guild's monthly allowance, or null when it has none set (or
+ * when the month's totals have not been read yet).
+ *
+ * Exported so the dashboard's usage panel shows the same number enforcement
+ * uses, rather than a second calculation that can disagree with it.
+ */
+function monthlyBudgetState(guildId, limits) {
+    if (!guildId) return null;
+    // The shape is `usage.monthlyBudget`'s, shared with the dashboard panel so
+    // the number on screen and the number doing the refusing cannot drift
+    // apart. What differs is only where the totals come from: enforcement reads
+    // the cache, because this call sits on a synchronous path.
+    return monthlyBudget(peekMonthlyUsage(guildId), limits);
+}
+
+/**
+ * Refuse a call that would spend past the guild's monthly ceiling.
+ *
+ * Both ceilings are optional and either one is enough to refuse: an operator
+ * who thinks in dollars sets the cost one, one who thinks in tokens sets the
+ * other, and a guild with neither is unbounded exactly as before.
+ */
+function enforceMonthlyBudget(guildId, rateLimit) {
+    const state = monthlyBudgetState(guildId, rateLimit);
+    if (!state) return;
+
+    if (state.tokens && state.tokens.used >= state.tokens.limit) {
+        throw new AiBudgetError({
+            exceeded: 'tokens',
+            usedTokens: state.tokens.used, limitTokens: state.tokens.limit,
+            usedCost: state.cost?.used ?? 0, limitCost: state.cost?.limit ?? 0
+        });
+    }
+    if (state.cost && state.cost.used >= state.cost.limit) {
+        throw new AiBudgetError({
+            exceeded: 'cost',
+            usedTokens: state.tokens?.used ?? 0, limitTokens: state.tokens?.limit ?? 0,
+            usedCost: state.cost.used, limitCost: state.cost.limit
+        });
     }
 }
 
@@ -102,6 +201,14 @@ function enforceRateLimit({ guildId, userId, channelId, rateLimit }) {
     const { perUser, perChannel, windowMin } = rateLimit;
     const userKey = userId && (guildId ? `${guildId}:${userId}` : userId);
 
+    // Widest bound first, and the only one that applies to a call nobody sent:
+    // the scheduled digests and newspapers spend the same guild's money as
+    // everybody else, and a ceiling they could route around would not be one.
+    // Refusing here spends no per-user or per-channel slot, which matters —
+    // the guild is out of budget either way and the person should not also
+    // lose their own allowance to the refusal.
+    enforceMonthlyBudget(guildId, rateLimit);
+
     // Channel first: it is the wider bound, and refusing on it should not
     // silently spend one of the user's own slots.
     if (channelId && !peekChannelRateLimit(channelId, perChannel, windowMin)) {
@@ -141,14 +248,34 @@ function userRateLimitKey(guildId, userId) {
  * charged once somebody has said yes and the call is actually going to run.
  */
 function toolCallBudget({ guildId, userId, rateLimit }) {
-    if (!rateLimit || !userId) return null;
+    // A call with nobody to charge it to is the scheduled work, and it gets a
+    // budget of its own (#831) rather than the null that used to mean
+    // unbounded. Keyed on the guild, since that is who pays for it.
+    if (!userId) return guildId ? spender(`scheduled:${guildId}`, SCHEDULED_WINDOW_MS, SCHEDULED_TOOL_CALLS_PER_HOUR) : null;
+
+    if (!rateLimit) return null;
     const { perUser, windowMin } = rateLimit;
     if (!perUser || perUser <= 0) return null;
 
-    const key = userRateLimitKey(guildId, userId);
-    const limit = perUser * TOOL_CALLS_PER_MESSAGE;
-    const windowMs = (windowMin || 10) * 60 * 1000;
+    return spender(
+        userRateLimitKey(guildId, userId),
+        (windowMin || 10) * 60 * 1000,
+        perUser * TOOL_CALLS_PER_MESSAGE
+    );
+}
 
+/**
+ * Spend one of this person's deep-task slots, and say whether there was one.
+ *
+ * Keyed per guild for the same reason the message window is: the allowance and
+ * the API key being billed both belong to one server.
+ */
+function checkDeepTaskLimit(guildId, userId) {
+    return deepTaskLimits.check(userRateLimitKey(guildId, userId), DEEP_TASK_WINDOW_MS, DEEP_TASKS_PER_WINDOW);
+}
+
+/** A budget function over one key, in the shape the MCP toolkit spends. */
+function spender(key, windowMs, limit) {
     const budget = () => toolCallLimits.check(key, windowMs, limit);
     budget.peek = () => toolCallLimits.peek(key, windowMs, limit);
     return budget;
@@ -156,6 +283,13 @@ function toolCallBudget({ guildId, userId, rateLimit }) {
 
 module.exports = {
     checkRateLimit,
+    monthlyBudgetState,
+    checkDeepTaskLimit,
+    DEEP_TASKS_PER_WINDOW,
+    DEEP_TASK_WINDOW_MS,
+    enforceMonthlyBudget,
+    AiBudgetError,
+    SCHEDULED_TOOL_CALLS_PER_HOUR,
     checkChannelRateLimit,
     peekRateLimit,
     peekChannelRateLimit,

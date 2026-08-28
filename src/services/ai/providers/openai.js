@@ -1,6 +1,6 @@
 const OpenAI = require('openai');
 const { decryptSecret } = require('../../../config/secretBox');
-const { toolkitFor, mapWithLimit, MAX_TOOL_ROUNDS, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // USD per 1M tokens (input, output). Prefix-matched; unknown models report
 // null cost via ai/usage.js.
@@ -132,8 +132,9 @@ async function runToolCalls({ toolkit, messages, calls, content }) {
     });
 }
 
-async function* stream({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools });
+async function* stream({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
+    const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = buildMessages({ systemPrompt, history, prompt });
 
@@ -149,7 +150,7 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, temperatu
         // On the last permitted round the tools are withheld, which leaves the
         // model nothing to do but answer. Without that a turn could end on a
         // tool call, and the user would get an empty message.
-        const offerTools = Boolean(toolkit) && round < MAX_TOOL_ROUNDS;
+        const offerTools = Boolean(toolkit) && round < rounds;
 
         const response = await client.chat.completions.create({
             model,
@@ -190,8 +191,9 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, temperatu
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools });
+async function complete({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
+    const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = buildMessages({ systemPrompt, history, prompt });
 
@@ -200,7 +202,7 @@ async function complete({ apiKey, model, systemPrompt, history, prompt, temperat
     const parts = [];
 
     for (let round = 0; ; round++) {
-        const offerTools = Boolean(toolkit) && round < MAX_TOOL_ROUNDS;
+        const offerTools = Boolean(toolkit) && round < rounds;
 
         const completion = await client.chat.completions.create({
             model,

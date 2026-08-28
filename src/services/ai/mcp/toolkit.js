@@ -112,6 +112,23 @@ const MAX_ATTACHMENTS_PER_RESULT = 4;
 // answer. Each round is a full request, so this bounds both latency and spend.
 const MAX_TOOL_ROUNDS = 4;
 
+// And the same two numbers for a turn nobody is watching a message for (#835).
+//
+// Four rounds and ninety seconds are right for a mention-reply: somebody is
+// looking at an ellipsis, and a reply that takes two minutes has failed even if
+// it arrives. They are the wrong numbers for "check these three feeds and diff
+// them against last week", which is several rounds of looking things up before
+// there is anything to say — and which caps the bot at "chatbot with tools"
+// rather than something that can do a piece of work.
+//
+// So the two ceilings are per-toolkit rather than module constants, and the
+// deep-task route asks for the larger pair. Nothing else may: the numbers are
+// only safe because that route runs detached from the interaction, is
+// attributed to the person who asked for it, and has an allowance of its own on
+// top of the ordinary windows.
+const TASK_MAX_TOOL_ROUNDS = 12;
+const TASK_TURN_BUDGET_MS = 8 * 60 * 1000;
+
 // And a ceiling on the whole turn's tool output, because the per-result cap
 // does not compose: four rounds of six calls each returning six thousand
 // characters is a hundred and forty thousand characters of tool text in a
@@ -450,7 +467,11 @@ async function prepareMcpToolkit(guildServers = [], {
     confirmMode = DEFAULT_CONFIRM_MODE,
     confirmTool,
     toolBudget,
-    botTools = []
+    botTools = [],
+    // Both default to the chat numbers, so every existing caller gets exactly
+    // what it got before without saying anything.
+    maxRounds = MAX_TOOL_ROUNDS,
+    turnBudgetMs = TURN_BUDGET_MS
 } = {}) {
     const servers = resolveMcpServers(guildServers);
     // A guild with no servers but with in-channel actions on still has tools to
@@ -695,7 +716,7 @@ async function prepareMcpToolkit(guildServers = [], {
     // Spent across the whole turn rather than per call: see the two constants
     // above for why neither ceiling works on its own.
     let charsSpent = 0;
-    const deadline = Date.now() + TURN_BUDGET_MS;
+    const deadline = Date.now() + turnBudgetMs;
 
     /**
      * A result, labelled with where it came from.
@@ -900,7 +921,9 @@ async function prepareMcpToolkit(guildServers = [], {
 
     // `deferred` is reported so a transport can say "12 tools, 40 more on
     // request" rather than counting the meta-tool as a tool.
-    return { definitions, servers: reached, deferred: deferred.map(entry => entry.name), call };
+    // `maxRounds` rides on the toolkit because the provider loops are what
+    // enforce it, and the toolkit is the only thing they are already handed.
+    return { definitions, servers: reached, deferred: deferred.map(entry => entry.name), call, maxRounds };
 }
 
 /**
@@ -952,10 +975,12 @@ async function prewarmMcpServers(guildServers = [], { concurrency = 4 } = {}) {
  * `useMcp` is the caller's switch — commands that parse the reply as JSON pass
  * it false — and is checked here so no provider has to remember to.
  */
-async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools } = {}) {
+async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs } = {}) {
     if (useMcp === false) return null;
     try {
-        return await prepareMcpToolkit(mcpServers, { onToolEvent, confirmMode: mcpConfirm, confirmTool, toolBudget, botTools });
+        return await prepareMcpToolkit(mcpServers, {
+            onToolEvent, confirmMode: mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs
+        });
     } catch (err) {
         // Discovery is best-effort in every direction: an unreadable config or
         // a bad stored record must not cost the user their answer.
@@ -964,8 +989,20 @@ async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, 
     }
 }
 
+/**
+ * How many tool rounds this turn may take.
+ *
+ * Asked of the toolkit rather than read from the constant, so a deep task gets
+ * its larger ceiling — and so a provider's loop still has a number when there
+ * is no toolkit at all, which is the case the constant used to cover.
+ */
+function roundsFor(toolkit) {
+    return toolkit?.maxRounds ?? MAX_TOOL_ROUNDS;
+}
+
 module.exports = {
     prepareMcpToolkit,
+    roundsFor,
     prewarmMcpServers,
     toolkitFor,
     renderResult,
@@ -976,6 +1013,8 @@ module.exports = {
     MAX_PARALLEL_TOOL_CALLS,
     MAX_PARALLEL_PER_SERVER,
     MAX_TOOL_ROUNDS,
+    TASK_MAX_TOOL_ROUNDS,
+    TASK_TURN_BUDGET_MS,
     MAX_TOOLS,
     DEFERRED_AFTER,
     LOAD_TOOL_NAME,

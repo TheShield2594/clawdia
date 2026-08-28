@@ -32,8 +32,12 @@ jest.mock('../src/services/ai/mcp/client', () => {
 const {
     prepareMcpToolkit,
     resetMcpCache,
+    roundsFor,
     MAX_TOOL_RESULT_CHARS_PER_TURN,
-    TURN_BUDGET_MS
+    MAX_TOOL_ROUNDS,
+    TURN_BUDGET_MS,
+    TASK_MAX_TOOL_ROUNDS,
+    TASK_TURN_BUDGET_MS
 } = require('../src/services/ai/mcp/toolkit');
 
 const GITHUB = { name: 'github', url: 'https://api.githubcopilot.com/mcp/', enabled: true };
@@ -238,5 +242,56 @@ describe('the turn time budget', () => {
         }
 
         expect(seen.at(-1)).toMatchObject({ type: 'end', ok: false, error: 'turn budget spent' });
+    });
+});
+
+// A turn nobody is watching a message for can afford ceilings a mention-reply
+// cannot (#835). They are per-toolkit rather than module constants so that the
+// deep-task route — and only it — can ask for the larger pair.
+describe('a turn with room to work', () => {
+    test('a toolkit built with no opinion gets the chat ceilings', async () => {
+        const toolkit = await prepareMcpToolkit([GITHUB]);
+
+        expect(roundsFor(toolkit)).toBe(MAX_TOOL_ROUNDS);
+
+        const realNow = Date.now;
+        Date.now = () => realNow() + TURN_BUDGET_MS + 1;
+        try {
+            expect(await toolkit.call('github__search', {})).toMatch(/time budget/);
+        } finally {
+            Date.now = realNow;
+        }
+    });
+
+    test('a task toolkit carries its round ceiling for the provider loops to read', async () => {
+        const toolkit = await prepareMcpToolkit([GITHUB], { maxRounds: TASK_MAX_TOOL_ROUNDS });
+        expect(roundsFor(toolkit)).toBe(TASK_MAX_TOOL_ROUNDS);
+    });
+
+    test('and a wall clock long enough for the work it is being given', async () => {
+        const toolkit = await prepareMcpToolkit([GITHUB], { turnBudgetMs: TASK_TURN_BUDGET_MS });
+
+        const realNow = Date.now;
+        // Past where a chat turn would have given up, and well short of this one.
+        Date.now = () => realNow() + TURN_BUDGET_MS + 1;
+        try {
+            expect(await toolkit.call('github__search', {})).toContain('ok');
+        } finally {
+            Date.now = realNow;
+        }
+
+        Date.now = () => realNow() + TASK_TURN_BUDGET_MS + 1;
+        try {
+            expect(await toolkit.call('github__search', {})).toMatch(/time budget/);
+        } finally {
+            Date.now = realNow;
+        }
+    });
+
+    test('a provider with no toolkit at all still has a round ceiling', () => {
+        // The number used to be a module constant every provider read directly,
+        // including on the path where tools are switched off entirely.
+        expect(roundsFor(null)).toBe(MAX_TOOL_ROUNDS);
+        expect(roundsFor(undefined)).toBe(MAX_TOOL_ROUNDS);
     });
 });

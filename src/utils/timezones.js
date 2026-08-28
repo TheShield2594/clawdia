@@ -132,6 +132,39 @@ function addCalendarDays(date, days, timeZone) {
     return zonedTimeToUtc(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate(), hour, minute, timeZone);
 }
 
+/**
+ * The same date `months` calendar months later, at the same local wall-clock
+ * time — the month-shaped sibling of addCalendarDays, for a task that repeats
+ * monthly (#834).
+ *
+ * The day is clamped to the target month's length rather than allowed to roll
+ * over: `Date.UTC(y, m, 31)` on a thirty-day month is the 1st of the month
+ * after, which would walk a task scheduled for the 31st forward through the
+ * calendar a day at a time.
+ *
+ * Clamping alone is not enough on its own, though, because it is lossy: step
+ * from the 31st of January and you land on the 28th of February, and stepping
+ * again from *that* gives the 28th of March. The 31st is gone for good after
+ * one short month. So the caller may pass the day it actually meant as
+ * `anchorDay`, and each step is measured from that rather than from wherever
+ * the last clamp landed — 31st, 28th, 31st, 30th, which is what somebody who
+ * said "monthly on the 31st" meant. Without it the behaviour is the lossy
+ * clamp, which is all a caller with no fixed day of its own needs.
+ */
+function addCalendarMonths(date, months, timeZone, { anchorDay = null } = {}) {
+    const { year, month, day: currentDay, hour, minute } = nowInTimezone(timeZone, date);
+    const day = anchorDay || currentDay;
+
+    const zeroBased = month - 1 + months;
+    const targetYear = year + Math.floor(zeroBased / 12);
+    const targetMonth = ((zeroBased % 12) + 12) % 12; // 0-based, non-negative
+
+    // Day 0 of the next month is the last day of this one.
+    const daysInMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+
+    return zonedTimeToUtc(targetYear, targetMonth + 1, Math.min(day, daysInMonth), hour, minute, timeZone);
+}
+
 module.exports = {
     isValidTimezone,
     canonicalizeTimezone,
@@ -139,5 +172,6 @@ module.exports = {
     nowInTimezone,
     formatLocalTime,
     parseAtOption,
-    addCalendarDays
+    addCalendarDays,
+    addCalendarMonths
 };

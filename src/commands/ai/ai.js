@@ -24,8 +24,22 @@ const {
 const { resolveProviderConfig, getCompletion, buildMcpAddendum } = require('../../services/aiService');
 const { serversEmbed, toolsEmbed, promptsEmbed, activityEmbed } = require('../../views/mcpView');
 const { toolLabel } = require('../../utils/toolLabel');
+const ScheduledTask = require('../../models/ScheduledTask');
+const { createTask } = require('../../services/scheduledTaskService');
+const { parseAtOption } = require('../../utils/timezones');
+const {
+    MAX_TASK_PROMPT_LENGTH,
+    MAX_TASK_DELAY_MINUTES,
+    MAX_TASKS_PER_GUILD
+} = require('../../utils/scheduledTaskLimits');
+const { runDeepTask, refuseTask } = require('../../services/ai/deepTask');
 
 const MEMORY_CAP = 10;
+
+// What a task request may say. Longer than a scheduled task's instruction —
+// somebody typing this is present and describing a job in one go — and far
+// short of anything that would crowd the model's own context.
+const DEEP_TASK_PROMPT_MAX = 1000;
 
 // Discord's message ceiling. A prompt's answer is a normal AI reply and can run
 // past it, so it is split the same way the chat transport splits one.
@@ -59,6 +73,14 @@ module.exports = {
                         .setMaxValue(MEMORY_CAP)
                 )
         )
+        .addSubcommand(sub =>
+            sub.setName('task')
+                .setDescription('Give the AI a multi-step job. It works in the background and posts the result.')
+                .addStringOption(opt =>
+                    opt.setName('prompt')
+                        .setDescription('What you want done, e.g. "check these three feeds and tell me what changed"')
+                        .setMaxLength(DEEP_TASK_PROMPT_MAX)
+                        .setRequired(true)))
         // A group rather than four top-level commands: Discord registers at
         // most a hundred, and tests/commandCap pins the count so spending one
         // is a decision rather than an accident.
@@ -102,6 +124,55 @@ module.exports = {
                             opt.setName('arguments')
                                 .setDescription('name=value pairs, or just the text when the prompt takes one argument')
                                 .setMaxLength(MAX_ARGUMENT_CHARS)))
+        )
+        // Standing instructions the bot runs on a cadence (#834). A group of
+        // its own rather than three top-level commands, for the same reason
+        // `mcp` is one: Discord registers at most a hundred and
+        // tests/commandCap pins the count.
+        .addSubcommandGroup(group =>
+            group.setName('schedule')
+                .setDescription('Recurring AI tasks this server runs on a cadence (Manage Server)')
+                .addSubcommand(sub =>
+                    sub.setName('add')
+                        .setDescription('Schedule an instruction for the AI to carry out on a cadence')
+                        .addStringOption(opt =>
+                            opt.setName('instruction')
+                                .setDescription('What the AI should do each time, e.g. "post a recap of #announcements"')
+                                .setMaxLength(MAX_TASK_PROMPT_LENGTH)
+                                .setRequired(true))
+                        .addStringOption(opt =>
+                            opt.setName('at')
+                                .setDescription('When it first runs, e.g. "09:00", "5pm", "2026-07-20 09:00"')
+                                .setRequired(false))
+                        .addIntegerOption(opt =>
+                            opt.setName('in_minutes')
+                                .setDescription('Minutes from now instead of an absolute time')
+                                .setMinValue(1)
+                                .setMaxValue(MAX_TASK_DELAY_MINUTES)
+                                .setRequired(false))
+                        .addStringOption(opt =>
+                            opt.setName('every')
+                                .setDescription('Repeat on this cadence. Leave empty to run it once.')
+                                .setRequired(false)
+                                .addChoices(
+                                    { name: 'Daily', value: 'daily' },
+                                    { name: 'Weekly', value: 'weekly' },
+                                    { name: 'Monthly', value: 'monthly' }
+                                ))
+                        .addChannelOption(opt =>
+                            opt.setName('channel')
+                                .setDescription('Where the result is posted. Defaults to this channel.')
+                                .setRequired(false)))
+                .addSubcommand(sub =>
+                    sub.setName('list')
+                        .setDescription('List this server\'s scheduled AI tasks'))
+                .addSubcommand(sub =>
+                    sub.setName('remove')
+                        .setDescription('Remove one scheduled AI task')
+                        .addStringOption(opt =>
+                            opt.setName('id')
+                                .setDescription('The short id shown in /ai schedule list')
+                                .setRequired(true)))
         ),
 
     // Names the guild has configured, so nobody has to remember one exactly.
@@ -133,6 +204,19 @@ module.exports = {
     },
 
     async execute(interaction) {
+        // Every one of these spends the guild's AI budget on a schedule nobody
+        // is watching, so the whole group is for the people who could have
+        // configured the AI in the first place.
+        if (interaction.options.getSubcommandGroup(false) === 'schedule') {
+            if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+                return interaction.reply({
+                    content: 'You need **Manage Server** permission to manage scheduled AI tasks.',
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+            return handleSchedule(interaction);
+        }
+
         if (interaction.options.getSubcommandGroup(false) === 'mcp') {
             // Connections carry credentials and reach outside the server, so
             // reading them is for the people who could have configured them.
@@ -149,6 +233,7 @@ module.exports = {
         }
 
         const sub = interaction.options.getSubcommand();
+        if (sub === 'task') return startDeepTask(interaction);
         if (sub !== 'memories') return;
 
         const deleteIndex = interaction.options.getInteger('delete');
@@ -192,6 +277,184 @@ module.exports = {
         return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 };
+
+// ── /ai task ─────────────────────────────────────────────────────────────────
+
+/**
+ * Hand a job to the AI and stop waiting for it (#835).
+ *
+ * The reply is an acknowledgement, not the answer: the run has a wall clock
+ * measured in minutes, and an interaction token has fifteen. So the command
+ * ends here and `runDeepTask` posts the progress and the result into the
+ * channel on its own — which is also what makes the larger tool budget safe to
+ * offer, since nothing is holding a webhook open while it is spent.
+ */
+async function startDeepTask(interaction) {
+    const prompt = interaction.options.getString('prompt').trim();
+    if (!prompt) {
+        return interaction.reply({ content: 'Say what you would like done.', flags: MessageFlags.Ephemeral });
+    }
+
+    const settings = await Guild.findOne({ guildId: interaction.guild.id }).lean();
+    const ai = settings?.ai;
+
+    // Checked before anything is posted, so a refusal is one ephemeral line
+    // rather than a progress message in the channel that goes nowhere. The
+    // deep-task allowance is spent here, by this call.
+    const refusal = refuseTask({ ai, guildId: interaction.guild.id, userId: interaction.user.id });
+    if (refusal) return interaction.reply({ content: refusal, flags: MessageFlags.Ephemeral });
+
+    if (!interaction.channel?.isTextBased?.()) {
+        return interaction.reply({ content: 'I need a text channel to post the result in.', flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.reply({
+        content: '🧠 On it — I\'ll post the result in this channel when it\'s done.',
+        flags: MessageFlags.Ephemeral
+    });
+
+    // Deliberately not awaited: the interaction is answered and the run is on
+    // its own from here. runDeepTask never throws — a failure becomes a message
+    // in the channel — and the catch is belt and braces for the unforeseen.
+    runDeepTask({
+        ai,
+        guild: interaction.guild,
+        channel: interaction.channel,
+        user: interaction.user,
+        member: interaction.member,
+        prompt
+    }).catch(err => console.error('[Deep task] detached run failed:', err?.message || err));
+}
+
+// ── /ai schedule ─────────────────────────────────────────────────────────────
+
+/** The last six characters of the id, which is what the listing shows. */
+function shortTaskId(task) {
+    return task._id.toString().slice(-6);
+}
+
+async function handleSchedule(interaction) {
+    const sub = interaction.options.getSubcommand();
+    if (sub === 'add') return addScheduledTask(interaction);
+    if (sub === 'list') return listScheduledTasks(interaction);
+    if (sub === 'remove') return removeScheduledTask(interaction);
+}
+
+async function addScheduledTask(interaction) {
+    const instruction = interaction.options.getString('instruction');
+    const at = interaction.options.getString('at');
+    const inMinutes = interaction.options.getInteger('in_minutes');
+    const every = interaction.options.getString('every');
+    const channel = interaction.options.getChannel('channel') || interaction.channel;
+
+    if (at && inMinutes) {
+        return interaction.reply({ content: 'Use either `at` or `in_minutes`, not both.', flags: MessageFlags.Ephemeral });
+    }
+    if (!at && !inMinutes) {
+        return interaction.reply({ content: 'Say when it should first run — either `at` or `in_minutes`.', flags: MessageFlags.Ephemeral });
+    }
+    if (!channel?.isTextBased?.()) {
+        return interaction.reply({ content: 'Pick a channel I can post text in.', flags: MessageFlags.Ephemeral });
+    }
+
+    // The guild's own timezone rather than the admin's: the task belongs to the
+    // server and will still be running long after this conversation.
+    const settings = await Guild.findOne({ guildId: interaction.guild.id }).lean();
+    const timezone = settings?.ai?.dailyDigest?.timezone || 'Etc/UTC';
+
+    let fireAt;
+    if (at) {
+        fireAt = parseAtOption(at, timezone);
+        if (!fireAt) {
+            return interaction.reply({
+                content: `Couldn't read "${at}" as a time. Try \`09:00\`, \`5pm\`, or \`2026-07-20 09:00\`.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+        if (fireAt.getTime() <= Date.now()) {
+            return interaction.reply({ content: 'That time has already passed — pick a future one.', flags: MessageFlags.Ephemeral });
+        }
+    } else {
+        fireAt = new Date(Date.now() + inMinutes * 60_000);
+    }
+
+    if (fireAt.getTime() - Date.now() > MAX_TASK_DELAY_MINUTES * 60_000) {
+        return interaction.reply({ content: 'A task can be scheduled at most a year out.', flags: MessageFlags.Ephemeral });
+    }
+
+    const { task, error } = await createTask({
+        guildId: interaction.guild.id,
+        channelId: channel.id,
+        createdBy: interaction.user.id,
+        kind: 'ai_prompt',
+        prompt: instruction,
+        fireAt,
+        repeat: every || null,
+        timezone
+    });
+    if (error) return interaction.reply({ content: error, flags: MessageFlags.Ephemeral });
+
+    const stamp = Math.floor(task.fireAt.getTime() / 1000);
+    const cadence = every ? `, repeating **${every}**` : ' (once)';
+    return interaction.reply({
+        content: `✅ Scheduled \`${shortTaskId(task)}\` in ${channel} — first run <t:${stamp}:F> (<t:${stamp}:R>)${cadence}.`
+            + '\n-# Each run is a full AI request billed to this server. It counts against the monthly budget on the dashboard.',
+        allowedMentions: { parse: [] }
+    });
+}
+
+async function listScheduledTasks(interaction) {
+    const tasks = await ScheduledTask.find({ guildId: interaction.guild.id }).sort({ fireAt: 1 }).limit(MAX_TASKS_PER_GUILD * 2);
+    if (!tasks.length) {
+        return interaction.reply({
+            content: 'No scheduled AI tasks on this server yet — add one with `/ai schedule add`.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    const lines = tasks.map(task => {
+        const stamp = Math.floor(task.fireAt.getTime() / 1000);
+        const cadence = task.repeat ? ` · repeats ${task.repeat}` : ' · once';
+        // A disabled task is one somebody switched off or one the runner gave
+        // up on, and the reason it gave up is the useful half.
+        const state = task.enabled ? '' : ` · **off**${task.lastError ? ` (${toolLabel(task.lastError, 60)})` : ''}`;
+        return `\`${shortTaskId(task)}\` <#${task.channelId}> — ${toolLabel(task.prompt || task.kind, 80)}\n`
+            + `-# next <t:${stamp}:R>${cadence}${state}`;
+    });
+
+    const embed = new EmbedBuilder()
+        .setTitle('⏱️ Scheduled AI tasks')
+        .setColor('#7aa7ff')
+        .setDescription(lines.join('\n\n').slice(0, 4000))
+        .setFooter({ text: `${tasks.filter(t => t.enabled).length} active · remove one with /ai schedule remove` });
+
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+
+async function removeScheduledTask(interaction) {
+    const wanted = interaction.options.getString('id').trim().toLowerCase();
+
+    // Matched on the short id the listing shows rather than the full ObjectId,
+    // and scoped to this guild so one server cannot delete another's by id.
+    const tasks = await ScheduledTask.find({ guildId: interaction.guild.id });
+    const match = tasks.filter(task => shortTaskId(task).toLowerCase() === wanted);
+
+    if (!match.length) {
+        return interaction.reply({
+            content: `No scheduled task \`${toolLabel(wanted, 20)}\` on this server. Run \`/ai schedule list\` to see the ids.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+    if (match.length > 1) {
+        return interaction.reply({
+            content: 'That short id matches more than one task — remove one of them from the dashboard, or ask again once it has run.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    await ScheduledTask.deleteOne({ _id: match[0]._id });
+    return interaction.reply({ content: `🗑️ Removed scheduled task \`${wanted}\`.`, flags: MessageFlags.Ephemeral });
+}
 
 /** The guild's stored connections, merged with the operator's config file. */
 async function guildMcpServers(guildId) {

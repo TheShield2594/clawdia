@@ -92,6 +92,8 @@ describe('on a provider that runs the bot\'s tool loop', () => {
     test('the actions travel as tools', async () => {
         const args = await turn();
 
+        // No Manage Server on this fixture, so scheduling is not among them —
+        // it is gated the way `/ai schedule add` is.
         expect(args.botTools.map(tool => tool.name))
             .toEqual(['create_poll', 'create_reminder', 'save_memory']);
         expect(args.systemPrompt).toMatch(/create_poll, create_reminder, save_memory/);

@@ -14,6 +14,10 @@ jest.mock('../src/models/Reminder', () => ({ countDocuments: jest.fn(async () =>
 jest.mock('../src/models/Poll', () => ({ create: jest.fn(async () => ({})) }));
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn(async () => null) }));
 jest.mock('../src/models/User', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
+jest.mock('../src/models/ScheduledTask', () => ({
+    countDocuments: jest.fn(async () => 0),
+    create: jest.fn(async doc => ({ _id: 'abcdef123456', ...doc })),
+}));
 jest.mock('../src/views/pollView', () => ({
     buildPollEmbed: jest.fn(() => ({ embed: true })),
     buildPollRows: jest.fn(() => [{ row: true }]),
@@ -28,12 +32,18 @@ const { buildBotTools, BOT_SERVER } = require('../src/services/ai/botTools');
 const { prepareMcpToolkit, TURN_BUDGET_MS } = require('../src/services/ai/mcp/toolkit');
 const { MEMORY_CAP, MAX_MEMORY_LENGTH } = require('../src/utils/memoryLimits');
 const { MAX_OPEN_REMINDERS } = require('../src/utils/reminderLimits');
+const ScheduledTask = require('../src/models/ScheduledTask');
+const { MAX_TASKS_PER_USER, MAX_TASK_PROMPT_LENGTH } = require('../src/utils/scheduledTaskLimits');
 
-function fakeMessage({ moderator = false } = {}) {
+function fakeMessage({ moderator = false, manageGuild = moderator } = {}) {
     const logChannel = { send: jest.fn(async () => ({ id: 'log1' })) };
     return {
         author: { id: 'u1' },
-        member: { permissions: { has: perm => moderator && (perm === 'ModerateMembers' || perm === 'ManageGuild') } },
+        member: {
+            permissions: {
+                has: perm => (perm === 'ManageGuild' ? manageGuild : moderator && perm === 'ModerateMembers')
+            }
+        },
         guild: { id: 'g1', channels: { cache: { get: jest.fn(() => logChannel) } } },
         channel: { id: 'c1', send: jest.fn(async () => ({ id: 'm1' })) },
         __logChannel: logChannel,
@@ -45,6 +55,7 @@ const toolNamed = (tools, name) => tools.find(tool => tool.name === name);
 beforeEach(() => {
     jest.clearAllMocks();
     Reminder.countDocuments.mockResolvedValue(0);
+    ScheduledTask.countDocuments.mockResolvedValue(0);
     Guild.findOne.mockResolvedValue({ moderation: { logChannelId: 'log-channel' } });
     User.findOneAndUpdate.mockResolvedValue({ userId: 'u1' });
     User.findOne.mockReturnValue({ lean: async () => ({ pinnedMemories: [] }) });
@@ -58,6 +69,22 @@ describe('which tools a turn is offered', () => {
     test('the three anyone can use', () => {
         const names = buildBotTools(fakeMessage()).map(tool => tool.name);
         expect(names).toEqual(['create_poll', 'create_reminder', 'save_memory']);
+    });
+
+    // `/ai schedule add` is behind Manage Server, so the tool that does the
+    // same thing has to be too: a standing task spends the server's budget on
+    // a cadence, and the approval prompt is answerable by whoever asked for the
+    // call — it is not a second pair of eyes.
+    test('and scheduling only for someone who could set one up from the command', () => {
+        expect(buildBotTools(fakeMessage()).map(tool => tool.name)).not.toContain('schedule_task');
+        expect(buildBotTools(fakeMessage({ manageGuild: true })).map(tool => tool.name))
+            .toContain('schedule_task');
+    });
+
+    test('a moderator without Manage Server gets the mod tool but not scheduling', () => {
+        const names = buildBotTools(fakeMessage({ moderator: true, manageGuild: false })).map(tool => tool.name);
+        expect(names).toContain('suggest_mod_action');
+        expect(names).not.toContain('schedule_task');
     });
 
     // Offering a moderator-only tool to someone who cannot use it spends schema
@@ -77,11 +104,14 @@ describe('which tools a turn is offered', () => {
         }
     });
 
-    // Memory is the one that outlives the conversation, so it is the one that
-    // asks first — through the same buttons a writing MCP tool goes through.
-    test('only the one that writes durable state needs approving', () => {
-        const tools = buildBotTools(fakeMessage({ moderator: true }));
-        expect(tools.filter(tool => tool.confirm).map(tool => tool.name)).toEqual(['save_memory']);
+    // These two are the ones whose effect outlives the conversation — a memory
+    // read back into every later reply, and a standing instruction that spends
+    // the guild's budget on a cadence — so they are the ones that ask first,
+    // through the same buttons a writing MCP tool goes through.
+    test('only the ones that write durable state need approving', () => {
+        const tools = buildBotTools(fakeMessage({ moderator: true, manageGuild: true }));
+        expect(tools.filter(tool => tool.confirm).map(tool => tool.name))
+            .toEqual(['save_memory', 'schedule_task']);
     });
 });
 
@@ -115,6 +145,73 @@ describe('what each tool does', () => {
 
         expect(Reminder.create).not.toHaveBeenCalled();
         expect(text).toMatch(new RegExp(`maximum of ${MAX_OPEN_REMINDERS} open reminders`));
+    });
+
+    // The heavy sibling of create_reminder: a reminder replays text somebody
+    // already wrote, and this wakes the model up on a cadence to do work that
+    // costs the guild a provider call each time.
+    test('a scheduled task is created against the guild and the person who asked', async () => {
+        const { text } = await run('schedule_task', {
+            instruction: 'Recap #announcements', delayMinutes: 60, repeat: 'weekly'
+        }, { manageGuild: true });
+
+        expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({
+            guildId: 'g1', channelId: 'c1', createdBy: 'u1',
+            kind: 'ai_prompt', prompt: 'Recap #announcements', repeat: 'weekly',
+        }));
+        const { fireAt } = ScheduledTask.create.mock.calls[0][0];
+        expect(Math.round((fireAt.getTime() - Date.now()) / 60000)).toBe(60);
+        expect(text).toMatch(/<t:\d+:F>/);
+        expect(text).toMatch(/\/ai schedule/);
+    });
+
+    test('"none" means run it once, not a cadence called none', async () => {
+        await run('schedule_task', { instruction: 'one-off', delayMinutes: 5, repeat: 'none' }, { manageGuild: true });
+        expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({ repeat: null }));
+    });
+
+    test('the model\'s route is held to the same caps as the slash command', async () => {
+        ScheduledTask.countDocuments
+            .mockResolvedValueOnce(0)                     // guild
+            .mockResolvedValueOnce(MAX_TASKS_PER_USER);   // user
+
+        const { text } = await run('schedule_task', { instruction: 'more', delayMinutes: 5, repeat: 'daily' }, { manageGuild: true });
+
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
+        expect(text).toMatch(new RegExp(`maximum of ${MAX_TASKS_PER_USER}`));
+    });
+
+    test('a task with no first-run time is refused rather than guessed at', async () => {
+        const { text } = await run('schedule_task', { instruction: 'when?', repeat: 'daily' }, { manageGuild: true });
+
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
+        expect(text).toMatch(/how many minutes/);
+    });
+
+    test('an over-long instruction is refused, not truncated', async () => {
+        // Truncating leaves a standing instruction whose second half is missing,
+        // running every day, with nobody reading it.
+        const { text } = await run('schedule_task', {
+            instruction: 'x'.repeat(MAX_TASK_PROMPT_LENGTH + 1), delayMinutes: 5, repeat: 'daily'
+        }, { manageGuild: true });
+
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
+        expect(text).toMatch(new RegExp(`${MAX_TASK_PROMPT_LENGTH} characters`));
+    });
+
+    test('the executor refuses scheduling again, even if the tool were reached', async () => {
+        // The tool is not offered without Manage Server; this is the second
+        // check behind it, the same belt and braces suggest_mod_action has.
+        const { runAction } = require('../src/services/ai/actions');
+        const message = fakeMessage();
+
+        const text = await runAction(
+            { type: 'schedule_task', instruction: 'nightly recap', delayMinutes: 60, repeat: 'daily' },
+            message
+        );
+
+        expect(text).toMatch(/only someone with Manage Server/);
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
     });
 
     test('a poll is posted and recorded', async () => {

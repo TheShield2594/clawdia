@@ -125,6 +125,15 @@ const JOBS = [
         fn: client => require('../tempBanService').processExpiredBans(client),
     },
     {
+        // The generic schedule (#834): one tick over persisted `fireAt`, the
+        // way reminders work, so anything hung off it is restart-proof and
+        // catches up after downtime without its own catch-up code.
+        name: 'runDueTasks',
+        service: 'scheduledTaskService',
+        schedule: '* * * * *',
+        fn: client => require('../scheduledTaskService').runDueTasks(client),
+    },
+    {
         name: 'postScheduledNewspapers',
         service: 'schedulerService',
         schedule: '0 * * * *',

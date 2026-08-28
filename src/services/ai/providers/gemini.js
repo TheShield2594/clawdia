@@ -1,6 +1,6 @@
 const { GoogleGenAI } = require('@google/genai');
 const { decryptSecret } = require('../../../config/secretBox');
-const { toolkitFor, mapWithLimit, MAX_TOOL_ROUNDS, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // Google's current SDK. It replaces `@google/generative-ai`, which Google
 // retired in favour of this one — that package still installs but no longer
@@ -183,6 +183,7 @@ function callsOf(source) {
 
 async function* stream(req) {
     const toolkit = await toolkitFor(req);
+    const rounds = roundsFor(toolkit);
     let chat = startChat(req, { toolkit });
     let declared = declaredCount(toolkit);
     let message = req.prompt;
@@ -193,7 +194,7 @@ async function* stream(req) {
     // arrives in the round after it — two pieces of prose, not one sentence.
     let wroteText = false;
 
-    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    for (let round = 0; round <= rounds; round++) {
         const result = await chat.sendMessageStream({ message });
         let roundText = false;
 
@@ -223,7 +224,7 @@ async function* stream(req) {
         // tools declared: the model's only remaining move is to answer. The
         // conversation so far comes from the chat itself, since it holds the
         // function-call turn these responses answer.
-        if (round + 1 === MAX_TOOL_ROUNDS) {
+        if (round + 1 === rounds) {
             chat = withoutTools(req, chat);
         } else if (declaredCount(toolkit) !== declared) {
             // The round loaded a deferred tool, so the chat is rebuilt to
@@ -239,6 +240,7 @@ async function* stream(req) {
 
 async function complete(req) {
     const toolkit = await toolkitFor(req);
+    const rounds = roundsFor(toolkit);
     let chat = startChat(req, { toolkit });
     let declared = declaredCount(toolkit);
     let message = req.prompt;
@@ -247,7 +249,7 @@ async function complete(req) {
     let sawUsage = false;
     const parts = [];
 
-    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    for (let round = 0; round <= rounds; round++) {
         const response = await chat.sendMessage({ message });
         if (response.usageMetadata) {
             sawUsage = true;
@@ -263,7 +265,7 @@ async function complete(req) {
         const calls = callsOf(response);
         if (!calls.length) break;
         message = await runToolCalls(toolkit, calls);
-        if (round + 1 === MAX_TOOL_ROUNDS) {
+        if (round + 1 === rounds) {
             chat = withoutTools(req, chat);
         } else if (declaredCount(toolkit) !== declared) {
             declared = declaredCount(toolkit);

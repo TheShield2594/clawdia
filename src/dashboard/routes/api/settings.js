@@ -284,6 +284,18 @@ function validateMcpRoute(value) {
     return null;
 }
 
+// The two monthly ceilings are what stands between a guild and an unbounded
+// provider bill (#831), so a value that is not a number has to be refused
+// rather than saved as one: Mongoose would cast `"lots"` to NaN, and a NaN
+// ceiling compares false against every total — a limit that never refuses.
+function validateMonthlyLimit(value, key) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return `${key} must be a number of 0 or more (0 disables it)`;
+    }
+    return null;
+}
+
 function validateAiUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
         const isWholeAi = key === 'ai' && value && typeof value === 'object';
@@ -313,6 +325,17 @@ function validateAiUpdate(updates) {
         if (route !== undefined) {
             const error = validateMcpRoute(route);
             if (error) return error;
+        }
+
+        for (const field of ['monthlyTokenLimit', 'monthlyCostLimit']) {
+            let limit;
+            if (key === `ai.${field}`) limit = value;
+            else if (isWholeAi) limit = value[field];
+
+            if (limit !== undefined) {
+                const error = validateMonthlyLimit(limit, `ai.${field}`);
+                if (error) return error;
+            }
         }
     }
     return null;
