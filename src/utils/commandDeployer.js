@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { randomUUID } = crypto;
 const { REST, Routes } = require('discord.js');
 const { listCommandFiles, loadCommandModules } = require('./commandLoader');
 
@@ -71,6 +72,12 @@ function buildCommandPayload(loadedCommands = null) {
 }
 
 /** The one call that actually changes what Discord has registered. */
+/**
+ * @param {string} clientId
+ * @param {string} token the bot token.
+ * @param {object[]} commands the bodies to publish.
+ * @returns {Promise<number>} how many were published.
+ */
 async function putCommands(clientId, token, commands) {
     const rest = new REST().setToken(token);
     try {
@@ -92,8 +99,9 @@ async function putCommands(clientId, token, commands) {
  * the opposite — see deployCommandsIfChanged below.
  *
  * @param {string} clientId
- * @param {string} token
+ * @param {string} token the bot token.
  * @param {Iterable<object>} [loadedCommands] see buildCommandPayload.
+ * @returns {Promise<number>} how many commands were published.
  */
 async function deployCommands(clientId, token, loadedCommands = null) {
     return putCommands(clientId, token, buildCommandPayload(loadedCommands));
@@ -111,6 +119,11 @@ const DEPLOYMENT_KEY = 'global';
  * is folded in because the same payload published under a different CLIENT_ID
  * is a different registration.
  */
+/**
+ * @param {string} clientId the Discord application the set would be published under.
+ * @param {object[]} commands the serialized command bodies.
+ * @returns {string} a sha256 hex digest, stable across iteration order.
+ */
 function commandSetHash(clientId, commands) {
     const sorted = [...commands].sort((a, b) => String(a.name).localeCompare(String(b.name)));
     return crypto.createHash('sha256')
@@ -123,6 +136,9 @@ function commandSetHash(clientId, commands) {
  * a warning rather than silently disabling the deploy — an operator who
  * mistypes it should get commands, not a bot with none.
  */
+/**
+ * @returns {'auto'|'always'|'never'} how DEPLOY_COMMANDS says to behave.
+ */
 function deployMode() {
     const raw = String(process.env.DEPLOY_COMMANDS ?? '').trim().toLowerCase();
     if (raw === '') return 'auto';
@@ -131,6 +147,67 @@ function deployMode() {
         `[DEPLOY] Ignoring DEPLOY_COMMANDS="${process.env.DEPLOY_COMMANDS}": expected auto, always or never. Using auto.`
     );
     return 'auto';
+}
+
+/**
+ * Take exclusive ownership of the right to publish `hash`.
+ *
+ * A plain `findOneAndUpdate` on `{ hash: { $ne } }` is not exclusive: when the
+ * document already exists holding an older hash, every shard's filter matches
+ * it and every shard proceeds to PUT. Mongo serializes the writes but matches
+ * all of them, so the duplicate-key error only ever guarded the case where no
+ * document existed yet.
+ *
+ * So the claim is a compare-and-swap on a token that changes on every attempt:
+ * each caller reads the token it saw, and only the writer whose filter still
+ * names that token wins. The loser's filter no longer matches and it is told
+ * the set is being published by someone else.
+ *
+ * There is deliberately no lease expiry. A claim abandoned by a crashed process
+ * is recovered by `pending` — the next boot sees an unfinished claim and takes
+ * it over — which needs no wall clock and no guess at how long a PUT may
+ * legitimately take.
+ *
+ * @param {import('mongoose').Model} CommandDeployment
+ * @param {string} hash fingerprint of the set to publish.
+ * @param {string} clientId
+ * @returns {Promise<{claimed: boolean, token: string|null, reason: string}>}
+ */
+async function claimDeployment(CommandDeployment, hash, clientId) {
+    const current = await CommandDeployment.findOne({ _id: DEPLOYMENT_KEY }).lean();
+
+    // Already published, and the publish finished. The common restart.
+    if (current && current.hash === hash && current.pending !== true) {
+        return { claimed: false, token: null, reason: 'command set unchanged' };
+    }
+
+    const token = randomUUID();
+    // `null` matches a missing field as well as an explicit null, which is what
+    // makes this work against a document written before claimToken existed.
+    const expected = current
+        ? { _id: DEPLOYMENT_KEY, claimToken: current.claimToken ?? null }
+        : { _id: DEPLOYMENT_KEY, claimToken: null };
+
+    try {
+        const claimed = await CommandDeployment.findOneAndUpdate(
+            expected,
+            { $set: { hash, pending: true, clientId, claimToken: token } },
+            // Only the no-document case may insert. With a document present an
+            // upsert would race a concurrent insert into a duplicate key rather
+            // than losing cleanly.
+            { upsert: !current, new: true }
+        );
+        return claimed
+            ? { claimed: true, token, reason: 'command set changed' }
+            : { claimed: false, token: null, reason: 'another process is publishing this set' };
+    } catch (error) {
+        // Another process inserted the document between our read and our write.
+        // It holds the claim; we do not.
+        if (error?.code === 11000) {
+            return { claimed: false, token: null, reason: 'another process is publishing this set' };
+        }
+        throw error;
+    }
 }
 
 /**
@@ -177,28 +254,9 @@ async function deployCommandsIfChanged(clientId, token, loadedCommands = null) {
     // module with no database connection and must not pull mongoose in.
     const CommandDeployment = require('../models/CommandDeployment');
 
-    let claimed;
-    try {
-        // Deploy when the recorded hash differs *or* when a previous attempt
-        // claimed this hash and never finished. Without the second clause a
-        // process killed mid-PUT would leave its hash recorded and every later
-        // boot would skip the deploy it never actually made.
-        await CommandDeployment.findOneAndUpdate(
-            { _id: DEPLOYMENT_KEY, $or: [{ hash: { $ne: hash } }, { pending: true }] },
-            { $set: { hash, pending: true, clientId } },
-            { upsert: true, new: true }
-        );
-        claimed = true;
-    } catch (error) {
-        // The document exists and did not match the filter, so the upsert tried
-        // to insert a second one against the fixed _id. That is precisely the
-        // "already deployed, nothing to do" case.
-        if (error?.code === 11000) claimed = false;
-        else throw error;
-    }
-
-    if (!claimed) {
-        return { deployed: false, count: commands.length, reason: 'command set unchanged' };
+    const claim = await claimDeployment(CommandDeployment, hash, clientId);
+    if (!claim.claimed) {
+        return { deployed: false, count: commands.length, reason: claim.reason };
     }
 
     let count;
@@ -211,7 +269,10 @@ async function deployCommandsIfChanged(clientId, token, loadedCommands = null) {
         // deploy error with.
         try {
             await CommandDeployment.updateOne(
-                { _id: DEPLOYMENT_KEY },
+                // Only this claim may release it. Without the token a shard
+                // whose PUT failed would clear a claim a *later* boot had since
+                // taken, and both would then publish.
+                { _id: DEPLOYMENT_KEY, claimToken: claim.token },
                 { $set: { hash: null, pending: true } }
             );
         } catch (releaseError) {
@@ -224,19 +285,31 @@ async function deployCommandsIfChanged(clientId, token, loadedCommands = null) {
     // must not be reported as a failed deploy: the document still says
     // `pending`, so the next boot re-publishes — which is wasteful, not wrong.
     try {
-        await recordDeployment(clientId, hash, count);
+        await recordDeployment(clientId, hash, count, claim.token);
     } catch (error) {
         console.error('[DEPLOY] Published, but could not record the deployment:', error.message);
     }
     return { deployed: true, count, reason: 'command set changed' };
 }
 
-async function recordDeployment(clientId, hash, count) {
+/**
+ * Mark the claim satisfied: this hash is what Discord now has.
+ *
+ * `token` scopes the write to the claim that actually made the call, so a slow
+ * shard cannot mark someone else's in-flight claim finished. The `always` path
+ * has no claim to scope to and passes none.
+ *
+ * @param {string} clientId
+ * @param {string} hash fingerprint of the published set.
+ * @param {number} count how many commands were published.
+ * @param {string|null} [token] the claim token this deploy holds, if any.
+ */
+async function recordDeployment(clientId, hash, count, token = null) {
     const CommandDeployment = require('../models/CommandDeployment');
     await CommandDeployment.updateOne(
-        { _id: DEPLOYMENT_KEY },
+        token ? { _id: DEPLOYMENT_KEY, claimToken: token } : { _id: DEPLOYMENT_KEY },
         { $set: { hash, pending: false, clientId, commandCount: count, deployedAt: new Date() } },
-        { upsert: true }
+        { upsert: !token }
     );
 }
 
@@ -245,6 +318,7 @@ module.exports = {
     buildCommandPayload,
     deployCommandsIfChanged,
     commandSetHash,
+    claimDeployment,
     listCommandFiles,
     GLOBAL_COMMAND_LIMIT,
     COMMAND_BUDGET,

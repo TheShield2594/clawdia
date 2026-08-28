@@ -17,12 +17,51 @@ jest.mock('discord.js', () => ({
     Routes: { applicationCommands: id => `/applications/${id}/commands` },
 }));
 
+const mockFindOne = jest.fn();
 const mockFindOneAndUpdate = jest.fn();
 const mockUpdateOne = jest.fn().mockResolvedValue({});
 jest.mock('../src/models/CommandDeployment', () => ({
+    findOne: (...args) => ({ lean: () => mockFindOne(...args) }),
     findOneAndUpdate: (...args) => mockFindOneAndUpdate(...args),
     updateOne: (...args) => mockUpdateOne(...args),
 }));
+
+/**
+ * A single-document stand-in for the collection, with Mongo's matching rules
+ * for the two things the claim depends on: `null` also matches a missing field,
+ * and a filter that does not match updates nothing. Stubbing findOneAndUpdate
+ * with a fixed answer would assert the mock, not the compare-and-swap.
+ */
+function fakeCollection(initial = null) {
+    let doc = initial ? { ...initial } : null;
+    const matches = filter => {
+        if (!doc) return false;
+        return Object.entries(filter).every(([key, want]) => {
+            if (key === '_id') return true;
+            const have = doc[key] ?? null;
+            return (want ?? null) === have;
+        });
+    };
+    mockFindOne.mockImplementation(async () => (doc ? { ...doc } : null));
+    mockFindOneAndUpdate.mockImplementation(async (filter, update, options = {}) => {
+        if (matches(filter)) {
+            doc = { ...doc, ...update.$set };
+            return { ...doc };
+        }
+        if (options.upsert && !doc) {
+            doc = { _id: DEPLOYMENT_KEY, ...update.$set };
+            return { ...doc };
+        }
+        if (options.upsert && doc) throw duplicateKey();
+        return null;
+    });
+    mockUpdateOne.mockImplementation(async (filter, update, options = {}) => {
+        if (matches(filter)) doc = { ...doc, ...update.$set };
+        else if (options.upsert && !doc) doc = { _id: DEPLOYMENT_KEY, ...update.$set };
+        return {};
+    });
+    return { current: () => doc };
+}
 
 const {
     deployCommandsIfChanged,
@@ -40,12 +79,16 @@ const fakeCommand = name => ({
 const duplicateKey = () => Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
 
 const COMMANDS = [fakeCommand('fish'), fakeCommand('hunt')];
+const HASH = commandSetHash('client-id', COMMANDS.map(c => c.data.toJSON()));
 
 beforeEach(() => {
     mockPut.mockClear().mockResolvedValue(undefined);
-    mockFindOneAndUpdate.mockReset().mockResolvedValue({});
-    mockUpdateOne.mockClear().mockResolvedValue({});
+    mockFindOne.mockReset();
+    mockFindOneAndUpdate.mockReset();
+    mockUpdateOne.mockReset().mockResolvedValue({});
     delete process.env.DEPLOY_COMMANDS;
+    // Empty collection: a fresh install.
+    fakeCollection(null);
 });
 
 afterAll(() => {
@@ -69,34 +112,49 @@ describe('the boot deploy', () => {
         await deployCommandsIfChanged('client-id', 'token', COMMANDS);
 
         const [filter, update] = mockUpdateOne.mock.calls.at(-1);
-        expect(filter).toEqual({ _id: DEPLOYMENT_KEY });
-        expect(update.$set.hash).toBe(commandSetHash('client-id', COMMANDS.map(c => c.data.toJSON())));
+        expect(filter._id).toBe(DEPLOYMENT_KEY);
+        // Scoped to this deploy's own claim, so a slow shard cannot mark
+        // someone else's in-flight claim finished.
+        expect(filter.claimToken).toEqual(expect.any(String));
+        expect(update.$set.hash).toBe(HASH);
         expect(update.$set.pending).toBe(false);
         expect(update.$set.commandCount).toBe(2);
     });
 
     test('makes no Discord call when the set is unchanged', async () => {
-        mockFindOneAndUpdate.mockRejectedValue(duplicateKey());
+        fakeCollection({ _id: DEPLOYMENT_KEY, hash: HASH, pending: false, claimToken: 'tok-1' });
 
         const result = await deployCommandsIfChanged('client-id', 'token', COMMANDS);
 
         expect(result).toEqual({ deployed: false, count: 2, reason: 'command set unchanged' });
         expect(mockPut).not.toHaveBeenCalled();
+        // Not even a write: the common restart is one indexed read.
+        expect(mockFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    test('publishes when the recorded hash is an older set', async () => {
+        fakeCollection({ _id: DEPLOYMENT_KEY, hash: 'an-older-hash', pending: false, claimToken: 'tok-1' });
+
+        const result = await deployCommandsIfChanged('client-id', 'token', COMMANDS);
+
+        expect(result.deployed).toBe(true);
+        expect(mockPut).toHaveBeenCalledTimes(1);
     });
 
     test('claims a hash that a previous boot left pending', async () => {
         // The crash case: a process killed mid-PUT leaves `pending: true` with
-        // the new hash already written. Matching only on `hash: { $ne }` would
-        // skip that deploy forever.
-        await deployCommandsIfChanged('client-id', 'token', COMMANDS);
+        // the new hash already written. Treating that as "already published"
+        // would skip the deploy forever.
+        fakeCollection({ _id: DEPLOYMENT_KEY, hash: HASH, pending: true, claimToken: 'tok-1' });
 
-        const [filter, update] = mockFindOneAndUpdate.mock.calls[0];
-        expect(filter._id).toBe(DEPLOYMENT_KEY);
-        expect(filter.$or).toContainEqual({ pending: true });
-        expect(update.$set.pending).toBe(true);
+        const result = await deployCommandsIfChanged('client-id', 'token', COMMANDS);
+
+        expect(result.deployed).toBe(true);
+        expect(mockPut).toHaveBeenCalledTimes(1);
     });
 
     test('releases the claim when Discord rejects the payload', async () => {
+        const store = fakeCollection(null);
         mockPut.mockRejectedValue(new Error('rate limited'));
 
         await expect(deployCommandsIfChanged('client-id', 'token', COMMANDS))
@@ -104,12 +162,23 @@ describe('the boot deploy', () => {
 
         // Without this the failed hash stays recorded and every later boot
         // skips a deploy that never actually happened.
-        const [, update] = mockUpdateOne.mock.calls.at(-1);
-        expect(update.$set).toEqual({ hash: null, pending: true });
+        expect(store.current()).toMatchObject({ hash: null, pending: true });
+    });
+
+    test('only the claim holder may release it', async () => {
+        // A shard whose PUT failed must not clear a claim that a later boot has
+        // since taken, or both would publish.
+        const store = fakeCollection(null);
+        mockPut.mockRejectedValue(new Error('rate limited'));
+        const deploy = deployCommandsIfChanged('client-id', 'token', COMMANDS);
+        await expect(deploy).rejects.toThrow('rate limited');
+
+        const released = store.current();
+        expect(mockUpdateOne.mock.calls.at(-1)[0].claimToken).toBe(released.claimToken);
     });
 
     test('propagates a database error rather than silently not deploying', async () => {
-        mockFindOneAndUpdate.mockRejectedValue(new Error('connection lost'));
+        mockFindOne.mockRejectedValue(new Error('connection lost'));
 
         await expect(deployCommandsIfChanged('client-id', 'token', COMMANDS))
             .rejects.toThrow('connection lost');
@@ -211,5 +280,93 @@ describe('a deploy that published but could not record itself', () => {
         expect(result.deployed).toBe(true);
         expect(errors).toHaveBeenCalledWith(expect.stringContaining('could not record'), expect.anything());
         errors.mockRestore();
+    });
+});
+
+describe('concurrent startups', () => {
+    // #854 review: the original claim matched on `hash: { $ne }`, which every
+    // shard's filter satisfies when the stored document holds an older hash —
+    // so N shards all claimed and all published the same set. These hold the
+    // compare-and-swap that replaced it.
+
+    /**
+     * Holds every PUT open until released, so the callers genuinely overlap —
+     * a winner parked mid-publish is exactly the window in which a second
+     * claimant must not also reach Discord. A PUT that arrives after the
+     * release resolves at once, so the test never depends on how many ticks the
+     * claim takes.
+     */
+    function pendingPuts() {
+        let released = false;
+        const resolvers = [];
+        mockPut.mockImplementation(() => (released
+            ? Promise.resolve()
+            : new Promise(resolve => resolvers.push(resolve))));
+        return {
+            release() {
+                released = true;
+                for (const resolve of resolvers) resolve();
+            },
+        };
+    }
+
+    /** Lets every caller run to its first real suspension point. */
+    const settle = () => new Promise(resolve => setImmediate(resolve));
+
+    test('only one of four shards publishes, from an empty collection', async () => {
+        fakeCollection(null);
+        const puts = pendingPuts();
+
+        const results = Promise.all(
+            [0, 1, 2, 3].map(() => deployCommandsIfChanged('client-id', 'token', COMMANDS))
+        );
+        await settle();
+        puts.release();
+
+        const settled = await results;
+        expect(mockPut).toHaveBeenCalledTimes(1);
+        expect(settled.filter(r => r.deployed)).toHaveLength(1);
+    });
+
+    test('only one of four shards publishes when an older set is recorded', async () => {
+        // The case the duplicate-key guard never covered: the document exists,
+        // so nothing inserts and every filter used to match.
+        fakeCollection({ _id: DEPLOYMENT_KEY, hash: 'an-older-hash', pending: false, claimToken: 'tok-1' });
+        const puts = pendingPuts();
+
+        const results = Promise.all(
+            [0, 1, 2, 3].map(() => deployCommandsIfChanged('client-id', 'token', COMMANDS))
+        );
+        await settle();
+        puts.release();
+
+        const settled = await results;
+        expect(mockPut).toHaveBeenCalledTimes(1);
+        expect(settled.filter(r => r.deployed)).toHaveLength(1);
+        for (const loser of settled.filter(r => !r.deployed)) {
+            expect(loser.reason).toBe('another process is publishing this set');
+        }
+    });
+
+    test('only one of four shards takes over a claim left pending by a crash', async () => {
+        fakeCollection({ _id: DEPLOYMENT_KEY, hash: HASH, pending: true, claimToken: 'tok-1' });
+        const puts = pendingPuts();
+
+        const results = Promise.all(
+            [0, 1, 2, 3].map(() => deployCommandsIfChanged('client-id', 'token', COMMANDS))
+        );
+        await settle();
+        puts.release();
+
+        await results;
+        expect(mockPut).toHaveBeenCalledTimes(1);
+    });
+
+    test('the winner leaves the record settled on the hash it published', async () => {
+        const store = fakeCollection({ _id: DEPLOYMENT_KEY, hash: 'older', pending: false, claimToken: 'tok-1' });
+
+        await Promise.all([0, 1].map(() => deployCommandsIfChanged('client-id', 'token', COMMANDS)));
+
+        expect(store.current()).toMatchObject({ hash: HASH, pending: false, commandCount: 2 });
     });
 });

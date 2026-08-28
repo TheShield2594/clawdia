@@ -10,7 +10,7 @@
  * and that a failing sink cannot replace the error it was reporting.
  */
 
-const { reportError, reportAndExit, isConfigured, describe: describeError, buildBody } =
+const { reportError, reportAndExit, isConfigured, describe: describeError, buildBody, parseSink } =
     require('../src/utils/errorReporter');
 
 const DISCORD_URL = 'https://discord.com/api/webhooks/123/abc';
@@ -60,7 +60,9 @@ describe('with a sink configured', () => {
         await reportError('unhandledRejection', new Error('boom'), { guildId: '42' });
 
         const [url, init] = fetchMock.mock.calls[0];
-        expect(url).toBe(PLAIN_URL);
+        // A parsed URL, not the raw string — fetch is handed only what
+        // parseSink vetted.
+        expect(String(url)).toBe(PLAIN_URL);
         expect(init.method).toBe('POST');
         const body = JSON.parse(init.body);
         expect(body).toMatchObject({
@@ -165,5 +167,63 @@ describe('describe()', () => {
 
     test('says something useful about undefined', () => {
         expect(describeError(undefined)).toEqual({ name: 'undefined', message: 'undefined', stack: null });
+    });
+});
+
+describe('the sink URL is vetted before anything is sent', () => {
+    // #854 review (CWE-319): the report carries a stack trace and whatever
+    // failure context the caller attached, so cleartext delivery exposes it,
+    // and a 3xx would hand it to a host the operator never configured.
+
+    test.each([
+        ['https://errors.example.com/ingest', true],
+        ['https://discord.com/api/webhooks/1/a', true],
+        // Loopback is the legitimate cleartext case — a collector sidecar on
+        // the same host, where there is no wire to read.
+        ['http://localhost:9000/ingest', true],
+        ['http://127.0.0.1:9000/ingest', true],
+        ['http://errors.example.com/ingest', false],
+        ['http://logs.internal:9000/ingest', false],
+        ['ftp://errors.example.com/ingest', false],
+        ['javascript:alert(1)', false],
+        ['not a url at all', false],
+    ])('%s → %s', (url, allowed) => {
+        expect(Boolean(parseSink(url))).toBe(allowed);
+    });
+
+    test('a cleartext sink sends nothing and says so once', async () => {
+        process.env.ERROR_WEBHOOK_URL = 'http://errors.example.com/ingest';
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+        await expect(reportError('uncaughtException', new Error('boom'))).resolves.toBe(false);
+
+        expect(fetchMock).not.toHaveBeenCalled();
+        // Silence would leave an operator believing crashes were being reported.
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('ERROR_WEBHOOK_URL'));
+        // ...and never echoes the URL, which is a credential.
+        expect(warn.mock.calls[0][0]).not.toContain('errors.example.com');
+        warn.mockRestore();
+    });
+
+    test('a refused sink does not buy the crash path an extra wait', () => {
+        process.env.ERROR_WEBHOOK_URL = 'http://errors.example.com/ingest';
+        expect(isConfigured()).toBe(false);
+
+        const exit = jest.fn();
+        reportAndExit('uncaughtException', new Error('boom'), { exit });
+        // Synchronous, as with no sink at all.
+        expect(exit).toHaveBeenCalledWith(1);
+    });
+
+    test('refuses to follow a redirect', async () => {
+        process.env.ERROR_WEBHOOK_URL = PLAIN_URL;
+        await reportError('uncaughtException', new Error('boom'));
+        expect(fetchMock.mock.calls[0][1].redirect).toBe('error');
+    });
+
+    test('passes the parsed URL through, so the sent target is the vetted one', async () => {
+        process.env.ERROR_WEBHOOK_URL = PLAIN_URL;
+        await reportError('uncaughtException', new Error('boom'));
+        expect(String(fetchMock.mock.calls[0][0])).toBe(PLAIN_URL);
     });
 });

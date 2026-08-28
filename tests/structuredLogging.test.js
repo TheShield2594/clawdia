@@ -21,6 +21,7 @@ const {
     withContext,
     addContext,
     toRecord,
+    scrubSecrets,
     prettyLine,
     resolveLevel,
     resolveFormat,
@@ -173,6 +174,63 @@ describe('correlation context', () => {
         });
 
         expect(out.records()[0]).toMatchObject({ requestId: 'req-1', userId: 'u1' });
+    });
+});
+
+describe('redaction through the console bridge', () => {
+    // #854 review: pino's `redact` only sees structured fields, and the bridge
+    // hands it a message string that `util.format` has already flattened — so
+    // a credential passed as a console argument reached the log intact. The
+    // argument is scrubbed before it is formatted.
+
+    test.each([
+        ['token', { token: 'gateway-token' }, 'gateway-token'],
+        ['authorization', { headers: { authorization: 'Bearer abc' } }, 'Bearer abc'],
+        ['apiKey', { config: { apiKey: 'sk-live-123' } }, 'sk-live-123'],
+    ])('censors %s passed as a console argument', (_label, payload, secret) => {
+        const { out, log } = jsonLogger();
+        const target = {};
+        installConsoleBridge({ target, log });
+
+        target.error('[AI] request failed', payload);
+
+        expect(out.lines[0]).not.toContain(secret);
+        expect(out.lines[0]).toContain('[redacted]');
+    });
+
+    test('catches a credential nested below the top level', () => {
+        // An axios error's `config.headers.Authorization` is three deep, which
+        // is why this is a walk rather than a fixed path list.
+        const scrubbed = scrubSecrets({ a: { b: { c: { sessionSecret: 'shh' } } } });
+        expect(JSON.stringify(scrubbed)).not.toContain('shh');
+    });
+
+    test('matches the key by substring, not by exact name', () => {
+        const scrubbed = scrubSecrets({ discordToken: 'x', 'X-Api-Key': 'y', refreshToken: 'z' });
+        expect(Object.values(scrubbed)).toEqual(['[redacted]', '[redacted]', '[redacted]']);
+    });
+
+    test('leaves everything else exactly as it was', () => {
+        const input = { url: 'https://x', retries: 2, nested: { ok: true } };
+        expect(scrubSecrets(input)).toEqual(input);
+    });
+
+    test('copies rather than mutating — the caller is often about to retry it', () => {
+        const config = { headers: { authorization: 'Bearer abc' } };
+        scrubSecrets(config);
+        expect(config.headers.authorization).toBe('Bearer abc');
+    });
+
+    test('survives a cycle', () => {
+        const cyclic = { token: 'x' };
+        cyclic.self = cyclic;
+        expect(() => scrubSecrets(cyclic)).not.toThrow();
+        expect(scrubSecrets(cyclic).token).toBe('[redacted]');
+    });
+
+    test('leaves an Error instance intact, so its stack still serializes', () => {
+        const err = new Error('boom');
+        expect(scrubSecrets(err)).toBe(err);
     });
 });
 

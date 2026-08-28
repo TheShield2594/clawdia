@@ -30,6 +30,12 @@ const CommandDeploymentSchema = new Schema({
     // Set on claim, cleared on success. A document left pending is a deploy
     // that never finished.
     pending: { type: Boolean, default: false },
+    // Compare-and-swap token, rewritten on every claim attempt. It is what makes
+    // the claim exclusive: two shards that read the same token both try to
+    // replace it, and only the first write matches. Without it, N shards whose
+    // filter merely said "hash differs" would all match the same document and
+    // all publish.
+    claimToken: { type: String, default: null },
     clientId: { type: String, default: null },
     commandCount: { type: Number, default: null },
     deployedAt: { type: Date, default: null },
