@@ -972,6 +972,58 @@ describe('a request from the server', () => {
  * sitting in the channel, and the server is left holding a request nobody will
  * ever answer.
  */
+/**
+ * Each side of a JSON-RPC connection numbers its own outgoing requests, so the
+ * two counters share a namespace by accident and will eventually collide: a
+ * server that has sent a few requests over a pooled session lands on the id of
+ * the call in flight. A message carrying a `method` is never a response,
+ * whatever id it has, and reading it as one is the difference between a
+ * question that gets answered and a tool that reports no output while the
+ * server waits out a request nobody will ever see.
+ */
+describe('a server request whose id collides with ours', () => {
+    test('is not mistaken for the answer to our call', async () => {
+        const answers = [];
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            if (!payload.method) { answers.push(payload); return acceptedResponse(); }
+            return sseResponse([
+                // The server's own request, numbered the same as ours.
+                { jsonrpc: '2.0', id: payload.id, method: 'elicitation/create', params: { message: 'which?' } },
+                { jsonrpc: '2.0', id: payload.id, result: { content: [{ type: 'text', text: 'the real answer' }] } }
+            ]);
+        });
+
+        const client = new McpHttpClient({ url: URL, elicitation: true });
+        const result = await client.callTool('deploy', {}, {
+            onElicit: async () => ({ action: 'decline' })
+        });
+
+        expect(result.content).toEqual([{ type: 'text', text: 'the real answer' }]);
+        for (let i = 0; i < 20 && !answers.length; i++) await new Promise(r => setImmediate(r));
+        // Answered under the id the *server* used, which is the same number
+        // our call carried — that collision is the whole point of this test.
+        expect(answers[0]).toMatchObject({ result: { action: 'decline' } });
+        expect(answers[0].id).toBe(2);
+    });
+
+    // Same reasoning for a batched JSON body, which may carry the server's own
+    // requests alongside the answer.
+    test('and not in a batched JSON body either', async () => {
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return jsonResponse([
+                { jsonrpc: '2.0', id: payload.id, method: 'ping' },
+                { jsonrpc: '2.0', id: payload.id, result: { tools: [{ name: 'search' }] } }
+            ]);
+        });
+
+        await expect(new McpHttpClient({ url: URL }).listTools()).resolves.toEqual([{ name: 'search' }]);
+    });
+});
+
 describe('the deadline while somebody is answering', () => {
     /** A stream held open by the test, so the deadline is what decides. */
     function heldStream() {

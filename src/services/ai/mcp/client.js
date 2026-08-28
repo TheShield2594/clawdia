@@ -143,6 +143,16 @@ async function readEventStream(stream, id, onNotification = null, onServerReques
      * the loop keeps reading. A JSON-RPC notification is a message with a
      * method and no id; a server-initiated request has both; a response to
      * some other request on the same stream has only an id, and is skipped.
+     *
+     * `method` is tested before the id, and that order is load-bearing. Each
+     * side numbers its own outgoing requests, so the two counters share a
+     * namespace by accident and will eventually collide — a server that has
+     * sent a few requests over a pooled session lands on the id of the call in
+     * flight. Matching on the id first would then return the server's
+     * *request* as though it were our answer, which reads as a result with no
+     * content ("the tool returned no output") while the server waits out a
+     * question nobody will ever answer. A message carrying a method is never a
+     * response, whatever id it has.
      */
     const finish = () => {
         if (!data.length) return undefined;
@@ -157,9 +167,9 @@ async function readEventStream(stream, id, onNotification = null, onServerReques
             return undefined;
         }
         if (!message || typeof message !== 'object') return undefined;
-        if (message.id === id) return message;
-
-        if (typeof message.method !== 'string') return undefined;
+        if (typeof message.method !== 'string') {
+            return message.id === id ? message : undefined;
+        }
 
         const listener = message.id === undefined ? onNotification : onServerRequest;
         try {
@@ -208,9 +218,13 @@ function parseJsonBody(text, id) {
     } catch {
         throw new McpError(`server sent a non-JSON response: ${text.slice(0, 200)}`);
     }
-    // Batched responses are legal even for a single request.
+    // Batched responses are legal even for a single request, and a batch may
+    // carry the server's own requests alongside the answer. `method` rules
+    // those out before the id is looked at, for the same reason the event
+    // reader does it in that order: the two sides number their requests
+    // independently, so an id match alone is not proof of a response.
     const list = Array.isArray(parsed) ? parsed : [parsed];
-    const match = list.find(m => m && m.id === id);
+    const match = list.find(m => m && m.id === id && typeof m.method !== 'string');
     if (!match) throw new McpError('server response did not answer the request');
     return match;
 }

@@ -86,6 +86,31 @@ function expiryMs(expiresAt) {
     return Number.isFinite(at) ? at : null;
 }
 
+/**
+ * How many times this grant has been invalidated, so a read that started before
+ * an invalidation cannot install its answer after one.
+ *
+ * The race is narrow and its worst case is not: `accessTokenFor` issues a
+ * `findOne`, an admin clicks Disconnect, `clearGrant` empties the memo and
+ * nulls the row — and then the in-flight read returns the grant as it was and
+ * memoizes the token that was just revoked. Nothing reads the row again while
+ * the memo answers, and there is no grant left to refresh from, so a
+ * disconnected connection would go on authenticating from process memory until
+ * the token expired on its own.
+ *
+ * Every writer bumps the epoch; a reader captures it before its query and
+ * declines to memoize if it moved. Same shape as the list cache's
+ * `generation` in connections.js, for the same reason.
+ */
+const epochs = new Map();
+
+const epochOf = key => epochs.get(key) || 0;
+
+function invalidate(key) {
+    epochs.set(key, epochOf(key) + 1);
+    tokenMemo.delete(key);
+}
+
 function memoGet(key) {
     const entry = tokenMemo.get(key);
     if (!entry) return null;
@@ -96,9 +121,10 @@ function memoGet(key) {
     return entry.token;
 }
 
-function memoSet(key, token, expiresAt) {
+function memoSet(key, token, expiresAt, epoch) {
     const at = expiryMs(expiresAt);
     if (!token || at === null) return;
+    if (epoch !== undefined && epoch !== epochOf(key)) return;
     const until = at - MEMO_SKEW_MS;
     if (until <= Date.now()) return;
     tokenMemo.set(key, { token, until });
@@ -159,7 +185,7 @@ async function readGrant(guildId, server) {
 
 /** Writes a grant, replacing whatever was there. Used by the dashboard callback. */
 async function saveGrant(guildId, server, grant) {
-    tokenMemo.delete(keyOf(guildId, server));
+    invalidate(keyOf(guildId, server));
     const result = await Guild.updateOne(
         { guildId, 'ai.mcpServers.name': server },
         {
@@ -178,7 +204,7 @@ async function saveGrant(guildId, server, grant) {
 /** Drops a grant, so the connection goes back to being unauthenticated. */
 async function clearGrant(guildId, server) {
     inFlight.delete(keyOf(guildId, server));
-    tokenMemo.delete(keyOf(guildId, server));
+    invalidate(keyOf(guildId, server));
     const result = await Guild.updateOne(
         { guildId, 'ai.mcpServers.name': server },
         { $set: { 'ai.mcpServers.$.oauth': null } },
@@ -219,7 +245,8 @@ async function refreshGrant(guildId, server, grant, { encryptedRefreshToken }) {
     const existing = inFlight.get(key);
     if (existing) return existing;
 
-    tokenMemo.delete(key);
+    invalidate(key);
+    const refreshEpoch = epochOf(key);
 
     const attempt = (async () => {
         const fresh = await refreshTokens(grant.tokenEndpoint, {
@@ -242,7 +269,7 @@ async function refreshGrant(guildId, server, grant, { encryptedRefreshToken }) {
 
         const stored = await storeRefreshed(guildId, server, encryptedRefreshToken, updated);
         if (stored) {
-            memoSet(key, updated.accessToken, updated.expiresAt);
+            memoSet(key, updated.accessToken, updated.expiresAt, refreshEpoch);
             return updated;
         }
 
@@ -250,7 +277,7 @@ async function refreshGrant(guildId, server, grant, { encryptedRefreshToken }) {
         // definition, so it is the one to use.
         const other = await readGrant(guildId, server);
         const winner = other?.accessToken ? other : updated;
-        memoSet(key, winner.accessToken, winner.expiresAt);
+        memoSet(key, winner.accessToken, winner.expiresAt, refreshEpoch);
         return winner;
     })().finally(() => inFlight.delete(key));
 
@@ -279,11 +306,15 @@ async function accessTokenFor(guildId, server, { force = false } = {}) {
     if (force) {
         // The caller is here because the server rejected what it was last
         // given, which may well be what is memoized.
-        tokenMemo.delete(key);
+        invalidate(key);
     } else {
         const memoized = memoGet(key);
         if (memoized) return memoized;
     }
+
+    // Captured before the read, not after it: what makes the answer below safe
+    // to memoize is that nothing invalidated the grant while it was in flight.
+    const epoch = epochOf(key);
 
     const doc = await Guild.findOne(
         { guildId, 'ai.mcpServers.name': server },
@@ -295,7 +326,7 @@ async function accessTokenFor(guildId, server, { force = false } = {}) {
     if (!grant?.accessToken && !grant?.refreshToken) return null;
 
     if (!force && grant.accessToken && !needsRefresh(grant.expiresAt)) {
-        memoSet(key, grant.accessToken, grant.expiresAt);
+        memoSet(key, grant.accessToken, grant.expiresAt, epoch);
         return grant.accessToken;
     }
     if (!grant.refreshToken) {
@@ -327,6 +358,7 @@ async function accessTokenFor(guildId, server, { force = false } = {}) {
 function _resetOAuthStore() {
     inFlight.clear();
     tokenMemo.clear();
+    epochs.clear();
 }
 
 module.exports = {

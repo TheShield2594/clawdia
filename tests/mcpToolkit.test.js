@@ -698,3 +698,45 @@ describe('a question a tool call raises', () => {
         expect(mockCallTool.mock.calls[0][2].onElicit).toBeUndefined();
     });
 });
+
+/**
+ * The turn budget bounds how long a Discord reply is held open waiting on
+ * somebody else's server. A person reading a question is not that — they are
+ * engaged, and the reply is waiting on them on purpose — so charging their
+ * thinking time to the same ninety seconds means one question ends the turn:
+ * every call after it finds the budget spent and is refused without running.
+ */
+describe('what a question costs the turn', () => {
+    const waitInsideElicit = ms => jest.fn(async () => {
+        await new Promise(resolve => setTimeout(resolve, ms));
+        return { action: 'decline' };
+    });
+
+    // The wait is deliberately longer than the whole budget, so without the
+    // credit the turn is unambiguously over by the time the answer lands.
+    test('the time somebody spends answering is given back', async () => {
+        const elicit = waitInsideElicit(120);
+        const toolkit = await prepareMcpToolkit([GITHUB], { elicit, turnBudgetMs: 60 });
+
+        // First call: the server asks, and the answer takes half the budget.
+        mockCallTool.mockImplementationOnce(async (_name, _args, { onElicit }) => {
+            await onElicit({ message: 'which?' }, { extendDeadline: () => {} });
+            return textResult('ok');
+        });
+        await toolkit.call('github__search_repositories', {});
+
+        // Without the credit the turn is spent here and this is refused.
+        const second = await toolkit.call('github__search_repositories', {});
+        expect(second).not.toMatch(/spent its time budget/);
+        expect(mockCallTool).toHaveBeenCalledTimes(2);
+    });
+
+    // Only the wait, and only once it is over, so a server that asks and goes
+    // away cannot hold a turn open indefinitely.
+    test('but the budget still runs out on its own', async () => {
+        const toolkit = await prepareMcpToolkit([GITHUB], { elicit: jest.fn(), turnBudgetMs: 30 });
+        await new Promise(resolve => setTimeout(resolve, 45));
+
+        expect(await toolkit.call('github__search_repositories', {})).toMatch(/spent its time budget/);
+    });
+});

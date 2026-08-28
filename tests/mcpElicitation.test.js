@@ -215,7 +215,7 @@ describe('what the person is shown', () => {
  * than as a promise nobody settles: the tool on the far side is holding its
  * request open until this resolves.
  */
-const { createElicitationHandler } = require('../src/services/ai/mcp/elicitation');
+const { createElicitationHandler, MODAL_PREFIX } = require('../src/services/ai/mcp/elicitation');
 
 function fakeMessage() {
     const prompt = {
@@ -235,26 +235,36 @@ function fakeMessage() {
     return { message, prompt, sends };
 }
 
-/** A button click, and the modal submission it goes on to open. */
+/**
+ * A button click, and the modal submission it goes on to open.
+ *
+ * `awaitModalSubmit` runs the real filter against the modal that was shown, so
+ * a filter that would accept somebody else's form fails here rather than in
+ * production — the collector Discord builds for it is client-global, and the
+ * filter is the only thing separating two open questions.
+ */
 function click(customId, { userId = 'asker', manageGuild = false, typed = null } = {}) {
-    const submission = typed && {
-        user: { id: userId },
-        fields: { getTextInputValue: name => typed[name] ?? '' },
-        deferUpdate: jest.fn(async () => {}),
-        reply: jest.fn(async () => {}),
-    };
-    return {
+    const interaction = {
         customId,
         user: { id: userId },
         memberPermissions: { has: () => manageGuild },
         deferUpdate: jest.fn(async () => {}),
-        showModal: jest.fn(async () => {}),
-        awaitModalSubmit: jest.fn(async () => {
-            if (!submission) throw new Error('never submitted');
-            return submission;
-        }),
-        submission,
+        shown: null,
+        showModal: jest.fn(async modal => { interaction.shown = modal.toJSON(); }),
+        submission: typed && {
+            user: { id: userId },
+            fields: { getTextInputValue: name => typed[name] ?? '' },
+            deferUpdate: jest.fn(async () => {}),
+            reply: jest.fn(async () => {}),
+        },
     };
+    interaction.awaitModalSubmit = jest.fn(async ({ filter }) => {
+        if (!interaction.submission) throw new Error('never submitted');
+        const offered = { ...interaction.submission, customId: interaction.shown.custom_id };
+        if (!filter(offered)) throw new Error('filtered out');
+        return interaction.submission;
+    });
+    return interaction;
 }
 
 const ASK = {
@@ -414,5 +424,85 @@ describe('a server that asks too much', () => {
 
         expect(result).toEqual({ action: 'decline' });
         expect(message.channel.send).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * `Message#awaitMessageComponent` scopes its collector to the message the
+ * buttons are on. `awaitModalSubmit` does not: it hands the collector no
+ * message, channel or guild, so every live collector in the process is offered
+ * every modal submission and the filter is the only thing that separates them.
+ *
+ * A round running two tool calls can have two questions open at once, which the
+ * per-turn ceiling allows. With one shared custom id, both would match the
+ * first form submitted — and where the two schemas share a field name (`name`,
+ * `path`, `confirm` — entirely plausible across two servers) one server would
+ * be silently sent the answer somebody typed for the other, with both prompts
+ * reporting success.
+ */
+describe('two questions open at once', () => {
+    test('get different modal ids', async () => {
+        const first = fakeMessage();
+        const second = fakeMessage();
+        const a = click('mcp-elicit-answer', { typed: { env: 'staging' } });
+        const b = click('mcp-elicit-answer', { typed: { env: 'production' } });
+        first.prompt.awaitMessageComponent.mockResolvedValue(a);
+        second.prompt.awaitMessageComponent.mockResolvedValue(b);
+
+        await createElicitationHandler(first.message)('github', ASK, {});
+        await createElicitationHandler(second.message)('linear', ASK, {});
+
+        expect(a.shown.custom_id).toMatch(new RegExp(`^${MODAL_PREFIX}:`));
+        expect(b.shown.custom_id).toMatch(new RegExp(`^${MODAL_PREFIX}:`));
+        expect(a.shown.custom_id).not.toBe(b.shown.custom_id);
+    });
+
+    // The filter is the only discriminator Discord applies, so it has to be
+    // the one that rejects the other question's form.
+    test('and each only accepts its own form back', async () => {
+        const { message, prompt } = fakeMessage();
+        const interaction = click('mcp-elicit-answer', { typed: { env: 'staging' } });
+        prompt.awaitMessageComponent.mockResolvedValue(interaction);
+
+        await createElicitationHandler(message)('github', ASK, {});
+
+        const { filter } = interaction.awaitModalSubmit.mock.calls[0][0];
+        const mine = { customId: interaction.shown.custom_id, user: { id: 'asker' } };
+        const somebodyElses = { customId: `${MODAL_PREFIX}:other:99`, user: { id: 'asker' } };
+
+        expect(filter(mine)).toBe(true);
+        expect(filter(somebodyElses)).toBe(false);
+    });
+});
+
+/**
+ * Answering is two waits, not one — noticing the prompt and clicking, then
+ * reading the form and typing — and each is allowed the full timeout. An
+ * extension that covers only the first leaves the stream destroyed while
+ * somebody is mid-form: the tool call is reported as failed, and then the
+ * answer they eventually submit is posted to a server that has stopped
+ * waiting, over a prompt that says it was answered.
+ */
+describe('the clock across both waits', () => {
+    test('is pushed out again once the form is open', async () => {
+        const { message, prompt } = fakeMessage();
+        const extendDeadline = jest.fn();
+        prompt.awaitMessageComponent.mockResolvedValue(click('mcp-elicit-answer', { typed: { env: 'staging' } }));
+
+        await createElicitationHandler(message)('github', ASK, { extendDeadline });
+
+        expect(extendDeadline).toHaveBeenCalledTimes(2);
+    });
+
+    // Only after the modal is shown: extending twice up front would buy the
+    // same total for a question that never reaches the form.
+    test('and not for a question cancelled at the button', async () => {
+        const { message, prompt } = fakeMessage();
+        const extendDeadline = jest.fn();
+        prompt.awaitMessageComponent.mockResolvedValue(click('mcp-elicit-decline'));
+
+        await createElicitationHandler(message)('github', ASK, { extendDeadline });
+
+        expect(extendDeadline).toHaveBeenCalledTimes(1);
     });
 });

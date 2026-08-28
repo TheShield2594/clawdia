@@ -419,3 +419,59 @@ describe('the in-process token memo', () => {
         expect(Guild.findOne).toHaveBeenCalledTimes(2);
     });
 });
+
+/**
+ * The memo's own race. Every writer empties it before the write it is
+ * invalidating for, but a read that issued its query *before* that write and
+ * returns after it carries the grant as it was — and would install the
+ * superseded token on the way out.
+ *
+ * The 401 paths self-heal at the cost of a round trip. Disconnect does not:
+ * the row is empty and there is no grant left to refresh from, so a revoked
+ * token would go on being served out of process memory until it expired.
+ */
+describe('a read that started before the grant changed', () => {
+    /** `Guild.findOne(...).lean()` that does not resolve until told to. */
+    function stubSlowRead(oauth) {
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        Guild.findOne.mockReturnValue({ lean: () => gate.then(() => ({ ai: { mcpServers: [{ name: 'linear', oauth }] } })) });
+        return release;
+    }
+
+    test('does not memoize the token a disconnect just revoked', async () => {
+        const release = stubSlowRead(storedGrant());
+        const inFlightRead = accessTokenFor('g1', 'linear');
+
+        await clearGrant('g1', 'linear');
+        release();
+        await inFlightRead;
+
+        // The row is empty now, and nothing may answer from memory instead.
+        stubRead(null);
+        await expect(accessTokenFor('g1', 'linear')).resolves.toBeNull();
+    });
+
+    test('nor the one a new grant was just written over', async () => {
+        const release = stubSlowRead(storedGrant());
+        const inFlightRead = accessTokenFor('g1', 'linear');
+
+        await saveGrant('g1', 'linear', { ...storedGrant(), accessToken: 'at9', refreshToken: 'rt9' });
+        release();
+        await inFlightRead;
+
+        stubRead(storedGrant({ accessToken: 'enc:at9' }));
+        await expect(accessTokenFor('g1', 'linear')).resolves.toBe('at9');
+    });
+
+    // A read with nothing racing it still memoizes, or the memo would never
+    // hold anything at all.
+    test('and an undisturbed read still memoizes', async () => {
+        stubRead(storedGrant());
+
+        await accessTokenFor('g1', 'linear');
+        await accessTokenFor('g1', 'linear');
+
+        expect(Guild.findOne).toHaveBeenCalledTimes(1);
+    });
+});

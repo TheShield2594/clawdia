@@ -777,7 +777,9 @@ async function prepareMcpToolkit(guildServers = [], {
     // Spent across the whole turn rather than per call: see the two constants
     // above for why neither ceiling works on its own.
     let charsSpent = 0;
-    const deadline = Date.now() + turnBudgetMs;
+    // Not const: time spent waiting for a *person* is credited back below, so
+    // one question does not spend the whole turn's allowance (#838).
+    let deadline = Date.now() + turnBudgetMs;
 
     /**
      * A result, labelled with where it came from.
@@ -945,8 +947,25 @@ async function prepareMcpToolkit(guildServers = [], {
         // has to say out loud — "the github server is asking you" — and the
         // handler itself belongs to the turn rather than to any one call, so
         // its per-turn ceiling counts every server's questions together.
+        // The turn budget exists to bound how long a Discord reply is held open
+        // waiting on somebody else's server. A person reading a question is not
+        // that: they are engaged, and the reply is waiting on them on purpose.
+        // Charging their thinking time to the same ninety seconds means one
+        // question ends the turn — every call after it finds the budget spent
+        // and is refused — so the wait is measured and given back.
+        //
+        // Only the wait, and only once it is over: a question that is never
+        // answered still costs its own time, so a turn cannot be held open
+        // indefinitely by a server that asks and goes away.
         const onElicit = typeof elicit === 'function'
-            ? (params, ctx) => elicit(server, params, ctx)
+            ? async (params, ctx) => {
+                const askedAt = Date.now();
+                try {
+                    return await elicit(server, params, ctx);
+                } finally {
+                    deadline += Date.now() - askedAt;
+                }
+            }
             : undefined;
 
         try {

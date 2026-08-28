@@ -74,7 +74,26 @@ const MAX_ELICITATIONS_PER_TURN = 2;
 
 const ANSWER = 'mcp-elicit-answer';
 const DECLINE = 'mcp-elicit-decline';
-const MODAL = 'mcp-elicit-modal';
+
+/**
+ * The modal's custom id, unique per question.
+ *
+ * `awaitModalSubmit` is not scoped the way `awaitMessageComponent` is: it hands
+ * the collector no message, channel or guild, so *every* live collector in the
+ * process is offered *every* modal submission and the filter is the only thing
+ * that separates them. With one shared id, two questions open at once — which
+ * a round running two tool calls can produce, and the per-turn ceiling allows —
+ * would both match the first form submitted. Overlapping field names is the bad
+ * case: one server is silently sent the answer somebody typed for the other,
+ * and both prompts say it was answered.
+ *
+ * So the id carries a counter, and the filter matches it exactly. The button
+ * step needs none of this: `Message#awaitMessageComponent` scopes its collector
+ * to the message the buttons are on.
+ */
+const MODAL_PREFIX = 'mcp-elicit-modal';
+let modalSeq = 0;
+const nextModalId = () => `${MODAL_PREFIX}:${Date.now().toString(36)}:${++modalSeq}`;
 
 const NOT_YOURS = 'Only the person who asked, or someone who can manage this server, can answer this.';
 
@@ -236,8 +255,8 @@ function buttons(disabled = false) {
     );
 }
 
-function modalFor(server, fields) {
-    const modal = new ModalBuilder().setCustomId(MODAL).setTitle(clean(`${server} needs an answer`, MAX_LABEL_CHARS));
+function modalFor(server, fields, customId) {
+    const modal = new ModalBuilder().setCustomId(customId).setTitle(clean(`${server} needs an answer`, MAX_LABEL_CHARS));
 
     for (const field of fields) {
         const input = new TextInputBuilder()
@@ -340,16 +359,26 @@ function createElicitationHandler(message, { timeoutMs = ELICIT_TIMEOUT_MS } = {
             return settle(`🚫 Cancelled by <@${click.user.id}>.`, { action: DECLINE_ACTION });
         }
 
-        await click.showModal(modalFor(serverName, parsed.fields));
+        const modalId = nextModalId();
+        await click.showModal(modalFor(serverName, parsed.fields, modalId));
+
+        // The clock again. Answering is two waits, not one — noticing the
+        // prompt and clicking, then reading the form and typing — and the
+        // extension above only covered the first. Without this second one the
+        // stream is destroyed while somebody is mid-form, and the tool call is
+        // reported as failed a minute before they press Submit.
+        extendDeadline?.(timeoutMs + 15_000);
 
         let submission;
         try {
             submission = await click.awaitModalSubmit({
                 time: timeoutMs,
-                // Discord only shows the modal to whoever clicked, so this is
-                // belt and braces — and it answers rather than dropping a
-                // submission in silence, the same as every other filter here.
-                filter: interaction => interaction.customId === MODAL
+                // The id is this question's alone; see MODAL_PREFIX for why
+                // that matters. The user check is belt and braces on top —
+                // Discord only shows the modal to whoever clicked — and it
+                // answers rather than dropping a submission in silence, the
+                // same as every other filter here.
+                filter: interaction => interaction.customId === modalId
                     && !rejectOtherUser(interaction, click.user.id, NOT_YOURS),
             });
         } catch {
@@ -377,6 +406,7 @@ function createElicitationHandler(message, { timeoutMs = ELICIT_TIMEOUT_MS } = {
 
 module.exports = {
     createElicitationHandler,
+    MODAL_PREFIX,
     fieldsOf,
     fieldOf,
     coerce,
