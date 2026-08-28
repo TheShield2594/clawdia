@@ -9,6 +9,39 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const pkg = JSON.parse(read('package.json'));
 const ci  = read('.github/workflows/ci.yml');
 
+/**
+ * The index of `marker` in the workflow, having asserted it is there.
+ *
+ * Everything below works on a slice of ci.yml between two markers, and
+ * `indexOf` answers -1 for a marker that is no longer there — which `slice`
+ * turns into an empty or reversed range rather than an error. An assertion that
+ * something is *absent* then passes against that empty string, so renaming the
+ * job would leave this file green while checking nothing at all. That is the
+ * same vacuous pass #633 was about, and it gets the same treatment: no
+ * non-answer.
+ */
+function markerAt(marker) {
+    const at = ci.indexOf(marker);
+    if (at < 0) {
+        throw new Error(
+            `ci.yml has no ${JSON.stringify(marker)}. The workflow was restructured and the ` +
+            'assertions below no longer read what they name — update the markers.',
+        );
+    }
+    return at;
+}
+
+/** The YAML of each of a job's steps, keyed by the step's name. */
+function stepsOf(job) {
+    const names = [...job.matchAll(/^ {6}- name: (.+)$/gm)];
+    return new Map(names.map((m, i) => [
+        m[1].trim(),
+        job.slice(m.index, i + 1 < names.length ? names[i + 1].index : job.length),
+    ]));
+}
+
+const testJob = ci.slice(markerAt('\n  test:'), markerAt('\n  publish:'));
+
 // #630. `jest --forceExit` kills the run once the last assertion has finished,
 // whether or not anything is still holding the event loop open. That is not a
 // fix for a leak, it is the removal of the only signal that one exists: a
@@ -42,7 +75,6 @@ describe('open-handle detection is not suppressed', () => {
     // one explains at length why `--forceExit` is gone, and a naive search of
     // the job text finds that explanation and calls it a violation.
     test('CI does not add it back on the command line', () => {
-        const testJob = ci.slice(ci.indexOf('\n  test:'), ci.indexOf('\n  publish:'));
         const commands = testJob
             .split('\n')
             .filter(line => !/^\s*#/.test(line))
@@ -61,17 +93,34 @@ describe('open-handle detection is not suppressed', () => {
     // the job's whole budget and takes the coverage and lint steps down with
     // it, so the run reports nothing at all. A step-level bound turns that into
     // a failed step with the other answers still intact.
-    test('a hung test step is bounded, so the steps after it still report', () => {
-        const step = ci.slice(ci.indexOf('- name: Run tests'), ci.indexOf('- name: Check per-subsystem'));
-        expect(step).toMatch(/timeout-minutes: \d+/);
+    test('the test step is bounded, and under the job that contains it', () => {
+        const steps = stepsOf(testJob);
+        const run = steps.get('Run tests');
+        expect(run).toMatch(/timeout-minutes: \d+/);
 
-        const stepBudget = Number(step.match(/timeout-minutes: (\d+)/)[1]);
-        // The job's own budget, which is declared before `steps:` — not the
-        // per-step ones, of which this step is now one.
-        const jobHeader = ci.slice(ci.indexOf('\n  test:'), ci.indexOf('\n    steps:'));
+        const stepBudget = Number(run.match(/timeout-minutes: (\d+)/)[1]);
+        // The job's own budget, declared before `steps:` — not the per-step
+        // ones, of which the test step is now one.
+        const jobHeader = ci.slice(markerAt('\n  test:'), markerAt('\n    steps:'));
         const jobBudget = Number(jobHeader.match(/timeout-minutes: (\d+)/)[1]);
         // Strictly under the job's own timeout, or the job dies first and the
         // bound has bought nothing.
         expect([stepBudget, stepBudget < jobBudget]).toEqual([stepBudget, true]);
+    });
+
+    // The other half of that bargain, and the half the bound is *for*. Sending
+    // the hang to a single step only helps if the steps after it still run;
+    // without `if: always()` they are skipped the moment the test step goes
+    // red, and a timed-out run reports neither coverage nor lint — exactly the
+    // silence the step budget was meant to prevent. Asserting the timeout alone
+    // would leave that removable with this file still green.
+    test.each([
+        'Check per-subsystem coverage floors',
+        'Report coverage',
+        'Lint',
+    ])('the %s step still reports when the tests fail', name => {
+        const step = stepsOf(testJob).get(name);
+        expect([name, step !== undefined]).toEqual([name, true]);
+        expect([name, /\n\s*if: always\(\)/.test(step)]).toEqual([name, true]);
     });
 });
