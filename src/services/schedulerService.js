@@ -7,7 +7,7 @@ const { ensurePricingFields, nextPrice, decayDemand, demandDecayFactor, trendBuc
 const { softResetElo, tierFor, makeSeasonId } = require('../utils/duelElo');
 const { topByNetWorth } = require('../utils/netWorth');
 const { recordOwedPayout } = require('../utils/owedPayout');
-const { creditCoinsOnce, grantItemOnce, hourlyPayoutKey, listingPayoutKey } = require('../utils/payoutKey');
+const { creditCoinsOnce, grantItemOnce, weeklyChampionPayoutKey, listingPayoutKey } = require('../utils/payoutKey');
 const COLORS = require('../utils/embedColors');
 
 const WAR_BOOSTER_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -587,32 +587,72 @@ function owedSummary(failed, unrecorded) {
     );
 }
 
-// ── Hourly Micro-Competition Announcements ────────────────────────────────────
+// ── Weekly Champion Announcements ─────────────────────────────────────────────
+//
+// This was an hourly competition: four categories, one winner each, announced
+// every hour on the hour for 500 coins apiece. In a large server that is a
+// lively ticker; in a small one it is 96 announcements a day naming the same
+// two people, and the announcement channel becomes something members mute.
+//
+// So the window is a week and the metric is cumulative — see models/WeeklyChampion
+// for why a week decided by a single lucky roll would not be worth entering —
+// and the reward is a week-sized prize rather than 168 hour-sized ones.
 
-const HOURLY_CATEGORY_LABELS = {
-    fish: { title: '🎣 Rarest Catch Last Hour',  reward: 500,  emoji: '🐟' },
-    mine: { title: '⛏️ Biggest Dig Last Hour',    reward: 500,  emoji: '💎' },
-    hunt: { title: '🏹 Largest Haul Last Hour',   reward: 500,  emoji: '🦌' },
-    // A category with no entry here is skipped when the hour is announced — the
-    // winner is still paid, just never named — so a new competition has to be
+const WEEKLY_CATEGORY_LABELS = {
+    // `unit` because `total` is not the same quantity in every category: three
+    // of these accumulate coins and fish accumulates rarity tiers, and a line
+    // reading "4,200 coins" for a scoreboard that never counted coins is a
+    // number members will try to reconcile against their balance.
+    fish:    { title: '🎣 Angler of the Week',   emoji: '🐟', unit: 'rarity score' },
+    mine:    { title: '⛏️ Miner of the Week',     emoji: '💎', unit: 'coins mined' },
+    hunt:    { title: '🏹 Hunter of the Week',    emoji: '🦌', unit: 'coins hunted' },
+    // A category with no entry here is skipped when the week is announced — the
+    // champion is still paid, just never named — so a new competition has to be
     // added in both places or it wins in silence.
-    explore: { title: '🧭 Richest Expedition Last Hour', reward: 500, emoji: '🗺️' },
+    explore: { title: '🧭 Explorer of the Week',  emoji: '🗺️', unit: 'coins recovered' },
 };
 
-async function announceHourlyWinners(client) {
-    const { EmbedBuilder } = require('discord.js');
-    const HourlyWinner = require('../models/HourlyWinner');
-    const User         = require('../models/User');
-    const { getPreviousHourKey } = require('../utils/hourlyWinner');
+// Fixed order so the four lines of an announcement read the same way every
+// week, whatever order the aggregation happened to group them in.
+const WEEKLY_CATEGORY_ORDER = ['hunt', 'mine', 'fish', 'explore'];
 
-    const prevHour   = getPreviousHourKey();
-    const candidates = await HourlyWinner.find({ hour: prevHour, rewarded: false }).lean();
+// One prize per category per guild. Deliberately not 500 × 168: the hourly
+// payout was a firehose that scaled with how often people played rather than
+// with how well, and the point of the change is a prize worth winning that
+// does not print coins by the hour.
+const WEEKLY_CHAMPION_REWARD = 10_000;
+
+async function announceWeeklyChampions(client) {
+    const { EmbedBuilder } = require('discord.js');
+    const WeeklyChampion = require('../models/WeeklyChampion');
+    const User           = require('../models/User');
+    const { getPreviousWeekKey } = require('../utils/weeklyChampion');
+
+    const prevWeek = getPreviousWeekKey();
+
+    // The champion of each guild+category, picked in the database rather than by
+    // pulling a week of every player's rows into the process. `rewarded` is
+    // deliberately *not* in the `$match`: excluding an already-claimed row would
+    // not skip that competition, it would crown whoever came second and pay them
+    // too. The claim below is what makes the sweep safe to run twice.
+    const candidates = await WeeklyChampion.aggregate([
+        { $match: { week: prevWeek } },
+        // `runs` then `createdAt` break a tie the same way every run, so a
+        // re-run after a partial failure cannot crown a different player.
+        { $sort: { total: -1, runs: -1, createdAt: 1 } },
+        { $group: { _id: { guildId: '$guildId', category: '$category' }, top: { $first: '$$ROOT' } } },
+        { $replaceRoot: { newRoot: '$top' } },
+    ]);
     if (!candidates.length) return;
 
-    // Claim each winner atomically to prevent double-pay under concurrent runs
+    candidates.sort((a, b) =>
+        String(a.guildId).localeCompare(String(b.guildId)) ||
+        WEEKLY_CATEGORY_ORDER.indexOf(a.category) - WEEKLY_CATEGORY_ORDER.indexOf(b.category));
+
+    // Claim each champion atomically to prevent double-pay under concurrent runs
     const actualWinners = [];
     for (const w of candidates) {
-        const claimed = await HourlyWinner.findOneAndUpdate(
+        const claimed = await WeeklyChampion.findOneAndUpdate(
             { _id: w._id, rewarded: false },
             { $set: { rewarded: true } },
             { new: true }
@@ -642,13 +682,13 @@ async function announceHourlyWinners(client) {
     // Which is also why `null` now has two meanings and the classification
     // matters — 'missing' is owed, 'duplicate' is done, and treating the second
     // as the first is #804 returning under a new name.
-    const rewardAmount = 500;
+    const rewardAmount = WEEKLY_CHAMPION_REWARD;
     const paidWinners = [];
     let failedCredits = 0;
     let unrecordedCredits = 0;
 
     for (const winner of actualWinners) {
-        const payoutKey = hourlyPayoutKey(prevHour, winner.category);
+        const payoutKey = weeklyChampionPayoutKey(prevWeek, winner.category);
         let status = null;
         let creditErr = null;
         try {
@@ -674,7 +714,7 @@ async function announceHourlyWinners(client) {
         if (status === 'duplicate') {
             paidWinners.push(winner);
             console.warn(
-                `[scheduler] hourly reward for ${winner.userId} in ${winner.guildId} ` +
+                `[scheduler] weekly reward for ${winner.userId} in ${winner.guildId} ` +
                 `(${winner.category}) was already applied under ${payoutKey} — not paid again`,
             );
             continue;
@@ -688,14 +728,14 @@ async function announceHourlyWinners(client) {
         );
         const recorded = await recordOwedPayout({
             service: 'schedulerService',
-            jobName: 'announceHourlyWinners',
+            jobName: 'announceWeeklyChampions',
             guildId: winner.guildId,
             payload: {
                 kind:      'coins',
                 userId:    winner.userId,
                 guildId:   winner.guildId,
                 amount:    rewardAmount,
-                hour:      prevHour,
+                week:      prevWeek,
                 category:  winner.category,
                 payoutKey,
             },
@@ -707,14 +747,14 @@ async function announceHourlyWinners(client) {
         // trace of an unrecorded payout, so it has to say which of the two
         // happened rather than assume the queue write it has not made yet.
         console.error(
-            `[scheduler] hourly reward credit failed for ${winner.userId} in ${winner.guildId} ` +
+            `[scheduler] weekly reward credit failed for ${winner.userId} in ${winner.guildId} ` +
             `(${winner.category}, ${rewardAmount} coins) — ` +
             `${recorded ? 'recorded as owed' : 'NOT recorded, must be paid by hand'}:`, reason,
         );
     }
 
     // Announce per guild (best-effort — reward already granted above).
-    // Only winners actually paid: the embed says "rewarded +500 coins", and a
+    // Only winners actually paid: the embed says "rewarded +10,000 coins", and a
     // winner whose credit is sitting in the owed queue has not been.
     const byGuild = new Map();
     for (const w of paidWinners) {
@@ -730,39 +770,52 @@ async function announceHourlyWinners(client) {
 
             const lines = [];
             for (const winner of guildWinners) {
-                const meta = HOURLY_CATEGORY_LABELS[winner.category];
+                const meta = WEEKLY_CATEGORY_LABELS[winner.category];
                 if (!meta) continue;
-                const detail = winner.details ? ` with **${winner.details}**` : '';
-                lines.push(`${meta.emoji} **${meta.title}**\n<@${winner.userId}> (${winner.username})${detail} — rewarded **+${rewardAmount.toLocaleString()} coins**`);
+                lines.push(
+                    `${meta.emoji} **${meta.title}**\n` +
+                    `<@${winner.userId}> (${winner.username}) — ` +
+                    `**${(winner.total ?? 0).toLocaleString()} ${meta.unit}**${weeklyRunNote(winner)}` +
+                    `${winner.bestDetails ? `\nBest of the week: **${winner.bestDetails}**` : ''}\n` +
+                    `Rewarded **+${rewardAmount.toLocaleString()} coins**`
+                );
             }
 
             if (!lines.length) continue;
 
             const embed = new EmbedBuilder()
                 .setColor(COLORS.PRIZE)
-                .setTitle('🏆 Last Hour\'s Champions')
+                .setTitle('👑 Champions of the Week')
                 .setDescription(lines.join('\n\n'))
-                .setFooter({ text: 'Hourly micro-competitions reset each hour. Hunt, fish, mine and explore to compete!' })
+                .setFooter({ text: 'Weekly competitions reset every Monday. Hunt, fish, mine and explore all week to compete!' })
                 .setTimestamp();
 
             await postAnnouncement(client, guildId, channelId, embed);
         } catch (err) {
-            console.error(`[scheduler] announceHourlyWinners failed for guild ${guildId}:`, err.message);
+            console.error(`[scheduler] announceWeeklyChampions failed for guild ${guildId}:`, err.message);
         }
     }
 
     // Last, so the winners who *were* paid are still announced. The per-winner
-    // catch above is what stops one bad credit stranding the rest of the hour;
-    // on its own it also meant an hour in which every credit failed returned
+    // catch above is what stops one bad credit stranding the rest of the week;
+    // on its own it also meant a week in which every credit failed returned
     // normally and runJob recorded a healthy run. Throwing here is what puts it
     // on /health and files the run-level dead-letter entry — the owed records
     // above are what make it recoverable.
     if (failedCredits) {
         throw new Error(
-            `${failedCredits} of ${actualWinners.length} hourly reward(s) could not be credited — ` +
+            `${failedCredits} of ${actualWinners.length} weekly reward(s) could not be credited — ` +
             owedSummary(failedCredits, unrecordedCredits)
         );
     }
+}
+
+// "over 37 runs" is the part of a weekly total that says how it was earned, and
+// a champion crowned on a single run should not read as if they ground for it.
+function weeklyRunNote(winner) {
+    const runs = winner.runs ?? 0;
+    if (runs <= 1) return '';
+    return ` over ${runs.toLocaleString()} runs`;
 }
 
 // ─── Dynamic shop pricing recalculation (issue #354) ────────────────────────
@@ -1255,7 +1308,7 @@ async function returnExpiredMarketListings() {
                 });
                 if (!recorded) unrecordedReturns += 1;
 
-                // After the record write, for the same reason as the hourly
+                // After the record write, for the same reason as the weekly
                 // credit above.
                 console.error(
                     `[scheduler] listing ${listing._id} was claimed but crediting ` +
@@ -1278,7 +1331,7 @@ async function returnExpiredMarketListings() {
         console.log(`[scheduler] returnExpiredMarketListings: returned items from ${processed} expired listing(s).`);
     }
 
-    // Same reasoning as announceHourlyWinners: the per-listing catches keep one
+    // Same reasoning as announceWeeklyChampions: the per-listing catches keep one
     // bad listing from stranding the batch, and would otherwise also keep the
     // whole batch failing off /health and out of the dead-letter queue.
     if (failed) {
@@ -1290,4 +1343,4 @@ async function returnExpiredMarketListings() {
     }
 }
 
-module.exports = { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest, returnExpiredMarketListings, postScheduledNewspapers: require('./newspaperService').postScheduledNewspapers };
+module.exports = { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceWeeklyChampions, recalcShopPrices, resolveRankedSeasons, applyBankInterest, returnExpiredMarketListings, postScheduledNewspapers: require('./newspaperService').postScheduledNewspapers };

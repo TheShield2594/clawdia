@@ -129,18 +129,18 @@ describe('the hook that advances them', () => {
     });
 });
 
-describe('exploration competes in the hourly micro-competition', () => {
+describe('exploration competes in the weekly champion race', () => {
     const fsx  = require('fs');
     const pathx = require('path');
     const read = (...p) => fsx.readFileSync(pathx.join(__dirname, '..', 'src', ...p), 'utf8');
     const { grindCommandSource } = require('./helpers/grindSources');
 
-    test('the scheduler can name an explore winner', () => {
+    test('the scheduler can name an explore champion', () => {
         // A category with no label entry is skipped at announcement time — the
-        // winner is paid and never mentioned, which reads as the reward being
+        // champion is paid and never mentioned, which reads as the reward being
         // broken. Every category something records must have a label.
         const scheduler = read('services', 'schedulerService.js');
-        const labels = scheduler.slice(scheduler.indexOf('HOURLY_CATEGORY_LABELS'));
+        const labels = scheduler.slice(scheduler.indexOf('WEEKLY_CATEGORY_LABELS'));
         const declared = new Set(
             [...labels.slice(0, labels.indexOf('};')).matchAll(/^\s+(\w+):\s*\{/gm)].map(m => m[1])
         );
@@ -157,7 +157,7 @@ describe('exploration competes in the hourly micro-competition', () => {
 
     test('only a paying expedition enters', () => {
         const src = read('commands', 'economy', 'explore.js');
-        const guardAt  = src.indexOf('if (result.payout > 0) {\n            await tryUpdateHourlyWinner');
+        const guardAt  = src.indexOf('if (result.payout > 0) {\n            await addWeeklyChampionProgress');
         expect(guardAt).toBeGreaterThan(-1);
     });
 });

@@ -603,7 +603,7 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 - Treasure coins feed the economy (transaction-logged, daily-capped — and the embed says so when the cap trims a haul); relics land in `/inventory` under their own section
 - **Featured region** — one core region a day pays +25%, rotating per guild alongside the featured crime, hunt zone, fishing spot and mine depth in `/featured`
 - **Quests and season missions** — daily and weekly expedition quests, plus two season pass daily missions
-- **Hourly micro-competition** — richest expedition of the hour wins coins, alongside the biggest dig and largest haul
+- **Weekly Champion race** — coins recovered across the week crown the Explorer of the Week, alongside the Hunter, Miner and Angler of the Week; announced every Monday, 10,000 coins each
 - **Weekly newspaper** — the top explorer joins the Game Standouts
 - Expeditions grant Explorer XP and mirror guild leveling XP, and Explorer Level shows on `/profile`
 - Rare finds unlock exploration achievements (including secret ones)

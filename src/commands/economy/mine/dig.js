@@ -29,7 +29,7 @@ const { recordMissionProgress } = require('../../../services/seasonMissionServic
 const { checkAndAward, announceAchievements } = require('../../../services/achievementService');
 const { isVersionError } = require('../../../utils/versionRetry');
 const { logBigWin } = require('../../../utils/bigWinLogger');
-const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../../utils/hourlyWinner');
+const { addWeeklyChampionProgress, getWeeklyChampionLeader } = require('../../../utils/weeklyChampion');
 const { randomFrom, MINE_CAVE_LINES } = require('../../../utils/copyLines');
 const { PITY_COPY } = require('../../../utils/pityBonus');
 const { buildMineEmbed } = require('./embeds');
@@ -482,15 +482,15 @@ async function handleDig(interaction) {
             return interaction.editReply({ content: 'Something went wrong saving your mine. Please try again.' });
         }
 
-        // Log big win, then await hourly leader update and re-fetch for accurate footer
+        // Log big win, then await the weekly tally update and re-fetch for accurate footer
         if (result.success && result.finalPayout > 0) {
             const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
             if (result.finalPayout >= bigWinThreshold || ['legendary', 'event'].includes(result.tier)) {
                 logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'mine', details: { itemName: result.ore?.name, rarity: result.tier }, client: interaction.client });
             }
-            await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'mine', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.ore ? `${result.ore.emoji ?? ''} ${result.ore.name} (${currency}${result.finalPayout.toLocaleString()})`.trim() : `${currency}${result.finalPayout.toLocaleString()}` }).catch(() => null);
+            await addWeeklyChampionProgress({ guildId: interaction.guild.id, category: 'mine', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.ore ? `${result.ore.emoji ?? ''} ${result.ore.name} (${currency}${result.finalPayout.toLocaleString()})`.trim() : `${currency}${result.finalPayout.toLocaleString()}` }).catch(() => null);
         }
-        const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'mine').catch(() => null);
+        const weeklyLeader = await getWeeklyChampionLeader(interaction.guild.id, 'mine').catch(() => null);
 
         const embed = buildMineEmbed(result, user, depth, pickaxe, currency, interaction.user);
 
@@ -524,10 +524,10 @@ async function handleDig(interaction) {
             embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
         }
 
-        // Hourly leader footer
-        const leaderNote = hourlyLeader
-            ? `🏆 Biggest dig this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? hourlyLeader.value.toLocaleString() + ' coins'}`
-            : '🏆 No hourly leader yet — be the first!';
+        // Weekly champion race footer
+        const leaderNote = weeklyLeader
+            ? `👑 Miner of the Week so far: ${weeklyLeader.username} — ${(weeklyLeader.total ?? 0).toLocaleString()} coins mined`
+            : '👑 No Miner of the Week yet — be the first!';
         const existingFooter = embed.data.footer?.text ?? '';
         embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });
 
