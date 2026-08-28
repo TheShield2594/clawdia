@@ -64,10 +64,33 @@ const { decryptSecret } = require('../../../config/secretBox');
 
 const CALLBACK_PATH = '/mcp/oauth/callback';
 
-/** The one redirect URI every flow uses. See the note above on why it is fixed. */
+/**
+ * The one redirect URI every flow uses. See the note above on why it is fixed.
+ *
+ * The localhost fallback is for a developer running the dashboard on their own
+ * machine and nobody else (#838). In a deployment it is worse than nothing: the
+ * URI is registered with the authorization server *and* checked by it on the
+ * way back, so an unset `DASHBOARD_URL` produces a flow that either fails at
+ * registration or sends the admin's browser to a port on their own laptop
+ * carrying an authorization code — with an error, if it surfaces at all, that
+ * says nothing about which variable is missing.
+ *
+ * So it is refused rather than guessed at whenever the process is not plainly
+ * local: the caller turns this into a 500 naming the variable, which is a
+ * minute of an admin's time instead of an afternoon.
+ */
 function redirectUriFor() {
-    const base = process.env.DASHBOARD_URL || `http://localhost:${process.env.DASHBOARD_PORT || 3000}`;
-    return `${base.replace(/\/+$/, '')}/api${CALLBACK_PATH}`;
+    const configured = String(process.env.DASHBOARD_URL || '').trim();
+    if (!configured) {
+        if (process.env.NODE_ENV === 'production') {
+            throw new OAuthError(
+                'DASHBOARD_URL is not set, so there is no address to send the OAuth callback back to. '
+                + 'Set it to the dashboard\'s public URL and try again.',
+            );
+        }
+        return `http://localhost:${process.env.DASHBOARD_PORT || 3000}/api${CALLBACK_PATH}`;
+    }
+    return `${configured.replace(/\/+$/, '')}/api${CALLBACK_PATH}`;
 }
 
 /**

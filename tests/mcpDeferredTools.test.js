@@ -145,17 +145,67 @@ describe('loading a tool', () => {
         expect(declared(toolkit)).toContain(wanted());
     });
 
-    test('says it cannot be called until the next turn', async () => {
+    test('says it cannot be called until the next round', async () => {
         const reply = await toolkit.call(LOAD_TOOL_NAME, { names: [wanted()] });
 
         expect(reply).toContain('Loaded: ');
         expect(reply).toContain(wanted());
-        expect(reply).toMatch(/next turn/i);
+        // "Round", not "turn" (#838): a model told to wait for its next *turn*
+        // has been told to stop and wait for the user to type again, which is
+        // the one thing it must not do with a tool it has just asked for.
+        expect(reply).toMatch(/next round/i);
+        expect(reply).not.toMatch(/next turn/i);
     });
 
     test('runs nothing against the server', async () => {
         await toolkit.call(LOAD_TOOL_NAME, { names: [wanted()] });
         expect(mockCallTool).not.toHaveBeenCalled();
+    });
+
+    // #838. The enum is what the model reads as "the legal values", so a name
+    // left in it after being handed over is an invitation to spend another
+    // round asking for a tool it already has.
+    test('takes the loaded name back out of the catalogue', async () => {
+        await toolkit.call(LOAD_TOOL_NAME, { names: [wanted()] });
+
+        const { enum: options } = loadTool(toolkit).inputSchema.properties.names.items;
+        expect(options).not.toContain(wanted());
+        expect(options).toHaveLength(9);
+        expect(loadTool(toolkit).inputSchema.properties.names.description)
+            .not.toContain(`- ${wanted()}:`);
+    });
+
+    test('leaves the names it did not load in the catalogue', async () => {
+        await toolkit.call(LOAD_TOOL_NAME, { names: [wanted()] });
+
+        const { enum: options } = loadTool(toolkit).inputSchema.properties.names.items;
+        expect(options).toContain(`github__tool_${DEFERRED_AFTER + 1}`);
+    });
+
+    // A meta-tool whose only legal argument is the empty list is a round
+    // waiting to happen, so it goes away once it has nothing left to offer.
+    test('drops the meta-tool once the catalogue is empty', async () => {
+        await toolkit.call(LOAD_TOOL_NAME, { names: [...toolkit.deferred] });
+
+        expect(loadTool(toolkit)).toBeUndefined();
+        expect(declared(toolkit)).toContain(wanted());
+    });
+
+    test('keeps the meta-tool while anything is still deferred', async () => {
+        await toolkit.call(LOAD_TOOL_NAME, { names: toolkit.deferred.slice(0, 9) });
+
+        expect(loadTool(toolkit)).toBeDefined();
+        expect(loadTool(toolkit).inputSchema.properties.names.items.enum).toHaveLength(1);
+    });
+
+    // A name asked for twice is answered as "you already have it", and the
+    // catalogue rewrite must not make it disappear from the world instead.
+    test('a name asked for twice is reported as already available', async () => {
+        await toolkit.call(LOAD_TOOL_NAME, { names: [wanted()] });
+        const reply = await toolkit.call(LOAD_TOOL_NAME, { names: [wanted()] });
+
+        expect(reply).toMatch(/already available/i);
+        expect(reply).toContain(wanted());
     });
 
     test('loads several at once', async () => {

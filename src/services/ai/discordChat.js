@@ -20,6 +20,7 @@ const { buildMcpAddendum } = require('./mcp/prompt');
 const { retrieveMcpKnowledge } = require('./mcp/resources');
 const { createToolActivity, STATUS_RESERVE } = require('./mcp/activity');
 const { createToolConfirmer } = require('./mcp/approval');
+const { createElicitationHandler } = require('./mcp/elicitation');
 const { recordToolCalls } = require('./mcp/usage');
 
 // Discord transport for the AI chat loop: rate limiting, prompt assembly,
@@ -409,6 +410,11 @@ async function handleAIChat(message, aiSettings, promptContent) {
             // holds the call until this resolves, so a tool that writes
             // something does not run until somebody in the channel says so.
             mcpConfirm, mcpRoute, confirmTool: createToolConfirmer(message),
+            // And the question a server may ask back (#838). Same channel, same
+            // rule about who may answer — the difference is that this one
+            // carries data, and the tool on the far side is holding its request
+            // open until it arrives.
+            elicit: createElicitationHandler(message),
             // The bot's own tools ride the same loop as the servers' — same
             // approval prompt, same activity footer, same result budget.
             botTools: toolActions ? botTools : [],

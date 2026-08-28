@@ -302,6 +302,72 @@ describe('server-sent event responses', () => {
         expect(tools).toEqual([{ name: 'search' }]);
     });
 
+    /**
+     * #838. A `list_changed` is about the connection rather than about any one
+     * request, so nobody is waiting for it: it arrives on whatever stream
+     * happens to be open, and without a connection-level listener it was read
+     * off the wire and dropped.
+     */
+    test('forwards every notification to the connection-level listener', async () => {
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return sseResponse([
+                { jsonrpc: '2.0', method: 'notifications/tools/list_changed' },
+                { jsonrpc: '2.0', id: payload.id, result: { tools: [{ name: 'search' }] } }
+            ]);
+        });
+
+        const seen = [];
+        const client = new McpHttpClient({ url: URL, onNotification: n => seen.push(n.method) });
+        await client.listTools();
+
+        expect(seen).toContain('notifications/tools/list_changed');
+    });
+
+    // Nobody asked for progress here, which used to mean no listener was passed
+    // at all and every notification on the stream went unread.
+    test('and does so on a request that asked for no progress', async () => {
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return sseResponse([
+                { jsonrpc: '2.0', method: 'notifications/resources/list_changed' },
+                { jsonrpc: '2.0', id: payload.id, result: { content: [{ type: 'text', text: 'ok' }] } }
+            ]);
+        });
+
+        const seen = [];
+        const client = new McpHttpClient({ url: URL, onNotification: n => seen.push(n.method) });
+        const result = await client.callTool('search', {});
+
+        expect(seen).toEqual(['notifications/resources/list_changed']);
+        expect(result.content).toEqual([{ type: 'text', text: 'ok' }]);
+    });
+
+    // Both audiences want every notification, and neither may cost the other
+    // one — a progress reader that throws is a bug in the caller, not a reason
+    // to miss the server saying its tool list moved.
+    test('a per-request listener that throws does not cost the connection one', async () => {
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return sseResponse([
+                { jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: payload.params._meta.progressToken, progress: 1 } },
+                { jsonrpc: '2.0', method: 'notifications/tools/list_changed' },
+                { jsonrpc: '2.0', id: payload.id, result: { content: [] } }
+            ]);
+        });
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const seen = [];
+        const client = new McpHttpClient({ url: URL, onNotification: n => seen.push(n.method) });
+        await client.callTool('search', {}, { onProgress: () => { throw new Error('listener bug'); } });
+
+        expect(seen).toEqual(['notifications/progress', 'notifications/tools/list_changed']);
+        warn.mockRestore();
+    });
+
     test('forwards progress notifications to a caller that asked for them', async () => {
         axios.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
@@ -768,5 +834,290 @@ describe('a server that is rate-limiting us', () => {
         test('nothing, for a date already in the past', () => {
             expect(retryAfterMs(new Date(Date.now() - 5000).toUTCString())).toBeNull();
         });
+    });
+});
+
+/**
+ * #838. Elicitation is the one exchange that runs the other way: the server
+ * sends a *request* down the stream its tool result is still coming on, and
+ * waits for an answer. Two things make it different from everything else here
+ * — the answer goes back on a POST of its own, because the transport has no way
+ * to write up the stream it arrived on, and the clock has to stop, because what
+ * the client is doing in the meantime is asking a person.
+ */
+describe('a request from the server', () => {
+    /** A stream that asks a question, then answers the tool call. */
+    function askingStream(payload, params) {
+        return sseResponse([
+            { jsonrpc: '2.0', id: 'srv-1', method: 'elicitation/create', params },
+            { jsonrpc: '2.0', id: payload.id, result: { content: [{ type: 'text', text: 'done' }] } }
+        ]);
+    }
+
+    function serverThatAsks(params = { message: 'which one?', requestedSchema: { type: 'object', properties: {} } }) {
+        const answers = [];
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            // A JSON-RPC message with no method is the client answering us.
+            if (!payload.method) {
+                answers.push(payload);
+                return acceptedResponse();
+            }
+            return askingStream(payload, params);
+        });
+        return answers;
+    }
+
+    /** Waits for the answer POST, which is deliberately not awaited in-band. */
+    const settled = async answers => {
+        for (let i = 0; i < 20 && !answers.length; i++) await new Promise(r => setImmediate(r));
+        return answers;
+    };
+
+    test('reaches the handler the call carried, with the server\'s params', async () => {
+        serverThatAsks({ message: 'which repo?', requestedSchema: { type: 'object', properties: { repo: { type: 'string' } } } });
+        const seen = [];
+
+        await new McpHttpClient({ url: URL, elicitation: true }).callTool('deploy', {}, {
+            onElicit: async params => { seen.push(params); return { action: 'accept', content: { repo: 'clawdia' } }; }
+        });
+
+        expect(seen).toEqual([{ message: 'which repo?', requestedSchema: { type: 'object', properties: { repo: { type: 'string' } } } }]);
+    });
+
+    test('and the answer goes back as a JSON-RPC response with the server\'s id', async () => {
+        const answers = serverThatAsks();
+
+        await new McpHttpClient({ url: URL, elicitation: true }).callTool('deploy', {}, {
+            onElicit: async () => ({ action: 'accept', content: { repo: 'clawdia' } })
+        });
+
+        await settled(answers);
+        expect(answers[0]).toEqual({
+            jsonrpc: '2.0',
+            id: 'srv-1',
+            result: { action: 'accept', content: { repo: 'clawdia' } }
+        });
+    });
+
+    // The tool result is still coming down the original stream while a person
+    // reads the question, so the question must not block the read.
+    test('the tool result still arrives while the question is outstanding', async () => {
+        serverThatAsks();
+        let release;
+        const asked = new Promise(resolve => { release = resolve; });
+
+        const result = await new McpHttpClient({ url: URL, elicitation: true }).callTool('deploy', {}, {
+            onElicit: () => asked.then(() => ({ action: 'decline' }))
+        });
+
+        expect(result.content).toEqual([{ type: 'text', text: 'done' }]);
+        release();
+    });
+
+    // The capability is the connection's and the person is the request's, so a
+    // scheduled task reaches here with nobody to ask. `cancel` is the spec's
+    // "no choice was made", which is exactly true.
+    test('with nobody to ask, it is answered cancel rather than left hanging', async () => {
+        const answers = serverThatAsks();
+
+        await new McpHttpClient({ url: URL, elicitation: true }).callTool('deploy', {});
+
+        await settled(answers);
+        expect(answers[0]).toMatchObject({ id: 'srv-1', result: { action: 'cancel' } });
+    });
+
+    // A server that gets no answer waits for one, so an unsupported method has
+    // to be refused rather than ignored: silence is a tool call that hangs
+    // until its deadline instead of failing in a sentence.
+    test('a method this client does not serve is refused, not ignored', async () => {
+        const answers = [];
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            if (!payload.method) { answers.push(payload); return acceptedResponse(); }
+            return sseResponse([
+                { jsonrpc: '2.0', id: 'srv-9', method: 'sampling/createMessage', params: {} },
+                { jsonrpc: '2.0', id: payload.id, result: { content: [] } }
+            ]);
+        });
+
+        await new McpHttpClient({ url: URL, elicitation: true }).callTool('think', {});
+
+        await settled(answers);
+        expect(answers[0].error).toMatchObject({ code: -32601, message: expect.stringContaining('sampling/createMessage') });
+    });
+
+    test('a handler that throws becomes an error response, not a hang', async () => {
+        const answers = serverThatAsks();
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+        await new McpHttpClient({ url: URL, elicitation: true }).callTool('deploy', {}, {
+            onElicit: async () => { throw new Error('the channel is gone'); }
+        });
+
+        await settled(answers);
+        expect(answers[0].error).toMatchObject({ code: -32603, message: 'the channel is gone' });
+        warn.mockRestore();
+    });
+});
+
+/**
+ * The clock. A tool call is bounded so a Discord reply cannot be held open
+ * forever, and `readWithDeadline` enforces that by destroying the stream. An
+ * elicitation puts the exchange in front of a person, and the seconds they
+ * spend reading it are not the server being slow — without moving the deadline,
+ * the call the question belongs to is killed underneath the prompt still
+ * sitting in the channel, and the server is left holding a request nobody will
+ * ever answer.
+ */
+/**
+ * Each side of a JSON-RPC connection numbers its own outgoing requests, so the
+ * two counters share a namespace by accident and will eventually collide: a
+ * server that has sent a few requests over a pooled session lands on the id of
+ * the call in flight. A message carrying a `method` is never a response,
+ * whatever id it has, and reading it as one is the difference between a
+ * question that gets answered and a tool that reports no output while the
+ * server waits out a request nobody will ever see.
+ */
+describe('a server request whose id collides with ours', () => {
+    test('is not mistaken for the answer to our call', async () => {
+        const answers = [];
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            if (!payload.method) { answers.push(payload); return acceptedResponse(); }
+            return sseResponse([
+                // The server's own request, numbered the same as ours.
+                { jsonrpc: '2.0', id: payload.id, method: 'elicitation/create', params: { message: 'which?' } },
+                { jsonrpc: '2.0', id: payload.id, result: { content: [{ type: 'text', text: 'the real answer' }] } }
+            ]);
+        });
+
+        const client = new McpHttpClient({ url: URL, elicitation: true });
+        const result = await client.callTool('deploy', {}, {
+            onElicit: async () => ({ action: 'decline' })
+        });
+
+        expect(result.content).toEqual([{ type: 'text', text: 'the real answer' }]);
+        for (let i = 0; i < 20 && !answers.length; i++) await new Promise(r => setImmediate(r));
+        // Answered under the id the *server* used, which is the same number
+        // our call carried — that collision is the whole point of this test.
+        expect(answers[0]).toMatchObject({ result: { action: 'decline' } });
+        expect(answers[0].id).toBe(2);
+    });
+
+    // Same reasoning for a batched JSON body, which may carry the server's own
+    // requests alongside the answer.
+    test('and not in a batched JSON body either', async () => {
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return jsonResponse([
+                { jsonrpc: '2.0', id: payload.id, method: 'ping' },
+                { jsonrpc: '2.0', id: payload.id, result: { tools: [{ name: 'search' }] } }
+            ]);
+        });
+
+        await expect(new McpHttpClient({ url: URL }).listTools()).resolves.toEqual([{ name: 'search' }]);
+    });
+});
+
+describe('the deadline while somebody is answering', () => {
+    /** A stream held open by the test, so the deadline is what decides. */
+    function heldStream() {
+        const stream = new Readable({ read() {} });
+        return {
+            stream,
+            push: event => stream.push(`event: message\ndata: ${JSON.stringify(event)}\n\n`),
+            end: () => stream.push(null),
+        };
+    }
+
+    test('is pushed out by the handler, so the call outlives its original budget', async () => {
+        const held = heldStream();
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            if (!payload.method) return acceptedResponse();
+            callId = payload.id;
+            setImmediate(() => held.push({ jsonrpc: '2.0', id: 'srv-1', method: 'elicitation/create', params: {} }));
+            return { status: 200, headers: { 'content-type': 'text/event-stream' }, data: held.stream };
+        });
+
+        let callId;
+        let answered;
+        const client = new McpHttpClient({ url: URL, elicitation: true });
+        const call = client.callTool('deploy', {}, {
+            timeout: 60,
+            onElicit: (_params, { extendDeadline }) => {
+                extendDeadline(5000);
+                return new Promise(resolve => { answered = resolve; });
+            }
+        });
+
+        // Comfortably past the 60ms the call started with. Without the
+        // extension the stream is destroyed here and the call rejects.
+        await new Promise(resolve => setTimeout(resolve, 250));
+        answered({ action: 'accept', content: {} });
+        held.push({ jsonrpc: '2.0', id: callId, result: { content: [{ type: 'text', text: 'deployed' }] } });
+
+        await expect(call).resolves.toMatchObject({ content: [{ type: 'text', text: 'deployed' }] });
+    });
+
+    // The extension is not a reprieve from the clock, only a longer one: a
+    // server that asks and then goes away still loses the call rather than
+    // holding a Discord reply open indefinitely.
+    test('and still expires when nobody answers at all', async () => {
+        const held = heldStream();
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            if (!payload.method) return acceptedResponse();
+            setImmediate(() => held.push({ jsonrpc: '2.0', id: 'srv-1', method: 'elicitation/create', params: {} }));
+            return { status: 200, headers: { 'content-type': 'text/event-stream' }, data: held.stream };
+        });
+
+        const client = new McpHttpClient({ url: URL, elicitation: true });
+        await expect(client.callTool('deploy', {}, {
+            timeout: 60,
+            onElicit: (_params, { extendDeadline }) => {
+                extendDeadline(150);
+                return new Promise(() => {});
+            }
+        })).rejects.toThrow(/before the deadline/);
+    });
+});
+
+describe('what the client tells a server it can do', () => {
+    async function capabilitiesOf(options) {
+        let sent;
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'initialize') sent = payload.params.capabilities;
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: payload.method === 'initialize' ? INIT_RESULT : { tools: [] } });
+        });
+        await new McpHttpClient({ url: URL, ...options }).listTools();
+        return sent;
+    }
+
+    test('nothing at all, when there is nobody to ask', async () => {
+        expect(await capabilitiesOf({})).toEqual({});
+    });
+
+    test('elicitation, when there is', async () => {
+        expect(await capabilitiesOf({ elicitation: true })).toEqual({ elicitation: {} });
+    });
+
+    // A capability is a promise to answer, and these two are promises this
+    // client should not make: `roots` offers a filesystem for a server to work
+    // inside, and a Discord bot has none; `sampling` is a server asking to
+    // spend the guild's model budget, which wants the ledger and the
+    // confirmation the tool loop already has rather than a declaration.
+    test('and never roots or sampling', async () => {
+        const capabilities = await capabilitiesOf({ elicitation: true });
+        expect(capabilities).not.toHaveProperty('roots');
+        expect(capabilities).not.toHaveProperty('sampling');
     });
 });

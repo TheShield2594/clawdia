@@ -39,7 +39,22 @@ const MAX_TOKEN_LENGTH = 4096;
  * itself. An admin who needs a guarantee uses that, or the block list.
  */
 const CONFIRM_MODES = ['off', 'destructive', 'writes', 'always'];
+
+// What a guild that has never chosen is read as. Still `off`: this is the value
+// behind every guild running today, and changing it would start asking them to
+// approve calls that have been running unattended since they set the feature up.
 const DEFAULT_CONFIRM_MODE = 'off';
+
+// What the dashboard *writes* onto a guild adding its first server (#838).
+//
+// The distinction is the whole point. `off` is a fine reading of silence and a
+// poor first answer: connecting a server is not consent to unattended writes on
+// it, and an admin who has just typed in a GitHub endpoint has no idea a
+// default even exists to be changed. Storing a value on the first save makes
+// the policy visible in the panel from the start, and one click undoes it —
+// whereas moving `DEFAULT_CONFIRM_MODE` would silently re-govern every guild
+// that has been running on the old reading of silence.
+const FIRST_SERVER_CONFIRM_MODE = 'writes';
 
 /**
  * How a guild on Claude reaches its MCP servers.
@@ -515,6 +530,7 @@ module.exports = {
     NAME_PATTERN,
     CONFIRM_MODES,
     DEFAULT_CONFIRM_MODE,
+    FIRST_SERVER_CONFIRM_MODE,
     MCP_ROUTES,
     DEFAULT_MCP_ROUTE,
     guildServersAllowed,

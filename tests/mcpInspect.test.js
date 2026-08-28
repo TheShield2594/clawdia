@@ -115,7 +115,12 @@ describe('a connection that answers', () => {
             url: 'https://api.githubcopilot.com/mcp/',
             authorizationToken: 'ghp_x',
             label: 'github',
-            getAccessToken: null
+            getAccessToken: null,
+            // A one-off probe belongs to no pooled entry, so there is no
+            // cached list for a `list_changed` to invalidate, and no channel
+            // to put a question to (#838).
+            onNotification: null,
+            elicitation: false
         }]);
     });
 

@@ -175,7 +175,10 @@ describe('an edit that invalidates an OAuth login', () => {
 
         await api('PUT', '/guild/g1/mcp-servers/linear', { url: 'https://mcp.example.com/mcp' });
 
-        expect(mockPrewarm).toHaveBeenCalledWith([expect.objectContaining({ name: 'linear', oauth: grant })]);
+        expect(mockPrewarm).toHaveBeenCalledWith(
+            [expect.objectContaining({ name: 'linear', oauth: grant })],
+            expect.objectContaining({ only: ['linear'] }),
+        );
     });
 
     test('and without one once the login has just been cleared', async () => {
@@ -183,7 +186,10 @@ describe('an edit that invalidates an OAuth login', () => {
 
         await api('PUT', '/guild/g1/mcp-servers/linear', { url: 'https://other.example.com/mcp' });
 
-        expect(mockPrewarm).toHaveBeenCalledWith([expect.objectContaining({ oauth: null })]);
+        expect(mockPrewarm).toHaveBeenCalledWith(
+            [expect.objectContaining({ oauth: null })],
+            expect.objectContaining({ only: ['linear'] }),
+        );
     });
 
     test('drops the login when the connection is pointed somewhere else', async () => {
@@ -260,11 +266,17 @@ describe('a saved server is dialled before it is needed', () => {
             authorizationToken: 'ghp_secret'
         });
 
-        expect(mockPrewarm).toHaveBeenCalledWith([expect.objectContaining({
-            name: 'github',
-            url: 'https://api.githubcopilot.com/mcp/',
-            authorizationToken: 'ghp_secret'
-        })]);
+        expect(mockPrewarm).toHaveBeenCalledWith(
+            [expect.objectContaining({
+                name: 'github',
+                url: 'https://api.githubcopilot.com/mcp/',
+                authorizationToken: 'ghp_secret'
+            })],
+            // Only the server that was saved (#838). Resolution folds the
+            // operator's config file in alongside it, so without this narrowing
+            // one save dials every shared server in that file as well.
+            expect.objectContaining({ only: ['github'] }),
+        );
     });
 
     test('a server saved switched off is not dialled', async () => {
@@ -419,7 +431,9 @@ describe('POST /guild/:id/mcp-servers/:name/test', () => {
             url: 'https://api.githubcopilot.com/mcp/',
             authorizationToken: 'ghp_good',
             label: 'github',
-            getAccessToken: null
+            getAccessToken: null,
+            onNotification: null,
+            elicitation: false
         }]);
         expect(body.toolCount).toBe(3);
         // delete_file is blocked, so it is offered by the server but not enabled.
@@ -668,5 +682,69 @@ describe('the route the panel is told about', () => {
 
     test('an explicit choice is reported as itself, not re-derived', async () => {
         expect((await listWith({ mcpRoute: 'connector', mcpConfirm: 'always' })).effectiveRoute).toBe('connector');
+    });
+});
+
+/**
+ * #838. `off` is a fine reading of silence and a poor first answer: connecting
+ * a server is not consent to unattended writes on it, and an admin typing in a
+ * GitHub endpoint has no idea a default exists to be changed.
+ *
+ * The value is *written* on the first save rather than read from a changed
+ * constant, which is the part that keeps this from re-governing every guild
+ * already running on `off`.
+ */
+describe('the approval policy a guild picks up with its first server', () => {
+    test('a first server stores "writes"', async () => {
+        const { body } = await api('PUT', '/guild/g1/mcp-servers/github', {
+            url: 'https://api.githubcopilot.com/mcp/',
+        });
+
+        expect(doc.ai.mcpConfirm).toBe('writes');
+        expect(body.confirmMode).toBe('writes');
+        expect(body.confirmNotice).toMatch(/approval/i);
+    });
+
+    test('a second server changes nothing', async () => {
+        doc = makeDoc([{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', enabled: true, allowedTools: [], blockedTools: [] }]);
+
+        const { body } = await api('PUT', '/guild/g1/mcp-servers/linear', {
+            url: 'https://mcp.linear.app/mcp',
+        });
+
+        expect(doc.ai.mcpConfirm).toBeUndefined();
+        expect(body.confirmMode).toBeUndefined();
+    });
+
+    // The guild said what it wanted; a save is not the moment to overrule it.
+    test('a stored choice is left alone, "off" included', async () => {
+        doc = makeDoc([]);
+        doc.ai.mcpConfirm = 'off';
+
+        const { body } = await api('PUT', '/guild/g1/mcp-servers/github', {
+            url: 'https://api.githubcopilot.com/mcp/',
+        });
+
+        expect(doc.ai.mcpConfirm).toBe('off');
+        expect(body.confirmNotice).toBeUndefined();
+    });
+
+    // Editing the one server a guild already has is not "adding a first
+    // server", and must not quietly turn approvals on underneath it.
+    test('re-saving the only server does not change the policy', async () => {
+        doc = makeDoc([{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', enabled: true, allowedTools: [], blockedTools: [] }]);
+
+        await api('PUT', '/guild/g1/mcp-servers/github', { url: 'https://api.githubcopilot.com/mcp/' });
+
+        expect(doc.ai.mcpConfirm).toBeUndefined();
+    });
+
+    test('the policy it chose is on the audit record', async () => {
+        await api('PUT', '/guild/g1/mcp-servers/github', { url: 'https://api.githubcopilot.com/mcp/' });
+
+        expect(logAuditEvent).toHaveBeenCalledWith(
+            expect.anything(), 'g1', 'mcp_server_add',
+            expect.objectContaining({ confirmModeDefaulted: 'writes' }),
+        );
     });
 });

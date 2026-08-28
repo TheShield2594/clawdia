@@ -384,11 +384,18 @@ looking up does not eat the allowance for the next one, and a user cannot spend
 without bound by asking the same expensive question over and over. Past it the
 model is told the call was refused and answers from what it has.
 
-Tools that write something can be made to wait: the Approval setting posts
+Tools that write something wait for a person: the Approval setting posts
 **Run it** / **Cancel** in the channel for a tool call and does not run it until
-the person who asked, or anyone who can manage the server, says so. The
-Connections tab also keeps a seven-day rollup of what each connection has been
-doing — calls, failures, refusals, latency and the last error.
+the person who asked, or anyone who can manage the server, says so. Adding a
+first connection turns that on for writes, since connecting a server is not by
+itself consent to unattended ones.
+
+It runs the other way too. A tool that gets halfway and needs one more fact can
+ask, and the question appears in the channel as a form to fill in — bounded to
+two questions a reply, and labelled with which server is asking, because a real
+one will not ask for a password or a key. The Connections tab also keeps a
+seven-day rollup of what each connection has been doing — calls, failures,
+refusals, latency and the last error.
 
 Approvals and that rollup both need the bot to be the one making the call, which
 on Claude it is not by default — Anthropic's connector opens the connections on

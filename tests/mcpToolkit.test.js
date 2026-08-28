@@ -87,7 +87,14 @@ describe('discovery', () => {
             authorizationToken: 'ghp_x',
             label: 'github',
             // A static-token connection has no OAuth grant to fetch (#796).
-            getAccessToken: null
+            getAccessToken: null,
+            // The pool's own listener, which drops a cached list when the
+            // server says it changed (#838).
+            onNotification: expect.any(Function),
+            // Declared once per pooled connection; the handler that answers it
+            // rides with each tool call, because the person to ask belongs to
+            // one Discord message and this client is shared.
+            elicitation: true
         }]);
     });
 
@@ -282,13 +289,34 @@ describe('calling a tool', () => {
             .toContain('The tool reported an error: no such repo');
     });
 
-    test('truncates a result too large to be worth sending to a model', async () => {
+    test('trims a result too large to be worth sending to a model', async () => {
         mockCallTool.mockResolvedValue(textResult('y'.repeat(MAX_TOOL_RESULT_CHARS * 2)));
         const toolkit = await prepareMcpToolkit([GITHUB]);
         const text = await toolkit.call('github__search_repositories', {});
 
         expect(text.length).toBeLessThan(MAX_TOOL_RESULT_CHARS + 300);
-        expect(text).toMatch(/truncated/);
+        expect(text).toMatch(/trimmed to fit/);
+    });
+
+    // #838. The whole point of the trimmer: a chain's next round reads the last
+    // field of what it was handed, so that field has to be a whole one.
+    test('a JSON result over the cap is still parseable JSON', async () => {
+        const rows = Array.from({ length: 400 }, (_, i) => ({
+            id: i, path: `src/services/module_${i}.js`, score: i / 400,
+        }));
+        mockCallTool.mockResolvedValue(textResult(JSON.stringify(rows)));
+        const toolkit = await prepareMcpToolkit([GITHUB]);
+        const text = await toolkit.call('github__search_repositories', {});
+
+        // Past the "[Result from …]" label line, and stopping at the note the
+        // trimmer appends after the document rather than inside it.
+        const body = text.slice(text.indexOf('\n') + 1);
+        const parsed = JSON.parse(body.slice(0, body.indexOf('\n[trimmed')));
+        expect(Array.isArray(parsed)).toBe(true);
+        expect(parsed.length).toBeLessThan(rows.length);
+        // Whole records, not a record ending mid-path.
+        for (const row of parsed) expect(row.path).toMatch(/^src\/services\/module_\d+\.js$/);
+        expect(text).toMatch(/of 400 items shown/);
     });
 
     // A failed call has to come back as something the model can read: losing the
@@ -627,5 +655,88 @@ describe('confirmation', () => {
 
         await toolkit.call('github__search', {});
         expect(confirmTool).toHaveBeenCalled();
+    });
+});
+
+/**
+ * #838. The client is pooled by (url, credential) and shared by every guild
+ * pointed at that server, so a handler living on it would answer one guild's
+ * question in another guild's channel. A tool call belongs to exactly one
+ * message, which is the scope that knows whose channel to ask in.
+ */
+describe('a question a tool call raises', () => {
+    test('rides with the call rather than with the connection', async () => {
+        const toolkit = await prepareMcpToolkit([GITHUB], { elicit: jest.fn() });
+        await toolkit.call('github__search_repositories', {});
+
+        expect(mockCallTool).toHaveBeenCalledWith(
+            'search_repositories', {},
+            expect.objectContaining({ onElicit: expect.any(Function) }),
+        );
+    });
+
+    // The prompt has to say which server is asking, and the call site is where
+    // that is known.
+    test('and arrives at the handler naming the server it came from', async () => {
+        const elicit = jest.fn(async () => ({ action: 'decline' }));
+        const toolkit = await prepareMcpToolkit([GITHUB], { elicit });
+        await toolkit.call('github__search_repositories', {});
+
+        const { onElicit } = mockCallTool.mock.calls[0][2];
+        await onElicit({ message: 'which one?' }, { extendDeadline: () => {} });
+
+        expect(elicit).toHaveBeenCalledWith('github', { message: 'which one?' }, expect.any(Object));
+    });
+
+    // A scheduled task or a command parsing the reply as JSON has nobody to
+    // ask, and passes no handler at all; the client answers those "cancel"
+    // rather than being handed an undefined to call.
+    test('a turn with nobody to ask passes no handler', async () => {
+        const toolkit = await prepareMcpToolkit([GITHUB]);
+        await toolkit.call('github__search_repositories', {});
+
+        expect(mockCallTool.mock.calls[0][2].onElicit).toBeUndefined();
+    });
+});
+
+/**
+ * The turn budget bounds how long a Discord reply is held open waiting on
+ * somebody else's server. A person reading a question is not that — they are
+ * engaged, and the reply is waiting on them on purpose — so charging their
+ * thinking time to the same ninety seconds means one question ends the turn:
+ * every call after it finds the budget spent and is refused without running.
+ */
+describe('what a question costs the turn', () => {
+    const waitInsideElicit = ms => jest.fn(async () => {
+        await new Promise(resolve => setTimeout(resolve, ms));
+        return { action: 'decline' };
+    });
+
+    // The wait is deliberately longer than the whole budget, so without the
+    // credit the turn is unambiguously over by the time the answer lands.
+    test('the time somebody spends answering is given back', async () => {
+        const elicit = waitInsideElicit(120);
+        const toolkit = await prepareMcpToolkit([GITHUB], { elicit, turnBudgetMs: 60 });
+
+        // First call: the server asks, and the answer takes half the budget.
+        mockCallTool.mockImplementationOnce(async (_name, _args, { onElicit }) => {
+            await onElicit({ message: 'which?' }, { extendDeadline: () => {} });
+            return textResult('ok');
+        });
+        await toolkit.call('github__search_repositories', {});
+
+        // Without the credit the turn is spent here and this is refused.
+        const second = await toolkit.call('github__search_repositories', {});
+        expect(second).not.toMatch(/spent its time budget/);
+        expect(mockCallTool).toHaveBeenCalledTimes(2);
+    });
+
+    // Only the wait, and only once it is over, so a server that asks and goes
+    // away cannot hold a turn open indefinitely.
+    test('but the budget still runs out on its own', async () => {
+        const toolkit = await prepareMcpToolkit([GITHUB], { elicit: jest.fn(), turnBudgetMs: 30 });
+        await new Promise(resolve => setTimeout(resolve, 45));
+
+        expect(await toolkit.call('github__search_repositories', {})).toMatch(/spent its time budget/);
     });
 });

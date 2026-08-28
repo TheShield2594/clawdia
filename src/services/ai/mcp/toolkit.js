@@ -9,6 +9,7 @@ const {
     DEFAULT_CONFIRM_MODE
 } = require('../../../config/mcpServers');
 const { MAX_RESPONSE_BYTES } = require('./client');
+const { trimResult } = require('./trim');
 const {
     entryFor,
     withSession,
@@ -260,23 +261,31 @@ function summarize(tool, serverName) {
  * trip re-sends the entire conversation. A catalogue line is about a tenth of a
  * schema; the round trip is the whole context again. The line wins.
  */
-function loadToolDefinition(deferred) {
-    const lines = deferred.map(entry => `- ${entry.name}: ${entry.summary}`).join('\n');
+function loadToolDefinition() {
     return {
         name: LOAD_TOOL_NAME,
         serverName: null,
         toolName: LOAD_TOOL_NAME,
+        // "Round", not "turn" (#838). A turn is the whole exchange — the user's
+        // message through to the reply — and a model told to wait for its next
+        // *turn* has been told to give up and wait for somebody to type again.
+        // What it actually has to do is finish this round, which it does by
+        // ending its message; the tool is declared on the request after that,
+        // several of which fit inside one turn.
         description:
             'Load the full definitions of tools that are available but not yet loaded. '
-            + 'Call this with the names you need, then call those tools on your next turn — '
-            + 'they cannot be called in the same turn they are loaded in.',
+            + 'Call this with the names you need, then call those tools in your next round — '
+            + 'they cannot be called in the same round they are loaded in.',
         inputSchema: {
             type: 'object',
             properties: {
                 names: {
                     type: 'array',
-                    items: { type: 'string', enum: deferred.map(entry => entry.name) },
-                    description: `The tools to load. Available:\n${lines}`
+                    // Rebuilt by `refreshCatalog` as tools are loaded, so the
+                    // enum offers what is still loadable rather than what was
+                    // loadable when the turn started.
+                    items: { type: 'string', enum: [] },
+                    description: ''
                 }
             },
             required: ['names']
@@ -425,9 +434,12 @@ function renderResult(
             ? 'The tool reported an error but sent no message.'
             : 'The tool returned no output.';
     }
-    if (text.length > MAX_TOOL_RESULT_CHARS) {
-        text = `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n[truncated: the tool returned more than ${MAX_TOOL_RESULT_CHARS} characters]`;
-    }
+    // Whole records rather than bytes (#838). A `slice` here landed in the
+    // middle of whatever JSON the tool returned, and the round after it read
+    // the half-written last field as though it were a value — a filename to
+    // call the next tool with, an id to look up — so the failure surfaced
+    // several steps downstream as an error about something that never existed.
+    text = trimResult(text, MAX_TOOL_RESULT_CHARS);
 
     return {
         text: isError ? `The tool reported an error: ${text}` : text,
@@ -455,6 +467,12 @@ function renderResult(
  *        An optional `toolBudget.peek()` reports the same without spending, so
  *        a call waiting on a person's approval can be refused early and charged
  *        late (#826)
+ * @param {Function} [options.elicit] `(server, params, ctx) => result` for a
+ *        server that asks the user a question mid-call (#838). Per turn, and
+ *        passed down to the call rather than held on the pooled client, because
+ *        the client is shared by every guild on that URL and the person to ask
+ *        belongs to one message. Absent — a scheduled task, a command parsing
+ *        the reply as JSON — means questions are answered "no choice made"
  * @param {Array} [options.botTools] tools the bot owns rather than a server —
  *        the in-channel actions (#832). Each carries the same fields a
  *        discovered tool does plus `run(args)`, which is called instead of a
@@ -466,6 +484,7 @@ async function prepareMcpToolkit(guildServers = [], {
     onToolEvent,
     confirmMode = DEFAULT_CONFIRM_MODE,
     confirmTool,
+    elicit,
     toolBudget,
     botTools = [],
     // Both default to the chat numbers, so every existing caller gets exactly
@@ -615,7 +634,44 @@ async function prepareMcpToolkit(guildServers = [], {
     const byCatalogName = new Map(deferred.map(entry => [entry.name, entry]));
     const loaded = new Set();
 
-    if (deferred.length) definitions.push(loadToolDefinition(deferred));
+    // The meta-tool's own definition, kept so its catalogue can be rewritten
+    // (#838). It is one object living in `definitions`, and every round's
+    // request rebuilds its provider-side parameters from whatever is in there
+    // now — so editing it in place is how the model is told that a name it has
+    // already loaded is no longer something to load.
+    const loadDefinition = deferred.length ? loadToolDefinition() : null;
+
+    /**
+     * Point the meta-tool at the tools that are still deferred.
+     *
+     * An enum that keeps the names it has already handed over is an invitation
+     * to spend a round loading them again: the model reads the enum as the list
+     * of legal values, sees `create_issue` in it, and asks for it a second time
+     * because nothing in the schema says it already has it. Once the catalogue
+     * is empty the meta-tool is dropped from `definitions` altogether — a tool
+     * whose only legal argument list is the empty one is a round waiting to
+     * happen.
+     */
+    function refreshCatalog() {
+        if (!loadDefinition) return;
+
+        const remaining = deferred.filter(entry => !loaded.has(entry.name));
+        if (!remaining.length) {
+            const at = definitions.indexOf(loadDefinition);
+            if (at >= 0) definitions.splice(at, 1);
+            return;
+        }
+
+        const names = loadDefinition.inputSchema.properties.names;
+        names.items.enum = remaining.map(entry => entry.name);
+        names.description = 'The tools to load. Available:\n'
+            + remaining.map(entry => `- ${entry.name}: ${entry.summary}`).join('\n');
+    }
+
+    if (loadDefinition) {
+        definitions.push(loadDefinition);
+        refreshCatalog();
+    }
 
     /**
      * Declare the named tools from here on, and say what happened.
@@ -658,11 +714,16 @@ async function prepareMcpToolkit(guildServers = [], {
             added.push(name);
         }
 
+        // After the loop rather than per name: one rewrite for a request that
+        // loaded six tools, and the meta-tool is only dropped once the last of
+        // them has been taken.
+        if (added.length) refreshCatalog();
+
         const parts = [];
         if (added.length) {
             parts.push(
-                `Loaded: ${added.join(', ')}. These are available from your next turn onwards — `
-                + 'finish this turn, then call them.',
+                `Loaded: ${added.join(', ')}. These are available from your next round onwards — `
+                + 'finish this round, then call them.',
             );
         }
         if (already.length) parts.push(`Already available, call directly: ${already.join(', ')}.`);
@@ -716,7 +777,9 @@ async function prepareMcpToolkit(guildServers = [], {
     // Spent across the whole turn rather than per call: see the two constants
     // above for why neither ceiling works on its own.
     let charsSpent = 0;
-    const deadline = Date.now() + turnBudgetMs;
+    // Not const: time spent waiting for a *person* is credited back below, so
+    // one question does not spend the whole turn's allowance (#838).
+    let deadline = Date.now() + turnBudgetMs;
 
     /**
      * A result, labelled with where it came from.
@@ -748,7 +811,11 @@ async function prepareMcpToolkit(guildServers = [], {
             return text;
         }
         charsSpent = MAX_TOOL_RESULT_CHARS_PER_TURN;
-        return `${text.slice(0, remaining)}\n[truncated: the reply has taken in as much tool output as it can hold]`;
+        // Same reasoning as the per-result cap above, and the more important of
+        // the two: a result reaching this one is by definition in a turn that
+        // has already run other tools, which is exactly the multi-step chain a
+        // mid-JSON cut poisons.
+        return trimResult(text, remaining);
     }
 
     /**
@@ -875,6 +942,32 @@ async function prepareMcpToolkit(guildServers = [], {
         const onProgress = ({ progress, total, message }) =>
             emit({ ...describe, type: 'progress', progress, total, message });
 
+        // A question this call raises, put to the person who asked for the
+        // reply. Bound to the server name here because that is what the prompt
+        // has to say out loud — "the github server is asking you" — and the
+        // handler itself belongs to the turn rather than to any one call, so
+        // its per-turn ceiling counts every server's questions together.
+        // The turn budget exists to bound how long a Discord reply is held open
+        // waiting on somebody else's server. A person reading a question is not
+        // that: they are engaged, and the reply is waiting on them on purpose.
+        // Charging their thinking time to the same ninety seconds means one
+        // question ends the turn — every call after it finds the budget spent
+        // and is refused — so the wait is measured and given back.
+        //
+        // Only the wait, and only once it is over: a question that is never
+        // answered still costs its own time, so a turn cannot be held open
+        // indefinitely by a server that asks and goes away.
+        const onElicit = typeof elicit === 'function'
+            ? async (params, ctx) => {
+                const askedAt = Date.now();
+                try {
+                    return await elicit(server, params, ctx);
+                } finally {
+                    deadline += Date.now() - askedAt;
+                }
+            }
+            : undefined;
+
         try {
             // Queued behind this server's other calls rather than the round's:
             // six calls at one server is a burst that server sees as one client
@@ -891,7 +984,7 @@ async function prepareMcpToolkit(guildServers = [], {
                 // after it. Below the call timeout this is the tighter of the
                 // two; above it, the call timeout still wins.
                 return withSession(target.entry, target.server, client =>
-                    client.callTool(target.toolName, args, { onProgress, timeout: remaining }));
+                    client.callTool(target.toolName, args, { onProgress, timeout: remaining, onElicit }));
             });
 
             if (!result) {
@@ -941,13 +1034,25 @@ async function prepareMcpToolkit(guildServers = [], {
  *
  * @returns {Promise<number>} how many connections now have a tool list
  */
-async function prewarmMcpServers(guildServers = [], { concurrency = 4 } = {}) {
+async function prewarmMcpServers(guildServers = [], { concurrency = 4, only = null } = {}) {
     let servers;
     try {
         servers = resolveMcpServers(guildServers);
     } catch (err) {
         console.warn(`[MCP] prewarm could not resolve servers: ${err.message}`);
         return 0;
+    }
+
+    // `only` narrows the warm-up to the servers named (#838). Resolution merges
+    // the operator's config file into whatever it is handed, which is right for
+    // the startup sweep and wrong for a dashboard save: an admin editing one
+    // server would dial every shared server in the config file as well, on
+    // every save, and a guild that has never used those pays their handshakes.
+    // The save still goes through resolution rather than around it, because
+    // that is what applies the file's defaults to the entry being saved.
+    if (only) {
+        const wanted = new Set(only);
+        servers = servers.filter(server => wanted.has(server.name));
     }
 
     const unique = new Map();
@@ -975,11 +1080,11 @@ async function prewarmMcpServers(guildServers = [], { concurrency = 4 } = {}) {
  * `useMcp` is the caller's switch — commands that parse the reply as JSON pass
  * it false — and is checked here so no provider has to remember to.
  */
-async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs } = {}) {
+async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs } = {}) {
     if (useMcp === false) return null;
     try {
         return await prepareMcpToolkit(mcpServers, {
-            onToolEvent, confirmMode: mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs
+            onToolEvent, confirmMode: mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs
         });
     } catch (err) {
         // Discovery is best-effort in every direction: an unreadable config or

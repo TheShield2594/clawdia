@@ -130,6 +130,60 @@ function accumulateToolCalls(pending, deltas) {
     }
 }
 
+/**
+ * Endpoints that answered a stream with "I do not know what stream_options is".
+ *
+ * `stream_options: { include_usage: true }` is how a streamed OpenAI response
+ * is made to report its token counts — without it the usage ledger has nothing
+ * to charge and the guild's spend goes unmeasured — but it is an OpenAI
+ * extension, and `baseURL` points this provider at anything that speaks the
+ * chat-completions shape: llama.cpp, vLLM, LM Studio, a corporate gateway.
+ * Several of those reject the unknown field with a 400 rather than ignoring it,
+ * which turned "your usage numbers are missing" into "the bot cannot answer"
+ * (#838).
+ *
+ * So it is sent by default and withdrawn on evidence: the first 400 that names
+ * the parameter is retried without it, and the endpoint is remembered for the
+ * life of the process so the next message pays no failed request. Usage for
+ * that endpoint is then whatever the stream reports on its own, which for most
+ * of them is nothing — the same position the bot was in before, and better than
+ * a reply that does not arrive.
+ */
+const noStreamOptions = new Set();
+
+// A 400 from an endpoint that has never heard of the field. Matched on the
+// parameter name rather than on a status alone: a 400 for a bad model name or
+// an over-long context is not something dropping usage reporting would fix,
+// and retrying those would double every genuine failure.
+function rejectsStreamOptions(err) {
+    if (err?.status !== 400) return false;
+    const text = `${err.message || ''} ${JSON.stringify(err.error ?? '')}`.toLowerCase();
+    return text.includes('stream_options') || text.includes('include_usage');
+}
+
+/**
+ * Open one streamed round, dropping `stream_options` for an endpoint that has
+ * refused it before — or that refuses it now.
+ *
+ * The retry is safe to make because nothing has been consumed: a request that
+ * fails at 400 produced no tokens, ran no tool, and cost nothing to repeat.
+ */
+async function openStream(client, params, endpoint) {
+    if (noStreamOptions.has(endpoint)) return client.chat.completions.create(params);
+
+    try {
+        return await client.chat.completions.create({
+            ...params,
+            stream_options: { include_usage: true }
+        });
+    } catch (err) {
+        if (!rejectsStreamOptions(err)) throw err;
+        console.warn(`[AI:openai] ${endpoint} rejects stream_options; usage will go unreported for it`);
+        noStreamOptions.add(endpoint);
+        return client.chat.completions.create(params);
+    }
+}
+
 function toolCallsOf(message) {
     return (message?.tool_calls || []).map((call, index) => ({
         id: call.id || `call_${index}`,
@@ -177,10 +231,14 @@ async function runToolCalls({ toolkit, messages, calls, content }) {
     });
 }
 
-async function* stream({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
+async function* stream({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
+    // What `noStreamOptions` is keyed on. `baseURL` is undefined for OpenAI
+    // itself, which is a key like any other — and the one endpoint guaranteed
+    // never to end up in the set.
+    const endpoint = baseURL || 'openai';
     const messages = buildMessages({ systemPrompt, history, prompt, images, model, visionCapable });
 
     const totals = { inputTokens: 0, outputTokens: 0 };
@@ -197,14 +255,13 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, images, t
         // tool call, and the user would get an empty message.
         const offerTools = Boolean(toolkit) && round < rounds;
 
-        const response = await client.chat.completions.create({
+        const response = await openStream(client, {
             model,
             messages,
             ...tuningParams(model, temperature, maxTokens),
             stream: true,
-            stream_options: { include_usage: true },
             ...(offerTools ? { tools: toolParams(toolkit) } : {})
-        });
+        }, endpoint);
 
         let content = '';
         let roundUsage = null;
@@ -236,8 +293,8 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, images, t
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
+async function complete({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = buildMessages({ systemPrompt, history, prompt, images, model, visionCapable });

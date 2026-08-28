@@ -218,8 +218,8 @@ async function* separated(pieces) {
     }
 }
 
-async function* stream({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
+async function* stream({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const { url, agents } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt, images, model });
@@ -257,8 +257,8 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, images, 
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
+async function complete({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const { url, agents } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt, images, model });

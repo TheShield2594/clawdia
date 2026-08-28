@@ -14,6 +14,7 @@ const {
     requiresApproval,
     CONFIRM_MODES,
     DEFAULT_CONFIRM_MODE,
+    FIRST_SERVER_CONFIRM_MODE,
     MCP_ROUTES,
     DEFAULT_MCP_ROUTE
 } = require('../../../config/mcpServers');
@@ -373,6 +374,7 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
         const tokenProvided = typeof req.body?.authorizationToken === 'string';
         const token = tokenProvided ? (req.body.authorizationToken.trim() || null) : undefined;
         let oauthCleared = null;
+        let confirmModeDefaulted = null;
 
         if (existing) {
             // An OAuth grant is bound to the resource it was issued for and to
@@ -401,6 +403,31 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
                 addedBy: req.user?.id || null
             });
             guildSettings.ai.mcpServers = servers;
+
+            // The first connection a guild adds picks the approval policy up
+            // with it (#838). `off` is the stored default, and a default of
+            // "run anything the model asks for, unattended" is the wrong first
+            // answer for a feature whose whole point is reaching somebody
+            // else's system — an admin who connects a GitHub server has not
+            // consented to unattended issue-filing by connecting it.
+            //
+            // Written on the guild's *first* server rather than by changing
+            // the constant, which is what keeps this from being a behaviour
+            // change under everyone: a guild already running servers on `off`
+            // chose that by running on it, and flipping the default would
+            // start asking them to approve calls that have been silent for
+            // months. `writes` rather than `always` because reads are the
+            // majority of calls and confirming those turns the feature into a
+            // button-clicking exercise, which is how an admin ends up setting
+            // it back to `off`.
+            //
+            // It goes in as a stored value, not an inferred one, so the
+            // dashboard shows it selected and it can be changed to `off` in
+            // one click by anybody who wants what the old default gave them.
+            if (servers.length === 1 && !guildSettings.ai.mcpConfirm) {
+                guildSettings.ai.mcpConfirm = FIRST_SERVER_CONFIRM_MODE;
+                confirmModeDefaulted = FIRST_SERVER_CONFIRM_MODE;
+            }
         }
 
         await guildSettings.save();
@@ -410,7 +437,8 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             enabled: validated.value.enabled,
             resources: validated.value.resources,
             tokenChanged: token !== undefined,
-            oauthCleared
+            oauthCleared,
+            confirmModeDefaulted
         });
 
         // The saved server, dialled now rather than on whoever sends the next
@@ -431,7 +459,14 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
                 ...validated.value,
                 authorizationToken: token ?? existing?.authorizationToken ?? null,
                 oauth: existing?.oauth ?? null,
-            }]).catch(err => console.warn(`[MCP] prewarm after save failed: ${err.message}`));
+            }], {
+                // Just the one that was saved (#838). Warming resolves the
+                // operator's config file in alongside it, and without this a
+                // save of one server dials every shared server in that file
+                // too — a handshake apiece, per save, for connections nobody
+                // touched.
+                only: [validated.value.name],
+            }).catch(err => console.warn(`[MCP] prewarm after save failed: ${err.message}`));
         }
 
         res.json({
@@ -440,7 +475,13 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             // Said out loud rather than left to be noticed: an admin who
             // renamed a URL and found the connection unauthenticated an hour
             // later has no way to work out why.
-            ...(oauthCleared ? { notice: `The OAuth login for "${name}" was removed because ${oauthCleared}. Reconnect it.` } : {})
+            ...(oauthCleared ? { notice: `The OAuth login for "${name}" was removed because ${oauthCleared}. Reconnect it.` } : {}),
+            // Same reasoning for the policy that was just chosen on the admin's
+            // behalf: a setting that appears without being asked for is one
+            // they should be told about while they are still looking at it.
+            ...(confirmModeDefaulted
+                ? { confirmMode: confirmModeDefaulted, confirmNotice: 'Tool calls that write something will ask for approval in Discord before they run. Change this under Approval.' }
+                : {})
         });
     } catch (error) {
         if (error?.name === 'ValidationError') {
