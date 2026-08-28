@@ -165,6 +165,18 @@ function fileNameFor(toolName, id) {
     return `${clean || 'tool'}-${id}`;
 }
 
+/**
+ * A promise that resolves after `ms`, with its timer cancellable.
+ *
+ * Cancellable because the loser of a race still holds a timer, and a ninety
+ * second one left behind keeps the event loop alive for a turn that is over.
+ */
+function deadlineTimer(ms) {
+    let timer;
+    const promise = new Promise(resolve => { timer = setTimeout(resolve, ms); });
+    return { promise, clear: () => clearTimeout(timer) };
+}
+
 function listTools(entry, server) {
     return cachedList(entry, server, 'tools', client => client.listTools());
 }
@@ -746,19 +758,45 @@ async function prepareMcpToolkit(guildServers = [], {
 
         emit({ ...describe, type: 'start' });
 
-        // A tool the bot owns: no session, no server limit, no timeout to
-        // negotiate — the work is a database write and a Discord message. What
-        // it says comes back unlabelled, because the label exists to mark text a
-        // third party wrote and this is the bot answering itself (#832).
+        // A tool the bot owns: no session and no server limit — the work is a
+        // database write and a Discord message. What it says comes back
+        // unlabelled, because the label exists to mark text a third party wrote
+        // and this is the bot answering itself (#832).
+        //
+        // It is still held to the turn's clock, or a stalled Discord send would
+        // hold the reply open past every other ceiling on this turn. What the
+        // deadline cannot do is call the write back: neither discord.js nor
+        // mongoose takes a cancellation signal here, so passing the model a
+        // "that failed" would be a guess — the poll may well appear a second
+        // later. So the wording says what is actually known, which is that the
+        // turn stopped waiting.
         if (target.run) {
+            let settled = false;
+            const running = Promise.resolve()
+                .then(() => target.run(args ?? {}))
+                .then(value => { settled = true; return String(value ?? ''); });
+            // A run that fails after the turn stopped waiting for it has nobody
+            // left to tell, and an unhandled rejection would take the process
+            // with it. The race below has already answered the model.
+            running.catch(() => {});
+
+            const budget = deadlineTimer(Math.max(0, deadline - Date.now()));
             try {
-                const text = String(await target.run(args ?? {}) ?? '');
+                const text = await Promise.race([running, budget.promise.then(() => null)]);
+
+                if (!settled) {
+                    finish(false, { error: 'turn budget spent' });
+                    return 'This turn ran out of time waiting for that action, so it is unfinished rather than failed — it may still go through. Tell the user you could not confirm it and offer to check.';
+                }
+
                 finish(true);
                 return withinBudget(text || 'The action ran but said nothing.');
             } catch (err) {
                 console.warn(`[MCP] bot tool "${target.toolName}" failed: ${err.message}`);
                 finish(false, { error: err.message });
                 return `That action could not be completed: ${err.message}. Tell the user it did not happen.`;
+            } finally {
+                budget.clear();
             }
         }
 

@@ -93,7 +93,11 @@ function extractAction(text) {
 }
 
 async function createPoll(action, message) {
-    const options = (action.options || [])
+    // Array-checked rather than `|| []`: a payload with `options` as a string —
+    // the shape a model reaches for when it ignores the schema, and the shape an
+    // ACTION block can carry with no schema at all — has no `.filter`, and the
+    // throw turned a validation answer into a failure report.
+    const options = (Array.isArray(action.options) ? action.options : [])
         .filter(option => typeof option === 'string' && option.trim())
         .map(option => option.trim())
         .slice(0, 5);

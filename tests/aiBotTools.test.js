@@ -25,7 +25,7 @@ const Guild = require('../src/models/Guild');
 const User = require('../src/models/User');
 
 const { buildBotTools, BOT_SERVER } = require('../src/services/ai/botTools');
-const { prepareMcpToolkit } = require('../src/services/ai/mcp/toolkit');
+const { prepareMcpToolkit, TURN_BUDGET_MS } = require('../src/services/ai/mcp/toolkit');
 const { MEMORY_CAP, MAX_MEMORY_LENGTH } = require('../src/utils/memoryLimits');
 const { MAX_OPEN_REMINDERS } = require('../src/utils/reminderLimits');
 
@@ -123,6 +123,17 @@ describe('what each tool does', () => {
         expect(message.channel.send).toHaveBeenCalledWith({ embeds: [{ embed: true }], components: [{ row: true }] });
         expect(Poll.create).toHaveBeenCalledWith(expect.objectContaining({ question: 'Pizza?', options: ['yes', 'no'] }));
         expect(text).toMatch(/poll is now in the channel/);
+    });
+
+    // A model that ignores the schema, or an ACTION block that never had one,
+    // can send `options` as a string. `.filter` on that is a TypeError, which
+    // turned the refusal the caller expects into a failure report.
+    test('a poll whose options are not a list is refused, not a crash', async () => {
+        const { text, message } = await run('create_poll', { question: 'Pizza?', options: 'yes,no' });
+
+        expect(message.channel.send).not.toHaveBeenCalled();
+        expect(Poll.create).not.toHaveBeenCalled();
+        expect(text).toMatch(/at least two options/);
     });
 
     test('a poll with one option is refused rather than posted empty', async () => {
@@ -308,6 +319,45 @@ describe('riding in the MCP toolkit', () => {
 
         expect(events.map(e => e.type)).toEqual(['start', 'end']);
         expect(events[1]).toMatchObject({ server: BOT_SERVER, tool: 'create_poll', ok: true });
+    });
+
+    // The turn budget bounds the wait on somebody else's HTTP request; a bot
+    // tool is local, but a stalled Discord send would hold the reply open just
+    // as long. What it cannot do is call the write back, so the wording says the
+    // turn stopped waiting rather than claiming the action failed.
+    test('a run that outlives the turn budget is reported as unconfirmed, not failed', async () => {
+        jest.useFakeTimers();
+        try {
+            const message = fakeMessage();
+            const stuck = toolNamed(buildBotTools(message), 'create_poll');
+            stuck.run = () => new Promise(() => {});
+            const toolkit = await toolkitWith([stuck]);
+
+            const call = toolkit.call('create_poll', { question: 'Pizza?', options: ['yes', 'no'] });
+            await jest.advanceTimersByTimeAsync(TURN_BUDGET_MS + 1000);
+
+            const result = await call;
+            expect(result).toMatch(/ran out of time/);
+            expect(result).toMatch(/may still go through/);
+            expect(result).not.toMatch(/did not happen/);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('and one that finishes in time is unaffected by the clock', async () => {
+        jest.useFakeTimers();
+        try {
+            const toolkit = await toolkitWith(buildBotTools(fakeMessage()));
+            const result = await toolkit.call('create_poll', { question: 'Pizza?', options: ['yes', 'no'] });
+
+            expect(Poll.create).toHaveBeenCalled();
+            expect(result).toMatch(/poll is now in the channel/);
+            // The losing timer is cleared, so nothing is left holding the loop.
+            expect(jest.getTimerCount()).toBe(0);
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     test('a name the model invented is answered, not thrown', async () => {

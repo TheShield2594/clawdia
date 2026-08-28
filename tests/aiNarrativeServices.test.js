@@ -107,6 +107,22 @@ describe('the DM campaign reading HP back out of the story', () => {
         expect(writtenHp()).toBeNull();
     });
 
+    // A party member is named rather than introduced, so nothing in the sentence
+    // marks them as a new subject except the name itself. Without the party in
+    // the scoping, the acting player being mentioned first was enough to charge
+    // him for his companion's wound.
+    test('nor when the acting character is named earlier in the same sentence', async () => {
+        const lyra = { userId: 'u2', name: 'Lyra', characterClass: 'Mage', hp: 70, inventory: [] };
+        await narrate('Aric swings wide, and Lyra takes 30 damage from the counterblow.', [PLAYER, lyra]);
+        expect(writtenHp()).toBeNull();
+    });
+
+    test('and the acting character is still charged for their own wound', async () => {
+        const lyra = { userId: 'u2', name: 'Lyra', characterClass: 'Mage', hp: 70, inventory: [] };
+        await narrate('Lyra shouts a warning, but Aric takes 20 damage anyway.', [PLAYER, lyra]);
+        expect(writtenHp()).toBe(100);
+    });
+
     test('reads the other verbs the model reaches for', async () => {
         await narrate('Aric suffers 25 damage from the blast.');
         expect(writtenHp()).toBe(95);
