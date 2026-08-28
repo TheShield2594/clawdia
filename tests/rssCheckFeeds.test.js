@@ -297,3 +297,62 @@ test('a feed with no usable dates at all posts nothing and raises nothing', asyn
     expect(client.send).not.toHaveBeenCalled();
     expect(Guild.updateOne).not.toHaveBeenCalled();
 });
+
+
+// ── What the cursor is allowed to skip ──────────────────────────────────────
+//
+// Batching made partial delivery possible for the first time: before it, one
+// item was posted or none was, so "sent" and "cursored" could not disagree.
+
+test('a batch that fails half way cursors to the last item that landed', async () => {
+    const url = 'https://example.com/rss';
+    mockFeedBodies.set(url, rssXmlItems([
+        { title: 'A', link: 'https://example.com/a', pubDate: 'Mon, 18 Aug 2025 12:00:00 GMT' },
+        { title: 'B', link: 'https://example.com/b', pubDate: 'Tue, 19 Aug 2025 12:00:00 GMT' },
+        { title: 'C', link: 'https://example.com/c', pubDate: 'Wed, 20 Aug 2025 12:00:00 GMT' },
+    ]));
+    mockGuilds = [{
+        guildId: 'g1',
+        rssFeeds: [{ _id: 'f1', url, channelId: 'c1', lastPublished: new Date('2025-08-17T00:00:00Z') }],
+    }];
+    const client = makeClient();
+    client.send
+        .mockResolvedValueOnce({})                            // A lands
+        .mockRejectedValueOnce(new Error('rate limited'));    // B does not
+
+    await checkRssFeeds(client);
+
+    // A must not be reposted next sweep, and B must not be skipped.
+    expect(client.send).toHaveBeenCalledTimes(2);
+    expect(Guild.updateOne).toHaveBeenCalledTimes(1);
+    expect(Guild.updateOne).toHaveBeenCalledWith(
+        { guildId: 'g1', 'rssFeeds._id': 'f1' },
+        { $set: { 'rssFeeds.$.lastPublished': new Date('2025-08-18T12:00:00Z') } }
+    );
+});
+
+test('an unreachable channel leaves the cursor alone rather than dropping the burst', async () => {
+    // channels.fetch throwing with nothing cached looks identical to a deleted
+    // channel, so advancing here would lose the items for good on a blip.
+    const url = 'https://example.com/rss';
+    mockFeedBodies.set(url, rssXml());
+    mockGuilds = [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url, channelId: 'c1', lastPublished: null }] }];
+    const client = makeClient();
+    client.channels.fetch.mockRejectedValue(new Error('500 internal server error'));
+
+    await checkRssFeeds(client);
+
+    expect(client.send).not.toHaveBeenCalled();
+    expect(Guild.updateOne).not.toHaveBeenCalled();
+});
+
+test('a sweep with no configured feeds still reports itself', async () => {
+    // Otherwise "no guild has a feed" and "the job never ran" read the same
+    // from the log, which is the gap the summary line exists to close.
+    mockGuilds = [];
+    const log = jest.spyOn(console, 'log');
+
+    await checkRssFeeds(makeClient());
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('[RSS] Sweep: 0 feed(s)'));
+});

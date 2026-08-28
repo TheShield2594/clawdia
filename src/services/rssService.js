@@ -198,49 +198,72 @@ const MAX_ITEMS_PER_SWEEP = 5;
  * Returns the number of items posted, for the sweep's summary line.
  */
 async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
+    // First sight of a feed posts its newest item and nothing else. Without
+    // that, subscribing to a feed would empty its whole archive into the
+    // channel.
+    const fresh = feed.lastPublished
+        ? entries.filter(entry => entry.date > feed.lastPublished)
+        : entries.slice(-1);
+    if (!fresh.length) return 0;
+
+    const toPost = fresh.slice(-MAX_ITEMS_PER_SWEEP);
+
+    // The cursor is moved to what was actually delivered, never past it. A
+    // batch that stops half way must not repost the half that landed on the
+    // next sweep, and must not skip the half that did not.
+    let delivered = 0;
+    let cursor = null;
+
     try {
-        // First sight of a feed posts its newest item and nothing else. Without
-        // that, subscribing to a feed would empty its whole archive into the
-        // channel.
-        const fresh = feed.lastPublished
-            ? entries.filter(entry => entry.date > feed.lastPublished)
-            : entries.slice(-1);
-        if (!fresh.length) return 0;
-
-        const newest = fresh[fresh.length - 1].date;
-        const toPost = fresh.slice(-MAX_ITEMS_PER_SWEEP);
-
         const channel = await fetchSendableChannel(client, feed.channelId);
 
-        if (channel) {
-            for (const { item, date } of toPost) {
-                const embed = new EmbedBuilder()
-                    .setColor(COLORS.INFO)
-                    .setTitle(item.title || 'New Post')
-                    .setURL(item.link)
-                    .setDescription(item.contentSnippet?.substring(0, 200) || 'No description available')
-                    .setTimestamp(date);
+        // No channel is not a delivery. Advancing the cursor here would drop
+        // the whole burst for good on a channel that was only briefly
+        // unreachable — `channels.fetch` failing with nothing in the cache
+        // looks exactly like a deleted one. Leaving it where it is costs a
+        // no-op re-check each sweep while the channel is really gone, which is
+        // the cheaper of the two mistakes.
+        if (!channel) return 0;
 
-                if (parsedFeed.image?.url) {
-                    embed.setThumbnail(parsedFeed.image.url);
-                }
+        for (const { item, date } of toPost) {
+            const embed = new EmbedBuilder()
+                .setColor(COLORS.INFO)
+                .setTitle(item.title || 'New Post')
+                .setURL(item.link)
+                .setDescription(item.contentSnippet?.substring(0, 200) || 'No description available')
+                .setTimestamp(date);
 
-                await channel.send({ embeds: [embed] });
+            if (parsedFeed.image?.url) {
+                embed.setThumbnail(parsedFeed.image.url);
             }
+
+            await channel.send({ embeds: [embed] });
+            delivered++;
+            cursor = date;
         }
 
-        // Targets the one subdocument rather than rewriting the whole
-        // rssFeeds array, which is also what `guild.save()` on a
-        // projected document could not do.
-        await Guild.updateOne(
-            { guildId: guild.guildId, 'rssFeeds._id': feed._id },
-            { $set: { 'rssFeeds.$.lastPublished': newest } }
-        );
-        return channel ? toPost.length : 0;
+        // The whole batch landed, so the cursor may also skip whatever the
+        // per-sweep cap left behind — those are not coming.
+        cursor = fresh[fresh.length - 1].date;
     } catch (error) {
         console.error(`Error delivering RSS update for ${feed.url} to guild ${guild.guildId}:`, error);
-        return 0;
     }
+
+    if (cursor) {
+        try {
+            // Targets the one subdocument rather than rewriting the whole
+            // rssFeeds array, which is also what `guild.save()` on a
+            // projected document could not do.
+            await Guild.updateOne(
+                { guildId: guild.guildId, 'rssFeeds._id': feed._id },
+                { $set: { 'rssFeeds.$.lastPublished': cursor } }
+            );
+        } catch (error) {
+            console.error(`Error advancing the RSS cursor for ${feed.url} in guild ${guild.guildId}:`, error);
+        }
+    }
+
+    return delivered;
 }
 
 // Overlap protection lives in the scheduler: this runs through runJob, which
@@ -268,8 +291,6 @@ async function checkRssFeeds(client) {
         // workers — bounded parallelism without chunking (no worker idles
         // while a slow feed holds up its chunk).
         const urls = [...subscriptionsByUrl.keys()];
-        if (!urls.length) return;
-
         let next = 0;
         let posted = 0;
         let failed = 0;
