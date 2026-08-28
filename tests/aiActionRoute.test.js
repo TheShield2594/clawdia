@@ -36,7 +36,8 @@ const mockUsesClientTools = jest.fn(() => true);
 jest.mock('../src/services/ai/providers', () => ({
     providers: new Map([['mock', { name: 'mock', label: 'Mock' }]]),
     mcpMode: () => 'client',
-    usesClientTools: (...args) => mockUsesClientTools(...args)
+    usesClientTools: (...args) => mockUsesClientTools(...args),
+    supportsVision: () => false
 }));
 
 const mockStream = jest.fn();

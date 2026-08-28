@@ -13,6 +13,13 @@ function resolveProviderConfig(aiSettings) {
     const model = aiSettings.model || DEFAULT_MODELS[providerName];
     const temperature = aiSettings.temperature ?? 0.7;
     const maxTokens = aiSettings.maxTokens ?? 1024;
+    // What the guild says its model's context window is, for the case the
+    // table in budget.js cannot know: a self-hosted Ollama serves whatever
+    // `num_ctx` the operator loaded the model with, and nothing about the
+    // model name says which. Null means "use the table" (#840).
+    const contextTokens = Number.isFinite(Number(aiSettings.contextTokens)) && Number(aiSettings.contextTokens) > 0
+        ? Number(aiSettings.contextTokens)
+        : null;
 
     const auth = providers.get(providerName)?.resolveAuth(aiSettings) || {};
 
@@ -47,6 +54,7 @@ function resolveProviderConfig(aiSettings) {
         model,
         temperature,
         maxTokens,
+        contextTokens,
         apiKey: auth.apiKey ?? null,
         baseUrl: auth.baseUrl ?? null,
         mcpServers,

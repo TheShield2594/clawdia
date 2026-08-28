@@ -42,6 +42,8 @@ jest.mock('../src/services/ai/providers', () => ({
     providers: new Map([['mock', { name: 'mock', label: 'Mock' }]]),
     mcpMode: () => null,
     usesClientTools: () => false,
+    // Text-only, so the transport never reaches for an attachment here.
+    supportsVision: () => false,
 }));
 
 const mockStream = jest.fn();

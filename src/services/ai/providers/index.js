@@ -6,6 +6,8 @@
 //     mcp: 'native' | 'client' | false,
 //     resolveAuth(aiSettings) -> { apiKey } | { baseUrl },
 //     validateModel?(model)   -> error string | null,
+//     supportsVision?(model)  -> whether this model can be shown an image;
+//                                absent means text-only,
 //     stream(req)             -> async generator of text deltas; sets
 //                                req.usageOut.usage when the provider reports it,
 //     complete(req)           -> { text, usage|null },
@@ -63,4 +65,19 @@ function usesClientTools(providerName, req = {}) {
     return provider.mcp === 'client';
 }
 
-module.exports = { providers, getProvider, DEFAULT_MODELS, mcpMode, usesClientTools };
+/**
+ * Whether this provider and model can be shown an image attachment (#839).
+ *
+ * Asked by the Discord transport before it downloads anything: a model that
+ * cannot see is not worth the round trip, and the user is owed a note saying
+ * their screenshot did not make it. A provider with no answer — one written
+ * before vision existed — is text-only.
+ */
+function supportsVision(providerName, model) {
+    const provider = providers.get(providerName);
+    return typeof provider?.supportsVision === 'function'
+        ? Boolean(provider.supportsVision(model))
+        : false;
+}
+
+module.exports = { providers, getProvider, DEFAULT_MODELS, mcpMode, usesClientTools, supportsVision };

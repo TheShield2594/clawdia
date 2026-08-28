@@ -30,6 +30,36 @@ OLLAMA_BASE_URL=http://localhost:11434
 - Override API keys per server
 - Custom system prompts
 - Dedicated AI chat channel
+- **Model context window** — leave empty and it is derived from the model name.
+  Set it for a self-hosted model whose window only you know: Ollama serves
+  whatever `num_ctx` the model was loaded with, and nothing in the model name
+  declares that value — `llama3.2` is the same name at 4k and at 128k
+
+**Images**:
+
+Attach a screenshot and ask about it. Up to three images a message (5 MB each)
+are sent to the model alongside the text, on every provider whose selected
+model can read one — OpenAI's 4o/4.1/o-series, every current Claude, Gemini 1.5
+and later, and the multimodal Ollama models (llava, llama3.2-vision, gemma3 and
+friends). PNG, JPEG, WebP and GIF; Gemini takes everything but GIF.
+
+A model that cannot read images is told the picture was there and that it
+cannot see it, so it says so instead of answering from the caption alone. The
+same happens to an image too large or too numerous to send. Nothing is
+downloaded for a model that cannot use it.
+
+**Context budgeting**:
+
+The assembled prompt — system prompt, knowledge base, MCP documents, history
+and the message — is measured against the model's context window before it is
+sent, and trimmed to fit if it does not: background knowledge goes first, then
+the oldest turns, then the least relevant fetched document, then knowledge the
+question matched, and only after all of that is the message itself cut. The
+system prompt, the tool rules and the pinned memories are never dropped.
+
+The knowledge base has no size cliff any more: retrieval always runs, and the
+few newest entries ride along as background whatever the size of the base. Only
+what the question actually matched is cited in the channel.
 
 **MCP Servers** (every provider):
 

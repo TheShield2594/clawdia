@@ -91,10 +91,44 @@ function textOf(content) {
         .join('');
 }
 
-function buildMessages(history, prompt) {
+/**
+ * Which Claude models can be shown an image (#839).
+ *
+ * Every model from Claude 3 onwards is multimodal, which is every model this
+ * bot's dashboard offers; the two that are not are the retired Claude 2 line
+ * and `instant`. So this is a deny list — an unknown model name is a model
+ * newer than this file, and the safe guess for a newer Claude is that it can
+ * see.
+ */
+function supportsVision(model) {
+    return !/claude-(2|instant)/i.test(String(model || ''));
+}
+
+/**
+ * The user turn: the text, or the text followed by the images.
+ *
+ * Base64 rather than a URL source, even though Anthropic would fetch the URL
+ * itself: the bytes are already in hand (vision.js fetches once for every
+ * provider) and a signed Discord CDN link that expires mid-queue would fail
+ * here as an opaque 400.
+ */
+function userContent(prompt, images) {
+    if (!images?.length) return prompt;
+    return [
+        ...(prompt ? [{ type: 'text', text: prompt }] : []),
+        ...images.map(image => ({
+            type: 'image',
+            source: { type: 'base64', media_type: image.mimeType, data: image.base64 }
+        }))
+    ];
+}
+
+function buildMessages(history, prompt, images, model) {
     return [
         ...history.map(h => ({ role: h.role, content: h.content })),
-        { role: 'user', content: prompt }
+        // Filtered here, not at the call site: this module is the one that
+        // knows which Claude models can see.
+        { role: 'user', content: userContent(prompt, supportsVision(model) ? images : null) }
     ];
 }
 
@@ -197,9 +231,9 @@ function addUsage(totals, usage) {
  * running into the first.
  */
 async function* streamWithTools(client, req, toolkit) {
-    const { model, systemPrompt, history, prompt, temperature, maxTokens, usageOut } = req;
+    const { model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut } = req;
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
-    const messages = buildMessages(history, prompt);
+    const messages = buildMessages(history, prompt, images, model);
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
@@ -241,9 +275,9 @@ async function* streamWithTools(client, req, toolkit) {
 
 /** The same loop, unstreamed. */
 async function completeWithTools(client, req, toolkit) {
-    const { model, systemPrompt, history, prompt, temperature, maxTokens } = req;
+    const { model, systemPrompt, history, prompt, images, temperature, maxTokens } = req;
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
-    const messages = buildMessages(history, prompt);
+    const messages = buildMessages(history, prompt, images, model);
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
@@ -276,7 +310,7 @@ async function completeWithTools(client, req, toolkit) {
 }
 
 async function* stream(req) {
-    const { apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers } = req;
+    const { apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut, useMcp = true, mcpServers } = req;
     const client = new Anthropic({ apiKey });
 
     const toolkit = await clientToolkit(req);
@@ -285,7 +319,7 @@ async function* stream(req) {
         return;
     }
 
-    let messages = buildMessages(history, prompt);
+    let messages = buildMessages(history, prompt, images, model);
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
     const { params, beta } = mcpExtras(useMcp, mcpServers);
     const api = messagesApi(client, beta);
@@ -322,13 +356,13 @@ async function* stream(req) {
 }
 
 async function complete(req) {
-    const { apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true, mcpServers } = req;
+    const { apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, useMcp = true, mcpServers } = req;
     const client = new Anthropic({ apiKey });
 
     const toolkit = await clientToolkit(req);
     if (toolkit) return completeWithTools(client, req, toolkit);
 
-    let messages = buildMessages(history, prompt);
+    let messages = buildMessages(history, prompt, images, model);
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
     const { params, beta } = mcpExtras(useMcp, mcpServers);
     const api = messagesApi(client, beta);
@@ -374,6 +408,7 @@ module.exports = {
     // (see providers/index.js `usesClientTools`) so nothing else has to know
     // that Anthropic is the provider with a choice to make.
     usesClientRoute,
+    supportsVision,
     resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.anthropicKey) || process.env.ANTHROPIC_API_KEY }),
     stream,
     complete

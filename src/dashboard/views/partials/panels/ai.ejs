@@ -80,9 +80,10 @@
                             <label class="field-label" for="ai-temperature">Temperature (<span id="ai-temp-display"><%= settings.ai.temperature ?? 0.7 %></span>)</label>
                             <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="<%= settings.ai.temperature ?? 0.7 %>" oninput="document.getElementById('ai-temp-display').textContent = this.value">
                         </div>
-                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
                             <div><label class="field-label" for="ai-max-tokens">Max output tokens</label><input type="number" id="ai-max-tokens" min="32" max="8192" value="<%= settings.ai.maxTokens ?? 1024 %>"></div>
                             <div><label class="field-label" for="ai-max-history">Conversation history length</label><input type="number" id="ai-max-history" min="0" max="100" value="<%= settings.ai.maxHistory ?? 20 %>"><small>0 disables history</small></div>
+                            <div><label class="field-label" for="ai-context-tokens">Model context window</label><input type="number" id="ai-context-tokens" min="1024" max="2000000" value="<%= settings.ai.contextTokens ?? '' %>"><small>Leave empty to derive it from the model name. Set it for a self-hosted model whose window only you know</small></div>
                         </div>
                         <label class="toggle">
                             <span class="toggle-text"><strong>Stream responses</strong><span>Edit messages in real-time as the model generates</span></span>

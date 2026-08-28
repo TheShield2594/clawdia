@@ -92,6 +92,43 @@ function functionDeclarations(toolkit) {
     });
 }
 
+/**
+ * Which Gemini models can be shown an image (#839).
+ *
+ * Everything from 1.5 onwards is multimodal. What is not: the retired
+ * text-only `gemini-pro` / `gemini-1.0-pro`, and the embedding, retrieval and
+ * image-generation endpoints, which are not chat models at all.
+ */
+function supportsVision(model) {
+    const name = String(model || '');
+    if (/^gemini-(1\.0-)?pro/i.test(name)) return false;
+    return !/(embedding|aqa|imagen)/i.test(name);
+}
+
+// What Gemini takes inline. It is the only provider here that does not accept
+// GIF, so a GIF is dropped for this provider rather than refused for all of
+// them — the rest of the message still goes.
+const GEMINI_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+
+/**
+ * The first message of the turn: the text, or the text and its images as Parts.
+ *
+ * Only the first — the loop below reassigns `message` to function responses on
+ * every round after it, and an image resent each round is an image billed each
+ * round for a model that already has it in the chat history.
+ */
+function userMessage({ prompt, images, model }) {
+    const usable = supportsVision(model)
+        ? (images || []).filter(image => GEMINI_IMAGE_TYPES.has(image.mimeType))
+        : [];
+    if (!usable.length) return prompt;
+
+    return [
+        ...(prompt ? [{ text: prompt }] : []),
+        ...usable.map(image => ({ inlineData: { mimeType: image.mimeType, data: image.base64 } }))
+    ];
+}
+
 function startChat({ apiKey, model, systemPrompt, history, temperature, maxTokens }, { toolkit = null, priorHistory = null } = {}) {
     const client = new GoogleGenAI({ apiKey });
     return client.chats.create({
@@ -186,7 +223,7 @@ async function* stream(req) {
     const rounds = roundsFor(toolkit);
     let chat = startChat(req, { toolkit });
     let declared = declaredCount(toolkit);
-    let message = req.prompt;
+    let message = userMessage(req);
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
@@ -243,7 +280,7 @@ async function complete(req) {
     const rounds = roundsFor(toolkit);
     let chat = startChat(req, { toolkit });
     let declared = declaredCount(toolkit);
-    let message = req.prompt;
+    let message = userMessage(req);
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
@@ -283,6 +320,7 @@ module.exports = {
     pricing: PRICING,
     // MCP tools are declared as Gemini functions and called from the loop here.
     mcp: 'client',
+    supportsVision,
     resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.geminiKey) || process.env.GEMINI_API_KEY }),
     stream,
     complete,

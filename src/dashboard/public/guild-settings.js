@@ -985,6 +985,11 @@ async function saveSettings(section) {
             'ai.temperature': parseFloat(document.getElementById('ai-temperature').value),
             'ai.maxTokens': parseInt(document.getElementById('ai-max-tokens').value, 10),
             'ai.maxHistory': parseInt(document.getElementById('ai-max-history').value, 10),
+            // Empty means "derive it from the model name", which is null rather
+            // than a NaN the schema would refuse.
+            'ai.contextTokens': document.getElementById('ai-context-tokens').value.trim()
+                ? parseInt(document.getElementById('ai-context-tokens').value, 10)
+                : null,
             'ai.streaming': document.getElementById('ai-streaming').checked,
             'ai.rateLimitPerUser': parseInt(document.getElementById('ai-rate-limit').value, 10),
             'ai.rateLimitPerChannel': parseInt(document.getElementById('ai-rate-channel').value, 10),

@@ -296,6 +296,19 @@ function validateMonthlyLimit(value, key) {
     return null;
 }
 
+// The context window this guild's model actually has, when the model name
+// cannot say (#840). Null and empty mean "work it out from the model name",
+// which is what every guild that never touches this field gets. The bounds are
+// the schema's, caught here so the form can show the message against the field
+// rather than surfacing a mongoose validation error.
+function validateContextTokens(value) {
+    if (value === undefined || value === null || value === '') return null;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1024 || value > 2_000_000) {
+        return 'ai.contextTokens must be an integer between 1024 and 2000000, or empty to derive it from the model';
+    }
+    return null;
+}
+
 function validateAiUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
         const isWholeAi = key === 'ai' && value && typeof value === 'object';
@@ -336,6 +349,15 @@ function validateAiUpdate(updates) {
                 const error = validateMonthlyLimit(limit, `ai.${field}`);
                 if (error) return error;
             }
+        }
+
+        let context;
+        if (key === 'ai.contextTokens') context = value;
+        else if (isWholeAi) context = value.contextTokens;
+
+        if (context !== undefined) {
+            const error = validateContextTokens(context);
+            if (error) return error;
         }
     }
     return null;

@@ -1,6 +1,7 @@
 const OpenAI = require('openai');
 const { decryptSecret } = require('../../../config/secretBox');
 const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
+const { dataUrl } = require('../vision');
 
 // USD per 1M tokens (input, output). Prefix-matched; unknown models report
 // null cost via ai/usage.js.
@@ -33,11 +34,55 @@ function tuningParams(model, temperature, maxTokens) {
     return { temperature, max_tokens: maxTokens };
 }
 
-function buildMessages({ systemPrompt, history, prompt }) {
+// Models that can be shown an image (#839). Everything in the 4o/4.1/5 and
+// o-series lines is multimodal except the small reasoning models, which take
+// text only and answer an image with a 400 rather than ignoring it — so the
+// list is an allow list with those two carved back out, and anything not on it
+// is asked in text alone.
+const VISION_MODELS = /^(gpt-4o|chatgpt-4o|gpt-4\.1|gpt-4-turbo|gpt-4-vision|gpt-5|o1|o3|o4)/i;
+const TEXT_ONLY_MODELS = /^(o1-mini|o3-mini)/i;
+
+function supportsVision(model) {
+    const name = String(model || '');
+    return VISION_MODELS.test(name) && !TEXT_ONLY_MODELS.test(name);
+}
+
+/**
+ * The user turn: a plain string, or the content array a message with images
+ * takes.
+ *
+ * The images ride as data URLs rather than as the Discord CDN link they came
+ * from — see vision.js on why the bytes are fetched here rather than by the
+ * provider — and the text goes first so the question is read before its
+ * subject, which is the order the user typed it in.
+ */
+function userContent(prompt, images) {
+    if (!images?.length) return prompt;
+    return [
+        ...(prompt ? [{ type: 'text', text: prompt }] : []),
+        ...images.map(image => ({ type: 'image_url', image_url: { url: dataUrl(image) } }))
+    ];
+}
+
+/**
+ * Whether images may ride on this request.
+ *
+ * The model name decides, and this module is the one that knows what OpenAI's
+ * names mean — so a caller cannot send an image to a model that would refuse
+ * it. `visionCapable` is the exception, and it is not a caller overriding the
+ * check: OpenRouter routes another vendor's model through this same request
+ * path, and `anthropic/claude-…` is a name only that provider can judge. Where
+ * it is given, it is the answer from whoever owns the id.
+ */
+function canSee({ model, visionCapable }) {
+    return visionCapable ?? supportsVision(model);
+}
+
+function buildMessages({ systemPrompt, history, prompt, images, model, visionCapable }) {
     return [
         { role: 'system', content: systemPrompt },
         ...history,
-        { role: 'user', content: prompt }
+        { role: 'user', content: userContent(prompt, canSee({ model, visionCapable }) ? images : null) }
     ];
 }
 
@@ -132,11 +177,11 @@ async function runToolCalls({ toolkit, messages, calls, content }) {
     });
 }
 
-async function* stream({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+async function* stream({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
-    const messages = buildMessages({ systemPrompt, history, prompt });
+    const messages = buildMessages({ systemPrompt, history, prompt, images, model, visionCapable });
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
@@ -191,11 +236,11 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, temperatu
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+async function complete({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
-    const messages = buildMessages({ systemPrompt, history, prompt });
+    const messages = buildMessages({ systemPrompt, history, prompt, images, model, visionCapable });
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
@@ -241,6 +286,9 @@ module.exports = {
     // MCP works here through the bot's own client: the tools are discovered,
     // offered to the model as functions, and called from the loop above.
     mcp: 'client',
+    // Which models can be shown an image attachment. Asked by the registry so
+    // the transport does not have to keep its own list.
+    supportsVision,
     resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.openaiKey) || process.env.OPENAI_API_KEY }),
     stream,
     complete

@@ -1,8 +1,16 @@
 const User = require('../../models/User');
 const { resolveMcpServers } = require('../../config/mcpServers');
-const { providers, mcpMode, usesClientTools } = require('./providers');
+const { providers, mcpMode, usesClientTools, supportsVision } = require('./providers');
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
-const { retrieveKnowledge, buildKnowledgeContext } = require('./knowledge');
+const { retrieveKnowledge, knowledgeSection } = require('./knowledge');
+const { collectImages, loadImages, visionNotice } = require('./vision');
+const {
+    fitPrompt,
+    inputBudget,
+    BACKGROUND_PRIORITY,
+    RESOURCE_PRIORITY,
+    MATCHED_KNOWLEDGE_PRIORITY
+} = require('./budget');
 const { loadHistory, appendHistory, clearHistory } = require('./history');
 const { createSummarizer, summaryContext } = require('./summarize');
 const { peekRateLimit, peekChannelRateLimit, userRateLimitKey } = require('./rateLimit');
@@ -150,7 +158,7 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
  * content, which is the right answer for the reply-to-bot trigger.
  */
 async function handleAIChat(message, aiSettings, promptContent) {
-    const { provider, model, temperature, maxTokens, apiKey, baseUrl, mcpServers, mcpConfirm, mcpRoute, rateLimit } = resolveProviderConfig(aiSettings);
+    const { provider, model, temperature, maxTokens, contextTokens, apiKey, baseUrl, mcpServers, mcpConfirm, mcpRoute, rateLimit } = resolveProviderConfig(aiSettings);
     const providerDef = providers.get(provider);
     const providerLabel = providerDef?.label || provider;
 
@@ -169,12 +177,28 @@ async function handleAIChat(message, aiSettings, promptContent) {
         return reply(message, 'Conversation history cleared.');
     }
 
+    // What the message carries besides words (#839). Collected here — it is a
+    // read of `message.attachments` and nothing more — because whether there is
+    // a picture decides the question below, and whether it is worth
+    // downloading is decided later, once the model is known to be able to see.
+    const attached = collectImages(message);
+    const canSee = supportsVision(provider, model);
+
     // A bare `@Clawdia` is all mention and no question. Before the token was
     // stripped this reached the provider as the literal `<@id>`; now it would
-    // reach it as an empty prompt, which some providers reject outright.
-    if (!content) {
+    // reach it as an empty prompt, which some providers reject outright. A
+    // message with no text but a screenshot on it is a question, though — it is
+    // how most people ask "what is this?" — so only a message with neither has
+    // nothing in it to answer.
+    if (!content && !attached.images.length) {
         return reply(message, 'You mentioned me but did not ask anything — what can I help with?');
     }
+
+    // Something still has to arrive as the user's turn when the user typed
+    // nothing at all. This says what happened rather than inventing a question
+    // on their behalf, and it is what goes into the history too, so the next
+    // message's context reads the way this one did.
+    const promptText = content || '[The user sent this attachment with no message text.]';
 
     // A peek, not a consuming check: the slot is spent inside getCompletion /
     // streamCompletion, which is what actually bounds provider spend. This is
@@ -197,15 +221,40 @@ async function handleAIChat(message, aiSettings, promptContent) {
     // channel as a permanent ellipsis next to a separate error message.
     let placeholder = null;
 
-    // Build system prompt: base + pinned memories + knowledge context + action instructions
-    let systemPrompt = aiSettings.systemPrompt || 'You are a helpful Discord bot assistant.';
+    // The system prompt as labelled pieces rather than one string (#840).
+    //
+    // Base + knowledge + tool rules + action rules + fetched documents, each
+    // saying whether it may be dropped and how readily, so that a prompt too
+    // big for the model loses the least valuable part of itself instead of
+    // whatever the far end's tokenizer happens to cut off. `required` is what
+    // makes the reply behave — the persona and the tool rules — and is never
+    // dropped; see budget.js for the order the rest goes in.
+    const sections = [{
+        id: 'base',
+        text: aiSettings.systemPrompt || 'You are a helpful Discord bot assistant.',
+        required: true
+    }];
 
     const userDoc = await User.findOne({ userId: message.author.id, guildId: message.guild.id }).lean();
     const pinnedMemories = userDoc?.pinnedMemories?.length ? userDoc.pinnedMemories : null;
 
-    const { entries: kbEntries, isBackground: kbIsBackground } = await retrieveKnowledge(message.guild.id, content);
-    if (kbEntries.length) {
-        systemPrompt += buildKnowledgeContext(kbEntries);
+    // Two tiers now, not one mode (#840): what the question actually retrieved,
+    // which the reply may cite, and the always-on background tier, which it may
+    // not. They are separate sections because they are worth different amounts
+    // — background is the first thing dropped when the prompt does not fit, and
+    // a matched entry is nearly the last.
+    const kb = await retrieveKnowledge(message.guild.id, content);
+    const kbMatched = kb.matched ?? (kb.isBackground ? [] : kb.entries || []);
+    const kbBackground = kb.background ?? (kb.isBackground ? kb.entries || [] : []);
+    if (kbMatched.length) {
+        sections.push({ id: 'knowledge', priority: MATCHED_KNOWLEDGE_PRIORITY, ...knowledgeSection(kbMatched) });
+    }
+    if (kbBackground.length) {
+        sections.push({
+            id: 'knowledgeBackground',
+            priority: BACKGROUND_PRIORITY,
+            ...knowledgeSection(kbBackground, { background: true })
+        });
     }
     // Every provider can reach MCP servers now — Anthropic through its own
     // connector, the rest through the bot's MCP client — so this only asks
@@ -230,16 +279,27 @@ async function handleAIChat(message, aiSettings, promptContent) {
         // The ACTION sentence only belongs in the MCP rule while there is an
         // ACTION block to be talked into emitting; the tool route's own addendum
         // carries the same rule in the vocabulary it uses.
-        systemPrompt += buildMcpAddendum({ actionsEnabled: Boolean(aiSettings.actionsEnabled) && !toolActions });
+        sections.push({
+            id: 'mcpRules',
+            required: true,
+            text: buildMcpAddendum({ actionsEnabled: Boolean(aiSettings.actionsEnabled) && !toolActions })
+        });
     }
     if (toolActions) {
-        systemPrompt += buildToolActionsAddendum(userDoc?.timezone);
+        sections.push({ id: 'actionRules', required: true, text: buildToolActionsAddendum(userDoc?.timezone) });
     } else if (aiSettings.actionsEnabled) {
-        systemPrompt += buildActionsAddendum(userDoc?.timezone);
+        sections.push({ id: 'actionRules', required: true, text: buildActionsAddendum(userDoc?.timezone) });
     }
 
     try {
         await message.channel.sendTyping();
+
+        // The bytes behind the attachments, now that the model is known to be
+        // able to use them (#839). Started here rather than awaited here: it
+        // and the resource retrieval below are independent round trips on the
+        // same critical path, and somebody is watching a typing indicator for
+        // the sum of everything on it.
+        const visionPending = loadImages(attached, { supported: canSee });
 
         // The other knowledge base: documents published by an MCP server the
         // guild switched resources on for, fetched now rather than pasted into
@@ -252,7 +312,15 @@ async function handleAIChat(message, aiSettings, promptContent) {
                 console.warn(`[MCP] resource retrieval failed: ${err.message}`);
                 return null;
             });
-        if (mcpKnowledge) systemPrompt += mcpKnowledge.text;
+        if (mcpKnowledge) {
+            // Its items are in score order, so what the budget drops first is
+            // the document that looked least like an answer.
+            sections.push({
+                id: 'mcpResources',
+                priority: RESOURCE_PRIORITY,
+                ...(mcpKnowledge.section || { header: mcpKnowledge.text, joiner: '', items: [''] })
+            });
+        }
 
         const { messages: rawHistory, summary } = await loadHistory(
             message.guild.id, message.channel.id, message.author.id, maxHistory
@@ -263,16 +331,66 @@ async function handleAIChat(message, aiSettings, promptContent) {
         // The rolling summary of turns that have fallen out of the retention
         // window (#833) rides in the same way, and after the memories: it is
         // the older material of the two, so it reads in the order it happened.
-        const history = [
+        //
+        // Neither is trimmable by the budget below, which is why they are held
+        // apart from the turns themselves: the memories are the user's own
+        // standing context, and the summary is already the compressed form of
+        // everything the window has dropped. Spending either to keep one more
+        // recent turn would be exactly backwards.
+        const historyPrefix = [
             ...(pinnedMemories
                 ? [
                     { role: 'user', content: `[My saved context for this conversation]\n${pinnedMemories.map(m => `- ${m.content}`).join('\n')}` },
                     { role: 'assistant', content: 'Understood, I have noted your saved context.' }
                   ]
                 : []),
-            ...summaryContext(summary),
-            ...rawHistory
+            ...summaryContext(summary)
         ];
+
+        const vision = await visionPending;
+        if (vision.skipped || vision.unsupported) {
+            // A model told nothing about an image it cannot see will answer the
+            // question anyway, from the text and its imagination.
+            sections.push({ id: 'visionNotice', required: true, text: visionNotice(vision) });
+        }
+
+        // Everything assembled is now measured against what the model can
+        // actually hold, and trimmed in priority order if it does not fit
+        // (#840). Before this, a large knowledge base and a long retention
+        // window could exceed a small model's context and fail as an opaque
+        // 400 — or, on Ollama, silently, with the model answering from whatever
+        // half of the prompt survived.
+        const fitted = fitPrompt({
+            sections,
+            historyPrefix,
+            history: rawHistory,
+            prompt: promptText,
+            images: vision.images.length,
+            budget: inputBudget({ provider, model, maxTokens, contextTokens })
+        });
+        const { report } = fitted;
+        if (report.estimatedBefore > report.budget) {
+            console.warn(`[AI:${provider}] prompt was ~${report.estimatedBefore} tokens against a ${report.budget} budget for `
+                + `${model}; trimmed to ~${report.estimatedAfter} (dropped ${JSON.stringify(report.dropped)}, `
+                + `${report.historyDropped} history message(s)${report.promptTruncated ? ', message truncated' : ''}).`);
+        }
+
+        // Everything trimmable is gone and it still does not fit. What is left
+        // is what nobody here may drop — the system prompt and the tool rules —
+        // plus the fixed costs: the pinned memories, the rolling summary, the
+        // images. Sending it anyway is a request that has already failed: a 400
+        // from the hosted APIs, or Ollama quietly cutting the instructions and
+        // answering as somebody else. So it is refused here, where the refusal
+        // can name the knob to turn, rather than spent for a reply nobody can
+        // use.
+        if (!report.fits) {
+            console.warn(`[AI:${provider}] ~${report.estimatedAfter} tokens will not fit ${model}'s `
+                + `${report.budget}-token budget with nothing left to trim (~${report.fixedTokens} of it fixed).`);
+            return reply(message, `That does not fit in ${providerLabel}'s context window for \`${model}\``
+                + `${vision.images.length ? ' along with the attached image(s)' : ''}. `
+                + 'Try sending fewer images, clearing saved context with `/ai memories`, or ask an admin to '
+                + 'shorten the system prompt or raise the model context window in the dashboard.');
+        }
 
         const usageOut = {};
         // Collects what the MCP tools did across every round of this turn, so
@@ -280,8 +398,12 @@ async function handleAIChat(message, aiSettings, promptContent) {
         // it used once it is done.
         const activity = createToolActivity();
         const callArgs = {
-            provider, model, apiKey, baseUrl, systemPrompt, history,
-            prompt: content, temperature, maxTokens, mcpServers,
+            provider, model, apiKey, baseUrl,
+            systemPrompt: fitted.systemPrompt, history: fitted.history, prompt: fitted.prompt,
+            // The provider filters these again against its own model list, so
+            // an image can never reach a model that would refuse it.
+            images: vision.images,
+            temperature, maxTokens, mcpServers,
             guildId: message.guild.id, usageOut, onToolEvent: activity.onEvent,
             // The guild's policy, and the buttons that answer it. The toolkit
             // holds the call until this resolves, so a tool that writes
@@ -556,18 +678,21 @@ async function handleAIChat(message, aiSettings, promptContent) {
             // this guild had yesterday.
             await appendHistory(
                 message.guild.id, message.channel.id, message.author.id,
-                content, fullResponse, maxHistory,
+                promptText, fullResponse, maxHistory,
                 createSummarizer(
                     { provider, model, apiKey, baseUrl, rateLimit },
                     { guildId: message.guild.id, userId: message.author.id, channelId: message.channel.id }
                 )
             );
-            if (kbEntries.length && !kbIsBackground) {
+            // Only what the question matched is a source. The background tier
+            // is in the prompt because it is recent, not because it answered
+            // anything, so citing it would credit an entry nobody retrieved.
+            if (kbMatched.length) {
                 const prefix = '📚 Sources: ';
                 const limit = DISCORD_MAX_LEN - prefix.length - 10;
                 let body = '';
                 let omitted = 0;
-                for (const entry of kbEntries) {
+                for (const entry of kbMatched) {
                     const title = entry.title.length > 80 ? entry.title.slice(0, 77) + '…' : entry.title;
                     const part = body ? `, ${title}` : title;
                     if (body.length + part.length > limit) { omitted++; continue; }

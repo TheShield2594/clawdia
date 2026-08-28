@@ -31,6 +31,7 @@ const {
     retrieveMcpKnowledge,
     buildResourceContext,
     scoreResource,
+    queryWords,
     MAX_RESOURCE_CHARS,
     MAX_KNOWLEDGE_CHARS,
     MAX_HEADING_CHARS
@@ -129,6 +130,33 @@ describe('scoring', () => {
 
     test('a resource nothing in the question mentions scores nothing', () => {
         expect(scoreResource({ uri: 'wiki://tax', name: 'Tax', description: 'VAT' }, words)).toBe(0);
+    });
+
+    // #840: both of these used to be hits.
+    test('a stopword is not a query word, however long it is', () => {
+        expect(queryWords('what does the handbook say about the kitchen rota?'))
+            .toEqual(['handbook', 'say', 'kitchen', 'rota']);
+    });
+
+    test('every document mentioning "the" no longer outranks the one that answers', () => {
+        const relevant = { uri: 'wiki://rota', name: 'Kitchen rota' };
+        const chatty = { uri: 'wiki://tax', name: 'Tax', description: 'the rules and the forms and the deadlines' };
+        const asked = queryWords('what does the handbook say about the kitchen rota?');
+
+        expect(scoreResource(relevant, asked)).toBeGreaterThan(0);
+        expect(scoreResource(chatty, asked)).toBe(0);
+    });
+
+    test('a word is matched at its boundaries, not anywhere inside another', () => {
+        const asked = queryWords('what does the cat eat?');
+
+        expect(scoreResource({ uri: 'x', name: 'Concatenate certificates' }, asked)).toBe(0);
+        expect(scoreResource({ uri: 'x', name: 'The cat' }, asked)).toBeGreaterThan(0);
+    });
+
+    test('and a URI still matches the part of it somebody named', () => {
+        expect(scoreResource({ uri: 'notes/2024/quarterly.md', name: 'Notes' }, queryWords('where is the quarterly?')))
+            .toBeGreaterThan(0);
     });
 });
 
