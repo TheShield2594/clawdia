@@ -165,34 +165,68 @@ async function fetchSendableChannel(client, channelId) {
 
     return channel;
 }
+// Most feeds list newest first, but nothing in RSS or Atom requires it, and a
+// feed that lists oldest first pinned `items[0]` to an article that never
+// changes — so the sweep advanced its cursor once and then had nothing new to
+// say for the rest of the feed's life. Order is taken from the dates, not from
+// the document.
+//
+// An item whose pubDate does not parse is dropped rather than posted: its date
+// is both the "is this new" test and the embed's timestamp, and
+// `setTimestamp(new Date('...'))` on an unparseable one throws RangeError —
+// which, on a feed being seen for the first time, aborted the delivery before
+// the cursor was written and so repeated on every sweep, forever.
+function datedItems(parsedFeed) {
+    return (parsedFeed.items || [])
+        .map(item => ({ item, date: new Date(item.pubDate || item.isoDate) }))
+        .filter(entry => !Number.isNaN(entry.date.getTime()))
+        .sort((a, b) => a.date - b.date);
+}
+
+// A feed that publishes a burst between two sweeps posts at most this many of
+// them, newest kept. The cursor still advances past the whole burst: a channel
+// is not a backfill target, and the alternative — posting all of them — is a
+// feed that reposts its archive the first time it is polled after an outage.
+const MAX_ITEMS_PER_SWEEP = 5;
+
 /**
- * Delivers a freshly-parsed feed to one guild's subscription: sends the embed
- * if the latest item is new for that guild, and advances its lastPublished
- * cursor. Per-subscription failures are contained here so one guild's deleted
- * channel does not stop the fan-out to the others.
+ * Delivers a freshly-parsed feed to one guild's subscription: sends what is new
+ * for that guild and advances its lastPublished cursor. Per-subscription
+ * failures are contained here so one guild's deleted channel does not stop the
+ * fan-out to the others.
+ *
+ * Returns the number of items posted, for the sweep's summary line.
  */
-async function deliverFeedUpdate(client, guild, feed, parsedFeed, latestItem, itemDate) {
+async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
     try {
-        // Not `itemDate <= lastPublished`: an unparseable pubDate gives an
-        // invalid Date, which compares false both ways, and it must skip (as
-        // it always has) rather than post with a timestamp that cannot render.
-        if (feed.lastPublished && !(itemDate > feed.lastPublished)) return;
+        // First sight of a feed posts its newest item and nothing else. Without
+        // that, subscribing to a feed would empty its whole archive into the
+        // channel.
+        const fresh = feed.lastPublished
+            ? entries.filter(entry => entry.date > feed.lastPublished)
+            : entries.slice(-1);
+        if (!fresh.length) return 0;
+
+        const newest = fresh[fresh.length - 1].date;
+        const toPost = fresh.slice(-MAX_ITEMS_PER_SWEEP);
 
         const channel = await fetchSendableChannel(client, feed.channelId);
 
         if (channel) {
-            const embed = new EmbedBuilder()
-                .setColor(COLORS.INFO)
-                .setTitle(latestItem.title || 'New Post')
-                .setURL(latestItem.link)
-                .setDescription(latestItem.contentSnippet?.substring(0, 200) || 'No description available')
-                .setTimestamp(itemDate);
+            for (const { item, date } of toPost) {
+                const embed = new EmbedBuilder()
+                    .setColor(COLORS.INFO)
+                    .setTitle(item.title || 'New Post')
+                    .setURL(item.link)
+                    .setDescription(item.contentSnippet?.substring(0, 200) || 'No description available')
+                    .setTimestamp(date);
 
-            if (parsedFeed.image?.url) {
-                embed.setThumbnail(parsedFeed.image.url);
+                if (parsedFeed.image?.url) {
+                    embed.setThumbnail(parsedFeed.image.url);
+                }
+
+                await channel.send({ embeds: [embed] });
             }
-
-            await channel.send({ embeds: [embed] });
         }
 
         // Targets the one subdocument rather than rewriting the whole
@@ -200,10 +234,12 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, latestItem, it
         // projected document could not do.
         await Guild.updateOne(
             { guildId: guild.guildId, 'rssFeeds._id': feed._id },
-            { $set: { 'rssFeeds.$.lastPublished': itemDate } }
+            { $set: { 'rssFeeds.$.lastPublished': newest } }
         );
+        return channel ? toPost.length : 0;
     } catch (error) {
         console.error(`Error delivering RSS update for ${feed.url} to guild ${guild.guildId}:`, error);
+        return 0;
     }
 }
 
@@ -232,11 +268,16 @@ async function checkRssFeeds(client) {
         // workers — bounded parallelism without chunking (no worker idles
         // while a slow feed holds up its chunk).
         const urls = [...subscriptionsByUrl.keys()];
+        if (!urls.length) return;
+
         let next = 0;
+        let posted = 0;
+        let failed = 0;
+        let skipped = 0;
         const worker = async () => {
             while (next < urls.length) {
                 const url = urls[next++];
-                if (shouldSkipDeadFeed(url)) continue;
+                if (shouldSkipDeadFeed(url)) { skipped++; continue; }
 
                 let parsedFeed;
                 try {
@@ -244,16 +285,15 @@ async function checkRssFeeds(client) {
                     recordFeedSuccess(url);
                 } catch (error) {
                     recordFeedFailure(url, error);
+                    failed++;
                     continue;
                 }
 
-                if (parsedFeed.items.length === 0) continue;
-
-                const latestItem = parsedFeed.items[0];
-                const itemDate = new Date(latestItem.pubDate || latestItem.isoDate);
+                const entries = datedItems(parsedFeed);
+                if (!entries.length) continue;
 
                 for (const { guild, feed } of subscriptionsByUrl.get(url)) {
-                    await deliverFeedUpdate(client, guild, feed, parsedFeed, latestItem, itemDate);
+                    posted += await deliverFeedUpdate(client, guild, feed, parsedFeed, entries);
                 }
             }
         };
@@ -261,6 +301,12 @@ async function checkRssFeeds(client) {
         await Promise.all(
             Array.from({ length: Math.min(RSS_FETCH_CONCURRENCY, urls.length) }, worker)
         );
+
+        // One line per sweep, always. "Feeds stopped posting" was previously
+        // indistinguishable from "nothing new was published" from the outside,
+        // and the per-feed errors say what broke without ever saying how much
+        // of the sweep it was.
+        console.log(`[RSS] Sweep: ${urls.length} feed(s), ${posted} posted, ${failed} failed, ${skipped} parked.`);
     } catch (error) {
         console.error('Error checking RSS feeds:', error);
     }
@@ -275,9 +321,10 @@ async function sendDailyNewsForProfile(client, guild, profile) {
 
     const allItems = [];
     const cutoffMs = Date.now() - (24 * 60 * 60 * 1000);
+    let unreachable = 0;
 
     for (const feedUrl of profile.feeds) {
-        if (shouldSkipDeadFeed(feedUrl)) continue;
+        if (shouldSkipDeadFeed(feedUrl)) { unreachable++; continue; }
 
         try {
             const parsedFeed = await parseFeedUrl(feedUrl);
@@ -298,6 +345,7 @@ async function sendDailyNewsForProfile(client, guild, profile) {
             allItems.push(...feedItems);
         } catch (error) {
             recordFeedFailure(feedUrl, error);
+            unreachable++;
         }
     }
 
@@ -313,7 +361,16 @@ async function sendDailyNewsForProfile(client, guild, profile) {
         uniqueItems.push(item);
     }
 
-    if (uniqueItems.length === 0) return;
+    // A digest that posts nothing looks identical from Discord to a digest that
+    // never ran, and its slot is already claimed for the day either way — so the
+    // two get told apart here, in the one place that knows which it was.
+    if (uniqueItems.length === 0) {
+        const why = profile.feeds.length > 0 && unreachable === profile.feeds.length
+            ? `all ${profile.feeds.length} feed(s) unreachable`
+            : 'nothing new in the last 24h';
+        console.log(`[RSS] Daily news for guild ${guild.guildId} (${profile.profileId}): sent nothing — ${why}.`);
+        return;
+    }
 
     uniqueItems.sort(compareByDateDesc);
 
@@ -470,5 +527,6 @@ module.exports = {
         feedFailCounts, feedLastFailTime, shouldSkipDeadFeed,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, RSS_FETCH_CONCURRENCY,
         dailyNewsDue, runDueDailyNews, DAILY_NEWS_REFIRE_GUARD_MS,
+        datedItems, MAX_ITEMS_PER_SWEEP,
     },
 };

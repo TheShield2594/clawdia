@@ -128,7 +128,14 @@ async function scheduleActivePollExpirations(client) {
         // No lower bound on endsAt: a poll that expired while the process was
         // down has no timer left anywhere, so excluding it here is what left it
         // open forever. scheduleExpiry closes an overdue one immediately.
-        const active = await Poll.find({ closed: false });
+        //
+        // `endsAt: null` is excluded, though, because it is not an overdue poll
+        // — it is `/poll` without a duration, which is stored open on purpose
+        // and has no timer to restore. Those were being handed to
+        // scheduleExpiry, where `endsAt.getTime()` threw once per such poll on
+        // every boot, and they were counted in the pickup line below as if
+        // something had been rescheduled.
+        const active = await Poll.find({ closed: false, endsAt: { $ne: null } });
         for (const poll of active) {
             try {
                 const guild = client.guilds.cache.get(poll.guildId);
