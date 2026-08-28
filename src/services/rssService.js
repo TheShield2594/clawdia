@@ -266,8 +266,23 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
     return delivered;
 }
 
-// Overlap protection lives in the scheduler: this runs through runJob, which
-// drops a tick while the previous sweep is still in flight.
+/**
+ * One sweep of every subscribed feed across every guild: fetch, post what is
+ * new to each subscribing channel, and advance each feed's cursor only as far
+ * as delivery actually got.
+ *
+ * Overlap protection lives in the scheduler: this runs through `runJob`, which
+ * drops a tick while the previous sweep is still in flight. A feed that keeps
+ * failing is parked for a cooldown rather than retried every tick, and one
+ * sweep logs a single summary line — feeds having stopped posting used to be
+ * indistinguishable from nothing having been published.
+ *
+ * Does not throw: a per-feed failure is logged and counted, and the sweep
+ * carries on to the rest.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
 async function checkRssFeeds(client) {
     try {
         // Projected and lean: a full Guild document carries every shop item's
@@ -422,10 +437,22 @@ async function sendDailyNewsForProfile(client, guild, profile) {
 }
 
 /**
+ * Send one guild's daily news digest now.
+ *
  * Failures propagate: both callers need them. The scheduled run goes through
- * runJob, which records the failure and files a dead-letter entry, and the
+ * `runJob`, which records the failure and files a dead-letter entry, and the
  * dashboard's "send now" button answers 500 instead of reporting success for a
  * digest that never went out.
+ *
+ * A profile with no feeds, or one disabled, is skipped rather than treated as
+ * an error, as is a guild that no longer exists.
+ *
+ * @param {import('discord.js').Client} client
+ * @param {string} guildId
+ * @param {?string} [profileId] one digest profile; null sends every enabled
+ *   profile the guild has
+ * @returns {Promise<void>}
+ * @throws whatever the send failed with — deliberately not swallowed
  */
 async function sendDailyNews(client, guildId, profileId = null) {
     const guild = await Guild.findOne({ guildId });
@@ -532,6 +559,12 @@ async function runDueDailyNews(client) {
     }
 }
 
+/**
+ * Start the daily news scheduler. Called once at startup.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {void}
+ */
 function scheduleDailyNews(client) {
     // A minute tick over persisted state, not one in-memory cron job per
     // profile: survives restarts, catches up after downtime, and needs no

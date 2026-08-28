@@ -29,7 +29,18 @@ const UNLOCK_LABELS = {
 
 const SOFT_PRESTIGE_BONUS = { yieldPct: 0.02, xpPct: 0.02 };
 
-// Returns the tier definition for a given rank (largest rank ≤ requested).
+/**
+ * The tier definition governing a rank: the highest entry in `PRESTIGE_TIERS`
+ * whose `rank` is at or below the one asked for.
+ *
+ * The table is not dense above rank 5, so this floors rather than looks up —
+ * which is right for bonuses and unlocks (a rank between two entries keeps the
+ * lower one's) and wrong for the display title, since flooring rank 7 would
+ * render it "Prestige V". Use `titleForExactRank` for anything a user reads.
+ *
+ * @param {number} rank a prestige rank; anything non-numeric or negative is 0
+ * @returns {{rank: number, title: ?string, bonuses: object, unlocks: string[]}}
+ */
 function tierFor(rank) {
     const r = Math.max(0, Number(rank) || 0);
     let best = PRESTIGE_TIERS[0];
@@ -39,9 +50,14 @@ function tierFor(rank) {
     return best;
 }
 
-// Returns the exact display title for a rank — uses the explicit PRESTIGE_TIERS
-// entry when one exists, otherwise synthesizes `Prestige <roman>` so P6–P9
-// don't render as the floored "Prestige V" label.
+/**
+ * The display title for exactly this rank — the explicit `PRESTIGE_TIERS` entry
+ * when there is one, otherwise a synthesized `Prestige <roman>`, so a rank the
+ * table does not name does not render as the floored tier below it.
+ *
+ * @param {number} rank
+ * @returns {?string} null at rank 0, which has no title
+ */
 function titleForExactRank(rank) {
     const r = Math.max(0, Number(rank) || 0);
     if (r === 0) return null;
@@ -50,7 +66,17 @@ function titleForExactRank(rank) {
     return `Prestige ${roman(r)}`;
 }
 
-// Returns the explicit definition for the upcoming rank (used in /prestige confirmation).
+/**
+ * What the next prestige buys — the tier at `rank + 1`, for the confirmation
+ * `/prestige` shows before it resets an account.
+ *
+ * Above the last explicit entry there is nothing to look up, so this carries the
+ * current tier's bonuses and unlocks forward under the new rank and title. The
+ * result is shaped like a `PRESTIGE_TIERS` entry either way.
+ *
+ * @param {number} rank the rank held now
+ * @returns {{rank: number, title: ?string, bonuses: object, unlocks: string[]}}
+ */
 function nextTierAfter(rank) {
     const r = Math.max(0, Number(rank) || 0);
     const target = r + 1;
@@ -62,6 +88,12 @@ function nextTierAfter(rank) {
     return { ...prior, rank: target, title: `Prestige ${roman(target)}` };
 }
 
+/**
+ * Roman numerals, for the synthesized tier titles.
+ *
+ * @param {number} n
+ * @returns {string} `'0'` for anything at or below zero
+ */
 function roman(n) {
     if (n <= 0) return '0';
     const map = [['M',1000],['CM',900],['D',500],['CD',400],['C',100],['XC',90],['L',50],['XL',40],['X',10],['IX',9],['V',5],['IV',4],['I',1]];
@@ -72,8 +104,17 @@ function roman(n) {
     return out;
 }
 
-// Aggregate active bonus multipliers from prestige rank.
-// Returns { yieldMult, xpMult, staminaRegenMult, crimeSuccessMult }
+/**
+ * The prestige bonuses as multipliers a caller can apply directly — 1.0 at rank
+ * 0, so an un-prestiged account needs no special case at the call site.
+ *
+ * `rareTierShift` is the odd one out: it is an additive probability shift, not a
+ * multiplier, and is 0 rather than 1 when the rank grants none.
+ *
+ * @param {number} rank
+ * @returns {{yieldMult: number, xpMult: number, staminaRegenMult: number,
+ *   crimeSuccessMult: number, rareTierShift: number}}
+ */
 function getBonusMultipliers(rank) {
     const tier = tierFor(rank);
     const b = tier.bonuses || {};
@@ -86,10 +127,24 @@ function getBonusMultipliers(rank) {
     };
 }
 
+/**
+ * Whether a rank has unlocked a piece of content.
+ *
+ * @param {number} rank
+ * @param {string} unlockId a key of `UNLOCK_LABELS` — `'black_market'`,
+ *   `'daily_challenge'`, and so on
+ * @returns {boolean}
+ */
 function hasUnlock(rank, unlockId) {
     return tierFor(rank).unlocks.includes(unlockId);
 }
 
+/**
+ * The badge shown beside a name: `✨` at 10, `⭐` from 5, `⟦P3⟧` below that.
+ *
+ * @param {number} rank
+ * @returns {string} empty at rank 0, so it can be concatenated unconditionally
+ */
 function badgeFor(rank) {
     if (!rank) return '';
     if (rank >= 10) return '✨';
