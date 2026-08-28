@@ -32,8 +32,14 @@ const {
     MAX_TASK_DELAY_MINUTES,
     MAX_TASKS_PER_GUILD
 } = require('../../utils/scheduledTaskLimits');
+const { runDeepTask, refuseTask } = require('../../services/ai/deepTask');
 
 const MEMORY_CAP = 10;
+
+// What a task request may say. Longer than a scheduled task's instruction —
+// somebody typing this is present and describing a job in one go — and far
+// short of anything that would crowd the model's own context.
+const DEEP_TASK_PROMPT_MAX = 1000;
 
 // Discord's message ceiling. A prompt's answer is a normal AI reply and can run
 // past it, so it is split the same way the chat transport splits one.
@@ -67,6 +73,14 @@ module.exports = {
                         .setMaxValue(MEMORY_CAP)
                 )
         )
+        .addSubcommand(sub =>
+            sub.setName('task')
+                .setDescription('Give the AI a multi-step job. It works in the background and posts the result.')
+                .addStringOption(opt =>
+                    opt.setName('prompt')
+                        .setDescription('What you want done, e.g. "check these three feeds and tell me what changed"')
+                        .setMaxLength(DEEP_TASK_PROMPT_MAX)
+                        .setRequired(true)))
         // A group rather than four top-level commands: Discord registers at
         // most a hundred, and tests/commandCap pins the count so spending one
         // is a decision rather than an accident.
@@ -219,6 +233,7 @@ module.exports = {
         }
 
         const sub = interaction.options.getSubcommand();
+        if (sub === 'task') return startDeepTask(interaction);
         if (sub !== 'memories') return;
 
         const deleteIndex = interaction.options.getInteger('delete');
@@ -262,6 +277,54 @@ module.exports = {
         return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 };
+
+// ── /ai task ─────────────────────────────────────────────────────────────────
+
+/**
+ * Hand a job to the AI and stop waiting for it (#835).
+ *
+ * The reply is an acknowledgement, not the answer: the run has a wall clock
+ * measured in minutes, and an interaction token has fifteen. So the command
+ * ends here and `runDeepTask` posts the progress and the result into the
+ * channel on its own — which is also what makes the larger tool budget safe to
+ * offer, since nothing is holding a webhook open while it is spent.
+ */
+async function startDeepTask(interaction) {
+    const prompt = interaction.options.getString('prompt').trim();
+    if (!prompt) {
+        return interaction.reply({ content: 'Say what you would like done.', flags: MessageFlags.Ephemeral });
+    }
+
+    const settings = await Guild.findOne({ guildId: interaction.guild.id }).lean();
+    const ai = settings?.ai;
+
+    // Checked before anything is posted, so a refusal is one ephemeral line
+    // rather than a progress message in the channel that goes nowhere. The
+    // deep-task allowance is spent here, by this call.
+    const refusal = refuseTask({ ai, guildId: interaction.guild.id, userId: interaction.user.id });
+    if (refusal) return interaction.reply({ content: refusal, flags: MessageFlags.Ephemeral });
+
+    if (!interaction.channel?.isTextBased?.()) {
+        return interaction.reply({ content: 'I need a text channel to post the result in.', flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.reply({
+        content: '🧠 On it — I\'ll post the result in this channel when it\'s done.',
+        flags: MessageFlags.Ephemeral
+    });
+
+    // Deliberately not awaited: the interaction is answered and the run is on
+    // its own from here. runDeepTask never throws — a failure becomes a message
+    // in the channel — and the catch is belt and braces for the unforeseen.
+    runDeepTask({
+        ai,
+        guild: interaction.guild,
+        channel: interaction.channel,
+        user: interaction.user,
+        member: interaction.member,
+        prompt
+    }).catch(err => console.error('[Deep task] detached run failed:', err?.message || err));
+}
 
 // ── /ai schedule ─────────────────────────────────────────────────────────────
 

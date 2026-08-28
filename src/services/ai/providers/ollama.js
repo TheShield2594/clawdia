@@ -1,6 +1,6 @@
 const axios = require('axios');
 const { guardedAgents, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
-const { toolkitFor, mapWithLimit, MAX_TOOL_ROUNDS, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // The endpoint the *operator* runs, from the environment or the shipped default.
 // A guild's `ai.ollamaBaseUrl` is a dashboard setting, so it is attacker input
@@ -190,8 +190,9 @@ async function* separated(pieces) {
     }
 }
 
-async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools });
+async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
+    const rounds = roundsFor(toolkit);
     const { url, agents } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt });
 
@@ -204,7 +205,7 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperat
     for (let round = 0; ; round++) {
         // Withholding the tools on the final round leaves the model nothing to
         // do but answer, so a turn can never end on an unanswered tool call.
-        const offerTools = Boolean(toolkit) && round < MAX_TOOL_ROUNDS;
+        const offerTools = Boolean(toolkit) && round < rounds;
         const body = requestBody({
             model, messages, temperature, maxTokens,
             stream: true,
@@ -228,8 +229,9 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperat
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools });
+async function complete({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
+    const rounds = roundsFor(toolkit);
     const { url, agents } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt });
 
@@ -238,7 +240,7 @@ async function complete({ baseUrl, model, systemPrompt, history, prompt, tempera
     const parts = [];
 
     for (let round = 0; ; round++) {
-        const offerTools = Boolean(toolkit) && round < MAX_TOOL_ROUNDS;
+        const offerTools = Boolean(toolkit) && round < rounds;
         const response = await axios.post(url, requestBody({
             model, messages, temperature, maxTokens,
             stream: false,

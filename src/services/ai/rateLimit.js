@@ -48,10 +48,23 @@ const TOOL_CALLS_PER_MESSAGE = 8;
 const SCHEDULED_TOOL_CALLS_PER_HOUR = 24;
 const SCHEDULED_WINDOW_MS = 60 * 60 * 1000;
 
+// And an allowance of its own for deep task mode (#835).
+//
+// A task turn is attributed to whoever ran it, so the guild's ordinary message
+// and tool windows already apply to it. This is the extra one, because a task
+// is not an ordinary message: three times the rounds and five times the wall
+// clock, running detached from the interaction with the bot free to keep
+// working after the person has walked away. A guild that allows twenty messages
+// an hour did not thereby allow twenty of those.
+const deepTaskLimits = new BoundedRateLimiter(AI_RL_MAX_KEYS);
+const DEEP_TASKS_PER_WINDOW = 3;
+const DEEP_TASK_WINDOW_MS = 60 * 60 * 1000;
+
 setInterval(() => {
     rateLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
     channelRateLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
     toolCallLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
+    deepTaskLimits.cleanup(DEEP_TASK_WINDOW_MS);
 }, 15 * 60 * 1000).unref();
 
 /**
@@ -262,6 +275,16 @@ function toolCallBudget({ guildId, userId, rateLimit }) {
     );
 }
 
+/**
+ * Spend one of this person's deep-task slots, and say whether there was one.
+ *
+ * Keyed per guild for the same reason the message window is: the allowance and
+ * the API key being billed both belong to one server.
+ */
+function checkDeepTaskLimit(guildId, userId) {
+    return deepTaskLimits.check(userRateLimitKey(guildId, userId), DEEP_TASK_WINDOW_MS, DEEP_TASKS_PER_WINDOW);
+}
+
 /** A budget function over one key, in the shape the MCP toolkit spends. */
 function spender(key, windowMs, limit) {
     const budget = () => toolCallLimits.check(key, windowMs, limit);
@@ -272,6 +295,9 @@ function spender(key, windowMs, limit) {
 module.exports = {
     checkRateLimit,
     monthlyBudgetState,
+    checkDeepTaskLimit,
+    DEEP_TASKS_PER_WINDOW,
+    DEEP_TASK_WINDOW_MS,
     enforceMonthlyBudget,
     AiBudgetError,
     SCHEDULED_TOOL_CALLS_PER_HOUR,

@@ -457,6 +457,13 @@ const guildSchema = new Schema({
         },
         // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)
         actionsEnabled: { type: Boolean, default: false },
+        // Whether `/ai task` is available on this server (#835). Off by default
+        // and per guild, because a task turn is a much larger unit of spend than
+        // a chat message — three times the tool rounds and five times the wall
+        // clock — and it runs detached, so the bot keeps working after the
+        // person who asked has walked away. Guarded further by an allowance of
+        // its own in services/ai/rateLimit.js.
+        taskModeEnabled: { type: Boolean, default: false },
         dailyDigest: {
             enabled:          { type: Boolean, default: false },
             channelId:        { type: String, default: null },

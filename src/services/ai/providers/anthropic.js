@@ -7,7 +7,7 @@ const {
     MCP_BETA,
     DEFAULT_MCP_ROUTE
 } = require('../../../config/mcpServers');
-const { toolkitFor, mapWithLimit, MAX_TOOL_ROUNDS, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // Anthropic can reach MCP servers two ways, and this module is the only place
 // that has to know it.
@@ -204,12 +204,13 @@ async function* streamWithTools(client, req, toolkit) {
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
     let wroteText = false;
+    const rounds = roundsFor(toolkit);
 
     for (let round = 0; ; round++) {
         // The last permitted round goes out with no tools, which leaves the
         // model nothing to do but answer — otherwise a turn could end on a tool
         // call and the user would get an empty message.
-        const offerTools = round < MAX_TOOL_ROUNDS;
+        const offerTools = round < rounds;
         const response = await client.messages.stream({
             ...base,
             messages,
@@ -247,9 +248,10 @@ async function completeWithTools(client, req, toolkit) {
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
     const parts = [];
+    const rounds = roundsFor(toolkit);
 
     for (let round = 0; ; round++) {
-        const offerTools = round < MAX_TOOL_ROUNDS;
+        const offerTools = round < rounds;
         const response = await client.messages.create({
             ...base,
             messages,

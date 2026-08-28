@@ -42,6 +42,7 @@ const sourceFiles = walk(SRC).map(full => ({
 const NON_JOB_TIMERS = new Set([
     'services/scheduler/index.js',      // the presence rotation, and the job table itself
     'services/ai/discordChat.js',       // typing indicator refresh for one reply
+    'services/ai/deepTask.js',          // tool-status repaint for one task, cleared when it ends
     'services/ai/rateLimit.js',         // in-memory rate-limit bucket sweep
     'events/messageCreate.js',          // in-memory reminder-cooldown sweep
     'dashboard/lib/middleware.js',      // in-memory HTTP rate-limit sweep

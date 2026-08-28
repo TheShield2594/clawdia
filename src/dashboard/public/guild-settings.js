@@ -992,6 +992,7 @@ async function saveSettings(section) {
             'ai.monthlyTokenLimit': parseInt(document.getElementById('ai-monthly-tokens').value, 10) || 0,
             'ai.monthlyCostLimit': parseFloat(document.getElementById('ai-monthly-cost').value) || 0,
             'ai.actionsEnabled': document.getElementById('ai-actions-enabled').checked,
+            'ai.taskModeEnabled': document.getElementById('ai-task-mode').checked,
             // These live on the Connections tab but belong to the same ai
             // document, so they save with everything else rather than needing
             // their own endpoint.
