@@ -162,6 +162,79 @@ function largestArrayKey(object) {
     return best && object[best].length > 1 ? best : null;
 }
 
+// Below this a string is not what is making the document too big, and cutting
+// it further costs a field its meaning without buying room worth having.
+const MIN_SHRINKABLE_STRING = 80;
+
+// How many halvings to try before giving up and letting the text path have it.
+// Each pass halves the longest string, so this is far more than enough to take
+// a megabyte down to nothing; it exists so a pathological document cannot spin.
+const MAX_SHRINK_PASSES = 60;
+
+/**
+ * Every string in a document that is long enough to be worth shortening, as
+ * things that can be written back.
+ *
+ * Top level and one level in, which is where tool results keep their prose: an
+ * object's own fields (`{ content: "<the whole file>" }`) and the fields of an
+ * array's elements (`[{ path, body }, …]`). Deeper than that and this would be
+ * a general tree rewriter, which is a different and much less predictable
+ * thing than "the one enormous field is what will not fit".
+ */
+function longStrings(value, into = [], depth = 0) {
+    if (depth > 1 || !value || typeof value !== 'object') return into;
+
+    for (const [key, child] of Object.entries(value)) {
+        if (typeof child === 'string') {
+            if (child.length >= MIN_SHRINKABLE_STRING) into.push({ holder: value, key });
+        } else if (child && typeof child === 'object') {
+            longStrings(child, into, depth + 1);
+        }
+    }
+    return into;
+}
+
+/**
+ * `parsed` with its longest strings cut down until it serialises inside
+ * `limit`, or null when there is nothing long enough to be worth cutting.
+ *
+ * This is the shape the array paths above do not cover and a byte-slice
+ * handles worst: one field holding the whole answer — a file's contents, a
+ * page of HTML, a stack trace — beside the fields that say what it is. Cutting
+ * the string keeps the document valid and keeps `path`, `status` and the rest
+ * of the scalars a following call needs; cutting the document loses them,
+ * because they sort after the big one about half the time.
+ *
+ * The value is mutated in place, which is safe because it came out of
+ * `JSON.parse` a few lines ago and belongs to nobody else.
+ */
+function shrinkStrings(parsed, limit) {
+    const slots = longStrings(parsed);
+    if (!slots.length) return null;
+
+    for (let pass = 0; pass < MAX_SHRINK_PASSES; pass++) {
+        const json = stringify(parsed);
+        if (json === null) return null;
+        if (json.length <= limit) return { json };
+
+        // The longest one each time, so a document with one enormous field and
+        // twenty small ones loses the enormous one rather than all twenty.
+        let longest = null;
+        for (const slot of slots) {
+            const text = slot.holder[slot.key];
+            if (typeof text === 'string' && (!longest || text.length > longest.holder[longest.key].length)) {
+                longest = slot;
+            }
+        }
+        const current = longest && longest.holder[longest.key];
+        if (!current || current.length < MIN_SHRINKABLE_STRING) return null;
+
+        const keep = Math.max(MIN_SHRINKABLE_STRING >> 1, Math.floor(current.length / 2));
+        longest.holder[longest.key] = `${current.slice(0, keep)}… [${current.length - keep} characters omitted]`;
+    }
+    return null;
+}
+
 /**
  * Head and tail of `text` on line boundaries, for a result with no structure to
  * preserve.
@@ -233,7 +306,17 @@ function trimResult(text, limit) {
         }
     }
 
+    // Nothing to drop whole, but perhaps something to shorten: one field
+    // holding the entire answer beside the scalars that describe it. Cutting
+    // the field keeps the document valid and keeps those; cutting the document
+    // loses whichever of them sorted after it.
+    if (parsed) {
+        const room = limit - note(limit, text.length, 'characters').length;
+        const shrunk = room > 0 ? shrinkStrings(parsed, room) : null;
+        if (shrunk) return shrunk.json + note(shrunk.json.length, text.length, 'characters');
+    }
+
     return headAndTail(text, limit);
 }
 
-module.exports = { trimResult, headAndTail, MIN_STRUCTURED_LIMIT, HEAD_SHARE, SHORT_MARKER };
+module.exports = { trimResult, headAndTail, shrinkStrings, MIN_STRUCTURED_LIMIT, HEAD_SHARE, SHORT_MARKER };

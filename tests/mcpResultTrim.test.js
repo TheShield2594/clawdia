@@ -131,6 +131,81 @@ describe('a JSON object wrapping a list', () => {
     });
 });
 
+/**
+ * The shape the array paths do not cover and a byte-slice handles worst: one
+ * field holding the whole answer — a file's contents, a page of HTML, a stack
+ * trace — beside the fields that say what it is. Cutting the document loses
+ * those scalars whenever they sort after the big one, which is about half the
+ * time; cutting the string keeps every one of them.
+ */
+describe('a document whose problem is one enormous field', () => {
+    const doc = JSON.stringify({
+        path: 'src/services/ai/mcp/toolkit.js',
+        status: 'ok',
+        lines: 1029,
+        content: 'x'.repeat(9000),
+    });
+    const trimmed = trimResult(doc, 1200);
+
+    test('stays valid JSON', () => {
+        expect(() => documentOf(trimmed)).not.toThrow();
+    });
+
+    test('keeps every scalar a following call would need', () => {
+        expect(documentOf(trimmed)).toMatchObject({
+            path: 'src/services/ai/mcp/toolkit.js',
+            status: 'ok',
+            lines: 1029,
+        });
+    });
+
+    test('and cuts the field that was the problem, saying how much', () => {
+        const { content } = documentOf(trimmed);
+        expect(content.length).toBeLessThan(9000);
+        expect(content).toMatch(/… \[\d+ characters omitted\]$/);
+    });
+
+    test('within the budget', () => {
+        expect(trimmed.length).toBeLessThanOrEqual(1200);
+    });
+
+    // A document with one enormous field and twenty small ones should lose the
+    // enormous one, not all twenty.
+    test('the longest string goes first', () => {
+        const mixed = JSON.stringify({
+            big: 'a'.repeat(8000),
+            note: 'b'.repeat(200),
+            tag: 'c'.repeat(120),
+        });
+        const { big, note, tag } = documentOf(trimResult(mixed, 1500));
+
+        expect(big.length).toBeLessThan(1200);
+        expect(note).toBe('b'.repeat(200));
+        expect(tag).toBe('c'.repeat(120));
+    });
+
+    // Tool results keep their prose one level in as often as at the top.
+    test('and it reaches the fields of an array\'s elements', () => {
+        const rows = JSON.stringify([{ path: 'a.js', body: 'y'.repeat(4000) }, { path: 'b.js', body: 'z'.repeat(4000) }]);
+        const parsed = documentOf(trimResult(rows, 1500));
+
+        expect(parsed).toHaveLength(2);
+        expect(parsed.map(row => row.path)).toEqual(['a.js', 'b.js']);
+    });
+
+    // Nothing long enough to be worth cutting: the text path takes it, and says
+    // so with its own marker rather than pretending to be JSON.
+    test('a document of nothing but short fields falls through to head and tail', () => {
+        const many = JSON.stringify(Object.fromEntries(
+            Array.from({ length: 400 }, (_, i) => [`k${i}`, `v${i}`]),
+        ));
+        const out = trimResult(many, 900);
+
+        expect(out.length).toBeLessThanOrEqual(900);
+        expect(out).toMatch(/omitted …\]/);
+    });
+});
+
 describe('output with no structure to preserve', () => {
     const log = `${Array.from({ length: 600 }, (_, i) => `line ${i} of some build output`).join('\n')}\nERROR: the build failed`;
     const trimmed = trimResult(log, 1500);
@@ -215,6 +290,53 @@ describe('whatever the shape and whatever the budget', () => {
     test.each([80, 199, 200, 400, 1000, 6000])('never exceeds a %i-character budget', limit => {
         for (const shape of shapes) {
             expect(trimResult(shape, limit).length).toBeLessThanOrEqual(limit);
+        }
+    });
+
+    /**
+     * The two properties that matter, over a wide spread of shapes and budgets
+     * rather than the handful written out above: nothing exceeds its budget,
+     * nothing throws, and anything that comes back looking like a JSON document
+     * *is* one. The generator is deterministic, so a failure here is a failure
+     * anybody can reproduce.
+     */
+    test('a structured result is always parseable, and always fits', () => {
+        let seed = 20260828;
+        const rand = n => {
+            seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+            return seed % n;
+        };
+        const generators = [
+            () => JSON.stringify(rows(rand(200) + 2)),
+            () => JSON.stringify(Array.from({ length: 2 }, () => ({ blob: 'y'.repeat(5000) }))),
+            () => JSON.stringify(Array.from({ length: 3 }, () => 'z'.repeat(3000))),
+            () => JSON.stringify({ a: 1, b: 'q'.repeat(9000), items: [1, 2, 3] }),
+            () => JSON.stringify({ items: Array.from({ length: rand(100) + 2 }, (_, i) => i), cursor: 'c'.repeat(rand(500)) }),
+            () => JSON.stringify({ nested: { items: Array.from({ length: 50 }, (_, i) => i) } }),
+            () => JSON.stringify({ onlyBig: 'w'.repeat(rand(9000) + 1000) }),
+            () => JSON.stringify(Array.from({ length: rand(5) + 2 }, () => ({ u: 'é😀'.repeat(rand(400)) }))),
+            () => 'plain '.repeat(rand(3000)),
+            () => JSON.stringify({ items: [] }),
+        ];
+        const limits = [30, 60, 120, 199, 200, 250, 400, 900, 2500, 6000];
+
+        for (let i = 0; i < 2000; i++) {
+            const shape = generators[i % generators.length]();
+            const limit = limits[rand(limits.length)];
+            const out = trimResult(shape, limit);
+
+            expect(out.length).toBeLessThanOrEqual(limit);
+            if (out === shape) continue;
+
+            const at = out.indexOf('\n[trimmed');
+            if (at <= 0) continue;
+            const body = out.slice(0, at);
+            // The head-and-tail path is elided text by design and says so; a
+            // body without that marker is claiming to be a whole document.
+            if (body.includes('omitted …]')) continue;
+            if (/^\s*[[{]/.test(body)) {
+                expect(() => JSON.parse(body)).not.toThrow();
+            }
         }
     });
 
