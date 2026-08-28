@@ -1005,7 +1005,7 @@ async execute(interaction) {
         if (interaction.deferred) {
             await interaction.editReply(errorMessage);
         } else {
-            await interaction.reply({ content: errorMessage, ephemeral: true });
+            await interaction.reply({ content: errorMessage, flags: MessageFlags.Ephemeral });
         }
     }
 }
@@ -1030,14 +1030,26 @@ async execute(interaction) {
 
 ### Ephemeral Replies
 
-For private responses:
+For a reply only the person who ran the command can see:
 
 ```javascript
+const { MessageFlags } = require('discord.js');
+
 await interaction.reply({
     content: 'Only you can see this!',
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
 });
 ```
+
+`flags: MessageFlags.Ephemeral`, not `ephemeral: true`. The boolean option is
+deprecated in discord.js v14 — it still works, and logs a deprecation warning
+on every call — and this codebase does not use it anywhere. Write the flag and
+your file matches the other 800-odd reply sites; write the boolean and the next
+person to grep for the pattern finds one file that disagrees.
+
+The same flag goes on `deferReply` when the eventual reply should be private:
+`await interaction.deferReply({ flags: MessageFlags.Ephemeral })`. Deferring
+publicly and then editing does not make the reply private afterwards.
 
 ### Button Interactions
 

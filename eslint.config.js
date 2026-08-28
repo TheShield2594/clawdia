@@ -65,6 +65,16 @@ const shared = {
     // this codebase are written on purpose, and console logging is how the bot
     // reports for itself. Neither is a defect here.
     'no-console': 'off',
+    'no-restricted-syntax': ['error', {
+        // discord.js v14 deprecated the `ephemeral: true` reply option in favour
+        // of `flags: MessageFlags.Ephemeral`. Every one of the ~830 ephemeral
+        // replies here is written with the flag; the boolean still works, so a
+        // stray one does not fail anything at runtime, it just leaves the
+        // codebase with two ways of saying the same thing and a deprecation
+        // warning per call. One had already drifted back in (#706).
+        selector: 'Property[key.name="ephemeral"][value.value=true]',
+        message: 'Use `flags: MessageFlags.Ephemeral` — the `ephemeral` option is deprecated in discord.js v14.',
+    }],
 };
 
 module.exports = [

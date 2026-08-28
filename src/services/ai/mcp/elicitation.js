@@ -2,7 +2,7 @@
 
 const {
     ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder,
-    TextInputBuilder, TextInputStyle, PermissionFlagsBits,
+    TextInputBuilder, TextInputStyle, PermissionFlagsBits, MessageFlags,
 } = require('discord.js');
 const { rejectOtherUser } = require('../../../utils/collectorOwner');
 const { toolLabel } = require('../../../utils/toolLabel');
@@ -391,7 +391,7 @@ function createElicitationHandler(message, { timeoutMs = ELICIT_TIMEOUT_MS } = {
             // worse one for the tool call holding its request open behind it —
             // and the model is told what went wrong, so it can ask again in its
             // own words if the answer mattered.
-            await submission.reply({ content: `⚠️ ${answers.error} Nothing was sent to the server.`, ephemeral: true }).catch(() => {});
+            await submission.reply({ content: `⚠️ ${answers.error} Nothing was sent to the server.`, flags: MessageFlags.Ephemeral }).catch(() => {});
             console.warn(`[MCP] an answer for "${serverName}" did not fit its schema: ${answers.error}`);
             return settle(
                 `⚠️ <@${submission.user.id}> — that answer did not fit what the server asked for.`,
