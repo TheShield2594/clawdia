@@ -2,6 +2,11 @@
 
 const User = require('../../models/User');
 const { MAX_REMINDER_MINUTES, MAX_REMINDER_MESSAGE_LENGTH } = require('../../utils/reminderLimits');
+const {
+    MAX_TASK_PROMPT_LENGTH,
+    MAX_TASK_DELAY_MINUTES,
+    MIN_TASK_DELAY_MINUTES
+} = require('../../utils/scheduledTaskLimits');
 const { MEMORY_CAP, MAX_MEMORY_LENGTH } = require('../../utils/memoryLimits');
 const { runAction } = require('./actions');
 
@@ -90,6 +95,51 @@ function reminderTool(message) {
         // The tool's own answer carries the timestamp for the model to quote, so
         // a second confirmation message in the channel would only repeat it.
         run: args => runAction({ type: 'create_reminder', ...args }, message, { announce: false })
+    });
+}
+
+/**
+ * Turn "remind me every Friday to…" into a standing agentic task (#834).
+ *
+ * The distinction this tool has to hold, and the description works hard at, is
+ * against `create_reminder`: a reminder replays text the user already wrote,
+ * and this wakes the model up on a cadence to *do* something — which is a full
+ * provider request against the guild's budget, on a schedule, with nobody
+ * watching. So it asks first, the way `save_memory` does and for the stronger
+ * version of the same reason: this is the only tool here whose effect is a
+ * recurring cost.
+ */
+function scheduleTaskTool(message) {
+    return tool({
+        name: 'schedule_task',
+        description:
+            'Schedule an instruction for you to carry out later, once or on a repeating cadence — '
+            + 'posting the result in this channel. Use it only when the answer has to be worked out at '
+            + 'the time (checking feeds, recapping a channel, comparing something against last week). '
+            + 'For "remind me to…", use create_reminder instead: each run of a scheduled task costs the '
+            + 'server a full AI request. The user is asked to approve it before it is set.',
+        properties: {
+            instruction: {
+                type: 'string',
+                maxLength: MAX_TASK_PROMPT_LENGTH,
+                description: 'What you should do each time it runs, written as a complete standalone instruction — '
+                    + 'nobody will be there to clarify it.'
+            },
+            delayMinutes: {
+                type: 'integer',
+                minimum: MIN_TASK_DELAY_MINUTES,
+                maximum: MAX_TASK_DELAY_MINUTES,
+                description: 'How many minutes from now the first run should be.'
+            },
+            repeat: {
+                type: 'string',
+                enum: ['none', 'daily', 'weekly', 'monthly'],
+                description: 'How often it repeats after the first run. "none" runs it once.'
+            }
+        },
+        required: ['instruction', 'delayMinutes', 'repeat'],
+        confirm: true,
+        run: args => runAction({ type: 'schedule_task', ...args }, message)
     });
 }
 
@@ -192,7 +242,7 @@ async function saveMemory(args, message) {
 function buildBotTools(message, { enabled = true } = {}) {
     if (!enabled) return [];
 
-    const tools = [pollTool(message), reminderTool(message), memoryTool(message)];
+    const tools = [pollTool(message), reminderTool(message), memoryTool(message), scheduleTaskTool(message)];
 
     // Offered only to someone who could act on it. The executor checks the same
     // permissions again — this is about not putting a tool in front of a model

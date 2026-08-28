@@ -279,8 +279,13 @@ describe('call sites', () => {
 
         // Where a provider call is legitimately unattributed, and why.
         const SCHEDULED = new Set([
-            'services/summaryService.js',    // cron: scheduled digests
-            'services/newspaperService.js',  // cron, plus an attributed preview
+            'services/summaryService.js',       // cron: scheduled digests
+            'services/newspaperService.js',     // cron, plus an attributed preview
+            // The generic schedule (#834). Unattributed for the same reason the
+            // two above are — a task fires on a cadence its guild configured,
+            // with nobody waiting on it — and bounded instead by the guild's
+            // monthly ceiling and the per-guild scheduled tool budget (#831).
+            'services/scheduledTaskService.js',
         ]);
 
         const unattributed = walk(SRC)

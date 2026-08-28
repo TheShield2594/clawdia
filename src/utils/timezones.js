@@ -132,6 +132,30 @@ function addCalendarDays(date, days, timeZone) {
     return zonedTimeToUtc(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate(), hour, minute, timeZone);
 }
 
+/**
+ * The same date `months` calendar months later, at the same local wall-clock
+ * time — the month-shaped sibling of addCalendarDays, for a task that repeats
+ * monthly (#834).
+ *
+ * The day is clamped to the target month's length rather than allowed to roll
+ * over: `Date.UTC(y, m, 31)` on a thirty-day month is the 1st of the month
+ * after, which would walk a task scheduled for the 31st forward through the
+ * calendar a day at a time. Clamping keeps the 31st on the 30th of April and
+ * back on the 31st of May, which is what somebody who said "monthly" meant.
+ */
+function addCalendarMonths(date, months, timeZone) {
+    const { year, month, day, hour, minute } = nowInTimezone(timeZone, date);
+
+    const zeroBased = month - 1 + months;
+    const targetYear = year + Math.floor(zeroBased / 12);
+    const targetMonth = ((zeroBased % 12) + 12) % 12; // 0-based, non-negative
+
+    // Day 0 of the next month is the last day of this one.
+    const daysInMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+
+    return zonedTimeToUtc(targetYear, targetMonth + 1, Math.min(day, daysInMonth), hour, minute, timeZone);
+}
+
 module.exports = {
     isValidTimezone,
     canonicalizeTimezone,
@@ -139,5 +163,6 @@ module.exports = {
     nowInTimezone,
     formatLocalTime,
     parseAtOption,
-    addCalendarDays
+    addCalendarDays,
+    addCalendarMonths
 };

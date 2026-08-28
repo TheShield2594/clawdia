@@ -93,8 +93,8 @@ describe('on a provider that runs the bot\'s tool loop', () => {
         const args = await turn();
 
         expect(args.botTools.map(tool => tool.name))
-            .toEqual(['create_poll', 'create_reminder', 'save_memory']);
-        expect(args.systemPrompt).toMatch(/create_poll, create_reminder, save_memory/);
+            .toEqual(['create_poll', 'create_reminder', 'save_memory', 'schedule_task']);
+        expect(args.systemPrompt).toMatch(/create_poll, create_reminder, save_memory, schedule_task/);
         expect(args.systemPrompt).not.toMatch(/ACTION:/);
     });
 
