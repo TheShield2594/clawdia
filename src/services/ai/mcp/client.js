@@ -330,8 +330,15 @@ class McpHttpClient {
      *        pooled client is sitting idle and the store is what knows when to
      *        refresh. `force` is the 401 path: the server rejected a token this
      *        believed was live, so refresh and try once more.
+     * @param {Function|null} [options.onNotification] `(notification) => void`
+     *        for every server-sent notification on every stream this client
+     *        reads (#838), as opposed to `request`'s per-call `onProgress`,
+     *        which is scoped to the one request that asked for it. This is what
+     *        `notifications/tools/list_changed` arrives on — a message about the
+     *        connection rather than about any one request, and one no caller is
+     *        in a position to be waiting for.
      */
-    constructor({ url, authorizationToken = null, label = 'MCP server', getAccessToken = null }) {
+    constructor({ url, authorizationToken = null, label = 'MCP server', getAccessToken = null, onNotification = null }) {
         // Throws for anything that is not a plain http(s) URL, and for a literal
         // private address — the one destination that is knowable before DNS.
         this.url = assertPublicHttpUrl(url, `${label} URL`).toString();
@@ -340,6 +347,7 @@ class McpHttpClient {
             ? authorizationToken.trim()
             : null;
         this.getAccessToken = typeof getAccessToken === 'function' ? getAccessToken : null;
+        this.onNotification = typeof onNotification === 'function' ? onNotification : null;
         this.sessionId = null;
         this.protocolVersion = null;
         this.serverInfo = null;
@@ -391,6 +399,27 @@ class McpHttpClient {
         const changed = Boolean(token) && token !== this.token;
         if (token) this.token = token;
         return changed;
+    }
+
+    /**
+     * The two notification audiences as one listener, or null when there is
+     * neither.
+     *
+     * A request's own progress reader and the connection-level handler both
+     * want every notification on the stream, and neither should be able to stop
+     * the other seeing one — so the second is delivered in a `finally`, and a
+     * listener that throws costs its own delivery rather than the other's.
+     */
+    notificationSink(perRequest) {
+        if (!this.onNotification) return perRequest || null;
+        if (!perRequest) return this.onNotification;
+        return notification => {
+            try {
+                perRequest(notification);
+            } finally {
+                this.onNotification(notification);
+            }
+        };
     }
 
     async post(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true, authRetried = false, onNotification = null } = {}) {
@@ -459,7 +488,7 @@ class McpHttpClient {
 
         const contentType = String(response.headers['content-type'] || '');
         const read = contentType.includes('text/event-stream')
-            ? readEventStream(response.data, id, onNotification)
+            ? readEventStream(response.data, id, this.notificationSink(onNotification))
             : collectText(response.data).then(text => parseJsonBody(text, id));
         return readWithDeadline(read, response.data, deadline);
     }

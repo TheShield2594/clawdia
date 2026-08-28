@@ -87,7 +87,10 @@ describe('discovery', () => {
             authorizationToken: 'ghp_x',
             label: 'github',
             // A static-token connection has no OAuth grant to fetch (#796).
-            getAccessToken: null
+            getAccessToken: null,
+            // The pool's own listener, which drops a cached list when the
+            // server says it changed (#838).
+            onNotification: expect.any(Function)
         }]);
     });
 

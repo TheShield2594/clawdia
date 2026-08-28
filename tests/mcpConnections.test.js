@@ -356,3 +356,122 @@ describe('one server does not see the whole round at once', () => {
         }
     });
 });
+
+/**
+ * #838. Without these the five-minute TTL is the whole answer, which is fine
+ * for the servers that never change and wrong for the ones that do it on
+ * purpose: a server that publishes its real toolset only after a login, or one
+ * whose tools depend on what the model just selected, announces the change and
+ * then waits up to five minutes to be believed. In between the model is offered
+ * tools that are gone and denied the ones that arrived.
+ */
+describe('a server saying its list changed', () => {
+    /** The listener the pool wires onto the client it builds for this entry. */
+    const listenerFor = entry => { clientFor(entry, SERVER); return entry.client.options.onNotification; };
+    const changed = method => ({ jsonrpc: '2.0', method });
+
+    let log;
+    beforeEach(() => { log = jest.spyOn(console, 'log').mockImplementation(() => {}); });
+    afterEach(() => log.mockRestore());
+
+    test('is wired onto every pooled client', () => {
+        expect(typeof listenerFor(entryFor(SERVER))).toBe('function');
+    });
+
+    test('drops the cached list, so the next caller fetches a fresh one', async () => {
+        const entry = entryFor(SERVER);
+        const list = jest.fn(async () => ['search']);
+
+        await cachedList(entry, SERVER, 'tools', list);
+        await cachedList(entry, SERVER, 'tools', list);
+        expect(list).toHaveBeenCalledTimes(1);
+
+        listenerFor(entry)(changed('notifications/tools/list_changed'));
+
+        await cachedList(entry, SERVER, 'tools', list);
+        expect(list).toHaveBeenCalledTimes(2);
+    });
+
+    // Expiry means "worth checking" and the pool answers it by serving the old
+    // list while a refresh runs. That is right for a TTL and wrong here: the
+    // server has *stated* the list is wrong, and a model handed a tool that no
+    // longer exists calls it and gets an error it cannot route around.
+    test('and does not serve it stale in the meantime', async () => {
+        const entry = entryFor(SERVER);
+        await cachedList(entry, SERVER, 'tools', async () => ['old']);
+
+        listenerFor(entry)(changed('notifications/tools/list_changed'));
+
+        await expect(cachedList(entry, SERVER, 'tools', async () => ['new'])).resolves.toEqual(['new']);
+    });
+
+    test('and clears a cached failure too, so a recovered server is retried', async () => {
+        const entry = entryFor(SERVER);
+        await expect(cachedList(entry, SERVER, 'tools', async () => { throw new McpError('down'); })).rejects.toThrow('down');
+
+        listenerFor(entry)(changed('notifications/tools/list_changed'));
+
+        await expect(cachedList(entry, SERVER, 'tools', async () => ['back'])).resolves.toEqual(['back']);
+    });
+
+    test('touches only the list it named', async () => {
+        const entry = entryFor(SERVER);
+        const tools = jest.fn(async () => ['search']);
+        const resources = jest.fn(async () => ['doc']);
+        await cachedList(entry, SERVER, 'tools', tools);
+        await cachedList(entry, SERVER, 'resources', resources);
+
+        listenerFor(entry)(changed('notifications/resources/list_changed'));
+
+        await cachedList(entry, SERVER, 'tools', tools);
+        await cachedList(entry, SERVER, 'resources', resources);
+        expect(tools).toHaveBeenCalledTimes(1);
+        expect(resources).toHaveBeenCalledTimes(2);
+    });
+
+    test('prompts too', async () => {
+        const entry = entryFor(SERVER);
+        const prompts = jest.fn(async () => ['review']);
+        await cachedList(entry, SERVER, 'prompts', prompts);
+
+        listenerFor(entry)(changed('notifications/prompts/list_changed'));
+
+        await cachedList(entry, SERVER, 'prompts', prompts);
+        expect(prompts).toHaveBeenCalledTimes(2);
+    });
+
+    test('a notification about anything else changes nothing', async () => {
+        const entry = entryFor(SERVER);
+        const list = jest.fn(async () => ['search']);
+        await cachedList(entry, SERVER, 'tools', list);
+
+        listenerFor(entry)(changed('notifications/progress'));
+        listenerFor(entry)(changed('notifications/message'));
+        listenerFor(entry)({});
+
+        await cachedList(entry, SERVER, 'tools', list);
+        expect(list).toHaveBeenCalledTimes(1);
+    });
+
+    // The likeliest moment to receive one, since notifications arrive on
+    // whatever stream is open: the answer in flight predates the change, so it
+    // may be handed to the caller waiting on it but must not be believed for
+    // another five minutes.
+    test('a refresh already in flight lands but is stored already expired', async () => {
+        const entry = entryFor(SERVER);
+        const gate = deferred();
+        const first = cachedList(entry, SERVER, 'tools', () => gate.promise);
+
+        listenerFor(entry)(changed('notifications/tools/list_changed'));
+        gate.resolve(['stale']);
+        await expect(first).resolves.toEqual(['stale']);
+
+        const second = jest.fn(async () => ['fresh']);
+        await expect(cachedList(entry, SERVER, 'tools', second)).resolves.toEqual(['fresh']);
+        expect(second).toHaveBeenCalledTimes(1);
+    });
+
+    test('a list nobody has cached is a no-op rather than a thrown listener', () => {
+        expect(() => listenerFor(entryFor(SERVER))(changed('notifications/tools/list_changed'))).not.toThrow();
+    });
+});

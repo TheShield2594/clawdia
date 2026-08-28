@@ -131,12 +131,13 @@ function entryFor(server) {
  * particular is easy to add in one place and forget in the other, which shows
  * up as a connection that works in a channel and 401s in the panel.
  */
-function mcpClientFor(server) {
+function mcpClientFor(server, { onNotification = null } = {}) {
     const grant = server.connection.oauth;
     return new McpHttpClient({
         url: server.connection.url,
         authorizationToken: server.connection.authorizationToken,
         label: server.name,
+        onNotification,
         // Required lazily: the store reaches the Guild model, and this module is
         // loaded by the config layer the model's own schema sits under. A static
         // token connection never touches it.
@@ -147,7 +148,9 @@ function mcpClientFor(server) {
 }
 
 function clientFor(entry, server) {
-    if (!entry.client) entry.client = mcpClientFor(server);
+    if (!entry.client) {
+        entry.client = mcpClientFor(server, { onNotification: notificationListener(entry, server.name) });
+    }
     return entry.client;
 }
 
@@ -211,10 +214,82 @@ async function withServerLimit(entry, fn) {
 function slotFor(entry, kind) {
     let slot = entry.lists.get(kind);
     if (!slot) {
-        slot = { value: null, expires: 0, staleUntil: 0, error: null, errorExpire: 0, pending: null };
+        // `generation` counts the times a server has told us this list is out
+        // of date. A refresh records the generation it started under, so one
+        // that was already in flight when the notification arrived cannot
+        // write its answer back as though it were current — see refreshList.
+        slot = { value: null, expires: 0, staleUntil: 0, error: null, errorExpire: 0, pending: null, generation: 0 };
         entry.lists.set(kind, slot);
     }
     return slot;
+}
+
+/**
+ * The three notifications a server sends when one of its lists changes, and
+ * the cache slot each of them is about (#838).
+ *
+ * Without these the five-minute TTL is the whole answer, which is fine for the
+ * servers that never change and wrong for the ones that do it on purpose: a
+ * server that publishes its real toolset only after a login, or one whose tools
+ * depend on a repository the model just selected, announces the change the
+ * moment it happens and then waits up to five minutes to be believed. In
+ * between, the model is offered tools that are gone and not offered the ones
+ * that arrived.
+ */
+const LIST_CHANGED_KINDS = {
+    'notifications/tools/list_changed': 'tools',
+    'notifications/resources/list_changed': 'resources',
+    'notifications/prompts/list_changed': 'prompts',
+};
+
+/**
+ * Drop a cached list because the server said it is no longer true.
+ *
+ * The value goes rather than merely expiring, and the stale window with it.
+ * Expiry means "worth checking" and the pool answers it by serving the old list
+ * while a refresh runs behind — which is right for a TTL and wrong here, where
+ * the server has stated the list is wrong. A model handed a tool that no longer
+ * exists calls it and gets an error it cannot do anything about.
+ *
+ * Bumping `generation` is what covers the refresh that was already in flight
+ * when this arrived: its answer predates the change, so it is allowed to land
+ * but not to look current.
+ */
+function invalidateList(entry, kind) {
+    const slot = entry.lists.get(kind);
+    if (!slot) return false;
+
+    slot.generation++;
+    slot.value = null;
+    slot.expires = 0;
+    slot.staleUntil = 0;
+    slot.error = null;
+    slot.errorExpire = 0;
+    return true;
+}
+
+/**
+ * The connection-level notification listener for one pooled entry.
+ *
+ * Notifications reach this on whatever stream happens to be open — a tool call
+ * in progress, a list being fetched — because this client speaks the Streamable
+ * HTTP transport request-by-request and does not hold the standing GET channel
+ * open. That covers the case the TTL is worst at, which is a server changing
+ * its toolset *because of something the bot just did*, and it is deliberately
+ * not the whole of the spec's story: a change announced while the bot is idle
+ * is still noticed by the TTL a few minutes later rather than at once. A
+ * standing SSE socket per pooled connection is a real cost — one per (url,
+ * credential) for the life of the process, with its own reconnect and its own
+ * failure modes — to shorten a window the TTL already bounds at five minutes.
+ */
+function notificationListener(entry, label) {
+    return notification => {
+        const kind = LIST_CHANGED_KINDS[notification?.method];
+        if (!kind) return;
+        if (invalidateList(entry, kind)) {
+            console.log(`[MCP] "${label}" says its ${kind} changed; the cached list was dropped`);
+        }
+    };
 }
 
 /** Record a list somebody else already fetched, as though this pool had. */
@@ -239,12 +314,20 @@ function primeList(entry, kind, value) {
 // nobody, since an expired list is served stale while this runs.
 function refreshList(entry, server, kind, fn) {
     const slot = slotFor(entry, kind);
+    const generation = slot.generation;
 
     slot.pending = withServerLimit(entry, () => withSession(entry, server, fn))
         .then(value => {
+            // A `list_changed` that landed while this was in flight means the
+            // answer predates the change (#838). It is still the best list
+            // anybody has, and the caller waiting on this promise gets it — but
+            // it is stored already expired, so the next message fetches the one
+            // the server was telling us about rather than trusting this for
+            // another five minutes.
+            const current = slot.generation === generation;
             slot.value = value;
-            slot.expires = Date.now() + LIST_TTL_MS;
-            slot.staleUntil = slot.expires + STALE_TTL_MS;
+            slot.expires = current ? Date.now() + LIST_TTL_MS : 0;
+            slot.staleUntil = current ? slot.expires + STALE_TTL_MS : 0;
             slot.error = null;
             slot.errorExpire = 0;
             return value;
@@ -319,6 +402,9 @@ module.exports = {
     entryFor,
     clientFor,
     mcpClientFor,
+    invalidateList,
+    notificationListener,
+    LIST_CHANGED_KINDS,
     withSession,
     withServerLimit,
     cachedList,

@@ -431,7 +431,8 @@ describe('POST /guild/:id/mcp-servers/:name/test', () => {
             url: 'https://api.githubcopilot.com/mcp/',
             authorizationToken: 'ghp_good',
             label: 'github',
-            getAccessToken: null
+            getAccessToken: null,
+            onNotification: null
         }]);
         expect(body.toolCount).toBe(3);
         // delete_file is blocked, so it is offered by the server but not enabled.

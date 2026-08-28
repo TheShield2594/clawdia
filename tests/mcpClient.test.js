@@ -302,6 +302,72 @@ describe('server-sent event responses', () => {
         expect(tools).toEqual([{ name: 'search' }]);
     });
 
+    /**
+     * #838. A `list_changed` is about the connection rather than about any one
+     * request, so nobody is waiting for it: it arrives on whatever stream
+     * happens to be open, and without a connection-level listener it was read
+     * off the wire and dropped.
+     */
+    test('forwards every notification to the connection-level listener', async () => {
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return sseResponse([
+                { jsonrpc: '2.0', method: 'notifications/tools/list_changed' },
+                { jsonrpc: '2.0', id: payload.id, result: { tools: [{ name: 'search' }] } }
+            ]);
+        });
+
+        const seen = [];
+        const client = new McpHttpClient({ url: URL, onNotification: n => seen.push(n.method) });
+        await client.listTools();
+
+        expect(seen).toContain('notifications/tools/list_changed');
+    });
+
+    // Nobody asked for progress here, which used to mean no listener was passed
+    // at all and every notification on the stream went unread.
+    test('and does so on a request that asked for no progress', async () => {
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return sseResponse([
+                { jsonrpc: '2.0', method: 'notifications/resources/list_changed' },
+                { jsonrpc: '2.0', id: payload.id, result: { content: [{ type: 'text', text: 'ok' }] } }
+            ]);
+        });
+
+        const seen = [];
+        const client = new McpHttpClient({ url: URL, onNotification: n => seen.push(n.method) });
+        const result = await client.callTool('search', {});
+
+        expect(seen).toEqual(['notifications/resources/list_changed']);
+        expect(result.content).toEqual([{ type: 'text', text: 'ok' }]);
+    });
+
+    // Both audiences want every notification, and neither may cost the other
+    // one — a progress reader that throws is a bug in the caller, not a reason
+    // to miss the server saying its tool list moved.
+    test('a per-request listener that throws does not cost the connection one', async () => {
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return sseResponse([
+                { jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: payload.params._meta.progressToken, progress: 1 } },
+                { jsonrpc: '2.0', method: 'notifications/tools/list_changed' },
+                { jsonrpc: '2.0', id: payload.id, result: { content: [] } }
+            ]);
+        });
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const seen = [];
+        const client = new McpHttpClient({ url: URL, onNotification: n => seen.push(n.method) });
+        await client.callTool('search', {}, { onProgress: () => { throw new Error('listener bug'); } });
+
+        expect(seen).toEqual(['notifications/progress', 'notifications/tools/list_changed']);
+        warn.mockRestore();
+    });
+
     test('forwards progress notifications to a caller that asked for them', async () => {
         axios.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
