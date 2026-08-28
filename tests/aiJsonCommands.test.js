@@ -42,6 +42,8 @@ const AiItem = require('../src/models/AiItem');
 const AiQuest = require('../src/models/AiQuest');
 const cooldownStore = require('../src/utils/commandCooldowns');
 
+const { useFixedClock, MINUTE } = require('./helpers/fixedClock');
+
 const forge = require('../src/commands/economy/forge');
 const questgen = require('../src/commands/community/questgen');
 
@@ -256,6 +258,12 @@ describe('/forge', () => {
     // read, then acted on, so two /forge calls a moment apart both read "long
     // enough" before either had written anything (#829).
     describe('the rarity cooldown', () => {
+        // The remaining time is floored to whole minutes, so a window set 20
+        // minutes out reads as 19 the moment the run takes longer than a tick
+        // to get there. Pinned, the fixture and the code read the same instant
+        // (#632).
+        useFixedClock();
+
         const runRare = () => {
             const interaction = makeInteraction({ rarity: 'rare' });
             return forge.execute(interaction).then(() => interaction);
@@ -274,7 +282,7 @@ describe('/forge', () => {
         });
 
         test('refuses without charging when the window is held', async () => {
-            cooldownStore.claimIfAvailable.mockResolvedValue(Date.now() + 20 * 60 * 1000);
+            cooldownStore.claimIfAvailable.mockResolvedValue(Date.now() + 20 * MINUTE);
 
             const interaction = await runRare();
 
@@ -317,6 +325,32 @@ describe('/forge', () => {
                 expect.anything(), expect.objectContaining({ bucket: 'forge:rare' }),
             );
             expect(replyText(interaction)).toMatch(/You need/);
+        });
+
+        // And when the debit does not answer at all. The dispatcher would catch
+        // the rejection and apologise, but the window would stay claimed for the
+        // day — a lockout paid for by a write that may never have landed.
+        test('goes back when the debit write throws', async () => {
+            User.findOneAndUpdate.mockRejectedValue(new Error('mongo is down'));
+
+            const interaction = await runRare();
+
+            expect(cooldownStore.release).toHaveBeenCalledWith(
+                expect.anything(), expect.objectContaining({ bucket: 'forge:rare' }),
+            );
+            expect(replyText(interaction)).toMatch(/could not take your payment/);
+            expect(mockGetCompletion).not.toHaveBeenCalled();
+        });
+
+        // A rejected write says nothing about whether the server applied it, so
+        // the cost is not handed back on the guess — that would mint it every
+        // time the debit had not landed.
+        test('and does not refund a debit it cannot know happened', async () => {
+            User.findOneAndUpdate.mockRejectedValue(new Error('mongo is down'));
+
+            await runRare();
+
+            expect(refunds()).toEqual([]);
         });
     });
 });

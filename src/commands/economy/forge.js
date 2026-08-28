@@ -41,6 +41,19 @@ function pickEmoji(raw, fallback) {
 }
 
 /**
+ * Hand back a cooldown window nothing was forged with.
+ *
+ * Best-effort, and awaited rather than dropped: the caller is on its way to
+ * telling the user what happened, and a failure to release is a line in the log
+ * rather than a reason to fail that message too.
+ */
+async function releaseWindow(interaction, cooldownScope) {
+    if (!cooldownScope) return;
+    await cooldownStore.release(interaction.client, cooldownScope).catch(err =>
+        console.error('[FORGE] Cooldown release failed:', err));
+}
+
+/**
  * Put the forge's cost back, and say whether it actually went back.
  *
  * Both failure paths below tell the user their coins have been returned, so
@@ -59,10 +72,7 @@ async function refundForge(interaction, cost, cooldownScope, context) {
     ).then(res => res.modifiedCount > 0)
      .catch(err => { console.error(`[FORGE] Refund failed after ${context}:`, err); return false; });
 
-    if (cooldownScope) {
-        await cooldownStore.release(interaction.client, cooldownScope).catch(err =>
-            console.error('[FORGE] Cooldown release failed:', err));
-    }
+    await releaseWindow(interaction, cooldownScope);
 
     return refunded;
 }
@@ -141,19 +151,32 @@ module.exports = {
         }
 
         // Atomic balance deduction — guards against concurrent forge requests
-        const chargedUser = await User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: cfg.cost } },
-            { $inc: { balance: -cfg.cost } },
-            { new: true }
-        );
+        let chargedUser;
+        try {
+            chargedUser = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: cfg.cost } },
+                { $inc: { balance: -cfg.cost } },
+                { new: true }
+            );
+        } catch (err) {
+            // The window is claimed and this forge is not happening, so the
+            // window goes back. The debit does not: a rejected write says
+            // nothing about whether the server applied it, and refunding on the
+            // guess would mint the cost every time it had not. So the one thing
+            // that is knowable is undone, and the user is told what to check —
+            // rather than being handed the dispatcher's generic apology with a
+            // day-long cooldown they never spent anything on.
+            console.error('[FORGE] Balance deduction failed:', err?.message || err);
+            await releaseWindow(interaction, cooldownScope);
+            return interaction.editReply({
+                content: 'The forge could not take your payment, so nothing was made. Check your balance — if the coins are missing, contact a server admin.',
+            });
+        }
         if (!chargedUser) {
             // The window was claimed a moment ago and nothing was forged with
             // it, so it goes straight back — a user who could not afford the
             // item must not be locked out of the rarity for a day over it.
-            if (cooldownScope) {
-                await cooldownStore.release(interaction.client, cooldownScope).catch(err =>
-                    console.error('[FORGE] Cooldown release failed:', err));
-            }
+            await releaseWindow(interaction, cooldownScope);
             const currency = guildSettings?.economy?.currency ?? '💰';
             return interaction.editReply({
                 content: `You need **${currency}${cfg.cost.toLocaleString()}** to forge a ${cfg.emoji} ${cfg.label} item. Your balance: **${currency}${(user?.balance ?? 0).toLocaleString()}**`,
