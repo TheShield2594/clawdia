@@ -73,9 +73,24 @@ function makeUser(fishingOverrides = {}) {
     return user;
 }
 
-// Casts until the predicate is satisfied, topping up the resources a cast spends.
-// Lets RNG-driven tests assert on outcomes without depending on the internal
-// order of Math.random() calls.
+/**
+ * Casts until `predicate` accepts a result, and returns that result, topping up
+ * the resources a cast spends. Lets RNG-driven tests assert on outcomes without
+ * depending on the internal order of Math.random() calls.
+ *
+ * Exhausting `maxCasts` throws. It used to return `null`, and three of the
+ * seven call sites below never looked at what came back (#633) — they cast,
+ * then asserted against the fixture. A `null` there is not a failure: the
+ * fixture is simply unchanged, which is exactly what "a lighter fish did not
+ * take the record" looks like, so the test passed without a fish ever having
+ * been caught. The assertions were green because nothing had happened.
+ *
+ * Guarding each call site with `expect(...).not.toBeNull()` was the obvious fix
+ * and is the one this replaced: it leaves the same trap set for the eighth call
+ * site. A helper that cannot hand back a non-answer needs no discipline at the
+ * call sites at all, and the throw names what it was looking for, which `null`
+ * never did.
+ */
 function castUntil(user, predicate, { maxCasts = 4000, username = 'angler' } = {}) {
     for (let i = 0; i < maxCasts; i++) {
         user.fishing.stamina = 10;
@@ -84,10 +99,32 @@ function castUntil(user, predicate, { maxCasts = 4000, username = 'angler' } = {
         const result = executeCast(user, 'pond', { reactionFactor: 1.0, username });
         if (predicate(result)) return result;
     }
-    return null;
+    throw new Error(
+        `castUntil: ${predicate.name || 'the predicate'} matched nothing in ${maxCasts} casts. ` +
+        'The catch tables or the cast path changed; the assertions after this call never ran.',
+    );
 }
 
 const isWeighedFish = r => r.success && r.catchType === 'fish' && r.weightLbs > 0;
+
+// ─── Cast helper ─────────────────────────────────────────────────────────────
+// The helper's own guarantee (#633). Every weeklyRecord test below leans on it
+// instead of checking a return value, so it is worth one test of its own: a
+// predicate that never matches must stop the run, not hand back a value the
+// assertions can pass against.
+describe('castUntil', () => {
+    test('exhausting the casts throws, naming the predicate', () => {
+        const neverMatches = () => false;
+        expect(() => castUntil(makeUser(), neverMatches, { maxCasts: 5 }))
+            .toThrow(/neverMatches matched nothing in 5 casts/);
+    });
+
+    test('a matching predicate returns the result it matched', () => {
+        const caught = castUntil(makeUser(), isWeighedFish);
+        expect(caught.catchType).toBe('fish');
+        expect(caught.weightLbs).toBeGreaterThan(0);
+    });
+});
 
 // ─── Reference guard ─────────────────────────────────────────────────────────
 // Two shipped features were dead because a function was called but never added
@@ -316,7 +353,6 @@ describe('weeklyRecord', () => {
         });
 
         const caught = castUntil(user, isWeighedFish);
-        expect(caught).not.toBeNull();
 
         expect(user.fishing.weeklyRecord.weight).toBe(caught.weightLbs);
         expect(user.fishing.weeklyRecord.weight).toBeLessThan(9999);
@@ -357,8 +393,7 @@ describe('weeklyRecord', () => {
         // end and the EU spring-forward. None of those is seven days, so the
         // week has not expired and a lighter fish must not take the record.
         const user = makeUser();
-        const first = castUntil(user, isWeighedFish);
-        expect(first).not.toBeNull();
+        castUntil(user, isWeighedFish);
         user.fishing.weeklyRecord.weight = 9999;
 
         advanceClock(2 * DAY);
@@ -369,15 +404,16 @@ describe('weeklyRecord', () => {
         // next weighed fish takes it.
         advanceClock(6 * DAY);
         const later = castUntil(user, isWeighedFish);
-        expect(later).not.toBeNull();
         expect(user.fishing.weeklyRecord.weight).toBe(later.weightLbs);
     });
 
     test('a new record records who set it', () => {
         const user = makeUser();
         const caught = castUntil(user, isWeighedFish, { username: 'reelbigfish' });
-        expect(caught).not.toBeNull();
 
+        // The catch this names is the one that set it: castUntil returns on the
+        // first weighed fish, and on a user with no record that fish takes it.
+        expect(user.fishing.weeklyRecord.weight).toBe(caught.weightLbs);
         expect(user.fishing.weeklyRecord.userId).toBe('u1');
         expect(user.fishing.weeklyRecord.username).toBe('reelbigfish');
         expect(user.fishing.weeklyRecord.weekStart).toBeTruthy();
