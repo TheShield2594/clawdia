@@ -7,10 +7,10 @@
             "lines": 10
         },
         "src/bot": {
-            "statements": 86,
+            "statements": 87,
             "branches": 84,
-            "functions": 82,
-            "lines": 89
+            "functions": 85,
+            "lines": 90
         },
         "src/commands/admin": {
             "statements": 18,
@@ -19,22 +19,22 @@
             "lines": 21
         },
         "src/commands/ai": {
-            "statements": 44,
-            "branches": 26,
+            "statements": 53,
+            "branches": 37,
             "functions": 75,
-            "lines": 45
+            "lines": 55
         },
         "src/commands/community": {
-            "statements": 9,
-            "branches": 0,
-            "functions": 13,
-            "lines": 10
+            "statements": 22,
+            "branches": 7,
+            "functions": 19,
+            "lines": 24
         },
         "src/commands/economy": {
             "statements": 15,
-            "branches": 2,
-            "functions": 21,
-            "lines": 15
+            "branches": 3,
+            "functions": 22,
+            "lines": 16
         },
         "src/commands/economy/fish": {
             "statements": 11,
@@ -80,8 +80,8 @@
         },
         "src/config": {
             "statements": 94,
-            "branches": 89,
-            "functions": 94,
+            "branches": 90,
+            "functions": 95,
             "lines": 94
         },
         "src/dashboard": {
@@ -91,10 +91,10 @@
             "lines": 72
         },
         "src/dashboard/lib": {
-            "statements": 84,
-            "branches": 71,
-            "functions": 85,
-            "lines": 86
+            "statements": 85,
+            "branches": 74,
+            "functions": 87,
+            "lines": 88
         },
         "src/dashboard/public": {
             "statements": 0,
@@ -103,88 +103,88 @@
             "lines": 0
         },
         "src/dashboard/routes": {
-            "statements": 77,
+            "statements": 78,
             "branches": 53,
-            "functions": 63,
-            "lines": 79
+            "functions": 71,
+            "lines": 81
         },
         "src/dashboard/routes/api": {
-            "statements": 35,
-            "branches": 26,
-            "functions": 31,
-            "lines": 38
+            "statements": 40,
+            "branches": 30,
+            "functions": 36,
+            "lines": 42
         },
         "src/data": {
-            "statements": 57,
-            "branches": 23,
-            "functions": 32,
-            "lines": 58
+            "statements": 59,
+            "branches": 25,
+            "functions": 33,
+            "lines": 60
         },
         "src/events": {
-            "statements": 49,
-            "branches": 41,
-            "functions": 35,
-            "lines": 51
+            "statements": 50,
+            "branches": 42,
+            "functions": 36,
+            "lines": 53
         },
         "src/games/casino": {
-            "statements": 22,
-            "branches": 14,
+            "statements": 23,
+            "branches": 15,
             "functions": 21,
-            "lines": 23
+            "lines": 24
         },
         "src/migrations": {
-            "statements": 42,
-            "branches": 35,
-            "functions": 38,
-            "lines": 45
+            "statements": 47,
+            "branches": 40,
+            "functions": 42,
+            "lines": 49
         },
         "src/models": {
-            "statements": 67,
+            "statements": 68,
             "branches": 0,
             "functions": 38,
-            "lines": 72
+            "lines": 73
         },
         "src/services": {
-            "statements": 53,
-            "branches": 45,
-            "functions": 47,
-            "lines": 56
+            "statements": 59,
+            "branches": 49,
+            "functions": 54,
+            "lines": 61
         },
         "src/services/ai": {
-            "statements": 45,
-            "branches": 41,
-            "functions": 37,
-            "lines": 48
+            "statements": 68,
+            "branches": 61,
+            "functions": 60,
+            "lines": 71
         },
         "src/services/ai/mcp": {
-            "statements": 91,
+            "statements": 92,
             "branches": 84,
-            "functions": 89,
-            "lines": 93
+            "functions": 90,
+            "lines": 94
         },
         "src/services/ai/providers": {
             "statements": 92,
             "branches": 80,
-            "functions": 89,
+            "functions": 91,
             "lines": 93
         },
         "src/services/scheduler": {
             "statements": 13,
             "branches": 0,
             "functions": 0,
-            "lines": 14
+            "lines": 15
         },
         "src/utils": {
-            "statements": 56,
-            "branches": 57,
-            "functions": 63,
-            "lines": 57
+            "statements": 60,
+            "branches": 61,
+            "functions": 65,
+            "lines": 61
         },
         "src/views": {
-            "statements": 58,
-            "branches": 49,
-            "functions": 40,
-            "lines": 61
+            "statements": 62,
+            "branches": 52,
+            "functions": 52,
+            "lines": 65
         }
     },
     "neverExecuted": [

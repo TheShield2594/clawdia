@@ -30,6 +30,70 @@ function escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Another creature entering the sentence. Two kinds: an article and the word
+// after it ("the goblin", "a skeleton"), and — because a party member is named
+// rather than introduced — the other characters in this session by name. Without
+// the second kind, "Aric swings wide and Lyra takes 30 damage" charged Aric for
+// Lyra's wound, since the only subject the sentence marked was his.
+const ARTICLE_SUBJECT = '\\b(?:the|a|an|another|each|every)\\s+\\S+';
+
+function otherSubjectPattern(otherNames = []) {
+    const named = otherNames
+        .filter(name => typeof name === 'string' && name.trim())
+        .map(name => escapeRegex(name.trim()));
+    return new RegExp([ARTICLE_SUBJECT, ...named].join('|'), 'gi');
+}
+
+/** The last index at which `pattern` matches before `limit`, or -1. */
+function lastMatchBefore(pattern, text, limit) {
+    let last = -1;
+    for (const match of text.matchAll(pattern)) {
+        if (match.index >= limit) break;
+        last = match.index;
+    }
+    return last;
+}
+
+/**
+ * A number the narration attributes to this character, or null.
+ *
+ * The scoping is what stops "your blow lands and the goblin takes 12 damage"
+ * taking twelve HP off the player who swung: an unscoped regex reads any
+ * "takes N damage" as theirs, and a scope that only asks whether the player is
+ * mentioned somewhere earlier in the sentence reads that one as theirs too,
+ * which is the same bug with more steps.
+ *
+ * So the subject nearest the verb wins. Whichever of "this character" and "some
+ * other creature" appears last before "takes 12 damage" is who it happened to —
+ * which is how the sentence reads to a person, and it holds for both orders
+ * ("the goblin lunges and Aric takes 15 damage" is still Aric's).
+ *
+ * @param {string} narrative the model's prose
+ * @param {string} namePattern the character's name, already regex-escaped
+ * @param {string} verbs alternation of the verbs to look for, e.g. `takes?`
+ * @param {string} unit what is being counted, e.g. `damage`
+ * @param {string[]} [otherNames] the other characters in the session, who are
+ *        subjects in their own right — what happens to them is not this
+ *        character's, however early in the sentence this character is named
+ */
+function amountFor(narrative, namePattern, verbs, unit, otherNames = []) {
+    const clause = new RegExp(`\\b(?:${verbs})\\s+(\\d+)\\s+${unit}\\b`, 'gi');
+    // "you"/"your" as well as the name: the model writes to the acting player in
+    // the second person about as often as it uses their character's name.
+    const scope = new RegExp(`${namePattern}|\\byour?\\b`, 'gi');
+
+    const others = otherSubjectPattern(otherNames);
+
+    for (const match of narrative.matchAll(clause)) {
+        const mine = lastMatchBefore(scope, narrative, match.index);
+        if (mine === -1) continue;
+        if (mine > lastMatchBefore(others, narrative, match.index)) {
+            return parseInt(match[1], 10);
+        }
+    }
+    return null;
+}
+
 async function startSession(interaction) {
     const { guild, channel, user } = interaction;
 
@@ -247,15 +311,18 @@ async function takeAction(interaction) {
             systemPrompt, history, prompt, temperature: 0.9, maxTokens: 500
         });
 
-        // Scope damage/heal detection to this player by name or "you/your"
+        // Scope damage/heal detection to this player by name or "you/your", and
+        // away from the rest of the party, who are subjects of their own.
         const namePattern = escapeRegex(player.name);
-        const scopePattern = `(?:${namePattern}|you|your)`;
-        const dmgMatch = narrative.match(new RegExp(`${scopePattern}[^.]*?takes?\\s+(\\d+)\\s+damage`, 'i'));
-        const healMatch = narrative.match(new RegExp(`${scopePattern}[^.]*?heals?\\s+(\\d+)\\s+hp`, 'i'));
+        const otherNames = session.players
+            .filter(p => p.userId !== player.userId)
+            .map(p => p.name);
+        const damage = amountFor(narrative, namePattern, 'takes?|suffers?', 'damage', otherNames);
+        const healed = amountFor(narrative, namePattern, 'heals?|recovers?|regains?', 'hp', otherNames);
 
         let newHp = player.hp;
-        if (dmgMatch) newHp = Math.max(0, newHp - parseInt(dmgMatch[1]));
-        if (healMatch) newHp = Math.min(CLASS_HP[player.characterClass] || 100, newHp + parseInt(healMatch[1]));
+        if (damage !== null) newHp = Math.max(0, newHp - damage);
+        if (healed !== null) newHp = Math.min(CLASS_HP[player.characterClass] || 100, newHp + healed);
 
         const playerEntry = `${player.name}: ${actionText}`;
 

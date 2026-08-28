@@ -1,11 +1,13 @@
 const User = require('../../models/User');
 const { resolveMcpServers } = require('../../config/mcpServers');
-const { providers, mcpMode } = require('./providers');
+const { providers, mcpMode, usesClientTools } = require('./providers');
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
 const { retrieveKnowledge, buildKnowledgeContext } = require('./knowledge');
 const { loadHistory, appendHistory, clearHistory } = require('./history');
+const { createSummarizer, summaryContext } = require('./summarize');
 const { peekRateLimit, peekChannelRateLimit, userRateLimitKey } = require('./rateLimit');
-const { buildActionsAddendum, extractAction, executeAction } = require('./actions');
+const { buildActionsAddendum, buildToolActionsAddendum, extractAction, executeAction } = require('./actions');
+const { buildBotTools, BOT_SERVER } = require('./botTools');
 const { buildMcpAddendum } = require('./mcp/prompt');
 const { retrieveMcpKnowledge } = require('./mcp/resources');
 const { createToolActivity, STATUS_RESERVE } = require('./mcp/activity');
@@ -199,10 +201,24 @@ async function handleAIChat(message, aiSettings) {
     // which meant a guild running MCP with actions off was told nothing at all
     // about where tool results come from — and that guild still has a model
     // that can be talked into calling another tool.
+    // The in-channel actions, as tools rather than as a line of text the model
+    // appends to its reply (#832). Which of the two the model is offered comes
+    // down to whether this request runs the bot's own tool loop: every provider
+    // but Anthropic always does, and Anthropic does unless it is taking its own
+    // MCP connector, where the bot never sees a call to attach a tool to.
+    const botTools = buildBotTools(message, { enabled: Boolean(aiSettings.actionsEnabled) });
+    const toolActions = botTools.length > 0
+        && usesClientTools(provider, { mcpRoute, mcpConfirm, mcpServers, botTools });
+
     if (mcpActive) {
-        systemPrompt += buildMcpAddendum({ actionsEnabled: Boolean(aiSettings.actionsEnabled) });
+        // The ACTION sentence only belongs in the MCP rule while there is an
+        // ACTION block to be talked into emitting; the tool route's own addendum
+        // carries the same rule in the vocabulary it uses.
+        systemPrompt += buildMcpAddendum({ actionsEnabled: Boolean(aiSettings.actionsEnabled) && !toolActions });
     }
-    if (aiSettings.actionsEnabled) {
+    if (toolActions) {
+        systemPrompt += buildToolActionsAddendum(userDoc?.timezone);
+    } else if (aiSettings.actionsEnabled) {
         systemPrompt += buildActionsAddendum(userDoc?.timezone);
     }
 
@@ -222,19 +238,25 @@ async function handleAIChat(message, aiSettings) {
             });
         if (mcpKnowledge) systemPrompt += mcpKnowledge.text;
 
-        const { messages: rawHistory } = await loadHistory(
+        const { messages: rawHistory, summary } = await loadHistory(
             message.guild.id, message.channel.id, message.author.id, maxHistory
         );
 
         // Prepend pinned memories as a user-context message so the model treats
         // them as reference information, not authoritative system instructions.
-        const history = pinnedMemories
-            ? [
-                { role: 'user', content: `[My saved context for this conversation]\n${pinnedMemories.map(m => `- ${m.content}`).join('\n')}` },
-                { role: 'assistant', content: 'Understood, I have noted your saved context.' },
-                ...rawHistory
-              ]
-            : rawHistory;
+        // The rolling summary of turns that have fallen out of the retention
+        // window (#833) rides in the same way, and after the memories: it is
+        // the older material of the two, so it reads in the order it happened.
+        const history = [
+            ...(pinnedMemories
+                ? [
+                    { role: 'user', content: `[My saved context for this conversation]\n${pinnedMemories.map(m => `- ${m.content}`).join('\n')}` },
+                    { role: 'assistant', content: 'Understood, I have noted your saved context.' }
+                  ]
+                : []),
+            ...summaryContext(summary),
+            ...rawHistory
+        ];
 
         const usageOut = {};
         // Collects what the MCP tools did across every round of this turn, so
@@ -249,6 +271,9 @@ async function handleAIChat(message, aiSettings) {
             // holds the call until this resolves, so a tool that writes
             // something does not run until somebody in the channel says so.
             mcpConfirm, mcpRoute, confirmTool: createToolConfirmer(message),
+            // The bot's own tools ride the same loop as the servers' — same
+            // approval prompt, same activity footer, same result budget.
+            botTools: toolActions ? botTools : [],
             // Who the request is for, so the limit is enforced where the spend
             // happens rather than only in the peek above.
             rateLimit, userId: message.author.id, channelId: message.channel.id
@@ -428,7 +453,7 @@ async function handleAIChat(message, aiSettings) {
             let tailText = currentBuf;
 
             // Post-process: reconcile sentMessages against the canonical cleanText chunks
-            if (aiSettings.actionsEnabled) {
+            if (aiSettings.actionsEnabled && !toolActions) {
                 const { cleanText, action } = extractAction(fullResponse);
                 if (action) {
                     // Derive the canonical chunks from cleanText so every sent message
@@ -461,7 +486,7 @@ async function handleAIChat(message, aiSettings) {
             }, { canRetry: () => !activity.ranTools });
             response = response || '(empty response)';
 
-            if (aiSettings.actionsEnabled) {
+            if (aiSettings.actionsEnabled && !toolActions) {
                 const { cleanText, action } = extractAction(response);
                 if (action) {
                     response = cleanText || '';
@@ -495,14 +520,31 @@ async function handleAIChat(message, aiSettings) {
 
         // After the reply, never before it: the ledger is for the dashboard, and
         // nothing about it is worth adding to the wait the user is already in.
+        //
+        // The bot's own tools are left out of it: that ledger is the Connections
+        // panel, one row per server an admin configured, and the bot is not one
+        // of them. They still show in the reply's activity footer, which is
+        // where "what did it just do" belongs.
         if (activity.used) {
-            await recordToolCalls(message.guild.id, activity.calls, activity.unreachableServers);
+            const serverCalls = activity.calls.filter(call => call.server !== BOT_SERVER);
+            if (serverCalls.length || activity.unreachableServers.length) {
+                await recordToolCalls(message.guild.id, serverCalls, activity.unreachableServers);
+            }
         }
 
         if (fullResponse.trim()) {
+            // The turns this trim drops are summarised rather than lost (#833).
+            // One cheap request per trim, attributed to the same user so it is
+            // bounded by the guild's own limits, and best-effort: the reply is
+            // already on screen, and a conversation without a summary is what
+            // this guild had yesterday.
             await appendHistory(
                 message.guild.id, message.channel.id, message.author.id,
-                content, fullResponse, maxHistory
+                content, fullResponse, maxHistory,
+                createSummarizer(
+                    { provider, model, apiKey, baseUrl, rateLimit },
+                    { guildId: message.guild.id, userId: message.author.id, channelId: message.channel.id }
+                )
             );
             if (kbEntries.length && !kbIsBackground) {
                 const prefix = '📚 Sources: ';

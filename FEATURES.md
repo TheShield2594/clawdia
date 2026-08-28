@@ -116,7 +116,24 @@ System Prompt Examples:
 **Memories:**
 
 Clawdia pins facts she learns about a user across conversations. `/ai memories`
-lists them and `/ai memories delete <number>` removes one.
+lists them and `/ai memories delete <number>` removes one. React 📌 to one of her
+messages to pin it yourself; she can also ask to save one herself with the
+`save_memory` tool, which posts approval buttons and saves nothing until someone
+clicks. Ten per user, per server.
+
+Older turns are not simply forgotten when they fall past the history window:
+what drops out is folded into a short rolling summary of the conversation, which
+rides ahead of the recent messages on every later reply.
+
+**In-channel actions:**
+
+With actions enabled, Clawdia can create a poll, set a reminder, save a memory,
+or (for moderators) send a suggestion to the mod-log channel. On every provider
+that runs the bot's own tool loop these are ordinary tools — schema-validated,
+several per reply, each one reporting back what actually happened, and listed in
+the reply's tool footer. Claude on its own MCP connector is the one route that
+cannot carry a tool; there they still travel as the older text protocol, one
+action per reply.
 
 ### AI Dungeon Master
 

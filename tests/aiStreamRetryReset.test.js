@@ -31,7 +31,9 @@ jest.mock('../src/services/ai/mcp/usage', () => ({
 
 jest.mock('../src/services/ai/providers', () => ({
     providers: new Map([['mock', { name: 'mock', label: 'Mock' }]]),
-    mcpMode: () => 'client'
+    mcpMode: () => 'client',
+    // A client-route provider: the in-channel actions travel as tools (#832).
+    usesClientTools: () => true
 }));
 
 const mockStream = jest.fn();

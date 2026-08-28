@@ -6,6 +6,7 @@ const Guild   = require('../../models/Guild');
 const AiItem  = require('../../models/AiItem');
 const { resolveProviderConfig, getCompletion } = require('../../services/aiService');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
+const { requestModelJson } = require('../../utils/modelJson');
 
 const RARITY_CONFIG = {
     common:    { label: 'Common',    emoji: '⚪', color: 0xAAAAAA, cost: 500,   xpReward: 25  },
@@ -120,46 +121,25 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
         let parsed;
         try {
             const config = resolveProviderConfig(guildSettings.ai);
-            // Some providers (e.g. Gemini 2.5, OpenAI reasoning models) spend part of
-            // the token budget on hidden reasoning before the visible JSON, which can
-            // truncate a tight budget mid-string. Retry once with a much larger budget
-            // if that happens rather than failing the whole request outright.
-            const tokenBudgets = [700, 1600];
-            let lastErr;
-            for (const maxTokens of tokenBudgets) {
-                const raw = await getCompletion({
-                    ...config,
-                    guildId: interaction.guild.id,
-                    // Attribution for the guild's AI limits, which `config`
-                    // carries: without it this command spends provider tokens
-                    // bounded only by its own command cooldown.
-                    userId: interaction.user.id,
-                    channelId: interaction.channelId,
-                    systemPrompt,
-                    history: [],
-                    prompt,
-                    temperature: 0.95,
-                    maxTokens,
-                    // Pure JSON out — no MCP tools, whose output would only muddy it.
-                    mcp: false,
-                });
-
-                const cleaned = raw.replace(/```json|```/gi, '').trim();
-                const start = cleaned.indexOf('{');
-                const end = cleaned.lastIndexOf('}');
-                const jsonSlice = start !== -1 && end > start ? cleaned.slice(start, end + 1) : cleaned;
-                try {
-                    parsed = JSON.parse(jsonSlice);
-                    lastErr = null;
-                    break;
-                } catch (err) {
-                    // Only a malformed/truncated JSON body is worth retrying with a
-                    // bigger budget — auth, rate-limit, and network errors would just
-                    // fail the same way again, so let those propagate immediately.
-                    lastErr = err;
-                }
-            }
-            if (lastErr) throw lastErr;
+            // The fence-stripping, brace-isolating, budget-growing retry lives in
+            // utils/modelJson — /questgen asks for a JSON object the same way, and
+            // the two copies of it were the least tested code in the tree (#830).
+            parsed = await requestModelJson(maxTokens => getCompletion({
+                ...config,
+                guildId: interaction.guild.id,
+                // Attribution for the guild's AI limits, which `config`
+                // carries: without it this command spends provider tokens
+                // bounded only by its own command cooldown.
+                userId: interaction.user.id,
+                channelId: interaction.channelId,
+                systemPrompt,
+                history: [],
+                prompt,
+                temperature: 0.95,
+                maxTokens,
+                // Pure JSON out — no MCP tools, whose output would only muddy it.
+                mcp: false,
+            }));
         } catch (err) {
             console.error('[FORGE] AI generation failed:', err?.message || err);
             // The refund is what the message below promises, so its outcome

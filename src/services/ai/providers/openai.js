@@ -132,8 +132,8 @@ async function runToolCalls({ toolkit, messages, calls, content }) {
     });
 }
 
-async function* stream({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget });
+async function* stream({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools });
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = buildMessages({ systemPrompt, history, prompt });
 
@@ -190,8 +190,8 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, temperatu
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget });
+async function complete({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools });
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = buildMessages({ systemPrompt, history, prompt });
 
