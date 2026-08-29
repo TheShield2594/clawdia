@@ -133,15 +133,15 @@ module.exports = [
         },
     },
 
-    // guild-settings.js consumes two globals it does not declare: escHtml from
-    // esc-html.js, loaded as its own <script>, and Chart from public/vendor/,
-    // which loadChartJs() injects the first time a chart is drawn (#685).
-    // Scoped to this file so esc-html.js is still checked against its own
-    // declaration.
+    // guild-settings.js consumes three globals it does not declare: escHtml from
+    // esc-html.js and buildSettingsPayload from settings-payload.js, each loaded
+    // as its own <script>, and Chart from public/vendor/, which loadChartJs()
+    // injects the first time a chart is drawn (#685). Scoped to this file so
+    // those two are still checked against their own declarations.
     {
         files: ['src/dashboard/public/guild-settings.js'],
         languageOptions: {
-            globals: { escHtml: 'readonly', Chart: 'readonly' },
+            globals: { escHtml: 'readonly', buildSettingsPayload: 'readonly', Chart: 'readonly' },
         },
     },
 

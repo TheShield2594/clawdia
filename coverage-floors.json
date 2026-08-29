@@ -19,10 +19,10 @@
             "lines": 21
         },
         "src/commands/ai": {
-            "statements": 53,
-            "branches": 37,
-            "functions": 75,
-            "lines": 55
+            "statements": 63,
+            "branches": 47,
+            "functions": 80,
+            "lines": 65
         },
         "src/commands/community": {
             "statements": 22,
@@ -31,10 +31,10 @@
             "lines": 24
         },
         "src/commands/economy": {
-            "statements": 15,
+            "statements": 16,
             "branches": 3,
             "functions": 22,
-            "lines": 16
+            "lines": 17
         },
         "src/commands/economy/fish": {
             "statements": 11,
@@ -85,21 +85,21 @@
             "lines": 94
         },
         "src/dashboard": {
-            "statements": 70,
-            "branches": 33,
-            "functions": 32,
-            "lines": 72
+            "statements": 71,
+            "branches": 37,
+            "functions": 39,
+            "lines": 73
         },
         "src/dashboard/lib": {
-            "statements": 85,
-            "branches": 74,
-            "functions": 87,
+            "statements": 86,
+            "branches": 76,
+            "functions": 89,
             "lines": 88
         },
         "src/dashboard/public": {
             "statements": 0,
-            "branches": 0,
-            "functions": 0,
+            "branches": 5,
+            "functions": 1,
             "lines": 0
         },
         "src/dashboard/routes": {
@@ -109,10 +109,10 @@
             "lines": 81
         },
         "src/dashboard/routes/api": {
-            "statements": 40,
-            "branches": 30,
-            "functions": 36,
-            "lines": 42
+            "statements": 64,
+            "branches": 62,
+            "functions": 58,
+            "lines": 64
         },
         "src/data": {
             "statements": 59,
@@ -121,14 +121,14 @@
             "lines": 60
         },
         "src/events": {
-            "statements": 50,
-            "branches": 42,
-            "functions": 36,
-            "lines": 53
+            "statements": 63,
+            "branches": 50,
+            "functions": 42,
+            "lines": 67
         },
         "src/games/casino": {
             "statements": 23,
-            "branches": 15,
+            "branches": 16,
             "functions": 21,
             "lines": 24
         },
@@ -139,22 +139,22 @@
             "lines": 49
         },
         "src/models": {
-            "statements": 68,
+            "statements": 69,
             "branches": 0,
             "functions": 38,
-            "lines": 73
+            "lines": 74
         },
         "src/services": {
             "statements": 59,
-            "branches": 49,
-            "functions": 54,
-            "lines": 61
+            "branches": 50,
+            "functions": 55,
+            "lines": 62
         },
         "src/services/ai": {
-            "statements": 68,
-            "branches": 61,
-            "functions": 60,
-            "lines": 71
+            "statements": 81,
+            "branches": 73,
+            "functions": 76,
+            "lines": 84
         },
         "src/services/ai/mcp": {
             "statements": 92,
@@ -165,7 +165,7 @@
         "src/services/ai/providers": {
             "statements": 92,
             "branches": 80,
-            "functions": 91,
+            "functions": 93,
             "lines": 93
         },
         "src/services/scheduler": {
@@ -175,10 +175,10 @@
             "lines": 15
         },
         "src/utils": {
-            "statements": 62,
-            "branches": 64,
-            "functions": 67,
-            "lines": 63
+            "statements": 63,
+            "branches": 65,
+            "functions": 69,
+            "lines": 64
         },
         "src/views": {
             "statements": 62,
@@ -190,13 +190,6 @@
     "neverExecuted": [
         "src/dashboard/public/guild-settings.js",
         "src/deploy-commands.js",
-        "src/events/guildBanAdd.js",
-        "src/events/guildCreate.js",
-        "src/events/ready.js",
-        "src/events/roleCreate.js",
-        "src/events/roleDelete.js",
-        "src/events/voiceStateUpdate.js",
-        "src/events/webhooksUpdate.js",
         "src/index.js",
         "src/models/AuditLog.js",
         "src/shard.js"
