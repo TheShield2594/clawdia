@@ -33,10 +33,13 @@ const SOFT_PRESTIGE_BONUS = { yieldPct: 0.02, xpPct: 0.02 };
  * The tier definition governing a rank: the highest entry in `PRESTIGE_TIERS`
  * whose `rank` is at or below the one asked for.
  *
- * The table is not dense above rank 5, so this floors rather than looks up —
- * which is right for bonuses and unlocks (a rank between two entries keeps the
- * lower one's) and wrong for the display title, since flooring rank 7 would
- * render it "Prestige V". Use `titleForExactRank` for anything a user reads.
+ * `PRESTIGE_TIERS` names every rank from 0 to 10, so for those this is a plain
+ * lookup. The flooring only does work for a rank the table does not name — one
+ * past 10, or a fractional one — and it is the right answer for bonuses and
+ * unlocks, which should keep the highest tier actually reached.
+ *
+ * It is the wrong answer for a title, which would then name a rank the account
+ * has passed. Use `titleForExactRank` for anything a user reads.
  *
  * @param {number} rank a prestige rank; anything non-numeric or negative is 0
  * @returns {{rank: number, title: ?string, bonuses: object, unlocks: string[]}}

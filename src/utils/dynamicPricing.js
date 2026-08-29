@@ -104,9 +104,12 @@ function decayDemand(item, volatility = 'medium') {
  * How far an item has moved from its base price, and the glyph `/market` shows
  * for it: 🔥 at +15%, 📈 at +5%, 🧊 at -15%, 📉 at -5%, `·` in between.
  *
+ * An item with no `basePrice` is compared against `price` instead, so it still
+ * reports a real percentage as long as one of the two is set.
+ *
  * @param {{price: number, basePrice?: number, currentPrice?: number}} item
- * @returns {{pct: number, arrow: string}} `{pct: 0, arrow: '·'}` for an item
- *   with no base price to compare against
+ * @returns {{pct: number, arrow: string}} `{pct: 0, arrow: '·'}` only when
+ *   neither `basePrice` nor `price` gives a non-zero base to divide by
  */
 function trendBucket(item) {
     const base = item.basePrice ?? item.price;

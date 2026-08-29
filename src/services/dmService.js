@@ -12,10 +12,15 @@ const MAX_STORY_LOG = 20;
  * `DmSession` document rather than by memory, so a restart mid-adventure loses
  * nothing.
  *
- * Every exported function below is a `/dm` subcommand handler and owns its
- * interaction end to end — each one replies or defers itself, so a caller must
- * not have replied first. They resolve to whatever the reply resolved to; none
- * of them is awaited for a value.
+ * The `/dm` subcommand handlers — `startSession`, `joinSession`,
+ * `beginSession`, `takeAction`, `partyStatus` and `stopSession` — each own
+ * their interaction end to end: they reply or defer themselves, so a caller
+ * must not have replied first, and they resolve to whatever the reply resolved
+ * to rather than to anything worth reading.
+ *
+ * `handleDmButton` is the exception, and is not a subcommand handler at all: it
+ * is a button router entry, and its boolean result is the whole point — see its
+ * own note below.
  *
  * A session is keyed on `guildId:channelId`, so two channels can run their own
  * adventures and one channel cannot run two.

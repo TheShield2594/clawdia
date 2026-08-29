@@ -79,7 +79,7 @@ module.exports = {
 ```
 
 That is the smallest working command, not the whole contract — see
-[The full module contract](#the-full-module-contract) below for the four
+[The full module contract](#the-full-module-contract) below for the five
 optional keys the interaction handler also looks for.
 
 ### The full module contract
@@ -1133,6 +1133,9 @@ npm run migrate:rollback -- 019_add_streak_field
 ### Error Handling
 
 ```javascript
+const { MessageFlags } = require('discord.js');
+
+// …inside the command module:
 async execute(interaction) {
     try {
         await interaction.deferReply();

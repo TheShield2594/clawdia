@@ -195,8 +195,9 @@ one of `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` /
 [Logging](#logging)).
 
 Any secret can be delivered as a file instead of a value — set `<NAME>_FILE` to
-a path, which is what to use with Docker secrets, since a plain environment
-variable is readable via `docker inspect` and a path is not.
+a path, which is what to use with Docker secrets. `docker inspect` still shows
+the variable and the path it holds; what it no longer shows is the secret
+itself, which stays in the mounted file.
 
 [#707]: https://github.com/TheShield2594/clawdia/issues/707
 

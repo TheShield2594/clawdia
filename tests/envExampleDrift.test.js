@@ -57,22 +57,58 @@ function walk(dir) {
     return out;
 }
 
+// `process.env.NAME` and the literal bracket forms `process.env['NAME']` /
+// `process.env["NAME"]`, which are the same read written differently and would
+// otherwise slip past this test entirely. A computed key —
+// `process.env[match[1]]` in config/mcpServers.js — is not a name and cannot be
+// resolved here; that one is by design, resolving `${VAR}` placeholders out of
+// the MCP config file.
+const ENV_READ = /\bprocess\.env(?:\.([A-Z][A-Z0-9_]*)|\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\])/g;
+
 function readByTheBot() {
     const names = new Map();
     for (const file of walk(path.join(ROOT, 'src'))) {
         const src = fs.readFileSync(file, 'utf8');
-        for (const m of src.matchAll(/\bprocess\.env\.([A-Z][A-Z0-9_]*)/g)) {
-            if (!names.has(m[1])) names.set(m[1], path.relative(ROOT, file));
+        for (const [, dotted, bracketed] of src.matchAll(ENV_READ)) {
+            const name = dotted || bracketed;
+            if (!names.has(name)) names.set(name, path.relative(ROOT, file));
         }
     }
     return names;
 }
 
-// A key counts as documented whether it is live (`NAME=value`) or commented out
-// as an optional knob (`# NAME=value`) — the file uses both on purpose.
+/**
+ * A key counts as documented when the file both names it — live as
+ * `NAME=value`, or commented out as an optional knob, since it uses both on
+ * purpose — and says something about it.
+ *
+ * The second half is the point. A bare `# NEW_KEY=` would satisfy a test that
+ * only looked for the name, and would satisfy it while telling an operator
+ * nothing, which is the state this whole file exists to prevent. So a key is
+ * documented only if there is prose in its block: the run of non-blank lines
+ * above it, up to the blank line that separates one group from the next. That
+ * is per-group rather than per-line deliberately — the four `MONGODB_*` auth
+ * variables share one explanation, and splitting it four ways would be worse.
+ */
 function documentedInEnvExample() {
-    const text = fs.readFileSync(ENV_EXAMPLE, 'utf8');
-    return new Set([...text.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)].map(m => m[1]));
+    const lines = fs.readFileSync(ENV_EXAMPLE, 'utf8').split('\n');
+    const assignment = /^#?\s*([A-Z][A-Z0-9_]*)=/;
+    const documented = new Set();
+
+    for (let i = 0; i < lines.length; i++) {
+        const named = assignment.exec(lines[i]);
+        if (!named) continue;
+
+        for (let j = i - 1; j >= 0 && lines[j].trim() !== ''; j--) {
+            const above = lines[j].trim();
+            // A commented-out assignment is another knob, not prose about this one.
+            if (above.startsWith('#') && !assignment.test(above)) {
+                documented.add(named[1]);
+                break;
+            }
+        }
+    }
+    return documented;
 }
 
 describe('.env.example is the source of truth for configuration', () => {

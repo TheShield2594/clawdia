@@ -9,17 +9,19 @@
  *
  * Drawing happens on the main thread, because the canvas API leaves no choice.
  * The PNG encode does not: it goes through `canvasEncode`, which hands it to
- * libuv's thread pool. That matters because every card here is drawn off a
- * gateway event rather than off a slash command, and the synchronous encode was
- * ~10 ms per card of gateway heartbeats the bot could not read (#592).
+ * libuv's thread pool. The synchronous encode it replaced cost ~10 ms per card
+ * of event-loop time (#592) — which is time the gateway cannot read a
+ * heartbeat in, whatever drew the card. `createWelcomeCard` is the sharpest
+ * case, because it runs off `guildMemberAdd` with no interaction waiting on
+ * it, but a slash-command card like `/rank` blocks the same loop.
  *
  * @module utils/cardGenerator
  */
 
 const { createCanvas, loadImage } = require('canvas');
 const { ensureFontsRegistered } = require('./registerFonts');
-// Every card here is drawn off a gateway event rather than off a slash command,
-// so the encode must not be the synchronous one (#592). See canvasEncode.js.
+// The encode must not be the synchronous one (#592). See canvasEncode.js and
+// the note at the top of this file.
 const { encodeCanvas } = require('./canvasEncode');
 
 ensureFontsRegistered();

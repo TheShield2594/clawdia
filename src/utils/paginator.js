@@ -6,13 +6,17 @@ const { ownedBy } = require('../utils/collectorOwner');
  * chunk is rendered into an embed and the set handed to `paginate`.
  *
  * @param {Array} items
- * @param {number} chunkSize
- * @returns {Array[]} empty when `items` is not an array or `chunkSize` is not
- *   positive, rather than throwing: callers page over query results that may
- *   legitimately be empty
+ * @param {number} chunkSize a positive integer
+ * @returns {Array[]} empty when `items` is not an array or `chunkSize` is not a
+ *   positive integer, rather than throwing: callers page over query results
+ *   that may legitimately be empty
  */
 function chunkArray(items, chunkSize) {
-    if (!Array.isArray(items) || chunkSize <= 0) return [];
+    // `chunkSize <= 0` alone let NaN and undefined through — the comparison is
+    // false for both — and the loop then advanced `i` by NaN, returning a
+    // single empty chunk that reads to a caller as one blank page. A fraction
+    // got through the same way and cut chunks at fractional offsets.
+    if (!Array.isArray(items) || !Number.isInteger(chunkSize) || chunkSize <= 0) return [];
     const chunks = [];
     for (let i = 0; i < items.length; i += chunkSize) {
         chunks.push(items.slice(i, i + chunkSize));

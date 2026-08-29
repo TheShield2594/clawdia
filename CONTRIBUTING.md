@@ -56,9 +56,10 @@ npm test                # the whole suite, ~20s
 npm run lint            # eslint, flat config
 ```
 
-`npm test -- --coverage` additionally applies the two coverage ratchets, which
-is what CI runs — see [Coverage](#coverage) below. `npm run lint:fix` applies
-what ESLint can fix on its own.
+The two coverage ratchets are two separate commands: `npm test -- --coverage`
+applies Jest's global thresholds, and `npm run coverage:check` applies the
+per-directory floors. CI runs both — see [Coverage](#coverage) below.
+`npm run lint:fix` applies what ESLint can fix on its own.
 
 Formatting is `npm run format -- <paths>`, and it takes explicit paths on
 purpose: Prettier's settings match the style the tree is already written in,
