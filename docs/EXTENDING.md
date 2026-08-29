@@ -882,6 +882,46 @@ Commands export the internals they want covered under a `__test__` key, which
 keeps the test off the interaction plumbing and on the logic that can actually
 be wrong.
 
+#### Driving a whole command
+
+Some of a command lives in the plumbing — a cooldown compare-and-set, a
+`balance: { $gte: cost }` on a debit, the branch that refuses. Those need
+`execute()` actually invoked, and two helpers make that a few lines rather than
+a bespoke mock per file (#786):
+
+```javascript
+const { fakeCollection } = require('./helpers/fakeCollection');
+const { makeInteraction, repliedText } = require('./helpers/fakeInteraction');
+
+const mockUsers = fakeCollection('User', { balance: 0, inventory: [] });
+jest.mock('../src/models/User', () => mockUsers.model);   // the `mock` prefix
+                                                          // is what lets jest
+                                                          // hoist this
+mockUsers.seed({ userId: 'user-1', guildId: 'guild-1', balance: 500 });
+
+const interaction = makeInteraction({ options: { bet: 100 } });
+await command.execute(interaction);
+
+expect(mockUsers.get('user-1').balance).toBe(400);
+expect(repliedText(interaction)).toContain('You bet');
+```
+
+- `makeInteraction` covers options, subcommands, deferrals, replies and
+  collectors. Every reply resolves to a message, so `fetchReply: true` works;
+  `components: [{ customId: 'confirm' }]` queues button presses, and an empty
+  queue closes the window the way discord.js does.
+- `fakeCollection` evaluates the query shapes the commands issue — `$or`,
+  `$and`, `$gte`, `$elemMatch` with the positional `$` bound to what it
+  matched — and honours `new: false`, upserts, and the unique index on
+  `{ userId, guildId }`. An operator it does not implement throws rather than
+  being ignored, because a guard that quietly evaluates to "matched" turns a
+  refusal test green.
+- `mockUsers.writes` is every update that was applied, in order, which is how a
+  test asserts that a debit carried its guard rather than trusting the result.
+
+Pin `Math.random` for anything that rolls, and give the command a one-item
+config (one job, one crime) so a payout is a number rather than a range.
+
 Anything that touches dashboard front-end code — `src/dashboard/public/*.js`,
 the EJS views — needs a DOM, requested per file with a docblock at the top:
 

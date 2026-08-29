@@ -1,18 +1,21 @@
 'use strict';
 
 /**
- * A stand-in ChatInputCommandInteraction for driving `src/games/casino/*`.
+ * The casino half of the interaction harness: the wallet document every game
+ * reads before it commits, and the eight games with the options each needs to
+ * reach its opening bet.
  *
- * The games reply, edit, fetch the reply and open collectors on it, and several
- * of them read `interaction.user.displayAvatarURL()` into an embed author —
- * which discord.js validates as a real URL, so it has to look like one. Every
- * payload the game renders is pushed onto `replies`, which is what assertions
- * about "what did the player actually see" read.
+ * The interaction itself is no longer built here. It was general enough to
+ * drive any command that takes options, defers, replies and opens a collector,
+ * and #786 needed exactly that for the economy commands — so it moved to
+ * tests/helpers/fakeInteraction.js and this file passes through to it.
  *
- * Shared by the two suites that drive whole games: the bet guard
+ * Used by the two suites that drive whole games: the bet guard
  * (tests/casinoBetGuard.test.js) and the wager signal
  * (tests/casinoWagerSignal.test.js).
  */
+
+const { makeInteraction: baseInteraction } = require('./fakeInteraction');
 
 const GUILD_ID   = 'guild-1';
 const USER_ID    = 'user-1';
@@ -33,39 +36,8 @@ const walletDoc = (overrides = {}) => ({
     ...overrides,
 });
 
-function makeInteraction(options) {
-    const replies = [];
-    const record = payload => { replies.push(payload); return Promise.resolve(payload); };
-
-    const message = {
-        createMessageComponentCollector: () => ({ on() { return this; }, stop() {} }),
-        // Nobody presses anything in these tests. A rejection is what discord.js
-        // hands back when the window closes, and the games all treat it as "no
-        // response"; a promise that never settles would just hang them.
-        awaitMessageComponent: () => Promise.reject(new Error('no response')),
-        edit: record,
-    };
-
-    return {
-        replies,
-        id: 'interaction-1',
-        user:    { id: USER_ID, username: 'player', displayAvatarURL: () => 'https://cdn.discordapp.com/avatar.png' },
-        member:  { displayName: 'player' },
-        guild:   { id: GUILD_ID, name: 'Guild' },
-        channel: { id: CHANNEL_ID, send: record },
-        client:  { users: { fetch: () => Promise.resolve(null) } },
-        options: {
-            getInteger: name => options[name] ?? null,
-            getString:  name => options[name] ?? null,
-            getNumber:  name => options[name] ?? null,
-        },
-        deferReply:  jest.fn().mockResolvedValue(undefined),
-        reply:       jest.fn(record),
-        editReply:   jest.fn(record),
-        followUp:    jest.fn(record),
-        fetchReply:  jest.fn().mockResolvedValue(message),
-    };
-}
+/** The interaction a game is driven through, with the options it reads. */
+const makeInteraction = options => baseInteraction({ options, userId: USER_ID, guildId: GUILD_ID });
 
 /** Every game's opening bet, with whatever options it reads to get there. */
 const GAMES = [

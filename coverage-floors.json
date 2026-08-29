@@ -31,10 +31,10 @@
             "lines": 24
         },
         "src/commands/economy": {
-            "statements": 16,
-            "branches": 3,
-            "functions": 22,
-            "lines": 17
+            "statements": 26,
+            "branches": 12,
+            "functions": 28,
+            "lines": 27
         },
         "src/commands/economy/fish": {
             "statements": 11,
@@ -175,10 +175,10 @@
             "lines": 15
         },
         "src/utils": {
-            "statements": 63,
-            "branches": 65,
-            "functions": 69,
-            "lines": 64
+            "statements": 69,
+            "branches": 68,
+            "functions": 75,
+            "lines": 70
         },
         "src/views": {
             "statements": 62,

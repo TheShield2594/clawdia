@@ -279,10 +279,19 @@ function buildQuickCount() {
         ...Array(targetCount).fill(pair.target),
         ...Array(decoyCount).fill(pair.decoy),
     ]).join('');
+    // Bounded, then filled deterministically — the same shape buildMathProblem
+    // below already uses. Unbounded, this spins forever on any run of rolls
+    // that keeps landing on the target, which is every roll under a pinned rng
+    // (#786) and an unlikely-but-possible one under a real one.
     const wrong = new Set();
-    while (wrong.size < 2) {
+    let attempts = 0;
+    while (wrong.size < 2 && attempts < 50) {
+        attempts++;
         const candidate = targetCount + Math.floor(Math.random() * 5) - 2;
         if (candidate !== targetCount && candidate >= 0) wrong.add(candidate);
+    }
+    for (let fallback = 1; wrong.size < 2; fallback++) {
+        wrong.add(targetCount + fallback);
     }
     const wrongArr = [...wrong];
     const buttons = shuffle([

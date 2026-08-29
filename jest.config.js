@@ -32,12 +32,12 @@ module.exports = {
     // for the step summary below and for anything reading coverage later.
     coverageReporters: ['text-summary', 'json-summary', 'lcov'],
 
-    // Measured over the suite at the commit that raised these — 271 suites,
-    // 5,260 tests, integration excluded: statements 45.34, branches 36.00,
-    // functions 46.94, lines 46.54. Raised from 36/25/38/37 by the dashboard
-    // validator, event-handler and settings-payload tests in #787, #788 and
-    // #789; the measurement excludes the two integration suites, so the number
-    // CI sees is this or better.
+    // Measured over the suite at the commit that raised these — 282 suites,
+    // 5,503 tests, integration excluded: statements 47.86, branches 37.99,
+    // functions 49.09, lines 49.10. Raised from 45/35/46/46 by the casino
+    // resolution modules of #785 and the economy command harness of #786; the
+    // measurement excludes the two integration suites, so the number CI sees is
+    // this or better.
     //
     // Each floor is the whole percent below its measurement, which is not the
     // arbitrary rounding it looks like: because the four denominators differ by
@@ -47,16 +47,16 @@ module.exports = {
     // than a deleted test suite, which is the window a ratchet wants.
     //
     // It is also why these are not rounded up to the nearest percent instead:
-    // branches measures 36.00 on the nose and functions 46.94, so a floor at the
-    // next whole number would leave none and 0.06 of a point of headroom — less
-    // than an unrelated refactor moves, and enough to fail the run after the one
-    // that set it.
+    // when they were last set, branches measured 36.00 on the nose and functions
+    // 46.94, so a floor at the next whole number would have left none and 0.06 of
+    // a point of headroom — less than an unrelated refactor moves, and enough to
+    // fail the run after the one that set it.
     coverageThreshold: {
         global: {
-            statements: 45,
-            branches: 35,
-            functions: 46,
-            lines: 46,
+            statements: 47,
+            branches: 37,
+            functions: 48,
+            lines: 48,
         },
     },
 };
