@@ -47,6 +47,65 @@ describe('ownedBy', () => {
         expect(i.replies[0].content).toBe("This isn't your spin.");
     });
 
+    // Half the call sites have no customId test to give — their collector is on
+    // a message carrying only their own buttons — and pass the message in the
+    // second position. Calling a string threw `matches is not a function` on
+    // every click including the owner's, and a filter that throws takes the
+    // collector with it, so those buttons did nothing at all (#786). No test
+    // reached the two-argument form until the interaction harness started
+    // running filters.
+    it('takes the message in the second position when there is no customId test', () => {
+        const owner = click('owner');
+        expect(ownedBy('owner', "This isn't your job.")(owner)).toBe(true);
+        expect(owner.replies).toEqual([]);
+
+        const stranger = click('stranger');
+        expect(ownedBy('owner', "This isn't your job.")(stranger)).toBe(false);
+        expect(stranger.replies[0].content).toBe("This isn't your job.");
+    });
+
+    it('still falls back to the default message with neither argument', () => {
+        const i = click('stranger');
+        expect(ownedBy('owner')(i)).toBe(false);
+        expect(i.replies[0].content).toBe(NOT_YOURS);
+    });
+
+    it('is what every call site actually passes', () => {
+        // The two forms, checked against the tree rather than assumed: a second
+        // argument is either a function or a string, and nothing else.
+        const bad = [];
+        const seen = [];
+        const walk = dir => {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) { if (entry.name !== 'dashboard') walk(full); continue; }
+                // The file that declares them, where the "second argument" is
+                // the parameter list.
+                if (!entry.name.endsWith('.js') || full === path.join(SRC, 'utils', 'collectorOwner.js')) continue;
+                const src = fs.readFileSync(full, 'utf8');
+                for (const m of src.matchAll(/ownedBy(?:Members)?\(\s*([^\n]*)/g)) {
+                    const rest = m[1].trim();
+                    // Only the single-line calls are checked; the wrapped ones
+                    // are the customId-test form by construction.
+                    if (!rest.includes(',')) continue;
+                    const second = rest.slice(rest.indexOf(',') + 1).trim();
+                    if (!second) continue;
+                    const looksLikeFunction = /^\(?\w*\)?\s*=>/.test(second) || /^(function|i\b|c\b)/.test(second);
+                    const looksLikeString = /^["'`]/.test(second);
+                    if (!looksLikeFunction && !looksLikeString) {
+                        bad.push(`${path.relative(SRC, full)}: ${second.slice(0, 40)}`);
+                    }
+                    seen.push(path.relative(SRC, full));
+                }
+            }
+        };
+        walk(SRC);
+        // A sweep that finds nothing to inspect reports the same green as one
+        // that found nothing wrong.
+        expect(seen.length).toBeGreaterThan(20);
+        expect(bad).toEqual([]);
+    });
+
     it('accepts a set of owners, for the two-party prompts', () => {
         expect(ownedBy(['a', 'b'])(click('b'))).toBe(true);
         expect(ownedBy(['a', 'b'])(click('c'))).toBe(false);

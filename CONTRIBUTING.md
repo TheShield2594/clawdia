@@ -71,9 +71,9 @@ Some documentation is generated and a test compares it against a fresh render,
 so adding a command or an endpoint turns the suite red until you regenerate:
 
 ```bash
-npm run docs:commands   # README's command list, from the loaded command set
-npm run docs:api        # API_REFERENCE's endpoint tables, from the routers
-npm run docs:panels     # the dashboard panel reference
+npm run docs:commands   # docs/COMMANDS.md, from the loaded command set
+npm run docs:api        # docs/API_REFERENCE.md's endpoint tables, from the routers
+npm run docs:panels     # the panel reference in docs/FEATURES.md
 ```
 
 ## Tests

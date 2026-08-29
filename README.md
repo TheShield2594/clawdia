@@ -156,13 +156,15 @@ the coverage ratchets, and the things about this codebase that surprise people
 — migrations that run themselves on every boot, a bot that registers its own
 slash commands, and a lint rule that decides which module may require which.
 
-`npm run docs:commands` rewrites the **Commands** block below from the command
-set the bot loads — the same catalog `/help` renders. A test compares the two,
-so adding or renaming a command turns `npm test` red until the block is
-regenerated. `npm run docs:api` does the same for the endpoint tables in
-[API_REFERENCE.md](docs/API_REFERENCE.md), reading them off the routers in
-`src/dashboard/routes/api/`; [docs/EXTENDING.md](docs/EXTENDING.md) is the guide
-to adding a command, a route or a model in the first place.
+`npm run docs:commands` rewrites the generated block in
+[docs/COMMANDS.md](docs/COMMANDS.md) from the command set the bot loads — the
+same catalog `/help` renders. A test compares the two, so adding or renaming a
+command turns `npm test` red until the block is regenerated. `npm run docs:api`
+does the same for the endpoint tables in
+[docs/API_REFERENCE.md](docs/API_REFERENCE.md), reading them off the routers in
+`src/dashboard/routes/api/`, and `npm run docs:panels` for the dashboard section
+list in [docs/FEATURES.md](docs/FEATURES.md); [docs/EXTENDING.md](docs/EXTENDING.md)
+is the guide to adding a command, a route or a model in the first place.
 
 `npm run format` takes explicit paths on purpose. Prettier's settings match the
 style the tree is already written in, but it has never been applied wholesale —

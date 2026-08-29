@@ -239,6 +239,28 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
 
     const find = (query, state) => docs.find(doc => matches(doc, query, state)) ?? null;
 
+    /**
+     * The document an upsert whose filter missed inserts: the query's equality
+     * terms plus `$setOnInsert`. It is the same for findOneAndUpdate and
+     * updateOne, and it is where a duplicate of a unique key surfaces as the
+     * E11000 the real server answers with rather than as a silent second row.
+     */
+    function insert(query, update) {
+        const stored = { ...defaults };
+        for (const [field, condition] of Object.entries(query)) {
+            if (!field.startsWith('$') && !isPlainObject(condition)) setPath(stored, field, condition);
+        }
+        for (const [path, value] of Object.entries(update.$setOnInsert ?? {})) setPath(stored, path, value);
+        if (unique.length && docs.some(d => uniqueKey(d) === uniqueKey(stored))) {
+            const error = new Error(
+                `E11000 duplicate key error collection: ${name} index: ${unique.join('_1_')}_1`);
+            error.code = 11000;
+            throw error;
+        }
+        docs.push(stored);
+        return stored;
+    }
+
     const model = {
         findOne: jest.fn((query = {}) => {
             const found = hydrate(find(query, { positional: {} }));
@@ -268,20 +290,7 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
             let stored = find(query, state);
             let inserted = false;
             if (!stored && options.upsert) {
-                // An upsert seeds the document from the query's equality terms,
-                // which is where userId and guildId come from.
-                stored = { ...defaults };
-                for (const [field, condition] of Object.entries(query)) {
-                    if (!field.startsWith('$') && !isPlainObject(condition)) setPath(stored, field, condition);
-                }
-                for (const [path, value] of Object.entries(update.$setOnInsert ?? {})) setPath(stored, path, value);
-                if (unique.length && docs.some(d => uniqueKey(d) === uniqueKey(stored))) {
-                    const error = new Error(
-                        `E11000 duplicate key error collection: ${name} index: ${unique.join('_1_')}_1`);
-                    error.code = 11000;
-                    throw error;
-                }
-                docs.push(stored);
+                stored = insert(query, update);
                 inserted = true;
             }
             if (!stored) return null;
@@ -302,11 +311,24 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
 
         updateOne: jest.fn(async (query = {}, update = {}, options = {}) => {
             const state = { positional: {} };
-            const stored = find(query, state);
-            if (!stored) return { matchedCount: 0, modifiedCount: 0 };
-            applyUpdate(stored, update, { positional: state.positional, arrayFilters: options.arrayFilters });
-            writes.push({ op: 'updateOne', query, update, doc: stored.userId ?? stored.guildId });
-            return { matchedCount: 1, modifiedCount: 1 };
+            let stored = find(query, state);
+            let inserted = false;
+            // `updateOne(filter, {}, { upsert: true })` is how /gift makes sure
+            // the recipient's row exists before crediting it. Without this the
+            // mock answered `matchedCount: 0` and wrote nothing, which reads as
+            // a refusal the real call never makes.
+            if (!stored && options.upsert) {
+                stored = insert(query, update);
+                inserted = true;
+            }
+            if (!stored) return { matchedCount: 0, modifiedCount: 0, upsertedCount: 0 };
+            if (Object.keys(update).length) {
+                applyUpdate(stored, update, { inserted, positional: state.positional, arrayFilters: options.arrayFilters });
+                writes.push({ op: 'updateOne', query, update, doc: stored.userId ?? stored.guildId });
+            }
+            return inserted
+                ? { matchedCount: 0, modifiedCount: 0, upsertedCount: 1 }
+                : { matchedCount: 1, modifiedCount: 1, upsertedCount: 0 };
         }),
 
         findOneAndDelete: jest.fn(async (query = {}) => {

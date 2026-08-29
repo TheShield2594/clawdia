@@ -25,6 +25,11 @@
  * does when the window closes — which is the timeout path every one of these
  * commands already handles. `components` queues presses for a test that wants
  * the other one.
+ *
+ * A queued press goes through the command's own `filter` first, so a press from
+ * somebody else is dropped rather than collected — which is what makes a test
+ * for "another member reached for this button" possible at all, and what caught
+ * every `ownedBy(id, "message")` call site throwing on its own owner's click.
  */
 
 const DEFAULTS = {
@@ -64,6 +69,9 @@ function makeInteraction({
 
     const record = payload => { replies.push(payload); return Promise.resolve(message); };
 
+    /** A filter the command supplied, run the way discord.js runs it. */
+    const accepts = (filter, press) => (typeof filter === 'function' ? filter(press) !== false : true);
+
     const componentInteraction = press => ({
         customId: press.customId,
         user: { id: press.user ?? userId },
@@ -84,7 +92,7 @@ function makeInteraction({
          * `components` are delivered on the next tick, then 'end' fires — the
          * same order a real collector produces when its time runs out.
          */
-        createMessageComponentCollector: () => {
+        createMessageComponentCollector: (opts = {}) => {
             const handlers = {};
             let ended = false;
             const end = reason => {
@@ -102,13 +110,22 @@ function makeInteraction({
             setTimeout(() => {
                 while (pending.length && !ended) {
                     const press = componentInteraction(pending.shift());
+                    // A rejected press is dropped and the next one tried, the
+                    // way a real collector goes on listening.
+                    if (!accepts(opts.filter, press)) continue;
                     (handlers.collect ?? []).forEach(fn => fn(press));
                 }
                 end('time');
             }, 0);
             return collector;
         },
-        awaitMessageComponent: jest.fn(() => {
+        awaitMessageComponent: jest.fn((opts = {}) => {
+            // Presses the filter turns away do not resolve the await; the real
+            // one keeps waiting, so here they are skipped and the next queued
+            // press is tried.
+            while (pending.length && !accepts(opts.filter, componentInteraction(pending[0]))) {
+                pending.shift();
+            }
             if (!pending.length) {
                 // Exactly what discord.js rejects with when the window closes
                 // with no press — the `name` included, because commands branch

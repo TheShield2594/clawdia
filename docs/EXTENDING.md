@@ -854,7 +854,7 @@ open; CI bounds the step so the hang fails there rather than sitting for hours.
 - Some suites guard an invariant rather than a behaviour, and those are the ones
   worth knowing about before you add a command or a script:
   `commandCap.test.js` (Discord's 100-command global limit, plus a ratchet on
-  the current count), `commandDocs.test.js` (README's command list against the
+  the current count), `commandDocs.test.js` (docs/COMMANDS.md against the
   loaded set), `lintGate.test.js` (the lint script and its CI step still exist)
   and `requirePathsResolve.test.js`.
 
