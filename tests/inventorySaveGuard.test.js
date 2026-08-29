@@ -38,6 +38,12 @@ const REVIEWED = new Map([
     // mint one. Reworking it means reshaping the material stores; tracked as
     // its own problem rather than waved through silently.
     ['commands/economy/pet.js', 'decrementMaterial is a clamped debit of grind materials, not a credit'],
+    // Not a User inventory at all: `applyEffects` builds a copy of the DM
+    // party's character list and pushes an adventuring item onto that copy, and
+    // dmService writes the result back through an explicit `$set` under the
+    // session's turn lease. There is no `save()` anywhere on the path, and
+    // nothing here is worth coins.
+    ['services/dm/effects.js', 'DmSession party inventory, on a local copy, written back as an explicit $set'],
 ]);
 
 const PATTERN = /\.inventory\.push\(|(?<!un)markModified\(['"]inventory['"]\)/;

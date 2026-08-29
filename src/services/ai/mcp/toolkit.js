@@ -473,6 +473,13 @@ function renderResult(
  *        the client is shared by every guild on that URL and the person to ask
  *        belongs to one message. Absent — a scheduled task, a command parsing
  *        the reply as JSON — means questions are answered "no choice made"
+ * @param {boolean} [options.botToolsOnly] build a toolkit from `botTools` and
+ *        nothing else, skipping server resolution entirely. `mcpServers: []`
+ *        does *not* mean this: `resolveMcpServers` merges the guild's list with
+ *        the operator-wide config file, so an empty guild list still resolves
+ *        every server the operator configured. A caller that must not reach any
+ *        server — the DM narrator, where a tool result is untrusted text
+ *        arriving mid-story — has to say so
  * @param {Array} [options.botTools] tools the bot owns rather than a server —
  *        the in-channel actions (#832). Each carries the same fields a
  *        discovered tool does plus `run(args)`, which is called instead of a
@@ -487,12 +494,13 @@ async function prepareMcpToolkit(guildServers = [], {
     elicit,
     toolBudget,
     botTools = [],
+    botToolsOnly = false,
     // Both default to the chat numbers, so every existing caller gets exactly
     // what it got before without saying anything.
     maxRounds = MAX_TOOL_ROUNDS,
     turnBudgetMs = TURN_BUDGET_MS
 } = {}) {
-    const servers = resolveMcpServers(guildServers);
+    const servers = botToolsOnly ? [] : resolveMcpServers(guildServers);
     // A guild with no servers but with in-channel actions on still has tools to
     // offer; only a request with neither takes the plain path.
     if (!servers.length && !botTools.length) return null;
@@ -1080,11 +1088,11 @@ async function prewarmMcpServers(guildServers = [], { concurrency = 4, only = nu
  * `useMcp` is the caller's switch — commands that parse the reply as JSON pass
  * it false — and is checked here so no provider has to remember to.
  */
-async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs } = {}) {
+async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs } = {}) {
     if (useMcp === false) return null;
     try {
         return await prepareMcpToolkit(mcpServers, {
-            onToolEvent, confirmMode: mcpConfirm, confirmTool, elicit, toolBudget, botTools, maxRounds, turnBudgetMs
+            onToolEvent, confirmMode: mcpConfirm, confirmTool, elicit, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs
         });
     } catch (err) {
         // Discovery is best-effort in every direction: an unreadable config or

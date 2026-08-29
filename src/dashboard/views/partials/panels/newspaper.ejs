@@ -1,7 +1,7 @@
                 <section id="newspaper" class="panel">
                     <div class="panel-head">
                         <h2>📰 Server Newspaper</h2>
-                        <p>A weekly AI-generated recap of what happened in your server — top earners, level-ups, casino highlights, moderation digest, and more. Use <code>/newspaper preview</code> to see a draft before the scheduled delivery.</p>
+                        <p>A weekly AI-generated recap of what happened in your server — top earners, level-ups, casino highlights, the war report, the forge, the quest log, last week's champions, shop price movers and more. Use <code>/newspaper preview</code> to see a draft before the scheduled delivery.</p>
                     </div>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable server newspaper</strong></span>
@@ -37,6 +37,11 @@
                     <label class="toggle"><span class="toggle-text">🎮 Game Standouts</span><span class="switch"><input type="checkbox" id="np-games" <%= settings.newspaper?.sections?.gameStandouts !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text">✨ Quote of the Week <small>(AI-invented if no channel opted in)</small></span><span class="switch"><input type="checkbox" id="np-quote" <%= settings.newspaper?.sections?.quoteOfTheWeek !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text">👋 New Members</span><span class="switch"><input type="checkbox" id="np-new-members" <%= settings.newspaper?.sections?.newMembers !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">⚔️ War Report <small>(the last or current inter-server war)</small></span><span class="switch"><input type="checkbox" id="np-war" <%= settings.newspaper?.sections?.warReport !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">⚒️ The Forge <small>(items the AI forged this week)</small></span><span class="switch"><input type="checkbox" id="np-forges" <%= settings.newspaper?.sections?.legendaryForges !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">📜 Quest Log <small>(quests completed, and new legendary ones)</small></span><span class="switch"><input type="checkbox" id="np-quests" <%= settings.newspaper?.sections?.questLog !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">🏆 Last Week's Champions</span><span class="switch"><input type="checkbox" id="np-champions" <%= settings.newspaper?.sections?.championBoard !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">🏪 Market Watch <small>(shop price movers; needs dynamic pricing)</small></span><span class="switch"><input type="checkbox" id="np-prices" <%= settings.newspaper?.sections?.priceMovers !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
 
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('newspaper')">Save changes</button>

@@ -345,6 +345,42 @@ describe('riding in the MCP toolkit', () => {
         expect(await prepareMcpToolkit([], { botTools: [] })).toBeNull();
     });
 
+    // `mcpServers: []` means "this guild added none", not "reach none":
+    // `resolveMcpServers` merges the guild's list with the operator's config
+    // file, so an empty guild list still resolves every server the operator
+    // configured. A caller that must not reach any — the DM narrator, where a
+    // tool result would be untrusted text arriving mid-story — has to say so.
+    //
+    // Loaded in isolation with the config module mocked, because the thing
+    // being pinned is that resolution is *skipped*, and a toolkit built in an
+    // environment with no operator config looks identical either way.
+    test('botToolsOnly skips server resolution rather than passing an empty list', async () => {
+        await jest.isolateModulesAsync(async () => {
+            const resolveMcpServers = jest.fn(() => [
+                { name: 'operator-notes', url: 'https://example.invalid/mcp' }
+            ]);
+            jest.doMock('../src/config/mcpServers', () => ({
+                ...jest.requireActual('../src/config/mcpServers'),
+                resolveMcpServers,
+            }));
+
+            const { prepareMcpToolkit: prepare } = require('../src/services/ai/mcp/toolkit');
+            const tools = buildBotTools(fakeMessage());
+
+            const only = await prepare([], { botTools: tools, botToolsOnly: true });
+            expect(resolveMcpServers).not.toHaveBeenCalled();
+            expect(only.servers).toEqual([]);
+            expect(only.definitions.every(d => !d.name.includes('__'))).toBe(true);
+
+            // And without the flag an empty guild list still reaches for the
+            // operator's servers — which is the whole reason the flag exists.
+            // What happens when it tries to dial one is not the point here, so
+            // the attempt is allowed to fail.
+            await prepare([], { botTools: tools }).catch(() => {});
+            expect(resolveMcpServers).toHaveBeenCalledWith([]);
+        });
+    });
+
     test('a call runs the tool and hands back what it said', async () => {
         const toolkit = await toolkitWith(buildBotTools(fakeMessage()));
 

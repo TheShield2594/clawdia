@@ -15,7 +15,17 @@ const dmSessionSchema = new Schema({
     hostId: { type: String, required: true },
     players: { type: [dmCharacterSchema], default: [] },
     storyLog: { type: [String], default: [] },
-    partyState: { type: Schema.Types.Mixed, default: {} },
+    // Where the party is and how many turns deep they are (#837). This was a
+    // `Mixed` field nothing ever wrote to — a schema that promised state
+    // tracking and delivered an empty object. The DM now sets `scene` through a
+    // `set_scene` effect, which is what lets a campaign resumed after a restart
+    // (or trimmed past the opening scene by the storyLog `$slice`) still know
+    // what room everyone is standing in.
+    partyState: {
+        scene:     { type: String, default: null },
+        turns:     { type: Number, default: 0 },
+        updatedAt: { type: Date,   default: null }
+    },
     active: { type: Boolean, default: true },
     statCardMessageId: { type: String, default: null }
 }, { timestamps: true });

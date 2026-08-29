@@ -103,6 +103,10 @@
                             <span class="switch"><input type="checkbox" id="ai-actions-enabled" <%= settings.ai.actionsEnabled ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
                         <label class="toggle">
+                            <span class="toggle-text"><strong>Enable event commentary</strong><span>Let the AI add a line of colour commentary to war, season and weekly-champion announcements. A few calls a week, charged to this server's budget.</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-event-commentary" <%= settings.ai.eventCommentary ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <label class="toggle">
                             <span class="toggle-text"><strong>Enable deep tasks</strong><span>Allow <code>/ai task</code> — multi-step work with a bigger tool budget, posted when it finishes. Costs much more per run than a chat message.</span></span>
                             <span class="switch"><input type="checkbox" id="ai-task-mode" <%= settings.ai.taskModeEnabled ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>

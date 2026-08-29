@@ -270,7 +270,10 @@ describe('call sites', () => {
     it.each(USER_TRIGGERED)('%s names a userId in every inline provider call', file => {
         const src = fs.readFileSync(path.join(SRC, file), 'utf8');
         const calls = src.match(/(?:getCompletion|streamCompletion)\(\{[\s\S]*?\n\s*\}\)/g) || [];
-        for (const call of calls) expect(call).toMatch(/userId:/);
+        // `userId: x` or the `guildId, userId, channelId` shorthand — the
+        // property being pinned is that the call names one, not which of the
+        // two ways of naming it the call site chose.
+        for (const call of calls) expect(call).toMatch(/\buserId\s*[:,}]/);
         // The config the call spreads has to be the one carrying the limits.
         expect(src).toMatch(/rateLimit/);
     });

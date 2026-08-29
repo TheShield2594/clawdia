@@ -41,6 +41,7 @@ const { softResetElo, tierFor, makeSeasonId } = require('../utils/duelElo');
 const { topByNetWorth } = require('../utils/netWorth');
 const { recordOwedPayout } = require('../utils/owedPayout');
 const { creditCoinsOnce, grantItemOnce, weeklyChampionPayoutKey, listingPayoutKey } = require('../utils/payoutKey');
+const { eventCommentary, addCommentary } = require('./commentaryService');
 const COLORS = require('../utils/embedColors');
 
 const WAR_BOOSTER_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -188,37 +189,67 @@ async function resolveOneWar(client, guildDoc) {
             .setTimestamp();
     }
 
+    // Everything a commentator may say about this war, and nothing else (#836).
+    // Built from the numbers the resolution above already computed, so the
+    // colour commentary cannot invent a score or a player.
+    const warFacts = {
+        outcome: tied
+            ? `${guildDoc.name} and ${oppName} drew`
+            : `${winnerName} beat ${loserName}`,
+        'final score': tied
+            ? `${guildDoc.name} ${myScore.toLocaleString()} — ${oppName} ${oppScore.toLocaleString()}`
+            : `${winnerName} ${winnerScore.toLocaleString()} — ${loserName} ${loserScore.toLocaleString()}`,
+        margin: tied ? 'nothing in it — a draw' : Math.abs(myScore - oppScore).toLocaleString(),
+        'MVP of the winning server': mvpName,
+        'most clutch player': clutchName,
+        'what the winners get': tied ? null : 'a 24-hour 2× coin booster and a 30-day War Victor badge'
+    };
+
+    /**
+     * Post one side's announcement, with that server's own commentary on it.
+     *
+     * Each guild is asked separately and pays for its own: the two servers have
+     * different personas, different budgets, and one of them may have the
+     * feature switched off entirely. A guild that does gets exactly the embed it
+     * would have got before — the commentary is a field on top of a complete
+     * announcement, never a replacement for one, so a provider outage here costs
+     * nobody their war result.
+     */
+    async function announceWar(targetDoc, targetGuildId, channelId, perspective) {
+        if (!channelId) return;
+        const embed = buildWarEmbed(perspective);
+
+        const commentary = await eventCommentary(targetDoc, {
+            event: 'war',
+            facts: {
+                ...warFacts,
+                'the server you are writing for': targetDoc?.name || 'this server',
+                'how it went for them': perspective === 'tie' ? 'a draw' : perspective === 'winner' ? 'they won' : 'they lost'
+            }
+        }).catch(() => null);
+        addCommentary(embed, commentary);
+
+        // The banner is the winner's, and only the winner's.
+        const payload = perspective === 'winner' && bannerAttachment
+            ? { embeds: [embed], files: [bannerAttachment] }
+            : { embeds: [embed] };
+        await postAnnouncement(client, targetGuildId, channelId, payload);
+    }
+
+    const oppDoc = opponentGuildId
+        ? await Guild.findOne({ guildId: opponentGuildId }).lean()
+        : null;
+    const oppChannelId = oppDoc?.activeWar?.announcementChannelId ?? null;
+
     if (tied) {
-        const embed = buildWarEmbed('tie');
-        await postAnnouncement(client, guildId, war.announcementChannelId, embed);
-        if (opponentGuildId) {
-            const oppDoc = await Guild.findOne({ guildId: opponentGuildId }).lean();
-            await postAnnouncement(client, opponentGuildId, oppDoc?.activeWar?.announcementChannelId ?? null, embed);
-        }
+        await announceWar(guildDoc, guildId, war.announcementChannelId, 'tie');
+        if (opponentGuildId) await announceWar(oppDoc, opponentGuildId, oppChannelId, 'tie');
     } else if (iWon) {
-        // Winner = this guild, loser = opponent
-        const winEmbed = buildWarEmbed('winner');
-        const loseEmbed = buildWarEmbed('loser');
-        const winPayload = bannerAttachment
-            ? { embeds: [winEmbed], files: [bannerAttachment] }
-            : { embeds: [winEmbed] };
-        await postAnnouncement(client, guildId, war.announcementChannelId, winPayload);
-        if (opponentGuildId) {
-            const oppDoc = await Guild.findOne({ guildId: opponentGuildId }).lean();
-            await postAnnouncement(client, opponentGuildId, oppDoc?.activeWar?.announcementChannelId ?? null, loseEmbed);
-        }
+        await announceWar(guildDoc, guildId, war.announcementChannelId, 'winner');
+        if (opponentGuildId) await announceWar(oppDoc, opponentGuildId, oppChannelId, 'loser');
     } else {
-        // Loser = this guild, winner = opponent
-        const loseEmbed = buildWarEmbed('loser');
-        await postAnnouncement(client, guildId, war.announcementChannelId, loseEmbed);
-        if (opponentGuildId) {
-            const oppDoc = await Guild.findOne({ guildId: opponentGuildId }).lean();
-            const winEmbed = buildWarEmbed('winner');
-            const winPayload = bannerAttachment
-                ? { embeds: [winEmbed], files: [bannerAttachment] }
-                : { embeds: [winEmbed] };
-            await postAnnouncement(client, opponentGuildId, oppDoc?.activeWar?.announcementChannelId ?? null, winPayload);
-        }
+        await announceWar(guildDoc, guildId, war.announcementChannelId, 'loser');
+        if (opponentGuildId) await announceWar(oppDoc, opponentGuildId, oppChannelId, 'winner');
     }
 
     return true;
@@ -362,6 +393,24 @@ async function resolveOneSeason(client, guildDoc) {
         .setDescription('The season leaderboard has been frozen and season coins have been reset.')
         .addFields({ name: '🏆 Final Top 3', value: winnerLines })
         .setTimestamp();
+
+    // The season's own sign-off, in the guild's voice (#836). The podium is
+    // named rather than mentioned: the commentary is prose, and a model handed
+    // `<@123>` writes it back into a sentence where it reads as noise.
+    const podium = topUsers.slice(0, 3).map((u, i) =>
+        `${i + 1}. ${resolvedNames[u.userId] ?? 'Unknown'} — ${(u.seasonCoins ?? 0).toLocaleString()} ${currency}`
+    );
+    addCommentary(embed, await eventCommentary(guildDoc, {
+        event: 'season',
+        facts: {
+            season: season.name ?? season.id,
+            'final podium': podium.length ? podium.join('; ') : 'nobody scored',
+            'players who took part': totalParticipants,
+            'winner\'s margin over second': topUsers.length > 1
+                ? ((topUsers[0].seasonCoins ?? 0) - (topUsers[1].seasonCoins ?? 0)).toLocaleString()
+                : null
+        }
+    }).catch(() => null));
 
     await postAnnouncement(client, guildId, announceChannelId, embed);
     return true;
@@ -837,7 +886,9 @@ async function announceWeeklyChampions(client) {
 
     for (const [guildId, guildWinners] of byGuild) {
         try {
-            const guildDoc  = await Guild.findOne({ guildId }, 'economy name').lean();
+            // `ai` rides along in the projection so the commentary below can be
+            // asked for without a second read of the same document (#836).
+            const guildDoc  = await Guild.findOne({ guildId }, 'economy name ai').lean();
             const channelId = guildDoc?.economy?.announcementChannelId ?? null;
             if (!channelId) continue;
 
@@ -862,6 +913,26 @@ async function announceWeeklyChampions(client) {
                 .setDescription(lines.join('\n\n'))
                 .setFooter({ text: 'Weekly competitions reset every Monday. Hunt, fish, mine and explore all week to compete!' })
                 .setTimestamp();
+
+            // One call for the week's whole slate rather than one per category:
+            // four separate paragraphs about four winners is what the embed
+            // above already is, and the commentary is worth having only if it
+            // can read across them (#836).
+            addCommentary(embed, await eventCommentary(guildDoc, {
+                event: 'champions',
+                facts: {
+                    'this week\'s champions': guildWinners
+                        .filter(w => WEEKLY_CATEGORY_LABELS[w.category])
+                        .map(w => {
+                            const meta = WEEKLY_CATEGORY_LABELS[w.category];
+                            return `${meta.title}: ${w.username} with ${(w.total ?? 0).toLocaleString()} ${meta.unit}`
+                                + `${w.bestDetails ? ` (best single result: ${w.bestDetails})` : ''}`;
+                        })
+                        .join('; '),
+                    'what each of them won': `${rewardAmount.toLocaleString()} coins`,
+                    'week ending': prevWeek
+                }
+            }).catch(() => null));
 
             await postAnnouncement(client, guildId, channelId, embed);
         } catch (err) {

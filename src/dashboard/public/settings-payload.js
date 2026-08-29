@@ -317,6 +317,7 @@ function buildSettingsPayload(section, ctx = {}) {
             'ai.monthlyTokenLimit': parseInt(document.getElementById('ai-monthly-tokens').value, 10) || 0,
             'ai.monthlyCostLimit': parseFloat(document.getElementById('ai-monthly-cost').value) || 0,
             'ai.actionsEnabled': document.getElementById('ai-actions-enabled').checked,
+            'ai.eventCommentary': document.getElementById('ai-event-commentary').checked,
             'ai.taskModeEnabled': document.getElementById('ai-task-mode').checked,
             // These live on the Connections tab but belong to the same ai
             // document, so they save with everything else rather than needing
@@ -394,6 +395,11 @@ function buildSettingsPayload(section, ctx = {}) {
                 gameStandouts:    document.getElementById('np-games').checked,
                 quoteOfTheWeek:   document.getElementById('np-quote').checked,
                 newMembers:       document.getElementById('np-new-members').checked,
+                warReport:        document.getElementById('np-war').checked,
+                legendaryForges:  document.getElementById('np-forges').checked,
+                questLog:         document.getElementById('np-quests').checked,
+                championBoard:    document.getElementById('np-champions').checked,
+                priceMovers:      document.getElementById('np-prices').checked,
             }
         };
     } else if (section === 'heist') {
