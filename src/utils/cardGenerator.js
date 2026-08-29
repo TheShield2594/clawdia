@@ -1,13 +1,42 @@
+/**
+ * Every image the bot draws for itself: the welcome card, the rank card, the
+ * war and wealth banners, pet sprites, achievement toasts and the season recap.
+ *
+ * Each `create*` returns a PNG `Buffer`, ready to hand to discord.js as an
+ * `AttachmentBuilder`. They never throw for a missing avatar or a broken image
+ * URL — a fetch that fails or takes more than 5 seconds is drawn around, so a
+ * slow CDN costs a placeholder rather than a member's welcome message.
+ *
+ * Drawing happens on the main thread, because the canvas API leaves no choice.
+ * The PNG encode does not: it goes through `canvasEncode`, which hands it to
+ * libuv's thread pool. The synchronous encode it replaced cost ~10 ms per card
+ * of event-loop time (#592) — which is time the gateway cannot read a
+ * heartbeat in, whatever drew the card. `createWelcomeCard` is the sharpest
+ * case, because it runs off `guildMemberAdd` with no interaction waiting on
+ * it, but a slash-command card like `/rank` blocks the same loop.
+ *
+ * @module utils/cardGenerator
+ */
+
 const { createCanvas, loadImage } = require('canvas');
 const { ensureFontsRegistered } = require('./registerFonts');
-// Every card here is drawn off a gateway event rather than off a slash command,
-// so the encode must not be the synchronous one (#592). See canvasEncode.js.
+// The encode must not be the synchronous one (#592). See canvasEncode.js and
+// the note at the top of this file.
 const { encodeCanvas } = require('./canvasEncode');
 
 ensureFontsRegistered();
 
 const EMOJI_FONT = '"DejaVu Sans", "Noto Color Emoji"';
 
+/**
+ * Shorten text with an ellipsis until it fits a pixel width, measured in the
+ * font currently set on the context.
+ *
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {string} text
+ * @param {number} maxWidth in pixels
+ * @returns {string} the text unchanged when it already fits
+ */
 function truncateText(ctx, text, maxWidth) {
     if (ctx.measureText(text).width <= maxWidth) return text;
     while (text.length > 0 && ctx.measureText(text + '…').width > maxWidth) {
@@ -16,6 +45,14 @@ function truncateText(ctx, text, maxWidth) {
     return text + '…';
 }
 
+/**
+ * `loadImage` with a deadline, so a slow or hanging avatar CDN cannot hold a
+ * card open. Callers draw a placeholder on rejection.
+ *
+ * @param {string} url
+ * @param {number} [ms] deadline in milliseconds
+ * @returns {Promise<import('canvas').Image>} rejects on timeout or fetch failure
+ */
 function loadImageWithTimeout(url, ms = 5000) {
     let timer;
     const image = loadImage(url).then(
@@ -30,7 +67,13 @@ function loadImageWithTimeout(url, ms = 5000) {
     ]);
 }
 
-// Returns frame/accent color and a corner glyph for each level band
+/**
+ * The frame/accent colour, corner glyph and label the rank card uses for a
+ * level band: Bronze, Silver, Gold, Diamond, Mythic.
+ *
+ * @param {number} level
+ * @returns {{color: string, glyph: string, label: string}}
+ */
 function getTierStyle(level) {
     if (level >= 100) return { color: '#ff6200', glyph: '✦', label: 'Mythic' };
     if (level >= 50)  return { color: '#b9f2ff', glyph: '◇', label: 'Diamond' };
@@ -39,6 +82,16 @@ function getTierStyle(level) {
     return                  { color: '#cd7f32', glyph: '⬡', label: 'Bronze' };
 }
 
+/**
+ * The 800×300 card posted when a member joins: their avatar, name, and the
+ * server's member count.
+ *
+ * Drawn off `guildMemberAdd`, so it is the card most sensitive to blocking —
+ * see the note at the top of this file.
+ *
+ * @param {import('discord.js').GuildMember} member
+ * @returns {Promise<Buffer>} PNG
+ */
 async function createWelcomeCard(member) {
     const canvas = createCanvas(800, 300);
     const ctx = canvas.getContext('2d');
@@ -83,6 +136,20 @@ async function createWelcomeCard(member) {
     return encodeCanvas(canvas);
 }
 
+/**
+ * The 900×300 `/rank` card: avatar, level, XP bar, position on the
+ * leaderboard, and a tier-coloured accent for the level band.
+ *
+ * @param {import('discord.js').User} user whose avatar and name are drawn
+ * @param {{level: number, xp: number}} userData their stored progress
+ * @param {number} rank position on the guild leaderboard
+ * @param {number} requiredXp XP needed for the next level, for the bar
+ * @param {object} [opts]
+ * @param {number} [opts.streakCurrent] daily streak, drawn when non-zero
+ * @param {boolean} [opts.hasActiveBoost] draws the XP boost marker
+ * @param {?object} [opts.rarestCatch] their best catch, drawn when present
+ * @returns {Promise<Buffer>} PNG
+ */
 async function createRankCard(user, userData, rank, requiredXp, opts = {}) {
     const { streakCurrent = 0, hasActiveBoost = false, rarestCatch = null } = opts;
 
@@ -212,6 +279,16 @@ const WAR_VICTORY_LINES = [
     'No mercy. No retreat. All glory.',
 ];
 
+/**
+ * The 900×260 banner posted to both servers when a guild war resolves.
+ *
+ * @param {string} winnerName
+ * @param {number} winnerScore
+ * @param {string} loserName
+ * @param {number} loserScore
+ * @param {string} mvpName the winning side's top contributor
+ * @returns {Promise<Buffer>} PNG
+ */
 async function createWarVictoryBanner(winnerName, winnerScore, loserName, loserScore, mvpName) {
     const canvas = createCanvas(900, 260);
     const ctx = canvas.getContext('2d');
@@ -278,6 +355,14 @@ async function createWarVictoryBanner(winnerName, winnerScore, loserName, loserS
     return encodeCanvas(canvas);
 }
 
+/**
+ * The 900×200 banner posted when a member crosses into a new wealth tier.
+ *
+ * @param {string} username
+ * @param {string} tierLabel the tier's display name
+ * @param {string} tierColor a CSS colour, used for the accent bars
+ * @returns {Promise<Buffer>} PNG
+ */
 async function createWealthTierBanner(username, tierLabel, tierColor) {
     const canvas = createCanvas(900, 200);
     const ctx = canvas.getContext('2d');
@@ -346,6 +431,15 @@ const PET_SPRITE_EMOJIS = {
 
 // An evolved pet should not look identical to a hatchling: stage 2 and 3 swap in
 // the evolved emoji and gain ring pips so the tier reads at a glance.
+/**
+ * A pet's sprite, drawn from its palette rather than loaded from a file.
+ *
+ * @param {string} petId a key of the sprite palette; an unknown id draws grey
+ *   rather than failing
+ * @param {number} [size] square, in pixels
+ * @param {number} [stage] growth stage, clamped to 1–3
+ * @returns {Promise<Buffer>} PNG
+ */
 async function generatePetSprite(petId, size = 80, stage = 1) {
     const canvas = createCanvas(size, size);
     const ctx    = canvas.getContext('2d');
@@ -447,6 +541,15 @@ function _achTier(xpReward) {
     return                                   { label: 'Platinum', color: '#e5e4e2' };
 }
 
+/**
+ * The 520×110 achievement toast. The XP reward picks the tier, which picks the
+ * icon and its colour.
+ *
+ * @param {string} text the achievement's name
+ * @param {string} description
+ * @param {number} xpReward
+ * @returns {Promise<Buffer>} PNG
+ */
 async function createAchievementCard(text, description, xpReward) {
     const W = 520, H = 110, ICON_SIZE = 58, PAD = 16;
     const canvas = createCanvas(W, H);
@@ -511,6 +614,15 @@ async function createAchievementCard(text, description, xpReward) {
 
 // ── End-of-season recap card ──────────────────────────────────────────────────
 
+/**
+ * The 700×420 card posted to a member when an economy season ends.
+ *
+ * @param {import('discord.js').User} user
+ * @param {string} seasonName
+ * @param {number} leaderboardRank where they finished
+ * @param {number} totalPlayers out of how many
+ * @returns {Promise<Buffer>} PNG
+ */
 async function createSeasonRecapCard(user, seasonName, leaderboardRank, totalPlayers) {
     const W = 700, H = 420;
     const canvas = createCanvas(W, H);

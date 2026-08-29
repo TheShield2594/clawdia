@@ -8,7 +8,17 @@ const VOLATILITY_FACTORS = {
 
 const HISTORY_CAP = 30;
 
-// Ensure pricing fields are populated for every shop item. Returns true if mutated.
+/**
+ * Backfill `basePrice`, `currentPrice` and `demandScore` on shop items that
+ * predate dynamic pricing, so the rest of this module can assume they exist.
+ *
+ * Mutates the items in place and reports whether it changed anything, so a
+ * caller can skip the save when it did not.
+ *
+ * @param {Array<{price: number, basePrice?: number, currentPrice?: number,
+ *   demandScore?: number}>} shopItems mutated in place
+ * @returns {boolean} true if any field was filled in
+ */
 function ensurePricingFields(shopItems) {
     let changed = false;
     for (const item of shopItems) {
@@ -28,7 +38,22 @@ function ensurePricingFields(shopItems) {
     return changed;
 }
 
-// Compute next price based on demand, clamped to ±band of basePrice.
+/**
+ * The price this item should move to on the next recalculation tick.
+ *
+ * Demand is put through `tanh` so extreme demand asymptotes rather than running
+ * away, scaled to at most `band` either side of `basePrice`; the result is then
+ * approached 60% of the way from the current price rather than jumped to, which
+ * is what keeps the `/market` price chart readable. Never returns less than 1.
+ *
+ * @param {{price: number, basePrice?: number, currentPrice?: number,
+ *   demandScore?: number}} item
+ * @param {number} band the maximum swing either side of base, as a fraction
+ *   (`0.5` is ±50%); falsy is treated as 0.5
+ * @param {'low'|'medium'|'high'} [volatility] how hard demand pushes;
+ *   unrecognised values fall back to medium
+ * @returns {number} a whole number of coins
+ */
 function nextPrice(item, band, volatility = 'medium') {
     const cfg = VOLATILITY_FACTORS[volatility] || VOLATILITY_FACTORS.medium;
     const base = item.basePrice ?? item.price;
@@ -41,17 +66,32 @@ function nextPrice(item, band, volatility = 'medium') {
     return Math.round(cur + (target - cur) * 0.6);
 }
 
-// The per-tick decay as a plain multiplier, so a caller can hand it to Mongo's
-// `$mul` and let the decay apply to whatever the stored score is at write time
-// rather than to the value it happened to read a moment earlier. Buys `$inc`
-// this field concurrently (see commands/economy/shop.js), and a decayed value
-// written back with `$set` would swallow any that landed in between.
+/**
+ * The per-tick decay as a plain multiplier, so a caller can hand it to Mongo's
+ * `$mul` and let the decay apply to whatever the stored score is at write time
+ * rather than to the value it happened to read a moment earlier. Buys `$inc`
+ * this field concurrently (see commands/economy/shop.js), and a decayed value
+ * written back with `$set` would swallow any that landed in between.
+ *
+ * @param {'low'|'medium'|'high'} [volatility] unrecognised values fall back to
+ *   medium
+ * @returns {number} between 0 and 1
+ */
 function demandDecayFactor(volatility = 'medium') {
     const cfg = VOLATILITY_FACTORS[volatility] || VOLATILITY_FACTORS.medium;
     return 1 - cfg.decay;
 }
 
-// Decay demand toward zero (oversupply if negative, demand if positive).
+/**
+ * This item's demand score after one tick of decay toward zero.
+ *
+ * Prefer `demandDecayFactor` and `$mul` for the write — see the note there.
+ * This is for callers that need the number itself, such as a preview.
+ *
+ * @param {{demandScore?: number}} item
+ * @param {'low'|'medium'|'high'} [volatility]
+ * @returns {number} signed: negative is oversupply, positive is demand
+ */
 function decayDemand(item, volatility = 'medium') {
     return (item.demandScore ?? 0) * demandDecayFactor(volatility);
 }
@@ -60,7 +100,17 @@ function decayDemand(item, volatility = 'medium') {
 // write rather than by rebuilding the array in JS, so the cap is enforced by the
 // database. HISTORY_CAP is exported for that write and for readers of the chart.
 
-// Convenience: % change between currentPrice and basePrice for /market trends display.
+/**
+ * How far an item has moved from its base price, and the glyph `/market` shows
+ * for it: 🔥 at +15%, 📈 at +5%, 🧊 at -15%, 📉 at -5%, `·` in between.
+ *
+ * An item with no `basePrice` is compared against `price` instead, so it still
+ * reports a real percentage as long as one of the two is set.
+ *
+ * @param {{price: number, basePrice?: number, currentPrice?: number}} item
+ * @returns {{pct: number, arrow: string}} `{pct: 0, arrow: '·'}` only when
+ *   neither `basePrice` nor `price` gives a non-zero base to divide by
+ */
 function trendBucket(item) {
     const base = item.basePrice ?? item.price;
     const cur  = item.currentPrice ?? base;

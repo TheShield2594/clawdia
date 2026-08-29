@@ -17,9 +17,18 @@ const COLORS = require('../utils/embedColors');
 // store using sorted sets (ZADD/ZRANGEBYSCORE with TTL) for atomic, shared state.
 const joinLog = new Map();
 
-// Tracks which guilds are currently in active raid mode (in-memory mirror of DB field).
+/**
+ * Guild ids currently in raid mode — an in-memory mirror of
+ * `raidDetection.raidModeActive` on the Guild document, exported so callers can
+ * ask without a database round trip. The document is the source of truth.
+ * @type {Set<string>}
+ */
 const raidModeActive = new Set();
-// 'auto' | 'manual' per guild
+/**
+ * How each active raid mode was turned on: `'auto'` by the join-rate detector,
+ * `'manual'` by a moderator. Only `'auto'` is swept off again.
+ * @type {Map<string, 'auto'|'manual'>}
+ */
 const raidModeActivatedBy = new Map();
 // Last join timestamp per guild (used for calm-window detection)
 const lastJoinTime = new Map();
@@ -47,6 +56,25 @@ async function applyRaidAction(member, rd, minAccountAgeDays) {
  * `settings` is the caller's already-resolved guild settings, passed down by
  * guildMemberAdd so one join costs one settings read rather than three (#593).
  * Omit it and this reads for itself.
+ */
+/**
+ * Record a join in the guild's sliding window and, if the window is now over
+ * threshold, turn raid mode on and act on the joiner.
+ *
+ * Called from the `guildMemberAdd` event for every join, so the cheap exits
+ * come first: a guild with raid detection disabled costs one settings read, or
+ * none when the caller already has them.
+ *
+ * Only accounts younger than `minAccountAgeDays` are kicked or quarantined —
+ * raid mode being on does not by itself act on an established member.
+ *
+ * @param {import('discord.js').GuildMember} member the member who joined
+ * @param {import('discord.js').Client} _client unused; the signature is the
+ *   event handler's
+ * @param {object} [settings] the guild's settings, when the caller has already
+ *   read them. Omit and they are fetched; a read failure is logged and the join
+ *   is ignored rather than throwing into the event handler
+ * @returns {Promise<void>}
  */
 async function handleMemberJoin(member, _client, settings) {
     const guildId = member.guild.id;
@@ -148,7 +176,21 @@ async function handleMemberJoin(member, _client, settings) {
     }
 }
 
-// Called by /raidmode toggle to manually enable or disable raid mode.
+/**
+ * Turn raid mode on or off by hand, from `/raidmode toggle`.
+ *
+ * Writes both the in-memory mirror and the Guild document, and announces the
+ * change in the raid alert channel (or the moderation log, if no raid channel
+ * is set). A mode set this way is marked `manual`, which is what stops
+ * `sweepRaidModes` from turning it off again when the server goes quiet — a
+ * moderator's decision outlasts the calm window.
+ *
+ * @param {string} guildId
+ * @param {import('discord.js').Guild} guild for resolving the alert channel
+ * @param {boolean} active on or off
+ * @param {object} guildSettings the guild's settings, already read
+ * @returns {Promise<void>}
+ */
 async function setRaidMode(guildId, guild, active, guildSettings) {
     const rd = guildSettings.raidDetection;
     const alertChannelId = rd.alertChannelId || guildSettings.moderation?.logChannelId;
@@ -197,12 +239,18 @@ async function setRaidMode(guildId, guild, active, guildSettings) {
     }
 }
 
-// Periodic tick: auto-disable raid mode once the server calms down.
-//
-// Registered in services/scheduler as a job rather than owning a setInterval
-// here (#611). The interval ran outside runJob, so a throw inside it recorded
-// nothing: no dead-letter entry, no failed run on the health payload, and
-// /health went on reporting healthy while raid mode never auto-disabled again.
+/**
+ * Periodic tick: auto-disable raid mode in every guild that has gone quiet for
+ * its calm window. Guilds whose raid mode was set manually are skipped.
+ *
+ * Registered in services/scheduler as a job rather than owning a `setInterval`
+ * here (#611). The interval ran outside `runJob`, so a throw inside it recorded
+ * nothing: no dead-letter entry, no failed run on the health payload, and
+ * /health went on reporting healthy while raid mode never auto-disabled again.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
 async function sweepRaidModes(client) {
     if (raidModeActive.size === 0) return;
 

@@ -7,6 +7,25 @@ const COLORS = require('../utils/embedColors');
 const MAX_PLAYERS = 6;
 const MAX_STORY_LOG = 20;
 
+/**
+ * The AI Dungeon Master: one persistent D&D session per channel, backed by the
+ * `DmSession` document rather than by memory, so a restart mid-adventure loses
+ * nothing.
+ *
+ * The `/dm` subcommand handlers — `startSession`, `joinSession`,
+ * `beginSession`, `takeAction`, `partyStatus` and `stopSession` — each own
+ * their interaction end to end: they reply or defer themselves, so a caller
+ * must not have replied first, and they resolve to whatever the reply resolved
+ * to rather than to anything worth reading.
+ *
+ * `handleDmButton` is the exception, and is not a subcommand handler at all: it
+ * is a button router entry, and its boolean result is the whole point — see its
+ * own note below.
+ *
+ * A session is keyed on `guildId:channelId`, so two channels can run their own
+ * adventures and one channel cannot run two.
+ */
+
 const CLASSES = ['Warrior', 'Mage', 'Rogue', 'Cleric', 'Ranger', 'Paladin'];
 const CLASS_HP = { Warrior: 120, Mage: 70, Rogue: 90, Cleric: 100, Ranger: 95, Paladin: 110 };
 const CLASS_INVENTORY = {
@@ -94,6 +113,13 @@ function amountFor(narrative, namePattern, verbs, unit, otherNames = []) {
     return null;
 }
 
+/**
+ * `/dm start` — open a session in this channel, with the caller as host.
+ * Refuses if one is already active here.
+ *
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @returns {Promise<*>} the reply
+ */
 async function startSession(interaction) {
     const { guild, channel, user } = interaction;
 
@@ -132,6 +158,13 @@ async function startSession(interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
+/**
+ * `/dm join` — add the caller to the party with a character name and class.
+ * Capped at six players; a class sets starting HP and inventory.
+ *
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @returns {Promise<*>} the reply
+ */
 async function joinSession(interaction) {
     const { guild, channel, user } = interaction;
     const characterName = interaction.options.getString('name');
@@ -183,6 +216,13 @@ async function joinSession(interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
+/**
+ * `/dm begin` — host only. Asks the model for an opening scene and pushes it as
+ * the first entry in the story log, which is what `takeAction` counts back from.
+ *
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @returns {Promise<*>} the reply
+ */
 async function beginSession(interaction) {
     const { guild, channel, user } = interaction;
 
@@ -259,6 +299,18 @@ async function beginSession(interaction) {
     }
 }
 
+/**
+ * `/dm action` — narrate one player's action and apply what the narration says
+ * happened: damage taken, items gained or lost.
+ *
+ * Defers first, because the model call will outrun Discord's three seconds. The
+ * player entry and the DM's narration are written together in one atomic
+ * `$push`, which is what lets roles be counted back from the end of a log the
+ * `$slice` trim keeps rewriting the front of.
+ *
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @returns {Promise<*>} the reply
+ */
 async function takeAction(interaction) {
     const { guild, channel, user } = interaction;
     const actionText = interaction.options.getString('action');
@@ -391,6 +443,12 @@ async function takeAction(interaction) {
     }
 }
 
+/**
+ * `/dm party` — each character's HP and inventory, and how long the log is.
+ *
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @returns {Promise<*>} the reply
+ */
 async function partyStatus(interaction) {
     const { guild, channel } = interaction;
 
@@ -418,6 +476,13 @@ async function partyStatus(interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
+/**
+ * `/dm stop` — end the session. The host may always stop their own; anyone else
+ * needs Manage Server.
+ *
+ * @param {import('discord.js').ChatInputCommandInteraction} interaction
+ * @returns {Promise<*>} the reply
+ */
 async function stopSession(interaction) {
     const { guild, channel, user } = interaction;
 
@@ -498,6 +563,17 @@ async function postOrUpdateStatCard(channel, session) {
     );
 }
 
+/**
+ * The "Story so far" button under the stat card: an ephemeral recap of the log.
+ *
+ * Routed from `interactionCreate` alongside the other button handlers, so it
+ * has to say whether the click was one of its own.
+ *
+ * @param {import('discord.js').ButtonInteraction} interaction
+ * @param {import('discord.js').Client} _client unused; the router's signature
+ * @returns {Promise<boolean>} true if this handler owned the button and has
+ *   answered it, false to let the router try the next handler
+ */
 async function handleDmButton(interaction, _client) {
     if (!interaction.customId.startsWith('dm_storysofar_')) return false;
 

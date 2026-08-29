@@ -1,3 +1,36 @@
+/**
+ * The periodic economy and competition jobs: war and season resolution, the
+ * weekly awards, shop price recalculation, bank interest, and returning expired
+ * market listings.
+ *
+ * Nothing here schedules itself. Every exported function is registered as a job
+ * in `services/scheduler/index.js`, which owns the cron expressions and runs
+ * each through `runJob` — so a throw is recorded on the health payload and
+ * filed as a dead-letter entry, and a tick is dropped rather than overlapped
+ * while the previous run is still going. Adding a `setInterval` here instead
+ * costs all of that (#611).
+ *
+ * They share a shape, and it is the shape a job that pays people out has to
+ * have:
+ *
+ * - **Idempotent.** Payouts go through `creditCoinsOnce` / `grantItemOnce`
+ *   against a payout key, so a job that runs twice — a retry, two processes,
+ *   a resolution racing a manual one — pays once.
+ * - **Per-guild failure isolation.** One guild's error is logged and the loop
+ *   moves to the next; a bad document does not cost every other server its
+ *   week. What propagates is a failure of the job itself, which is what
+ *   `runJob` is there to record.
+ * - **Announcements are best-effort.** A missing channel or a revoked
+ *   permission never rolls back a payout that already landed.
+ *
+ * Each takes the Discord client and resolves when the sweep is done. None
+ * returns a value; what they did is in the database and the announcements.
+ * `returnExpiredMarketListings` is the exception — it posts nothing, so it
+ * takes no client.
+ *
+ * @module services/schedulerService
+ */
+
 const Guild = require('../models/Guild');
 const User  = require('../models/User');
 const SeasonRecord = require('../models/SeasonRecord');
@@ -191,6 +224,13 @@ async function resolveOneWar(client, guildDoc) {
     return true;
 }
 
+/**
+ * Resolve every guild war whose window has closed: award the winner, hand out
+ * boosters and badges, and post the victory banner to both servers.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
 async function resolveExpiredWars(client) {
     const expired = await Guild.find({
         'activeWar.status': 'active',
@@ -327,6 +367,13 @@ async function resolveOneSeason(client, guildDoc) {
     return true;
 }
 
+/**
+ * Close out every expired economy season: freeze the leaderboard, pay the top
+ * three, reset season coins, and post the recap.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
 async function resolveExpiredSeasons(client) {
     const expired = await Guild.find({
         'currentSeason.id': { $ne: null },
@@ -342,8 +389,16 @@ async function resolveExpiredSeasons(client) {
     }
 }
 
-// Awards 7-day 👑 #1 badges to the top user in each leaderboard category across all guilds.
-// Run once per week (Sunday 23:59 UTC recommended).
+/**
+ * Award the 7-day 👑 #1 badge to the top member in each leaderboard category,
+ * in every guild. Weekly.
+ *
+ * Takes a short lease per guild (`badgesAwardLeaseAt`) so a second runner
+ * cannot double-award the same week.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
 async function awardWeeklyLeaderboardBadges(client) {
     const { EmbedBuilder } = require('discord.js');
 
@@ -458,6 +513,13 @@ async function awardWeeklyLeaderboardBadges(client) {
 // Pet of the Week payout. Overridable per guild via economy.potwReward.
 const POTW_COIN_REWARD = 5_000;
 
+/**
+ * Pick each guild's Pet of the Week and pay its owner — 5,000 coins by default,
+ * overridable per guild with `economy.potwReward`.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
 async function selectPetOfTheWeek(client) {
     const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
     const { generatePetSprite } = require('../utils/cardGenerator');
@@ -622,6 +684,17 @@ const WEEKLY_CATEGORY_ORDER = ['hunt', 'mine', 'fish', 'explore'];
 // does not print coins by the hour.
 const WEEKLY_CHAMPION_REWARD = 10_000;
 
+/**
+ * Crown one champion per grind category — hunt, mine, fish, explore — in each
+ * guild, and pay each 10,000 coins.
+ *
+ * Weekly and one prize per category, deliberately: the hourly payout this
+ * replaced scaled with how often people played rather than how well, and
+ * printed coins by the hour.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
 async function announceWeeklyChampions(client) {
     const { EmbedBuilder } = require('discord.js');
     const WeeklyChampion = require('../models/WeeklyChampion');
@@ -830,6 +903,20 @@ function weeklyRunNote(winner) {
 // So the shop is read under a projection that names only the pricing fields, and
 // the new prices go back as a `bulkWrite` of per-item `$set`s. The Buffers are
 // never read and never rewritten.
+/**
+ * Move every dynamic-pricing guild's shop prices one step toward what demand
+ * says they should be, decay the demand scores, and append to the price history.
+ *
+ * Reads the shop under a projection naming only the pricing fields and writes
+ * the new prices as a `bulkWrite` of per-item `$set`s. That is not a
+ * micro-optimisation: shop items carry their icon inline as an `imageData`
+ * Buffer, so the whole-document read-mutate-`save()` this replaced pulled every
+ * icon of every guild into the process every fifteen minutes and wrote them all
+ * back untouched.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
 async function recalcShopPrices(client) {
     const { EmbedBuilder } = require('discord.js');
     // Only the lease window is needed here; the claim below re-reads the guild.
@@ -987,6 +1074,14 @@ async function recalcShopPrices(client) {
 //  1. Awards top-3 prizes (coins + seasonal title)
 //  2. Soft-decays all ELO toward 1200
 //  3. Resets season counters and starts the next season
+/**
+ * Roll over expired ranked-duel seasons: pay the top three and give them the
+ * seasonal title, soft-decay every ELO toward 1200, reset the counters and
+ * start the next season.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
 async function resolveRankedSeasons(client) {
     const { EmbedBuilder } = require('discord.js');
     const now = new Date();
@@ -1134,6 +1229,19 @@ const INTEREST_BEARING_CAP = 100_000;
 // trips for an equally unbounded amount of memory.
 const INTEREST_BATCH_SIZE = 1_000;
 
+/**
+ * Pay weekly interest on bank balances, in batches of 1,000 users.
+ *
+ * Only the first 100,000 coins of a balance earn: uncapped 5%/week compounds to
+ * roughly 260% APY, which lets a large balance inflate the economy without
+ * bound. Batched rather than one document at a time because a guild with tens
+ * of thousands of bankers would otherwise cost that many sequential round
+ * trips, and holding every operation in one array trades those round trips for
+ * an equally unbounded amount of memory.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
 async function applyBankInterest(client) {
     const { EmbedBuilder } = require('discord.js');
     const { isDistrictActive } = require('./districtService');
@@ -1220,9 +1328,16 @@ async function applyBankInterest(client) {
     }
 }
 
-// Return expired market listings to sellers before the MongoDB TTL index deletes them.
-// TTL-deleted documents do not fire Mongoose hooks, so without this job items would
-// permanently vanish from the economy when a listing expires unclaimed.
+/**
+ * Return expired market listings to their sellers before the MongoDB TTL index
+ * deletes them.
+ *
+ * TTL-deleted documents do not fire Mongoose hooks, so without this job an item
+ * whose listing expired unclaimed would vanish from the economy permanently.
+ * The one job here that needs no client: it posts nothing.
+ *
+ * @returns {Promise<void>}
+ */
 async function returnExpiredMarketListings() {
     const MarketListing = require('../models/MarketListing');
     const now = new Date();
