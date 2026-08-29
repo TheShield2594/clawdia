@@ -342,6 +342,13 @@ const guildSchema = new Schema({
         // the token ceiling and not the cost one.
         monthlyTokenLimit: { type: Number, default: 0, min: 0 },
         monthlyCostLimit: { type: Number, default: 0, min: 0 },
+        // Colour commentary on the things the scheduler resolves — wars,
+        // seasons, the weekly champions (#836). Off by default even when the
+        // rest of AI is on: every other AI call in the bot answers somebody who
+        // asked for it, and this one spends the guild's budget on an event
+        // nobody typed. A server that wants its war announcements narrated says
+        // so; the announcements are unchanged for everyone else.
+        eventCommentary: { type: Boolean, default: false },
         // Per-channel personas: each entry overrides systemPrompt for that channel
         channelPersonas: {
             type: [{
@@ -881,6 +888,15 @@ const guildSchema = new Schema({
             gameStandouts:     { type: Boolean, default: true },
             quoteOfTheWeek:    { type: Boolean, default: true },
             newMembers:        { type: Boolean, default: true },
+            // The signals the paper gained when its sections became a registry
+            // (#836). Each reports nothing at all on a server that does not use
+            // the feature behind it, so they default on with the rest: a guild
+            // that never fought a war simply has no war report.
+            warReport:         { type: Boolean, default: true },
+            legendaryForges:   { type: Boolean, default: true },
+            questLog:          { type: Boolean, default: true },
+            championBoard:     { type: Boolean, default: true },
+            priceMovers:       { type: Boolean, default: true },
         },
         quoteChannelIds: [{ type: String }],
         lastRunAt:        { type: Date, default: null }
