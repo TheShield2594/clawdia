@@ -140,8 +140,14 @@ function buildMessages(history, prompt, images, model) {
  * as a trailing ACTION block on the other, and only one of the two may be
  * offered to the model (#832).
  */
-function usesClientRoute({ useMcp = true, mcpRoute, mcpConfirm, mcpServers, botTools } = {}) {
+function usesClientRoute({ useMcp = true, mcpRoute, mcpConfirm, mcpServers, botTools, botToolsOnly } = {}) {
     if (useMcp === false) return false;
+
+    // A caller that has switched every server off has nothing for the connector
+    // to carry, and taking it would both cost the bot tools their schemas and —
+    // since `mcpServers` is merged with the operator-wide config downstream —
+    // hand the model the very servers the caller asked to be kept away from.
+    if (botToolsOnly) return true;
 
     const route = mcpRoute || DEFAULT_MCP_ROUTE;
     // An OAuth connection takes the client route whatever the setting says, and

@@ -56,6 +56,12 @@ const PARTY_TARGETS = new Set(['party', 'all', 'everyone', 'everybody', 'the par
 
 const EFFECT_TYPES = new Set(['damage', 'heal', 'add_item', 'remove_item', 'set_scene']);
 
+// The block's own line, and — for the abandoned attempts before the last one —
+// the whole line it sits on. `.` stops at the newline without the `s` flag, so
+// this takes one line at a time rather than everything to the end of the reply.
+const MARKER = '\nEFFECTS:';
+const EARLIER_BLOCK = /\nEFFECTS:\[.*$/gm;
+
 /**
  * Pull the trailing `EFFECTS:[…]` block off the model's reply.
  *
@@ -70,35 +76,39 @@ const EFFECT_TYPES = new Set(['damage', 'heal', 'add_item', 'remove_item', 'set_
 function extractEffects(text) {
     const source = typeof text === 'string' ? text : '';
 
-    // Anchored to the end, like `extractAction`: the block is the last thing in
-    // the reply.
-    const match = source.match(/\nEFFECTS:(\[.*\])\s*$/s);
-    if (match) {
-        const cleanText = source.slice(0, source.lastIndexOf('\nEFFECTS:')).trimEnd();
-        try {
-            const parsed = JSON.parse(match[1]);
-            if (Array.isArray(parsed)) {
-                return { cleanText, effects: parsed.slice(0, MAX_EFFECTS), hadBlock: true };
-            }
-        } catch {
-            // Falls through to the salvage below, which cuts the same text and
-            // answers "no block" — so a turn whose JSON is unreadable is a turn
-            // the prose reader gets to look at, rather than one where nothing
-            // happened at all.
+    // The *last* marker, found before anything is parsed. A regex anchored to
+    // the end of the reply looks like it does the same thing and does not: `.*`
+    // is greedy, so on a reply carrying two blocks it matches from the first
+    // marker's `[` to the last block's `]`, which is not JSON — and the parse
+    // failed, the good final block was thrown away, and the first block's raw
+    // JSON was left sitting in the middle of the scene the party reads.
+    const at = source.lastIndexOf(MARKER);
+    if (at === -1) return { cleanText: source, effects: [], hadBlock: false };
+
+    // Everything after the last marker is the model talking to the parser, so
+    // it never reaches the embed. Earlier markers are stripped from the prose
+    // for the same reason — an abandoned first attempt is still raw JSON.
+    const cleanText = source.slice(0, at).replace(EARLIER_BLOCK, '').trimEnd();
+    const payload = source.slice(at + MARKER.length).trim();
+
+    // Not a block at all — a model that wrote the word and then kept narrating.
+    // The prose is left exactly as it was.
+    if (!payload.startsWith('[')) return { cleanText: source, effects: [], hadBlock: false };
+
+    try {
+        const parsed = JSON.parse(payload);
+        if (Array.isArray(parsed)) {
+            return { cleanText, effects: parsed.slice(0, MAX_EFFECTS), hadBlock: true };
         }
+    } catch {
+        // Unreadable, most often because the model ran out of `maxTokens`
+        // mid-array. The effects are lost either way; what matters is that
+        // `{"type":"damage","targ` is cut off the scene rather than shown, and
+        // that "no block" sends the turn to the prose reader instead of leaving
+        // it believing nothing happened.
     }
 
-    // Whatever is left of a block that did not parse. The common cause is the
-    // model running out of `maxTokens` mid-array, and the important thing about
-    // it is that `{"type":"damage","targ` must not be shown to the party as part
-    // of the scene. Recognised by the opening bracket rather than by position,
-    // because a truncated block has no closing one to anchor on.
-    const at = source.lastIndexOf('\nEFFECTS:');
-    if (at !== -1 && source.slice(at + '\nEFFECTS:'.length).trimStart().startsWith('[')) {
-        return { cleanText: source.slice(0, at).trimEnd(), effects: [], hadBlock: false };
-    }
-
-    return { cleanText: source, effects: [], hadBlock: false };
+    return { cleanText, effects: [], hadBlock: false };
 }
 
 function clampAmount(value) {

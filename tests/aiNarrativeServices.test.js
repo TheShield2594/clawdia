@@ -335,6 +335,32 @@ describe('the DM campaign applying a structured EFFECTS block', () => {
         expect(hp(0)).toBeNull();
     });
 
+    // Discord rejects an embed description of length zero, so a model that
+    // answers with nothing but an effects block would otherwise throw after the
+    // turn had already been paid for.
+    test('a reply that is only a block still has a scene to show', async () => {
+        const it = await narrate('\nEFFECTS:[{"type":"damage","target":"Aric","amount":10}]');
+
+        expect(hp(0)).toBe(110);
+        const [{ embeds }] = it.editReply.mock.calls.at(-1);
+        expect(embeds[0].data.description).toEqual(expect.stringMatching(/\S/));
+    });
+
+    // The block that is written twice — an abandoned first attempt, then the
+    // real one. The last is what counts, and neither may reach the party as raw
+    // JSON.
+    test('two blocks resolve to the last, and neither is printed', async () => {
+        const it = await narrate(
+            'She swings.\nEFFECTS:[{"type":"damage","target":"Aric","amount":5}]'
+            + '\nThen the floor gives way.\nEFFECTS:[{"type":"damage","target":"Aric","amount":40}]'
+        );
+
+        expect(hp(0)).toBe(80);
+        const [{ embeds }] = it.editReply.mock.calls.at(-1);
+        expect(embeds[0].data.description).not.toMatch(/EFFECTS:/);
+        expect(embeds[0].data.description).toMatch(/Then the floor gives way\./);
+    });
+
     test('a target nobody in the party answers to is dropped', async () => {
         await narrate(block([{ type: 'damage', target: 'the goblin', amount: 12 }]));
         expect(hp(0)).toBeNull();
@@ -389,6 +415,19 @@ describe('the DM turn lease', () => {
         mockGetCompletion.mockResolvedValue('The corridor narrows.');
     });
 
+    // `mcpServers: []` is not enough on its own: the toolkit merges the guild's
+    // list with the operator-wide config file, so an empty guild list still
+    // resolves every server the operator configured — and a tool result is
+    // untrusted text arriving in the middle of somebody's story.
+    test('gives the narrator the dice and no MCP server at all', async () => {
+        await takeAction(interaction());
+
+        const req = mockGetCompletion.mock.calls.at(-1)[0];
+        expect(req.botToolsOnly).toBe(true);
+        expect(req.mcpServers).toEqual([]);
+        expect(req.botTools.map(t => t.name)).toEqual(['dice_roll']);
+    });
+
     test('is taken for the session, not for the player', async () => {
         await takeAction(interaction());
         expect(activeGameLock.tryAcquire).toHaveBeenCalledWith('dm:g1:c1', expect.any(Number), expect.any(String));
@@ -413,12 +452,35 @@ describe('the DM turn lease', () => {
 
     // A throw inside the turn must free the campaign rather than park it until
     // the lease expires.
+    //
+    // The failure has to be one `resolveTurn` does not catch itself, or this
+    // asserts nothing the test above it does not: a rejected completion is
+    // handled inside the turn, so the body returns normally and the `finally`
+    // is reached the ordinary way. So the pre-lease check succeeds and the read
+    // *inside* the lease — which sits outside that try — is the one that fails.
     test('and released when the turn throws', async () => {
-        mockGetCompletion.mockRejectedValue(new Error('provider down'));
+        const session = {
+            sessionId: 'g1:c1', guildId: 'g1', channelId: 'c1', hostId: 'u1',
+            players: [PLAYER], storyLog: ['The gate stands open.'], active: true, partyState: {},
+        };
+        DmSession.findOne
+            .mockReturnValueOnce(asQuery(session))
+            .mockReturnValueOnce({ lean: async () => { throw new Error('mongo went away'); } });
 
-        await takeAction(interaction());
+        await expect(takeAction(interaction())).rejects.toThrow('mongo went away');
 
         expect(activeGameLock.release).toHaveBeenCalledWith('dm:g1:c1', 'lease-token');
+    });
+
+    // The lease has to outlast the whole turn: one model request per tool round
+    // plus the one that answers, each able to sit on a provider timeout. A lease
+    // that expires underneath its holder lets the next player straight in, and
+    // the two turns this exists to serialise then run side by side in silence.
+    test('is held for longer than a turn can possibly take', async () => {
+        await takeAction(interaction());
+
+        const [, ttl] = activeGameLock.tryAcquire.mock.calls[0];
+        expect(ttl).toBeGreaterThan(5 * 60 * 1000);
     });
 });
 

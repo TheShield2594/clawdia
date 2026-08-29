@@ -175,7 +175,14 @@ async function postScheduledNewspapers(client) {
             );
             if (!claimed) continue;
 
-            const embed = await generateNewspaper(client, guildDoc, dg);
+            // The claimed document, not the one the sweep started from. Both are
+            // this guild, but `claimed` was read at claim time and `guildDoc`
+            // when the sweep began — which can be several guilds and several
+            // Discord round trips earlier. The signals read `activeWar`,
+            // `dynamicPricing` and `shop` off it (./newspaper/signals.js), and
+            // those are exactly the fields a war resolution or a price recalc
+            // moves in between.
+            const embed = await generateNewspaper(client, claimed, dg);
             await channel.send({ embeds: [embed] });
         } catch (err) {
             console.error(`[newspaper] postScheduledNewspapers failed for guild ${guildId}:`, err.message);

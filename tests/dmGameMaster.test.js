@@ -164,6 +164,30 @@ describe('pulling the effects block off a narration', () => {
         expect(hadBlock).toBe(false);
     });
 
+    // A model that writes a block, thinks better of it, and writes another. The
+    // last one is the one it meant; the abandoned one is raw JSON and must not
+    // be left sitting in the middle of the scene.
+    test('two blocks resolve to the last, and the first leaves no trace', () => {
+        const { cleanText, effects, hadBlock } = extractEffects(
+            'She swings.\nEFFECTS:[{"type":"damage","target":"Aric","amount":5}]'
+            + '\nThen the floor gives way.\nEFFECTS:[{"type":"damage","target":"Aric","amount":40}]'
+        );
+
+        expect(hadBlock).toBe(true);
+        expect(effects).toEqual([{ type: 'damage', target: 'Aric', amount: 40 }]);
+        expect(cleanText).toBe('She swings.\nThen the floor gives way.');
+    });
+
+    test('a reply that is nothing but a block leaves no prose behind', () => {
+        const { cleanText, effects, hadBlock } = extractEffects(
+            '\nEFFECTS:[{"type":"damage","target":"Aric","amount":10}]'
+        );
+
+        expect(hadBlock).toBe(true);
+        expect(effects).toHaveLength(1);
+        expect(cleanText).toBe('');
+    });
+
     test('a block holding something that is not a list yields nothing', () => {
         const { effects, hadBlock } = extractEffects('Scene.\nEFFECTS:{"type":"damage"}');
         expect(hadBlock).toBe(false);

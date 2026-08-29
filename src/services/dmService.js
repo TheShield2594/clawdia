@@ -15,6 +15,12 @@ const MAX_STORY_LOG = 20;
 // both lists of unknown length, so both are cut to fit rather than trusted.
 const MAX_FIELD_CHARS = 1024;
 
+// What stands in for a narration the model did not write. The rolls and the
+// effect log are printed alongside it, so a turn that resolves to this is not
+// an empty message — it is a turn whose mechanics landed and whose prose did
+// not arrive.
+const EMPTY_SCENE = '*The Dungeon Master pauses, saying nothing.*';
+
 /**
  * The AI Dungeon Master: one persistent D&D session per channel, backed by the
  * `DmSession` document rather than by memory, so a restart mid-adventure loses
@@ -110,16 +116,30 @@ async function narrate({ config, guildId, userId, channelId, systemPrompt, histo
         guildId, userId, channelId,
         // Not `mcp: false`. That switched off the toolkit entirely, which is
         // right for the guild's servers and wrong for the dice: `dice_roll` is
-        // a bot-owned tool, and the toolkit is what carries it. No servers are
-        // passed, so this builds a toolkit of exactly one tool.
+        // a bot-owned tool, and the toolkit is what carries it.
         mcp: true,
+        // `mcpServers: []` on its own would not do it. The toolkit merges the
+        // guild's list with the operator-wide config file, so an empty guild
+        // list still resolves every server the operator configured — and on
+        // Anthropic's `auto` route those servers would also pull the request
+        // onto the connector, losing the dice. `botToolsOnly` is the flag that
+        // actually means none.
         mcpServers: [],
+        botToolsOnly: true,
         botTools: [diceTool(rolls)],
         systemPrompt, history, prompt, temperature: 0.9, maxTokens
     });
 
     const { cleanText, effects, hadBlock } = extractEffects(raw);
-    return { text: cleanText, effects, hadBlock, rolls };
+    // A turn can legitimately come back with no prose at all: a model that
+    // answers with nothing but an effects block, or one that spent its whole
+    // reply on tool calls. The effects are still real and still worth applying,
+    // but the empty string is not something either caller can use — Discord
+    // rejects an embed description of length zero, so the turn would throw after
+    // the model had already been paid for, and in `/dm begin` an empty story log
+    // entry would then read as "the adventure has already begun" and block every
+    // retry. So the scene always says something.
+    return { text: cleanText || EMPTY_SCENE, effects, hadBlock, rolls };
 }
 
 /** The rolls of a turn as an embed field, or null when nobody rolled. */
