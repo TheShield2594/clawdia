@@ -11,32 +11,18 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
+const {
+    STREAK_BONUS,
+    MAX_SESSION_MULT,
+    sessionMult,
+    rollCard,
+    cardLabel,
+    probabilities,
+} = require('./higherlowerOdds');
 const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
-const SUITS   = ['♠', '♥', '♦', '♣'];
-
-// Session multiplier: starts at 1.0, gains +0.5 per correct guess, capped at 6.0.
-const STREAK_BONUS = 0.5;
-const MAX_SESSION_MULT = 6.0;
-
-function sessionMult(streak) {
-    return Math.min(MAX_SESSION_MULT, 1.0 + streak * STREAK_BONUS);
-}
-
-function rollCard() {
-    return {
-        value: Math.floor(Math.random() * 13) + 1,
-        suit:  SUITS[Math.floor(Math.random() * SUITS.length)],
-    };
-}
-
-function cardLabel(value) {
-    const face = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
-    return face[value] ?? String(value);
-}
-
 function cardDisplay(card) {
     const lbl  = cardLabel(card.value);
     const suit = card.suit;
@@ -54,17 +40,6 @@ function cardDisplay(card) {
 
 function cardInline(card) {
     return `**${cardLabel(card.value)}${card.suit}**`;
-}
-
-function probabilities(value) {
-    const higher = 13 - value;
-    const lower  = value - 1;
-    const total  = 13;
-    return {
-        higher: higher / total,
-        lower:  lower  / total,
-        equal:  1      / total,
-    };
 }
 
 function embedAuthor(interaction) {

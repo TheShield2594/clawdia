@@ -127,10 +127,10 @@
             "lines": 67
         },
         "src/games/casino": {
-            "statements": 23,
-            "branches": 16,
-            "functions": 21,
-            "lines": 24
+            "statements": 31,
+            "branches": 23,
+            "functions": 35,
+            "lines": 31
         },
         "src/migrations": {
             "statements": 47,

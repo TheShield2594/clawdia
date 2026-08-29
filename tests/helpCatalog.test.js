@@ -116,15 +116,23 @@ describe('the catalog against the real command tree', () => {
 describe('/casino advertises the games it actually has', () => {
     const casino = require('../src/commands/economy/casino');
     const gamesDir = path.join(__dirname, '..', 'src', 'games', 'casino');
+    // A game is a module with an execute(); the directory also holds the plain
+    // resolution modules #785 pulled out of the games — pokerHands, the keno
+    // paytable and so on — which have no name and register no subcommand.
     const gameNames = fs.readdirSync(gamesDir)
         .filter(file => file.endsWith('.js'))
-        .map(file => require(path.join(gamesDir, file)).name)
+        .map(file => require(path.join(gamesDir, file)))
+        .filter(mod => typeof mod.execute === 'function')
+        .map(mod => mod.name)
         .sort();
 
     test('registers one subcommand per game module', () => {
         const subcommands = casino.data.toJSON().options.map(opt => opt.name);
 
-        expect(gameNames.every(name => subcommands.includes(name))).toBe(true);
+        // A derivation that filters can collapse to nothing and still report
+        // "every one is registered".
+        expect(gameNames).toHaveLength(8);
+        expect(gameNames.filter(name => !subcommands.includes(name))).toEqual([]);
     });
 
     test('names every game in the description, and nothing else', () => {
