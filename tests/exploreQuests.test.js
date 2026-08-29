@@ -163,17 +163,37 @@ describe('exploration competes in the weekly champion race', () => {
 });
 
 describe('exploration appears in the weekly newspaper', () => {
-    const fsx  = require('fs');
-    const pathx = require('path');
+    // Asked of the signal itself rather than of the source text it used to be
+    // written in: the paper's sections are a registry now (#836), and what
+    // matters has always been that the top explorer is queried, gets a name
+    // fetched for them, and reaches both renderings — not which file says so.
+    const { SIGNALS } = require('../src/services/newspaper/signals');
+    const signal = SIGNALS.find(s => s.id === 'gameStandouts');
 
-    test('the top explorer is queried, resolved to a name, and rendered', () => {
-        const src = fsx.readFileSync(pathx.join(__dirname, '..', 'src', 'services', 'newspaperService.js'), 'utf8');
-        // Queried from the grind profiles...
-        expect(src).toContain("topBySystem('exploration')");
-        // ...added to the id set the usernames are fetched for (without this it
-        // renders as "Unknown")...
-        expect(src).toContain('userIds.add(stats.gameStandouts.topExplorer.userId)');
-        // ...and rendered in both the plain-text and embed builders.
-        expect(src.match(/topExplorer\.exploration\?\.level/g) ?? []).toHaveLength(2);
+    const standouts = [{ emoji: '🧭', label: 'exploration', short: 'Explorer', leader: { userId: 'u9', level: 7 } }];
+    const context = { names: { u9: 'Ada' }, currency: '💰' };
+
+    test('the top explorer is queried from the grind profiles', async () => {
+        const GrindProfile = require('../src/models/GrindProfile');
+        const chain = docs => {
+            const c = { sort: () => c, select: () => c, lean: async () => docs, then: (res, rej) => Promise.resolve(docs).then(res, rej) };
+            return c;
+        };
+        const spy = jest.spyOn(GrindProfile, 'findOne').mockImplementation(() => chain(null));
+
+        await signal.query({ guildId: 'g1' });
+
+        expect(spy.mock.calls.some(([filter]) => filter.system === 'exploration')).toBe(true);
+        spy.mockRestore();
+    });
+
+    // Without this they render as "Unknown".
+    test('and is resolved to a name', () => {
+        expect(signal.userIds(standouts)).toEqual(['u9']);
+    });
+
+    test('and reaches both the model\'s brief and the printed paper', () => {
+        expect(signal.brief(standouts, context)).toMatch(/Ada leads exploration at level 7/);
+        expect(signal.render(standouts, context)[0]).toMatch(/\*\*Ada\*\* — Explorer Level 7/);
     });
 });

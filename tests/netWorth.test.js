@@ -166,7 +166,10 @@ describe('every wealth surface goes through the shared helper', () => {
         'commands/leveling/leaderboard.js',
         'dashboard/routes/api/economy.js',
         'services/schedulerService.js',
-        'services/newspaperService.js',
+        // The newspaper's rich list moved into the signals registry when the
+        // paper's sections became one entry each (#836) — the surface is the
+        // same, the file it lives in is not.
+        'services/newspaper/signals.js',
     ];
 
     test.each(SURFACES)('%s imports netWorth', (rel) => {

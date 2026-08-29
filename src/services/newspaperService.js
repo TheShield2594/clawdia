@@ -1,74 +1,20 @@
 const { EmbedBuilder } = require('discord.js');
-const Guild        = require('../models/Guild');
-const User         = require('../models/User');
-const Case         = require('../models/Case');
-const Transaction  = require('../models/Transaction');
-const GrindProfile = require('../models/GrindProfile');
+const Guild = require('../models/Guild');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
-const { topByNetWorth } = require('../utils/netWorth');
+const { collectSignals, signalUserIds, buildDataSummary, buildSections } = require('./newspaper/signals');
 
-async function collectStats(guildId, sections) {
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const data = {};
-
-    if (sections.topEarners !== false) {
-        // Ranked on balance + bank so the paper's rich list matches the one
-        // `/leaderboard economy` and the dashboard print.
-        data.topEarners = await topByNetWorth(User, guildId, 5);
-    }
-
-    if (sections.levelUps !== false) {
-        data.topLevels = await User.find({ guildId })
-            .sort({ level: -1 })
-            .limit(5)
-            .select('userId level xp')
-            .lean();
-    }
-
-    if (sections.casinoHighlights !== false) {
-        data.bigWins = await Transaction.find({
-            guildId,
-            type: { $in: ['gamble', 'casino_jackpot', 'duel_win'] },
-            amount: { $gt: 0 },
-            createdAt: { $gte: weekAgo }
-        })
-            .sort({ amount: -1 })
-            .limit(5)
-            .select('userId type amount note')
-            .lean();
-    }
-
-    if (sections.moderationDigest !== false) {
-        data.modCount = await Case.countDocuments({
-            guildId,
-            createdAt: { $gte: weekAgo }
-        });
-    }
-
-    if (sections.gameStandouts !== false) {
-        const topBySystem = system =>
-            GrindProfile.findOne({ guildId, system, 'data.xp': { $gt: 0 } })
-                .sort({ 'data.xp': -1 }).select('userId data').lean()
-                // Preserve the legacy { userId, <system>: data } shape for the renderers
-                .then(p => (p ? { userId: p.userId, [system]: p.data } : null));
-        const [topHunter, topFisher, topMiner, topExplorer] = await Promise.all([
-            topBySystem('hunt'),
-            topBySystem('fishing'),
-            topBySystem('mining'),
-            topBySystem('exploration'),
-        ]);
-        data.gameStandouts = { topHunter, topFisher, topMiner, topExplorer };
-    }
-
-    if (sections.newMembers !== false) {
-        data.newMemberCount = await User.countDocuments({
-            guildId,
-            createdAt: { $gte: weekAgo }
-        });
-    }
-
-    return data;
-}
+/**
+ * The weekly server newspaper.
+ *
+ * What the paper can report on lives in `./newspaper/signals.js` — one entry per
+ * section, each owning its own query and both of its renderings (#836). This
+ * file is the paper around them: resolve the names, ask the model for an
+ * edition, and print the plain one when there is no model or the model failed.
+ *
+ * The AI half is best-effort by construction. The stats are collected before
+ * anything is asked of a provider, so a provider that is down costs the guild
+ * its narrator and not its paper.
+ */
 
 async function resolveUsernames(discordGuild, userIds) {
     const map = {};
@@ -83,53 +29,6 @@ async function resolveUsernames(discordGuild, userIds) {
     return map;
 }
 
-function buildDataSummary(stats, usernameMap, currency, sections) {
-    const lines = [];
-
-    if (stats.topEarners?.length && sections.topEarners !== false) {
-        lines.push('TOP EARNERS (NET WORTH — BALANCE + BANK):');
-        stats.topEarners.forEach((u, i) =>
-            lines.push(`  ${i + 1}. ${usernameMap[u.userId] || 'Unknown'} — ${(u.netWorth || 0).toLocaleString()} ${currency}`)
-        );
-    }
-
-    if (stats.topLevels?.length && sections.levelUps !== false) {
-        lines.push('\nTOP LEVELS:');
-        stats.topLevels.forEach((u, i) =>
-            lines.push(`  ${i + 1}. ${usernameMap[u.userId] || 'Unknown'} — Level ${u.level}`)
-        );
-    }
-
-    if (stats.bigWins?.length && sections.casinoHighlights !== false) {
-        lines.push('\nBIGGEST WINS THIS WEEK:');
-        stats.bigWins.forEach((t) =>
-            lines.push(`  ${usernameMap[t.userId] || 'Unknown'} — +${t.amount.toLocaleString()} ${currency} (${t.type.replace(/_/g, ' ')})`)
-        );
-    } else if (sections.casinoHighlights !== false) {
-        lines.push('\nCASINO HIGHLIGHTS: A quiet week at the tables. No major wins.');
-    }
-
-    if (stats.modCount !== undefined && sections.moderationDigest !== false) {
-        lines.push(`\nMODERATION: ${stats.modCount} action${stats.modCount !== 1 ? 's' : ''} taken this week.`);
-    }
-
-    if (stats.gameStandouts && sections.gameStandouts !== false) {
-        const { topHunter, topFisher, topMiner, topExplorer } = stats.gameStandouts;
-        const parts = [];
-        if (topHunter) parts.push(`🏹 ${usernameMap[topHunter.userId] || 'Unknown'} leads hunting at level ${topHunter.hunt?.level ?? 1}`);
-        if (topFisher) parts.push(`🎣 ${usernameMap[topFisher.userId] || 'Unknown'} leads fishing at level ${topFisher.fishing?.level ?? 1}`);
-        if (topMiner)  parts.push(`⛏️ ${usernameMap[topMiner.userId]  || 'Unknown'} leads mining at level ${topMiner.mining?.level ?? 1}`);
-        if (topExplorer) parts.push(`🧭 ${usernameMap[topExplorer.userId] || 'Unknown'} leads exploration at level ${topExplorer.exploration?.level ?? 1}`);
-        if (parts.length) lines.push('\nGAME STANDOUTS:\n  ' + parts.join('\n  '));
-    }
-
-    if (stats.newMemberCount !== undefined && sections.newMembers !== false) {
-        lines.push(`\nNEW MEMBERS: ${stats.newMemberCount} new member${stats.newMemberCount !== 1 ? 's' : ''} joined this week.`);
-    }
-
-    return lines.join('\n');
-}
-
 // `requester` attributes an on-demand run (the /newspaper preview) to the user
 // who asked for it, so it counts against the guild's AI limits like any other
 // user-initiated call. The scheduled path passes nothing: it runs on a cadence
@@ -141,23 +40,17 @@ async function generateNewspaper(client, guildDoc, preloadedGuild, requester) {
     const currency = guildDoc.economy?.currency ?? '💰';
     const includeQuote = sections.quoteOfTheWeek !== false;
 
-    const stats = await collectStats(guildId, sections);
+    const stats = await collectSignals({ guildId, guildDoc, sections });
 
     // Use pre-fetched guild when available (avoids a duplicate guilds.fetch)
     const discordGuild = preloadedGuild ?? await client.guilds.fetch(guildId).catch(() => null);
 
-    // Gather user IDs to resolve
-    const userIds = new Set();
-    (stats.topEarners || []).forEach(u => userIds.add(u.userId));
-    (stats.topLevels || []).forEach(u => userIds.add(u.userId));
-    (stats.bigWins || []).forEach(t => userIds.add(t.userId));
-    if (stats.gameStandouts?.topHunter) userIds.add(stats.gameStandouts.topHunter.userId);
-    if (stats.gameStandouts?.topFisher) userIds.add(stats.gameStandouts.topFisher.userId);
-    if (stats.gameStandouts?.topMiner)  userIds.add(stats.gameStandouts.topMiner.userId);
-    if (stats.gameStandouts?.topExplorer) userIds.add(stats.gameStandouts.topExplorer.userId);
-
-    const usernameMap = await resolveUsernames(discordGuild, [...userIds]);
-    const dataSummary = buildDataSummary(stats, usernameMap, currency, sections);
+    // Every name the collected signals want, resolved in one members.fetch —
+    // which is why the signals declare their user ids rather than resolving
+    // their own.
+    const usernameMap = await resolveUsernames(discordGuild, signalUserIds(stats));
+    const renderContext = { names: usernameMap, currency };
+    const dataSummary = buildDataSummary(stats, renderContext);
 
     const now = new Date();
     const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -206,7 +99,7 @@ async function generateNewspaper(client, guildDoc, preloadedGuild, requester) {
 
     // Fallback: build a plain-text newspaper without AI
     if (!narrativeText) {
-        narrativeText = buildFallbackNewspaper(stats, usernameMap, currency, sections, guildDoc.name, dateStr);
+        narrativeText = buildFallbackNewspaper(stats, renderContext, guildDoc.name, dateStr);
     }
 
     // Chunk to Discord's 4096-char embed limit
@@ -220,50 +113,19 @@ async function generateNewspaper(client, guildDoc, preloadedGuild, requester) {
         .setTimestamp();
 }
 
-function buildFallbackNewspaper(stats, usernameMap, currency, sections, guildName, dateStr) {
+/**
+ * The paper as it prints with no model: every signal's own lines, under its own
+ * heading, in registry order.
+ *
+ * This is the edition a guild with no AI configured always gets, and the one a
+ * guild with AI gets on the week its provider is down — so it has to be a whole
+ * paper rather than an apology.
+ */
+function buildFallbackNewspaper(stats, renderContext, guildName, dateStr) {
     const lines = [`**📰 ${guildName || 'Server'} Weekly**`, `*${dateStr}*`, ''];
 
-    if (stats.topEarners?.length && sections.topEarners !== false) {
-        lines.push('**💰 Top Earners**');
-        stats.topEarners.slice(0, 3).forEach((u, i) => {
-            const medals = ['🥇', '🥈', '🥉'];
-            lines.push(`${medals[i]} **${usernameMap[u.userId] || 'Unknown'}** — ${(u.netWorth || 0).toLocaleString()} ${currency}`);
-        });
-        lines.push('');
-    }
-
-    if (stats.topLevels?.length && sections.levelUps !== false) {
-        lines.push('**📈 Level Leaders**');
-        stats.topLevels.slice(0, 3).forEach((u, i) => {
-            lines.push(`${i + 1}. **${usernameMap[u.userId] || 'Unknown'}** — Level ${u.level}`);
-        });
-        lines.push('');
-    }
-
-    if (stats.bigWins?.length && sections.casinoHighlights !== false) {
-        lines.push('**🎰 Casino Highlights**');
-        stats.bigWins.slice(0, 3).forEach(t => {
-            lines.push(`• **${usernameMap[t.userId] || 'Unknown'}** won **${t.amount.toLocaleString()} ${currency}**`);
-        });
-        lines.push('');
-    }
-
-    if (stats.modCount !== undefined && sections.moderationDigest !== false) {
-        lines.push(`**🛡️ Moderation Digest** — ${stats.modCount} action${stats.modCount !== 1 ? 's' : ''} this week.`, '');
-    }
-
-    if (stats.gameStandouts && sections.gameStandouts !== false) {
-        const { topHunter, topFisher, topMiner, topExplorer } = stats.gameStandouts;
-        lines.push('**🎮 Game Standouts**');
-        if (topHunter) lines.push(`🏹 **${usernameMap[topHunter.userId] || 'Unknown'}** — Hunt Level ${topHunter.hunt?.level ?? 1}`);
-        if (topFisher) lines.push(`🎣 **${usernameMap[topFisher.userId] || 'Unknown'}** — Fishing Level ${topFisher.fishing?.level ?? 1}`);
-        if (topMiner)  lines.push(`⛏️ **${usernameMap[topMiner.userId]  || 'Unknown'}** — Mining Level ${topMiner.mining?.level ?? 1}`);
-        if (topExplorer) lines.push(`🧭 **${usernameMap[topExplorer.userId] || 'Unknown'}** — Explorer Level ${topExplorer.exploration?.level ?? 1}`);
-        lines.push('');
-    }
-
-    if (stats.newMemberCount !== undefined && sections.newMembers !== false) {
-        lines.push(`**👋 New Members** — ${stats.newMemberCount} new member${stats.newMemberCount !== 1 ? 's' : ''} joined this week.`, '');
+    for (const block of buildSections(stats, renderContext)) {
+        lines.push(...block, '');
     }
 
     lines.push('*Stay active — see you next issue!*');
