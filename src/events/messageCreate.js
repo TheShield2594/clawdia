@@ -69,8 +69,33 @@ const LEET_MAP = {
     '6': 'b', '8': 'b'
 };
 
-// messageId -> { userId -> [timestamps] }
-const spamTracker = new Map();
+// One entry per (guild, user) seen inside the spam window.
+//
+// This was a `Map<guildId, Map<userId, timestamps>>` with nothing that ever
+// removed an entry: a user's array was pruned only when *that same user* posted
+// again, so a visitor who said one word in one guild two months ago was still
+// resident, and the outer map grew a guild entry per guild for the life of the
+// process (#600). The bounded limiter is what the rest of the bot already uses
+// for exactly this — a hard key ceiling with FIFO eviction, plus a sweep that
+// drops keys whose timestamps have all aged out.
+//
+// The key is `guildId:userId` rather than a nested map because the ceiling has
+// to bound the whole thing; a cap on the outer map alone bounds nothing, since
+// the arrays hang off the inner ones. Eviction only forgives whatever a user
+// had accumulated, which costs them a longer run-up to the threshold — the same
+// trade every other limiter here makes.
+const SPAM_MAX_KEYS = 20_000;
+
+// The dashboard offers 1–60 seconds for the window, so 60s is the longest one
+// any guild can be running. The sweep uses it, which is what makes the sweep
+// safe: `cleanup` only drops a key once every timestamp on it predates the
+// window it is given, so sweeping on the *widest* configurable window can never
+// forget a message some guild's narrower window would still have counted.
+const SPAM_MIN_WINDOW_MS = 1_000;
+const SPAM_MAX_WINDOW_MS = 60_000;
+
+const spamLimiter = new BoundedRateLimiter(SPAM_MAX_KEYS);
+setInterval(() => spamLimiter.cleanup(SPAM_MAX_WINDOW_MS), SPAM_MAX_WINDOW_MS).unref();
 
 // Normalize leet-speak and obfuscation attempts before profanity check
 function normalizeToxic(text) {
@@ -90,6 +115,11 @@ module.exports = {
     name: 'messageCreate',
     // Exported for unit testing only
     _getCustomBadWordRegexes: getCustomBadWordRegexes,
+    // The spam window's backing store. Exposed so a test can assert the sweep
+    // actually reclaims it (#600) — a leak is invisible from the outside,
+    // because a tracker that never forgets behaves identically until it is the
+    // thing using the memory.
+    _spamLimiter: spamLimiter,
     async execute(message, client) {
         if (message.author.bot || !message.guild) return;
 
@@ -448,20 +478,22 @@ async function handleAutoModeration(message, guildSettings) {
     if (mod.spamProtection && !isModerator) {
         const guildId = message.guild.id;
         const userId = message.author.id;
-        const now = Date.now();
-        const windowMs = (mod.spamWindow || 5) * 1000;
+        // Clamped to the range the dashboard's own input offers. Nothing
+        // validates `spamWindow` on the way into the database, and the sweep
+        // above is only sound while no guild's window outruns it.
+        const windowMs = Math.min(
+            Math.max((mod.spamWindow || 5) * 1000, SPAM_MIN_WINDOW_MS),
+            SPAM_MAX_WINDOW_MS
+        );
         const threshold = mod.spamThreshold || 5;
 
-        if (!spamTracker.has(guildId)) spamTracker.set(guildId, new Map());
-        const guildMap = spamTracker.get(guildId);
-        if (!guildMap.has(userId)) guildMap.set(userId, []);
+        const key = `${guildId}:${userId}`;
 
-        const timestamps = guildMap.get(userId).filter(t => now - t < windowMs);
-        timestamps.push(now);
-        guildMap.set(userId, timestamps);
-
-        if (timestamps.length >= threshold) {
-            guildMap.set(userId, []);
+        if (spamLimiter.hit(key, windowMs) >= threshold) {
+            // Forget the burst that just earned a punishment, so the next
+            // message starts a fresh count instead of tripping the same
+            // still-full window again.
+            spamLimiter.reset(key);
             await message.delete().catch(console.error);
             const warn = await message.channel.send(`${message.author}, slow down! You're sending messages too fast.`);
             setTimeout(() => warn.delete().catch(() => {}), 5000);

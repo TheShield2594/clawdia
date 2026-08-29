@@ -154,8 +154,29 @@ async function startDashboard() {
         console.log(`${shardTag(client)}[DASHBOARD] Not the primary shard — dashboard not started.`);
         return;
     }
-    const dashboard = require('./dashboard/server');
-    dashboard.start(client);
+    // Nothing the dashboard does at construction time is worth the gateway
+    // (#616). `listen` already holds this line for a socket that cannot bind —
+    // "the dashboard being unreachable is bad; the bot leaving every guild
+    // because of it is worse" — but the half in front of it did not: a throw out
+    // of `createApp` propagated through startBot() to the `process.exit(1)` at
+    // the bottom of this file, and the bot never logged in at all.
+    //
+    // That is not hypothetical. A connect-mongo major bump changed the shape of
+    // its export, and the one line that builds the session store took the whole
+    // bot down on boot with `MongoStore.create is not a function` — a dashboard
+    // detail, on a path that had nothing to do with Discord (see
+    // dashboard/lib/sessionStore.js).
+    //
+    // Configuration is deliberately not covered by this: config/validateEnv.js
+    // runs before the database is even connected and exits there, so a bad
+    // DASHBOARD_URL is still a refusal to start rather than a bot that quietly
+    // serves Discord with no dashboard.
+    try {
+        const dashboard = require('./dashboard/server');
+        dashboard.start(client);
+    } catch (err) {
+        console.error('[DASHBOARD] Failed to start. The bot continues without it:', err);
+    }
 }
 
 // Graceful shutdown: close DB and destroy Discord client before exiting

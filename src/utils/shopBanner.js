@@ -2,6 +2,7 @@
 
 const { createCanvas, loadImage } = require('canvas');
 const { ensureFontsRegistered } = require('./registerFonts');
+const { encodeCanvas } = require('./canvasEncode');
 
 ensureFontsRegistered();
 
@@ -70,7 +71,10 @@ async function renderCategoryBanner({ activity, title, subtitle, items, currency
         await renderTile(ctx, safeItems[i], x, y, theme, currency);
     }
 
-    return canvas.toBuffer('image/png');
+    // Async encode, not `canvas.toBuffer()` — see utils/canvasEncode.js.
+    // This banner is far larger than the welcome card #592 measured: four
+    // tiles wide and as many rows as the category has items.
+    return encodeCanvas(canvas);
 }
 
 async function renderTile(ctx, item, x, y, theme, currency) {

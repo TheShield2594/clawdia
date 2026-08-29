@@ -57,6 +57,42 @@ class BoundedRateLimiter {
         return arr.filter(t => now - t < windowMs).length < limit;
     }
 
+    /**
+     * Records a hit against `key` and returns how many hits fall inside
+     * `windowMs`, counting the one just recorded.
+     *
+     * `check` above answers "may this happen?" and refuses to record once the
+     * limit is reached. Some callers want the opposite reading: the event is
+     * real and has already happened, and the count itself is the signal — spam
+     * detection fires *because* the fifth message in five seconds exists. Those
+     * callers get the count and decide, rather than being handed a boolean that
+     * has already made the decision with an off-by-one to unpick.
+     *
+     * Eviction is the same FIFO rule `check` uses, so a caller mixing the two
+     * on one instance sees one bounded map rather than two policies.
+     */
+    hit(key, windowMs) {
+        const now = Date.now();
+        const timestamps = (this._map.get(key) || []).filter(t => now - t < windowMs);
+        if (!this._map.has(key) && this._map.size >= this._maxSize) {
+            this._map.delete(this._map.keys().next().value);
+        }
+        timestamps.push(now);
+        this._map.set(key, timestamps);
+        return timestamps.length;
+    }
+
+    /**
+     * Forgets `key` entirely, so its next hit counts as the first.
+     *
+     * This is what a caller that *acted* on a count needs: having punished the
+     * spammer, the window that proved it must not also prove the next message,
+     * or one burst becomes a punishment per message until it ages out.
+     */
+    reset(key) {
+        this._map.delete(key);
+    }
+
     /** Drops keys whose recorded requests have all aged out of `windowMs`. */
     cleanup(windowMs) {
         const cutoff = Date.now() - windowMs;
