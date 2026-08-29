@@ -372,7 +372,10 @@ function buildSettingsPayload(section, ctx = {}) {
             'dailyNews.time': document.getElementById('dailynews-time').value,
             'dailyNews.timezone': document.getElementById('dailynews-timezone').value.trim() || null,
             'dailyNews.title': document.getElementById('dailynews-title').value,
-            'dailyNews.maxItemsPerFeed': parseInt(document.getElementById('dailynews-max-items').value),
+            // Same radix and same fallback as the per-profile copy above: an
+            // empty field parses to NaN, JSON.stringify turns that into null,
+            // and the schema's `default: 3` does not apply to an explicit null.
+            'dailyNews.maxItemsPerFeed': parseInt(document.getElementById('dailynews-max-items').value, 10) || 3,
             'dailyNews.feeds': feeds,
             dailyNewsProfiles: profiles
         };

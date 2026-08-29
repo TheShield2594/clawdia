@@ -331,6 +331,23 @@ describe('voice XP', () => {
     it('logs a failed save rather than rejecting into the gateway', async () => {
         const errors = jest.spyOn(console, 'error').mockImplementation(() => {});
         getGuildSettings.mockResolvedValue(levelingSettings());
+        const user = makeUser({ save: jest.fn().mockRejectedValue(new Error('mongo is down')) });
+        User.findOne.mockResolvedValue(user);
+        const guild = makeGuild();
+
+        await expect(sitInVoice(guild, makeMember(guild), 10)).resolves.toBeUndefined();
+
+        expect(user.save).toHaveBeenCalled();
+        expect(errors).toHaveBeenCalledWith('Voice XP error:', expect.any(Error));
+        // The rivalry check runs off the saved figures, so a save that did not
+        // land must not announce one.
+        expect(checkRivalry).not.toHaveBeenCalled();
+        errors.mockRestore();
+    });
+
+    it('logs a failed lookup the same way', async () => {
+        const errors = jest.spyOn(console, 'error').mockImplementation(() => {});
+        getGuildSettings.mockResolvedValue(levelingSettings());
         User.findOne.mockRejectedValue(new Error('mongo is down'));
         const guild = makeGuild();
 

@@ -273,6 +273,31 @@ describe('ai', () => {
     });
 });
 
+describe('dailynews', () => {
+    it('falls back to three items rather than sending a NaN ceiling', async () => {
+        // parseInt('') is NaN, JSON.stringify turns that into null, and the
+        // schema's `default: 3` does not apply to an explicit null — so an
+        // empty field used to store a ceiling of null.
+        bootPage();
+        clickTab('rss');
+        await settle();
+        document.getElementById('dailynews-max-items').value = '';
+
+        const payload = buildSettingsPayload('dailynews');
+
+        expect(payload['dailyNews.maxItemsPerFeed']).toBe(3);
+    });
+
+    it('sends the ceiling that was typed', async () => {
+        bootPage();
+        clickTab('rss');
+        await settle();
+        document.getElementById('dailynews-max-items').value = '7';
+
+        expect(buildSettingsPayload('dailynews')['dailyNews.maxItemsPerFeed']).toBe(7);
+    });
+});
+
 describe('the over-length system prompt guard', () => {
     // The one piece of saveSettings('ai') that is not payload construction, and
     // the reason it stayed behind in the bundle. EJS renders a stored prompt
@@ -305,14 +330,43 @@ describe('the over-length system prompt guard', () => {
 });
 
 describe('the bundle', () => {
-    it('no longer builds the payload itself', () => {
+    it('delegates its payload to the shared module at call time', async () => {
         // The split only holds if guild-settings.js keeps delegating; a section
-        // added back into it would be untested again.
-        const bundle = fs.readFileSync(
-            path.join(__dirname, '..', 'src', 'dashboard', 'public', 'guild-settings.js'), 'utf8'
-        );
-        expect(bundle).toContain('buildSettingsPayload(section, {');
-        expect(bundle).not.toMatch(/^\s+data = \{$/m);
+        // built back inside it would be untested again. Asserted by standing in
+        // for the module rather than by reading the bundle's source, so it is
+        // the call that is pinned and not the formatting of the line making it.
+        bootPage();
+        clickTab('welcome');
+        await settle();
+
+        // Installed after bootPage, not before: booting re-evaluates
+        // settings-payload.js, which would put the real function back.
+        const real = window.buildSettingsPayload;
+        const spy = jest.fn(() => ({ 'welcome.enabled': true }));
+        window.buildSettingsPayload = spy;
+        window.fetch.mockClear();
+        try {
+            await window.saveSettings('welcome');
+        } finally {
+            window.buildSettingsPayload = real;
+        }
+
+        expect(spy).toHaveBeenCalledTimes(1);
+        const [section, ctx] = spy.mock.calls[0];
+        expect(section).toBe('welcome');
+        // Everything the panels hold outside the document still reaches it.
+        expect(ctx).toEqual(expect.objectContaining({
+            serializeEscalationLadder: expect.any(Function),
+            storeItems: expect.any(Array),
+            jobsList: expect.any(Array),
+            jobTiersList: expect.any(Array),
+            mcpSettings: expect.any(Function),
+        }));
+
+        // And what the module returned is what was POSTed, so this is the whole
+        // path rather than a call whose result the bundle then discards.
+        const [, options] = window.fetch.mock.calls.find(([url]) => /\/settings$/.test(String(url)));
+        expect(JSON.parse(options.body)).toEqual({ 'welcome.enabled': true });
     });
 
     it('is served the module it calls', () => {

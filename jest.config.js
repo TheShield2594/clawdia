@@ -33,8 +33,8 @@ module.exports = {
     coverageReporters: ['text-summary', 'json-summary', 'lcov'],
 
     // Measured over the suite at the commit that raised these — 271 suites,
-    // 5,255 tests, integration excluded: statements 45.37, branches 36.05,
-    // functions 46.91, lines 46.56. Raised from 36/25/38/37 by the dashboard
+    // 5,260 tests, integration excluded: statements 45.34, branches 36.00,
+    // functions 46.94, lines 46.54. Raised from 36/25/38/37 by the dashboard
     // validator, event-handler and settings-payload tests in #787, #788 and
     // #789; the measurement excludes the two integration suites, so the number
     // CI sees is this or better.
@@ -47,10 +47,10 @@ module.exports = {
     // than a deleted test suite, which is the window a ratchet wants.
     //
     // It is also why these are not rounded up to the nearest percent instead:
-    // branches measures 36.05 and functions 46.91, so a floor at the next whole
-    // number would leave 0.05 and 0.09 of a point of headroom — less than an
-    // unrelated refactor moves, and enough to fail the run after the one that
-    // set it.
+    // branches measures 36.00 on the nose and functions 46.94, so a floor at the
+    // next whole number would leave none and 0.06 of a point of headroom — less
+    // than an unrelated refactor moves, and enough to fail the run after the one
+    // that set it.
     coverageThreshold: {
         global: {
             statements: 45,

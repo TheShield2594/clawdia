@@ -85,6 +85,14 @@ describe('isAllowedSettingKey', () => {
         expect(isAllowedSettingKey('welcomeMat')).toBe(false);
         expect(ALLOWED_SETTING_PARENTS.has('welcome')).toBe(true);
     });
+
+    it('is exported as a copy, so a caller cannot widen the writable surface', () => {
+        const mine = settings.ALLOWED_SETTING_PARENTS;
+        mine.add('casinoJackpot');
+
+        expect(settings.ALLOWED_SETTING_PARENTS.has('casinoJackpot')).toBe(false);
+        expect(isAllowedSettingKey('casinoJackpot.pool')).toBe(false);
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -453,10 +461,15 @@ describe('validateAiUpdate', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /guild/:guildId/settings', () => {
+    // The gateway facade lives out here so the reschedule hook is a mock the
+    // assertions can read, rather than a fresh one built per request and thrown
+    // away inside the middleware.
+    const bot = { rescheduleBibleVerse: jest.fn() };
+
     function makeApp() {
         const app = express();
         app.use(express.json());
-        app.use((req, _res, next) => { req.bot = { rescheduleBibleVerse: jest.fn() }; next(); });
+        app.use((req, _res, next) => { req.bot = bot; next(); });
         app.use('/api/v1', settings);
         return app;
     }
@@ -547,6 +560,16 @@ describe('POST /guild/:guildId/settings', () => {
         expect(res.body).toEqual({ success: true });
         expect(doc.set).toHaveBeenCalledWith('welcome.enabled', true);
         expect(doc.save).toHaveBeenCalled();
+        // The scheduler holds the old cron until it is told; without this the
+        // verse keeps arriving at the time the guild just changed away from.
+        expect(bot.rescheduleBibleVerse).toHaveBeenCalledWith('g1');
+    });
+
+    it('leaves the schedule alone when no bibleVerse key changed', async () => {
+        const res = await post({ 'welcome.enabled': true });
+
+        expect(res.status).toBe(200);
+        expect(bot.rescheduleBibleVerse).not.toHaveBeenCalled();
     });
 
     it('404s a guild with no settings document', async () => {

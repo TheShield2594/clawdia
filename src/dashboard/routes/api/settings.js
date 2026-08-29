@@ -483,8 +483,17 @@ module.exports = router;
 // string or null (#787). Reaching them through supertest instead would mean a
 // request, a session, a guild document and a mongoose save for each of the
 // several dozen field rules below, and the rules are the part worth pinning.
+// A fresh copy per read, defined rather than assigned because Object.assign
+// would copy the getter's value once and hand every caller the same Set. The
+// allow-list is a security control: handing out the live one would let anything
+// that requires this router widen the writable surface of every guild document
+// with a single `.add()`. `isAllowedSettingKey` keeps reading the internal one.
+Object.defineProperty(module.exports, 'ALLOWED_SETTING_PARENTS', {
+    enumerable: true,
+    get: () => new Set(ALLOWED_SETTING_PARENTS),
+});
+
 Object.assign(module.exports, {
-    ALLOWED_SETTING_PARENTS,
     isAllowedSettingKey,
     validateWelcomeUpdate,
     validateFarewellUpdate,
