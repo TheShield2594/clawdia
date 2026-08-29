@@ -46,10 +46,10 @@ describe('coverage ratchet', () => {
     // meant to be raised, never lowered.
     test('the thresholds sit near the coverage the suite actually has', () => {
         const global = config.coverageThreshold.global;
-        expect(global.statements).toBeGreaterThanOrEqual(36);
-        expect(global.branches).toBeGreaterThanOrEqual(25);
-        expect(global.functions).toBeGreaterThanOrEqual(38);
-        expect(global.lines).toBeGreaterThanOrEqual(37);
+        expect(global.statements).toBeGreaterThanOrEqual(45);
+        expect(global.branches).toBeGreaterThanOrEqual(35);
+        expect(global.functions).toBeGreaterThanOrEqual(46);
+        expect(global.lines).toBeGreaterThanOrEqual(46);
     });
 
     test('the summary Jest prints and the JSON the CI step reads are both produced', () => {

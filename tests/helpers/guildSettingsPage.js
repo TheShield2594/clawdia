@@ -96,6 +96,7 @@ function bootPage({ panelFetch } = {}) {
     };
     window.eval(fs.readFileSync(path.join(PUBLIC, 'esc-html.js'), 'utf8'));
     window.eval(bootstrap);
+    window.eval(fs.readFileSync(path.join(PUBLIC, 'settings-payload.js'), 'utf8'));
     window.eval(fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8'));
 }
 
