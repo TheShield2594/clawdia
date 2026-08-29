@@ -1,21 +1,33 @@
 'use strict';
 
 // The two AI content services whose output is read by code, not just by people
-// (#830): the DM campaign, which parses HP changes back out of the model's
-// prose, and the newspaper, which has to print something even when the model
+// (#830): the DM campaign, which turns a narration into HP and inventory
+// changes, and the newspaper, which has to print something even when the model
 // says nothing at all.
 //
-// The damage regex is the sharp one. It is scoped to the acting player by name
-// or by "you", because a scene that says "the goblin takes 12 damage" must not
-// take 12 HP off the character who swung at it — and a name is user input, so
-// it goes through an escape before it becomes a pattern.
+// The campaign reads a structured `EFFECTS:` block now (#837) — which is what
+// lets a trap hurt somebody who did not type, and a party actually be wiped
+// out. The prose regex it replaced is still exercised below as what happens
+// when a model ignores the format, which is its only remaining job.
 
 jest.mock('../src/models/DmSession', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
+// The turn lease is Mongo-backed (#837), and these tests have no Mongo. Granted
+// by default; the contention test below is the one that takes it away.
+jest.mock('../src/utils/activeGameLock', () => ({
+    tryAcquire: jest.fn(async () => 'lease-token'),
+    release: jest.fn(async () => true),
+    holderActivity: jest.fn(async () => null),
+    DEFAULT_TTL_MS: 60_000,
+}));
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn(), find: jest.fn(), findOneAndUpdate: jest.fn() }));
-jest.mock('../src/models/User', () => ({ find: jest.fn(), findOne: jest.fn(), countDocuments: jest.fn() }));
+jest.mock('../src/models/User', () => ({ find: jest.fn(), findOne: jest.fn(), countDocuments: jest.fn(), aggregate: jest.fn() }));
 jest.mock('../src/models/Case', () => ({ countDocuments: jest.fn() }));
 jest.mock('../src/models/Transaction', () => ({ find: jest.fn() }));
 jest.mock('../src/models/GrindProfile', () => ({ findOne: jest.fn() }));
+// The signals the paper gained when its sections became a registry (#836).
+jest.mock('../src/models/AiItem', () => ({ find: jest.fn() }));
+jest.mock('../src/models/AiQuest', () => ({ find: jest.fn() }));
+jest.mock('../src/models/WeeklyChampion', () => ({ find: jest.fn() }));
 jest.mock('../src/utils/netWorth', () => ({ topByNetWorth: jest.fn(async () => []) }));
 
 const mockGetCompletion = jest.fn();
@@ -25,11 +37,20 @@ jest.mock('../src/services/aiService', () => ({
 }));
 
 const DmSession = require('../src/models/DmSession');
+const activeGameLock = require('../src/utils/activeGameLock');
+
+// `DmSession.findOne` is awaited directly in some places and `.lean()`-ed in the
+// two that resolve a turn, so the mock has to be both a promise and a query —
+// the way a real Mongoose query is.
+const asQuery = doc => Object.assign(Promise.resolve(doc), { lean: async () => doc });
 const Guild = require('../src/models/Guild');
 const User = require('../src/models/User');
 const Case = require('../src/models/Case');
 const Transaction = require('../src/models/Transaction');
 const GrindProfile = require('../src/models/GrindProfile');
+const AiItem = require('../src/models/AiItem');
+const AiQuest = require('../src/models/AiQuest');
+const WeeklyChampion = require('../src/models/WeeklyChampion');
 
 const { takeAction } = require('../src/services/dmService');
 const { generateNewspaper } = require('../src/services/newspaperService');
@@ -38,13 +59,32 @@ let errorSpy;
 
 beforeEach(() => {
     jest.clearAllMocks();
+    activeGameLock.tryAcquire.mockResolvedValue('lease-token');
+    activeGameLock.release.mockResolvedValue(true);
     errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     Guild.findOne.mockResolvedValue({ guildId: 'g1', ai: { enabled: true, provider: 'mock' } });
 });
 
 afterEach(() => errorSpy.mockRestore());
 
-describe('the DM campaign reading HP back out of the story', () => {
+// A `findOneAndUpdate` faithful enough for the turn write: the service asks for
+// the post-write document (`new: true`) so a character who joined mid-turn is
+// counted before the party is declared wiped, and a mock that hands back the
+// pre-write party would report a wipe that did not happen — and hide one that
+// did.
+function applyingUpdate(doc) {
+    return async (_filter, update) => {
+        if (!update?.$push?.storyLog) return doc;
+        const players = doc.players.map((p, i) => ({
+            ...p,
+            hp: update.$set?.[`players.$[p${i}].hp`] ?? p.hp,
+            inventory: update.$set?.[`players.$[p${i}].inventory`] ?? p.inventory,
+        }));
+        return { ...doc, players };
+    };
+}
+
+describe('the DM campaign reading HP out of the model\'s prose, when that is all there is', () => {
     const PLAYER = { userId: 'u1', name: 'Aric', characterClass: 'Warrior', hp: 120, inventory: ['Longsword'] };
 
     function session(players = [PLAYER]) {
@@ -67,17 +107,20 @@ describe('the DM campaign reading HP back out of the story', () => {
         };
     }
 
-    // The HP write, if there was one: the update sets it through an arrayFilter
-    // so only the acting player's slot moves.
-    function writtenHp() {
-        const call = DmSession.findOneAndUpdate.mock.calls.find(c => c[1]?.$set?.['players.$[elem].hp'] !== undefined);
-        return call ? call[1].$set['players.$[elem].hp'] : null;
+    // The HP write for one party slot, if there was one. Each character that
+    // moved is written through its own array filter, so the index is the
+    // character's position in the party — which is what lets a turn hurt two
+    // people at once in the structured tests below.
+    function writtenHp(index = 0) {
+        const path = `players.$[p${index}].hp`;
+        const call = DmSession.findOneAndUpdate.mock.calls.find(c => c[1]?.$set?.[path] !== undefined);
+        return call ? call[1].$set[path] : null;
     }
 
     async function narrate(text, players) {
         const doc = session(players);
-        DmSession.findOne.mockResolvedValue(doc);
-        DmSession.findOneAndUpdate.mockResolvedValue(doc);
+        DmSession.findOne.mockReturnValue(asQuery(doc));
+        DmSession.findOneAndUpdate.mockImplementation(applyingUpdate(doc));
         mockGetCompletion.mockResolvedValue(text);
         const it = interaction();
         await takeAction(it);
@@ -157,7 +200,7 @@ describe('the DM campaign reading HP back out of the story', () => {
     });
 
     test('a limit refusal says so instead of "try again"', async () => {
-        DmSession.findOne.mockResolvedValue(session());
+        DmSession.findOne.mockReturnValue(asQuery(session()));
         mockGetCompletion.mockRejectedValue(
             Object.assign(new Error('limit'), { rateLimited: true, limit: 5, windowMin: 10 })
         );
@@ -166,6 +209,216 @@ describe('the DM campaign reading HP back out of the story', () => {
         await takeAction(it);
 
         expect(it.editReply).toHaveBeenCalledWith(expect.stringMatching(/AI request limit \(5 per 10m\)/));
+    });
+});
+
+// #837: what the narration actually did, as data.
+//
+// The prose reader above can only ever wound the character who typed, which is
+// why a dragon's breath weapon used to hit exactly one person and a party wipe
+// could not happen. The model now says what happened in a trailing block, and
+// these are the cases that block exists for.
+describe('the DM campaign applying a structured EFFECTS block', () => {
+    const ARIC = { userId: 'u1', name: 'Aric', characterClass: 'Warrior', hp: 120, inventory: ['Longsword'] };
+    const LYRA = { userId: 'u2', name: 'Lyra', characterClass: 'Mage', hp: 70, inventory: [] };
+
+    function interaction(userId = 'u1') {
+        return {
+            user: { id: userId },
+            guild: { id: 'g1' },
+            channel: { id: 'c1', send: jest.fn(async () => ({ id: 'm1' })), messages: { fetch: jest.fn() } },
+            channelId: 'c1',
+            options: { getString: () => 'swing at the dragon' },
+            deferReply: jest.fn(async () => {}),
+            editReply: jest.fn(async payload => payload),
+            reply: jest.fn(async payload => payload),
+        };
+    }
+
+    async function narrate(text, players = [ARIC]) {
+        const doc = {
+            sessionId: 'g1:c1', guildId: 'g1', channelId: 'c1', hostId: 'u1',
+            players, storyLog: ['The gate stands open.'], active: true, partyState: {},
+        };
+        DmSession.findOne.mockReturnValue(asQuery(doc));
+        DmSession.findOneAndUpdate.mockImplementation(applyingUpdate(doc));
+        mockGetCompletion.mockResolvedValue(text);
+        const it = interaction();
+        await takeAction(it);
+        return it;
+    }
+
+    function writes() {
+        const call = DmSession.findOneAndUpdate.mock.calls.find(c => c[1]?.$push?.storyLog);
+        return { update: call?.[1] ?? {}, options: call?.[2] ?? {} };
+    }
+
+    function hp(index) {
+        return writes().update.$set?.[`players.$[p${index}].hp`] ?? null;
+    }
+
+    function inventory(index) {
+        return writes().update.$set?.[`players.$[p${index}].inventory`] ?? null;
+    }
+
+    const block = effects => `The dragon inhales.\nEFFECTS:${JSON.stringify(effects)}`;
+
+    test('hurts the character the block names, not the one who typed', async () => {
+        await narrate(block([{ type: 'damage', target: 'Lyra', amount: 30 }]), [ARIC, LYRA]);
+
+        expect(hp(0)).toBeNull();
+        expect(hp(1)).toBe(40);
+    });
+
+    // The whole point of the rewrite: an area effect reaches everyone, so the
+    // party can lose.
+    test('a party-wide effect reaches every living character', async () => {
+        await narrate(block([{ type: 'damage', target: 'party', amount: 200 }]), [ARIC, LYRA]);
+
+        expect(hp(0)).toBe(0);
+        expect(hp(1)).toBe(0);
+    });
+
+    test('and a party that all falls at once ends the session', async () => {
+        await narrate(block([{ type: 'damage', target: 'party', amount: 500 }]), [ARIC, LYRA]);
+
+        const closed = DmSession.findOneAndUpdate.mock.calls.some(c => c[1]?.$set?.active === false);
+        expect(closed).toBe(true);
+    });
+
+    // `/dm join` is a `$push` that runs outside the turn lease, so somebody can
+    // enter the party while the scene is being written. The wipe is decided
+    // from the party the write returns, not from the copy the turn worked with.
+    test('does not bury a player who joined while the scene was being written', async () => {
+        const doc = {
+            sessionId: 'g1:c1', guildId: 'g1', channelId: 'c1', hostId: 'u1',
+            players: [ARIC], storyLog: ['The gate stands open.'], active: true, partyState: {},
+        };
+        DmSession.findOne.mockReturnValue(asQuery(doc));
+        DmSession.findOneAndUpdate.mockImplementation(async (_filter, update) => {
+            if (!update?.$push?.storyLog) return doc;
+            // The latecomer, pushed by a concurrent /dm join.
+            return { ...doc, players: [{ ...ARIC, hp: 0 }, { ...LYRA, userId: 'u3', name: 'Kest' }] };
+        });
+        mockGetCompletion.mockResolvedValue(block([{ type: 'damage', target: 'Aric', amount: 500 }]));
+
+        await takeAction(interaction());
+
+        const closed = DmSession.findOneAndUpdate.mock.calls.some(c => c[1]?.$set?.active === false);
+        expect(closed).toBe(false);
+    });
+
+    test('healing stops at the class ceiling', async () => {
+        await narrate(block([{ type: 'heal', target: 'Aric', amount: 90 }]), [{ ...ARIC, hp: 60 }]);
+        expect(hp(0)).toBe(120);
+    });
+
+    test('items are real now, in both directions', async () => {
+        await narrate(block([
+            { type: 'add_item', target: 'Aric', item: 'Rusty Key' },
+            { type: 'remove_item', target: 'Aric', item: 'longsword' },
+        ]));
+
+        expect(inventory(0)).toEqual(['Rusty Key']);
+    });
+
+    test('the scene the block sets is where the party is', async () => {
+        await narrate(block([{ type: 'set_scene', scene: 'The flooded lower vault' }]));
+
+        expect(writes().update.$set['partyState.scene']).toBe('The flooded lower vault');
+    });
+
+    // A block is believed completely, including when it says nothing happened —
+    // otherwise the prose reader would second-guess a model that got it right.
+    test('a block that reports nothing overrides what the prose says', async () => {
+        await narrate('Aric takes 40 damage — or seems to.\nEFFECTS:[]');
+        expect(hp(0)).toBeNull();
+    });
+
+    test('a target nobody in the party answers to is dropped', async () => {
+        await narrate(block([{ type: 'damage', target: 'the goblin', amount: 12 }]));
+        expect(hp(0)).toBeNull();
+    });
+
+    test('a malformed block costs the effects, not the scene', async () => {
+        const it = await narrate('The dragon inhales.\nEFFECTS:[{"type":"damage",');
+
+        expect(hp(0)).toBeNull();
+        expect(it.editReply).toHaveBeenCalledWith(expect.objectContaining({ embeds: expect.any(Array) }));
+    });
+
+    // Mongo rejects an update naming an array filter no path uses, so a turn in
+    // which nothing moved must carry none.
+    test('a turn that changes nothing writes no array filters', async () => {
+        await narrate('You look around the empty room.');
+        expect(writes().options.arrayFilters).toBeUndefined();
+    });
+
+    test('and one that changes somebody carries exactly their filter', async () => {
+        await narrate(block([{ type: 'damage', target: 'Lyra', amount: 10 }]), [ARIC, LYRA]);
+        expect(writes().options.arrayFilters).toEqual([{ 'p1.userId': 'u2' }]);
+    });
+});
+
+// #837: two players acting at the same moment used to both read the same
+// history, both pay for a completion, and both append a narration written as
+// though the other had not happened.
+describe('the DM turn lease', () => {
+    const PLAYER = { userId: 'u1', name: 'Aric', characterClass: 'Warrior', hp: 120, inventory: [] };
+
+    function interaction() {
+        return {
+            user: { id: 'u1' },
+            guild: { id: 'g1' },
+            channel: { id: 'c1', send: jest.fn(async () => ({ id: 'm1' })), messages: { fetch: jest.fn() } },
+            channelId: 'c1',
+            options: { getString: () => 'push on' },
+            deferReply: jest.fn(async () => {}),
+            editReply: jest.fn(async payload => payload),
+            reply: jest.fn(async payload => payload),
+        };
+    }
+
+    beforeEach(() => {
+        const doc = {
+            sessionId: 'g1:c1', guildId: 'g1', channelId: 'c1', hostId: 'u1',
+            players: [PLAYER], storyLog: ['The gate stands open.'], active: true, partyState: {},
+        };
+        DmSession.findOne.mockReturnValue(asQuery(doc));
+        DmSession.findOneAndUpdate.mockResolvedValue(doc);
+        mockGetCompletion.mockResolvedValue('The corridor narrows.');
+    });
+
+    test('is taken for the session, not for the player', async () => {
+        await takeAction(interaction());
+        expect(activeGameLock.tryAcquire).toHaveBeenCalledWith('dm:g1:c1', expect.any(Number), expect.any(String));
+    });
+
+    // Refused rather than queued: a turn that waits for the one in front of it
+    // narrates from a story that has already moved on.
+    test('turns a second player away without spending an AI call', async () => {
+        activeGameLock.tryAcquire.mockResolvedValue(null);
+
+        const it = interaction();
+        await takeAction(it);
+
+        expect(mockGetCompletion).not.toHaveBeenCalled();
+        expect(it.editReply).toHaveBeenCalledWith(expect.stringMatching(/still being narrated/));
+    });
+
+    test('is released once the turn is over', async () => {
+        await takeAction(interaction());
+        expect(activeGameLock.release).toHaveBeenCalledWith('dm:g1:c1', 'lease-token');
+    });
+
+    // A throw inside the turn must free the campaign rather than park it until
+    // the lease expires.
+    test('and released when the turn throws', async () => {
+        mockGetCompletion.mockRejectedValue(new Error('provider down'));
+
+        await takeAction(interaction());
+
+        expect(activeGameLock.release).toHaveBeenCalledWith('dm:g1:c1', 'lease-token');
     });
 });
 
@@ -198,7 +451,7 @@ describe('the DM campaign history roles', () => {
     // The history the model was handed for this action.
     async function historyFor(storyLog) {
         const doc = { sessionId: 'g1:c1', guildId: 'g1', channelId: 'c1', hostId: 'u1', players: [PLAYER], storyLog, active: true };
-        DmSession.findOne.mockResolvedValue(doc);
+        DmSession.findOne.mockReturnValue(asQuery(doc));
         DmSession.findOneAndUpdate.mockResolvedValue(doc);
         mockGetCompletion.mockResolvedValue('The corridor narrows.');
 
@@ -273,6 +526,16 @@ describe('the newspaper when the model does not deliver', () => {
         GrindProfile.findOne.mockReturnValue({
             sort: () => ({ select: () => ({ lean: async () => null }) }),
         });
+        User.aggregate.mockResolvedValue([]);
+        const emptyList = {
+            sort: () => emptyList,
+            limit: () => emptyList,
+            select: () => emptyList,
+            lean: async () => [],
+        };
+        AiItem.find.mockReturnValue(emptyList);
+        AiQuest.find.mockReturnValue(emptyList);
+        WeeklyChampion.find.mockReturnValue(emptyList);
     });
 
     test('prints the model\'s edition when there is one', async () => {

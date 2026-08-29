@@ -3,9 +3,17 @@ const DmSession = require('../models/DmSession');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
 const Guild = require('../models/Guild');
 const COLORS = require('../utils/embedColors');
+const { extractEffects, applyEffects, effectsInstruction } = require('./dm/effects');
+const { proseEffects } = require('./dm/prose');
+const { diceTool, describe: describeRoll } = require('./dm/dice');
+const { withTurn } = require('./dm/turnLock');
 
 const MAX_PLAYERS = 6;
 const MAX_STORY_LOG = 20;
+
+// Discord's own ceiling on an embed field. The rolls and the effect log are
+// both lists of unknown length, so both are cut to fit rather than trusted.
+const MAX_FIELD_CHARS = 1024;
 
 /**
  * The AI Dungeon Master: one persistent D&D session per channel, backed by the
@@ -24,6 +32,25 @@ const MAX_STORY_LOG = 20;
  *
  * A session is keyed on `guildId:channelId`, so two channels can run their own
  * adventures and one channel cannot run two.
+ *
+ * ## How a turn resolves (#837)
+ *
+ * The two turns that cost an AI call — `/dm begin` and `/dm action` — run under
+ * this session's turn lease (`./dm/turnLock.js`), and re-read the session
+ * *inside* it. Everything before the lease is a cheap refusal: whether there is
+ * a session at all, whether the caller is in it. Everything the outcome depends
+ * on is read after it, because between the two reads another player's turn may
+ * have moved the whole party.
+ *
+ * What the narration did is carried by the structured `EFFECTS:` block the
+ * model appends (`./dm/effects.js`), not inferred from the prose — so damage
+ * lands on whoever it hit rather than on whoever typed, items are real, and the
+ * party can actually be wiped out. A turn whose model ignored the format falls
+ * back to reading the sentence (`./dm/prose.js`), which is the old behaviour and
+ * its old limits.
+ *
+ * Skill checks go through the `dice_roll` tool, so an outcome is a number the
+ * party can see rather than the model's mood.
  */
 
 const CLASSES = ['Warrior', 'Mage', 'Rogue', 'Cleric', 'Ranger', 'Paladin'];
@@ -37,6 +64,11 @@ const CLASS_INVENTORY = {
     Paladin: ['Holy Sword', 'Chainmail', 'Healing Potion']
 };
 
+/** A character's HP ceiling, which is their class's. */
+function maxHpFor(player) {
+    return CLASS_HP[player?.characterClass] || 100;
+}
+
 function makeSessionId(guildId, channelId) {
     return `${guildId}:${channelId}`;
 }
@@ -45,72 +77,79 @@ async function getActiveSession(guildId, channelId) {
     return DmSession.findOne({ guildId, channelId, active: true });
 }
 
-function escapeRegex(str) {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// Another creature entering the sentence. Two kinds: an article and the word
-// after it ("the goblin", "a skeleton"), and — because a party member is named
-// rather than introduced — the other characters in this session by name. Without
-// the second kind, "Aric swings wide and Lyra takes 30 damage" charged Aric for
-// Lyra's wound, since the only subject the sentence marked was his.
-const ARTICLE_SUBJECT = '\\b(?:the|a|an|another|each|every)\\s+\\S+';
-
-function otherSubjectPattern(otherNames = []) {
-    const named = otherNames
-        .filter(name => typeof name === 'string' && name.trim())
-        .map(name => escapeRegex(name.trim()));
-    return new RegExp([ARTICLE_SUBJECT, ...named].join('|'), 'gi');
-}
-
-/** The last index at which `pattern` matches before `limit`, or -1. */
-function lastMatchBefore(pattern, text, limit) {
-    let last = -1;
-    for (const match of text.matchAll(pattern)) {
-        if (match.index >= limit) break;
-        last = match.index;
+/**
+ * The guild's provider config for a DM call, or an error string to show.
+ *
+ * `mcpServers` is deliberately dropped on the floor here rather than spread
+ * through: the guild's connected servers have no business being reachable from
+ * inside a story, and a narrator that can read somebody's issue tracker
+ * mid-scene is a prompt injection surface with a dragon on it. The dice tool
+ * below is the only tool a DM turn is given, and it is the bot's own.
+ */
+async function dmProviderConfig(guildId) {
+    const gs = await Guild.findOne({ guildId });
+    const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(gs?.ai || {});
+    if (provider !== 'ollama' && !apiKey) {
+        return { error: 'AI is not configured for this server. An admin must add an API key.' };
     }
-    return last;
+    return { config: { provider, model, apiKey, baseUrl, rateLimit } };
 }
 
 /**
- * A number the narration attributes to this character, or null.
+ * Ask the model to narrate, with the dice in its hands and none of the guild's
+ * MCP servers.
  *
- * The scoping is what stops "your blow lands and the goblin takes 12 damage"
- * taking twelve HP off the player who swung: an unscoped regex reads any
- * "takes N damage" as theirs, and a scope that only asks whether the player is
- * mentioned somewhere earlier in the sentence reads that one as theirs too,
- * which is the same bug with more steps.
- *
- * So the subject nearest the verb wins. Whichever of "this character" and "some
- * other creature" appears last before "takes 12 damage" is who it happened to —
- * which is how the sentence reads to a person, and it holds for both orders
- * ("the goblin lunges and Aric takes 15 damage" is still Aric's).
- *
- * @param {string} narrative the model's prose
- * @param {string} namePattern the character's name, already regex-escaped
- * @param {string} verbs alternation of the verbs to look for, e.g. `takes?`
- * @param {string} unit what is being counted, e.g. `damage`
- * @param {string[]} [otherNames] the other characters in the session, who are
- *        subjects in their own right — what happens to them is not this
- *        character's, however early in the sentence this character is named
+ * Returns the prose with the effects block stripped, the effects it carried,
+ * and every roll the model made on the way — which the caller prints, because a
+ * roll nobody sees is not an audit trail.
  */
-function amountFor(narrative, namePattern, verbs, unit, otherNames = []) {
-    const clause = new RegExp(`\\b(?:${verbs})\\s+(\\d+)\\s+${unit}\\b`, 'gi');
-    // "you"/"your" as well as the name: the model writes to the acting player in
-    // the second person about as often as it uses their character's name.
-    const scope = new RegExp(`${namePattern}|\\byour?\\b`, 'gi');
+async function narrate({ config, guildId, userId, channelId, systemPrompt, history, prompt, maxTokens }) {
+    const rolls = [];
+    const raw = await getCompletion({
+        ...config,
+        guildId, userId, channelId,
+        // Not `mcp: false`. That switched off the toolkit entirely, which is
+        // right for the guild's servers and wrong for the dice: `dice_roll` is
+        // a bot-owned tool, and the toolkit is what carries it. No servers are
+        // passed, so this builds a toolkit of exactly one tool.
+        mcp: true,
+        mcpServers: [],
+        botTools: [diceTool(rolls)],
+        systemPrompt, history, prompt, temperature: 0.9, maxTokens
+    });
 
-    const others = otherSubjectPattern(otherNames);
+    const { cleanText, effects, hadBlock } = extractEffects(raw);
+    return { text: cleanText, effects, hadBlock, rolls };
+}
 
-    for (const match of narrative.matchAll(clause)) {
-        const mine = lastMatchBefore(scope, narrative, match.index);
-        if (mine === -1) continue;
-        if (mine > lastMatchBefore(others, narrative, match.index)) {
-            return parseInt(match[1], 10);
+/** The rolls of a turn as an embed field, or null when nobody rolled. */
+function rollsField(rolls) {
+    if (!rolls.length) return null;
+    const lines = rolls.map(roll => describeRoll(roll, roll.reason));
+    return { name: '🎲 Rolls', value: fitLines(lines), inline: false };
+}
+
+/** The mechanical outcome as an embed field, or null when nothing changed. */
+function changesField(changes) {
+    if (!changes.length) return null;
+    return { name: '📋 What changed', value: fitLines(changes), inline: false };
+}
+
+// Field values are capped at 1024 characters, and a party-wide effect can
+// easily produce more lines than that. Dropping whole lines rather than cutting
+// mid-word keeps every line that is shown readable.
+function fitLines(lines) {
+    const kept = [];
+    let length = 0;
+    for (const line of lines) {
+        if (length + line.length + 1 > MAX_FIELD_CHARS - 20) {
+            kept.push('…');
+            break;
         }
+        kept.push(line);
+        length += line.length + 1;
     }
-    return null;
+    return kept.join('\n');
 }
 
 /**
@@ -138,7 +177,7 @@ async function startSession(interaction) {
             hostId: user.id,
             players: [],
             storyLog: [],
-            partyState: {},
+            partyState: { scene: null, turns: 0, updatedAt: null },
             active: true
         },
         { upsert: true, new: true }
@@ -216,9 +255,17 @@ async function joinSession(interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
+// What a player is told when somebody else holds the turn. Not an error: the
+// campaign is fine, it is just mid-sentence.
+const BUSY_MESSAGE = 'Another turn in this channel is still being narrated — give it a few seconds and try again.';
+
 /**
  * `/dm begin` — host only. Asks the model for an opening scene and pushes it as
  * the first entry in the story log, which is what `takeAction` counts back from.
+ *
+ * The "has the adventure already begun?" check is re-run under the turn lease,
+ * because on its own it is a check-then-act: two hosts pressing together both
+ * saw an empty log and both paid for an opening scene.
  *
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  * @returns {Promise<*>} the reply
@@ -245,39 +292,67 @@ async function beginSession(interaction) {
 
     await interaction.deferReply();
 
+    const outcome = await withTurn(
+        session.sessionId,
+        () => openScene(interaction, session.sessionId),
+        'the opening scene'
+    );
+    if (outcome === null) return interaction.editReply(BUSY_MESSAGE);
+    return outcome;
+}
+
+async function openScene(interaction, sessionId) {
+    const { channel, guild } = interaction;
+
+    // `.lean()` on both turn reads: nothing here saves the document — every
+    // write below is an explicit update — and a plain object is what the effect
+    // application wants back (see ./dm/effects.js on spreading a subdocument).
+    const session = await DmSession.findOne({ sessionId, active: true }).lean();
+    if (!session) return interaction.editReply('The session has ended.');
+    if (session.players.length === 0) return interaction.editReply('At least one player must join before beginning.');
+    if (session.storyLog.length > 0) return interaction.editReply('The adventure has already begun!');
+
     const partyDesc = session.players
         .map(p => `- **${p.name}** the ${p.characterClass} (HP: ${p.hp}, Items: ${p.inventory.join(', ')})`)
         .join('\n');
 
-    const systemPrompt = buildDMSystemPrompt();
-    const openingPrompt = `The party consists of:\n${partyDesc}\n\nSet the opening scene for this adventure. Introduce the setting, hint at the first challenge or mystery, and end with a clear situation requiring the party to make a decision or take action. Keep it to 2-3 paragraphs.`;
+    const systemPrompt = buildDMSystemPrompt(session.players);
+    const openingPrompt = `The party consists of:\n${partyDesc}\n\nSet the opening scene for this adventure. Introduce the setting, hint at the first challenge or mystery, and end with a clear situation requiring the party to make a decision or take action. Keep it to 2-3 paragraphs.\n\nSet the party's location with a set_scene effect.`;
 
     try {
-        const gs = await Guild.findOne({ guildId: guild.id });
-        const aiSettings = gs?.ai || {};
-        const { provider, model, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(aiSettings);
-
-        if (provider !== 'ollama' && !apiKey) {
-            return interaction.editReply('AI is not configured for this server. An admin must add an API key.');
-        }
+        const { config, error } = await dmProviderConfig(guild.id);
+        if (error) return interaction.editReply(error);
 
         // guildId/userId/channelId are what tie this call to the guild's usage
         // ledger and to its configured AI limits; a DM campaign is otherwise an
         // unbounded provider bill behind a slash command.
-        const story = await getCompletion({
-            provider, model, apiKey, baseUrl, mcpServers, rateLimit,
+        const { text: story, effects, rolls } = await narrate({
+            config,
             guildId: guild.id, userId: interaction.user.id, channelId: interaction.channelId,
-            // A narrator has no business making tool calls mid-story.
-            mcp: false,
-            systemPrompt, history: [], prompt: openingPrompt, temperature: 0.9, maxTokens: 600
+            systemPrompt, history: [], prompt: openingPrompt, maxTokens: 600
         });
 
-        await DmSession.findOneAndUpdate(
-            { sessionId: session.sessionId },
-            { $push: { storyLog: story } }
-        );
+        // The opening scene can hand out starting gear and set the location; it
+        // has nobody to wound yet, but the same path applies whatever it did.
+        const applied = applyEffects(session.players, effects, { maxHpFor });
 
-        const updatedSession = await DmSession.findOne({ sessionId: session.sessionId });
+        const update = {
+            $push: { storyLog: story },
+            $set: {
+                ...playerWrites(session.players, applied.players),
+                'partyState.updatedAt': new Date()
+            }
+        };
+        if (applied.scene) update.$set['partyState.scene'] = applied.scene;
+
+        // `new: true`: the document the write returns is the party as it now
+        // stands, including anybody who joined while the scene was being
+        // written — which the copy above cannot know about.
+        const updatedSession = await DmSession.findOneAndUpdate(
+            { sessionId, active: true },
+            update,
+            { new: true, ...updateOptions(session.players, applied.players) }
+        );
 
         const embed = new EmbedBuilder()
             .setTitle('📖 The Adventure Begins...')
@@ -285,7 +360,11 @@ async function beginSession(interaction) {
             .setDescription(story)
             .setFooter({ text: 'Use /dm action to take an action!' });
 
-        const storyRow = makeStoryButton(session.sessionId);
+        for (const field of [rollsField(rolls), changesField(applied.changes)]) {
+            if (field) embed.addFields(field);
+        }
+
+        const storyRow = makeStoryButton(sessionId);
         await interaction.editReply({ embeds: [embed], components: [storyRow] });
 
         if (updatedSession) {
@@ -300,13 +379,66 @@ async function beginSession(interaction) {
 }
 
 /**
- * `/dm action` — narrate one player's action and apply what the narration says
- * happened: damage taken, items gained or lost.
+ * The `$set` paths for the characters an effect list actually moved.
  *
- * Defers first, because the model call will outrun Discord's three seconds. The
- * player entry and the DM's narration are written together in one atomic
- * `$push`, which is what lets roles be counted back from the end of a log the
- * `$slice` trim keeps rewriting the front of.
+ * Written per character through `arrayFilters` rather than as one `$set` of the
+ * whole `players` array, because `/dm join` is a concurrent `$push` on that same
+ * array: replacing it wholesale would drop an adventurer who joined while the
+ * turn was being narrated. Only the fields that changed are written, so the
+ * update is also the record of what the turn did.
+ */
+function playerWrites(before, after) {
+    const writes = {};
+    after.forEach((player, i) => {
+        const was = before[i];
+        if (!was) return;
+        if (player.hp !== was.hp) writes[`players.$[p${i}].hp`] = player.hp;
+        if (!sameInventory(was.inventory, player.inventory)) {
+            writes[`players.$[p${i}].inventory`] = player.inventory;
+        }
+    });
+    return writes;
+}
+
+/**
+ * The matching `arrayFilters`. Mongo rejects an update carrying a filter
+ * identifier no path uses, so this has to name exactly the characters
+ * `playerWrites` wrote — same index, same condition.
+ */
+function playerFilters(before, after) {
+    const filters = [];
+    after.forEach((player, i) => {
+        const was = before[i];
+        if (!was) return;
+        if (player.hp === was.hp && sameInventory(was.inventory, player.inventory)) return;
+        filters.push({ [`p${i}.userId`]: player.userId });
+    });
+    return filters;
+}
+
+/**
+ * The update options for a turn's write.
+ *
+ * `arrayFilters` is omitted rather than passed empty when no character moved:
+ * an update carrying filters it does not use is rejected, and a turn in which
+ * nothing mechanical happened writes only the story log.
+ */
+function updateOptions(before, after) {
+    const arrayFilters = playerFilters(before, after);
+    return arrayFilters.length ? { arrayFilters } : {};
+}
+
+function sameInventory(a = [], b = []) {
+    return a.length === b.length && a.every((item, i) => item === b[i]);
+}
+
+/**
+ * `/dm action` — narrate one player's action and apply what the narration says
+ * happened: damage to anyone it hit, healing, items gained or lost, a new scene.
+ *
+ * Defers first, because the model call will outrun Discord's three seconds, and
+ * then takes the session's turn so two players acting together cannot both
+ * narrate from the same history.
  *
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  * @returns {Promise<*>} the reply
@@ -331,6 +463,38 @@ async function takeAction(interaction) {
 
     await interaction.deferReply();
 
+    const outcome = await withTurn(
+        session.sessionId,
+        () => resolveTurn(interaction, session.sessionId, actionText),
+        `${player.name}'s turn`
+    );
+    if (outcome === null) return interaction.editReply(BUSY_MESSAGE);
+    return outcome;
+}
+
+/**
+ * One turn, holding the session's lease.
+ *
+ * Everything is re-read here: between `takeAction`'s cheap checks and this, the
+ * party may have taken a fireball, gained a member, or been wiped out. A turn
+ * narrated from the state the player saw when they typed is exactly the race
+ * the lease exists to close, so the state it narrates from is read inside it.
+ */
+async function resolveTurn(interaction, sessionId, actionText) {
+    const { channel, guild, user } = interaction;
+
+    const session = await DmSession.findOne({ sessionId, active: true }).lean();
+    if (!session) return interaction.editReply('The session has ended.');
+
+    const player = session.players.find(p => p.userId === user.id);
+    if (!player) return interaction.editReply('You are no longer part of this session.');
+    if (session.storyLog.length === 0) {
+        return interaction.editReply('The adventure has not begun yet. The host must use `/dm begin`.');
+    }
+    if (player.hp <= 0) {
+        return interaction.editReply(`**${player.name}** has fallen and cannot act. The rest of the party fights on.`);
+    }
+
     // Roles are counted back from the end of the log, never forward from its
     // start. The log is written in exactly two places — `/dm begin` pushes the
     // opening scene, and the action below pushes the player entry and the
@@ -350,74 +514,70 @@ async function takeAction(interaction) {
         content: entry
     }));
 
-    const systemPrompt = buildDMSystemPrompt();
+    const systemPrompt = buildDMSystemPrompt(session.players);
     const partyStatusLine = session.players
-        .map(p => `${p.name} (${p.characterClass}, HP: ${p.hp})`)
-        .join(', ');
+        .map(p => `${p.name} (${p.characterClass}, ${p.hp <= 0 ? 'DOWN' : `HP: ${p.hp}/${maxHpFor(p)}`}, carrying: ${p.inventory.join(', ') || 'nothing'})`)
+        .join('\n');
 
-    const prompt = `Party status: ${partyStatusLine}\n\n**${player.name}** (${player.characterClass}) performs the following action: ${actionText}\n\nNarrate what happens next, including any consequences, NPC reactions, or changes to the environment. End with the current situation and what the party might do next. Keep it focused and 1-2 paragraphs.`;
+    const sceneLine = session.partyState?.scene
+        ? `Current location: ${session.partyState.scene}\n\n`
+        : '';
+
+    const prompt = `${sceneLine}Party:\n${partyStatusLine}\n\n**${player.name}** (${player.characterClass}) performs the following action: ${actionText}\n\nNarrate what happens next, including any consequences, NPC reactions, or changes to the environment. End with the current situation and what the party might do next. Keep it focused and 1-2 paragraphs.`;
 
     try {
-        const gs = await Guild.findOne({ guildId: guild.id });
-        const aiSettings = gs?.ai || {};
-        const { provider, model, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(aiSettings);
+        const { config, error } = await dmProviderConfig(guild.id);
+        if (error) return interaction.editReply(error);
 
-        if (provider !== 'ollama' && !apiKey) {
-            return interaction.editReply('AI is not configured for this server.');
-        }
-
-        const narrative = await getCompletion({
-            provider, model, apiKey, baseUrl, mcpServers, rateLimit,
+        const { text: narrative, effects, hadBlock, rolls } = await narrate({
+            config,
             guildId: guild.id, userId: user.id, channelId: interaction.channelId,
-            // A narrator has no business making tool calls mid-story.
-            mcp: false,
-            systemPrompt, history, prompt, temperature: 0.9, maxTokens: 500
+            systemPrompt, history, prompt, maxTokens: 700
         });
 
-        // Scope damage/heal detection to this player by name or "you/your", and
-        // away from the rest of the party, who are subjects of their own.
-        const namePattern = escapeRegex(player.name);
-        const otherNames = session.players
-            .filter(p => p.userId !== player.userId)
-            .map(p => p.name);
-        const damage = amountFor(narrative, namePattern, 'takes?|suffers?', 'damage', otherNames);
-        const healed = amountFor(narrative, namePattern, 'heals?|recovers?|regains?', 'hp', otherNames);
-
-        let newHp = player.hp;
-        if (damage !== null) newHp = Math.max(0, newHp - damage);
-        if (healed !== null) newHp = Math.min(CLASS_HP[player.characterClass] || 100, newHp + healed);
+        // A model that used the block is believed completely, including when it
+        // says nothing happened. A model that ignored it gets the old prose
+        // reader, which can only ever wound the character who acted — see
+        // ./dm/prose.js for why that fallback is still here.
+        const turnEffects = hadBlock ? effects : proseEffects(narrative, player, session.players);
+        const applied = applyEffects(session.players, turnEffects, { maxHpFor });
 
         const playerEntry = `${player.name}: ${actionText}`;
 
-        // Atomic write: push both log entries (with trim) and update HP if changed
-        const updateOps = {
-            $push: { storyLog: { $each: [playerEntry, narrative], $slice: -MAX_STORY_LOG } }
+        const update = {
+            $push: { storyLog: { $each: [playerEntry, narrative], $slice: -MAX_STORY_LOG } },
+            $inc: { 'partyState.turns': 1 },
+            $set: {
+                ...playerWrites(session.players, applied.players),
+                'partyState.updatedAt': new Date()
+            }
         };
-        const updateOptions = {};
-        if (newHp !== player.hp) {
-            updateOps.$set = { 'players.$[elem].hp': newHp };
-            updateOptions.arrayFilters = [{ 'elem.userId': player.userId }];
-        }
+        if (applied.scene) update.$set['partyState.scene'] = applied.scene;
 
-        await DmSession.findOneAndUpdate(
-            { sessionId: session.sessionId, active: true },
-            updateOps,
-            updateOptions
+        // `new: true`, so what comes back is the party as it now stands rather
+        // than the copy this turn worked from — which matters because `/dm
+        // join` runs outside the turn lease, and somebody who joined mid-turn
+        // is standing even if everyone this turn knew about has fallen.
+        const updatedSession = await DmSession.findOneAndUpdate(
+            { sessionId, active: true },
+            update,
+            { new: true, ...updateOptions(session.players, applied.players) }
         );
 
-        // Compute wipe using updated HP for this player
-        const wiped = session.players.every(p =>
-            p.userId === player.userId ? newHp <= 0 : p.hp <= 0
-        );
+        // A wipe is now something that can actually happen: an effect may take
+        // down a character who never typed anything, and a breath weapon
+        // targeting "party" may take down all of them at once. Guarded on
+        // length because `every` on an empty party is vacuously true, and an
+        // empty party is a session nobody has joined, not a dead one.
+        const finalParty = updatedSession?.players ?? applied.players;
+        const wiped = finalParty.length > 0 && finalParty.every(p => p.hp <= 0);
 
         if (wiped) {
             await DmSession.findOneAndUpdate(
-                { sessionId: session.sessionId },
+                { sessionId },
                 { $set: { active: false } }
             );
         }
-
-        const updatedSession = await DmSession.findOne({ sessionId: session.sessionId });
 
         const embed = new EmbedBuilder()
             .setTitle(`⚔️ ${player.name} acts!`)
@@ -425,11 +585,15 @@ async function takeAction(interaction) {
             .setDescription(narrative)
             .setFooter({ text: wiped ? 'The party has fallen...' : 'Use /dm action to respond!' });
 
+        for (const field of [rollsField(rolls), changesField(applied.changes)]) {
+            if (field) embed.addFields(field);
+        }
+
         if (wiped) {
             embed.addFields({ name: '💀 Session Ended', value: 'The entire party has fallen. The adventure is over.' });
         }
 
-        const components = wiped ? [] : [makeStoryButton(session.sessionId)];
+        const components = wiped ? [] : [makeStoryButton(sessionId)];
         await interaction.editReply({ embeds: [embed], components });
 
         if (updatedSession && !wiped) {
@@ -472,6 +636,8 @@ async function partyStatus(interaction) {
         .setColor('#8b4513')
         .addFields(fields)
         .setFooter({ text: `Story entries: ${session.storyLog.length}` });
+
+    if (session.partyState?.scene) embed.setDescription(`📍 ${session.partyState.scene}`);
 
     return interaction.reply({ embeds: [embed] });
 }
@@ -526,7 +692,7 @@ function makeStoryButton(sessionId) {
 function buildStatCardEmbed(session) {
     const MAX_BAR = 10;
     const fields = session.players.map(p => {
-        const maxHp = CLASS_HP[p.characterClass] || 100;
+        const maxHp = maxHpFor(p);
         const filled = Math.min(MAX_BAR, Math.round((Math.max(0, p.hp) / maxHp) * MAX_BAR));
         const bar = '█'.repeat(filled) + '░'.repeat(MAX_BAR - filled);
         const invLine = p.inventory.length ? p.inventory.join(', ') : 'Empty';
@@ -537,12 +703,17 @@ function buildStatCardEmbed(session) {
         };
     });
 
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setTitle('🗡️ Party Status')
         .setColor(COLORS.NEUTRAL)
         .addFields(fields)
         .setFooter({ text: 'Updated after each action' })
         .setTimestamp();
+
+    // Where they are, now that something actually writes it (#837).
+    if (session.partyState?.scene) embed.setDescription(`📍 ${session.partyState.scene}`);
+
+    return embed;
 }
 
 async function postOrUpdateStatCard(channel, session) {
@@ -592,19 +763,15 @@ async function handleDmButton(interaction, _client) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
-        const gs = await Guild.findOne({ guildId: session.guildId });
-        const aiSettings = gs?.ai || {};
-        const { provider, model, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(aiSettings);
-
-        if (provider !== 'ollama' && !apiKey) {
-            return interaction.editReply('AI is not configured for this server.');
-        }
+        const { config, error } = await dmProviderConfig(session.guildId);
+        if (error) return interaction.editReply(error);
 
         const logSnippet = session.storyLog.slice(-16).join('\n\n');
         const recap = await getCompletion({
-            provider, model, apiKey, baseUrl, mcpServers, rateLimit,
+            ...config,
             guildId: session.guildId, userId: interaction.user.id, channelId: interaction.channelId,
-            // A narrator has no business making tool calls mid-story.
+            // A recap is not a turn: nothing is rolled and nothing is applied,
+            // so this one keeps the plain tool-less path.
             mcp: false,
             systemPrompt: 'You are a dramatic fantasy narrator. Summarize the story concisely.',
             history: [],
@@ -636,7 +803,7 @@ function aiLimitMessage(err) {
         : `You have reached the server's AI request limit (${err.limit} per ${err.windowMin}m). Please wait a few minutes.`;
 }
 
-function buildDMSystemPrompt() {
+function buildDMSystemPrompt(players = []) {
     return `You are an experienced, creative Dungeon Master running a text-based RPG on Discord. Your role is to:
 - Narrate vivid, engaging story scenes
 - React meaningfully to player actions
@@ -645,8 +812,21 @@ function buildDMSystemPrompt() {
 - Track and reference party members by their character names
 - Create tension, atmosphere, and opportunities for heroism
 - Be fair but unpredictable — success is not guaranteed
-- When a character takes damage or heals, mention the amount explicitly with their name (e.g., "Aric takes 15 damage", "Lyra heals 20 HP")
-The party is playing in a classic fantasy setting. Be creative, dramatic, and fun!`;
+
+When an action's outcome is genuinely uncertain — a lock picked, a leap made, a blow landed, a lie told — call the dice_roll tool and narrate the number it gives you. Do not decide for yourself whether an uncertain action succeeds, and do not invent a roll you did not make: the party is shown every roll, so an invented one will not be there.
+
+The party is playing in a classic fantasy setting. Be creative, dramatic, and fun!
+${effectsInstruction(players)}`;
 }
 
-module.exports = { startSession, joinSession, beginSession, takeAction, partyStatus, stopSession, handleDmButton, CLASSES };
+module.exports = {
+    startSession,
+    joinSession,
+    beginSession,
+    takeAction,
+    partyStatus,
+    stopSession,
+    handleDmButton,
+    CLASSES,
+    CLASS_HP
+};
