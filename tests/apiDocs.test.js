@@ -1,6 +1,6 @@
 'use strict';
 
-// API_REFERENCE.md documented none of the 46 endpoints under
+// docs/API_REFERENCE.md documented none of the 46 endpoints under
 // src/dashboard/routes/api/ — it was a cookbook of generic Express snippets
 // whose only endpoint example was a `/api/custom/:guildId` that has never
 // existed (#711). The tables are generated now, and this is what keeps them

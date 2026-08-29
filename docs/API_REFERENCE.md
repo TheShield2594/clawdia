@@ -9,7 +9,7 @@ dashboard's own JavaScript is the only client it was built for, and anything
 else calling it has to carry a browser session.
 
 To *write* an endpoint rather than call one, see
-[docs/EXTENDING.md](docs/EXTENDING.md#adding-api-endpoints).
+[docs/EXTENDING.md](EXTENDING.md#adding-api-endpoints).
 
 ## Where it lives
 

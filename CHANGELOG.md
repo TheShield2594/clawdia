@@ -137,7 +137,7 @@ kind of response. The unversioned `/api` stays mounted beside it as an alias to
 the same router, so a browser holding a cached bundle and anything scripted
 against an instance keeps working; the response *bodies* of five endpoints did
 change, and a script reading them needs updating. See
-[API_REFERENCE.md](API_REFERENCE.md#response-shapes).
+[API_REFERENCE.md](docs/API_REFERENCE.md#response-shapes).
 
 - **One envelope, and a version** (#582). Bare arrays, `{entries,…}`,
   `{cases,…}`, bare objects and `{success:true,…}` all coexisted, so a caller

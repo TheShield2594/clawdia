@@ -70,7 +70,7 @@ services:
     # All of this takes effect ONLY on the first start against an empty
     # mongodb_data volume; the image skips initialization when data exists. To
     # enable auth on a deployment that already has data, see "Enabling MongoDB
-    # authentication" in SETUP_GUIDE.md — a few mongosh commands, not a wipe.
+    # authentication" in docs/SETUP_GUIDE.md — a few mongosh commands, not a wipe.
     # Left unset, everything behaves exactly as before (no auth), so existing
     # deployments keep starting; new ones should set all four.
     environment:

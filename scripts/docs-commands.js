@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// Renders README's command reference from the commands the bot actually loads.
+// Renders docs/COMMANDS.md's command reference from the commands the bot
+// actually loads.
 //
 // The list used to be hand-maintained, and it had drifted the way every
 // parallel list does (#712): 26 registered commands were missing from it, and
@@ -11,9 +12,12 @@
 // So it is generated from the same catalog `/help` renders (utils/helpCatalog),
 // which is itself derived from `client.commands`: name and description come out
 // of each command's own SlashCommandBuilder, and the category out of the folder
-// it was loaded from. README, `/help` and the deployed set now have one source.
+// it was loaded from. The reference, `/help` and the deployed set now have one
+// source. It lived in README until #720 moved the reference material into
+// docs/; the generator does not care which file, only that the markers are in
+// it.
 //
-//   npm run docs:commands           rewrite the block in README.md
+//   npm run docs:commands           rewrite the block in docs/COMMANDS.md
 //   npm run docs:commands -- --check  exit 1 if the block is out of date
 //
 // `--check` is what tests/commandDocs.test.js runs on, so a new command file
@@ -26,7 +30,7 @@ const path = require('path');
 const { loadCommandModules } = require('../src/utils/commandLoader');
 const { buildCategories } = require('../src/utils/helpCatalog');
 
-const README_PATH = path.join(__dirname, '..', 'README.md');
+const DOC_PATH = path.join(__dirname, '..', 'docs', 'COMMANDS.md');
 const BEGIN = '<!-- BEGIN GENERATED COMMANDS — npm run docs:commands -->';
 const END = '<!-- END GENERATED COMMANDS -->';
 
@@ -56,20 +60,20 @@ function renderCommands(categories) {
 }
 
 /**
- * @param {string} readme current file contents
+ * @param {string} doc current file contents
  * @param {string} body rendered markdown
  * @returns {string} the file with the block replaced
  */
-function replaceBlock(readme, body) {
-    const start = readme.indexOf(BEGIN);
-    const end = readme.indexOf(END);
+function replaceBlock(doc, body) {
+    const start = doc.indexOf(BEGIN);
+    const end = doc.indexOf(END);
     if (start === -1 || end === -1 || end < start) {
-        throw new Error(`README.md is missing the ${BEGIN} / ${END} markers`);
+        throw new Error(`docs/COMMANDS.md is missing the ${BEGIN} / ${END} markers`);
     }
-    return `${readme.slice(0, start)}${BEGIN}\n\n${body}\n\n${readme.slice(end)}`;
+    return `${doc.slice(0, start)}${BEGIN}\n\n${body}\n\n${doc.slice(end)}`;
 }
 
-function buildReadme() {
+function buildDoc() {
     const { commands, failures } = loadCommandModules();
     // A command that will not load is a command missing from the docs, and
     // silently documenting 96 of 97 is exactly the drift this script exists to
@@ -79,26 +83,26 @@ function buildReadme() {
     }
 
     const categories = buildCategories(commands.map(({ command }) => command));
-    const readme = fs.readFileSync(README_PATH, 'utf8');
-    return { current: readme, next: replaceBlock(readme, renderCommands(categories)) };
+    const doc = fs.readFileSync(DOC_PATH, 'utf8');
+    return { current: doc, next: replaceBlock(doc, renderCommands(categories)) };
 }
 
 function main(argv) {
     const check = argv.includes('--check');
-    const { current, next } = buildReadme();
+    const { current, next } = buildDoc();
 
     if (current === next) {
-        console.log('README command list is up to date.');
+        console.log('docs/COMMANDS.md is up to date.');
         return 0;
     }
 
     if (check) {
-        console.error('README command list is out of date. Run `npm run docs:commands`.');
+        console.error('docs/COMMANDS.md is out of date. Run `npm run docs:commands`.');
         return 1;
     }
 
-    fs.writeFileSync(README_PATH, next);
-    console.log('README command list regenerated.');
+    fs.writeFileSync(DOC_PATH, next);
+    console.log('docs/COMMANDS.md regenerated.');
     return 0;
 }
 
@@ -111,4 +115,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { renderCommands, replaceBlock, buildReadme, BEGIN, END, README_PATH };
+module.exports = { renderCommands, replaceBlock, buildDoc, BEGIN, END, DOC_PATH };

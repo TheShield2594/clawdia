@@ -4,26 +4,15 @@
 
 ### Supported Providers
 
-| Provider | Free Tier | Speed | Best For |
-|----------|-----------|-------|----------|
-| **Google Gemini** | ✅ 60 req/min | ⚡ Fast | General chat, testing |
-| **OpenAI GPT-3.5** | ❌ Paid | ⚡ Fast | Complex tasks, coding |
-| **OpenAI GPT-4** | ❌ Paid | 🐌 Slower | Advanced reasoning |
-| **Anthropic Claude** | ❌ Paid | ⚡ Fast | Nuanced reasoning, long context |
-| **OpenRouter** | ❌ Paid | ⚡ Fast | Access to many models via one API |
-| **Ollama (self-hosted)** | ✅ Free | Varies | Privacy-first, local inference |
+Five: OpenAI, Google Gemini, Anthropic Claude, OpenRouter, and a local Ollama
+instance. [AI_COMPARISON.md](AI_COMPARISON.md) is the side-by-side — default
+model, credential, cost estimates, MCP route — and
+[SETUP_GUIDE.md](SETUP_GUIDE.md#ai-integration) is how to get each key.
+
+A provider is picked per Discord server in the dashboard, so one install can run
+Gemini in one server and a local model in another.
 
 ### Configuration Options
-
-**Global Configuration** (`.env` file):
-
-```env
-OPENAI_API_KEY=sk-...
-GEMINI_API_KEY=AIza...
-ANTHROPIC_API_KEY=sk-ant-...
-OPENROUTER_API_KEY=...
-OLLAMA_BASE_URL=http://localhost:11434
-```
 
 **Per-Server Configuration** (Dashboard):
 - Choose AI provider per server
@@ -61,9 +50,9 @@ The knowledge base has no size cliff any more: retrieval always runs, and the
 few newest entries ride along as background whatever the size of the base. Only
 what the question actually matched is cited in the channel.
 
-**MCP Servers** (every provider):
+### MCP Servers
 
-The bot can call tools on remote [MCP](https://modelcontextprotocol.io)
+Works with every provider. The bot can call tools on remote [MCP](https://modelcontextprotocol.io)
 servers, using whichever model is selected in the Chat tab. With Claude the
 servers travel on the request and Anthropic connects to them; with OpenAI,
 Gemini, Ollama or OpenRouter, Clawdia is the MCP client — it lists the tools,
@@ -74,6 +63,41 @@ Past two dozen enabled tools the bot stops sending full JSON Schemas on every
 message: the rest are catalogued as a name and one line each, and the model
 loads the ones it wants by name. A server publishing ninety tools is otherwise
 the largest single cost of a message, on a reply budget of 1,024 tokens.
+
+While a tool is running the reply names it — with how far it has got, for a
+server that reports progress — and the finished message keeps a short summary of
+what ran, how long it took and anything that failed or could not be reached. A
+slow answer is legible that way, and a server that is down is visible rather
+than silently making the model wrong.
+
+The per-user rate limit bounds tool calls as well as messages, in a window of
+its own: eight calls for every message the limit allows, shared across that
+window rather than reset per message. One question that needs a lot of looking
+up does not eat the allowance for the next one, and a user cannot spend without
+bound by asking the same expensive question over and over. Past the limit the
+model is told the call was refused and answers from what it has.
+
+Tools that write something wait for a person. The **Approval** setting posts
+**Run it** / **Cancel** in the channel for a tool call and does not run it until
+the person who asked, or anyone who can manage the server, says so. Adding a
+first connection turns that on for writes, since connecting a server is not by
+itself consent to unattended ones.
+
+It runs the other way too. A tool that gets halfway and needs one more fact can
+ask, and the question appears in the channel as a form to fill in — bounded to
+two questions a reply, and labelled with which server is asking, because a real
+one will not ask for a password or a key.
+
+Approvals and the activity rollup below both need the bot to be the one making
+the call, which on Claude it is not by default — Anthropic's connector opens the
+connections on their side. Turning approvals on switches Claude to the bot's own
+MCP client automatically, and the route is settable either way if you would
+rather choose.
+
+`/ai mcp` answers the same questions from a channel: which connections exist,
+what tools they offer, whether one still works, and what they have been doing.
+It needs Manage Server and replies privately. A tool that answers with an image
+or a PDF has it posted to the channel rather than dropped.
 
 Add servers per-server in the dashboard under **AI → 🔌 Connections**, or
 operator-wide in `config/mcp-servers.json`; a dashboard entry overrides a file
@@ -96,6 +120,8 @@ Dashboard:
   on, the server's resources become a live knowledge base: the ones that match a
   question are read as it is asked and put in the prompt beside the curated
   entries
+- A seven-day rollup per connection — calls, failures, refusals, latency and the
+  last error — under the Connections tab
 
 Prompts:
 - A server's prompt templates are runnable from Discord — `/ai mcp prompts`
@@ -210,44 +236,15 @@ Compiles multiple RSS feeds into a single daily post at a scheduled time.
 
 ### Configuration
 
-| Setting | Description | Example |
-|---------|-------------|---------|
-| **Enabled** | Turn on/off | ✅ |
-| **Channel** | Where to post | #news |
-| **Time** | Delivery time (24h) | 09:00 |
-| **Title** | Embed title | 📰 Daily News |
-| **Max Items** | Items per feed | 3 |
-| **Feeds** | RSS URLs | Multiple URLs |
-
-### RSS Feed Examples
-
-**Technology:**
-
-```text
-https://techcrunch.com/feed/
-https://www.theverge.com/rss/index.xml
-https://arstechnica.com/feed/
-```
-
-**Gaming:**
-
-```text
-https://www.ign.com/articles?format=rss
-https://www.polygon.com/rss/index.xml
-https://kotaku.com/rss
-```
-
-**General News:**
-
-```text
-http://feeds.bbci.co.uk/news/rss.xml
-http://rss.cnn.com/rss/cnn_topstories.rss
-https://www.reddit.com/r/worldnews/.rss
-```
+Channel, delivery time, timezone, embed title, items per feed and the feed list,
+all per Discord server, plus named profiles if one server wants more than one
+digest. The settings, the feed examples and the walkthrough are in
+[SETUP_GUIDE.md](SETUP_GUIDE.md#daily-news-configuration).
 
 ### Manual Trigger
 
-Administrators can send an immediate digest using the **Send digest now** button in the dashboard's Daily News panel.
+Administrators can send an immediate digest using the **Send digest now** button
+in the dashboard's Daily News panel. There is no slash command for it.
 
 ## ⚖️ Moderation System
 

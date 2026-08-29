@@ -37,7 +37,7 @@ a `SESSION_SECRET` of 32 characters or more. Everything else is defaulted.
 database, and reports every problem at once rather than one per restart.
 
 You do not need a real Discord bot or a real database to run the tests. You do
-need both to run the bot: [SETUP_GUIDE.md](SETUP_GUIDE.md) walks through
+need both to run the bot: [SETUP_GUIDE.md](docs/SETUP_GUIDE.md) walks through
 creating the application, and the integration suites use
 `mongodb-memory-server`, which downloads a MongoDB binary on first run.
 
@@ -169,7 +169,7 @@ On `requiredPermissions` that is a security bug rather than an annoyance,
 because `setDefaultMemberPermissions` on the builder is only a default that a
 guild admin can reassign.
 
-For an HTTP endpoint, [API_REFERENCE.md](API_REFERENCE.md) documents what the
+For an HTTP endpoint, [API_REFERENCE.md](docs/API_REFERENCE.md) documents what the
 dashboard's API already serves and how its authentication, authorization and
 response envelopes work; the tables in it are generated, so write the route's
 one-sentence `//` comment and run `npm run docs:api`.

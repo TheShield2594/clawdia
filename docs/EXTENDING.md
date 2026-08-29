@@ -6,7 +6,7 @@ routes, scheduled tasks, and the conventions each of them follows.
 
 It is a guide to writing code, not a description of the running system. For the
 HTTP endpoints the dashboard actually serves — every path, who may call it, and
-what it does — see [API_REFERENCE.md](../API_REFERENCE.md).
+what it does — see [API_REFERENCE.md](API_REFERENCE.md).
 
 ## Project Structure
 
@@ -706,7 +706,7 @@ Four rules, all of which the existing routes follow:
   `{ error }` describing the field. Never let a caller-supplied string reach a
   query as an operator or a path.
 - **Write a one-sentence `//` comment above the route.** It becomes that
-  endpoint's summary in [API_REFERENCE.md](../API_REFERENCE.md); a route
+  endpoint's summary in [API_REFERENCE.md](API_REFERENCE.md); a route
   without one fails `npm test`. Run `npm run docs:api` after adding a route.
 
 [#561]: https://github.com/TheShield2594/clawdia/issues/561
@@ -1046,7 +1046,7 @@ real console. Tests that want the structured record should use
 writing one:
 
 - **They run at boot, automatically**, after the database connects and before
-  the bot logs in — see [Schema migrations](../SETUP_GUIDE.md#schema-migrations)
+  the bot logs in — see [Schema migrations](SETUP_GUIDE.md#schema-migrations)
   for the operator's side of that.
 - **A failure aborts startup.** Booting on a half-applied schema is worse than
   not booting, so a migration that throws takes the process down with it.

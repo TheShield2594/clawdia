@@ -1,12 +1,12 @@
 const { PermissionFlagsBits } = require('discord.js');
 
 // The permission set the invite URL requests — the single source of truth for
-// SETUP_GUIDE.md's invite link, the dashboard's per-guild invite button, and
-// FEATURES.md's "Bot Permissions Required" list (tests/invitePermissions.test.js
+// docs/SETUP_GUIDE.md's invite link, the dashboard's per-guild invite button, and
+// docs/FEATURES.md's "Bot Permissions Required" list (tests/invitePermissions.test.js
 // holds the three together). It used to be `permissions=8` (Administrator),
 // which contradicted the documented minimum set and granted everything (#723).
 //
-// Keyed by the name Discord's UI shows, which is also the name FEATURES.md
+// Keyed by the name Discord's UI shows, which is also the name docs/FEATURES.md
 // lists. Each entry names the feature that needs it; add a permission only
 // with the feature that uses it, or the "minimum" claim rots.
 //

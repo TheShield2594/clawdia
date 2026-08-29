@@ -90,33 +90,62 @@ Administrator: if a feature misbehaves, grant the specific missing permission
 **Default model:** `gemini-2.0-flash`. There is a free tier; current rates and
 its limits are at [Google AI Pricing](https://ai.google.dev/pricing).
 
-### Choosing a provider
+### Anthropic (Claude)
 
-OpenAI and Gemini are two of five. Clawdia also supports Anthropic (Claude),
-OpenRouter, and a local Ollama instance — configured the same way, with
-`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, and `OLLAMA_BASE_URL`.
+1. Go to the [Anthropic Console](https://console.anthropic.com/)
+2. Create an account or sign in
+3. Open **API Keys** and create one
+4. Copy the key (starts with `sk-ant-...`)
+5. Add to `.env` as `ANTHROPIC_API_KEY=sk-ant-...`
 
-[AI_COMPARISON.md](AI_COMPARISON.md) covers what differs between them and which
-to start with.
+**Alternative:** Add the API key per-server in the bot dashboard under AI Chat settings.
+
+**Default model:** `claude-haiku-4-5`. Current rates are at
+[Anthropic Pricing](https://www.anthropic.com/pricing#api).
+
+### OpenRouter
+
+1. Go to [OpenRouter Keys](https://openrouter.ai/keys)
+2. Create an account or sign in, and create a key
+3. Add to `.env` as `OPENROUTER_API_KEY=...`
+
+**Alternative:** Add the API key per-server in the bot dashboard under AI Chat settings.
+
+**Default model:** `openai/gpt-4o-mini`. One key reaches many vendors' models;
+`OPENROUTER_REFERER` sets the attribution header OpenRouter shows on your
+dashboard.
+
+### Local (Ollama)
+
+1. Install [Ollama](https://ollama.com/) and pull a model — `ollama pull llama3.2`
+2. Point `OLLAMA_BASE_URL` at the instance, e.g. `http://localhost:11434`
+3. Set the model in the dashboard under AI Chat settings — `llama3.2`,
+   `mistral`, whatever you pulled
+
+No key, no per-token cost, and nothing leaves the host. The per-server base URL
+a guild admin can set in the dashboard must be an `http(s)` address that does
+not resolve into private or reserved space, or a server admin could aim the bot
+at anything reachable from its container. Your own endpoint is exempt from that:
+set it as `OLLAMA_BASE_URL`.
+
+Set **Model context window** in the dashboard too — see
+[FEATURES.md](FEATURES.md#configuration-options) for why a self-hosted model is
+the case where the bot cannot work it out for itself.
+
+### Choosing between them
+
+[AI_COMPARISON.md](AI_COMPARISON.md) is the side-by-side: default model,
+credential, whether cost estimates are available, and how each one reaches MCP.
 
 ### MCP Servers
 
-The bot can call tools hosted on remote
-[MCP](https://modelcontextprotocol.io) servers — a GitHub repo, a calendar, an
-internal search. Whichever model is selected in AI → Chat is the one that uses
-them; a connection is configured once and does not need redoing when you switch
-provider.
+Connecting the bot to remote [MCP](https://modelcontextprotocol.io) servers — a
+GitHub repo, a calendar, an internal search. What the connections then *do* —
+the two routes, tool approvals, the per-user call budget, the activity rollup —
+is [FEATURES.md](FEATURES.md#mcp-servers); this is how to set one up.
 
-Two routes, chosen automatically from the provider:
-
-| Provider | Route | What happens |
-|---|---|---|
-| **Anthropic (Claude)** | Native | The server list travels on the request and Anthropic opens the connections |
-| **OpenAI, Gemini, Ollama, OpenRouter** | Client | The bot connects, lists the tools, offers them to the model as functions and runs the calls it asks for |
-
-On the client route the model must support tool calling. Every current OpenAI
-and Gemini model does; on Ollama and OpenRouter it depends which model you
-picked, and one that cannot call tools simply never uses a connection.
+Whichever model is selected in AI → Chat is the one that uses them, and a
+connection is configured once rather than redone when you switch provider.
 
 There are two ways to add a server, and they stack:
 
@@ -430,22 +459,50 @@ malformed config disables the connector, it never stops the bot from starting.
 
 ## Daily News Configuration
 
+### The settings
+
+| Setting | Description | Example |
+|---------|-------------|---------|
+| **Enabled** | Turn the digest on or off | ✅ |
+| **Channel** | Where to post | #news |
+| **Time** | Delivery time, 24-hour | `09:00` |
+| **Timezone** | The zone that time is read in | `Europe/London` |
+| **Title** | Embed title | 📰 Daily News |
+| **Max Items** | Items taken from each feed, 1–10 | 3 |
+| **Feeds** | RSS URLs, one per line | Several |
+
+A server that wants more than one digest — a morning tech roundup and an
+evening general one — adds a second **profile**, each with its own channel,
+time and feed list.
+
 ### Finding RSS Feeds
 
-Most news sites and blogs provide RSS feeds. Here are some examples:
+Most news sites and blogs publish one. Look for the RSS icon, or try `/feed`,
+`/rss` and `/feed.xml` under the site's domain.
 
-**Major News Sources:**
-- BBC: `http://feeds.bbci.co.uk/news/rss.xml`
-- CNN: `http://rss.cnn.com/rss/cnn_topstories.rss`
-- Reuters: `https://www.reutersagency.com/feed/`
-- TechCrunch: `https://techcrunch.com/feed/`
-- The Verge: `https://www.theverge.com/rss/index.xml`
+**General news:**
 
-**Finding RSS Feeds:**
-1. Look for RSS icon on websites
-2. Check `/feed`, `/rss`, or `/feed.xml` paths
-3. Use browser extensions like "RSS Feed Reader"
-4. Use RSS feed discovery tools
+```text
+http://feeds.bbci.co.uk/news/rss.xml
+http://rss.cnn.com/rss/cnn_topstories.rss
+https://www.reddit.com/r/worldnews/.rss
+```
+
+**Technology:**
+
+```text
+https://techcrunch.com/feed/
+https://www.theverge.com/rss/index.xml
+https://arstechnica.com/feed/
+```
+
+**Gaming:**
+
+```text
+https://www.ign.com/articles?format=rss
+https://www.polygon.com/rss/index.xml
+https://kotaku.com/rss
+```
 
 ### Configuration Steps
 
@@ -467,14 +524,14 @@ dashboard already requires Manage Server on the guild). It posts a digest
 immediately to the configured channel, so you can check the feeds, the
 channel and the bot's permissions without waiting for the scheduled time.
 
-The button calls `POST /api/guild/:guildId/dailynews/trigger`; there is no
-slash command for it.
+The button calls `POST /api/v1/guild/:guildId/dailynews/trigger`
+([API_REFERENCE.md](API_REFERENCE.md)); there is no slash command for it.
 
 ## Dashboard Setup
 
 ### Environment Variables
 
-**Start from [`.env.example`](.env.example)** — `cp .env.example .env` — rather
+**Start from [`.env.example`](../.env.example)** — `cp .env.example .env` — rather
 than from a list in a guide. It is the complete set, it is annotated variable by
 variable, and a test fails the build when the code reads something it does not
 explain. This guide used to carry its own copy of the list, which had already
@@ -674,23 +731,33 @@ Dependabot raises the bumps; there is nothing to do by hand.
 
 ### Viewing Logs
 
-**Portainer:** Stacks > clawdia > bot > Logs
+**Portainer:** Stacks > clawdia > bot > Logs. **Command line:** `docker logs
+clawdia -f`.
 
-**Command line:**
-
-```bash
-docker logs clawdia -f
-```
-
-Under `NODE_ENV=production` those lines are JSON, one object per event — a
-level, an ISO timestamp, the subsystem as `component`, and a `requestId` shared
-by every line a single dashboard request produced:
+Everything the bot writes goes through [pino](https://getpino.io): one line per
+event, carrying a level, an ISO timestamp, the subsystem it came from, and — for
+anything a dashboard request produced — a correlation id shared by every line of
+that request.
 
 ```json
-{"level":"error","time":"2026-08-14T11:42:35.001Z","component":"RSS","msg":"Feed fetch failed","err":{"type":"Error","message":"404"}}
+{"level":"error","time":"2026-08-14T11:42:35.001Z","component":"RSS","requestId":"5f3c…","msg":"Feed fetch failed","err":{"type":"Error","message":"404"}}
 ```
 
-That is meant for a log backend, and it is legible by hand with a filter:
+| Variable | Default | Effect |
+|---|---|---|
+| `LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent`. Anything below the level is not written at all |
+| `LOG_FORMAT` | `json` under `NODE_ENV=production`, else `pretty` | `pretty` renders `11:42:35.001 ERROR [RSS] Feed fetch failed` instead |
+
+`component` is the `[TAG]` every log line in this codebase already carried —
+`READY`, `MIGRATIONS`, `RSS`, `DASHBOARD` — promoted to a field, so a log backend
+can filter on it rather than grepping text. Under sharding, `shard` is a field
+too. Credentials are redacted before a line is written: tokens, `Authorization`
+headers, cookies and provider keys come out as `[redacted]`.
+
+Everything goes to stdout, errors included — a change from the bare
+`console.error` this replaced, and the convention every JSON log shipper
+expects. The `json-file` driver in `docker-compose.yml` captures it either way
+(50 MB × 5 files per service). To read a production stream by hand:
 
 ```bash
 docker logs clawdia -f | npx pino-pretty                       # readable lines
@@ -698,39 +765,89 @@ docker logs clawdia --since 1h | jq -c 'select(.level=="error")'
 docker logs clawdia --since 1h | jq -c 'select(.component=="MIGRATIONS")'
 ```
 
-`LOG_LEVEL` (default `info`) drops anything below it before it is written —
 `LOG_LEVEL=warn` is the setting for a busy install whose 250 MB of retention is
-being spent on startup notices. `LOG_FORMAT=pretty` renders readable lines in
-the container itself, if you would rather not pipe. Tokens, `Authorization`
-headers, cookies and provider keys are replaced with `[redacted]` before a line
-is written.
+being spent on startup notices.
 
-Nothing here reaches anyone on its own. `ERROR_WEBHOOK_URL` is what makes a
-crash arrive somewhere — set it to a Discord webhook (formatted as a Discord
-message) or any JSON endpoint, and an uncaught exception is reported before the
-process exits. README's **Logging** section has the full table.
+**`ERROR_WEBHOOK_URL` is the other half.** An uncaught exception or a burst of
+unhandled rejections exits the process, and until you set this the only record
+is a line in a rolling file nobody is watching — which is how a bot that
+crash-loops at 04:00 gets noticed days later, by a user. Set it to a Discord
+webhook (recognised and formatted as a Discord message) or to any endpoint that
+accepts a JSON POST, and the process reports the crash before it goes. It waits
+at most `ERROR_REPORT_TIMEOUT_MS` (2000) for that and exits either way; unset,
+the exit is synchronous and nothing is sent.
+
+The report carries a stack trace, so the URL must be `https://` — or `http://`
+to loopback, for a collector on the same host, where there is no wire to read.
+Anything else is refused with a warning rather than sent in cleartext, and a
+redirect is never followed, so a `3xx` cannot walk the report to a host you did
+not configure.
 
 ### Health Monitoring
 
 The bot serves `GET /health` on the dashboard port — 3000 inside the container,
 and whatever `DASHBOARD_HOST_PORT` publishes on the host (3000 under
-`docker-compose.yml`, 7001 under `portainer-stack.yml`):
+`docker-compose.yml`, 7001 under `portainer-stack.yml`). It is unauthenticated
+and deliberately thin for anonymous callers — status and uptime, nothing else:
 
-```bash
-curl -s http://localhost:3000/health   # or 7001 on the Portainer stack
-# {"status":"healthy","uptime":43200}
+```json
+{ "status": "healthy", "uptime": 43200 }
 ```
 
-`status` is `healthy`, `degraded` (MongoDB is up, but a scheduled service —
-RSS, raid detection, temp-ban sweeps, the daily verse — is failing every run) or
-`unhealthy` (MongoDB is not connected). Only `healthy` answers HTTP 200.
+A caller who is logged in and administers a guild the bot is in gets the full
+payload instead: MongoDB connection state, heap and RSS, unhandled-rejection and
+uncaught-exception counts, and a per-service record of the last run, last error
+and success/error/skip counts for every scheduled job.
 
-Nothing watches this for you. Point an uptime monitor at the endpoint and alert
-on a non-200 response *and* on a body whose `status` is not `"healthy"` — the
-`degraded` case is the one you would otherwise never hear about, because the bot
-keeps answering Discord perfectly well while it is in it. README's **Monitoring**
-section covers the setup, and the optional `autoheal` service that restarts an
-`unhealthy` container.
+`status` is one of three values, and the HTTP code follows it:
+
+| `status` | HTTP | Meaning |
+|---|---:|---|
+| `healthy` | 200 | MongoDB connected, every scheduled service's last run succeeded |
+| `degraded` | 503 | MongoDB connected, but a scheduled service is failing |
+| `unhealthy` | 503 | MongoDB is not connected — the bot can neither read nor write |
+
+`degraded` is the state worth wiring up. It is what a dead RSS poller, a stalled
+temp-ban sweep or a raid detector throwing every tick looks like from outside,
+and the bot keeps answering Discord perfectly well while it is in it.
+
+**Point an uptime monitor at `/health`** — Uptime Kuma, Better Stack, Healthchecks.io,
+a Prometheus blackbox probe, anything that can make an HTTP request on a
+schedule. Alert on both:
+
+- a non-200 response, and
+- a body whose `status` is not `"healthy"`, for monitors that can assert on
+  JSON — it survives a proxy that rewrites status codes, and it names which of
+  the two failure states you are in.
+
+A 30–60 second interval matches the scheduler's granularity. Give it a couple of
+minutes of grace on startup: the container healthcheck already allows 90 seconds
+before the first probe counts.
+
+#### Restarting an unhealthy container
+
+`restart: unless-stopped` restarts a container whose process exited. It does
+nothing about a container that is up and failing its healthcheck — outside
+Swarm, Docker records `unhealthy` and stops there. `docker-compose.yml` carries
+an optional `autoheal` service for that, off by default:
+
+```bash
+docker compose --profile autoheal up -d
+```
+
+It watches the daemon and restarts containers labelled `autoheal=true`, which
+the bot service already is. `portainer-stack.yml` has the same block, commented
+out.
+
+It is opt-in because it holds the Docker API, and anything that can reach the
+Docker API can read every environment variable of every container on the host —
+`docker inspect clawdia` prints the bot token and each provider key in full. If
+you enable it, move the secrets to the `<NAME>_FILE` form first (see
+`src/config/fileSecrets.js`) so there is nothing in the environment to read.
+
+Note that only `unhealthy` restarts. `degraded` answers 503 to the monitor but
+is not a healthcheck failure: restarting the process does not fix a feed that is
+404ing, and the restart loop would be worse than the degraded state.
 
 ## Database Management
 
@@ -815,8 +932,8 @@ It runs `down()` and deletes the `MigrationRecord`, which means the next boot
 re-applies it — so pair a rollback with deploying the code you are rolling back
 to. Only the most recently applied migration can be rolled back. For an
 irreversible one there is no rollback: restore the pre-migration dump and
-redeploy the old image, in that order. [docs/RELEASING.md](docs/RELEASING.md)
-covers the version-rollback case; [docs/EXTENDING.md](docs/EXTENDING.md#schema-migrations)
+redeploy the old image, in that order. [docs/RELEASING.md](RELEASING.md)
+covers the version-rollback case; [docs/EXTENDING.md](EXTENDING.md#schema-migrations)
 covers writing a new migration.
 
 ### Enabling MongoDB authentication
@@ -967,11 +1084,22 @@ Both forms prompt for confirmation first. Verify the archive with
 3. Check intents are enabled in Discord Developer Portal
 4. View logs: `docker logs clawdia`
 
+### Slash Commands Not Appearing
+
+The bot publishes them itself at startup — check the log for a
+`[READY] Deployed N slash commands` line, and that the invite used the
+`applications.commands` scope. Newly registered global commands can take up to
+an hour to appear. `npm run deploy` re-publishes them by hand;
+`DEPLOY_COMMANDS=always` makes the bot re-publish on every boot rather than
+only when the set changes.
+
 ### Dashboard Not Loading
 
 1. Check port 3000 is accessible
 2. Verify `DASHBOARD_URL` matches your domain
 3. Check MongoDB is running: `docker ps`
+4. Verify `MONGODB_URI` is reachable from the container network and that `.env`
+   is mounted where the stack expects it
 
 ### AI Not Working
 
@@ -979,6 +1107,8 @@ Both forms prompt for confirmation first. Verify the archive with
 2. Check you have credits/quota remaining
 3. Try switching providers (OpenAI ↔ Gemini)
 4. Check logs for specific error messages
+5. On Ollama, check the endpoint is reachable from the bot's container — a
+   timeout here is usually a host address the container cannot resolve
 
 ### Daily News Not Posting
 
