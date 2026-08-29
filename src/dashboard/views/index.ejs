@@ -1,50 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Clawdia — A chill Discord bot with serious teeth</title>
-    <meta name="description" content="Moderation, leveling, economy, AI chat and analytics — in one self-hosted Discord bot. Own your data.">
-    <%- include('partials/favicon') %>
-    <link rel="stylesheet" href="<%= asset('/fonts/fonts.css') %>">
-    <link rel="stylesheet" href="<%= asset('/styles.css') %>">
+    <%- include('partials/head', {
+        title: 'Clawdia — A chill Discord bot with serious teeth',
+        description: 'Moderation, leveling, economy, AI chat and analytics — in one self-hosted Discord bot. Own your data.',
+    }) %>
 </head>
 <body style="background:var(--cream-50);">
 
 <div class="cw-home">
 
     <!-- NAV -->
-    <nav class="cw-nav">
-        <div class="cw-nav-inner">
-            <div class="cw-brand">
-                <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-                    <ellipse cx="16" cy="22" rx="8.5" ry="6" fill="#14110d"/>
-                    <ellipse cx="7" cy="12.5" rx="2.6" ry="3.8" fill="#14110d" transform="rotate(-18 7 12.5)"/>
-                    <ellipse cx="12.5" cy="9" rx="2.6" ry="4" fill="#14110d" transform="rotate(-6 12.5 9)"/>
-                    <ellipse cx="19.5" cy="9" rx="2.6" ry="4" fill="#14110d" transform="rotate(6 19.5 9)"/>
-                    <ellipse cx="25" cy="12.5" rx="2.6" ry="3.8" fill="#14110d" transform="rotate(18 25 12.5)"/>
-                    <path d="M14 20.5c0.6-1.6 3.4-1.6 4 0" stroke="#d97742" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-                </svg>
-                <span class="cw-wordmark">Clawdia</span>
-            </div>
-            <div class="cw-nav-links">
-                <a href="#features">Features</a>
-                <a href="#features">Modules</a>
-                <a href="#insights">Insights</a>
-                <a href="#self-host">Self-host</a>
-                <a href="https://github.com/TheShield2594/clawdia" target="_blank" rel="noopener">Docs</a>
-            </div>
-            <div class="cw-nav-cta">
-                <% if (user) { %>
-                    <a href="/dashboard" class="cw-link-quiet">Dashboard</a>
-                    <a href="/dashboard" class="cw-btn cw-btn-dark">Open Dashboard <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
-                <% } else { %>
-                    <a href="/auth/login" class="cw-link-quiet">Sign in</a>
-                    <a href="/auth/login" class="cw-btn cw-btn-dark">Add to Discord <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
-                <% } %>
-            </div>
-        </div>
-    </nav>
+    <%- include('partials/nav', { page: 'home' }) %>
 
     <!-- HERO -->
     <header class="cw-hero">
@@ -365,14 +332,7 @@
         <div class="cw-footer-inner">
             <div>
                 <div class="cw-brand">
-                    <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
-                        <ellipse cx="16" cy="22" rx="8.5" ry="6" fill="#ece4d2"/>
-                        <ellipse cx="7" cy="12.5" rx="2.6" ry="3.8" fill="#ece4d2" transform="rotate(-18 7 12.5)"/>
-                        <ellipse cx="12.5" cy="9" rx="2.6" ry="4" fill="#ece4d2" transform="rotate(-6 12.5 9)"/>
-                        <ellipse cx="19.5" cy="9" rx="2.6" ry="4" fill="#ece4d2" transform="rotate(6 19.5 9)"/>
-                        <ellipse cx="25" cy="12.5" rx="2.6" ry="3.8" fill="#ece4d2" transform="rotate(18 25 12.5)"/>
-                        <path d="M14 20.5c0.6-1.6 3.4-1.6 4 0" stroke="#e89163" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-                    </svg>
+                    <%- include('partials/brand-mark', { size: 26, fill: '#ece4d2', accent: '#e89163' }) %>
                     <span class="cw-wordmark">Clawdia</span>
                 </div>
                 <p class="cw-footer-tag">A chill, self-hosted Discord bot with serious teeth. Built by the community, for the community.</p>

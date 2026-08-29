@@ -11,6 +11,12 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
+const {
+    BASE_WIN_MULT,
+    MAX_ROUNDS,
+    shufflesForRound,
+    payoutForRound,
+} = require('./cupgameOdds');
 const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0bd.png';
@@ -19,22 +25,6 @@ const MIN_BET = 10;
 const QUEEN  = '🂽';
 const DECOYS = ['🂡', '🂱'];
 const HIDDEN = '🂠';
-
-// Base win multiplier (1/3 chance × 2.8 ≈ 93% RTP)
-const BASE_WIN_MULT = 2.8;
-// Shuffle counts per round (gets harder each double-or-nothing)
-const ROUND_SHUFFLES = [3, 5, 7, 9];
-// Maximum double-or-nothing rounds before forced cash-out
-const MAX_ROUNDS = 4;
-
-function shufflesForRound(round) {
-    return ROUND_SHUFFLES[Math.min(round - 1, ROUND_SHUFFLES.length - 1)];
-}
-
-function payoutForRound(bet, round) {
-    // Round 1 = BASE_WIN_MULT, doubles each subsequent round
-    return Math.floor(bet * BASE_WIN_MULT * Math.pow(2, round - 1));
-}
 
 function embedAuthor(interaction) {
     return {

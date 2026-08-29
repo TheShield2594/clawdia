@@ -1,7 +1,7 @@
 # Choosing an AI Provider
 
 Clawdia ships five AI providers. Each is a module in
-[`src/services/ai/providers/`](src/services/ai/providers/) implementing one
+[`src/services/ai/providers/`](../src/services/ai/providers/) implementing one
 interface and registered in `providers/index.js` — that registry is the source
 of truth for everything in the table below.
 
@@ -11,7 +11,7 @@ live in [SETUP_GUIDE.md](SETUP_GUIDE.md#ai-integration).
 
 ## The providers
 
-| Provider | Default model | Credential | Cost estimates | [MCP](README.md#mcp-servers) | Notes |
+| Provider | Default model | Credential | Cost estimates | [MCP](FEATURES.md#mcp-servers) | Notes |
 | --- | --- | --- | --- | --- | --- |
 | **OpenAI** | `gpt-4o-mini` | `OPENAI_API_KEY` | Yes | Client | GPT-4o, GPT-4.1, o1 and o3 families |
 | **Gemini** | `gemini-2.0-flash` | `GEMINI_API_KEY` | Yes | Client | Has a free tier; Flash models are the cheap end |

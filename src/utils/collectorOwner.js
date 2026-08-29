@@ -48,20 +48,36 @@ function rejectOtherUser(componentInteraction, owners, message = NOT_YOURS) {
 }
 
 /**
+ * Normalises the two shapes call sites use. Half of them pass the message in
+ * the second position and no customId test at all — every collector on a
+ * message that carries only this command's buttons has no need of one — and
+ * calling a string threw `matches is not a function` on every click, the
+ * owner's included (#786). A filter that throws takes the whole collector with
+ * it, so those buttons did nothing at all.
+ *
+ * @returns {[(i: object) => boolean, string]} the customId test and the message
+ */
+function resolveArgs(matches, message) {
+    if (typeof matches === 'string') return [() => true, matches];
+    return [matches ?? (() => true), message ?? NOT_YOURS];
+}
+
+/**
  * Build a collector filter that accepts only `owners` and says so to everyone
  * else.
  *
  * @param {string|string[]} owners  user id, or ids, the components belong to
- * @param {(i: object) => boolean} [matches]  the customId test this replaces —
- *        run first, so a click on some unrelated component on the same message
- *        is still ignored in silence rather than answered with a refusal that
- *        makes no sense.
+ * @param {((i: object) => boolean)|string} [matches]  the customId test this
+ *        replaces — run first, so a click on some unrelated component on the
+ *        same message is still ignored in silence rather than answered with a
+ *        refusal that makes no sense. A string here is taken as `message`.
  * @param {string} [message]  what to tell everyone else
  */
-function ownedBy(owners, matches = () => true, message = NOT_YOURS) {
+function ownedBy(owners, matches, message) {
+    const [test, text] = resolveArgs(matches, message);
     return componentInteraction => {
-        if (!matches(componentInteraction)) return false;
-        return !rejectOtherUser(componentInteraction, owners, message);
+        if (!test(componentInteraction)) return false;
+        return !rejectOtherUser(componentInteraction, owners, text);
     };
 }
 
@@ -70,11 +86,12 @@ function ownedBy(owners, matches = () => true, message = NOT_YOURS) {
  * changes while the collector runs — a crash lobby's players, say. `isMember`
  * is asked at click time rather than a list being captured up front.
  */
-function ownedByMembers(isMember, matches = () => true, message = NOT_YOURS) {
+function ownedByMembers(isMember, matches, message) {
+    const [test, text] = resolveArgs(matches, message);
     return componentInteraction => {
-        if (!matches(componentInteraction)) return false;
+        if (!test(componentInteraction)) return false;
         if (isMember(componentInteraction.user.id)) return true;
-        componentInteraction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
+        componentInteraction.reply({ content: text, flags: MessageFlags.Ephemeral }).catch(() => {});
         return false;
     };
 }

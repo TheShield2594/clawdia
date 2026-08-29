@@ -11,30 +11,21 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
+const {
+    POOL_SIZE,
+    PICK_COUNT,
+    DRAW_COUNT,
+    PAYOUTS,
+    PAYTABLE_FOOTER,
+    drawNumbers,
+    nearMissCount,
+} = require('./kenoPaytable');
 const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b1.png';
 const MIN_BET = 10;
 
-const POOL_SIZE  = 40;
-const PICK_COUNT = 5;
-const DRAW_COUNT = 10;
-
-// Approximate RTP ~92% (hypergeometric: P2≈27.8%, P3≈7.9%, P4≈0.96%, P5≈0.038%)
-// EV = 0.278×1 + 0.079×5 + 0.0096×20 + 0.00038×150 ≈ 0.923
-const PAYOUTS = { 2: 1, 3: 5, 4: 20, 5: 150 };
-const PAYTABLE_FOOTER = `2 matches = ${PAYOUTS[2]}× · 3 = ${PAYOUTS[3]}× · 4 = ${PAYOUTS[4]}× · 5 = ${PAYOUTS[5]}×`;
-
 const delay = ms => new Promise(r => setTimeout(r, ms));
-
-function drawNumbers() {
-    const pool = Array.from({ length: POOL_SIZE }, (_, i) => i + 1);
-    for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-    return pool.slice(0, DRAW_COUNT).sort((a, b) => a - b);
-}
 
 function embedAuthor(interaction) {
     return {
@@ -68,11 +59,6 @@ function hitBar(hits) {
     const filled = '🟨'.repeat(hits);
     const empty  = '⬛'.repeat(PICK_COUNT - hits);
     return filled + empty;
-}
-
-// Near-miss: how many picks were within 2 of any drawn number
-function nearMissCount(picked, drawn) {
-    return picked.filter(p => drawn.some(d => Math.abs(d - p) <= 2 && !drawn.includes(p))).length;
 }
 
 function phaseTitle(hits, _total) {

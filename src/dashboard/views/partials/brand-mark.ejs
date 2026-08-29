@@ -1,0 +1,23 @@
+<%#
+    The paw wordmark's glyph, on its own so the ten ellipses live in one file
+    (#690). It was pasted into three views, at two sizes and two colourways,
+    and a change to the shape had to be made three times.
+
+    Purely decorative: every call site puts the word "Clawdia" next to it, so
+    the SVG is hidden from assistive tech rather than labelled twice.
+
+    Locals, all optional:
+
+      size    px, square — 28 in the page nav, 24 in the settings sidebar
+      fill    the paw itself; ink on cream, cream on ink
+      accent  the mouth stroke, which is the one part that is not the fill
+-%>
+<svg width="<%= locals.size || 28 %>" height="<%= locals.size || 28 %>" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <% const fill = locals.fill || '#14110d'; %>
+    <ellipse cx="16" cy="22" rx="8.5" ry="6" fill="<%= fill %>"/>
+    <ellipse cx="7" cy="12.5" rx="2.6" ry="3.8" fill="<%= fill %>" transform="rotate(-18 7 12.5)"/>
+    <ellipse cx="12.5" cy="9" rx="2.6" ry="4" fill="<%= fill %>" transform="rotate(-6 12.5 9)"/>
+    <ellipse cx="19.5" cy="9" rx="2.6" ry="4" fill="<%= fill %>" transform="rotate(6 19.5 9)"/>
+    <ellipse cx="25" cy="12.5" rx="2.6" ry="3.8" fill="<%= fill %>" transform="rotate(18 25 12.5)"/>
+    <path d="M14 20.5c0.6-1.6 3.4-1.6 4 0" stroke="<%= locals.accent || '#d97742' %>" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+</svg>

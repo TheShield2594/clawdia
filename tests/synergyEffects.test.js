@@ -1,7 +1,7 @@
 'use strict';
 
 // Every synergy in crossSystemData is advertised by /synergies, /mine profile and
-// FEATURES.md. Several of them had a helper in synergyService and no call site at
+// docs/FEATURES.md. Several of them had a helper in synergyService and no call site at
 // all, so a player could see "Artificer — +5% ore yield, +1 max mining stamina"
 // listed as active and get neither. These tests pin each advertised bonus to the
 // code path that pays it out.

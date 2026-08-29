@@ -7,7 +7,7 @@
  * MONGO_INITDB_ROOT_USERNAME / MONGO_INITDB_ROOT_PASSWORD. It never runs again
  * for an existing volume, so enabling auth on a deployment that already has
  * data means creating this user by hand instead — see "Enabling MongoDB
- * authentication" in SETUP_GUIDE.md for the exact commands.
+ * authentication" in docs/SETUP_GUIDE.md for the exact commands.
  *
  * The user gets readWrite on the bot's database and nothing else: no admin
  * role, no access to other databases, enough for the bot, the migrations and

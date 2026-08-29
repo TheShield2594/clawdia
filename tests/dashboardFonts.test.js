@@ -20,7 +20,10 @@ const FONTS = path.join(PUBLIC, 'fonts');
 const read = p => fs.readFileSync(p, 'utf8');
 const stylesCss = read(path.join(PUBLIC, 'styles.css'));
 const fontsCss = read(path.join(FONTS, 'fonts.css'));
-const views = ['index.ejs', 'dashboard.ejs', 'guild-settings.ejs'];
+// The three pages plus the head partial they all now include (#690) — the
+// stylesheet <link> lives in the partial, so a sweep over the pages alone
+// would have nothing left to look at.
+const views = ['index.ejs', 'dashboard.ejs', 'guild-settings.ejs', 'partials/head.ejs'];
 
 describe('web fonts load under the dashboard\'s own CSP', () => {
     it('asks for no stylesheet, font or preconnect from a third-party origin', () => {
@@ -105,10 +108,15 @@ describe('web fonts load under the dashboard\'s own CSP', () => {
         expect(faces.filter(face => !/font-display:\s*swap/.test(face))).toEqual([]);
     });
 
-    it('links the font stylesheet from every view that renders text in those families', () => {
-        for (const view of views) {
+    it('links the font stylesheet from the head every page includes', () => {
+        const head = read(path.join(VIEWS, 'partials', 'head.ejs'));
+        expect(/href="<%= asset\('\/fonts\/fonts\.css'\) %>"/.test(head)).toBe(true);
+
+        // And every page that renders text in those families pulls that head
+        // in, which is the half a link-in-the-partial check cannot see.
+        for (const view of ['index.ejs', 'dashboard.ejs', 'guild-settings.ejs']) {
             const html = read(path.join(VIEWS, view));
-            expect([view, /href="<%= asset\('\/fonts\/fonts\.css'\) %>"/.test(html)]).toEqual([view, true]);
+            expect([view, /include\('partials\/head'/.test(html)]).toEqual([view, true]);
         }
     });
 });

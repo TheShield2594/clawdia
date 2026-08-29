@@ -6,7 +6,7 @@ routes, scheduled tasks, and the conventions each of them follows.
 
 It is a guide to writing code, not a description of the running system. For the
 HTTP endpoints the dashboard actually serves — every path, who may call it, and
-what it does — see [API_REFERENCE.md](../API_REFERENCE.md).
+what it does — see [API_REFERENCE.md](API_REFERENCE.md).
 
 ## Project Structure
 
@@ -643,6 +643,12 @@ Two related conventions worth knowing while writing a panel:
 - A third-party script belongs in `public/vendor/`, vendored from an
   exact-pinned dependency by a `scripts/vendor-*.sh` helper, never loaded from
   a CDN (#685). `script-src` is `'self'` and a nonce, and it stays that way.
+- Page chrome is shared too (#690). A new top-level view opens with
+  `<%- include('partials/head', { title: '…' }) %>` — that is where the
+  charset, the viewport, the favicon links and both stylesheets live — and
+  reaches for the paw mark through `partials/brand-mark.ejs` rather than
+  pasting ten ellipses. The cream bar on the landing page and the server
+  picker is `partials/nav.ejs`, which takes a `page` local.
 
 ### Adding API Endpoints
 
@@ -700,7 +706,7 @@ Four rules, all of which the existing routes follow:
   `{ error }` describing the field. Never let a caller-supplied string reach a
   query as an operator or a path.
 - **Write a one-sentence `//` comment above the route.** It becomes that
-  endpoint's summary in [API_REFERENCE.md](../API_REFERENCE.md); a route
+  endpoint's summary in [API_REFERENCE.md](API_REFERENCE.md); a route
   without one fails `npm test`. Run `npm run docs:api` after adding a route.
 
 [#561]: https://github.com/TheShield2594/clawdia/issues/561
@@ -848,7 +854,7 @@ open; CI bounds the step so the hang fails there rather than sitting for hours.
 - Some suites guard an invariant rather than a behaviour, and those are the ones
   worth knowing about before you add a command or a script:
   `commandCap.test.js` (Discord's 100-command global limit, plus a ratchet on
-  the current count), `commandDocs.test.js` (README's command list against the
+  the current count), `commandDocs.test.js` (docs/COMMANDS.md against the
   loaded set), `lintGate.test.js` (the lint script and its CI step still exist)
   and `requirePathsResolve.test.js`.
 
@@ -875,6 +881,46 @@ describe('payoutMultiplier', () => {
 Commands export the internals they want covered under a `__test__` key, which
 keeps the test off the interaction plumbing and on the logic that can actually
 be wrong.
+
+#### Driving a whole command
+
+Some of a command lives in the plumbing — a cooldown compare-and-set, a
+`balance: { $gte: cost }` on a debit, the branch that refuses. Those need
+`execute()` actually invoked, and two helpers make that a few lines rather than
+a bespoke mock per file (#786):
+
+```javascript
+const { fakeCollection } = require('./helpers/fakeCollection');
+const { makeInteraction, repliedText } = require('./helpers/fakeInteraction');
+
+const mockUsers = fakeCollection('User', { balance: 0, inventory: [] });
+jest.mock('../src/models/User', () => mockUsers.model);   // the `mock` prefix
+                                                          // is what lets jest
+                                                          // hoist this
+mockUsers.seed({ userId: 'user-1', guildId: 'guild-1', balance: 500 });
+
+const interaction = makeInteraction({ options: { bet: 100 } });
+await command.execute(interaction);
+
+expect(mockUsers.get('user-1').balance).toBe(400);
+expect(repliedText(interaction)).toContain('You bet');
+```
+
+- `makeInteraction` covers options, subcommands, deferrals, replies and
+  collectors. Every reply resolves to a message, so `fetchReply: true` works;
+  `components: [{ customId: 'confirm' }]` queues button presses, and an empty
+  queue closes the window the way discord.js does.
+- `fakeCollection` evaluates the query shapes the commands issue — `$or`,
+  `$and`, `$gte`, `$elemMatch` with the positional `$` bound to what it
+  matched — and honours `new: false`, upserts, and the unique index on
+  `{ userId, guildId }`. An operator it does not implement throws rather than
+  being ignored, because a guard that quietly evaluates to "matched" turns a
+  refusal test green.
+- `mockUsers.writes` is every update that was applied, in order, which is how a
+  test asserts that a debit carried its guard rather than trusting the result.
+
+Pin `Math.random` for anything that rolls, and give the command a one-item
+config (one job, one crime) so a payout is a number rather than a range.
 
 Anything that touches dashboard front-end code — `src/dashboard/public/*.js`,
 the EJS views — needs a DOM, requested per file with a docblock at the top:
@@ -1040,7 +1086,7 @@ real console. Tests that want the structured record should use
 writing one:
 
 - **They run at boot, automatically**, after the database connects and before
-  the bot logs in — see [Schema migrations](../SETUP_GUIDE.md#schema-migrations)
+  the bot logs in — see [Schema migrations](SETUP_GUIDE.md#schema-migrations)
   for the operator's side of that.
 - **A failure aborts startup.** Booting on a half-applied schema is worse than
   not booting, so a migration that throws takes the process down with it.

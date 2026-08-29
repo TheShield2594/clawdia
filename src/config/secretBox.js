@@ -22,7 +22,7 @@
  * and an operator who runs the bot and its database on one machine they own
  * may reasonably decide the key buys them little. What must not happen is that
  * choice being made silently, so migration 018 says on the log which way an
- * install is configured, and the trade-off is written up in SETUP_GUIDE.md.
+ * install is configured, and the trade-off is written up in docs/SETUP_GUIDE.md.
  *
  * Whichever way it is configured, reads work: a stored value carries a version
  * prefix when it is encrypted, and anything without one is a plaintext key

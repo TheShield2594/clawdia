@@ -154,7 +154,7 @@ function collectEnvProblems(env = process.env) {
         // has not migrated yet.
         warnings.push(
             'MONGODB_URI has no credentials. Enable MongoDB authentication — ' +
-            'see "Enabling MongoDB authentication" in SETUP_GUIDE.md.'
+            'see "Enabling MongoDB authentication" in docs/SETUP_GUIDE.md.'
         );
     }
 

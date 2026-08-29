@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// Renders API_REFERENCE.md's endpoint tables from the routers that serve them.
+// Renders docs/API_REFERENCE.md's endpoint tables from the routers that serve them.
 //
 // The file used to be a cookbook of generic Express and Discord.js snippets
 // whose only endpoint example was a `/api/custom/:guildId` that has never
@@ -9,7 +9,7 @@
 // documented nowhere (#711). A hand-written list of that many routes drifts the
 // same week it is written, so this generates it instead.
 //
-//   npm run docs:api             rewrite the block in API_REFERENCE.md
+//   npm run docs:api             rewrite the block in docs/API_REFERENCE.md
 //   npm run docs:api -- --check  exit 1 if the block is out of date
 //
 // `--check` is what tests/apiDocs.test.js runs, so adding, moving or renaming a
@@ -33,7 +33,7 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const API_DIR = path.join(ROOT, 'src', 'dashboard', 'routes', 'api');
 const API_INDEX = path.join(ROOT, 'src', 'dashboard', 'routes', 'api.js');
-const DOC_PATH = path.join(ROOT, 'API_REFERENCE.md');
+const DOC_PATH = path.join(ROOT, 'docs', 'API_REFERENCE.md');
 
 const BEGIN = '<!-- BEGIN GENERATED ENDPOINTS — npm run docs:api -->';
 const END = '<!-- END GENERATED ENDPOINTS -->';
@@ -131,7 +131,7 @@ function parseRouter(file) {
         if (!summary) {
             throw new Error(
                 `${file}.js:${index + 1} — ${method.toUpperCase()} ${routePath} has no comment above it.\n` +
-                '    Add a one-sentence // comment directly above the route; it becomes the summary in API_REFERENCE.md.'
+                '    Add a one-sentence // comment directly above the route; it becomes the summary in docs/API_REFERENCE.md.'
             );
         }
         if (summary.length > SUMMARY_MAX) {
@@ -200,7 +200,7 @@ function replaceBlock(doc, body) {
     const start = doc.indexOf(BEGIN);
     const end = doc.indexOf(END);
     if (start === -1 || end === -1 || end < start) {
-        throw new Error(`API_REFERENCE.md is missing the ${BEGIN} / ${END} markers`);
+        throw new Error(`docs/API_REFERENCE.md is missing the ${BEGIN} / ${END} markers`);
     }
     return `${doc.slice(0, start)}${BEGIN}\n\n${body}\n\n${doc.slice(end)}`;
 }

@@ -128,6 +128,19 @@ module.exports = {
         // before either one writes back.
         const claimNow = new Date();
         const cooldownFloor = new Date(claimNow.getTime() - COOLDOWN_MS);
+
+        // The row has to exist before the guarded claim below, and it cannot be
+        // the same write: an upsert whose filter misses does not answer null,
+        // it inserts a document built from the filter's equality terms — and
+        // { userId, guildId } is a unique index, so every refusal came back as
+        // a duplicate-key error instead of the "Laying Low" embed below (#786).
+        // Same two-step shape as /daily and /work.
+        await User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
+            { upsert: true, new: true }
+        );
+
         const claimed = await User.findOneAndUpdate(
             {
                 userId: interaction.user.id,
@@ -137,11 +150,8 @@ module.exports = {
                     { $or: [{ lastCrime: null }, { lastCrime: { $lte: cooldownFloor } }] },
                 ],
             },
-            {
-                $set: { lastCrime: claimNow },
-                $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id },
-            },
-            { upsert: true, new: true }
+            { $set: { lastCrime: claimNow } },
+            { new: true }
         );
 
         if (!claimed) {

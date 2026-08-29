@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// Renders FEATURES.md's dashboard section list from the dashboard itself.
+// Renders docs/FEATURES.md's dashboard section list from the dashboard itself.
 //
 // The list was hand-written and had drifted: it enumerated 20 sections when 25
 // panels existed, with Exploration and Newspaper missing entirely (#705). A
@@ -9,7 +9,7 @@
 // "Daily News" section that is part of the RSS panel, not a panel of its own —
 // which is the shape a hand-maintained list of 25 things always ends up in.
 //
-//   npm run docs:panels             rewrite the block in FEATURES.md
+//   npm run docs:panels             rewrite the block in docs/FEATURES.md
 //   npm run docs:panels -- --check  exit 1 if the block is out of date
 //
 // `--check` is what tests/panelDocs.test.js runs, so adding, renaming, moving
@@ -47,7 +47,7 @@ const VIEWS = path.join(ROOT, 'src', 'dashboard', 'views');
 const PANEL_DIR = path.join(VIEWS, 'partials', 'panels');
 const SIDEBAR = path.join(VIEWS, 'guild-settings.ejs');
 const PANELS_MODULE = path.join(ROOT, 'src', 'dashboard', 'lib', 'panels.js');
-const DOC_PATH = path.join(ROOT, 'FEATURES.md');
+const DOC_PATH = path.join(ROOT, 'docs', 'FEATURES.md');
 
 const BEGIN = '<!-- BEGIN GENERATED PANELS — npm run docs:panels -->';
 const END = '<!-- END GENERATED PANELS -->';
@@ -204,7 +204,7 @@ function parseAll() {
             throw new Error(
                 `partials/panels/${item.panel}.ejs has no description.\n` +
                 '    Add a <p> to its .panel-head, or declare one with <%# summary: … %>;\n' +
-                "    it becomes the section's row in FEATURES.md."
+                "    it becomes the section's row in docs/FEATURES.md."
             );
         }
         if (summary.length > SUMMARY_MAX) {
@@ -250,7 +250,7 @@ function replaceBlock(doc, body) {
     const start = doc.indexOf(BEGIN);
     const end = doc.indexOf(END);
     if (start === -1 || end === -1 || end < start) {
-        throw new Error(`FEATURES.md is missing the ${BEGIN} / ${END} markers`);
+        throw new Error(`docs/FEATURES.md is missing the ${BEGIN} / ${END} markers`);
     }
     return `${doc.slice(0, start)}${BEGIN}\n\n${body}\n\n${doc.slice(end)}`;
 }

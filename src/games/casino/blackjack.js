@@ -12,40 +12,22 @@ const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const { randomFrom, BJ_WIN_LINES, BJ_LOSE_LINES, BJ_BUST_LINES, BJ_PUSH_LINES } = require('../../utils/copyLines');
 const COLORS = require('../../utils/embedColors');
+const {
+    buildDeck,
+    cardValue,
+    handTotal,
+    canDoubleDown,
+    canSplitHand,
+    playDealerHand,
+    settleHand,
+    isNaturalBlackjack,
+} = require('./blackjackHands');
 const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-const SUITS  = ['♠', '♥', '♦', '♣'];
-const VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-
-function buildDeck() {
-    const deck = [];
-    for (const suit of SUITS) {
-        for (const value of VALUES) deck.push({ suit, value });
-    }
-    for (let i = deck.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [deck[i], deck[j]] = [deck[j], deck[i]];
-    }
-    return deck;
-}
-
-function cardValue(card) {
-    if (['J', 'Q', 'K'].includes(card.value)) return 10;
-    if (card.value === 'A') return 11;
-    return parseInt(card.value, 10);
-}
-
-function handTotal(hand) {
-    let total = hand.reduce((sum, c) => sum + cardValue(c), 0);
-    let aces  = hand.filter(c => c.value === 'A').length;
-    while (total > 21 && aces > 0) { total -= 10; aces--; }
-    return total;
-}
 
 function displayHand(hand, hideSecond = false) {
     // Render cards as ASCII art boxes inside a monospace code block
@@ -56,15 +38,6 @@ function displayHand(hand, hideSecond = false) {
     });
     const rows = [0, 1, 2, 3].map(r => cards.map(c => c[r]).join(' ')).join('\n');
     return `\`\`\`\n${rows}\n\`\`\``;
-}
-
-function canDoubleDown(hand) {
-    const total = handTotal(hand);
-    return hand.length === 2 && (total === 9 || total === 10 || total === 11);
-}
-
-function canSplitHand(hand) {
-    return hand.length === 2 && cardValue(hand[0]) === cardValue(hand[1]);
 }
 
 function buildEmbed(interaction, playerHand, dealerHand, bet, currency, status, color, hideDealer, splitState = null) {
@@ -292,7 +265,7 @@ module.exports = {
         const insuranceCost   = Math.floor(bet / 2);
 
         // Dealer peek: if dealer shows Ace and has natural blackjack, resolve before player acts
-        if (dealerShowsAce && handTotal(dealerHand) === 21) {
+        if (dealerShowsAce && isNaturalBlackjack(dealerHand)) {
             const peekRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(`bj_hit_${gameId}`).setLabel('Hit').setStyle(ButtonStyle.Primary).setDisabled(true),
                 new ButtonBuilder().setCustomId(`bj_stand_${gameId}`).setLabel('Stand').setStyle(ButtonStyle.Secondary).setDisabled(true),
@@ -541,7 +514,7 @@ module.exports = {
 
         collector.on('end', async (_, reason) => {
             if (reason === 'bust') {
-                if (insuranceBet > 0 && handTotal(dealerHand.slice(0, 2)) === 21) {
+                if (insuranceBet > 0 && isNaturalBlackjack(dealerHand.slice(0, 2))) {
                     await User.updateOne(
                         { userId: interaction.user.id, guildId: interaction.guild.id },
                         { $inc: { balance: insuranceBet * 3 } },
@@ -567,8 +540,7 @@ module.exports = {
             await interaction.editReply({ embeds: [revealEmbed], components: [] }).catch(() => {});
             await delay(600);
 
-            while (handTotal(dealerHand) < 17) dealerHand.push(deck.pop());
-            const dealerTotal = handTotal(dealerHand);
+            const dealerTotal = playDealerHand(dealerHand, deck);
 
             const [freshUser_raw, freshGuild] = await Promise.all([
                 User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
@@ -591,14 +563,15 @@ module.exports = {
                     const hTotal = handTotal(splitHands[h]);
                     const hBet   = splitBets[h];
 
-                    if (hTotal > 21) {
+                    const outcome = settleHand(hTotal, dealerTotal);
+                    if (outcome === 'bust') {
                         handResults.push(`Hand ${h + 1}: 💥 Bust (-${currency}${hBet.toLocaleString()})`);
-                    } else if (dealerTotal > 21 || hTotal > dealerTotal) {
+                    } else if (outcome === 'win') {
                         const netProfit = Math.round(hBet * totalCoinMult);
                         totalCredit += hBet + netProfit;
                         const boostNote = totalCoinMult > 1.0 ? ` *(🚀 ${totalCoinMult.toFixed(1)}x)*` : '';
                         handResults.push(`Hand ${h + 1}: ✅ Win (+${currency}${netProfit.toLocaleString()}${boostNote})`);
-                    } else if (hTotal === dealerTotal) {
+                    } else if (outcome === 'push') {
                         totalCredit += hBet;
                         handResults.push(`Hand ${h + 1}: 🤝 Push`);
                     } else if (luckySaveEligible(hBet) && luckyActive && Math.random() < 0.20) {
@@ -618,20 +591,17 @@ module.exports = {
             } else {
                 const playerTotal = handTotal(playerHand);
                 const boostNote   = totalCoinMult > 1.0 ? ` *(🚀 ${totalCoinMult.toFixed(1)}x)*` : '';
+                // A player bust never reaches the dealer reveal, so this is
+                // 'win', 'push' or 'lose'.
+                const outcome     = settleHand(playerTotal, dealerTotal);
 
-                if (dealerTotal > 21) {
+                if (outcome === 'win') {
                     const netProfit = Math.round(activeBet * totalCoinMult);
                     totalCredit = activeBet + netProfit;
                     title       = '🃏 Blackjack — You Win';
                     description = `${randomFrom(BJ_WIN_LINES)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💰 Payout: ${currency}${(activeBet + netProfit).toLocaleString()}  (+${currency}${netProfit.toLocaleString()} net)${boostNote}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
                     color       = '#2ecc71';
-                } else if (playerTotal > dealerTotal) {
-                    const netProfit = Math.round(activeBet * totalCoinMult);
-                    totalCredit = activeBet + netProfit;
-                    title       = '🃏 Blackjack — You Win';
-                    description = `${randomFrom(BJ_WIN_LINES)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💰 Payout: ${currency}${(activeBet + netProfit).toLocaleString()}  (+${currency}${netProfit.toLocaleString()} net)${boostNote}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
-                    color       = '#2ecc71';
-                } else if (playerTotal === dealerTotal) {
+                } else if (outcome === 'push') {
                     totalCredit = activeBet;
                     title       = '🃏 Blackjack — Push';
                     description = `${randomFrom(BJ_PUSH_LINES)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
@@ -655,7 +625,7 @@ module.exports = {
 
             // Resolve insurance (only pays on dealer natural blackjack)
             if (insuranceBet > 0) {
-                const dealerNaturalBJ = handTotal(dealerHand.slice(0, 2)) === 21;
+                const dealerNaturalBJ = isNaturalBlackjack(dealerHand.slice(0, 2));
                 if (dealerNaturalBJ) {
                     totalCredit += insuranceBet * 3;
                     description += `\n🛡️ Insurance paid! +${currency}${(insuranceBet * 2).toLocaleString()}`;

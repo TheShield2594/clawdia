@@ -1,6 +1,6 @@
 'use strict';
 
-// FEATURES.md enumerated 20 dashboard sections when 25 panels existed, with
+// docs/FEATURES.md enumerated 20 dashboard sections when 25 panels existed, with
 // Exploration and Newspaper missing outright (#705). The list is generated now,
 // and this is what keeps it generated: adding, renaming or removing a panel
 // turns `npm test` red until `npm run docs:panels` has been run.

@@ -20,28 +20,15 @@ const {
     deleteLobby,
     addPlayer,
 } = require('../../utils/crashLobby');
+const {
+    generateCrashPoint,
+    multiplierAt,
+    ticksUntilCrash,
+    multLabel,
+} = require('./crashCurve');
 
-const GROWTH  = 1.12;
 const TICK_MS = 1200;
 const MIN_BET = 10;
-
-function generateCrashPoint() {
-    const r = Math.random();
-    if (r < 0.01) return 1.00;
-    return Math.min(100.00, parseFloat((0.99 / r).toFixed(2)));
-}
-
-function multiplierAt(tick) {
-    return parseFloat(Math.pow(GROWTH, tick).toFixed(2));
-}
-
-function ticksUntilCrash(crashPoint) {
-    return Math.ceil(Math.log(crashPoint) / Math.log(GROWTH));
-}
-
-function multLabel(m) {
-    return m >= 10 ? m.toFixed(1) + 'x' : m.toFixed(2) + 'x';
-}
 
 function crashColor(m) {
     if (m < 1.5)  return '#00ff88';

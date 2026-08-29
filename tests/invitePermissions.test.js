@@ -1,6 +1,6 @@
 /**
- * #723. SETUP_GUIDE.md's invite URL granted Administrator (`permissions=8`)
- * while FEATURES.md documented a precise minimum permission set — and the URL
+ * #723. docs/SETUP_GUIDE.md's invite URL granted Administrator (`permissions=8`)
+ * while docs/FEATURES.md documented a precise minimum permission set — and the URL
  * is the thing users actually click. The set now lives once, in
  * src/config/invitePermissions.js; this holds the two documents and the
  * dashboard's invite button to it.
@@ -30,18 +30,18 @@ describe('invite permission set', () => {
         }
     });
 
-    it('is the bitfield SETUP_GUIDE.md tells users to click', () => {
-        const guide = read('SETUP_GUIDE.md');
+    it('is the bitfield docs/SETUP_GUIDE.md tells users to click', () => {
+        const guide = read('docs/SETUP_GUIDE.md');
         expect(guide).toContain(`permissions=${INVITE_PERMISSIONS_BITFIELD}`);
         // The old URL must not survive anywhere in the guide.
         expect(guide).not.toContain('permissions=8&');
     });
 
-    it('is the list FEATURES.md documents, name for name', () => {
+    it('is the list docs/FEATURES.md documents, name for name', () => {
         // The permissions section, not the whole file — a permission name
         // appearing in some feature description elsewhere must not satisfy
         // this.
-        const features = read('FEATURES.md');
+        const features = read('docs/FEATURES.md');
         const section = features.slice(
             features.indexOf('### Bot Permissions Required'),
             features.indexOf('### User Permissions')

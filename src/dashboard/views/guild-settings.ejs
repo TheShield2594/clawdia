@@ -1,12 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><%= guild.name %> · Dashboard — Clawdia</title>
-    <%- include('partials/favicon') %>
-    <link rel="stylesheet" href="<%= asset('/fonts/fonts.css') %>">
-    <link rel="stylesheet" href="<%= asset('/styles.css') %>">
+    <%- include('partials/head', { title: guild.name + ' · Dashboard — Clawdia' }) %>
     <%# Chart.js is deliberately not here (#685). It is vendored under /vendor/
         and injected by loadChartJs() the first time a chart is about to be
         drawn — only the Analytics panel and the Economy panel's Health tab draw
@@ -25,16 +20,9 @@
 
         <!-- Brand -->
         <div style="padding:4px 8px 22px;">
-            <a href="/" style="display:flex;align-items:center;gap:10px;text-decoration:none;">
-                <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
-                    <ellipse cx="16" cy="22" rx="8.5" ry="6" fill="#ece4d2"/>
-                    <ellipse cx="7" cy="12.5" rx="2.6" ry="3.8" fill="#ece4d2" transform="rotate(-18 7 12.5)"/>
-                    <ellipse cx="12.5" cy="9" rx="2.6" ry="4" fill="#ece4d2" transform="rotate(-6 12.5 9)"/>
-                    <ellipse cx="19.5" cy="9" rx="2.6" ry="4" fill="#ece4d2" transform="rotate(6 19.5 9)"/>
-                    <ellipse cx="25" cy="12.5" rx="2.6" ry="3.8" fill="#ece4d2" transform="rotate(18 25 12.5)"/>
-                    <path d="M14 20.5c0.6-1.6 3.4-1.6 4 0" stroke="#e89163" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-                </svg>
-                <span class="cw-wordmark" style="color:var(--cream-100);font-size:24px;">Clawdia</span>
+            <a href="/" class="cw-brand-link">
+                <%- include('partials/brand-mark', { size: 24, fill: '#ece4d2', accent: '#e89163' }) %>
+                <span class="cw-wordmark cw-side-wordmark">Clawdia</span>
             </a>
         </div>
 

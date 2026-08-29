@@ -46,10 +46,10 @@ describe('coverage ratchet', () => {
     // meant to be raised, never lowered.
     test('the thresholds sit near the coverage the suite actually has', () => {
         const global = config.coverageThreshold.global;
-        expect(global.statements).toBeGreaterThanOrEqual(45);
-        expect(global.branches).toBeGreaterThanOrEqual(35);
-        expect(global.functions).toBeGreaterThanOrEqual(46);
-        expect(global.lines).toBeGreaterThanOrEqual(46);
+        expect(global.statements).toBeGreaterThanOrEqual(47);
+        expect(global.branches).toBeGreaterThanOrEqual(37);
+        expect(global.functions).toBeGreaterThanOrEqual(48);
+        expect(global.lines).toBeGreaterThanOrEqual(48);
     });
 
     test('the summary Jest prints and the JSON the CI step reads are both produced', () => {
@@ -105,6 +105,13 @@ describe('per-subsystem floors', () => {
     // going back, and a floor of zero would not.
     test('the moderation floor reflects the tests that now drive those commands', () => {
         expect(floors.directories['src/commands/moderation'].branches).toBeGreaterThanOrEqual(60);
+    });
+
+    // #786 is the same argument for the economy commands, which had 86 of 97
+    // command files never invoking execute() and the money-moving ones at zero
+    // branches. A floor of 3 would not notice the harness being deleted.
+    test('the economy floor reflects the harness that now drives those commands', () => {
+        expect(floors.directories['src/commands/economy'].branches).toBeGreaterThanOrEqual(12);
     });
 
     test('a file belongs to its own directory, not to every parent of it', () => {

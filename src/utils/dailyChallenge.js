@@ -32,9 +32,18 @@ function generateWrongAnswers(correct, count) {
         const candidate = correct + offset;
         if (candidate !== correct && candidate > 0 && candidate < 150) wrong.add(candidate);
     }
-    while (wrong.size < count) {
+    // Bounded, then filled deterministically: the offsets above cover the usual
+    // case, and this only runs when they were all rejected. Unbounded, it spins
+    // forever on any run of rolls that keeps producing the same candidate
+    // (#786).
+    let attempts = 0;
+    while (wrong.size < count && attempts < 50) {
+        attempts++;
         const candidate = correct + Math.floor(Math.random() * 20) - 10;
         if (candidate !== correct && candidate > 0) wrong.add(candidate);
+    }
+    for (let fallback = 1; wrong.size < count; fallback++) {
+        wrong.add(correct + fallback + offsets.length);
     }
     return [...wrong].slice(0, count);
 }

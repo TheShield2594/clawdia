@@ -1,0 +1,59 @@
+<%#
+    The cream page-chrome nav, shared by the landing page and the server picker
+    (#690). Both render the same bar, the same brand and the same layout; only
+    the middle links and the right-hand call to action differ, and keeping two
+    copies meant a nav change landed on one page and not the other.
+
+    Locals:
+
+      page  'home' or 'dashboard'
+
+    'home' is the only one that shows section links, because they are anchors
+    into that page, and the only one whose brand is not a link — it is already
+    where the link would go.
+-%>
+<nav class="cw-nav">
+    <div class="cw-nav-inner">
+        <div class="cw-brand">
+            <%_ if (page === 'home') { _%>
+                <%- include('brand-mark', { size: 28 }) %>
+                <span class="cw-wordmark">Clawdia</span>
+            <%_ } else { _%>
+                <a href="/" class="cw-brand-link">
+                    <%- include('brand-mark', { size: 28 }) %>
+                    <span class="cw-wordmark">Clawdia</span>
+                </a>
+            <%_ } _%>
+        </div>
+        <%_ if (page === 'home') { _%>
+            <div class="cw-nav-links">
+                <a href="#features">Features</a>
+                <a href="#features">Modules</a>
+                <a href="#insights">Insights</a>
+                <a href="#self-host">Self-host</a>
+                <a href="https://github.com/TheShield2594/clawdia" target="_blank" rel="noopener">Docs</a>
+            </div>
+            <div class="cw-nav-cta">
+                <%_ if (user) { _%>
+                    <a href="/dashboard" class="cw-link-quiet">Dashboard</a>
+                    <a href="/dashboard" class="cw-btn cw-btn-dark">Open Dashboard <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                <%_ } else { _%>
+                    <a href="/auth/login" class="cw-link-quiet">Sign in</a>
+                    <a href="/auth/login" class="cw-btn cw-btn-dark">Add to Discord <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                <%_ } _%>
+            </div>
+        <%_ } else { _%>
+            <div class="cw-nav-cta">
+                <%_ if (user.avatar) { _%>
+                    <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png" alt="<%= user.username %>'s avatar" class="cw-dash-avatar">
+                <%_ } else { _%>
+                    <div class="cw-dash-avatar-fallback"><%= user.username.charAt(0).toUpperCase() %></div>
+                <%_ } _%>
+                <span class="cw-nav-username"><%= user.username %></span>
+                <form method="post" action="/auth/logout" class="cw-logout-form">
+                    <button type="submit" class="cw-btn cw-btn-dark cw-nav-logout-btn">Logout</button>
+                </form>
+            </div>
+        <%_ } _%>
+    </div>
+</nav>
