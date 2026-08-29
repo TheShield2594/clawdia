@@ -24,13 +24,14 @@ const read = p => fs.readFileSync(p, 'utf8');
 
 describe('the dashboard ships a tab icon', () => {
     test('every top-level view pulls in the icon links', () => {
-        // Not a copy in each head: one partial, so the three cannot drift and
-        // #690's shared head has one thing to absorb rather than three.
+        // Not a copy in each head: one partial, and since #690 the shared head
+        // is what includes it, so the three pages cannot drift on either.
         expect(views.length).toBeGreaterThan(0);
         for (const view of views) {
-            expect([view, read(path.join(VIEWS, view)).includes("include('partials/favicon')")])
+            expect([view, read(path.join(VIEWS, view)).includes("include('partials/head'")])
                 .toEqual([view, true]);
         }
+        expect(read(path.join(VIEWS, 'partials', 'head.ejs'))).toContain("include('favicon')");
     });
 
     test('the partial links both files, through the hashing asset helper', () => {

@@ -643,6 +643,12 @@ Two related conventions worth knowing while writing a panel:
 - A third-party script belongs in `public/vendor/`, vendored from an
   exact-pinned dependency by a `scripts/vendor-*.sh` helper, never loaded from
   a CDN (#685). `script-src` is `'self'` and a nonce, and it stays that way.
+- Page chrome is shared too (#690). A new top-level view opens with
+  `<%- include('partials/head', { title: '…' }) %>` — that is where the
+  charset, the viewport, the favicon links and both stylesheets live — and
+  reaches for the paw mark through `partials/brand-mark.ejs` rather than
+  pasting ten ellipses. The cream bar on the landing page and the server
+  picker is `partials/nav.ejs`, which takes a `page` local.
 
 ### Adding API Endpoints
 

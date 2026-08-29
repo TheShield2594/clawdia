@@ -1,0 +1,26 @@
+<%#
+    Everything the three top-level views put in <head> (#690).
+
+    The block was identical in all three except for the <title>, so a change to
+    it — the vendored-font <link> of #681, the favicon of #688, a CSP-driven
+    move of a stylesheet — had to be made three times, and twice was enough to
+    leave one view behind.
+
+    Locals:
+
+      title        required, the tab title, already assembled by the caller
+      description  optional; the landing page is the only one search engines
+                   see, and the dashboard pages sit behind a login
+
+    Anything a single view needs on its own — guild-settings pulls in
+    esc-html.js — stays in that view, after the include.
+-%>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><%= title %></title>
+<%_ if (locals.description) { _%>
+<meta name="description" content="<%= description %>">
+<%_ } _%>
+<%- include('favicon') %>
+<link rel="stylesheet" href="<%= asset('/fonts/fonts.css') %>">
+<link rel="stylesheet" href="<%= asset('/styles.css') %>">

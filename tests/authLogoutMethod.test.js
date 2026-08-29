@@ -74,12 +74,29 @@ test('Fetch Metadata is accepted when Origin is absent', async () => {
 });
 
 // The controls that post to it. A link left behind would 404 in a user's face.
+// Rendered rather than read as text: since #690 the nav's control lives in
+// partials/nav.ejs, and grepping the page file alone would now see one of the
+// two and report the other missing.
 test('the dashboard view submits it as a form, with no logout links left', () => {
     const fs = require('fs');
     const path = require('path');
-    const view = fs.readFileSync(
-        path.join(__dirname, '..', 'src', 'dashboard', 'views', 'dashboard.ejs'), 'utf8');
+    const ejs = require('ejs');
+    const { asset } = require('../src/dashboard/lib/assets');
 
-    expect(view).not.toMatch(/href="\/auth\/logout"/);
-    expect(view.match(/<form method="post" action="\/auth\/logout"/g)).toHaveLength(2);
+    const file = path.join(__dirname, '..', 'src', 'dashboard', 'views', 'dashboard.ejs');
+    const render = guilds => ejs.render(
+        fs.readFileSync(file, 'utf8'),
+        { user: { id: '1', username: 'tester', avatar: null }, guilds, version: '0.0.0', asset },
+        { filename: file },
+    );
+
+    // With no manageable servers the empty state offers a second one, labelled
+    // "Refresh login", because a stale Discord session is the usual cause.
+    const empty = render([]);
+    expect(empty).not.toMatch(/href="\/auth\/logout"/);
+    expect(empty.match(/<form method="post" action="\/auth\/logout"/g)).toHaveLength(2);
+
+    const populated = render([{ id: '2', name: 'Guild', icon: null, botPresent: true }]);
+    expect(populated).not.toMatch(/href="\/auth\/logout"/);
+    expect(populated.match(/<form method="post" action="\/auth\/logout"/g)).toHaveLength(1);
 });

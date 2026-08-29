@@ -1083,12 +1083,15 @@ textarea.auto-resize {
 .cw-nav { padding: 20px 48px; border-bottom: 1px solid rgba(0,0,0,.06); background: rgba(250,246,239,.88); backdrop-filter: blur(12px); position: sticky; top: 0; z-index: 50; }
 .cw-nav-inner { display: flex; align-items: center; justify-content: space-between; max-width: 1320px; margin: 0 auto; }
 .cw-brand { display: flex; align-items: center; gap: 10px; }
+.cw-brand-link { display: flex; align-items: center; gap: 10px; text-decoration: none; }
 .cw-wordmark { font-family: 'Instrument Serif', serif; font-size: 28px; letter-spacing: -0.01em; color: var(--ink-950); }
 .cw-nav-links { display: flex; gap: 28px; font-size: 14.5px; color: var(--ink-700); }
 .cw-nav-links a { cursor: pointer; color: var(--ink-700); text-decoration: none; }
 .cw-nav-links a:hover { color: var(--ink-950); }
 .cw-nav-links a:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 4px; border-radius: 4px; }
 .cw-nav-cta { display: flex; align-items: center; gap: 14px; }
+.cw-nav-username { font-size: 14px; color: var(--ink-700); font-weight: 500; }
+.cw-nav-logout-btn { padding: 9px 16px; font-size: 13.5px; }
 .cw-link-quiet { font-size: 14.5px; color: var(--ink-700); cursor: pointer; text-decoration: none; }
 .cw-link-quiet:hover { color: var(--ink-950); }
 
@@ -1228,6 +1231,7 @@ textarea.auto-resize {
 .cw-footer ul a { color: var(--cream-100); cursor: pointer; text-decoration: none; }
 .cw-footer ul a:hover { color: var(--cream-50); }
 .cw-footer .cw-wordmark { color: var(--cream-100); }
+.cw-side-wordmark { color: var(--cream-100); font-size: 24px; }
 .cw-footer-tag { color: var(--ink-300); font-size: 14px; margin: 14px 0 0; max-width: 280px; line-height: 1.5; }
 .cw-footer-bottom { max-width: 1320px; margin: 48px auto 0; padding-top: 24px; border-top: 1px solid var(--ink-800); display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-400); font-family: 'JetBrains Mono', monospace; }
 
@@ -1268,7 +1272,7 @@ textarea.auto-resize {
 
 /* Shared avatar elements (also used in nav) */
 .cw-dash-avatar { width: 34px; height: 34px; border-radius: 10px; object-fit: cover; }
-.cw-dash-avatar-fallback { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; }
+.cw-dash-avatar-fallback { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; background: var(--ink-700); color: var(--cream-100); }
 
 /* Header */
 .cw-dash-lp-header { max-width: 1320px; margin: 0 auto; padding: 72px 48px 40px; }
