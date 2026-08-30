@@ -24,6 +24,7 @@ function checkAuth(req, res, next) {
 const { hasManagePermission, verifyLiveGuildAccess } = require('../lib/permissions');
 const { CHANNEL_TYPES } = require('../../bot/gateway');
 const { PANELS, DEFAULT_PANEL, isPanel } = require('../lib/panels');
+const { groupReactionRolePanels } = require('../lib/reactionRolePanels');
 
 function getManageableGuilds(req) {
     return req.user.guilds
@@ -197,6 +198,11 @@ async function buildGuildSettingsLocals(req) {
             stageChannels: stageChannels,
             categories: categories,
             roles: roles,
+            // Grouped here rather than in reactionroles.ejs (#689): the API
+            // returns the same shape so the browser can re-render the list
+            // after a create or delete without reloading the page, and two
+            // groupings would be two things to keep in step.
+            reactionRolePanels: groupReactionRolePanels(safeSettings.reactionRoles),
             defaultJobs: DEFAULT_JOBS,
             defaultTiers: DEFAULT_TIERS,
             builtinAchievements,

@@ -5,33 +5,30 @@
                     </div>
 
                     <div class="panel-head" style="margin-top:.5rem"><h3>Active panels</h3></div>
+                    <%# Grouped by the route rather than here, because guild-settings.js
+                        re-renders this same list from the API's response after a
+                        publish or a delete instead of reloading the page (#689).
+                        Keep the markup below and renderRrPanels() in step. -%>
                     <div id="rr-panels-list">
-                        <%
-                        const rrMap = {};
-                        (settings.reactionRoles || []).forEach(function(rr) {
-                            if (!rrMap[rr.messageId]) rrMap[rr.messageId] = { channelId: rr.channelId, mappings: [] };
-                            rrMap[rr.messageId].mappings.push({ emoji: rr.emoji, roleId: rr.roleId });
-                        });
-                        const rrPanels = Object.entries(rrMap);
-                        %>
+                        <% const rrPanels = locals.reactionRolePanels || []; %>
                         <% if (!rrPanels.length) { %>
                             <div class="empty-state"><h3>No reaction role panels yet</h3><p>Create a panel below and the bot will post it to your chosen channel with reactions automatically added.</p></div>
                         <% } else { %>
-                            <% rrPanels.forEach(function([messageId, panel]) { %>
+                            <% rrPanels.forEach(function(panel) { %>
                                 <% const panelChannel = channels.find(function(c) { return c.id === panel.channelId; }); %>
                                 <div class="store-card">
                                     <div class="store-card-body">
                                         <div class="store-card-name">#<%= panelChannel ? panelChannel.name : panel.channelId %></div>
-                                        <div style="margin-top:.35rem;display:flex;flex-wrap:wrap;gap:.35rem;">
+                                        <div class="rr-panel-mappings">
                                             <% panel.mappings.forEach(function(m) { %>
                                                 <% const mappingRole = roles.find(function(r) { return r.id === m.roleId; }); %>
                                                 <span class="store-meta-tag role-meta"><%= m.emoji %> → @<%= mappingRole ? mappingRole.name : m.roleId %></span>
                                             <% }); %>
                                         </div>
-                                        <div style="margin-top:.4rem;font-size:.78rem;color:var(--text-dim)">Message ID: <%= messageId %></div>
+                                        <div class="rr-panel-message-id">Message ID: <%= panel.messageId %></div>
                                     </div>
                                     <div class="store-card-actions">
-                                        <button class="btn btn-sm btn-danger" data-message-id="<%= messageId %>" onclick="deleteRrPanel(this.dataset.messageId)">Delete panel</button>
+                                        <button class="btn btn-sm btn-danger" data-action="rr-panel-delete" data-message-id="<%= panel.messageId %>">Delete panel</button>
                                     </div>
                                 </div>
                             <% }); %>

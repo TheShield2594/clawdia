@@ -6,6 +6,20 @@ const { safeFetchFeed } = require('../../../utils/safeFeedFetch');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId } = require('../../lib/apiHelpers');
 
+/**
+ * The guild's feeds in the shape the dashboard's list renders from.
+ *
+ * Both mutations answer with the whole list rather than just the row that
+ * changed (#689). The page patches its list in place instead of reloading, and
+ * the feeds are addressed by *position* — so a client holding only its own idea
+ * of the order is a client whose next delete removes the wrong feed. Handing
+ * back the array the server just saved keeps the two in step for the cost of a
+ * few hundred bytes on a request that was already round-tripping.
+ */
+function feedList(guildSettings) {
+    return (guildSettings.rssFeeds || []).map(feed => ({ url: feed.url, channelId: feed.channelId }));
+}
+
 
 // Checks that a URL is a fetchable RSS or Atom feed before it is subscribed to.
 // The one write on the router that had no rate limit, and the one that reaches
@@ -63,7 +77,7 @@ router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, checkWriteRa
         guildSettings.rssFeeds.push({ url: url.trim(), channelId });
         await guildSettings.save();
 
-        res.json({ success: true });
+        res.json({ success: true, feeds: feedList(guildSettings) });
     } catch (error) {
         console.error('RSS add error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -93,13 +107,28 @@ router.post('/guild/:guildId/dailynews/trigger', checkAuth, checkGuildAccess, ch
 router.delete('/guild/:guildId/rss/:index', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, index } = req.params;
 
+    // `splice(NaN, 1)` removes element 0, so an unparseable index used to
+    // delete the *first* feed rather than none of them — and a request for a
+    // position past the end used to answer 200 having changed nothing, which
+    // the page then took as its cue to drop a row that is still subscribed.
+    // Both are checked now that the list is patched in place rather than
+    // re-rendered from the database on the next load (#689).
+    const position = Number(index);
+    if (!Number.isInteger(position) || position < 0) {
+        return res.status(400).json({ error: 'index must be a non-negative integer' });
+    }
+
     try {
         const guildSettings = await Guild.findOne({ guildId });
+        if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
+        if (position >= (guildSettings.rssFeeds || []).length) {
+            return res.status(404).json({ error: 'No feed at that position. Reload the page and try again.' });
+        }
 
-        guildSettings.rssFeeds.splice(parseInt(index), 1);
+        guildSettings.rssFeeds.splice(position, 1);
         await guildSettings.save();
 
-        res.json({ success: true });
+        res.json({ success: true, feeds: feedList(guildSettings) });
     } catch (error) {
         console.error('RSS delete error:', error);
         res.status(500).json({ error: 'Internal server error' });

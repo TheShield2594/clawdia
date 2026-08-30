@@ -3,6 +3,9 @@ const router = express.Router();
 const Guild = require('../../../models/Guild');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId } = require('../../lib/apiHelpers');
+// Grouped the same way the settings page groups it, so the list the browser
+// re-renders after a mutation matches the one a reload would produce (#689).
+const { groupReactionRolePanels } = require('../../lib/reactionRolePanels');
 
 // Posts a reaction role panel to a channel and stores its emoji-to-role mappings.
 router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
@@ -72,7 +75,13 @@ router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, c
             throw innerError;
         }
 
-        res.json({ success: true, messageId: sent.messageId });
+        // The whole list, not just the panel that was published: the page
+        // patches its list in place rather than reloading (#689).
+        res.json({
+            success: true,
+            messageId: sent.messageId,
+            panels: groupReactionRolePanels(guildSettings.reactionRoles),
+        });
     } catch (error) {
         console.error('Reaction role panel create error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -95,7 +104,7 @@ router.delete('/guild/:guildId/reactionrole/panel/:messageId', checkAuth, checkG
         guildSettings.reactionRoles = guildSettings.reactionRoles.filter(r => r.messageId !== messageId);
         await guildSettings.save();
 
-        res.json({ success: true });
+        res.json({ success: true, panels: groupReactionRolePanels(guildSettings.reactionRoles) });
     } catch (error) {
         console.error('Reaction role panel delete error:', error);
         res.status(500).json({ error: 'Internal server error' });
