@@ -86,10 +86,11 @@ describe('the spam window is reclaimed', () => {
         }
         expect(spamLimiter.size).toBe(25);
 
-        // One sweep tick is 60s — the widest window any guild can configure —
-        // so the first tick still sees timestamps inside it. The one after it
-        // is where a visitor who never came back is finally forgotten.
-        jest.advanceTimersByTime(60_000);
+        // The frozen clock puts every one of those messages exactly one sweep
+        // interval before the next tick, which is the expiry boundary itself: a
+        // timestamp precisely `windowMs` old is one `check` and `hit` have
+        // already stopped counting, so the sweep must not keep it for another
+        // round either. One tick, not two.
         jest.advanceTimersByTime(60_000);
 
         expect(spamLimiter.size).toBe(0);

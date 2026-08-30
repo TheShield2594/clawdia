@@ -93,11 +93,18 @@ class BoundedRateLimiter {
         this._map.delete(key);
     }
 
-    /** Drops keys whose recorded requests have all aged out of `windowMs`. */
+    /**
+     * Drops keys whose recorded requests have all aged out of `windowMs`.
+     *
+     * The comparison is inclusive because `check` and `hit` keep a timestamp
+     * only while `now - t < windowMs` — a timestamp exactly `windowMs` old has
+     * already expired for them. A strict `<` here would disagree with that on
+     * the boundary and hold the key for one more sweep.
+     */
     cleanup(windowMs) {
         const cutoff = Date.now() - windowMs;
         for (const [key, timestamps] of this._map) {
-            if (timestamps.every(t => t < cutoff)) this._map.delete(key);
+            if (timestamps.every(t => t <= cutoff)) this._map.delete(key);
         }
     }
 

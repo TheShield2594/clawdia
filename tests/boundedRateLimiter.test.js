@@ -91,6 +91,31 @@ describe('cleanup', () => {
             jest.useRealTimers();
         }
     });
+
+    test('expires a timestamp that is exactly one window old', () => {
+        jest.useFakeTimers();
+        try {
+            const limiter = new BoundedRateLimiter();
+            limiter.hit('a', 60_000);
+
+            jest.advanceTimersByTime(60_000);
+
+            // `check` and `hit` keep a timestamp only while `now - t <
+            // windowMs`, so at exactly `windowMs` it has already aged out for
+            // them. The sweep agrees on the same tick rather than holding the
+            // key for one more round.
+            expect(limiter.hit('a', 60_000)).toBe(1);
+            limiter.reset('a');
+
+            limiter.hit('a', 60_000);
+            jest.advanceTimersByTime(60_000);
+            limiter.cleanup(60_000);
+
+            expect(limiter.size).toBe(0);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
 });
 
 describe('hit', () => {

@@ -481,8 +481,12 @@ async function handleAutoModeration(message, guildSettings) {
         // Clamped to the range the dashboard's own input offers. Nothing
         // validates `spamWindow` on the way into the database, and the sweep
         // above is only sound while no guild's window outruns it.
+        //
+        // `??`, not `||`: an out-of-range value is the clamp's job, so a stored
+        // 0 becomes the one-second floor rather than being read as "unset" and
+        // silently given the five-second default.
         const windowMs = Math.min(
-            Math.max((mod.spamWindow || 5) * 1000, SPAM_MIN_WINDOW_MS),
+            Math.max((mod.spamWindow ?? 5) * 1000, SPAM_MIN_WINDOW_MS),
             SPAM_MAX_WINDOW_MS
         );
         const threshold = mod.spamThreshold || 5;

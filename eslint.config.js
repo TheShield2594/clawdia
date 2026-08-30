@@ -100,7 +100,9 @@ const SYNC_CANVAS_ENCODE = [
         message: 'Use `encodeCanvas(canvas)` from utils/canvasEncode.js — `canvas.toBuffer()` blocks the event loop (#592).',
     },
     {
-        selector: 'CallExpression[callee.property.name="toBuffer"][arguments.0.type="Literal"]',
+        // A template literal is the same call written with backticks, and it is
+        // the spelling a copy-paste out of a formatted string arrives in.
+        selector: 'CallExpression[callee.property.name="toBuffer"]:matches([arguments.0.type="Literal"], [arguments.0.type="TemplateLiteral"])',
         message: 'Use `encodeCanvas(canvas, mimeType)` from utils/canvasEncode.js — the one-argument `toBuffer` blocks the event loop (#592).',
     },
 ];
