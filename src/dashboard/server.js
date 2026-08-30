@@ -21,7 +21,7 @@ const { instanceStats } = require('./lib/instanceStats');
 // need their answers, because createApp() can be handed an environment directly
 // by a test, and because a rule enforced only at the edge is a rule that quietly
 // stops being enforced when a second caller appears.
-const { resolveDashboardUrl, checkSessionSecret } = require('../config/validateEnv');
+const { resolveDashboardUrl, checkDashboardUrl, checkSessionSecret } = require('../config/validateEnv');
 
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
@@ -341,7 +341,20 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
         // The hero's stat row is measured, not written into the template
         // (#704). `null` when the client has not been ready yet, and the
         // template drops the row for that rather than claiming zero servers.
-        res.render('index', { user: req.user, stats: instanceStats(bot) });
+        //
+        // `baseUrl` is for the landing page's Open Graph tags (#687), which
+        // have to be absolute: an unfurler resolves nothing relative to the
+        // page it fetched. Taken from the validated DASHBOARD_URL rather than
+        // the request's own Host header, which is attacker-controlled and would
+        // let anyone who can reach the port mint a card pointing at their own
+        // domain. `null` only in the misconfiguration that already refuses to
+        // start, and the template drops the tags rather than emitting a
+        // half-formed URL.
+        res.render('index', {
+            user: req.user,
+            stats: instanceStats(bot),
+            baseUrl: checkDashboardUrl().baseUrl,
+        });
     });
 
     app.use(errorHandler);

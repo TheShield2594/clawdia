@@ -1,10 +1,49 @@
 <!DOCTYPE html>
 <html lang="en">
+<%
+    // Written once and used three times below — the tab title, the meta
+    // description, and the Open Graph pair an unfurler reads instead of either.
+    const pageTitle = 'Clawdia — A chill Discord bot with serious teeth';
+    const pageDescription = 'Moderation, leveling, economy, AI chat and analytics — in one self-hosted Discord bot. Own your data.';
+%>
 <head>
-    <%- include('partials/head', {
-        title: 'Clawdia — A chill Discord bot with serious teeth',
-        description: 'Moderation, leveling, economy, AI chat and analytics — in one self-hosted Discord bot. Own your data.',
-    }) %>
+    <%- include('partials/head', { title: pageTitle, description: pageDescription }) %>
+
+    <%#
+        Open Graph and Twitter Card, on this view only (#687).
+
+        Links to a Discord bot are shared in Discord, and Discord unfurls OG
+        tags — so this is not an SEO nicety at the edge of the product, it is
+        how the product looks in its own main distribution channel. Without
+        them a shared link renders as bare blue text.
+
+        Deliberately not in partials/head.ejs and deliberately not on the other
+        two views: dashboard.ejs and guild-settings.ejs sit behind checkAuth,
+        no crawler or unfurler can reach them, and a card for a page that
+        answers a redirect to /login describes nothing.
+
+        Everything absolute, off the validated DASHBOARD_URL: an unfurler
+        fetches the URL and resolves nothing against the page it came from, so
+        a root-relative og:image is simply dropped.
+    -%>
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Clawdia">
+    <meta property="og:title" content="<%= pageTitle %>">
+    <meta property="og:description" content="<%= pageDescription %>">
+    <%_ if (locals.baseUrl) { _%>
+    <meta property="og:url" content="<%= baseUrl %>/">
+    <meta property="og:image" content="<%= baseUrl %><%= asset('/og-image.png') %>">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <%# The card carries text, so it needs alt text like any other image. -%>
+    <meta property="og:image:alt" content="Clawdia — a chill Discord bot with serious teeth. Moderation, leveling, economy, AI chat and analytics.">
+    <link rel="canonical" href="<%= baseUrl %>/">
+    <%_ } _%>
+    <%# summary_large_image rather than summary: the card is 1.91:1 artwork
+        with type in it, and the square summary crop cuts the wordmark off. -%>
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="<%= pageTitle %>">
+    <meta name="twitter:description" content="<%= pageDescription %>">
 </head>
 <body style="background:var(--cream-50);">
 
