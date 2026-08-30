@@ -219,11 +219,16 @@ A few things worth knowing:
   itself with the service automatically. A server that does not support that
   reports the URL to register by hand.
 
-Any other server that wants a login works the same way, as long as it speaks
-the Streamable HTTP transport — the one the bot's MCP client implements, here
-and for token connections alike. Atlassian is the notable absence: its published
-endpoint uses the older HTTP+SSE transport, which is a separate protocol rather
-than a response format, and is not implemented.
+Any other server that wants a login works the same way, over either of MCP's two
+HTTP transports. The bot's client tries **Streamable HTTP** first — one endpoint,
+every request a POST — and falls back to the older **HTTP+SSE** transport when
+the server answers that POST with a 404 or a 405, which is what a server built
+against the 2024-11-05 revision does. Nothing has to be configured either way;
+paste the endpoint the service publishes. Atlassian's is one of the older ones,
+which is why its preset URL ends `/sse` rather than `/mcp`.
+
+Local **stdio** servers are still out of reach: they are a subprocess on the
+machine running the server, not an address, and the bot connects over HTTP.
 
 **Tool gating.** *Only these tools* is an allowlist — leave it empty to allow
 everything the server offers. *Never these tools* is a denylist and wins over
@@ -306,7 +311,7 @@ file lives outside the repo checkout.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Unique identifier, letters/digits/`_`/`-`. Appears in Claude's tool calls. |
-| `url` | Yes | The server's HTTPS endpoint, speaking the Streamable HTTP transport. Local stdio servers cannot be reached this way, and neither can the older HTTP+SSE transport — a Streamable HTTP server may still answer in SSE, which is a different thing. |
+| `url` | Yes | The server's HTTPS endpoint. Either HTTP transport works — Streamable HTTP is tried first and the older HTTP+SSE is used if the server refuses the POST. Local stdio servers cannot be reached this way. |
 | `enabled` | No | Set `false` to keep an entry in the file without connecting to it. |
 | `authorization_token` | No | OAuth bearer token, if the server needs one. |
 | `allowed_tools` | No | Allowlist of tool names. Empty means every tool. |

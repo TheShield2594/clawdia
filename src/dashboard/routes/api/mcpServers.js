@@ -42,12 +42,11 @@ const DEFAULT_USAGE_DAYS = 7;
 // presets used to be absent entirely, because the dashboard had one credential
 // field and it held a token rather than a login.
 //
-// Atlassian is not among them, despite being one of the services that made the
-// case for the flow: the endpoint it publishes speaks the older HTTP+SSE
-// transport, which src/services/ai/mcp/client.js does not implement — it is a
-// Streamable HTTP client, and a bare POST to an SSE endpoint cannot complete
-// the handshake. A preset that cannot connect is worse than no preset; it wants
-// the transport, not another entry in this list.
+// Atlassian was held back from this list for a while: the endpoint it publishes
+// speaks the older HTTP+SSE transport, and a Streamable HTTP POST to an SSE
+// endpoint cannot complete a handshake. The client speaks both now — it tries
+// the POST and falls back on the 404 or 405 that answers it (#838) — so the
+// preset ships.
 //
 // A preset with an empty `url` is a service with no single hosted endpoint to
 // point at — the server is one you run or one a hosting provider spins up per
@@ -152,6 +151,20 @@ const PRESETS = [
         oauth: true,
         hint: 'Pages and databases in the Notion workspace you log in to.',
         tokenHint: 'No token: click Connect and authorize the bot in Notion. Notion asks which pages to share during the login, so grant it the smallest set that is useful.',
+        suggestedBlockedTools: []
+    },
+    {
+        id: 'atlassian',
+        label: 'Atlassian (Jira & Confluence)',
+        name: 'atlassian',
+        url: 'https://mcp.atlassian.com/v1/sse',
+        requiresToken: false,
+        oauth: true,
+        // The one preset on the older transport, which is why the URL ends
+        // /sse rather than /mcp. Nothing here has to say so — the handshake
+        // works it out — but it is the reason the address looks unlike the rest.
+        hint: 'Jira issues and Confluence pages in the Atlassian site you log in to.',
+        tokenHint: 'No token: click Connect and authorize the bot in Atlassian. The login is per site, and whoever authorizes it is the account the bot acts as.',
         suggestedBlockedTools: []
     },
     {
