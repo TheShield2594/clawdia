@@ -2,6 +2,9 @@ const { SlashCommandBuilder, AttachmentBuilder, MessageFlags } = require('discor
 const { createCanvas, loadImage } = require('canvas');
 const dns = require('dns');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
+// The PNG encode goes to libuv's thread pool rather than blocking the gateway
+// on the way out — see utils/canvasEncode.js (#592).
+const { encodeCanvas } = require('../../utils/canvasEncode');
 
 const MAX_WIDTH   = 800;
 const MAX_DIM     = 4000;
@@ -75,7 +78,7 @@ module.exports = {
 
             ctx.drawImage(src, 0, captionH, w, h);
 
-            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'caption.png' });
+            const attachment = new AttachmentBuilder(await encodeCanvas(canvas), { name: 'caption.png' });
             await interaction.editReply({ files: [attachment] });
         } catch (err) {
             console.error('caption: image load or render failed', err);

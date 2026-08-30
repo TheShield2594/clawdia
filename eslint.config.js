@@ -37,6 +37,17 @@ const LAYER_EXCEPTIONS = [
     'models/Guild -> utils/guildSettingsCache',
 ];
 
+// discord.js v14 deprecated the `ephemeral: true` reply option in favour of
+// `flags: MessageFlags.Ephemeral`. Every one of the ~830 ephemeral replies here
+// is written with the flag; the boolean still works, so a stray one does not
+// fail anything at runtime, it just leaves the codebase with two ways of saying
+// the same thing and a deprecation warning per call. One had already drifted
+// back in (#706).
+const DEPRECATED_EPHEMERAL = {
+    selector: 'Property[key.name="ephemeral"][value.value=true]',
+    message: 'Use `flags: MessageFlags.Ephemeral` — the `ephemeral` option is deprecated in discord.js v14.',
+};
+
 const shared = {
     // `_`-prefixed arguments and catch bindings are the established way here of
     // saying "this is part of the signature and deliberately unused".
@@ -65,17 +76,36 @@ const shared = {
     // this codebase are written on purpose, and console logging is how the bot
     // reports for itself. Neither is a defect here.
     'no-console': 'off',
-    'no-restricted-syntax': ['error', {
-        // discord.js v14 deprecated the `ephemeral: true` reply option in favour
-        // of `flags: MessageFlags.Ephemeral`. Every one of the ~830 ephemeral
-        // replies here is written with the flag; the boolean still works, so a
-        // stray one does not fail anything at runtime, it just leaves the
-        // codebase with two ways of saying the same thing and a deprecation
-        // warning per call. One had already drifted back in (#706).
-        selector: 'Property[key.name="ephemeral"][value.value=true]',
-        message: 'Use `flags: MessageFlags.Ephemeral` — the `ephemeral` option is deprecated in discord.js v14.',
-    }],
+    'no-restricted-syntax': ['error', DEPRECATED_EPHEMERAL],
 };
+
+// The synchronous node-canvas encode, in both of its spellings:
+// `canvas.toBuffer()` and `canvas.toBuffer('image/png')`. The callback form —
+// `toBuffer(cb, mimeType)`, which is the one utils/canvasEncode.js wraps — has a
+// function as its first argument and is not matched by either selector.
+//
+// This is a bot on one event loop. A PNG encode measured ~10 ms for the 800×300
+// welcome card and grows with the surface, and every millisecond of it is a
+// millisecond the gateway cannot read a heartbeat — which on a join raid is
+// hundreds of them back to back (#592). The async form hands the encode to
+// libuv's thread pool instead, so the rule is: in src/, encode through
+// utils/canvasEncode.js.
+//
+// Scoped to `src/` deliberately. scripts/ is one-shot CLI work with no gateway
+// to stall, and the one deliberate exception inside src/ carries a disable
+// comment that says why.
+const SYNC_CANVAS_ENCODE = [
+    {
+        selector: 'CallExpression[callee.property.name="toBuffer"][arguments.length=0]',
+        message: 'Use `encodeCanvas(canvas)` from utils/canvasEncode.js — `canvas.toBuffer()` blocks the event loop (#592).',
+    },
+    {
+        // A template literal is the same call written with backticks, and it is
+        // the spelling a copy-paste out of a formatted string arrives in.
+        selector: 'CallExpression[callee.property.name="toBuffer"]:matches([arguments.0.type="Literal"], [arguments.0.type="TemplateLiteral"])',
+        message: 'Use `encodeCanvas(canvas, mimeType)` from utils/canvasEncode.js — the one-argument `toBuffer` blocks the event loop (#592).',
+    },
+];
 
 module.exports = [
     {
@@ -102,6 +132,18 @@ module.exports = [
                 layers: LAYERS,
                 allow: LAYER_EXCEPTIONS,
             }],
+        },
+    },
+
+    // ── Canvas encodes inside the bot ───────────────────────────────────
+    // `no-restricted-syntax` takes one options array, and a later block replaces
+    // rather than extends it, so the shared restriction is repeated here beside
+    // the src-only one.
+    {
+        files: ['src/**/*.js'],
+        ignores: ['src/dashboard/public/**'],
+        rules: {
+            'no-restricted-syntax': ['error', DEPRECATED_EPHEMERAL, ...SYNC_CANVAS_ENCODE],
         },
     },
 

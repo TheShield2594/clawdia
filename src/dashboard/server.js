@@ -371,8 +371,18 @@ function listen(app, port = process.env.DASHBOARD_PORT || 3000) {
     return server;
 }
 
-function start(client) {
-    return listen(createApp({ client }));
+/**
+ * Build and bind in one call — what src/index.js uses.
+ *
+ * `deps` is passed straight through to `createApp`, so the same injection the
+ * factory takes is reachable from the one entry point that actually starts a
+ * dashboard. Failures are deliberately left to propagate: everything that can
+ * go wrong here goes wrong synchronously, inside the caller's stack, which is
+ * what lets src/index.js catch a dashboard that cannot be built and keep the
+ * gateway up rather than exiting the process with it (#616).
+ */
+function start(client, deps = {}) {
+    return listen(createApp({ client, ...deps }));
 }
 
 module.exports = { createApp, listen, start, errorHandler, discordStrategyOptions };

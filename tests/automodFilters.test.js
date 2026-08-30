@@ -267,6 +267,22 @@ describe('spam window filter', () => {
         expect(next.delete).not.toHaveBeenCalled();
     });
 
+    test('clamps an out-of-range window to the floor rather than reading it as unset', async () => {
+        // 0 is not a window the dashboard can produce, but nothing validates
+        // this field on the way into the database. It means "as short as
+        // allowed" — one second — not "use the five-second default", which is
+        // what a falsy fallback would have made of it.
+        getGuildSettings.mockResolvedValue(spamSettings({ spamWindow: 0 }));
+        await run(burst('zerowindow'));
+        await run(burst('zerowindow'));
+
+        jest.advanceTimersByTime(1_500);
+        const late = burst('zerowindow');
+        await run(late);
+
+        expect(late.delete).not.toHaveBeenCalled();
+    });
+
     test('honours a configured threshold rather than the default of five', async () => {
         getGuildSettings.mockResolvedValue(spamSettings({ spamThreshold: 2 }));
         const sent = [makeMessage({ content: 'hi', userId: 'fast' }), makeMessage({ content: 'hi', userId: 'fast' })];

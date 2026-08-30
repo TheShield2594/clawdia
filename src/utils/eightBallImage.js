@@ -222,6 +222,13 @@ function renderEightBall(text, type) {
     drawWindow(ctx, TINTS[type] ?? TINTS.neutral);
     drawAnswer(ctx, text);
 
+    // The one canvas in the bot that keeps the synchronous encode (#592). It is
+    // bounded in a way none of the others are: the answer table has twenty
+    // entries, the cache above is keyed on the answer, so this line runs at
+    // most twenty times in the life of the process and never again once each
+    // answer has been drawn once. Making it async would turn every caller into
+    // one that awaits a value the cache almost always already has.
+    // eslint-disable-next-line no-restricted-syntax -- bounded to 20 encodes, see above
     const buffer = canvas.toBuffer('image/png');
     cache.set(key, buffer);
     return buffer;

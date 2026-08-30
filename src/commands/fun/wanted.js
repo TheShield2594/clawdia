@@ -9,6 +9,9 @@ const {
 const { createCanvas, loadImage } = require('canvas');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
 const { applySepia } = require('../../utils/canvasFilters');
+// The PNG encode goes to libuv's thread pool rather than blocking the gateway
+// on the way out — see utils/canvasEncode.js (#592).
+const { encodeCanvas } = require('../../utils/canvasEncode');
 
 const W           = 400;
 const H           = 530;
@@ -109,7 +112,7 @@ async function generatePoster(interaction, target) {
             ctx.fillStyle = '#3a1a00';
             ctx.fillText('Contact your local sheriff', W / 2, AVATAR_Y + AVATAR_SIZE + 130);
 
-            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'wanted.png' });
+            const attachment = new AttachmentBuilder(await encodeCanvas(canvas), { name: 'wanted.png' });
             const regenId = `wanted_regen_${interaction.id}_${Date.now()}`;
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(regenId).setLabel('🤠 Wanted: Me').setStyle(ButtonStyle.Secondary),

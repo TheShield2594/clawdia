@@ -9,6 +9,9 @@ const {
 const { createCanvas, loadImage } = require('canvas');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
 const { applyGrayscale } = require('../../utils/canvasFilters');
+// The PNG encode goes to libuv's thread pool rather than blocking the gateway
+// on the way out — see utils/canvasEncode.js (#592).
+const { encodeCanvas } = require('../../utils/canvasEncode');
 
 const SIZE = 512;
 
@@ -66,7 +69,7 @@ async function generateWasted(interaction, target) {
             ctx.lineWidth    = 4;
             ctx.strokeText('WASTED', SIZE / 2, SIZE / 2);
 
-            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'wasted.png' });
+            const attachment = new AttachmentBuilder(await encodeCanvas(canvas), { name: 'wasted.png' });
             const regenId = `wasted_regen_${interaction.id}_${Date.now()}`;
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(regenId).setLabel('💀 Waste: Me').setStyle(ButtonStyle.Secondary),
