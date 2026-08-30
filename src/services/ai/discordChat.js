@@ -21,6 +21,7 @@ const { retrieveMcpKnowledge } = require('./mcp/resources');
 const { createToolActivity, STATUS_RESERVE } = require('./mcp/activity');
 const { createToolConfirmer } = require('./mcp/approval');
 const { createElicitationHandler } = require('./mcp/elicitation');
+const { createSamplingHandler } = require('./mcp/sampling');
 const { recordToolCalls } = require('./mcp/usage');
 
 // Discord transport for the AI chat loop: rate limiting, prompt assembly,
@@ -398,6 +399,12 @@ async function handleAIChat(message, aiSettings, promptContent) {
         // the reply can say what the bot is waiting on while it waits, and what
         // it used once it is done.
         const activity = createToolActivity();
+        // One confirmer for the turn. The tool loop asks it before a call the
+        // guild's policy says needs approving; the sampling handler asks it
+        // before spending the guild's model budget on a server's behalf. Each
+        // prompt is its own message with its own clock, so sharing the function
+        // shares no state — it is one object rather than two doing the same job.
+        const confirmer = createToolConfirmer(message);
         const callArgs = {
             provider, model, apiKey, baseUrl,
             systemPrompt: fitted.systemPrompt, history: fitted.history, prompt: fitted.prompt,
@@ -409,12 +416,24 @@ async function handleAIChat(message, aiSettings, promptContent) {
             // The guild's policy, and the buttons that answer it. The toolkit
             // holds the call until this resolves, so a tool that writes
             // something does not run until somebody in the channel says so.
-            mcpConfirm, mcpRoute, confirmTool: createToolConfirmer(message),
+            mcpConfirm, mcpRoute, confirmTool: confirmer,
             // And the question a server may ask back (#838). Same channel, same
             // rule about who may answer — the difference is that this one
             // carries data, and the tool on the far side is holding its request
             // open until it arrives.
             elicit: createElicitationHandler(message),
+            // And the completion a server may ask this guild's model for
+            // (#838). Approved in the channel like a write is — always, not
+            // only when confirmMode says so, because the cost is the guild's
+            // and the request is somebody else's prose — and billed to the
+            // same ledger and the same limits as the reply it interrupts.
+            sample: createSamplingHandler({
+                config: { provider, model, apiKey, baseUrl, temperature, rateLimit },
+                confirm: confirmer,
+                guildId: message.guild.id,
+                userId: message.author.id,
+                channelId: message.channel.id,
+            }),
             // The bot's own tools ride the same loop as the servers' — same
             // approval prompt, same activity footer, same result budget.
             botTools: toolActions ? botTools : [],

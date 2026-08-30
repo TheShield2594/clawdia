@@ -400,6 +400,16 @@ malformed config disables the connector, it never stops the bot from starting.
   tool decides what to do about it. At most two questions per reply, and the
   prompt says out loud that a real server will not ask for a password, an API
   key or a login code — cancel if one does.
+- **A server asking for a completion** is the third of these, and the one that
+  spends money. A server that needs a judgement rather than a fact — summarise
+  this diff, is this a duplicate — can ask the bot to run *your* model and send
+  the answer back. It is always approved in the channel, whatever Approval is
+  set to, because the request is prose the server wrote and the tokens are
+  billed to this server: they show up in AI → Usage beside the reply that
+  caused them, and count against the same monthly ceilings. At most two per
+  reply, capped at 1,024 generated tokens each, no tools offered, and the
+  conversation is never included — a server asking for the channel's history
+  gets a completion built from its own messages and nothing else.
 - Tool annotations come from the server, so the two middle modes are worth what
   that server is honest about. *Never these tools* and the per-connection
   *Always ask before these tools* list ask the server nothing; use those where

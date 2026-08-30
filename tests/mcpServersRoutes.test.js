@@ -433,7 +433,8 @@ describe('POST /guild/:id/mcp-servers/:name/test', () => {
             label: 'github',
             getAccessToken: null,
             onNotification: null,
-            elicitation: false
+            elicitation: false,
+            sampling: false
         }]);
         expect(body.toolCount).toBe(3);
         // delete_file is blocked, so it is offered by the server but not enabled.

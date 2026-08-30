@@ -413,6 +413,14 @@ class McpHttpClient {
      *        exactly the scope that knows whose channel to ask in — see
      *        `callTool`'s `onElicit`. A request with nobody behind it is
      *        answered `cancel`, which is the spec's "no choice was made".
+     * @param {boolean} [options.sampling] whether to tell servers this client
+     *        will run a completion on their behalf (#838). Declared on the
+     *        connection and answered per request for the same reason
+     *        `elicitation` is: the capability is negotiated once in a handshake
+     *        every guild on this URL shares, and the guild whose model, key and
+     *        budget would pay for it belongs to one Discord message. A request
+     *        with no handler behind it is refused rather than answered, since
+     *        there is no "declined" shape for a completion.
      * @param {'auto'|'http'|'sse'} [options.transport] which HTTP transport to
      *        speak (#838). `auto` tries Streamable HTTP and falls back to the
      *        older HTTP+SSE on the handshake's 404 or 405, which is the
@@ -427,6 +435,7 @@ class McpHttpClient {
         getAccessToken = null,
         onNotification = null,
         elicitation = false,
+        sampling = false,
         transport = 'auto',
     }) {
         // Throws for anything that is not a plain http(s) URL, and for a literal
@@ -439,6 +448,7 @@ class McpHttpClient {
         this.getAccessToken = typeof getAccessToken === 'function' ? getAccessToken : null;
         this.onNotification = typeof onNotification === 'function' ? onNotification : null;
         this.elicitation = Boolean(elicitation);
+        this.sampling = Boolean(sampling);
         this.transport = ['http', 'sse'].includes(transport) ? transport : 'auto';
         // The standing GET stream of the older transport, and what is still
         // waiting for an answer on it. Both stay empty on Streamable HTTP,
@@ -692,11 +702,12 @@ class McpHttpClient {
         // newest request that brought a handler is the best available answer,
         // and it is the right one in the case that actually occurs, which is a
         // server asking a question about the tool call it is running right now.
-        let handler = null;
+        let handlers = null;
         for (const waiter of this.pending.values()) {
-            if (waiter.onServerRequest) handler = waiter.onServerRequest;
+            const offered = waiter.onServerRequest;
+            if (offered && (offered.elicit || offered.sample)) handlers = offered;
         }
-        this.answerServerRequest(message, handler, this.pending.get(message.id)?.deadline
+        this.answerServerRequest(message, handlers, this.pending.get(message.id)?.deadline
             ?? { at: Date.now() + CALL_TIMEOUT_MS, reschedule: null });
     }
 
@@ -805,37 +816,53 @@ class McpHttpClient {
      *
      * A method this client does not serve is refused with JSON-RPC's own "no
      * such method" rather than ignored, because a server that gets no answer
-     * waits for one: an unanswered `sampling/createMessage` is a tool call that
-     * hangs until its own deadline instead of failing in a sentence.
+     * waits for one: an unanswered request is a tool call that hangs until its
+     * own deadline instead of failing in a sentence.
+     *
+     * The two methods it does serve differ in what "nobody is here" means. An
+     * elicitation with no handler is answered `cancel` — the spec's "no choice
+     * was made", which is exactly what happened. A sampling request has no such
+     * shape: its result type is a completion, so the only honest way to say "I
+     * will not run one" is an error, which is what `onSample` throwing produces.
+     *
+     * @param {object} request the server's JSON-RPC request
+     * @param {?{elicit: ?Function, sample: ?Function}} handlers the per-request
+     *        handlers, which is the scope that knows whose channel to ask in
+     *        and whose budget would pay
+     * @param {object} deadline the exchange's deadline, pushed out while a
+     *        person is being waited on
      */
-    async answerServerRequest(request, onElicit, deadline) {
+    async answerServerRequest(request, handlers, deadline) {
         const reply = body => this.post({ jsonrpc: '2.0', id: request.id, ...body })
             .catch(err => console.warn(`[MCP] could not answer "${this.label}"'s ${request.method}: ${err.message}`));
 
-        if (request.method !== 'elicitation/create') {
+        // Handed to a handler rather than applied around it: only the handler
+        // knows how long it is about to be, and a fixed extension would be
+        // either too short for a person or long enough to hold a Discord reply
+        // open on a server that asked and then went away.
+        const extendDeadline = ms => {
+            deadline.at = Math.max(deadline.at, Date.now() + ms);
+            deadline.reschedule?.();
+        };
+
+        const handler = request.method === 'elicitation/create' ? handlers?.elicit
+            : request.method === 'sampling/createMessage' ? handlers?.sample
+                : undefined;
+
+        if (handler === undefined && !['elicitation/create', 'sampling/createMessage'].includes(request.method)) {
             return reply({ error: { code: METHOD_NOT_FOUND, message: `${request.method} is not supported by this client` } });
         }
-        if (typeof onElicit !== 'function') {
+        if (typeof handler !== 'function') {
             // The capability is the connection's and the person is the
             // request's, so a scheduled task or a command parsing the reply as
-            // JSON reaches here with nobody to ask. `cancel` is the spec's
-            // "no choice was made", which is exactly true.
-            return reply({ result: { action: 'cancel' } });
+            // JSON reaches here with nobody behind it.
+            return request.method === 'elicitation/create'
+                ? reply({ result: { action: 'cancel' } })
+                : reply({ error: { code: INTERNAL_ERROR, message: 'no user is available to authorise this request' } });
         }
 
         try {
-            const result = await onElicit(request.params ?? {}, {
-                // Handed to the handler rather than applied around it: only the
-                // handler knows how long it is about to be, and a fixed
-                // extension would be either too short for a person or long
-                // enough to hold a Discord reply open on a server that asked
-                // and then went away.
-                extendDeadline: ms => {
-                    deadline.at = Math.max(deadline.at, Date.now() + ms);
-                    deadline.reschedule?.();
-                }
-            });
-            return reply({ result });
+            return reply({ result: await handler(request.params ?? {}, { extendDeadline }) });
         } catch (err) {
             console.warn(`[MCP] "${this.label}" asked for ${request.method} and it failed: ${err.message}`);
             return reply({ error: { code: INTERNAL_ERROR, message: err.message || 'the client could not answer' } });
@@ -851,10 +878,11 @@ class McpHttpClient {
      * The request id doubles as the token — it is already unique per connection,
      * which is what the spec asks of it.
      *
-     * `onElicit` is opt-in for a different reason: it is a person, and a
-     * request is the smallest scope that knows which one (#838).
+     * `onElicit` and `onSample` are opt-in for a different reason: both end at a
+     * person — one answering a question, one approving a spend — and a request
+     * is the smallest scope that knows which one (#838).
      */
-    async request(method, params, { timeout, onProgress, onElicit } = {}) {
+    async request(method, params, { timeout, onProgress, onElicit, onSample } = {}) {
         const id = ++this.nextId;
         const wantsProgress = typeof onProgress === 'function';
         const body = wantsProgress
@@ -867,7 +895,7 @@ class McpHttpClient {
                 id,
                 timeout,
                 onNotification: wantsProgress ? progressReader(id, onProgress) : null,
-                onServerRequest: onElicit,
+                onServerRequest: { elicit: onElicit, sample: onSample },
             }
         );
         return jsonRpcResult(message);
@@ -973,14 +1001,12 @@ class McpHttpClient {
      * client offering a filesystem for a server to work inside, and this client
      * is a Discord bot: there is no project directory a guild's question is
      * being asked about, and the honest answer to "what are your roots" is that
-     * there are none. `sampling` is absent for a different reason — it is a
-     * server asking to spend the guild's model budget, which wants the same
-     * ledger and confirmation the tool loop already has, and that is more than
-     * a capability declaration.
+     * there are none.
      */
     clientCapabilities() {
         const capabilities = {};
         if (this.elicitation) capabilities.elicitation = {};
+        if (this.sampling) capabilities.sampling = {};
         return capabilities;
     }
 
@@ -1108,7 +1134,7 @@ class McpHttpClient {
      * thrown: "that repository does not exist" is an answer the model should see
      * and work around, not a reason to abandon the reply.
      */
-    async callTool(name, args, { onProgress, timeout, onElicit } = {}) {
+    async callTool(name, args, { onProgress, timeout, onElicit, onSample } = {}) {
         await this.initialize();
         // A caller with a deadline of its own can ask for less than the call
         // timeout, never more: a tool that answers in forty seconds is still a
@@ -1121,10 +1147,11 @@ class McpHttpClient {
         const result = await this.request(
             'tools/call',
             { name, arguments: args && typeof args === 'object' ? args : {} },
-            // `onElicit` rides with the call rather than with the connection:
-            // a question this tool raises belongs to the message that asked for
-            // it, and the pooled client is shared by every guild on this URL.
-            { timeout: limit, onProgress, onElicit }
+            // Both handlers ride with the call rather than with the
+            // connection: a question this tool raises, or a completion it wants
+            // paid for, belongs to the message that asked for it, and the
+            // pooled client is shared by every guild on this URL.
+            { timeout: limit, onProgress, onElicit, onSample }
         );
         return {
             content: Array.isArray(result.content) ? result.content : [],

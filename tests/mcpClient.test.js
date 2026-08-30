@@ -928,25 +928,46 @@ describe('a request from the server', () => {
         expect(answers[0]).toMatchObject({ id: 'srv-1', result: { action: 'cancel' } });
     });
 
-    // A server that gets no answer waits for one, so an unsupported method has
-    // to be refused rather than ignored: silence is a tool call that hangs
-    // until its deadline instead of failing in a sentence.
-    test('a method this client does not serve is refused, not ignored', async () => {
+    /** Answers `method` from the server mid-tool-call, and collects the reply. */
+    function serverThatAsksFor(method) {
         const answers = [];
         axios.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             if (!payload.method) { answers.push(payload); return acceptedResponse(); }
             return sseResponse([
-                { jsonrpc: '2.0', id: 'srv-9', method: 'sampling/createMessage', params: {} },
+                { jsonrpc: '2.0', id: 'srv-9', method, params: {} },
                 { jsonrpc: '2.0', id: payload.id, result: { content: [] } }
             ]);
         });
+        return answers;
+    }
+
+    // A server that gets no answer waits for one, so an unsupported method has
+    // to be refused rather than ignored: silence is a tool call that hangs
+    // until its deadline instead of failing in a sentence.
+    test('a method this client does not serve is refused, not ignored', async () => {
+        // roots/list is the one deliberate absence: this client is a Discord
+        // bot and has no filesystem for a server to work inside.
+        const answers = serverThatAsksFor('roots/list');
 
         await new McpHttpClient({ url: URL, elicitation: true }).callTool('think', {});
 
         await settled(answers);
-        expect(answers[0].error).toMatchObject({ code: -32601, message: expect.stringContaining('sampling/createMessage') });
+        expect(answers[0].error).toMatchObject({ code: -32601, message: expect.stringContaining('roots/list') });
+    });
+
+    // Sampling *is* served, but only for a turn that has somebody to approve
+    // the spend. A request with nobody behind it is an error rather than a
+    // cancel, because a completion has no "declined" shape to send back (#838).
+    test('a sampling request with nobody to authorise it is an error, not a cancel', async () => {
+        const answers = serverThatAsksFor('sampling/createMessage');
+
+        await new McpHttpClient({ url: URL, sampling: true }).callTool('think', {});
+
+        await settled(answers);
+        expect(answers[0].result).toBeUndefined();
+        expect(answers[0].error).toMatchObject({ code: -32603, message: expect.stringContaining('authorise') });
     });
 
     test('a handler that throws becomes an error response, not a hang', async () => {
