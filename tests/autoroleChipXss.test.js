@@ -145,6 +145,14 @@ describe('autorole chip', () => {
         button.dispatchEvent(new window.Event('click', { bubbles: true }));
         await settle();
 
+        // Removing an auto-role asks first now (#677), like every other
+        // destructive action on the page. The dialog is not what this test is
+        // about — the wiring above is — so it is answered and the DELETE it
+        // releases is what gets checked.
+        expect(document.getElementById('confirm-modal').style.display).toBe('flex');
+        window._confirmResolve(true);
+        await settle();
+
         const removeCall = window.fetch.mock.calls
             .find(c => String(c[0]).includes(`/autorole/${PAYLOAD_ROLE.id}`));
         expect(removeCall).toBeDefined();
