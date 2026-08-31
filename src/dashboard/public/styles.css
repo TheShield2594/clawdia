@@ -1238,8 +1238,9 @@ textarea.auto-resize {
 .cw-footer-inner { max-width: 1320px; margin: 0 auto; display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr; gap: 40px; }
 .cw-footer h4 { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-400); margin: 0 0 14px; font-weight: 500; }
 .cw-footer ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
-.cw-footer ul a { color: var(--cream-100); cursor: pointer; text-decoration: none; }
+.cw-footer ul a { color: var(--cream-100); text-decoration: none; }
 .cw-footer ul a:hover { color: var(--cream-50); }
+.cw-footer ul a:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 4px; border-radius: 4px; }
 .cw-footer .cw-wordmark { color: var(--cream-100); }
 .cw-side-wordmark { color: var(--cream-100); font-size: 24px; }
 .cw-footer-tag { color: var(--ink-300); font-size: 14px; margin: 14px 0 0; max-width: 280px; line-height: 1.5; }
