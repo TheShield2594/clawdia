@@ -116,6 +116,24 @@ function ownsGuild(guildId, client = null) {
 }
 
 /**
+ * Which process is responsible for work belonging to `guildId`.
+ *
+ * `ownsGuild` answers the routing question and nothing else, so it has no
+ * opinion about work that has no guild — and the scheduler has some: a reminder
+ * set in a DM carries `guildId: null`. That work still has to happen exactly
+ * once, so it falls to the primary shard, the one process every deployment is
+ * guaranteed to have.
+ *
+ * This is the predicate a per-guild scheduled job filters its work list with.
+ * Unsharded it is constantly true for guild-scoped rows and true on the only
+ * process for the rest, so it changes nothing until a second shard exists.
+ */
+function handlesGuild(guildId, client = null) {
+    if (guildId === null || guildId === undefined || guildId === '') return isPrimaryShard(client);
+    return ownsGuild(guildId, client);
+}
+
+/**
  * Guard for process-local session state keyed by guild.
  *
  * The four multiplayer stores hold a round for one guild in memory, which is
@@ -165,6 +183,7 @@ module.exports = {
     shardId,
     isPrimaryShard,
     ownsGuild,
+    handlesGuild,
     assertGuildAffinity,
     shardTag,
 };

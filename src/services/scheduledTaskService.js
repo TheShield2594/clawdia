@@ -2,6 +2,7 @@ const ScheduledTask = require('../models/ScheduledTask');
 const Guild = require('../models/Guild');
 const { runJob } = require('../utils/jobRunner');
 const { addCalendarDays, addCalendarMonths, isValidTimezone, nowInTimezone } = require('../utils/timezones');
+const { handlesGuild } = require('../utils/sharding');
 const {
     MAX_TASK_FAILURES,
     MAX_TASKS_PER_TICK,
@@ -236,6 +237,13 @@ async function runDueTasks(client) {
         .limit(MAX_TASKS_PER_TICK);
 
     for (const task of due) {
+        // Per-guild job: the claim is atomic, so a shard that took another
+        // shard's task would not double-run it — it would run it somewhere the
+        // task's channel cannot be reached, which is worse. Each shard scans the
+        // same window and claims only its own; the window is per shard, so the
+        // deployment's throughput per tick rises with the shard count.
+        if (!handlesGuild(task.guildId, client)) continue;
+
         const claimed = await claim(task, now);
         // Somebody else took it, or it was switched off between the scan and
         // the claim. Either way it is not this tick's to run.

@@ -5,6 +5,7 @@ const cron = require('node-cron');
 
 const { safeFetchFeed } = require('../utils/safeFeedFetch');
 const { runJob } = require('../utils/jobRunner');
+const { handlesGuild } = require('../utils/sharding');
 const COLORS = require('../utils/embedColors');
 
 const parser = new Parser();
@@ -328,6 +329,8 @@ async function checkRssFeeds(client) {
         // sweep and fan the parsed result out to every subscription.
         const subscriptionsByUrl = new Map(); // url -> [{ guild, feed }]
         for (const guild of guilds) {
+            // Per-guild job: each shard posts only for the guilds it can reach.
+            if (!handlesGuild(guild.guildId, client)) continue;
             for (const feed of guild.rssFeeds) {
                 if (!feed?.url) continue;
                 let subs = subscriptionsByUrl.get(feed.url);

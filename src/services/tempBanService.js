@@ -1,5 +1,6 @@
 const TempBan = require('../models/TempBan');
 const { logModeration } = require('./moderationLogService');
+const { handlesGuild } = require('../utils/sharding');
 
 // Discord API error code: the user is not banned. The only fetch failure that
 // means the record has done its job.
@@ -17,6 +18,11 @@ async function processExpiredBans(client) {
     let failed = 0;
 
     for (const entry of expired) {
+        // Per-guild job. This has to come before the cache lookup: the delete
+        // below reads a miss as "the guild is gone", and on another shard's
+        // guild that would throw the record away while the ban stays in place.
+        if (!handlesGuild(entry.guildId, client)) continue;
+
         try {
             const guild = client.guilds.cache.get(entry.guildId);
             if (!guild) {

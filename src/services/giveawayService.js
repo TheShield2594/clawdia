@@ -14,6 +14,7 @@
 const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
 const COLORS = require('../utils/embedColors');
+const { handlesGuild } = require('../utils/sharding');
 
 // Ended giveaways are kept around so `/giveaway reroll` still works, but not
 // forever: each one carries a full entrant list, and nothing else prunes the
@@ -36,6 +37,10 @@ async function checkGiveaways(client) {
             .select('guildId giveaways');
 
         for (const guildSettings of guilds) {
+            // Per-guild job: a shard that cannot reach this guild must not end
+            // its giveaways, or the winners are drawn where nobody is told.
+            if (!handlesGuild(guildSettings.guildId, client)) continue;
+
             let dirty = false;
 
             for (const ga of guildSettings.giveaways) {

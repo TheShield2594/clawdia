@@ -2,6 +2,7 @@ const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
 const { collectSignals, signalUserIds, buildDataSummary, buildSections } = require('./newspaper/signals');
+const { handlesGuild } = require('../utils/sharding');
 
 /**
  * The weekly server newspaper.
@@ -152,6 +153,9 @@ async function postScheduledNewspapers(client) {
 
     for (const guildDoc of guilds) {
         const { guildId } = guildDoc;
+        // Per-guild job: each shard posts only for guilds it can reach.
+        if (!handlesGuild(guildId, client)) continue;
+
         try {
             // Validate channel before consuming the weekly slot — misconfigured
             // channels must not burn lastRunAt.

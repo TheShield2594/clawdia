@@ -1,6 +1,7 @@
 const { PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
 const User = require('../models/User');
+const { handlesGuild } = require('../utils/sharding');
 
 function isLeapYear(year) {
     return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
@@ -32,6 +33,9 @@ async function checkBirthdays(client) {
         : { 'birthday.month': month, 'birthday.day': day };
 
     for (const settings of guilds) {
+        // Per-guild job: each shard wishes only its own guilds.
+        if (!handlesGuild(settings.guildId, client)) continue;
+
         const guild = client.guilds.cache.get(settings.guildId);
         if (!guild) continue;
 

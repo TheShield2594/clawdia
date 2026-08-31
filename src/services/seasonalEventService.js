@@ -1,6 +1,7 @@
 const Guild = require('../models/Guild');
 const { SEASONAL_EVENTS, getActiveSeasonalEvent } = require('../data/seasonalEvents');
 const COLORS = require('../utils/embedColors');
+const { handlesGuild } = require('../utils/sharding');
 
 /**
  * Check all guilds for seasonal event auto-start/auto-end and apply changes.
@@ -16,6 +17,11 @@ async function checkSeasonalEvents(client) {
     const guilds = await Guild.find({}, 'guildId activeEvent economy.announcementChannelId').lean();
 
     for (const guild of guilds) {
+        // Per-guild job. Checked before the writes below rather than relying on
+        // the cache miss: a shard that does not own this guild must not be the
+        // one to start or end its event.
+        if (!handlesGuild(guild.guildId, client)) continue;
+
         const discordGuild = client.guilds.cache.get(guild.guildId);
         if (!discordGuild) continue;
 

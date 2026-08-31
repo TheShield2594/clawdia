@@ -8,23 +8,67 @@ const { isPrimaryShard, shardTag } = require('../../utils/sharding');
 // start-once service is listed here — nothing else in the codebase should
 // call cron.schedule at bootstrap or hang jobs off a clientReady handler.
 
+// ── Scope: which processes run a job (#889) ─────────────────────────────────
+//
+// Every job used to run on shard 0 and nowhere else, which is correct for work
+// that must happen once per deployment and wrong for work that reaches a guild:
+// shard 0's client only holds the guilds Discord routed to shard 0, so an
+// announcement for a guild on shard 3 was silently dropped. The trade was
+// deliberate — a missed announcement beats a duplicated payout — but the
+// classification it was standing in for is the actual fix, and this is it.
+//
+//   'deployment'  Runs on the primary shard only. The job's unit of work is not
+//                 a guild it can partition on, or it never reaches Discord at
+//                 all, so a second runner would only duplicate it.
+//
+//   'guild'       Runs on every shard, each one filtering its work list down to
+//                 the guilds Discord routes to it. The filter is `handlesGuild`
+//                 (src/utils/sharding.js), applied inside the service at the top
+//                 of its per-guild loop — before any claim, so a shard that
+//                 cannot announce for a guild does not take that guild's lease
+//                 and leave the shard that can with nothing to do.
+//
+// A job is 'guild' when both hold: every write it makes is scoped to one
+// guild's documents, and it reaches Discord for that guild. `applyBankInterest`
+// is 'guild' for that reason, though it is the job usually named as the
+// deployment-wide example — it claims per guild (`bankInterestLastRunAt`) and
+// then posts the interest summary to that guild's announcement channel, so
+// pinning it to shard 0 loses the summary for every other shard's guilds while
+// gaining nothing. `returnExpiredMarketListings` is the genuine article: it
+// takes no client, announces nothing, and returns items to sellers straight in
+// the database.
+//
+// What this costs: a 'guild' job's initial query runs once per shard rather than
+// once per deployment, because Mongo cannot evaluate Discord's `(id >> 22) % N`
+// routing rule and the partition therefore has to happen in the process. For the
+// per-minute jobs the query is already narrow (rows that are due). For the
+// weekly full-collection scans it is a lean projection over the guild list, N
+// times an hour at worst. That is the price of announcements that arrive.
+//
+// Unsharded — every deployment today — `handlesGuild` is constantly true and
+// every job runs exactly where it ran before.
+const SCOPE = { DEPLOYMENT: 'deployment', GUILD: 'guild' };
+
 // Recurring jobs. `fn` receives the Discord client. Schedules without a
 // timezone run in server-local time, matching their previous behavior.
 const JOBS = [
     {
         name: 'checkRssFeeds',
+        scope: SCOPE.GUILD,
         service: 'rssService',
         schedule: '*/5 * * * *',
         fn: client => require('../rssService').checkRssFeeds(client),
     },
     {
         name: 'checkReminders',
+        scope: SCOPE.GUILD,
         service: 'reminderService',
         schedule: '* * * * *',
         fn: client => require('../reminderService').checkReminders(client),
     },
     {
         name: 'checkGiveaways',
+        scope: SCOPE.GUILD,
         service: 'giveawayService',
         schedule: '* * * * *',
         fn: client => require('../giveawayService').checkGiveaways(client),
@@ -33,6 +77,7 @@ const JOBS = [
         // Previously scheduled twice (a 5-minute interval in index.js and a
         // 2-minute cron in ready.js); the more frequent schedule wins.
         name: 'checkTempVoice',
+        scope: SCOPE.GUILD,
         service: 'tempVoiceService',
         schedule: '*/2 * * * *',
         runOnStart: true,
@@ -40,30 +85,35 @@ const JOBS = [
     },
     {
         name: 'checkBirthdays',
+        scope: SCOPE.GUILD,
         service: 'birthdayService',
         schedule: '0 * * * *',
         fn: client => require('../birthdayService').checkBirthdays(client),
     },
     {
         name: 'checkSeasonalEvents',
+        scope: SCOPE.GUILD,
         service: 'seasonalEventService',
         schedule: '0 * * * *',
         fn: client => require('../seasonalEventService').checkSeasonalEvents(client),
     },
     {
         name: 'resolveExpiredWars',
+        scope: SCOPE.GUILD,
         service: 'schedulerService',
         schedule: '*/5 * * * *',
         fn: client => require('../schedulerService').resolveExpiredWars(client),
     },
     {
         name: 'resolveExpiredSeasons',
+        scope: SCOPE.GUILD,
         service: 'schedulerService',
         schedule: '*/5 * * * *',
         fn: client => require('../schedulerService').resolveExpiredSeasons(client),
     },
     {
         name: 'awardWeeklyLeaderboardBadges',
+        scope: SCOPE.GUILD,
         service: 'schedulerService',
         schedule: '59 23 * * 0',
         timezone: 'Etc/UTC',
@@ -71,6 +121,7 @@ const JOBS = [
     },
     {
         name: 'selectPetOfTheWeek',
+        scope: SCOPE.GUILD,
         service: 'schedulerService',
         schedule: '0 0 * * 1',
         timezone: 'Etc/UTC',
@@ -78,6 +129,7 @@ const JOBS = [
     },
     {
         name: 'applyBankInterest',
+        scope: SCOPE.GUILD,
         service: 'schedulerService',
         schedule: '1 0 * * 1',
         timezone: 'Etc/UTC',
@@ -88,6 +140,7 @@ const JOBS = [
         // reading a week that has certainly closed rather than racing the
         // boundary it is keyed on.
         name: 'announceWeeklyChampions',
+        scope: SCOPE.GUILD,
         service: 'schedulerService',
         schedule: '5 0 * * 1',
         timezone: 'Etc/UTC',
@@ -95,18 +148,21 @@ const JOBS = [
     },
     {
         name: 'recalcShopPrices',
+        scope: SCOPE.GUILD,
         service: 'schedulerService',
         schedule: '*/15 * * * *',
         fn: client => require('../schedulerService').recalcShopPrices(client),
     },
     {
         name: 'resolveRankedSeasons',
+        scope: SCOPE.GUILD,
         service: 'schedulerService',
         schedule: '*/10 * * * *',
         fn: client => require('../schedulerService').resolveRankedSeasons(client),
     },
     {
         name: 'returnExpiredMarketListings',
+        scope: SCOPE.DEPLOYMENT,
         service: 'schedulerService',
         schedule: '*/10 * * * *',
         fn: () => require('../schedulerService').returnExpiredMarketListings(),
@@ -117,12 +173,14 @@ const JOBS = [
         // healthy, and the service was silently dead until someone noticed
         // bans not lifting or raid mode stuck on (#611).
         name: 'sweepRaidModes',
+        scope: SCOPE.GUILD,
         service: 'raidService',
         schedule: '* * * * *',
         fn: client => require('../raidService').sweepRaidModes(client),
     },
     {
         name: 'processExpiredBans',
+        scope: SCOPE.GUILD,
         service: 'tempBanService',
         schedule: '* * * * *',
         runOnStart: true,
@@ -133,12 +191,14 @@ const JOBS = [
         // way reminders work, so anything hung off it is restart-proof and
         // catches up after downtime without its own catch-up code.
         name: 'runDueTasks',
+        scope: SCOPE.GUILD,
         service: 'scheduledTaskService',
         schedule: '* * * * *',
         fn: client => require('../scheduledTaskService').runDueTasks(client),
     },
     {
         name: 'postScheduledNewspapers',
+        scope: SCOPE.GUILD,
         service: 'schedulerService',
         schedule: '0 * * * *',
         timezone: 'Etc/UTC',
@@ -234,39 +294,41 @@ function startScheduler(client) {
 
     runStarters(SHARD_STARTERS, client);
 
-    // ── The scheduler is singleton work, and runs on shard 0 only (#732) ─────
+    // ── Where each job runs (#732, #889) ────────────────────────────────────
     //
     // Under sharding each shard is its own process, so an ungated scheduler
-    // fires every job once per shard. jobRunner's overlap guard would not
+    // fires every job once per shard, and jobRunner's overlap guard would not
     // notice: `inFlight` is a process-local Set, so N processes each see an
-    // empty one. applyBankInterest paying every account N times is the shape of
-    // that mistake, and it is the expensive shape.
+    // empty one. That is why everything was pinned to shard 0 — applyBankInterest
+    // paying every account N times is the shape of the mistake, and it is the
+    // expensive shape.
     //
-    // The trade-off this makes, stated plainly rather than discovered later:
-    // most of these jobs reach a guild through the client, and shard 0's client
-    // only has the guilds Discord routed to shard 0. So gating here means a job
-    // that announces into a guild on another shard cannot reach it. That is a
-    // missed announcement; the alternative is duplicated money. Money wins.
+    // The `scope` on each job is what replaces that blanket pin. A 'guild' job
+    // runs everywhere and partitions its own work list; a 'deployment' job still
+    // runs only on the primary shard. See the table above for the rule.
     //
-    // Step 2 is to classify each job as deployment-wide (bank interest, market
-    // listing returns — pure database work that must happen once) or per-guild
-    // (the announcements, which should run on every shard filtered to the
-    // guilds that shard owns, since `ownsGuild` makes that partition exact).
-    // That classification needs each job read against a live multi-shard
-    // deployment, which is why it is not guessed at here.
-    //
-    // Unsharded — every deployment today — `isPrimaryShard` is true and none of
-    // this changes anything.
-    if (!isPrimaryShard(client)) {
-        console.log(`${shardTag(client)}[SCHEDULER] Presence only — scheduled jobs and services run on shard 0.`);
-        return;
-    }
+    // Unsharded, `isPrimaryShard` is true and every job is scheduled here just as
+    // it was before.
+    const primary = isPrimaryShard(client);
+    const scheduled = JOBS.filter(job => primary || job.scope === SCOPE.GUILD);
 
-    for (const job of JOBS) {
+    for (const job of scheduled) {
         const run = () => runJob(job.service, job.name, () => job.fn(client));
         const task = cron.schedule(job.schedule, run, job.timezone ? { timezone: job.timezone } : undefined);
         scheduledTasks.push(task);
         if (job.runOnStart) run();
+    }
+
+    if (!primary) {
+        // The start-once services are still singleton work and stay on the
+        // primary shard: each keeps its own schedule rather than declaring one
+        // here, so none of them can be classified from this table. They are the
+        // remaining half of #889 and are called out in tests/schedulerScope.
+        console.log(
+            `${shardTag(client)}[SCHEDULER] Started ${scheduled.length} per-guild jobs; ` +
+            `${JOBS.length - scheduled.length} deployment-wide job(s) and ${STARTERS.length} services run on shard 0.`
+        );
+        return;
     }
 
     runStarters(STARTERS, client);
@@ -287,4 +349,4 @@ function stopScheduler() {
     started = false;
 }
 
-module.exports = { startScheduler, stopScheduler, JOBS, STARTERS, SHARD_STARTERS };
+module.exports = { startScheduler, stopScheduler, JOBS, STARTERS, SHARD_STARTERS, SCOPE };
