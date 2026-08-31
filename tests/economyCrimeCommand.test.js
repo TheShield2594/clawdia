@@ -20,6 +20,8 @@ const mockGuilds = fakeCollection('Guild');
 
 jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/models/Guild', () => mockGuilds.model);
+jest.mock('../src/utils/guildSettingsCache', () =>
+    require('./helpers/guildSettingsCacheMock')());
 
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 jest.mock('../src/utils/grindProfile', () => ({ attachGrind: jest.fn(async user => user) }));

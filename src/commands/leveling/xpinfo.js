@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const COLORS = require('../../utils/embedColors');
 
 const XP_COOLDOWN_SECONDS = 60;
@@ -34,7 +34,7 @@ module.exports = {
         if (!interaction.inGuild()) return;
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         try {
-            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+            const guildSettings = await getGuildSettings(interaction.guild.id);
             const leveling = guildSettings?.leveling ?? {};
 
             const xpRate = leveling.xpRate ?? 1.0;

@@ -2,7 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } =
 const Case = require('../../models/Case');
 const { logModeration } = require('../../services/moderationLogService');
 const { applyEscalation, findStepForCount } = require('../../services/escalationService');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const User = require('../../models/User');
 const { fitDescription, truncate, EMBED_LIMITS } = require('../../utils/embedFields');
 const COLORS = require('../../utils/embedColors');
@@ -65,7 +65,7 @@ module.exports = {
                 const canBypass = interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages);
                 const bypassEscalation = bypassRequested && canBypass;
 
-                const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+                const guildSettings = await getGuildSettings(interaction.guild.id);
                 // Only ever read by the bypass branches below, to say what the
                 // bypass suppressed — when escalation is going to run,
                 // applyEscalation looks the step up itself. The condition used

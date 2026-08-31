@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const { attachGrind } = require('../../utils/grindProfile');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { createRankCard } = require('../../utils/cardGenerator');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
 const { badgeFor, titleForExactRank: prestigeTitle } = require('../../utils/prestige');
@@ -46,7 +46,7 @@ module.exports = {
         try {
             const [user, guildSettings] = await Promise.all([
                 User.findOne({ userId: targetUser.id, guildId: interaction.guild.id }),
-                Guild.findOne({ guildId: interaction.guild.id }),
+                getGuildSettings(interaction.guild.id),
             ]);
             await attachGrind(user);
 

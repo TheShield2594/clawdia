@@ -20,6 +20,7 @@ const {
     checkCsrfOrigin,
 } = require('../src/dashboard/lib/middleware');
 const { forgetLiveGuildAccess } = require('../src/dashboard/lib/permissions');
+const stubBotGateway = require('./helpers/stubBotGateway');
 
 const MANAGE_GUILD = (0x20n).toString();
 const NO_PERMS     = '0';
@@ -44,10 +45,10 @@ function makeReq({ authenticated = true, guilds = [], botGuilds = [], params = {
     return {
         isAuthenticated: () => authenticated,
         user: authenticated ? { id: 'user-1', guilds } : undefined,
-        bot: {
-            hasGuild: id => botGuilds.includes(id),
+        bot: stubBotGateway({
+            hasGuild: async id => botGuilds.includes(id),
             canManageGuild: async () => live,
-        },
+        }),
         params,
         headers,
     };
@@ -186,9 +187,11 @@ describe('checkGuildAccess', () => {
     // dashboard because Discord is having an incident.
     test('falls back to the snapshot when the live check cannot answer', async () => {
         for (const bot of [
-            { hasGuild: () => true, canManageGuild: async () => null },
-            { hasGuild: () => true, canManageGuild: async () => { throw new Error('Discord is down'); } },
-            { hasGuild: () => true }, // a gateway with no such method at all
+            stubBotGateway({ hasGuild: async () => true, canManageGuild: async () => null }),
+            stubBotGateway({ hasGuild: async () => true, canManageGuild: async () => { throw new Error('Discord is down'); } }),
+            // A gateway with no such method at all: the stub fills the protocol
+            // in with nulls, which is the same "could not be asked" answer.
+            { ...stubBotGateway({ hasGuild: async () => true }), canManageGuild: undefined },
         ]) {
             forgetLiveGuildAccess();
             const res = makeRes();
@@ -206,7 +209,7 @@ describe('checkGuildAccess', () => {
     test('asks Discord once per user and guild, not once per request', async () => {
         const canManageGuild = jest.fn().mockResolvedValue(true);
         const req = makeReq({ guilds: [adminOf('g1')], botGuilds: ['g1'], params: { guildId: 'g1' } });
-        req.bot = { hasGuild: () => true, canManageGuild };
+        req.bot = stubBotGateway({ hasGuild: async () => true, canManageGuild });
 
         await checkGuildAccess(req, makeRes(), jest.fn());
         await checkGuildAccess(req, makeRes(), jest.fn());

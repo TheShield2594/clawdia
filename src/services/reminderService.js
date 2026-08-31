@@ -1,5 +1,6 @@
 const Reminder = require('../models/Reminder');
 const { addCalendarDays } = require('../utils/timezones');
+const { handlesGuild } = require('../utils/sharding');
 
 const REPEAT_INTERVAL_DAYS = {
     daily: 1,
@@ -72,6 +73,9 @@ async function checkReminders(client) {
         });
 
         for (const reminder of dueReminders) {
+            // Per-guild job. A reminder set in a DM has no guildId, so
+            // handlesGuild routes it to the primary shard rather than to none.
+            if (!handlesGuild(reminder.guildId, client)) continue;
             try {
                 const delivered = await deliver(client, reminder);
 

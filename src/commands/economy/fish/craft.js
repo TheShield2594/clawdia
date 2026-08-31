@@ -3,7 +3,7 @@
 // /fish craft — recipes, and spending materials (fishing and hunting alike) on
 // one.
 
-const Guild = require('../../../models/Guild');
+const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind } = require('../../../utils/grindProfile');
@@ -18,7 +18,7 @@ const COLORS = require('../../../utils/embedColors');
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function handleCraft(interaction, sub) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
         return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }

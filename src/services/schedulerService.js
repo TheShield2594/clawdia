@@ -32,6 +32,7 @@
  */
 
 const Guild = require('../models/Guild');
+const { handlesGuild } = require('../utils/sharding');
 const User  = require('../models/User');
 const SeasonRecord = require('../models/SeasonRecord');
 const { createWarVictoryBanner, createSeasonRecapCard } = require('../utils/cardGenerator');
@@ -273,6 +274,12 @@ async function resolveExpiredWars(client) {
     });
 
     for (const guildDoc of expired) {
+        // Per-guild job (src/services/scheduler). A war has two sides and only
+        // the declaring guild decides the partition, so the opponent's copy of
+        // the announcement still depends on where that guild routes — but this
+        // is strictly more of it than shard 0 alone could deliver.
+        if (!handlesGuild(guildDoc.guildId, client)) continue;
+
         try {
             await resolveOneWar(client, guildDoc);
         } catch (err) {
@@ -438,6 +445,9 @@ async function resolveExpiredSeasons(client) {
     });
 
     for (const guildDoc of expired) {
+        // Per-guild job: each shard resolves only its own guilds' seasons.
+        if (!handlesGuild(guildDoc.guildId, client)) continue;
+
         try {
             await resolveOneSeason(client, guildDoc);
         } catch (err) {
@@ -464,6 +474,11 @@ async function awardWeeklyLeaderboardBadges(client) {
 
     for (const guildDoc of guilds) {
         const guildId = guildDoc.guildId;
+        // Per-guild job. Before the lease, not after: a shard that cannot reach
+        // this guild would otherwise take the week's lease and then have nowhere
+        // to announce, leaving the shard that could with nothing to claim.
+        if (!handlesGuild(guildId, client)) continue;
+
         try {
             // Atomically acquire a short-lived lease; badgesLastAwardedAt is only written on success
             const leaseUntil = new Date(Date.now() + 5 * 60 * 1000); // 5-minute lease window
@@ -587,6 +602,10 @@ async function selectPetOfTheWeek(client) {
 
     for (const guildDoc of guilds) {
         const guildId = guildDoc.guildId;
+        // Per-guild job, checked before the claim for the same reason as the
+        // badge lease above.
+        if (!handlesGuild(guildId, client)) continue;
+
         try {
             // Atomic claim: only proceed if this guild hasn't been processed this week
             const claimed = await Guild.findOneAndUpdate(
@@ -778,13 +797,20 @@ async function announceWeeklyChampions(client) {
     ]);
     if (!candidates.length) return;
 
-    candidates.sort((a, b) =>
+    // Per-guild job (src/services/scheduler): the aggregation spans every guild,
+    // so the partition happens here, before the reward claim. A shard that
+    // claimed another shard's champion would mark them rewarded and then be
+    // unable to announce it.
+    const mine = candidates.filter(c => handlesGuild(c.guildId, client));
+    if (!mine.length) return;
+
+    mine.sort((a, b) =>
         String(a.guildId).localeCompare(String(b.guildId)) ||
         WEEKLY_CATEGORY_ORDER.indexOf(a.category) - WEEKLY_CATEGORY_ORDER.indexOf(b.category));
 
     // Claim each champion atomically to prevent double-pay under concurrent runs
     const actualWinners = [];
-    for (const w of candidates) {
+    for (const w of mine) {
         const claimed = await WeeklyChampion.findOneAndUpdate(
             { _id: w._id, rewarded: false },
             { $set: { rewarded: true } },
@@ -1005,6 +1031,9 @@ async function recalcShopPrices(client) {
     const guilds = await Guild.find({ 'dynamicPricing.enabled': true }, 'guildId dynamicPricing.recalcMinutes').lean();
 
     for (const guildSummary of guilds) {
+        // Per-guild job, checked before the lease claim below.
+        if (!handlesGuild(guildSummary.guildId, client)) continue;
+
         try {
             const recalcMs = (guildSummary.dynamicPricing?.recalcMinutes ?? 60) * 60_000;
             const now      = new Date();
@@ -1176,6 +1205,10 @@ async function resolveRankedSeasons(client) {
         ]
     });
     for (const g of uninitialized) {
+        // Per-guild job: two shards initialising the same guild's first season
+        // would race on a plain save, with no claim to settle it.
+        if (!handlesGuild(g.guildId, client)) continue;
+
         const seasonNumber = g.rankedDuels.seasonNumber ?? 1;
         const days = g.rankedDuels.seasonDurationDays ?? 60;
         g.rankedDuels.currentSeasonId = makeSeasonId(seasonNumber);
@@ -1190,6 +1223,9 @@ async function resolveRankedSeasons(client) {
     });
 
     for (const guildDoc of expired) {
+        // Per-guild job, checked before the season-end claim below.
+        if (!handlesGuild(guildDoc.guildId, client)) continue;
+
         try {
             const guildId  = guildDoc.guildId;
             const seasonId = guildDoc.rankedDuels.currentSeasonId;
@@ -1337,6 +1373,13 @@ async function applyBankInterest(client) {
 
     for (const guildDoc of guilds) {
         const guildId = guildDoc.guildId;
+        // Per-guild job, despite being the usual example of a deployment-wide
+        // one. Every write it makes is inside this guild — the weekly claim on
+        // `bankInterestLastRunAt`, the credits to this guild's users — and it
+        // finishes by posting the interest summary to this guild's announcement
+        // channel. Pinned to shard 0 it pays correctly and tells nobody.
+        if (!handlesGuild(guildId, client)) continue;
+
         try {
             // Atomic weekly claim — skip if already run within the last 7 days
             const claimed = await Guild.findOneAndUpdate(

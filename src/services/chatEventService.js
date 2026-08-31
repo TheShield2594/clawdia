@@ -39,6 +39,14 @@ const CRATE_ITEMS = [
 
 const guildState = new Map(); // guildId -> { lastEventAt, messagesSince }
 
+// One entry per guild the process has ever seen a message in, with nothing to
+// remove it — the bot leaving a guild does not, and there is no TTL because a
+// quiet guild's message count is meant to survive between events. Capped FIFO,
+// the same rule guildSettingsCache and BoundedRateLimiter use. Eviction costs
+// the evicted guild its progress toward the next event, so it waits another
+// MIN_MESSAGES_BETWEEN messages; nothing fires early and no money moves.
+const MAX_TRACKED_GUILDS = 5_000;
+
 const randInt    = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const randomFrom = arr => arr[Math.floor(Math.random() * arr.length)];
 
@@ -65,6 +73,9 @@ async function maybeTriggerChatEvent(message, guildSettings) {
         const guildId = message.guild.id;
         let state = guildState.get(guildId);
         if (!state) {
+            if (guildState.size >= MAX_TRACKED_GUILDS) {
+                guildState.delete(guildState.keys().next().value);
+            }
             state = { lastEventAt: 0, messagesSince: 0 };
             guildState.set(guildId, state);
         }
@@ -317,4 +328,7 @@ async function spawnTrivia(message, guildSettings) {
     });
 }
 
-module.exports = { maybeTriggerChatEvent };
+module.exports = {
+    maybeTriggerChatEvent,
+    __test__: { guildState, MAX_TRACKED_GUILDS, MIN_MESSAGES_BETWEEN },
+};

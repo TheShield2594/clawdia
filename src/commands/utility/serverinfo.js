@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { raidModeActive, raidModeActivatedBy } = require('../../services/raidService');
 const COLORS = require('../../utils/embedColors');
 
@@ -10,7 +10,7 @@ module.exports = {
     async execute(interaction) {
         const { guild } = interaction;
 
-        const guildSettings = await Guild.findOne({ guildId: guild.id }).catch(() => null);
+        const guildSettings = await getGuildSettings(guild.id).catch(() => null);
         const rd = guildSettings?.raidDetection;
 
         let raidStatus = 'Detection disabled';

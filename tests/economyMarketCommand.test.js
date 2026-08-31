@@ -22,6 +22,8 @@ const mockTransactions = fakeCollection('Transaction', {}, { unique: [] });
 
 jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/models/Guild', () => mockGuilds.model);
+jest.mock('../src/utils/guildSettingsCache', () =>
+    require('./helpers/guildSettingsCacheMock')());
 jest.mock('../src/models/MarketListing', () => mockListings.model);
 jest.mock('../src/models/Transaction', () => mockTransactions.model);
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));

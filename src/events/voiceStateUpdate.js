@@ -3,15 +3,54 @@ const { getGuildSettings } = require('../utils/guildSettingsCache');
 const User = require('../models/User');
 const { checkRivalry } = require('../services/rivalryService');
 
-// userId -> joinTimestamp (ms)
+// `${guildId}:${userId}` -> joinTimestamp (ms)
 const voiceJoinTimes = new Map();
+
+// A join is cleared only by the matching leave, and the leave can simply never
+// arrive: the bot is removed from a guild while people are still in voice, or a
+// gateway gap swallows the transition. Every such entry is permanent, so this
+// map is bounded the way every other one in this repo is (guildSettingsCache,
+// BoundedRateLimiter) — a sweep of entries older than any plausible session,
+// plus a hard FIFO cap for the case where joins arrive faster than the sweep.
+const MAX_VOICE_SESSION_MS = 24 * 60 * 60 * 1000;
+const VOICE_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+const MAX_TRACKED_VOICE_SESSIONS = 5_000;
+let lastVoiceSweepAt = 0;
+
+/**
+ * Drops joins older than a session could plausibly be.
+ *
+ * Amortised over joins rather than run from a timer, because this module owns
+ * no schedule — src/services/scheduler is the only place that may register one
+ * (tests/schedulerOwnsJobs.test.js enforces that) — and a sweep is only ever
+ * needed while joins are actually happening. The interval keeps it O(n) per
+ * hour rather than per join.
+ */
+function sweepVoiceJoinTimes(now) {
+    if (now - lastVoiceSweepAt < VOICE_SWEEP_INTERVAL_MS) return;
+    lastVoiceSweepAt = now;
+    const cutoff = now - MAX_VOICE_SESSION_MS;
+    for (const [key, joinedAt] of voiceJoinTimes) {
+        if (joinedAt <= cutoff) voiceJoinTimes.delete(key);
+    }
+}
 
 module.exports = {
     name: 'voiceStateUpdate',
     async execute(oldState, newState, client) {
         await handleVoiceStateUpdate(oldState, newState, client);
         await handleVoiceXp(oldState, newState, client);
-    }
+    },
+    __test__: {
+        voiceJoinTimes,
+        MAX_VOICE_SESSION_MS,
+        VOICE_SWEEP_INTERVAL_MS,
+        MAX_TRACKED_VOICE_SESSIONS,
+        resetVoiceJoinTimes() {
+            voiceJoinTimes.clear();
+            lastVoiceSweepAt = 0;
+        },
+    },
 };
 
 async function handleVoiceXp(oldState, newState, client) {
@@ -24,17 +63,33 @@ async function handleVoiceXp(oldState, newState, client) {
     const joinedVoice = !oldState.channelId && newState.channelId;
     const leftVoice = oldState.channelId && !newState.channelId;
 
+    const key = `${guildId}:${member.id}`;
+
     if (joinedVoice) {
-        voiceJoinTimes.set(`${guildId}:${member.id}`, Date.now());
+        const now = Date.now();
+        sweepVoiceJoinTimes(now);
+        // FIFO eviction, as in BoundedRateLimiter. An evicted join forfeits
+        // only that one session's voice XP, which is a better failure than
+        // growth with no ceiling.
+        if (!voiceJoinTimes.has(key) && voiceJoinTimes.size >= MAX_TRACKED_VOICE_SESSIONS) {
+            voiceJoinTimes.delete(voiceJoinTimes.keys().next().value);
+        }
+        voiceJoinTimes.set(key, now);
         return;
     }
 
     if (!leftVoice) return;
 
-    const key = `${guildId}:${member.id}`;
     const joinedAt = voiceJoinTimes.get(key);
     if (!joinedAt) return;
     voiceJoinTimes.delete(key);
+
+    // Past the sweep's cutoff this entry was going to be discarded, so paying it
+    // out would make the award depend on whether a sweep happened to have run —
+    // a 30-hour join worth 5,400 XP or nothing, decided by timing. It is also
+    // the shape of a join whose leave was lost and whose "session" is really the
+    // gap until the user rejoined. Discard it either way.
+    if (Date.now() - joinedAt > MAX_VOICE_SESSION_MS) return;
 
     try {
         const guildSettings = await getGuildSettings(guildId);

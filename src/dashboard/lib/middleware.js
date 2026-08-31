@@ -40,9 +40,12 @@ function checkAuth(req, res, next) {
 // deliberate soft edge on the *unknown* answer only; a definite `false` denies.
 async function checkGuildAccess(req, res, next) {
     const { guildId } = req.params;
-    const userGuilds = req.user.guilds.filter(guild =>
-        hasManagePermission(guild) && req.bot.hasGuild(guild.id)
-    );
+    // One call for the whole list rather than one per guild: the facade may be
+    // another process now (src/bot/remoteGateway.js), and a user in fifty
+    // servers would otherwise cost fifty round trips per request.
+    const manageable = req.user.guilds.filter(hasManagePermission);
+    const present = await req.bot.hasGuilds(manageable.map(g => g.id));
+    const userGuilds = manageable.filter(guild => present[guild.id]);
 
     if (!userGuilds.find(g => g.id === guildId)) {
         return res.status(403).json({ error: 'Forbidden' });

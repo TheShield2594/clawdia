@@ -13,7 +13,7 @@
 // commands/<category>/<name>/index.js registers as a command, so nothing under
 // mine/ is ever a command of its own.
 
-const Guild = require('../../../../models/Guild');
+const { getGuildSettings } = require('../../../../utils/guildSettingsCache');
 const { MessageFlags } = require('discord.js');
 const User = require('../../../../models/User');
 const { attachGrind } = require('../../../../utils/grindProfile');
@@ -28,7 +28,7 @@ const { handleRepair } = require('./repair');
 const { handleUnlock } = require('./unlock');
 
 async function handleShop(interaction, sub) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
         return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }

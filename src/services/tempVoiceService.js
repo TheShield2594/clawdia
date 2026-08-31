@@ -1,5 +1,6 @@
 const { ChannelType, PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
+const { handlesGuild } = require('../utils/sharding');
 
 async function handleVoiceStateUpdate(oldState, newState, _client) {
     const guild = newState.guild ?? oldState.guild;
@@ -70,6 +71,11 @@ async function checkTempVoice(client) {
         const guilds = await Guild.find({ 'tempVoice.enabled': true, 'tempVoice.activeChannels.0': { $exists: true } });
 
         for (const guildSettings of guilds) {
+            // Per-guild job. The cache miss below already skips another shard's
+            // guilds, but it cannot tell them apart from a guild this shard owns
+            // and has not cached yet — which would silently clear activeChannels.
+            if (!handlesGuild(guildSettings.guildId, client)) continue;
+
             const guild = client.guilds.cache.get(guildSettings.guildId);
             if (!guild) continue;
 

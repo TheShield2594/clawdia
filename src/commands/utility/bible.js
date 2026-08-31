@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { lookupVerse, getDailyVerse, createVerseEmbed, createVerseComponents } = require('../../services/bibleService');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 
 module.exports = {
     cooldown: 5,
@@ -60,7 +60,7 @@ module.exports = {
                 });
             }
 
-            const guildSettings = await Guild.findOne({ guildId: interaction.guildId });
+            const guildSettings = await getGuildSettings(interaction.guildId);
             const translation = guildSettings?.bibleVerse?.translation || 'kjv';
 
             let displayVerse = verseData;

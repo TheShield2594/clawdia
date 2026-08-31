@@ -324,10 +324,23 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
     //
     // Merely being logged in is not enough: Discord OAuth is open to any account,
     // so authentication alone conveys no privilege here.
-    app.get('/health', (req, res) => {
-        const detailed = req.isAuthenticated?.() === true
-            && Array.isArray(req.user?.guilds)
-            && req.user.guilds.some(g => hasManagePermission(g) && bot.hasGuild(g.id));
+    app.get('/health', async (req, res) => {
+        const manageable = req.isAuthenticated?.() === true && Array.isArray(req.user?.guilds)
+            ? req.user.guilds.filter(hasManagePermission)
+            : [];
+        // A health probe must answer even when the bot process does not, so a
+        // facade that cannot be reached downgrades the payload rather than
+        // failing the request — the un-detailed status is exactly what an
+        // anonymous monitor gets, and it is still the honest answer.
+        let detailed = false;
+        if (manageable.length) {
+            try {
+                const present = await bot.hasGuilds(manageable.map(g => g.id));
+                detailed = manageable.some(g => present[g.id]);
+            } catch (err) {
+                console.error('[DASHBOARD] /health could not reach the bot process:', err.message);
+            }
+        }
 
         const status = getStatus({ detailed });
         // Non-200 for `degraded` as well as `unhealthy`, so a monitor that only
@@ -337,7 +350,7 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
         res.status(httpStatusFor(status.status)).json(status);
     });
 
-    app.get('/', (req, res) => {
+    app.get('/', async (req, res, next) => {
         // The hero's stat row is measured, not written into the template
         // (#704). `null` when the client has not been ready yet, and the
         // template drops the row for that rather than claiming zero servers.
@@ -350,11 +363,15 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
         // domain. `null` only in the misconfiguration that already refuses to
         // start, and the template drops the tags rather than emitting a
         // half-formed URL.
-        res.render('index', {
-            user: req.user,
-            stats: instanceStats(bot),
-            baseUrl: checkDashboardUrl().baseUrl,
-        });
+        try {
+            res.render('index', {
+                user: req.user,
+                stats: await instanceStats(bot),
+                baseUrl: checkDashboardUrl().baseUrl,
+            });
+        } catch (err) {
+            next(err);
+        }
     });
 
     app.use(errorHandler);

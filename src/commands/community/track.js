@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const COLORS = require('../../utils/embedColors');
 
 const TRACK_INFO = {
@@ -43,7 +43,7 @@ module.exports = {
 
     async execute(interaction) {
         const chosen = interaction.options.getString('choose');
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
 
         if (!guildSettings?.progressionTracks?.enabled) {
             return interaction.reply({ content: 'Progression tracks are not enabled on this server.', flags: MessageFlags.Ephemeral });

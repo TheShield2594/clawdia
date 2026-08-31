@@ -3,7 +3,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const { attachGrind } = require('../../utils/grindProfile');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { SYNERGY_LIST } = require('../../data/crossSystemData');
 const { ensureHuntData }    = require('../../services/huntService');
 const { ensureFishingData } = require('../../services/fishService');
@@ -18,7 +18,7 @@ module.exports = {
         .setDescription('View all cross-system synergy bonuses and your progress toward unlocking them'),
 
     async execute(interaction) {
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
         if (guildSettings?.economy?.enabled === false) {
             return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }

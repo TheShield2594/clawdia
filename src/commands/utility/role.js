@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const COLORS = require('../../utils/embedColors');
 
 module.exports = {
@@ -20,7 +20,7 @@ module.exports = {
 
     async execute(interaction) {
         const sub           = interaction.options.getSubcommand();
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
 
         // Collect all unique roleIds from reaction role panels
         const selfRoleIds = [...new Set((guildSettings?.reactionRoles || []).map(r => r.roleId))];

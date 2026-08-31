@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const COLORS = require('../../utils/embedColors');
 
 module.exports = {
@@ -14,7 +14,7 @@ module.exports = {
 
     async execute(interaction) {
         const text          = interaction.options.getString('suggestion');
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
 
         if (!guildSettings?.suggestions?.enabled || !guildSettings.suggestions.channelId) {
             return interaction.reply({ content: 'Suggestions are not enabled on this server.', flags: MessageFlags.Ephemeral });

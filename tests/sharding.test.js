@@ -24,6 +24,7 @@ const {
     shardId,
     isPrimaryShard,
     ownsGuild,
+    handlesGuild,
     assertGuildAffinity,
     shardTag,
 } = require('../src/utils/sharding');
@@ -236,6 +237,44 @@ describe('the four process-bound session stores are covered by affinity', () => 
     });
 });
 
+describe('handlesGuild routes scheduled work', () => {
+    const shardedClient = (id, count) => ({ shard: { ids: [id], count } });
+
+    it('is true everywhere when unsharded, so nothing changes today', () => {
+        for (const guildId of SNOWFLAKES) {
+            expect(handlesGuild(guildId)).toBe(true);
+        }
+        expect(handlesGuild(null)).toBe(true);
+    });
+
+    it('gives each guild to exactly one shard', () => {
+        for (const count of [2, 3, 4, 8]) {
+            for (const guildId of SNOWFLAKES) {
+                const owners = [];
+                for (let id = 0; id < count; id++) {
+                    if (handlesGuild(guildId, shardedClient(id, count))) owners.push(id);
+                }
+                expect(owners).toHaveLength(1);
+                expect(owners[0]).toBe(shardIdForGuild(guildId, count));
+            }
+        }
+    });
+
+    it('routes work with no guild to the primary shard rather than to none', () => {
+        // A reminder set in a DM carries guildId: null. It still has to be
+        // delivered exactly once, and no routing rule covers it.
+        for (const absent of [null, undefined, '']) {
+            expect(handlesGuild(absent, shardedClient(0, 4))).toBe(true);
+            expect(handlesGuild(absent, shardedClient(1, 4))).toBe(false);
+            expect(handlesGuild(absent, shardedClient(3, 4))).toBe(false);
+        }
+    });
+
+    it('claims nothing for an id it cannot route', () => {
+        expect(handlesGuild('not-a-snowflake', shardedClient(1, 4))).toBe(false);
+    });
+});
+
 describe('singleton work is gated, not merely documented', () => {
     const read = rel => fs.readFileSync(path.join(__dirname, '..', 'src', rel), 'utf8');
 
@@ -253,15 +292,20 @@ describe('singleton work is gated, not merely documented', () => {
         expect(code).toMatch(/isPrimaryShard\(client\)[\s\S]{0,200}runMigrations\(\)/);
     });
 
-    it('schedules cron jobs on the primary shard only', () => {
+    it('gates deployment-wide jobs and the start-once services on the primary shard', () => {
         // jobRunner's overlap guard is a process-local Set, so it cannot see a
-        // second process running the same job — applyBankInterest paying every
-        // account twice is the shape of getting this wrong.
+        // second process running the same job. Work that is not partitioned by
+        // guild therefore stays on one process — applyBankInterest paying every
+        // account twice is the shape of getting this wrong. Per-guild jobs are
+        // safe to run everywhere precisely because they claim and announce
+        // inside one guild, and #889 is the classification that says which is
+        // which. tests/schedulerScope.test.js holds the behaviour; this holds
+        // that the gate is still a gate.
         const code = read('services/scheduler/index.js');
         expect(code).toContain('isPrimaryShard');
-        const gateIndex = code.indexOf('if (!isPrimaryShard(client))');
+        const gateIndex = code.indexOf('if (!primary) {');
         expect(gateIndex).toBeGreaterThan(-1);
-        expect(code.indexOf('for (const job of JOBS)')).toBeGreaterThan(gateIndex);
+        expect(code).toContain('primary || job.scope === SCOPE.GUILD');
         expect(code.indexOf('runStarters(STARTERS, client)')).toBeGreaterThan(gateIndex);
     });
 
@@ -270,7 +314,7 @@ describe('singleton work is gated, not merely documented', () => {
         // shard that skipped it would show no activity to the guilds it serves.
         const code = read('services/scheduler/index.js');
         const presenceIndex = code.indexOf('setPresence(client);');
-        const gateIndex = code.indexOf('if (!isPrimaryShard(client))');
+        const gateIndex = code.indexOf('if (!primary) {');
         expect(presenceIndex).toBeGreaterThan(-1);
         expect(presenceIndex).toBeLessThan(gateIndex);
     });
@@ -281,7 +325,7 @@ describe('singleton work is gated, not merely documented', () => {
         // owns a cold cache on the first message after a restart.
         const code = read('services/scheduler/index.js');
         const shardStarters = code.indexOf('runStarters(SHARD_STARTERS, client)');
-        const gateIndex = code.indexOf('if (!isPrimaryShard(client))');
+        const gateIndex = code.indexOf('if (!primary) {');
         expect(shardStarters).toBeGreaterThan(-1);
         expect(shardStarters).toBeLessThan(gateIndex);
     });

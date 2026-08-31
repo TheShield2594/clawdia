@@ -2,6 +2,7 @@ const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
 const { assertGuildAffinity } = require('../utils/sharding');
 const COLORS = require('../utils/embedColors');
+const { handlesGuild } = require('../utils/sharding');
 
 // guildId -> [{timestamp, userId, accountAgeDays}]
 //
@@ -255,6 +256,13 @@ async function sweepRaidModes(client) {
     if (raidModeActive.size === 0) return;
 
     for (const guildId of [...raidModeActive]) {
+        // Per-guild job. `raidModeActive` is process-local and only ever filled
+        // by join events, which reach the owning shard — so this guard is
+        // normally redundant. It is here for the case it is not: a guild whose
+        // routing changed under a reshard would otherwise have its raid mode
+        // disabled by a process that cannot see whether the raid is still going.
+        if (!handlesGuild(guildId, client)) continue;
+
         // Never auto-disable a manually activated raid mode
         if (raidModeActivatedBy.get(guildId) === 'manual') continue;
 

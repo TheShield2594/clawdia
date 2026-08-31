@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const User    = require('../../models/User');
 const AiItem  = require('../../models/AiItem');
 const { attachGrind } = require('../../utils/grindProfile');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
 const { MATERIAL_RARITY, TIER_LABELS, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
 const { getItemLore } = require('../../data/defaultShopItems');
@@ -237,7 +237,7 @@ module.exports = {
 
         const [userData, guildSettings] = await Promise.all([
             User.findOne({ userId: target.id, guildId: interaction.guild.id }),
-            Guild.findOne({ guildId: interaction.guild.id })
+            getGuildSettings(interaction.guild.id)
         ]);
         await attachGrind(userData);
 

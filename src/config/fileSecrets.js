@@ -37,6 +37,10 @@ const FILE_BACKED_SECRETS = [
     'OPENROUTER_API_KEY',
     'IMGFLIP_USERNAME',
     'IMGFLIP_PASSWORD',
+    // Shared by the bot and the split-out dashboard (#876). Whoever holds it
+    // can ban, unban and post in every guild the bot is in, so it belongs here
+    // for the same reason CLIENT_SECRET does.
+    'BOT_GATEWAY_TOKEN',
 ];
 
 /**

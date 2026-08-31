@@ -1,11 +1,11 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { logTransaction } = require('../../utils/logTransaction');
 const COLORS = require('../../utils/embedColors');
 
 async function getCurrency(guildId) {
-    const guildSettings = await Guild.findOne({ guildId });
+    const guildSettings = await getGuildSettings(guildId);
     return guildSettings?.economy?.currency ?? '💰';
 }
 

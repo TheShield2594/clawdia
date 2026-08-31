@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getCase } = require('../../services/caseService');
 const Case = require('../../models/Case');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const COLORS = require('../../utils/embedColors');
 
 module.exports = {
@@ -55,7 +55,7 @@ module.exports = {
             });
 
             // Post to appeal channel / mod log
-            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+            const guildSettings = await getGuildSettings(interaction.guild.id);
             const alertChannelId = guildSettings?.moderation?.appealChannelId
                 || guildSettings?.moderation?.logChannelId;
             if (!alertChannelId) return;

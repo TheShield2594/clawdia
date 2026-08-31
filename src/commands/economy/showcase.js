@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { MATERIAL_RARITY, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
 const { ACHIEVEMENTS } = require('../../data/achievements');
 const COLORS = require('../../utils/embedColors');
@@ -68,7 +68,7 @@ module.exports = {
 
             const [profileUser, guildSettings] = await Promise.all([
                 User.findOne({ userId: target.id, guildId: interaction.guild.id }),
-                Guild.findOne({ guildId: interaction.guild.id })
+                getGuildSettings(interaction.guild.id)
             ]);
 
             if (!profileUser) {

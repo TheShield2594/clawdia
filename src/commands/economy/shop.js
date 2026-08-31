@@ -8,6 +8,7 @@ const {
     MessageFlags,
 } = require('discord.js');
 const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const User = require('../../models/User');
 const Transaction = require('../../models/Transaction');
 const { ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, isP8BlackMarketItem, RARITY_ORDER } = require('../../data/defaultShopItems');
@@ -249,7 +250,7 @@ module.exports = {
         try {
             const focused = interaction.options.getFocused()?.toLowerCase() ?? '';
             const [guildSettings, viewer] = await Promise.all([
-                Guild.findOne({ guildId: interaction.guild.id }, 'shop economy dynamicPricing').lean(),
+                getGuildSettings(interaction.guild.id),
                 User.findOne(
                     { userId: interaction.user.id, guildId: interaction.guild.id },
                     'accountPrestige'
@@ -468,7 +469,7 @@ module.exports = {
             const doPurchase = async (reply) => {
                 // Re-fetch to catch any changes since the pre-check (stock sold out, balance changed)
                 const [freshGuild, freshUser] = await Promise.all([
-                    Guild.findOne({ guildId: interaction.guild.id }),
+                    getGuildSettings(interaction.guild.id),
                     User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id })
                 ]);
 

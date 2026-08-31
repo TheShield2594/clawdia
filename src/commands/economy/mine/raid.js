@@ -3,7 +3,7 @@
 // /mine raid — taking ore off another player, and the locks that keep the two
 // sides of that from racing each other.
 
-const Guild = require('../../../models/Guild');
+const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../../utils/grindProfile');
@@ -17,7 +17,7 @@ const COLORS = require('../../../utils/embedColors');
 // ─── RAID ─────────────────────────────────────────────────────────────────────
 
 async function handleRaid(interaction) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
         return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }

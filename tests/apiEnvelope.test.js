@@ -21,6 +21,7 @@ const express = require('express');
 const request = require('supertest');
 
 const { readPage, pageEnvelope } = require('../src/dashboard/lib/apiPage');
+const stubBotGateway = require('./helpers/stubBotGateway');
 
 const API_DIR = path.join(__dirname, '..', 'src', 'dashboard', 'routes', 'api');
 
@@ -208,11 +209,11 @@ function appWith(routerPath) {
     app.use((req, res, next) => {
         req.isAuthenticated = () => true;
         req.user = { id: 'admin-1', guilds: [{ id: 'g1', permissions: '8' }] };
-        req.bot = {
-            hasGuild: () => true,
+        req.bot = stubBotGateway({
+            hasGuild: async () => true,
             canManageGuild: async () => true,
             resolveUsers: async () => ({}),
-        };
+        });
         next();
     });
     app.use('/api/v1', require(routerPath));

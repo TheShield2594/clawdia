@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const SeasonRecord = require('../../models/SeasonRecord');
 const { ensureMissions: ensureMissionsShared } = require('../../services/seasonMissionService');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
@@ -67,15 +68,23 @@ async function ensureMissions(user) {
 
 // ── Subcommand handlers ───────────────────────────────────────────────────────
 
-async function executeView(interaction) {
-    const [user, guildSettings] = await Promise.all([
+// Every player-facing subcommand opens the same way, and did so in seven
+// identical copies: the caller's row, created on first use, and the guild's
+// settings read beside it. The settings read goes through the cache (#877), so
+// the round trip this waits on is the upsert alone.
+async function loadPlayerAndSettings(interaction) {
+    return Promise.all([
         User.findOneAndUpdate(
             { userId: interaction.user.id, guildId: interaction.guild.id },
             { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
             { upsert: true, new: true }
         ),
-        Guild.findOne({ guildId: interaction.guild.id })
+        getGuildSettings(interaction.guild.id),
     ]);
+}
+
+async function executeView(interaction) {
+    const [user, guildSettings] = await loadPlayerAndSettings(interaction);
 
     const season = guildSettings?.season;
     if (!season?.enabled || !season?.seasonId) {
@@ -146,14 +155,7 @@ async function executeView(interaction) {
 
 async function executeClaim(interaction) {
     const tier = interaction.options.getInteger('tier');
-    const [user, guildSettings] = await Promise.all([
-        User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id },
-            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
-            { upsert: true, new: true }
-        ),
-        Guild.findOne({ guildId: interaction.guild.id })
-    ]);
+    const [user, guildSettings] = await loadPlayerAndSettings(interaction);
 
     const season = guildSettings?.season;
     if (!season?.enabled || !season?.seasonId) {
@@ -307,14 +309,7 @@ async function executeClaim(interaction) {
 }
 
 async function executeUnlock(interaction) {
-    const [user, guildSettings] = await Promise.all([
-        User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id },
-            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
-            { upsert: true, new: true }
-        ),
-        Guild.findOne({ guildId: interaction.guild.id })
-    ]);
+    const [user, guildSettings] = await loadPlayerAndSettings(interaction);
 
     const season = guildSettings?.season;
     if (!season?.enabled || !season?.seasonId) {
@@ -362,14 +357,7 @@ async function executeUnlock(interaction) {
 }
 
 async function executeMissions(interaction) {
-    const [user, guildSettings] = await Promise.all([
-        User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id },
-            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
-            { upsert: true, new: true }
-        ),
-        Guild.findOne({ guildId: interaction.guild.id })
-    ]);
+    const [user, guildSettings] = await loadPlayerAndSettings(interaction);
 
     const season = guildSettings?.season;
     if (!season?.enabled) {
@@ -401,14 +389,7 @@ async function executeMissions(interaction) {
 
 async function executeClaimMission(interaction) {
     const missionIndex = interaction.options.getInteger('mission') - 1;
-    const [user, guildSettings] = await Promise.all([
-        User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id },
-            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
-            { upsert: true, new: true }
-        ),
-        Guild.findOne({ guildId: interaction.guild.id })
-    ]);
+    const [user, guildSettings] = await loadPlayerAndSettings(interaction);
 
     const season = guildSettings?.season;
     if (!season?.enabled) return interaction.reply({ content: 'No active season.', flags: MessageFlags.Ephemeral });
@@ -459,14 +440,7 @@ async function executeClaimMission(interaction) {
 }
 
 async function executeClaimAll(interaction) {
-    const [user, guildSettings] = await Promise.all([
-        User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id },
-            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
-            { upsert: true, new: true }
-        ),
-        Guild.findOne({ guildId: interaction.guild.id })
-    ]);
+    const [user, guildSettings] = await loadPlayerAndSettings(interaction);
 
     const season = guildSettings?.season;
     if (!season?.enabled || !season?.seasonId) {
@@ -596,7 +570,7 @@ async function executeClaimAll(interaction) {
 // ── Economy season (issue #238) subcommands ───────────────────────────────────
 
 async function executeLeaderboard(interaction) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     const currentSeason = guildSettings?.currentSeason;
 
     if (!currentSeason?.id) {
@@ -636,7 +610,7 @@ async function executeLeaderboard(interaction) {
 async function executeSeasonMe(interaction) {
     const [user, guildSettings] = await Promise.all([
         User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
-        Guild.findOne({ guildId: interaction.guild.id })
+        getGuildSettings(interaction.guild.id)
     ]);
 
     const currentSeason = guildSettings?.currentSeason;
@@ -695,6 +669,11 @@ async function executeHistory(interaction) {
 }
 
 // Admin: start economy season
+// The two admin writes below read currentSeason to decide whether to write it, so
+// they go to the model rather than getGuildSettings: a cached read would put a TTL
+// between the check and the write. Projected, which is what the cache was for.
+const readSeasonForWrite = guildId => Guild.findOne({ guildId }, 'currentSeason').lean();
+
 async function executeAdminStart(interaction) {
     if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
         return interaction.reply({ content: 'Administrator only.', flags: MessageFlags.Ephemeral });
@@ -702,7 +681,7 @@ async function executeAdminStart(interaction) {
 
     const name = interaction.options.getString('name') ?? `Season ${Date.now()}`;
     const durationDays = interaction.options.getInteger('duration') ?? 90;
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await readSeasonForWrite(interaction.guild.id);
 
     if (guildSettings?.currentSeason?.id) {
         return interaction.reply({ content: 'A season is already active. End it first with `/season end`.', flags: MessageFlags.Ephemeral });
@@ -730,7 +709,7 @@ async function executeAdminEnd(interaction) {
 
     await interaction.deferReply();
 
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await readSeasonForWrite(interaction.guild.id);
     const currentSeason = guildSettings?.currentSeason;
 
     if (!currentSeason?.id) {
@@ -791,14 +770,7 @@ async function executeAdminEnd(interaction) {
 // ── Seasonal event progress subcommand ───────────────────────────────────────
 
 async function executeSeasonEvent(interaction) {
-    const [user, guildSettings] = await Promise.all([
-        User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id },
-            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
-            { upsert: true, new: true }
-        ),
-        Guild.findOne({ guildId: interaction.guild.id })
-    ]);
+    const [user, guildSettings] = await loadPlayerAndSettings(interaction);
 
     const activeEvent = guildSettings?.activeEvent;
     if (!activeEvent?.type) {
@@ -899,7 +871,7 @@ const TIER_SKIP_ITEM_ID = 'tier_skip_token';
 async function executeTierSkip(interaction) {
     const [user, guildSettings] = await Promise.all([
         User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
-        Guild.findOne({ guildId: interaction.guild.id })
+        getGuildSettings(interaction.guild.id)
     ]);
 
     const season = guildSettings?.season;

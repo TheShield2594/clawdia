@@ -3,7 +3,7 @@ const {
     EmbedBuilder,
     MessageFlags,
 } = require('discord.js');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const User  = require('../../models/User');
 const { logTransaction } = require('../../utils/logTransaction');
 const { createReplaySession, replayButtonRow } = require('../../utils/replaySession');
@@ -107,7 +107,7 @@ module.exports = {
                 .setMaxValue(100)),
 
     async execute(interaction) {
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.rollEnabled === false) {
             return interaction.reply({ content: 'Dice roll is disabled on this server.', flags: MessageFlags.Ephemeral });
         }

@@ -6,7 +6,7 @@ const {
     ButtonStyle,
     MessageFlags,
 } = require('discord.js');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const User = require('../../models/User');
 const Syndicate = require('../../models/Syndicate');
 const FailedJob = require('../../models/FailedJob');
@@ -146,7 +146,7 @@ async function resolveHeist(client, heist) {
     const target = SYNDICATE_TARGETS[heist.target];
     const { outcome, payout, perPlayer } = computeSyndicateOutcome(heist);
 
-    const guildDoc = await Guild.findOne({ guildId: heist.guildId }, 'economy').lean();
+    const guildDoc = await getGuildSettings(heist.guildId);
     const currency = guildDoc?.economy?.currency ?? '💰';
 
     const players = [...heist.players.entries()];
@@ -1043,7 +1043,7 @@ module.exports = {
     cooldownAmount: () => 5,
 
     async execute(interaction, client) {
-        const guildDoc = await Guild.findOne({ guildId: interaction.guild.id }, 'economy syndicates').lean();
+        const guildDoc = await getGuildSettings(interaction.guild.id);
 
         if (!guildDoc?.economy?.enabled) {
             return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });

@@ -8,7 +8,7 @@ const User  = require('../../models/User');
 const { DECEASED_PET_LIMIT } = User;
 const { attachGrind } = require('../../utils/grindProfile');
 const { isVersionError, withVersionRetry } = require('../../utils/versionRetry');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const {
     PET_DEFINITIONS,
     PERSONALITY_TRAITS,
@@ -422,7 +422,7 @@ async function executeAdopt(interaction) {
         });
     }
 
-    const [user, guildSettings] = await Promise.all([resolveUser(interaction), Guild.findOne({ guildId: interaction.guild.id })]);
+    const [user, guildSettings] = await Promise.all([resolveUser(interaction), getGuildSettings(interaction.guild.id)]);
 
     if (guildSettings?.economy?.enabled === false) return interaction.reply({ content: 'The economy is disabled in this server.', flags: MessageFlags.Ephemeral });
     if ((user.pets ?? []).some(p => p.petId === petId)) return interaction.reply({ content: `You already own a ${def.emoji} **${def.name}**!`, flags: MessageFlags.Ephemeral });
@@ -506,7 +506,7 @@ async function executeStatus(interaction) {
 
     const [user, guildSettings] = await Promise.all([
         resolveUser(interaction),
-        Guild.findOne({ guildId: interaction.guild.id }),
+        getGuildSettings(interaction.guild.id),
     ]);
     await syncHungerAndRunaway(user, interaction);
 
@@ -724,7 +724,7 @@ async function executeFeed(interaction) {
 
     await interaction.deferReply();
 
-    const [user, guildSettings] = await Promise.all([resolveUser(interaction), Guild.findOne({ guildId: interaction.guild.id })]);
+    const [user, guildSettings] = await Promise.all([resolveUser(interaction), getGuildSettings(interaction.guild.id)]);
     await syncHungerAndRunaway(user, interaction);
 
     if (!user.pets || user.pets.length === 0) return interaction.editReply('You have no pets to feed!');
@@ -983,7 +983,7 @@ async function executeBattle(interaction) {
     const petRef   = readSlotOption(interaction);
     const bet      = interaction.options.getInteger('bet') ?? 0;
 
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
         return interaction.reply({ content: 'The economy is disabled in this server.', flags: MessageFlags.Ephemeral });
     }

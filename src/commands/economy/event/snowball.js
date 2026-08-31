@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
-const Guild = require('../../../models/Guild');
+const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { logTransaction } = require('../../../utils/logTransaction');
 const { debitUpTo } = require('../../../utils/balanceDebit');
 const {
@@ -18,7 +18,7 @@ const COIN_STEAL_RATE  = 0.05;          // steal 5% of target's wallet on hit
 async function handleSnowball(interaction) {
     await interaction.deferReply();
 
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
 
     if (!hasActiveEvent(guildSettings) || guildSettings.activeEvent.type !== 'winter_wonderland') {
         return interaction.editReply({

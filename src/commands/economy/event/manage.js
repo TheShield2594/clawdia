@@ -11,6 +11,7 @@
 
 const { EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const Guild = require('../../../models/Guild');
+const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { SEASONAL_EVENTS } = require('../../../data/seasonalEvents');
 const { buildClearedEvent } = require('../../../services/seasonalEventService');
 const COLORS = require('../../../utils/embedColors');
@@ -27,7 +28,7 @@ const EVENT_TYPE_CHOICES = [
 async function handleStatus(interaction) {
     await interaction.deferReply();
 
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     const ev = guildSettings?.activeEvent;
 
     if (!ev?.type) {
@@ -69,7 +70,12 @@ async function handleStatus(interaction) {
 async function handleStart(interaction) {
     await interaction.deferReply();
 
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    // Read through the model rather than getGuildSettings: this value decides
+    // whether the write below happens, and a cached read would put up to a TTL
+    // between the two — long enough for a second /event start to pass the same
+    // check. The projection is what made the cached read worth having, so the
+    // read stays narrow either way.
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'activeEvent').lean();
     const current = guildSettings?.activeEvent;
 
     if (current?.type && !(current.endsAt && new Date(current.endsAt) <= new Date())) {
@@ -155,7 +161,8 @@ async function handleStart(interaction) {
 async function handleEnd(interaction) {
     await interaction.deferReply();
 
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    // Uncached and projected, for the reason handleStart gives.
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'activeEvent').lean();
     const current = guildSettings?.activeEvent;
 
     if (!current?.type) {

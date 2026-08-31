@@ -12,7 +12,7 @@ const {
     startTournament
 } = require('../../../services/tournamentService');
 const { EmbedBuilder, MessageFlags } = require('discord.js');
-const Guild = require('../../../models/Guild');
+const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -42,7 +42,7 @@ async function handleTournamentStatus(interaction) {
     // Auto-end if expired
     if (new Date() > tournament.endsAt) {
         const ended = await endTournament(tournament._id);
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
         const currency = guildSettings?.economy?.currency ?? '💰';
         const announceChannelId = ended.announceChannelId ?? guildSettings?.economy?.announcementChannelId ?? null;
         announceTournamentEnd(interaction.client, ended, interaction.guild.id, announceChannelId).catch(() => null);
@@ -63,7 +63,7 @@ async function handleTournamentStart(interaction) {
     const durationMins = interaction.options.getInteger('duration') ?? 60;
     const seedAmount   = interaction.options.getInteger('prize_pool') ?? 0;
     const entryFee     = interaction.options.getInteger('entry_fee') ?? 0;
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     const announceChannelId = guildSettings?.economy?.announcementChannelId ?? null;
 
     let tournament;
@@ -107,7 +107,7 @@ async function handleTournamentStart(interaction) {
 async function handleRecords(interaction) {
     await interaction.deferReply();
 
-    const guildDoc = await Guild.findOne({ guildId: interaction.guild.id }, 'fishingWorldRecords').lean().catch(() => null);
+    const guildDoc = await getGuildSettings(interaction.guild.id).catch(() => null);
     const records  = (guildDoc?.fishingWorldRecords ?? [])
         .sort((a, b) => b.weight - a.weight)
         .slice(0, 15);

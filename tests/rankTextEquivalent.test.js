@@ -20,6 +20,8 @@ const mockGuilds = fakeCollection('Guild');
 
 jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/models/Guild', () => mockGuilds.model);
+jest.mock('../src/utils/guildSettingsCache', () =>
+    require('./helpers/guildSettingsCacheMock')());
 jest.mock('../src/utils/grindProfile', () => ({ attachGrind: jest.fn(async user => user) }));
 // The canvas render is the one part of this that needs fonts and a GPU-free
 // encode; what it draws is cardGenerator's business, not this file's.

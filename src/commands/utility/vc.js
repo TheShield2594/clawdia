@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -31,7 +31,7 @@ module.exports = {
 
     async execute(interaction) {
         const sub           = interaction.options.getSubcommand();
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
 
         if (!guildSettings?.tempVoice?.enabled) {
             return interaction.reply({ content: 'Temporary voice channels are not enabled on this server.', flags: MessageFlags.Ephemeral });

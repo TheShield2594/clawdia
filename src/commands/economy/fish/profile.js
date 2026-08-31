@@ -4,7 +4,7 @@
 // and what they have become.
 
 const User = require('../../../models/User');
-const Guild = require('../../../models/Guild');
+const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { attachGrind } = require('../../../utils/grindProfile');
 const { MessageFlags, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const {
@@ -46,7 +46,7 @@ async function handleProfile(interaction) {
 
     const [userData, guildSettings] = await Promise.all([
         User.findOne({ userId: target.id, guildId: interaction.guild.id }),
-        Guild.findOne({ guildId: interaction.guild.id })
+        getGuildSettings(interaction.guild.id)
     ]);
     await attachGrind(userData);
 
@@ -192,7 +192,7 @@ async function handleProfile(interaction) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function handlePrestige(interaction) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
         return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
@@ -335,7 +335,7 @@ async function handlePrestige(interaction) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function handleInv(interaction, sub) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
         return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
@@ -523,7 +523,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
     ).catch(() => {});
 
     // Broadcast to economy channel
-    const guildSettings = await Guild.findOne({ guildId }, 'economy accountPrestige').lean().catch(() => null);
+    const guildSettings = await getGuildSettings(guildId).catch(() => null);
     const announceChannelId = guildSettings?.accountPrestige?.announceChannelId
         ?? guildSettings?.economy?.announcementChannelId
         ?? null;

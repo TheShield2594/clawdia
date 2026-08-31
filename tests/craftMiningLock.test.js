@@ -15,6 +15,8 @@ jest.mock('../src/utils/activeGameLock', () => ({
 }));
 
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
+jest.mock('../src/utils/guildSettingsCache', () =>
+    require('./helpers/guildSettingsCacheMock')());
 jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn() }));
 
 const lock  = require('../src/utils/activeGameLock');

@@ -2,11 +2,11 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User     = require('../../models/User');
-const Guild    = require('../../models/Guild');
 const AiQuest  = require('../../models/AiQuest');
 const { resolveProviderConfig, getCompletion } = require('../../services/aiService');
 const COLORS = require('../../utils/embedColors');
 const { requestModelJson } = require('../../utils/modelJson');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 
 const COST         = 200;       // coins to generate
 const COOLDOWN_MS  = 23 * 60 * 60 * 1000; // 23h — allow slight drift
@@ -63,7 +63,7 @@ module.exports = {
 
         const [user, guildSettings] = await Promise.all([
             User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
-            Guild.findOne({ guildId: interaction.guild.id }),
+            getGuildSettings(interaction.guild.id),
         ]);
 
         if (!guildSettings?.quests?.enabled) {

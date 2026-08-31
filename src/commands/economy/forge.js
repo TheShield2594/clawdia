@@ -2,12 +2,12 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User    = require('../../models/User');
-const Guild   = require('../../models/Guild');
 const AiItem  = require('../../models/AiItem');
 const { resolveProviderConfig, getCompletion } = require('../../services/aiService');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { requestModelJson } = require('../../utils/modelJson');
 const cooldownStore = require('../../utils/commandCooldowns');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 
 const RARITY_CONFIG = {
     common:    { label: 'Common',    emoji: '⚪', color: 0xAAAAAA, cost: 500,   xpReward: 25  },
@@ -105,7 +105,7 @@ module.exports = {
 
         const [user, guildSettings] = await Promise.all([
             User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
-            Guild.findOne({ guildId: interaction.guild.id }),
+            getGuildSettings(interaction.guild.id),
         ]);
 
         if (!guildSettings?.ai?.enabled) {

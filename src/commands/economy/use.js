@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const {
     EFFECT_CONFIGS,
     resolveEffectType,
@@ -77,7 +77,7 @@ module.exports = {
         // Read first to resolve item identity (itemId casing, effect checks)
         const [preview, guildSettings] = await Promise.all([
             User.findOne(userFilter),
-            Guild.findOne({ guildId: interaction.guild.id })
+            getGuildSettings(interaction.guild.id)
         ]);
 
         if (!preview || !preview.inventory?.length) {

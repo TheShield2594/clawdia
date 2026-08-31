@@ -84,7 +84,7 @@ router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, check
 router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
-        if (!req.bot.hasGuild(guildId)) return res.status(404).json({ error: 'Guild not found or bot not in guild' });
+        if (!await req.bot.hasGuild(guildId)) return res.status(404).json({ error: 'Guild not found or bot not in guild' });
 
         let bans;
         try {
@@ -97,7 +97,7 @@ router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, asyn
         }
 
         const banList = bans.map(b => ({ type: 'ban', ...b, expires: null }));
-        const timeoutList = (req.bot.listActiveTimeouts(guildId, 200) || [])
+        const timeoutList = (await req.bot.listActiveTimeouts(guildId, 200) || [])
             .map(t => ({ type: 'timeout', ...t, reason: null }));
 
         res.json({ bans: banList, timeouts: timeoutList });

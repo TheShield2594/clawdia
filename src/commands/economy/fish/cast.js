@@ -6,6 +6,7 @@
 const { TIER_NUM, TIER_STARS } = require('../../../data/materialRarity');
 const { EmbedBuilder, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const Guild = require('../../../models/Guild');
+const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const User = require('../../../models/User');
 const {
     prepareCastUser,
@@ -52,7 +53,7 @@ const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function handleCast(interaction) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
         return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }

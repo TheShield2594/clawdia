@@ -55,7 +55,7 @@ const COMMAND_FILE_MAX_LINES = 900;
 const GRANDFATHERED_COMMANDS = {
     'src/commands/economy/explore.js':   1655,
     'src/commands/economy/pet.js':       1490,
-    'src/commands/economy/season.js':    1083,
+    'src/commands/economy/season.js':    1055,
     'src/commands/economy/syndicate.js': 1075,
 };
 

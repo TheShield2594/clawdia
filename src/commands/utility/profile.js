@@ -3,7 +3,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const { attachGrind } = require('../../utils/grindProfile');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
 const { getStreakMultiplier, MILESTONES } = require('../../utils/streakMultiplier');
 const { badgeFor, titleForExactRank } = require('../../utils/prestige');
@@ -53,7 +53,7 @@ module.exports = {
         try {
             const [userData, guildSettings] = await Promise.all([
                 User.findOne({ userId: targetUser.id, guildId: interaction.guild.id }),
-                Guild.findOne({ guildId: interaction.guild.id }),
+                getGuildSettings(interaction.guild.id),
             ]);
             await attachGrind(userData);
 

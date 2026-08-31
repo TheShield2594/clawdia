@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const {
     resolveMcpServers,
     getMcpServers,
@@ -295,7 +295,7 @@ async function startDeepTask(interaction) {
         return interaction.reply({ content: 'Say what you would like done.', flags: MessageFlags.Ephemeral });
     }
 
-    const settings = await Guild.findOne({ guildId: interaction.guild.id }).lean();
+    const settings = await getGuildSettings(interaction.guild.id);
     const ai = settings?.ai;
 
     // Checked before anything is posted, so a refusal is one ephemeral line
@@ -359,7 +359,7 @@ async function addScheduledTask(interaction) {
 
     // The guild's own timezone rather than the admin's: the task belongs to the
     // server and will still be running long after this conversation.
-    const settings = await Guild.findOne({ guildId: interaction.guild.id }).lean();
+    const settings = await getGuildSettings(interaction.guild.id);
     const timezone = settings?.ai?.dailyDigest?.timezone || 'Etc/UTC';
 
     let fireAt;
@@ -458,7 +458,7 @@ async function removeScheduledTask(interaction) {
 
 /** The guild's stored connections, merged with the operator's config file. */
 async function guildMcpServers(guildId) {
-    const settings = await Guild.findOne({ guildId }).lean();
+    const settings = await getGuildSettings(guildId);
     return resolveMcpServers(settings?.ai?.mcpServers || []);
 }
 
@@ -473,7 +473,7 @@ async function guildMcpServers(guildId) {
  * rather than leaving the field spinning.
  */
 async function respondWithPrompts(interaction, typed) {
-    const settings = await Guild.findOne({ guildId: interaction.guild.id }).lean();
+    const settings = await getGuildSettings(interaction.guild.id);
 
     const listings = await Promise.race([
         listGuildPrompts(settings?.ai?.mcpServers || []),
@@ -497,7 +497,7 @@ async function respondWithPrompts(interaction, typed) {
 
 async function handleMcp(interaction) {
     const sub = interaction.options.getSubcommand();
-    const settings = await Guild.findOne({ guildId: interaction.guild.id }).lean();
+    const settings = await getGuildSettings(interaction.guild.id);
     const ai = settings?.ai || {};
 
     if (sub === 'prompts') {
