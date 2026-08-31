@@ -6,11 +6,11 @@ const path = require('path');
 
 // The runner reaches for the MigrationRecord model at require time, so the
 // model is replaced with an in-memory stand-in before anything loads it.
-const records = [];
-jest.mock('../src/models/MigrationRecord', () => ({
-    find: () => ({ lean: async () => records.map(r => ({ name: r.name })) }),
-    create: async doc => { records.push(doc); return doc; },
-}));
+const { fakeMigrationRecords } = require('./helpers/fakeMigrationRecords');
+
+const mockRecords = fakeMigrationRecords();
+jest.mock('../src/models/MigrationRecord', () => mockRecords.model);
+const records = mockRecords.rows;
 
 const { runMigrations } = require('../src/migrations/runner');
 

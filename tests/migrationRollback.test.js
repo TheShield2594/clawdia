@@ -11,16 +11,11 @@ const path = require('path');
 // every shipped migration declares down() or irreversible: true, and a
 // mongodump is attempted before anything irreversible runs.
 
-const records = [];
-jest.mock('../src/models/MigrationRecord', () => ({
-    find: () => ({ lean: async () => records.map(r => ({ name: r.name })) }),
-    create: async doc => { records.push(doc); return doc; },
-    deleteOne: async ({ name }) => {
-        const i = records.findIndex(r => r.name === name);
-        if (i !== -1) records.splice(i, 1);
-        return { deletedCount: i === -1 ? 0 : 1 };
-    },
-}));
+const { fakeMigrationRecords } = require('./helpers/fakeMigrationRecords');
+
+const mockRecords = fakeMigrationRecords();
+jest.mock('../src/models/MigrationRecord', () => mockRecords.model);
+const records = mockRecords.rows;
 
 jest.mock('child_process', () => ({ spawnSync: jest.fn() }));
 

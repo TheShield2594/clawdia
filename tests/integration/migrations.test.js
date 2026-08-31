@@ -30,7 +30,7 @@ const os = require('os');
 const path = require('path');
 const mongoose = require('mongoose');
 
-const { useMongo } = require('../helpers/mongo');
+const { useMongo, buildIndexes } = require('../helpers/mongo');
 
 useMongo();
 
@@ -601,6 +601,66 @@ describe('rollback, against a real server', () => {
 
         await expect(rollbackMigration('gone', { dir })).rejects.toThrow(/irreversible/);
         expect(await appliedInOrder()).toEqual(['a', 'gone']);
+    });
+});
+
+// ── Two processes at once ────────────────────────────────────────────────────
+//
+// #654. This is the case a mock cannot answer: the loser's insert has to be
+// rejected by the server's own unique index, and whether the runner survives
+// that rejection is the whole question. Before the claim, both processes ran
+// the migration and the second one threw E11000 out of runMigrations — aborting
+// a boot over bookkeeping for a migration that had applied fine.
+
+describe('two processes migrating at once', () => {
+    // useMongo connects with autoIndex off, so the unique index that makes the
+    // claim a lock exists only because this asks for it — which also checks
+    // that the schema still declares it.
+    beforeEach(() => buildIndexes(MigrationRecord));
+
+    test('applies each migration once, and neither process aborts', async () => {
+        const dir = migrationsDir({
+            // Long enough that the second process is certain to find the claim
+            // held rather than already completed.
+            '001_a.js': migrationSource({ name: 'a', body: 'await new Promise(r => setTimeout(r, 150));' }),
+            '002_b.js': migrationSource({ name: 'b', body: 'await new Promise(r => setTimeout(r, 150));' }),
+        });
+
+        await expect(Promise.all([
+            runMigrations({ dir }),
+            runMigrations({ dir }),
+        ])).resolves.toEqual([undefined, undefined]);
+
+        expect(globalThis.__migrationRuns).toEqual(['a', 'b']);
+        expect(await appliedInOrder()).toEqual(['a', 'b']);
+    }, 30_000);
+
+    test('leaves one complete record per migration, with its duration on it', async () => {
+        const dir = migrationsDir({ '001_a.js': migrationSource({ name: 'a', body: 'await new Promise(r => setTimeout(r, 150));' }) });
+
+        await Promise.all([runMigrations({ dir }), runMigrations({ dir })]);
+
+        const records = await MigrationRecord.find({}).lean();
+        expect(records).toHaveLength(1);
+        expect(records[0].state).toBe('complete');
+        expect(typeof records[0].durationMs).toBe('number');
+    }, 30_000);
+
+    test('a held claim does not read as applied while the migration is still running', async () => {
+        const dir = migrationsDir({ '001_a.js': migrationSource({ name: 'a', body: 'await new Promise(r => setTimeout(r, 500));' }) });
+
+        const running = runMigrations({ dir });
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // The record exists — it is the lock — but it is not a record of
+        // anything having been applied yet. Every reader of that state has to
+        // agree, the shard wait of #732 included, or a second shard starts
+        // serving traffic against a half-migrated database.
+        expect(await MigrationRecord.countDocuments({ name: 'a' })).toBe(1);
+        expect(await pendingMigrationNames({ dir })).toEqual(['a']);
+
+        await running;
+        expect(await pendingMigrationNames({ dir })).toEqual([]);
     });
 });
 
