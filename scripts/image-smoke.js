@@ -110,13 +110,26 @@ check('every font the card generators register resolves', () => {
     }
 });
 
-// The native binding, end to end: load it, register the fonts through the same
-// module the bot uses, draw, and encode. A build stage that compiled against
-// headers the runtime stage does not ship fails on the require; a broken cairo
-// or pixman fails on the encode.
-check('canvas loads, registers fonts and encodes a PNG', () => {
+// Resolving is not registering. A file can sit at the expected path and still
+// fail registerFont() — truncated by a bad layer copy, or a format this build of
+// canvas was not compiled to read — and the bot deliberately swallows that:
+// warn, carry on in the fallback face, because refusing to start over a font is
+// worse. Which leaves the same silent downgrade the check above exists to catch,
+// one step further along, so the smoke asserts on the registration itself.
+check('every required font actually registers, not just resolves', () => {
+    const failed = fonts.ensureFontsRegistered()
+        .filter(f => !f.optional && !f.registered)
+        .map(f => `${f.family}${f.weight === 'bold' ? ' (bold)' : ''}: ${f.error}`);
+
+    if (failed.length) throw new Error(failed.join('; '));
+});
+
+// The native binding, end to end: load it, draw with the fonts registered
+// above, and encode. A build stage that compiled against headers the runtime
+// stage does not ship fails on the require; a broken cairo or pixman fails on
+// the encode.
+check('canvas loads and encodes a PNG', () => {
     const { createCanvas } = require('canvas');
-    fonts.ensureFontsRegistered();
 
     const canvas = createCanvas(160, 48);
     const ctx = canvas.getContext('2d');

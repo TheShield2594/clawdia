@@ -112,3 +112,89 @@ describe('resolveFonts', () => {
         spy.mockRestore();
     });
 });
+
+describe('ensureFontsRegistered', () => {
+    // The module memoizes its one pass, so each case needs a fresh copy of it
+    // with canvas mocked before the top-level destructure of registerFont.
+    const load = registerFont => {
+        let mod;
+        jest.isolateModules(() => {
+            jest.doMock('canvas', () => ({ registerFont }));
+            mod = require('../src/utils/registerFonts');
+        });
+        return mod;
+    };
+
+    afterEach(() => {
+        jest.dontMock('canvas');
+        jest.restoreAllMocks();
+    });
+
+    test('registers every resolved family and says so', () => {
+        jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+        const registerFont = jest.fn();
+
+        const report = load(registerFont).ensureFontsRegistered();
+
+        expect(registerFont).toHaveBeenCalledTimes(FONTS.length);
+        expect(report.map(f => f.registered)).toEqual(FONTS.map(() => true));
+        expect(report.every(f => f.error === null)).toBe(true);
+    });
+
+    test('reports a font that resolved and then failed to register', () => {
+        // The gap this report exists for: the file is at the expected path, so
+        // resolution is happy, and registerFont rejects it anyway — a truncated
+        // copy, or a format this build of canvas cannot read. Without the
+        // report that is a warning on stderr and nothing else, and every
+        // generated card silently drops to the fallback face.
+        jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const registerFont = jest.fn(() => { throw new Error('Could not parse font file'); });
+
+        const report = load(registerFont).ensureFontsRegistered();
+
+        expect(report.every(f => f.registered)).toBe(false);
+        for (const font of report) {
+            expect(font.registered).toBe(false);
+            expect(font.error).toBe('Could not parse font file');
+        }
+    });
+
+    test('does not throw when a font cannot be registered', () => {
+        // A bot that refuses to start over a font is worse than one whose cards
+        // render in the wrong face, so the failure stays non-fatal here. Only
+        // the image smoke test turns it into an error, and only for the
+        // families the table marks required.
+        jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const mod = load(() => { throw new Error('boom'); });
+
+        expect(() => mod.ensureFontsRegistered()).not.toThrow();
+    });
+
+    test('marks a family that resolved nowhere as not registered', () => {
+        jest.spyOn(fs, 'existsSync').mockReturnValue(false);
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const registerFont = jest.fn();
+
+        const report = load(registerFont).ensureFontsRegistered();
+
+        expect(registerFont).not.toHaveBeenCalled();
+        expect(report.map(f => f.error)).toEqual(FONTS.map(() => 'not found'));
+    });
+
+    test('registers once and returns the same report on every later call', () => {
+        // registerFont must run before any canvas context is created, and the
+        // report has to survive the early return — a second caller that got
+        // undefined back would read it as "nothing failed".
+        jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+        const registerFont = jest.fn();
+        const mod = load(registerFont);
+
+        const first = mod.ensureFontsRegistered();
+        const second = mod.ensureFontsRegistered();
+
+        expect(registerFont).toHaveBeenCalledTimes(FONTS.length);
+        expect(second).toBe(first);
+    });
+});

@@ -58,7 +58,13 @@ const FONTS = [
     },
 ];
 
+// The outcome of the one registration pass, memoized alongside the flag that
+// makes it happen once. Returning it is what lets a caller that wants to be
+// strict — scripts/image-smoke.js — see a family that resolved to a file and
+// then failed to register anyway, which warns here and is invisible to
+// everything else.
 let registered = false;
+let registrationReport = null;
 
 /**
  * Where each family resolved, without registering anything.
@@ -81,31 +87,47 @@ function resolveFonts() {
     }));
 }
 
+/**
+ * Registers every family in the table, once, and reports what happened.
+ *
+ * Nothing here throws: a bot that will not start because a font is missing is
+ * worse than one whose cards render in the wrong face. The report is how a
+ * caller that *does* want to fail — the image smoke test — can tell the two
+ * apart, since a family that resolved to a file and then failed to register is
+ * otherwise indistinguishable from a healthy one from the outside.
+ *
+ * @returns {{ family: string, weight: string, optional: boolean, path: ?string,
+ *             registered: boolean, error: ?string }[]}
+ */
 function ensureFontsRegistered() {
     // registerFont must run before any canvas context is created, and
     // re-registering the same family is wasteful, so do it exactly once.
-    if (registered) return;
+    if (registered) return registrationReport;
     registered = true;
 
-    for (const font of resolveFonts()) {
+    registrationReport = resolveFonts().map(font => {
+        const label = `${font.family}${font.weight === 'bold' ? ' (bold)' : ''}`;
         const found = font.path;
 
         if (!found) {
-            const label = `${font.family}${font.weight === 'bold' ? ' (bold)' : ''}`;
             if (font.optional) {
                 console.warn(`[FONTS] ${label} not found — emoji will render as fallback glyphs.`);
             } else {
                 console.warn(`[FONTS] ${label} not found in any known location — generated images will use canvas's default font.`);
             }
-            continue;
+            return { ...font, registered: false, error: 'not found' };
         }
 
         try {
             registerFont(found, { family: font.family, weight: font.weight });
+            return { ...font, registered: true, error: null };
         } catch (err) {
             console.warn(`[FONTS] Failed to register ${font.family} from ${found}: ${err.message}`);
+            return { ...font, registered: false, error: err.message };
         }
-    }
+    });
+
+    return registrationReport;
 }
 
 module.exports = { ensureFontsRegistered, resolveFonts, FONTS };
