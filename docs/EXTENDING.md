@@ -59,7 +59,19 @@ and `eslint.config.js`.
 
 A command is one file under `src/commands/<category>/`, or a folder with an
 `index.js` when it has outgrown one file. The category comes from the
-directory; nothing else registers a command.
+directory; nothing else registers a command — the loader treats only
+`<category>/<name>/index.js` as a command, so a folder's siblings, and any
+folders nested inside it, never register as commands of their own.
+
+That nesting is how `/hunt`, `/fish` and `/mine` are laid out: `hunt/index.js`
+is the definition and the dispatch, `hunt/start.js` and `hunt/quests.js` are
+verbs, and `hunt/shop/` is a verb group that outgrew a file in turn — its own
+`index.js` plus one file per shop verb.
+
+`eslint-rules/command-file-size.js` caps how long any of these may get and
+fails the lint when one goes over. The two ways past it are splitting the file
+the way above, and moving the logic into the service layer, which is where most
+of what makes a command file long belongs anyway.
 
 ### Basic Command Template
 
