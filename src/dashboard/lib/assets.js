@@ -4,7 +4,11 @@ const path = require('path');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
-// url path -> { mtimeMs, version }
+// `${root}\0${url path}` -> { mtimeMs, version }
+//
+// The root is part of the key rather than assumed: two roots serving the same
+// url path are different files, and a cache that could not tell them apart
+// would hand out the first one's hash for the second one's contents.
 const cache = new Map();
 
 /**
@@ -12,12 +16,17 @@ const cache = new Map();
  * changes so an edit is picked up without a restart in development.
  *
  * @param {string} urlPath - root-relative URL, e.g. "/styles.css"
+ * @param {string} [publicDir] - the directory to resolve against. The dashboard
+ *   serves one and never passes this; it is a parameter so that a test can hash
+ *   a file it is free to rewrite. tests/assets used to write its fixture into
+ *   the real `public/` and delete it again, which is a transient file inside
+ *   src/ that any suite sweeping the tree in another Jest worker could see.
  * @returns {string|null} short hex digest, or null if the file cannot be read
  */
-function assetVersion(urlPath) {
-    const filePath = path.join(PUBLIC_DIR, urlPath.replace(/^\/+/, ''));
+function assetVersion(urlPath, publicDir = PUBLIC_DIR) {
+    const filePath = path.join(publicDir, urlPath.replace(/^\/+/, ''));
     // Never let a caller escape the public directory with "..".
-    if (path.relative(PUBLIC_DIR, filePath).startsWith('..')) return null;
+    if (path.relative(publicDir, filePath).startsWith('..')) return null;
 
     let mtimeMs;
     try {
@@ -26,7 +35,8 @@ function assetVersion(urlPath) {
         return null;
     }
 
-    const hit = cache.get(urlPath);
+    const key = `${publicDir}\0${urlPath}`;
+    const hit = cache.get(key);
     if (hit && hit.mtimeMs === mtimeMs) return hit.version;
 
     let version;
@@ -35,7 +45,7 @@ function assetVersion(urlPath) {
     } catch {
         return null;
     }
-    cache.set(urlPath, { mtimeMs, version });
+    cache.set(key, { mtimeMs, version });
     return version;
 }
 
@@ -49,12 +59,13 @@ function assetVersion(urlPath) {
  * changed URL.
  *
  * @param {string} urlPath - root-relative URL, e.g. "/guild-settings.js"
+ * @param {string} [publicDir] - see assetVersion; the views never pass it.
  * @returns {string} the same URL with a `?v=` cache key, or unchanged if the
  *   file is missing (a 404 is better surfaced than papered over).
  */
-function asset(urlPath) {
-    const version = assetVersion(urlPath);
+function asset(urlPath, publicDir = PUBLIC_DIR) {
+    const version = assetVersion(urlPath, publicDir);
     return version ? `${urlPath}?v=${version}` : urlPath;
 }
 
-module.exports = { asset, assetVersion };
+module.exports = { asset, assetVersion, PUBLIC_DIR };
