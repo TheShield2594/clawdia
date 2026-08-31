@@ -138,10 +138,17 @@ const SYNERGY_LIST = Object.values(SYNERGIES);
 // max on User.staminaUpgrades, and matches the other stackable permanent buys.
 const MAX_STAMINA_UPGRADES = 3;
 
+// The Wilderness district's server-wide yield bonus (see /invest). It lifts the
+// payout of every gathering run — hunt, fish and mine each apply it, and their
+// embeds each print it — so it is one number here rather than the five copies of
+// `0.10` it was spread across (#892).
+const WILDERNESS_YIELD_BONUS = 0.10;
+
 module.exports = {
     CROSS_CONSUMABLES,
     CROSS_CRAFT_RECIPES,
     SYNERGIES,
     SYNERGY_LIST,
-    MAX_STAMINA_UPGRADES
+    MAX_STAMINA_UPGRADES,
+    WILDERNESS_YIELD_BONUS
 };

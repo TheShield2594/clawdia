@@ -7,7 +7,6 @@ const {
     FISH_BY_TIER,
     JUNK_ITEMS,
     TREASURE_ITEMS,
-    FISHER_LEVELS,
     LIMITS,
     PRESTIGE_BONUSES,
     FAILURE_SEVERITIES,
@@ -22,11 +21,9 @@ const {
 const { getCurrentWeather } = require('./weatherService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getPityBonus } = require('../utils/pityBonus');
-const { ensureHuntData, getMaxStamina: getHuntMaxStamina } = require('./huntService');
-const { getFishSynergyStaminaBonus, getFishDeepProspectorStaminaBonus } = require('./synergyService');
-const { MAX_STAMINA_UPGRADES } = require('../data/crossSystemData');
 const { getBonusMultipliers } = require('../utils/prestige');
-const { getGatheringYieldEffect, consumeEffect } = require('./effectsService');
+const grind = require('./grindEngine');
+const { WILDERNESS_YIELD_BONUS } = require('../data/crossSystemData');
 
 const DAILY_QUEST_COUNT = 3;
 const WEEK_MS = 7 * 24 * 3_600_000;
@@ -34,16 +31,12 @@ const WEEK_MS = 7 * 24 * 3_600_000;
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
 function ensureFishingData(user) {
-    if (!user.fishing) user.fishing = {};
+    // Stamina, xp, level, prestige, the daily counters and the material bag are
+    // the engine's fields and it seeds them for every grind the same way (#892).
+    // What is below is the rest of a fishing profile, which is fishing's own.
+    grind.ensureSharedFields(user, 'fish');
     const f = user.fishing;
 
-    if (f.stamina            == null) f.stamina            = 10;
-    if (f.staminaLastRegen   == null) f.staminaLastRegen   = null;
-    if (f.energyDrinksToday  == null) f.energyDrinksToday  = 0;
-    if (f.lastDrinkDayReset  == null) f.lastDrinkDayReset  = null;
-    if (f.xp                 == null) f.xp                 = 0;
-    if (f.level              == null) f.level               = 1;
-    if (f.prestige           == null) f.prestige            = 0;
     if (f.lastCast           == null) f.lastCast            = null;
     if (f.injuryUntil        == null) f.injuryUntil         = null;
     if (f.activeLocation     == null) f.activeLocation      = 'pond';
@@ -52,7 +45,6 @@ function ensureFishingData(user) {
     if (!Array.isArray(f.rods))       f.rods                = [];
     if (!f.bait)         f.bait         = {};
     if (!f.consumables)  f.consumables  = {};
-    if (!f.materials)    f.materials    = {};
     if (f.activeBait           == null) f.activeBait           = null;
     if (f.activeBaitCastsLeft  == null) f.activeBaitCastsLeft  = 0;
     if (f.activeLuck           == null) f.activeLuck           = false;
@@ -68,9 +60,6 @@ function ensureFishingData(user) {
     if (f.eventCatches         == null) f.eventCatches         = 0;
     if (f.bestPayout           == null) f.bestPayout           = 0;
     if (f.consecutiveFails     == null) f.consecutiveFails     = 0;
-    if (f.dailyCoins           == null) f.dailyCoins           = 0;
-    if (f.dailyCasts           == null) f.dailyCasts           = 0;
-    if (f.dailyWindowStart     == null) f.dailyWindowStart     = null;
     if (f.personalBest         == null) f.personalBest         = { fish: null, weight: 0, payout: 0 };
     if (f.weeklyRecord         == null) f.weeklyRecord         = { fish: null, weight: 0, userId: null, username: null, weekStart: null };
     if (f.lastBossEncounter    == null) f.lastBossEncounter    = null;
@@ -83,63 +72,19 @@ function ensureFishingData(user) {
 
 // ─── STAMINA ─────────────────────────────────────────────────────────────────
 
-function getMaxStamina(user) {
-    const prestige = user.fishing?.prestige ?? 0;
-    const bonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)]?.staminaBonus ?? 0;
-    // Outdoorsman and Deep Prospector each promise +1 max fishing stamina;
-    // only the first was ever read, so Deep Prospector granted nothing.
-    const synergyBonus = getFishSynergyStaminaBonus(user) + getFishDeepProspectorStaminaBonus(user);
-    // Permanent Stamina +1 from the shop, applied through /use.
-    const purchased = Math.min(Math.max(0, user?.staminaUpgrades ?? 0), MAX_STAMINA_UPGRADES);
-    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus + purchased;
-}
+// The mechanics below — the stamina bank, the rolling daily window, the level
+// ladder and the countdown format — are the same in all four grinds and live in
+// services/grindEngine.js (#892). What is left here is the `'fish'` in each
+// call: which spec the engine should use.
+const getMaxStamina = user => grind.getMaxStamina(user, 'fish');
 
-function applyStaminaRegen(user) {
-    const f = user.fishing;
-    const max = getMaxStamina(user);
-    if (f.stamina >= max) {
-        f.stamina = max;
-        f.staminaLastRegen = new Date();
-        user.markModified('fishing');
-        return;
-    }
-    if (!f.staminaLastRegen) {
-        f.staminaLastRegen = new Date();
-        user.markModified('fishing');
-        return;
-    }
-    const elapsed   = Date.now() - f.staminaLastRegen.getTime();
-    const intervals = Math.floor(elapsed / LIMITS.STAMINA_REGEN_MS);
-    if (intervals <= 0) return;
+const applyStaminaRegen = user => grind.applyStaminaRegen(user, 'fish');
 
-    f.stamina = Math.min(max, f.stamina + intervals);
-    f.staminaLastRegen = new Date(f.staminaLastRegen.getTime() + intervals * LIMITS.STAMINA_REGEN_MS);
-    user.markModified('fishing');
-}
-
-function msUntilNextStamina(user) {
-    const f = user.fishing;
-    const max = getMaxStamina(user);
-    if (f.stamina >= max) return 0;
-    if (!f.staminaLastRegen) return LIMITS.STAMINA_REGEN_MS;
-    const elapsed = Date.now() - f.staminaLastRegen.getTime();
-    return Math.max(0, LIMITS.STAMINA_REGEN_MS - (elapsed % LIMITS.STAMINA_REGEN_MS));
-}
+const msUntilNextStamina = user => grind.msUntilNextStamina(user, 'fish');
 
 // ─── DAILY WINDOW ─────────────────────────────────────────────────────────────
 
-function applyDailyReset(user) {
-    const f   = user.fishing;
-    const now = Date.now();
-    if (!f.dailyWindowStart || now - f.dailyWindowStart.getTime() >= LIMITS.DAILY_WINDOW_MS) {
-        f.dailyCoins        = 0;
-        f.dailyCasts        = 0;
-        f.dailyWindowStart  = new Date(now);
-        f.energyDrinksToday = 0;
-        f.lastDrinkDayReset = new Date(now);
-        user.markModified('fishing');
-    }
-}
+const applyDailyReset = user => grind.applyDailyReset(user, 'fish');
 
 // ─── SUCCESS FORMULA ──────────────────────────────────────────────────────────
 
@@ -348,24 +293,28 @@ function applyPayoutModifiers(user, rawPayout, location) {
 
     payout = Math.round(payout);
 
-    // Hard cap: zero coins — check before consuming item charges
-    if (f.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
-        return { adjustedPayout: 0, cappedByHard: true };
+    // The daily soft cap, the hard cap and the gathering-yield doubling are the
+    // same rules in all three gear grinds and live in the engine (#892).
+    const throttle = grind.dailyThrottle(user, 'fish');
+    if (throttle.cappedByHard) {
+        return { adjustedPayout: 0, cappedByHard: true, gatheringYield: null };
     }
 
-    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
-    // is active. Only spend a charge when there is something to double — a worthless
-    // junk pull must not burn a charge for 2 × 0.
-    const gatherEffect = payout > 0 ? getGatheringYieldEffect(user) : null;
-    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
-    if (f.dailyCoins >= LIMITS.DAILY_SOFT_CAP) {
-        payout = Math.round(payout * 0.50);
-    }
+    const basePayout    = throttle.settle(payout);
+    const doubledPayout = throttle.settle(payout * 2);
 
-    const remaining = LIMITS.DAILY_HARD_CAP - f.dailyCoins;
-    payout = Math.min(payout, remaining);
+    // This copy used to spend a charge whenever the payout was non-zero, where
+    // hunt and mine spent one only when doubling actually paid more. An angler
+    // within a hair of the daily hard cap lost a Silvered Talisman charge to a
+    // bonus the headroom clamp then swallowed whole. One rule now, and it is
+    // the one that does not burn a charge for nothing.
+    const gatheringYield = grind.claimGatheringYield(user, basePayout, doubledPayout);
 
-    return { adjustedPayout: Math.max(0, payout), cappedByHard: false, gatherEffectConsumed: gatherEffect };
+    return {
+        adjustedPayout: gatheringYield ? doubledPayout : basePayout,
+        cappedByHard:   false,
+        gatheringYield,
+    };
 }
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
@@ -431,37 +380,13 @@ function applyRepair(rod, requestedAmount) {
 
 // ─── LEVEL / XP ──────────────────────────────────────────────────────────────
 
-function levelFromXp(totalXp) {
-    let level = 1;
-    for (const row of FISHER_LEVELS) {
-        if (totalXp >= row.xpRequired) level = row.level;
-        else break;
-    }
-    return level;
-}
+const levelFromXp = totalXp => grind.levelFromXp(totalXp, 'fish');
 
-function getLevelData(level) {
-    return FISHER_LEVELS[Math.min(level, FISHER_LEVELS.length) - 1];
-}
+const getLevelData = level => grind.getLevelData(level, 'fish');
 
-function xpToNextLevel(currentLevel, currentXp) {
-    if (currentLevel >= FISHER_LEVELS.length) return null;
-    return FISHER_LEVELS[currentLevel].xpRequired - currentXp;
-}
+const xpToNextLevel = (currentLevel, currentXp) => grind.xpToNextLevel(currentLevel, currentXp, 'fish');
 
-function applyXp(user, xpGain) {
-    const f        = user.fishing;
-    const oldLevel = f.level;
-    f.xp          += xpGain;
-    const newLevel = levelFromXp(f.xp);
-
-    if (newLevel > oldLevel) {
-        f.level = newLevel;
-        user.markModified('fishing');
-        return { oldLevel, newLevel, leveledUp: true };
-    }
-    return { oldLevel, newLevel: oldLevel, leveledUp: false };
-}
+const applyXp = (user, xpGain) => grind.applyXp(user, xpGain, 'fish');
 
 // ─── CONSUMABLE MANAGEMENT ───────────────────────────────────────────────────
 
@@ -516,17 +441,18 @@ function activateConsumable(user, consumableId) {
         if (f.energyDrinksToday >= LIMITS.ENERGY_DRINKS_PER_DAY) {
             return { success: false, error: `You've already used ${LIMITS.ENERGY_DRINKS_PER_DAY} stamina items today.` };
         }
+        // An energy drink refills both bars, so this reaches into the hunting
+        // profile — through the shared engine rather than by requiring
+        // huntService, which was the service-to-service edge #892 named.
         const max = getMaxStamina(user);
-        ensureHuntData(user);
-        const huntMax = getHuntMaxStamina(user);
-        if (f.stamina >= max && user.hunt.stamina >= huntMax) {
+        grind.ensureSharedFields(user, 'hunt');
+        if (f.stamina >= max && grind.restoreStamina(user, 'hunt', 0).wasFull) {
             return { success: false, error: `Both stamina bars are already full.` };
         }
         f.consumables[consumableId] -= 1;
         f.stamina = Math.min(max, f.stamina + def.staminaRestore);
         f.energyDrinksToday += 1;
-        user.hunt.stamina = Math.min(huntMax, user.hunt.stamina + def.staminaRestore);
-        user.markModified('hunt');
+        grind.restoreStamina(user, 'hunt', def.staminaRestore);
     } else if (def.type === 'repair') {
         return { success: false, error: `Use repair kits with \`/fish shop repair\`.` };
     } else {
@@ -726,8 +652,8 @@ function executeCast(user, locationId, options = {}) {
             const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
             const preModPayout   = Math.round(sizedPayout * critMultiplier * traitPayoutMult * streakMult * reactionFactor);
 
-            const { adjustedPayout, cappedByHard, gatherEffectConsumed } = applyPayoutModifiers(user, preModPayout, location);
-            result.gatherEffectConsumed = gatherEffectConsumed;
+            const { adjustedPayout, cappedByHard, gatheringYield } = applyPayoutModifiers(user, preModPayout, location);
+            result.gatheringYield = gatheringYield;
 
             // ── Special material drop ──────────────────────────────────────
             let specialDrop = null;
@@ -1057,7 +983,11 @@ async function prepareCastUser(user) {
     const { attachGrind } = require('../utils/grindProfile');
     await attachGrind(user);
     ensureFishingData(user);
-    ensureHuntData(user);
+    // The cast can touch the hunting profile — an energy drink refills its bar,
+    // and a Winter Hunt catch drops a material into its bag — so its shared
+    // fields have to exist. huntService seeds the rest of them on the first
+    // hunt; nothing here reads any of it.
+    grind.ensureSharedFields(user, 'hunt');
     applyStaminaRegen(user);
     applyDailyReset(user);
     assignDailyFishQuests(user);
@@ -1219,7 +1149,7 @@ function revertEscapedCast(user, snapshot, result) {
     // otherwise a required reel-in miss hands back pity progress.
     user.fishing.consecutiveFails = snapshot.consecutiveFails + 1;
     // The doubled-yield charge paid for a payout that is being reversed.
-    if (result.gatherEffectConsumed) refundEffectCharge(user, result.gatherEffectConsumed);
+    if (result.gatheringYield) refundEffectCharge(user, result.gatheringYield.effect);
     user.markModified('fishing');
     result.success     = false;
     result.finalPayout = 0;
@@ -1244,7 +1174,6 @@ function downgradeOptionalMiss(user, result) {
     result.tier = 'uncommon';
 }
 
-const WILDERNESS_YIELD_BONUS = 0.10;
 
 /**
  * The post-roll bonus stack: pity counter, pet yield, featured-spot bonus,
@@ -1309,6 +1238,9 @@ function rollWinterHuntMaterial(user, result, crossSystemType, locationId) {
     const ARCTIC_MATERIALS = ['arctic_fox_pelt', 'snowy_feather', 'thick_hide', 'polar_claw', 'mammoth_tusk'];
     if (Math.random() >= 0.40) return null;
     const matId = ARCTIC_MATERIALS[Math.floor(Math.random() * ARCTIC_MATERIALS.length)];
+    // The bag may not exist yet for an angler who has never hunted; prepareCastUser
+    // seeds it, and this makes the function safe called on its own.
+    grind.ensureSharedFields(user, 'hunt');
     user.hunt.materials[matId] = (user.hunt.materials[matId] ?? 0) + 1;
     user.markModified('hunt');
     return matId;
@@ -1341,15 +1273,7 @@ async function commitCast(user, balanceAtLoad) {
 
 // ─── FORMATTING HELPERS ───────────────────────────────────────────────────────
 
-function formatMs(ms) {
-    if (ms <= 0) return '0s';
-    const secs = Math.floor(ms / 1000);
-    const mins = Math.floor(secs / 60);
-    const hrs  = Math.floor(mins / 60);
-    if (hrs  > 0) return `${hrs}h ${mins % 60}m`;
-    if (mins > 0) return `${mins}m ${secs % 60}s`;
-    return `${secs}s`;
-}
+const formatMs = grind.formatMs;
 
 function rodStatusEmoji(status) {
     return { good: '✅', degraded: '⚠️', condemned: '💀', broken: '❌' }[status] ?? '❓';

@@ -404,6 +404,34 @@ module.exports = {
 };
 ```
 
+### The grind engine
+
+`/hunt`, `/fish`, `/mine` and `/explore` are four subsystems built on one
+design, and the parts of that design that are not about animals or fish or ore
+live in `src/services/grindEngine.js`: the stamina bank, the rolling daily
+window, the level ladder, the daily payout throttle and the gathering-yield
+doubling. Each is parameterised by a spec per subsystem — which key on the user
+document it lives under, which tables in `data/<name>Data.js` describe it, which
+synergies feed its stamina bar — and the subsystem's own service supplies the
+`'hunt'` or `'fish'` and keeps the rest: the roll tables, the encounter
+resolution, the quests.
+
+Two rules follow from it, and both exist because they were broken before:
+
+- **A mechanic every grind has belongs in the engine, not in a fourth copy.**
+  The engine exists because `applyStaminaRegen` was written out four times and
+  only one of the four had been fixed to stop writing to the database on every
+  read.
+- **A grind service never requires another grind service.** `fishService`
+  required `huntService` to reach the hunting stamina bar, because an energy
+  drink refills both; that is `grindEngine.restoreStamina(user, 'hunt', n)`
+  now. Reaching a shared mechanic through whichever sibling happens to own it
+  is how four subsystems become one knot. `tests/grindEngine.test.js` fails if
+  one comes back.
+
+The shop half is the same shape: `src/utils/grindShop.js` holds the wallet, the
+charge and the refund that all three gear shops spend through.
+
 ### Using a Service in Commands
 
 ```javascript

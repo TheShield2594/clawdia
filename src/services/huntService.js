@@ -6,7 +6,6 @@ const {
     WEAPON_UPGRADES,
     ZONES,
     ANIMALS_BY_TIER,
-    HUNTER_LEVELS,
     LIMITS,
     PRESTIGE_BONUSES,
     HUNT_QUEST_TEMPLATES,
@@ -14,12 +13,12 @@ const {
     APEX_TYPES,
     FIELD_TROPHIES
 } = require('../data/huntData');
-const { hasEffect, consumeEffect, getEffect, getGatheringYieldEffect, EFFECT_CONFIGS } = require('./effectsService');
+const { hasEffect, consumeEffect } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getPityBonus } = require('../utils/pityBonus');
-const { getHuntSynergyStaminaBonus, getHuntWayfinderStaminaBonus } = require('./synergyService');
-const { MAX_STAMINA_UPGRADES } = require('../data/crossSystemData');
 const { getBonusMultipliers } = require('../utils/prestige');
+const grind = require('./grindEngine');
+const { WILDERNESS_YIELD_BONUS } = require('../data/crossSystemData');
 
 // Zones where a critical failure can destroy your weapon (death event)
 const DANGEROUS_ZONE_IDS = new Set(['desert_wastes', 'arctic_tundra', 'murky_swamp', 'legendary_peaks']);
@@ -39,17 +38,11 @@ const FIELD_TROPHY_FLAGS = Object.keys(FIELD_TROPHIES);
  * Called once per command before any reads/writes to user.hunt.
  */
 function ensureHuntData(user) {
-    if (!user.hunt) {
-        user.hunt = {};
-    }
+    // Stamina, xp, level, prestige, the daily counters and the material bag are
+    // the engine's fields and it seeds them for every grind the same way (#892).
+    // What is below is the rest of a hunting profile, which is hunting's own.
+    grind.ensureSharedFields(user, 'hunt');
     const h = user.hunt;
-    if (h.stamina            == null) h.stamina            = 10;
-    if (h.staminaLastRegen   == null) h.staminaLastRegen   = null;
-    if (h.staminaTonicsToday == null) h.staminaTonicsToday = 0;
-    if (h.lastTonicDayReset  == null) h.lastTonicDayReset  = null;
-    if (h.xp                 == null) h.xp                 = 0;
-    if (h.level              == null) h.level              = 1;
-    if (h.prestige           == null) h.prestige            = 0;
     if (h.lastHunt           == null) h.lastHunt            = null;
     if (h.injuryUntil        == null) h.injuryUntil         = null;
     if (h.activeZone         == null) h.activeZone          = 'beginner_forest';
@@ -58,7 +51,6 @@ function ensureHuntData(user) {
     if (!Array.isArray(h.weapons))            h.weapons            = [];
     if (!h.ammo)         h.ammo         = {};
     if (!h.consumables)  h.consumables  = {};
-    if (!h.materials)    h.materials    = {};
     if (h.activeBait           == null) h.activeBait           = null;
     if (h.activeBaitHuntsLeft  == null) h.activeBaitHuntsLeft  = 0;
     if (h.activeCharm          == null) h.activeCharm          = null;
@@ -79,9 +71,6 @@ function ensureHuntData(user) {
     if (h.eventKills           == null) h.eventKills           = 0;
     if (h.bestPayout           == null) h.bestPayout           = 0;
     if (h.consecutiveFails     == null) h.consecutiveFails     = 0;
-    if (h.dailyCoins           == null) h.dailyCoins           = 0;
-    if (h.dailyHunts           == null) h.dailyHunts           = 0;
-    if (h.dailyWindowStart     == null) h.dailyWindowStart     = null;
 
     // Ensure beginner_forest is always unlocked
     if (!h.unlockedZones.includes('beginner_forest')) {
@@ -93,83 +82,35 @@ function ensureHuntData(user) {
 
 // ─── STAMINA ─────────────────────────────────────────────────────────────────
 
-function getMaxStamina(user) {
-    const prestige = user.hunt?.prestige ?? 0;
-    const bonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)]?.staminaBonus ?? 0;
-    // Outdoorsman and Wayfinder both advertise +1 max hunt stamina; they stack,
-    // exactly as Deep Prospector and Artificer do on mining.
-    const synergyBonus = getHuntSynergyStaminaBonus(user) + getHuntWayfinderStaminaBonus(user);
-    const trophyBonus  = user.hunt?.woodlandInstinct ? 1 : 0;
-    // Permanent Stamina +1 from the shop, applied through /use.
-    const purchased = Math.min(Math.max(0, user?.staminaUpgrades ?? 0), MAX_STAMINA_UPGRADES);
-    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus + trophyBonus + purchased;
-}
+// The mechanics below — the stamina bank, the rolling daily window, the level
+// ladder and the countdown format — are the same in all four grinds and live in
+// services/grindEngine.js (#892). What is left here is the `'hunt'` in each
+// call: which spec the engine should use.
+const getMaxStamina = user => grind.getMaxStamina(user, 'hunt');
 
 /**
  * Regenerates stamina based on elapsed time since last regen tick.
  * Preserves sub-interval remainder so progress isn't lost.
  * Mutates user.hunt in place.
  */
-function applyStaminaRegen(user) {
-    const h = user.hunt;
-    const max = getMaxStamina(user);
-    if (h.stamina >= max) {
-        h.stamina = max;
-        // Reset the clock so accumulated "full" time doesn't grant free regen later
-        h.staminaLastRegen = new Date();
-        user.markModified('hunt');
-        return;
-    }
-    if (!h.staminaLastRegen) {
-        h.staminaLastRegen = new Date();
-        user.markModified('hunt');
-        return;
-    }
-    const elapsed = Date.now() - h.staminaLastRegen.getTime();
-    const intervals = Math.floor(elapsed / LIMITS.STAMINA_REGEN_MS);
-    if (intervals <= 0) return;
-
-    h.stamina = Math.min(max, h.stamina + intervals);
-    // Advance lastRegen by exactly the intervals consumed (keeps remainder)
-    h.staminaLastRegen = new Date(h.staminaLastRegen.getTime() + intervals * LIMITS.STAMINA_REGEN_MS);
-    user.markModified('hunt');
-}
+const applyStaminaRegen = user => grind.applyStaminaRegen(user, 'hunt');
 
 /** Returns ms until next stamina point regenerates, or 0 if already full. */
-function msUntilNextStamina(user) {
-    const h = user.hunt;
-    const max = getMaxStamina(user);
-    if (h.stamina >= max) return 0;
-    if (!h.staminaLastRegen) return LIMITS.STAMINA_REGEN_MS;
-    const elapsed = Date.now() - h.staminaLastRegen.getTime();
-    return Math.max(0, LIMITS.STAMINA_REGEN_MS - (elapsed % LIMITS.STAMINA_REGEN_MS));
-}
+const msUntilNextStamina = user => grind.msUntilNextStamina(user, 'hunt');
 
 // ─── DAILY WINDOW ────────────────────────────────────────────────────────────
 
 /** Ms until the rolling 24h daily window rolls over (0 if it already has). */
-function msUntilDailyReset(h) {
-    if (!h?.dailyWindowStart) return 0;
-    const elapsed = Date.now() - h.dailyWindowStart.getTime();
-    return Math.max(0, LIMITS.DAILY_WINDOW_MS - elapsed);
-}
+// Takes the user rather than `user.hunt`, and answers null rather than 0 when
+// no window has started — the shape mine already used, and the one a caller can
+// tell apart from a window that has run out (#892).
+const msUntilDailyReset = user => grind.msUntilDailyReset(user, 'hunt');
 
 /**
  * Resets daily counters if the rolling 24h window has expired.
  * Also resets the stamina tonic daily limit.
  */
-function applyDailyReset(user) {
-    const h = user.hunt;
-    const now = Date.now();
-    if (!h.dailyWindowStart || now - h.dailyWindowStart.getTime() >= LIMITS.DAILY_WINDOW_MS) {
-        h.dailyCoins        = 0;
-        h.dailyHunts        = 0;
-        h.dailyWindowStart  = new Date(now);
-        h.staminaTonicsToday = 0;
-        h.lastTonicDayReset  = new Date(now);
-        user.markModified('hunt');
-    }
-}
+const applyDailyReset = user => grind.applyDailyReset(user, 'hunt');
 
 // ─── SUCCESS FORMULA ─────────────────────────────────────────────────────────
 
@@ -550,17 +491,16 @@ function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
     // Hard cap: zero coins — check before consuming item charges. Report what the
     // kill was worth so the embed can name the forfeited amount instead of
     // striking through a zero.
-    if (h.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
+    // The daily soft cap, the hard cap and the gathering-yield doubling are the
+    // same rules in all three gear grinds and live in the engine (#892).
+    const throttle = grind.dailyThrottle(user, 'hunt');
+    if (throttle.cappedByHard) {
         return { adjustedPayout: 0, cappedByHard: true, forfeitedPayout: grossPayout };
     }
+    const { softCapped } = throttle;
 
-    // Applies the daily soft cap and clamps to the headroom left under the hard cap.
-    const softCapped = h.dailyCoins >= LIMITS.DAILY_SOFT_CAP;
-    const remaining  = LIMITS.DAILY_HARD_CAP - h.dailyCoins;
-    const settle = raw => Math.max(0, Math.min(softCapped ? Math.round(raw * 0.50) : raw, remaining));
-
-    const basePayout    = settle(payout);
-    const doubledPayout = settle(payout * 2);
+    const basePayout    = throttle.settle(payout);
+    const doubledPayout = throttle.settle(payout * 2);
 
     /** Which of the day's penalties actually bit, and by how much. */
     const reportFor = (net, doubled) => {
@@ -587,24 +527,13 @@ function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
         };
     }
 
-    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
-    // is active. Only burn the charge when doubling actually pays more — within a
-    // hair of the daily hard cap the headroom clamp swallows the bonus entirely, and
-    // a charge that buys nothing shouldn't be spent.
-    const gatherEffect = getGatheringYieldEffect(user);
-    if (gatherEffect && doubledPayout > basePayout) {
-        consumeEffect(user, gatherEffect);
-        const cfg = EFFECT_CONFIGS[gatherEffect];
+    const gatheringYield = grind.claimGatheringYield(user, basePayout, doubledPayout);
+    if (gatheringYield) {
         return {
             adjustedPayout: doubledPayout,
             cappedByHard:   false,
-            gatheringYield: {
-                effect:      gatherEffect,
-                label:       cfg?.label ?? gatherEffect.replace(/_/g, ' '),
-                emoji:       cfg?.emoji ?? '✨',
-                chargesLeft: getEffect(user, gatherEffect)?.charges ?? 0,
-            },
-            dailyReport: reportFor(doubledPayout, true),
+            gatheringYield,
+            dailyReport:    reportFor(doubledPayout, true),
         };
     }
 
@@ -794,46 +723,22 @@ function projectWeaponLifetime(weaponData) {
  * Calculates hunter level from total XP.
  * Returns the highest level whose xpRequired <= totalXp.
  */
-function levelFromXp(totalXp) {
-    let level = 1;
-    for (const row of HUNTER_LEVELS) {
-        if (totalXp >= row.xpRequired) level = row.level;
-        else break;
-    }
-    return level;
-}
+const levelFromXp = totalXp => grind.levelFromXp(totalXp, 'hunt');
 
 /**
  * Returns the HUNTER_LEVELS row for the given level (1-indexed).
  */
-function getLevelData(level) {
-    return HUNTER_LEVELS[Math.min(level, HUNTER_LEVELS.length) - 1];
-}
+const getLevelData = level => grind.getLevelData(level, 'hunt');
 
 /**
  * Returns XP needed to reach next level, or null if max level.
  */
-function xpToNextLevel(currentLevel, currentXp) {
-    if (currentLevel >= HUNTER_LEVELS.length) return null;
-    return HUNTER_LEVELS[currentLevel].xpRequired - currentXp;
-}
+const xpToNextLevel = (currentLevel, currentXp) => grind.xpToNextLevel(currentLevel, currentXp, 'hunt');
 
 /**
  * Adds XP, handles level-up, returns { oldLevel, newLevel, leveledUp }.
  */
-function applyXp(user, xpGain) {
-    const h = user.hunt;
-    const oldLevel = h.level;
-    h.xp += xpGain;
-    const newLevel = levelFromXp(h.xp);
-
-    if (newLevel > oldLevel) {
-        h.level = newLevel;
-        user.markModified('hunt');
-        return { oldLevel, newLevel, leveledUp: true };
-    }
-    return { oldLevel, newLevel: oldLevel, leveledUp: false };
-}
+const applyXp = (user, xpGain) => grind.applyXp(user, xpGain, 'hunt');
 
 // ─── CONSUMABLE MANAGEMENT ───────────────────────────────────────────────────
 
@@ -1324,15 +1229,7 @@ function updateHuntQuestProgress(user, result, zoneId) {
 
 // ─── FORMATTING HELPERS ───────────────────────────────────────────────────────
 
-function formatMs(ms) {
-    if (ms <= 0) return '0s';
-    const secs = Math.floor(ms / 1000);
-    const mins = Math.floor(secs / 60);
-    const hrs  = Math.floor(mins / 60);
-    if (hrs  > 0) return `${hrs}h ${mins % 60}m`;
-    if (mins > 0) return `${mins}m ${secs % 60}s`;
-    return `${secs}s`;
-}
+const formatMs = grind.formatMs;
 
 function weaponStatusEmoji(status) {
     return { good: '✅', degraded: '⚠️', condemned: '💀', broken: '❌' }[status] ?? '❓';
@@ -1614,7 +1511,6 @@ async function claimHuntCooldown(user) {
     return { claimed: true, claimNow, release };
 }
 
-const WILDERNESS_YIELD_BONUS = 0.10;
 
 /**
  * The post-roll bonus stack: pity counter, pet coin yield, pet XP (folded

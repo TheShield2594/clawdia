@@ -185,14 +185,22 @@ describe('daily hard cap reporting', () => {
     });
 
     it('reports the time left on the rolling window', () => {
-        const h = cappedUser().hunt;
-        const remaining = msUntilDailyReset(h);
+        const remaining = msUntilDailyReset(cappedUser());
         expect(remaining).toBeGreaterThan(17 * 3600_000);
         expect(remaining).toBeLessThanOrEqual(18 * 3600_000);
     });
 
-    it('reports no wait for a window that has not started', () => {
-        expect(msUntilDailyReset({ dailyWindowStart: null })).toBe(0);
-        expect(msUntilDailyReset(undefined)).toBe(0);
+    // Since #892 this takes the user and answers null — not 0 — when no window
+    // has started. The two are opposite facts: a window that has run out is 0
+    // and resets on the next hunt, a hunter who has never hunted has no window.
+    // Hunt said 0 for both and mine said null for the second; this is mine's
+    // answer, in the shared engine, for all four grinds.
+    it('tells a window that has not started apart from one that has run out', () => {
+        expect(msUntilDailyReset({ hunt: { dailyWindowStart: null } })).toBeNull();
+        expect(msUntilDailyReset({})).toBeNull();
+        expect(msUntilDailyReset(undefined)).toBeNull();
+
+        const expired = { hunt: { dailyWindowStart: new Date(Date.now() - 25 * 3600_000) } };
+        expect(msUntilDailyReset(expired)).toBe(0);
     });
 });

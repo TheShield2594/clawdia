@@ -5,7 +5,6 @@ const {
     PICKAXE_UPGRADES,
     DEPTHS,
     ORES_BY_TIER,
-    MINER_LEVELS,
     LIMITS,
     INTENSITY_LEVELS,
     DEFAULT_INTENSITY_LEVEL,
@@ -14,10 +13,10 @@ const {
 } = require('../data/mineData');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getPityBonus } = require('../utils/pityBonus');
-const { hasIronWill, getMineDeepProspectorStaminaBonus, getArtificerMineStaminaBonus, getArtificerMineYieldBonus } = require('./synergyService');
-const { MAX_STAMINA_UPGRADES } = require('../data/crossSystemData');
+const { hasIronWill, getArtificerMineYieldBonus } = require('./synergyService');
 const { getBonusMultipliers } = require('../utils/prestige');
-const { getGatheringYieldEffect, consumeEffect, getEffect, EFFECT_CONFIGS } = require('./effectsService');
+const grind = require('./grindEngine');
+const { WILDERNESS_YIELD_BONUS } = require('../data/crossSystemData');
 
 const DANGEROUS_DEPTH_IDS = new Set(['crystal_caves', 'the_abyss']);
 const MINE_DEATH_RATE = 0.08;
@@ -26,16 +25,12 @@ const DAILY_QUEST_COUNT = 3;
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
 function ensureMineData(user) {
-    if (!user.mining) user.mining = {};
+    // Stamina, xp, level, prestige, the daily counters and the material bag are
+    // the engine's fields and it seeds them for every grind the same way (#892).
+    // What is below is the rest of a mining profile, which is mining's own.
+    grind.ensureSharedFields(user, 'mine');
     const m = user.mining;
 
-    if (m.stamina            == null) m.stamina            = 10;
-    if (m.staminaLastRegen   == null) m.staminaLastRegen   = null;
-    if (m.energyTonicsToday  == null) m.energyTonicsToday  = 0;
-    if (m.lastTonicDayReset  == null) m.lastTonicDayReset  = null;
-    if (m.xp                 == null) m.xp                 = 0;
-    if (m.level              == null) m.level              = 1;
-    if (m.prestige           == null) m.prestige            = 0;
     if (m.lastMine           == null) m.lastMine            = null;
     if (m.injuryUntil        == null) m.injuryUntil         = null;
     if (m.activeDepth        == null) m.activeDepth         = 'surface_quarry';
@@ -47,7 +42,6 @@ function ensureMineData(user) {
     if (!Array.isArray(m.pickaxes))             m.pickaxes            = [];
     if (!m.charges)       m.charges      = {};
     if (!m.consumables)   m.consumables  = {};
-    if (!m.materials)     m.materials    = {};
     if (m.activeMagnet               == null) m.activeMagnet               = null;
     if (m.activeMagnetMinesLeft      == null) m.activeMagnetMinesLeft      = 0;
     if (m.activeLamp                 == null) m.activeLamp                 = null;
@@ -64,9 +58,6 @@ function ensureMineData(user) {
     if (m.eventFinds           == null) m.eventFinds           = 0;
     if (m.bestPayout           == null) m.bestPayout           = 0;
     if (m.consecutiveFails     == null) m.consecutiveFails     = 0;
-    if (m.dailyCoins           == null) m.dailyCoins           = 0;
-    if (m.dailyMines           == null) m.dailyMines           = 0;
-    if (m.dailyWindowStart     == null) m.dailyWindowStart     = null;
 
     if (!m.unlockedDepths.includes('surface_quarry')) {
         m.unlockedDepths.push('surface_quarry');
@@ -86,63 +77,19 @@ function ensureMineData(user) {
 
 // ─── STAMINA ─────────────────────────────────────────────────────────────────
 
-function getMaxStamina(user) {
-    const prestige = user.mining?.prestige ?? 0;
-    const bonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)]?.staminaBonus ?? 0;
-    // Deep Prospector and Artificer both advertise +1 max mining stamina. Neither
-    // was ever read here, so both delivered nothing.
-    const synergyBonus = getMineDeepProspectorStaminaBonus(user) + getArtificerMineStaminaBonus(user);
-    // Permanent Stamina +1 from the shop, applied through /use.
-    const purchased = Math.min(Math.max(0, user?.staminaUpgrades ?? 0), MAX_STAMINA_UPGRADES);
-    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus + purchased;
-}
+// The mechanics below — the stamina bank, the rolling daily window, the level
+// ladder and the countdown format — are the same in all four grinds and live in
+// services/grindEngine.js (#892). What is left here is the `'mine'` in each
+// call: which spec the engine should use.
+const getMaxStamina = user => grind.getMaxStamina(user, 'mine');
 
-function applyStaminaRegen(user) {
-    const m = user.mining;
-    const max = getMaxStamina(user);
-    if (m.stamina >= max) {
-        m.stamina = max;
-        m.staminaLastRegen = new Date();
-        user.markModified('mining');
-        return;
-    }
-    if (!m.staminaLastRegen) {
-        m.staminaLastRegen = new Date();
-        user.markModified('mining');
-        return;
-    }
-    const elapsed = Date.now() - m.staminaLastRegen.getTime();
-    const intervals = Math.floor(elapsed / LIMITS.STAMINA_REGEN_MS);
-    if (intervals <= 0) return;
+const applyStaminaRegen = user => grind.applyStaminaRegen(user, 'mine');
 
-    m.stamina = Math.min(max, m.stamina + intervals);
-    m.staminaLastRegen = new Date(m.staminaLastRegen.getTime() + intervals * LIMITS.STAMINA_REGEN_MS);
-    user.markModified('mining');
-}
-
-function msUntilNextStamina(user) {
-    const m = user.mining;
-    const max = getMaxStamina(user);
-    if (m.stamina >= max) return 0;
-    if (!m.staminaLastRegen) return LIMITS.STAMINA_REGEN_MS;
-    const elapsed = Date.now() - m.staminaLastRegen.getTime();
-    return Math.max(0, LIMITS.STAMINA_REGEN_MS - (elapsed % LIMITS.STAMINA_REGEN_MS));
-}
+const msUntilNextStamina = user => grind.msUntilNextStamina(user, 'mine');
 
 // ─── DAILY WINDOW ────────────────────────────────────────────────────────────
 
-function applyDailyReset(user) {
-    const m = user.mining;
-    const now = Date.now();
-    if (!m.dailyWindowStart || now - m.dailyWindowStart.getTime() >= LIMITS.DAILY_WINDOW_MS) {
-        m.dailyCoins        = 0;
-        m.dailyMines        = 0;
-        m.dailyWindowStart  = new Date(now);
-        m.energyTonicsToday = 0;
-        m.lastTonicDayReset = new Date(now);
-        user.markModified('mining');
-    }
-}
+const applyDailyReset = user => grind.applyDailyReset(user, 'mine');
 
 // ─── SUCCESS FORMULA ─────────────────────────────────────────────────────────
 
@@ -360,42 +307,28 @@ function applyPayoutModifiers(user, rawPayout, depth) {
 
     payout = Math.round(payout);
 
-    // Hard cap: zero coins — check before consuming item charges
-    if (m.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
+    // The daily soft cap, the hard cap and the gathering-yield doubling are the
+    // same rules in all three gear grinds and live in the engine (#892).
+    const throttle = grind.dailyThrottle(user, 'mine');
+    if (throttle.cappedByHard) {
         return {
             adjustedPayout: 0, cappedByHard: true, gatheringYield: null,
             forfeited: payout, softCapped: true, fatigueMult, artificerRate: artificerBonus,
         };
     }
 
-    // Applies the daily soft cap and clamps to the headroom left under the hard cap.
-    const softCapped = m.dailyCoins >= LIMITS.DAILY_SOFT_CAP;
-    const remaining  = LIMITS.DAILY_HARD_CAP - m.dailyCoins;
-    const settle = raw => Math.max(0, Math.min(softCapped ? Math.round(raw * 0.50) : raw, remaining));
+    const basePayout    = throttle.settle(payout);
+    const doubledPayout = throttle.settle(payout * 2);
+    const throttles     = { softCapped: throttle.softCapped, fatigueMult, artificerRate: artificerBonus };
 
-    const basePayout    = settle(payout);
-    const doubledPayout = settle(payout * 2);
-    const throttles     = { softCapped, fatigueMult, artificerRate: artificerBonus };
-
-    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
-    // is active. Only burn the charge when doubling actually pays more — within a
-    // hair of the daily hard cap the headroom clamp swallows the bonus entirely, and
-    // a charge that buys nothing shouldn't be spent.
-    const gatherEffect = getGatheringYieldEffect(user);
-    if (gatherEffect && doubledPayout > basePayout) {
-        consumeEffect(user, gatherEffect);
-        const cfg = EFFECT_CONFIGS[gatherEffect];
+    const gatheringYield = grind.claimGatheringYield(user, basePayout, doubledPayout);
+    if (gatheringYield) {
         return {
             ...throttles,
             forfeited:      Math.max(0, payout * 2 - doubledPayout),
             adjustedPayout: doubledPayout,
             cappedByHard:   false,
-            gatheringYield: {
-                effect:      gatherEffect,
-                label:       cfg?.label ?? gatherEffect.replace(/_/g, ' '),
-                emoji:       cfg?.emoji ?? '✨',
-                chargesLeft: getEffect(user, gatherEffect)?.charges ?? 0,
-            },
+            gatheringYield,
         };
     }
 
@@ -412,11 +345,7 @@ function applyPayoutModifiers(user, rawPayout, depth) {
  * How long until the daily window — caps, fatigue and Energy Tonic allowance —
  * rolls over. Null when the player has no window open yet.
  */
-function msUntilDailyReset(user) {
-    const start = user.mining?.dailyWindowStart;
-    if (!start) return null;
-    return Math.max(0, LIMITS.DAILY_WINDOW_MS - (Date.now() - start.getTime()));
-}
+const msUntilDailyReset = user => grind.msUntilDailyReset(user, 'mine');
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
 
@@ -496,37 +425,13 @@ function applyRepair(pickaxe, requestedAmount) {
 
 // ─── LEVEL / XP ──────────────────────────────────────────────────────────────
 
-function levelFromXp(totalXp) {
-    let level = 1;
-    for (const row of MINER_LEVELS) {
-        if (totalXp >= row.xpRequired) level = row.level;
-        else break;
-    }
-    return level;
-}
+const levelFromXp = totalXp => grind.levelFromXp(totalXp, 'mine');
 
-function getLevelData(level) {
-    return MINER_LEVELS[Math.min(level, MINER_LEVELS.length) - 1];
-}
+const getLevelData = level => grind.getLevelData(level, 'mine');
 
-function xpToNextLevel(currentLevel, currentXp) {
-    if (currentLevel >= MINER_LEVELS.length) return null;
-    return MINER_LEVELS[currentLevel].xpRequired - currentXp;
-}
+const xpToNextLevel = (currentLevel, currentXp) => grind.xpToNextLevel(currentLevel, currentXp, 'mine');
 
-function applyXp(user, xpGain) {
-    const m = user.mining;
-    const oldLevel = m.level;
-    m.xp += xpGain;
-    const newLevel = levelFromXp(m.xp);
-
-    if (newLevel > oldLevel) {
-        m.level = newLevel;
-        user.markModified('mining');
-        return { oldLevel, newLevel, leveledUp: true };
-    }
-    return { oldLevel, newLevel: oldLevel, leveledUp: false };
-}
+const applyXp = (user, xpGain) => grind.applyXp(user, xpGain, 'mine');
 
 // ─── CONSUMABLE MANAGEMENT ───────────────────────────────────────────────────
 
@@ -931,15 +836,7 @@ function updateMineQuestProgress(user, result, depthId) {
 
 // ─── FORMATTING HELPERS ───────────────────────────────────────────────────────
 
-function formatMs(ms) {
-    if (ms <= 0) return '0s';
-    const secs = Math.floor(ms / 1000);
-    const mins = Math.floor(secs / 60);
-    const hrs  = Math.floor(mins / 60);
-    if (hrs  > 0) return `${hrs}h ${mins % 60}m`;
-    if (mins > 0) return `${mins}m ${secs % 60}s`;
-    return `${secs}s`;
-}
+const formatMs = grind.formatMs;
 
 function pickaxeStatusEmoji(status) {
     return { good: '✅', degraded: '⚠️', condemned: '💀', broken: '❌' }[status] ?? '❓';
@@ -1183,7 +1080,6 @@ async function claimDigCooldown(user) {
     return { claimed: true, claimNow, release };
 }
 
-const WILDERNESS_YIELD_BONUS = 0.10;
 
 /**
  * The post-roll bonus stack: pity counter (a rare find abandoned in a cave-in

@@ -142,26 +142,26 @@ describe('the Daily Limits embed field', () => {
 
 describe('the Today profile field', () => {
     it('shows the wall before a hunter reaches it', () => {
-        const f = buildTodayField({ dailyHunts: 10, dailyCoins: 5000, dailyWindowStart: FRESH_WINDOW() }, '💰');
+        const f = buildTodayField({ hunt: { dailyHunts: 10, dailyCoins: 5000, dailyWindowStart: FRESH_WINDOW() } }, '💰');
         expect(f.value).toContain('×1.00');
         expect(f.value).toContain(`Drops to ×0.85 at ${LIMITS.DIM_RETURNS_THRESHOLD_1} hunts`);
         expect(f.value).toContain('Soft cap');
     });
 
     it('says plainly when the soft cap is already biting', () => {
-        const f = buildTodayField({ dailyHunts: 95, dailyCoins: 92_000, dailyWindowStart: FRESH_WINDOW() }, '💰');
+        const f = buildTodayField({ hunt: { dailyHunts: 95, dailyCoins: 92_000, dailyWindowStart: FRESH_WINDOW() } }, '💰');
         expect(f.value).toContain('×0.70');
         expect(f.value).toContain('payouts halved');
     });
 
     it('handles a hunter who has not hunted today', () => {
-        const f = buildTodayField({}, '💰');
+        const f = buildTodayField({ hunt: {} }, '💰');
         expect(f.value).toContain('×1.00');
         expect(f.value.length).toBeLessThanOrEqual(1024);
     });
 
     it('fits Discord limits at the hard cap', () => {
-        const f = buildTodayField({ dailyHunts: 500, dailyCoins: LIMITS.DAILY_HARD_CAP, dailyWindowStart: FRESH_WINDOW() }, '💰');
+        const f = buildTodayField({ hunt: { dailyHunts: 500, dailyCoins: LIMITS.DAILY_HARD_CAP, dailyWindowStart: FRESH_WINDOW() } }, '💰');
         expect(f.value.length).toBeLessThanOrEqual(1024);
         expect(f.value).toContain('█'.repeat(12));
     });

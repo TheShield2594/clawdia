@@ -171,7 +171,7 @@ async function executeProfile(interaction) {
         });
     }
 
-    if (isSelf) embed.addFields(buildTodayField(h, currency));
+    if (isSelf) embed.addFields(buildTodayField(userData, currency));
 
     if (prestige === 0 && h.level >= 50) {
         embed.setFooter({ text: 'Max level reached! Use /hunt prestige to reset and unlock new bonuses.' });
@@ -224,7 +224,11 @@ function buildTrophyField(trophies) {
     };
 }
 
-function buildTodayField(h, currency) {
+// Takes the user rather than the hunt subdocument, like its siblings here and
+// like the engine's msUntilDailyReset (#892).
+function buildTodayField(user, currency) {
+    const h = user.hunt ?? {};
+
     const dim   = getDiminishingReturns(h.dailyHunts ?? 0);
     const coins = h.dailyCoins ?? 0;
 
@@ -245,7 +249,7 @@ function buildTodayField(h, currency) {
     } else {
         lines.push(`🪙 Soft cap (−50%) at ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()}`);
     }
-    lines.push(`🕛 Resets in ${formatMs(msUntilDailyReset(h))}`);
+    lines.push(`🕛 Resets in ${formatMs(msUntilDailyReset(user))}`);
 
     return { name: '📅 Today', value: lines.join('\n'), inline: false };
 }
