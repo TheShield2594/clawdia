@@ -64,19 +64,30 @@ async function pumpEvents(stream, onEvent) {
     let buffer = '';
     let event = null;
     let data = [];
+    // What the event being assembled has cost so far. The cap has to be against
+    // this rather than against `buffer` alone: `buffer` is drained of every
+    // complete line on each pass, so a server sending one enormous event as ten
+    // thousand short `data:` lines keeps it small the whole way down while the
+    // array behind it grows without limit. `buffer` is still counted, for the
+    // opposite shape — a single huge line with no newline in it, which never
+    // reaches `data` at all.
+    let eventBytes = 0;
 
     const dispatch = () => {
         if (data.length) onEvent({ event, data: data.join('\n') });
         event = null;
         data = [];
+        eventBytes = 0;
+    };
+
+    const refuseIfTooBig = extra => {
+        if (eventBytes + extra <= MAX_EVENT_BYTES) return;
+        stream.destroy();
+        throw new Error(`event exceeded ${MAX_EVENT_BYTES} bytes`);
     };
 
     for await (const chunk of stream) {
         buffer += chunk.toString('utf8');
-        if (buffer.length > MAX_EVENT_BYTES) {
-            stream.destroy();
-            throw new Error(`event exceeded ${MAX_EVENT_BYTES} bytes`);
-        }
 
         let index;
         while ((index = buffer.indexOf('\n')) >= 0) {
@@ -90,8 +101,21 @@ async function pumpEvents(stream, onEvent) {
             const field = colon === -1 ? line : line.slice(0, colon);
             const value = colon === -1 ? '' : line.slice(colon + 1).replace(/^ /, '');
             if (field === 'event') event = value;
-            else if (field === 'data') data.push(value);
+            else if (field === 'data') {
+                // Checked as the line lands, not once the chunk is drained: the
+                // blank line that ends an event resets the counter, so a
+                // too-large event that arrives complete in one read would be
+                // dispatched and forgotten before any check after this loop.
+                data.push(value);
+                eventBytes += value.length;
+                refuseIfTooBig(0);
+            }
         }
+
+        // What is left in `buffer` is a line with no newline yet, which the
+        // counter above cannot see: the other shape of an oversized event is a
+        // single unterminated line that never reaches `data` at all.
+        refuseIfTooBig(buffer.length);
     }
 
     // A stream that ends without a trailing blank line still carries its last

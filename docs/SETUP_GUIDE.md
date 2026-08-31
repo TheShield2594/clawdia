@@ -224,8 +224,7 @@ HTTP transports. The bot's client tries **Streamable HTTP** first — one endpoi
 every request a POST — and falls back to the older **HTTP+SSE** transport when
 the server answers that POST with a 404 or a 405, which is what a server built
 against the 2024-11-05 revision does. Nothing has to be configured either way;
-paste the endpoint the service publishes. Atlassian's is one of the older ones,
-which is why its preset URL ends `/sse` rather than `/mcp`.
+paste the endpoint the service publishes.
 
 Local **stdio** servers are still out of reach: they are a subprocess on the
 machine running the server, not an address, and the bot connects over HTTP.

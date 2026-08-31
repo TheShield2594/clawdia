@@ -157,12 +157,14 @@ const PRESETS = [
         id: 'atlassian',
         label: 'Atlassian (Jira & Confluence)',
         name: 'atlassian',
-        url: 'https://mcp.atlassian.com/v1/sse',
+        // Atlassian's own endpoint for custom clients. Not /v1/sse: that is the
+        // HTTP+SSE address this preset was originally written against, and
+        // Atlassian retired it on 30 June 2026 in favour of Streamable HTTP.
+        // The client speaks both, so either would negotiate — but a preset
+        // pointing at a withdrawn endpoint is a Connect button that fails.
+        url: 'https://mcp.atlassian.com/v1/mcp/authv2',
         requiresToken: false,
         oauth: true,
-        // The one preset on the older transport, which is why the URL ends
-        // /sse rather than /mcp. Nothing here has to say so — the handshake
-        // works it out — but it is the reason the address looks unlike the rest.
         hint: 'Jira issues and Confluence pages in the Atlassian site you log in to.',
         tokenHint: 'No token: click Connect and authorize the bot in Atlassian. The login is per site, and whoever authorizes it is the account the bot acts as.',
         suggestedBlockedTools: []

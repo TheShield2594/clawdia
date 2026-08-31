@@ -21,7 +21,8 @@ jest.mock('axios');
 const { PassThrough, Readable } = require('stream');
 const axios = require('axios');
 const { McpHttpClient, McpError } = require('../src/services/ai/mcp/client');
-const { resolveEndpoint } = require('../src/services/ai/mcp/sse');
+const { PassThrough: _PT } = require('stream');
+const { resolveEndpoint, pumpEvents, MAX_EVENT_BYTES } = require('../src/services/ai/mcp/sse');
 
 const URL_ = 'https://mcp.example.com/sse';
 const MESSAGES = 'https://mcp.example.com/messages?sessionId=abc';
@@ -158,6 +159,25 @@ describe('choosing a transport', () => {
         expect(client.transport).toBe('auto');
     });
 
+    test('does not leave a stream open when the fallback handshake fails', async () => {
+        const channel = openChannel();
+        let refused = false;
+        axios.post.mockImplementation(async () => {
+            if (!refused) { refused = true; return textResponse('not here', 405); }
+            // The endpoint is named, so the stream is up — and then initialize
+            // fails behind it. The client is about to go back to Streamable
+            // HTTP, where nothing reads this socket.
+            return textResponse('broken', 500);
+        });
+
+        const client = new McpHttpClient({ url: URL_ });
+        await expect(client.initialize()).rejects.toThrow(McpError);
+
+        expect(channel.stream.destroyed).toBe(true);
+        expect(client.sse).toBeNull();
+        expect(client.sseEndpoint).toBeNull();
+    });
+
     test('stays on Streamable HTTP when the POST works', async () => {
         axios.post.mockImplementation(async (_url, payload) => (
             payload.id === undefined
@@ -248,24 +268,43 @@ describe('talking over the standing stream', () => {
         expect(quickProgress).toEqual([{ progress: 1, total: 2, message: null }]);
     });
 
-    test('answers a server request on a POST of its own', async () => {
+    test('answers a server request on a POST of its own, and survives the wait', async () => {
         const asked = [];
+        let callId = null;
         axios.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'tools/call') {
-                setImmediate(() => {
-                    channel.send({ jsonrpc: '2.0', id: 9001, method: 'elicitation/create', params: { message: 'Which repo?' } });
-                    setImmediate(() => channel.send({ jsonrpc: '2.0', id: payload.id, result: { content: [] } }));
-                });
+                callId = payload.id;
+                setImmediate(() => channel.send({
+                    jsonrpc: '2.0', id: 9001, method: 'elicitation/create', params: { message: 'Which repo?' },
+                }));
             }
-            if (payload.id === 9001) asked.push(payload);
+            if (payload.id === 9001) {
+                asked.push(payload);
+                // The tool answers only once it has what it asked for, which is
+                // what a real server does — the question is blocking the call.
+                setImmediate(() => channel.send({ jsonrpc: '2.0', id: callId, result: { content: [] } }));
+            }
             return { status: 202, headers: {}, data: Readable.from([]) };
         });
 
-        await client.callTool('search', {}, {
-            onElicit: params => ({ action: 'accept', content: { repo: params.message } }),
+        // The handler takes three times the call's own deadline, which is what a
+        // person reading a question in a channel does. It says so through
+        // `extendDeadline`, and the call has to survive it — so the deadline
+        // that moves has to be the one belonging to the call the question
+        // arrived during. Looking it up by the *server's* request id finds
+        // either nothing or an unrelated call of ours that happens to share the
+        // number, since each side numbers its requests independently; either way
+        // the tool call dies underneath the prompt still open in the channel.
+        const result = await client.callTool('search', {}, {
+            timeout: 100,
+            onElicit: async (params, { extendDeadline }) => {
+                extendDeadline(5000);
+                await new Promise(resolve => setTimeout(resolve, 300));
+                return { action: 'accept', content: { repo: params.message } };
+            },
         });
-        await new Promise(resolve => setImmediate(resolve));
 
+        expect(result).toEqual({ content: [], structuredContent: null, isError: false });
         expect(asked).toHaveLength(1);
         expect(asked[0].result).toEqual({ action: 'accept', content: { repo: 'Which repo?' } });
     });
@@ -303,12 +342,145 @@ describe('talking over the standing stream', () => {
         expect(client.pending.size).toBe(0);
     });
 
+    test('waits out a 429 the server put a bounded clock on, then re-sends', async () => {
+        const posts = [];
+        axios.post.mockImplementation(async (_url, payload) => {
+            posts.push(payload);
+            // Only the first attempt at the list is refused.
+            if (payload.method === 'tools/list' && posts.filter(p => p.method === 'tools/list').length === 1) {
+                return { status: 429, headers: { 'retry-after': '0' }, data: Readable.from([]) };
+            }
+            if (payload.method === 'tools/list') {
+                setImmediate(() => channel.send({ jsonrpc: '2.0', id: payload.id, result: { tools: [{ name: 'search' }] } }));
+            }
+            return { status: 202, headers: {}, data: Readable.from([]) };
+        });
+
+        await expect(client.listTools()).resolves.toEqual([{ name: 'search' }]);
+        // The same id both times: a 429 is the server refusing the message
+        // rather than acting on it, so the waiter registered for it still holds.
+        const attempts = posts.filter(p => p.method === 'tools/list');
+        expect(attempts).toHaveLength(2);
+        expect(attempts[0].id).toBe(attempts[1].id);
+    });
+
+    test('reports a 429 the turn cannot afford rather than sitting on it', async () => {
+        axios.post.mockImplementation(async (_url, payload) => (
+            payload.method === 'tools/list'
+                ? { status: 429, headers: { 'retry-after': '600' }, data: Readable.from([]) }
+                : { status: 202, headers: {}, data: Readable.from([]) }
+        ));
+
+        await expect(client.listTools()).rejects.toThrow(/rate-limiting/);
+        expect(client.pending.size).toBe(0);
+    });
+
     test('ignores a keepalive that is not JSON', async () => {
         replyOnChannel(channel, { ...HANDSHAKE, 'tools/list': { result: { tools: [{ name: 'search' }] } } });
         channel.raw(': ping\n\n');
         channel.raw('event: message\ndata: not json\n\n');
 
         await expect(client.listTools()).resolves.toEqual([{ name: 'search' }]);
+    });
+});
+
+describe('an expiring OAuth token on the older transport', () => {
+    test('is refreshed once on a 401 and the message re-sent', async () => {
+        // The credential and the server are the same ones Streamable HTTP would
+        // meet; a connection that reconnected only on the newer transport would
+        // be an OAuth server here failing every time its hourly token expired.
+        // The store hands back the token it holds until it is told to refresh,
+        // which is what an expiring grant looks like from here.
+        let token = 'stale';
+        const getAccessToken = jest.fn(async ({ force }) => {
+            if (force) token = 'fresh';
+            return token;
+        });
+
+        const channel = openChannel();
+        const seen = [];
+        axios.post.mockImplementation(async (_url, payload, config) => {
+            seen.push(config.headers.Authorization);
+            // The handshake goes through on the stale token; it expires between
+            // then and the list, which is the case that matters.
+            if (payload.method === 'tools/list' && config.headers.Authorization === 'Bearer stale') {
+                return { status: 401, headers: {}, data: Readable.from(['expired']) };
+            }
+            if (payload.id !== undefined) {
+                setImmediate(() => channel.send({
+                    jsonrpc: '2.0', id: payload.id,
+                    result: payload.method === 'initialize' ? INIT_RESULT : { tools: [] },
+                }));
+            }
+            return { status: 202, headers: {}, data: Readable.from([]) };
+        });
+
+        const client = new McpHttpClient({ url: URL_, transport: 'sse', getAccessToken });
+        await expect(client.listTools()).resolves.toEqual([]);
+
+        expect(getAccessToken).toHaveBeenCalledWith({ force: true });
+        expect(seen).toContain('Bearer fresh');
+        client.close();
+    });
+});
+
+describe('the size of one event', () => {
+    /**
+     * Feeds `frames` through the parser and reports what came out, or the throw.
+     *
+     * One tick between writes so each frame is delivered as its own read. Piled
+     * in together the stream coalesces them, which would let a test about
+     * *accumulating* lines pass on a parser that only ever measured one read.
+     */
+    async function pump(frames) {
+        const stream = new _PT();
+        const events = [];
+        const done = pumpEvents(stream, event => events.push(event));
+        // Marked handled before the writes, and awaited after: the parser
+        // rejects part-way through the loop below for the oversized cases, and
+        // a rejection with nothing attached to it yet is an unhandled one
+        // whatever ends up awaiting it a few ticks later.
+        done.catch(() => {});
+        for (const frame of frames) {
+            // Refusing an event destroys the stream, and writing to a destroyed
+            // one raises an error nobody is listening for.
+            if (stream.destroyed) break;
+            stream.write(frame);
+            await new Promise(resolve => setImmediate(resolve));
+        }
+        if (!stream.destroyed) stream.end();
+        await done;
+        return events;
+    }
+
+    test('joins the data lines of one event', async () => {
+        expect(await pump(['event: message\ndata: {"a":1,\ndata: "b":2}\n\n']))
+            .toEqual([{ event: 'message', data: '{"a":1,\n"b":2}' }]);
+    });
+
+    test('refuses one enormous line', async () => {
+        await expect(pump([`data: ${'x'.repeat(MAX_EVENT_BYTES + 10)}\n\n`]))
+            .rejects.toThrow(/exceeded/);
+    });
+
+    test('refuses an event split across many small lines', async () => {
+        // The cap used to be measured against the read buffer alone, which is
+        // drained of every complete line on each pass — so a server sending one
+        // enormous event as thousands of short `data:` lines kept the buffer
+        // small the whole way down while the array behind it grew without
+        // limit, and the ceiling never fired.
+        const line = `data: ${'x'.repeat(9_000)}\n`;
+        const frames = Array.from({ length: Math.ceil(MAX_EVENT_BYTES / 9_000) + 2 }, () => line);
+        await expect(pump(frames)).rejects.toThrow(/exceeded/);
+    });
+
+    test('counts each event on its own, so a long session is not a large event', async () => {
+        // The counter resets at the blank line. Otherwise the standing stream —
+        // open for the life of the session and carrying every response — would
+        // simply be a slow timer on a working connection.
+        const chunk = `data: ${'x'.repeat(200_000)}\n\n`;
+        const events = await pump(Array.from({ length: 40 }, () => chunk));
+        expect(events).toHaveLength(40);
     });
 });
 

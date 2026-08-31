@@ -993,13 +993,25 @@ function renderRssFeeds(feeds) {
     feeds.forEach(function(feed, index) { list.appendChild(rssFeedRow(feed, index)); });
 }
 
+// Add and Publish are the two buttons on this page that create something on a
+// second click rather than overwriting what the first one made. The page used
+// to reload after both, which was never a guard — the reload was on a timer,
+// and a click inside it posted again — but the page it left had no button on it
+// to click twice. Now that it stays, the window is the whole request, so both
+// hold a flag for the length of their POST. Cleared in `finally`: a failed add
+// has to be retryable, and a flag left set by a network error is a button that
+// never works again until the admin reloads.
+let _rssAddInFlight = false;
+
 async function addRssFeed() {
+    if (_rssAddInFlight) return;
     const guildId = BOOT.guildId;
     const urlField = document.getElementById('rss-url');
     const channelField = document.getElementById('rss-channel');
     const url = urlField.value;
     const channelId = channelField.value;
     if (!url || !channelId) { toast('Please fill in all fields', 'error'); return; }
+    _rssAddInFlight = true;
     try {
         const response = await fetch(`/api/v1/guild/${guildId}/rss/add`, {
             method: 'POST',
@@ -1018,6 +1030,8 @@ async function addRssFeed() {
     } catch (error) {
         console.error(error);
         toast('An error occurred', 'error');
+    } finally {
+        _rssAddInFlight = false;
     }
 }
 
@@ -2017,7 +2031,13 @@ function addRrMapping() {
     list.appendChild(row);
 }
 
+// See _rssAddInFlight. This one matters more: a duplicate publish posts a second
+// embed to the channel and stores a second set of mappings, so the cost of the
+// double click is a panel an admin has to go and delete.
+let _rrPublishInFlight = false;
+
 async function publishRrPanel() {
+    if (_rrPublishInFlight) return;
     const channelId = document.getElementById('rr-channel').value;
     if (!channelId) { toast('Select a target channel', 'error'); return; }
 
@@ -2032,6 +2052,7 @@ async function publishRrPanel() {
     if (!mappings.length) { toast('Add at least one emoji → role mapping', 'error'); return; }
 
     const guildId = BOOT.guildId;
+    _rrPublishInFlight = true;
     try {
         const response = await fetch('/api/v1/guild/' + guildId + '/reactionrole/panel', {
             method: 'POST',
@@ -2057,6 +2078,8 @@ async function publishRrPanel() {
     } catch (error) {
         console.error(error);
         toast('An error occurred', 'error');
+    } finally {
+        _rrPublishInFlight = false;
     }
 }
 

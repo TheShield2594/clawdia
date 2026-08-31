@@ -696,19 +696,28 @@ class McpHttpClient {
             return;
         }
 
-        // A server request — an elicitation. Nothing on the wire says which of
-        // this connection's in-flight calls it belongs to: the older transport
-        // has one stream and no correlation field, and the spec adds none. The
-        // newest request that brought a handler is the best available answer,
-        // and it is the right one in the case that actually occurs, which is a
-        // server asking a question about the tool call it is running right now.
-        let handlers = null;
+        // A server request — an elicitation, or a request for a completion.
+        // Nothing on the wire says which of this connection's in-flight calls it
+        // belongs to: the older transport has one stream and no correlation
+        // field, and the spec adds none. The newest request that brought a
+        // handler is the best available answer, and it is the right one in the
+        // case that actually occurs, which is a server asking about the tool
+        // call it is running right now.
+        //
+        // Its *deadline* goes with it, and that is the load-bearing part. The
+        // id on this message is the server's own — each side numbers its
+        // requests independently — so looking `pending` up by it finds either
+        // nothing or, worse, an unrelated call of ours that happens to share the
+        // number. Either way `extendDeadline` would move a deadline nobody is
+        // waiting on, and the call the question actually belongs to would be
+        // killed underneath the prompt still sitting in the channel.
+        let chosen = null;
         for (const waiter of this.pending.values()) {
             const offered = waiter.onServerRequest;
-            if (offered && (offered.elicit || offered.sample)) handlers = offered;
+            if (offered && (offered.elicit || offered.sample)) chosen = waiter;
         }
-        this.answerServerRequest(message, handlers, this.pending.get(message.id)?.deadline
-            ?? { at: Date.now() + CALL_TIMEOUT_MS, reschedule: null });
+        this.answerServerRequest(message, chosen?.onServerRequest ?? null,
+            chosen?.deadline ?? { at: Date.now() + CALL_TIMEOUT_MS, reschedule: null });
     }
 
     /**
@@ -749,7 +758,6 @@ class McpHttpClient {
      */
     async postOverSse(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, onNotification = null, onServerRequest = null } = {}) {
         const endpoint = await this.openSseChannel();
-        await this.authorize();
 
         const deadline = { at: Date.now() + timeout, reschedule: null };
         let waiting = null;
@@ -758,6 +766,57 @@ class McpHttpClient {
                 this.pending.set(id, { resolve, reject, onNotification, onServerRequest, deadline });
             });
         }
+
+        try {
+            await this.deliver(endpoint, payload, { timeout });
+        } catch (err) {
+            // Nothing is coming back for this one. The entry goes, and the
+            // promise nobody will now await is marked handled — the throw below
+            // is what the caller sees.
+            if (id !== null) this.pending.delete(id);
+            waiting?.catch(() => {});
+            throw err;
+        }
+
+        if (id === null) return null;
+
+        try {
+            return await readWithDeadline(waiting, null, deadline);
+        } finally {
+            // On the timeout path the entry is still registered, and a late
+            // answer arriving against an id nobody is waiting for would sit in
+            // the map for the life of the session.
+            this.pending.delete(id);
+        }
+    }
+
+    /**
+     * Hand one message to the endpoint the server named, and read nothing back.
+     *
+     * The POST's own response carries no answer — 202 with an empty body is what
+     * a server on this transport returns, and a body that does arrive is
+     * discarded — so this returns as soon as the server has accepted it. The
+     * answer comes down the standing stream, and the waiter for it was
+     * registered before this was called: a server fast enough to answer on the
+     * stream before its own 202 has been read is otherwise a response with
+     * nobody left to give it to.
+     *
+     * The two retries are the same two `postOverHttp` does, for the same
+     * reasons, and they are why this is a function rather than four lines
+     * inline. A 429 naming a wait the turn can afford is worth sitting out
+     * rather than reporting; a 401 on an OAuth connection is the ordinary end
+     * of an access token's life and is worth one forced refresh. Neither is
+     * specific to a transport — the older one carries the same credential to
+     * the same kind of server — and a connection that reconnected only on
+     * Streamable HTTP would be an OAuth server on this transport failing every
+     * time its hourly token expired.
+     *
+     * The pending waiter survives both: the retry re-sends the same payload
+     * under the same id, which is safe precisely because a 429 and a 401 are
+     * both the server refusing the message rather than acting on it.
+     */
+    async deliver(endpoint, payload, { timeout, retryable = true, authRetried = false }) {
+        await this.authorize();
 
         let response;
         try {
@@ -772,31 +831,34 @@ class McpHttpClient {
                 ...guardedAgents()
             });
         } catch (err) {
-            this.pending.delete(id);
-            // Nothing is coming back for this one; whoever holds `waiting` is
-            // rejected by the throw below rather than left hanging.
-            waiting?.catch(() => {});
             throw new McpError(err.message || 'request failed', { code: err.code || null });
         }
 
+        if (response.status === 429 && retryable) {
+            const wait = retryAfterMs(response.headers['retry-after']);
+            if (wait !== null) {
+                response.data?.destroy?.();
+                await new Promise(resolve => setTimeout(resolve, wait));
+                return this.deliver(endpoint, payload, { timeout, retryable: false, authRetried });
+            }
+        }
+
         if (response.status >= 400) {
+            // Read before anything decides what to do with it: the body is the
+            // server's own explanation and the stream can only be consumed once.
             const body = await collectText(response.data);
-            this.pending.delete(id);
-            waiting?.catch(() => {});
-            throw httpError(response.status, body, response.headers['www-authenticate'] ?? null);
+            const challenge = response.headers['www-authenticate'] ?? null;
+
+            if (response.status === 401 && this.getAccessToken && !authRetried
+                && await this.authorize({ force: true })) {
+                return this.deliver(endpoint, payload, { timeout, retryable, authRetried: true });
+            }
+
+            throw httpError(response.status, body, challenge);
         }
+
         response.data?.destroy?.();
-
-        if (id === null) return null;
-
-        try {
-            return await readWithDeadline(waiting, null, deadline);
-        } finally {
-            // On the timeout path the entry is still registered, and a late
-            // answer arriving against an id nobody is waiting for would sit in
-            // the map for the life of the session.
-            this.pending.delete(id);
-        }
+        return null;
     }
 
     /**
@@ -954,6 +1016,12 @@ class McpHttpClient {
                 console.log(`[MCP] "${this.label}" refused a Streamable HTTP POST (HTTP ${err.status}); connected over the older HTTP+SSE transport instead`);
                 return client;
             } catch (sseErr) {
+                // The stream may well be up — a server can name an endpoint and
+                // then fail the initialize behind it — and this client is about
+                // to go back to speaking Streamable HTTP, where nothing reads
+                // it. Left open it is a socket held for the life of the pooled
+                // client with no reader and no session behind it.
+                await this.close();
                 this.transport = 'auto';
                 console.warn(`[MCP] "${this.label}" answered neither transport; the HTTP+SSE attempt said: ${sseErr.message}`);
                 throw err;

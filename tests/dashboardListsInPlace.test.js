@@ -41,6 +41,9 @@ function stubApi() {
         if (key) {
             const entry = apiResponses[key];
             entry.calls.push({ url: String(url), init });
+            // `gate` holds the response open, which is how a test gets two
+            // clicks to overlap the way a real double-click does.
+            if (entry.gate) await entry.gate;
             return { ok: entry.ok !== false, status: entry.ok === false ? 400 : 200, json: async () => entry.body };
         }
         return realFetch(url, init);
@@ -184,6 +187,42 @@ describe('RSS feeds', () => {
         expect(document.querySelectorAll('#rss-feeds .list-item')).toHaveLength(1);
     });
 
+    it('posts once when the Add button is double-clicked', async () => {
+        // The reload used to take the button off the page. It was never a guard
+        // — it was on a timer, and a click inside it posted again — but now that
+        // the page stays, the window is the whole request.
+        let release;
+        apiResponses['/rss/add'] = {
+            calls: [],
+            body: { success: true, feeds: [{ url: FEED_URL, channelId: CHANNEL_ID }] },
+            gate: new Promise(resolve => { release = resolve; }),
+        };
+
+        document.getElementById('rss-url').value = FEED_URL;
+        document.getElementById('rss-channel').value = CHANNEL_ID;
+        const first = window.addRssFeed();
+        const second = window.addRssFeed();
+        release();
+        await Promise.all([first, second]);
+
+        expect(apiResponses['/rss/add'].calls).toHaveLength(1);
+    });
+
+    it('lets the next add through after one fails', async () => {
+        // A flag left set by a network error is a button that never works again
+        // until the admin reloads the page.
+        apiResponses['/rss/add'] = { calls: [], ok: false, body: { error: 'nope' } };
+        document.getElementById('rss-url').value = FEED_URL;
+        document.getElementById('rss-channel').value = CHANNEL_ID;
+        await window.addRssFeed();
+
+        document.getElementById('rss-url').value = FEED_URL;
+        document.getElementById('rss-channel').value = CHANNEL_ID;
+        await window.addRssFeed();
+
+        expect(apiResponses['/rss/add'].calls).toHaveLength(2);
+    });
+
     it('puts a feed URL in as text, never as markup', () => {
         window.renderRssFeeds([{ url: '<img src=x onerror=alert(1)>', channelId: CHANNEL_ID }]);
         const url = document.querySelector('#rss-feeds .url');
@@ -263,6 +302,48 @@ describe('reaction role panels', () => {
         await confirmDialog();
 
         expect(document.querySelectorAll('#rr-panels-list .store-card')).toHaveLength(1);
+    });
+
+    it('publishes once when the button is double-clicked', async () => {
+        // Worth more than the RSS guard: a duplicate publish posts a second
+        // embed to the channel and stores a second set of mappings, so the cost
+        // is a panel somebody has to go and delete.
+        let release;
+        apiResponses['/reactionrole/panel'] = {
+            calls: [],
+            body: { success: true, messageId: panel.messageId, panels: [panel] },
+            gate: new Promise(resolve => { release = resolve; }),
+        };
+
+        document.getElementById('rr-channel').value = CHANNEL_ID;
+        window.addRrMapping();
+        document.querySelector('#rr-mappings-list .rr-emoji').value = '👍';
+        document.querySelector('#rr-mappings-list .rr-role').value = ROLE_ID;
+
+        const first = window.publishRrPanel();
+        const second = window.publishRrPanel();
+        release();
+        await Promise.all([first, second]);
+
+        expect(apiResponses['/reactionrole/panel'].calls).toHaveLength(1);
+    });
+
+    it('lets the next publish through after one fails', async () => {
+        apiResponses['/reactionrole/panel'] = { calls: [], ok: false, body: { error: 'nope' } };
+        const fill = () => {
+            document.getElementById('rr-channel').value = CHANNEL_ID;
+            window.addRrMapping();
+            document.querySelector('#rr-mappings-list .rr-emoji').value = '👍';
+            document.querySelector('#rr-mappings-list .rr-role').value = ROLE_ID;
+        };
+
+        fill();
+        await window.publishRrPanel();
+        document.getElementById('rr-mappings-list').textContent = '';
+        fill();
+        await window.publishRrPanel();
+
+        expect(apiResponses['/reactionrole/panel'].calls).toHaveLength(2);
     });
 
     it('puts an emoji field in as text, never as markup', () => {
