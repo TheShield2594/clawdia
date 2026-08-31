@@ -48,12 +48,24 @@ npm start               # plain node, and what the image runs
 
 ## Before you open a pull request
 
-Both of these gate CI, and the Docker image is only built when they pass, so a
-red one means nothing ships:
+All three of these gate CI, and the Docker image is only published when they
+pass, so a red one means nothing ships:
 
 ```bash
 npm test                # the whole suite, ~20s
 npm run lint            # eslint, flat config
+npm audit --audit-level=high
+```
+
+CI also builds the image on every pull request, boots it, and scans it — the
+Dockerfile used to be built only after a merge, which made the deploy the first
+thing to notice a broken layer. `npm run image:smoke` is the check the workflow
+runs *inside* the container: it is about the image rather than the source, so
+running it on your machine tells you little. Point it at a build instead:
+
+```bash
+docker build -t clawdia:dev .
+docker run --rm --entrypoint node clawdia:dev scripts/image-smoke.js
 ```
 
 The two coverage ratchets are two separate commands: `npm test -- --coverage`

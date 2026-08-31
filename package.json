@@ -15,6 +15,7 @@
     "docs:api": "node scripts/docs-api.js",
     "docs:panels": "node scripts/docs-panels.js",
     "favicon": "node scripts/make-favicon.js",
+    "image:smoke": "node scripts/image-smoke.js",
     "og-image": "node scripts/make-og-image.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
