@@ -46,7 +46,7 @@ router.post('/guild/:guildId/summary-jobs', checkAuth, checkGuildAccess, checkWr
     if (!Number.isFinite(m) || m < 0 || m > 59) return res.status(400).json({ error: 'minute must be 0–59' });
 
     try {
-        const channels = req.bot.listChannels(guildId);
+        const channels = await req.bot.listChannels(guildId);
         if (!channels) return res.status(404).json({ error: 'Guild not found' });
 
         const srcChannel = channels.find(c => c.id === sourceChannelId.trim());

@@ -26,16 +26,18 @@ const { CHANNEL_TYPES } = require('../../bot/gateway');
 const { PANELS, DEFAULT_PANEL, isPanel } = require('../lib/panels');
 const { groupReactionRolePanels } = require('../lib/reactionRolePanels');
 
-function getManageableGuilds(req) {
-    return req.user.guilds
-        .filter(hasManagePermission)
-        .map(guild => ({
-            id: guild.id,
-            name: guild.name,
-            icon: guild.icon,
-            owner: guild.owner === true,
-            botPresent: req.bot.hasGuild(guild.id)
-        }));
+async function getManageableGuilds(req) {
+    const manageable = req.user.guilds.filter(hasManagePermission);
+    // Batched: the facade may be another process, and this runs on every page
+    // that renders the guild picker.
+    const present = await req.bot.hasGuilds(manageable.map(g => g.id));
+    return manageable.map(guild => ({
+        id: guild.id,
+        name: guild.name,
+        icon: guild.icon,
+        owner: guild.owner === true,
+        botPresent: present[guild.id] === true
+    }));
 }
 
 const { INVITE_PERMISSIONS_BITFIELD } = require('../../config/invitePermissions');
@@ -53,12 +55,19 @@ function buildInviteUrl(guildId) {
     return `https://discord.com/oauth2/authorize?${query}`;
 }
 
-router.get('/', checkAuth, (req, res) => {
-    const guilds = getManageableGuilds(req).map(g => ({
-        ...g,
-        inviteUrl: buildInviteUrl(g.id)
-    }));
-    res.render('dashboard', { user: req.user, guilds });
+router.get('/', checkAuth, async (req, res, next) => {
+    try {
+        const guilds = (await getManageableGuilds(req)).map(g => ({
+            ...g,
+            inviteUrl: buildInviteUrl(g.id)
+        }));
+        res.render('dashboard', { user: req.user, guilds });
+    } catch (err) {
+        // The facade may be another process (#876), so this can now fail for a
+        // reason that is not this route's. Hand it to the error middleware
+        // rather than letting it become an unhandled rejection.
+        next(err);
+    }
 });
 
 /**
@@ -72,7 +81,7 @@ router.get('/', checkAuth, (req, res) => {
  */
 async function buildGuildSettingsLocals(req) {
     const { guildId } = req.params;
-    const userGuilds = getManageableGuilds(req);
+    const userGuilds = await getManageableGuilds(req);
 
     if (!userGuilds.find(g => g.id === guildId)) {
         return { status: 403, message: 'You do not have permission to manage this guild.' };
@@ -91,7 +100,7 @@ async function buildGuildSettingsLocals(req) {
 
     let guildSettings = await Guild.findOne({ guildId }, SHOP_IMAGES_EXCLUDED);
     let shopIsProjected = true;
-    const guild = req.bot.getGuild(guildId);
+    const guild = await req.bot.getGuild(guildId);
 
     if (!guild) {
         return { status: 404, message: 'Guild not found' };
@@ -123,7 +132,7 @@ async function buildGuildSettingsLocals(req) {
         }
     }
 
-    const allChannels = req.bot.listChannels(guildId) || [];
+    const allChannels = await req.bot.listChannels(guildId) || [];
     const ofType = type => allChannels.filter(c => c.type === type).map(c => ({ id: c.id, name: c.name }));
 
     const channels = ofType(CHANNEL_TYPES.TEXT);
@@ -131,7 +140,7 @@ async function buildGuildSettingsLocals(req) {
     const stageChannels = ofType(CHANNEL_TYPES.STAGE);
     const categories = ofType(CHANNEL_TYPES.CATEGORY);
 
-    const roles = (req.bot.listRoles(guildId) || [])
+    const roles = (await req.bot.listRoles(guildId) || [])
         .filter(r => r.name !== '@everyone')
         .map(r => ({ id: r.id, name: r.name }));
 

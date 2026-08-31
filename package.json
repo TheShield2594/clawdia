@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "start:sharded": "node src/shard.js",
+    "start:dashboard": "node src/dashboard/index.js",
     "dev": "nodemon src/index.js",
     "deploy": "node src/deploy-commands.js",
     "migrate:rollback": "node scripts/rollback-migration.js",

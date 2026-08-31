@@ -164,8 +164,8 @@ describe('botGateway hands out data, never live objects', () => {
         bot = createBotGateway(stubClient({ guilds: { g1: fixture.guild } }));
     });
 
-    test('getGuild returns plain fields with no discord.js caches attached', () => {
-        const guild = bot.getGuild('g1');
+    test('getGuild returns plain fields with no discord.js caches attached', async () => {
+        const guild = await bot.getGuild('g1');
 
         expect(guild).toEqual({
             id: 'g1',
@@ -178,25 +178,25 @@ describe('botGateway hands out data, never live objects', () => {
         expect(guild.roles).toBeUndefined();
     });
 
-    test('listChannels and listRoles return arrays of plain records', () => {
-        expect(bot.listChannels('g1')).toEqual([
+    test('listChannels and listRoles return arrays of plain records', async () => {
+        expect(await bot.listChannels('g1')).toEqual([
             { id: 'c1', name: 'general', type: CHANNEL_TYPES.TEXT, parentId: 'cat1' },
             { id: 'v1', name: 'Voice', type: CHANNEL_TYPES.VOICE, parentId: null },
         ]);
-        expect(bot.listRoles('g1')).toEqual([
+        expect(await bot.listRoles('g1')).toEqual([
             { id: 'r1', name: 'Member', position: 1, managed: false },
         ]);
     });
 
     // The whole facade answers "we are not in that guild" the same way, so a
     // route can keep answering it with one 404 rather than a special case each.
-    test('reads return null for a guild the bot is not in', () => {
-        expect(bot.hasGuild('nope')).toBe(false);
-        expect(bot.getGuild('nope')).toBeNull();
-        expect(bot.listChannels('nope')).toBeNull();
-        expect(bot.listRoles('nope')).toBeNull();
-        expect(bot.hasChannel('nope', 'c1')).toBe(false);
-        expect(bot.listActiveTimeouts('nope', 10)).toBeNull();
+    test('reads return null for a guild the bot is not in', async () => {
+        expect(await bot.hasGuild('nope')).toBe(false);
+        expect(await bot.getGuild('nope')).toBeNull();
+        expect(await bot.listChannels('nope')).toBeNull();
+        expect(await bot.listRoles('nope')).toBeNull();
+        expect(await bot.hasChannel('nope', 'c1')).toBe(false);
+        expect(await bot.listActiveTimeouts('nope', 10)).toBeNull();
         return Promise.all([
             expect(bot.searchMembers('nope', 'a', 5)).resolves.toBeNull(),
             expect(bot.listBans('nope', 10)).resolves.toBeNull(),
@@ -242,8 +242,8 @@ describe('botGateway hands out data, never live objects', () => {
         await expect(bot.listBans('g1', 200)).rejects.toThrow('Missing Permissions');
     });
 
-    test('listActiveTimeouts skips members whose timeout has already lapsed', () => {
-        const active = bot.listActiveTimeouts('g1', 200);
+    test('listActiveTimeouts skips members whose timeout has already lapsed', async () => {
+        const active = await bot.listActiveTimeouts('g1', 200);
 
         expect(active.map(t => t.userId)).toEqual(['u1']);
         expect(active[0].expires).toEqual(expect.any(String));

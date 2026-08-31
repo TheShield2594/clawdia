@@ -145,6 +145,29 @@ async function connectDatabase() {
     connection.on('error', err => console.error('[DATABASE] Connection error:', err.message));
 }
 
+/**
+ * Serves the gateway facade to a dashboard running in its own process (#876).
+ *
+ * Off unless BOT_GATEWAY_PORT is set, and when it is set the in-process
+ * dashboard does not start — the two are the same dashboard in two places, and
+ * running both would have this process doing the very work the split moves out.
+ *
+ * Per shard rather than per deployment, because what it serves is *this*
+ * process's guild cache: under sharding the dashboard has to be able to reach
+ * whichever shard owns the guild it is asked about. One listener per shard is
+ * what makes that possible; routing between them is the deployment's business
+ * (a load balancer keyed on the shard formula), not this file's.
+ *
+ * @returns {boolean} whether the split is on.
+ */
+function startGatewayRpc() {
+    const { serveGatewayIfConfigured } = require('./bot/gatewayServer');
+    return serveGatewayIfConfigured(
+        () => require('./bot/gateway').createBotGateway(client),
+        { health: () => health.getStatus({ detailed: false }) },
+    );
+}
+
 async function startDashboard() {
     // The dashboard binds a TCP port, so it is singleton work: under sharding
     // every shard is its own process and N of them would fight over one port.
@@ -216,7 +239,14 @@ async function startBot() {
 
     await loadCommands();
     await loadEvents();
-    await startDashboard();
+
+    // Either the dashboard runs here, or it runs in its own process and this one
+    // serves it the facade. Never both.
+    if (!startGatewayRpc()) {
+        await startDashboard();
+    } else {
+        console.log('[DASHBOARD] BOT_GATEWAY_PORT is set — the dashboard runs in its own process (src/dashboard/index.js).');
+    }
 
     // All background services, scheduled jobs, and presence rotation start
     // from the clientReady handler in events/ready.js via services/scheduler.

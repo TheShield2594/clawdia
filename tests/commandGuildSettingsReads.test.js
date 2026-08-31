@@ -79,8 +79,10 @@ describe('commands do not hydrate the whole guild document', () => {
             // Read-modify-write on the same field: the value read decides
             // whether the write happens, so a cached read would put a TTL
             // between the check and the write for a second caller to slip into.
-            'src/commands/admin/event.js': 2,      // /event start, /event end — activeEvent
-            'src/commands/economy/season.js': 2,   // /season start, /season end — currentSeason
+            'src/commands/economy/event/manage.js': 2,  // /event start, /event end — activeEvent
+            // One read, shared by /season start and /season end through
+            // readSeasonForWrite — the reason is written down once there.
+            'src/commands/economy/season.js': 1,
 
             // Three of the same in war.js (challenge, accept, cancel — activeWar),
             // plus the invite-code lookup, which is not a guildId query at all,

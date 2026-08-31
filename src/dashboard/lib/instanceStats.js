@@ -65,10 +65,14 @@ function formatCount(value) {
  *   zeroes, because "we have not been told yet" and "nobody uses this" are
  *   different claims and only one of them is true at boot.
  */
-function instanceStats(bot, { status = () => getStatus({ detailed: false }) } = {}) {
+async function instanceStats(bot, { status = () => getStatus({ detailed: false }) } = {}) {
     let reach;
     try {
-        reach = bot?.reach?.();
+        // Awaited: the facade is asynchronous whether it reads a local cache or
+        // calls the bot process (#876). A bot process that cannot be reached is
+        // the same answer as one that has not been ready yet — we do not know —
+        // and the template drops the row rather than claiming zero servers.
+        reach = await bot?.reach?.();
     } catch {
         return null;
     }

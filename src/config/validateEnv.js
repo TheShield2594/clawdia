@@ -35,6 +35,13 @@
 // see config/fileSecrets.js, which must run first so the values are in place.
 const REQUIRED_ENV = ['DISCORD_TOKEN', 'CLIENT_ID', 'MONGODB_URI', 'SESSION_SECRET', 'CLIENT_SECRET'];
 
+// What the split-out dashboard process needs (#876). DISCORD_TOKEN is absent on
+// purpose: that process never connects to the gateway, and a container that
+// cannot use the bot token should not be handed one — it is the credential with
+// the widest blast radius in the deployment. CLIENT_ID and CLIENT_SECRET stay,
+// because OAuth is exactly what this process does.
+const DASHBOARD_REQUIRED_ENV = REQUIRED_ENV.filter(name => name !== 'DISCORD_TOKEN');
+
 // express-session will happily sign cookies with "hunter2". The floor is the
 // one openssl invocation in .env.example: `openssl rand -hex 32`.
 const SESSION_SECRET_MIN_LENGTH = 32;
@@ -127,11 +134,11 @@ function checkSessionSecret(env = process.env) {
  * @param {object} env
  * @returns {{ errors: string[], warnings: string[] }}
  */
-function collectEnvProblems(env = process.env) {
+function collectEnvProblems(env = process.env, { required = REQUIRED_ENV } = {}) {
     const errors = [];
     const warnings = [];
 
-    const missing = REQUIRED_ENV.filter(key => !env[key]);
+    const missing = required.filter(key => !env[key]);
     if (missing.length) {
         errors.push(`Missing required environment variables: ${missing.join(', ')}`);
     }
@@ -169,7 +176,63 @@ function collectEnvProblems(env = process.env) {
     errors.push(...dashboardUrl.errors);
     warnings.push(...dashboardUrl.warnings);
 
+    errors.push(...checkGatewaySplit(env));
+
     return { errors, warnings };
+}
+
+/**
+ * The three variables that move the dashboard into its own process (#876).
+ *
+ * Checked together because they are only meaningful together: a port with no
+ * token is an endpoint that can act in every guild the bot is in and will not
+ * start; a URL with no token is a dashboard whose every call is refused; and a
+ * token alone does nothing, which is the one combination worth only a silence
+ * — an operator midway through setting this up should not be blocked by having
+ * written the secret first.
+ */
+function checkGatewaySplit(env) {
+    const errors = [];
+    const port = env.BOT_GATEWAY_PORT;
+    const url = env.BOT_GATEWAY_URL;
+
+    if (port !== undefined && port !== '') {
+        const parsed = Number(port);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+            errors.push(`BOT_GATEWAY_PORT must be a port number between 1 and 65535. Got: "${port}"`);
+        }
+        if (String(parsed) === String(Number(env.DASHBOARD_PORT || 3000))) {
+            errors.push(
+                `BOT_GATEWAY_PORT (${port}) must differ from DASHBOARD_PORT — ` +
+                'the two are served by different processes and cannot share a port.'
+            );
+        }
+    }
+
+    if (url) {
+        try {
+            new URL(url);
+        } catch {
+            errors.push(`BOT_GATEWAY_URL is not a valid URL: "${url}"`);
+        }
+    }
+
+    if ((port || url) && !env.BOT_GATEWAY_TOKEN) {
+        errors.push(
+            'BOT_GATEWAY_TOKEN is not set. The gateway endpoint can ban, unban and post in ' +
+            'every guild the bot is in, so it does not run without a shared secret. ' +
+            'Generate one with: openssl rand -hex 32'
+        );
+    }
+
+    if (env.BOT_GATEWAY_TOKEN && env.BOT_GATEWAY_TOKEN.length < SESSION_SECRET_MIN_LENGTH) {
+        errors.push(
+            `BOT_GATEWAY_TOKEN must be at least ${SESSION_SECRET_MIN_LENGTH} characters. ` +
+            'Generate one with: openssl rand -hex 32'
+        );
+    }
+
+    return errors;
 }
 
 /**
@@ -181,11 +244,15 @@ function collectEnvProblems(env = process.env) {
  *
  * @param {object}   [options]
  * @param {object}   [options.env]    environment to read, for tests
- * @param {string}   [options.label]  log prefix — 'STARTUP' or 'SHARD'
+ * @param {string}   [options.label]  log prefix — 'STARTUP', 'SHARD' or 'DASHBOARD'
+ * @param {string[]} [options.required] which variables must be present.
+ *   Defaults to REQUIRED_ENV. The split-out dashboard passes a narrower list:
+ *   it holds no gateway connection, so demanding DISCORD_TOKEN of it would put
+ *   the bot's token in a container that has no use for one (#876).
  * @param {Function} [options.onFail] what to do when it fails; exits by default
  */
-function assertEnv({ env = process.env, label = 'STARTUP', onFail } = {}) {
-    const { errors, warnings } = collectEnvProblems(env);
+function assertEnv({ env = process.env, label = 'STARTUP', onFail, required } = {}) {
+    const { errors, warnings } = collectEnvProblems(env, required ? { required } : undefined);
 
     for (const warning of warnings) console.warn(`[${label}] WARNING: ${warning}`);
     if (!errors.length) return true;
@@ -203,6 +270,8 @@ module.exports = {
     collectEnvProblems,
     checkDashboardUrl,
     checkSessionSecret,
+    checkGatewaySplit,
+    DASHBOARD_REQUIRED_ENV,
     resolveDashboardUrl,
     REQUIRED_ENV,
     SESSION_SECRET_MIN_LENGTH,

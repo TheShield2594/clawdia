@@ -107,6 +107,11 @@ services:
     # DASHBOARD_PORT is the container's side and should normally stay 3000, which
     # is what the image EXPOSEs and what its own HEALTHCHECK probes.
     # DASHBOARD_HOST_PORT is the host's side and is yours to pick.
+    #
+    # With the `split-dashboard` profile on, this container serves no dashboard
+    # and the `dashboard` service publishes the same host port instead. Comment
+    # this mapping out then — two services cannot both publish it, and the bot's
+    # facade port is deliberately never published at all.
     ports:
       - "127.0.0.1:${DASHBOARD_HOST_PORT:-3000}:${DASHBOARD_PORT:-3000}"
     depends_on:
@@ -163,6 +168,74 @@ services:
       # Read by the optional `autoheal` service below. Harmless when that
       # service is not running, which is why it is not commented out: enabling
       # autoheal is then one flag, with nothing to remember to uncomment here.
+      autoheal: "true"
+
+  # The dashboard, as its own container. Off by default (#876).
+  #
+  #   docker compose --profile split-dashboard up -d
+  #
+  # Embedded, the dashboard shares an event loop with the Discord gateway, the
+  # cron jobs, canvas rendering and every full-collection aggregation — so a
+  # heavy dashboard request delays heartbeats for every guild, and a fault in a
+  # route reaches the process guards in src/index.js, which exit. That makes a
+  # bad page a bot-wide outage.
+  #
+  # Split, this container serves the dashboard and the `bot` container serves it
+  # the handful of things only a gateway connection can answer, over
+  # BOT_GATEWAY_URL. Turning it on takes three variables in .env:
+  #
+  #   BOT_GATEWAY_PORT=3001                 # the bot serves the facade here
+  #   BOT_GATEWAY_URL=http://clawdia:3001   # where this container finds it
+  #   BOT_GATEWAY_TOKEN=<openssl rand -hex 32>
+  #
+  # Setting BOT_GATEWAY_PORT is what stops the bot starting its own dashboard,
+  # so the two never both bind a port. Leave the variables unset and this
+  # service does not run and nothing else changes.
+  dashboard:
+    profiles: [split-dashboard]
+    build: .
+    image: ghcr.io/theshield2594/clawdia:${CLAWDIA_IMAGE_TAG:-latest}
+    container_name: clawdia-dashboard
+    restart: unless-stopped
+    # The same image, a different entry point. There is no second build, and no
+    # way for the two to drift to different versions of the shared code.
+    command: ["node", "src/dashboard/index.js"]
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:${DASHBOARD_HOST_PORT:-3000}:${DASHBOARD_PORT:-3000}"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - db-network      # reads the database it owns directly
+      - clawdia-network # reaches the bot's gateway endpoint, and Discord OAuth
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    # BOT_GATEWAY_PORT is set for this container too (it comes from the shared
+    # .env), so the image's own healthcheck would probe a port this process does
+    # not serve. Overridden to the dashboard's port, which is the one it binds.
+    healthcheck:
+      test: ["CMD", "node", "-e",
+        "require('http').get('http://127.0.0.1:' + (process.env.DASHBOARD_PORT || 3000) + '/health', (r) => { let b=''; r.on('data', d => b+=d); r.on('end', () => { try { const s = JSON.parse(b).status; process.exit(s === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    # Lighter than the bot's: no canvas rendering, no gateway, no cron jobs.
+    # Rendering guild-settings.ejs is the heaviest thing it does.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512m
+        reservations:
+          memory: 128m
+    stop_grace_period: 15s
+    labels:
       autoheal: "true"
 
   # Optional container-level self-healing, off by default:

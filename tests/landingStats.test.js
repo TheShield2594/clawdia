@@ -45,37 +45,37 @@ function stubClient({ ready = true, guilds = [] } = {}) {
 }
 
 describe('the gateway reach() the row is built from', () => {
-    test('counts the guilds the bot is in and sums their members', () => {
+    test('counts the guilds the bot is in and sums their members', async () => {
         const bot = createBotGateway(stubClient({
             guilds: [{ memberCount: 120 }, { memberCount: 8 }, { memberCount: 1_000 }],
         }));
 
-        expect(bot.reach()).toEqual({ guilds: 3, members: 1_128 });
+        expect(await bot.reach()).toEqual({ guilds: 3, members: 1_128 });
     });
 
     // Before READY the cache is empty because nothing has filled it, not
     // because the bot is in no guilds. Reporting 0 there would be the same
     // class of false claim the hardcoded numbers were.
-    test('answers null before the client has been ready', () => {
-        expect(createBotGateway(stubClient({ ready: false, guilds: [{ memberCount: 5 }] })).reach()).toBeNull();
+    test('answers null before the client has been ready', async () => {
+        expect(await createBotGateway(stubClient({ ready: false, guilds: [{ memberCount: 5 }] })).reach()).toBeNull();
     });
 
-    test('reports zero honestly once ready and in no guilds', () => {
-        expect(createBotGateway(stubClient({ guilds: [] })).reach()).toEqual({ guilds: 0, members: 0 });
+    test('reports zero honestly once ready and in no guilds', async () => {
+        expect(await createBotGateway(stubClient({ guilds: [] })).reach()).toEqual({ guilds: 0, members: 0 });
     });
 
     // A guild Discord has not sent a member count for must not turn the whole
     // sum into NaN, which would render as "NaN members reached".
-    test('treats a guild with no member count as contributing none', () => {
+    test('treats a guild with no member count as contributing none', async () => {
         const bot = createBotGateway(stubClient({
             guilds: [{ memberCount: 40 }, { memberCount: undefined }, { memberCount: null }],
         }));
 
-        expect(bot.reach()).toEqual({ guilds: 3, members: 40 });
+        expect(await bot.reach()).toEqual({ guilds: 3, members: 40 });
     });
 
-    test('leaks no discord.js object across the facade', () => {
-        const reach = createBotGateway(stubClient({ guilds: [{ memberCount: 3 }] })).reach();
+    test('leaks no discord.js object across the facade', async () => {
+        const reach = await createBotGateway(stubClient({ guilds: [{ memberCount: 3 }] })).reach();
 
         expect(Object.keys(reach).sort()).toEqual(['guilds', 'members']);
         expect(Object.values(reach).every(v => typeof v === 'number')).toBe(true);
@@ -112,37 +112,37 @@ describe('formatCount', () => {
 describe('instanceStats', () => {
     const status = uptime => () => ({ status: 'healthy', uptime });
 
-    test('formats what the instance reports', () => {
+    test('formats what the instance reports', async () => {
         const bot = { reach: () => ({ guilds: 3, members: 14_200 }) };
 
-        expect(instanceStats(bot, { status: status(90_061) })).toEqual({
+        expect(await instanceStats(bot, { status: status(90_061) })).toEqual({
             servers: '3',
             members: '14,200',
             uptime: '1d 1h',
         });
     });
 
-    test('is null when the client has not been ready', () => {
-        expect(instanceStats({ reach: () => null }, { status: status(10) })).toBeNull();
+    test('is null when the client has not been ready', async () => {
+        expect(await instanceStats({ reach: () => null }, { status: status(10) })).toBeNull();
     });
 
-    test('is null for a facade with no reach() at all', () => {
-        expect(instanceStats({ hasGuild: () => false }, { status: status(10) })).toBeNull();
+    test('is null for a facade with no reach() at all', async () => {
+        expect(await instanceStats({ hasGuild: () => false }, { status: status(10) })).toBeNull();
     });
 
     // The landing page is the one route that renders for anyone. A throw here
     // must cost the row, never the page.
-    test('is null when the facade throws', () => {
+    test('is null when the facade throws', async () => {
         const bot = { reach: () => { throw new Error('no client'); } };
 
-        expect(instanceStats(bot, { status: status(10) })).toBeNull();
+        expect(await instanceStats(bot, { status: status(10) })).toBeNull();
     });
 
-    test('is null when health cannot be read', () => {
+    test('is null when health cannot be read', async () => {
         const bot = { reach: () => ({ guilds: 1, members: 2 }) };
         const broken = () => { throw new Error('no health'); };
 
-        expect(instanceStats(bot, { status: broken })).toBeNull();
+        expect(await instanceStats(bot, { status: broken })).toBeNull();
     });
 });
 

@@ -29,6 +29,7 @@ const Guild = require('../src/models/Guild');
 const { CONFIRM_MODES, MCP_ROUTES } = require('../src/config/mcpServers');
 
 const settings = require('../src/dashboard/routes/api/settings');
+const stubBotGateway = require('./helpers/stubBotGateway');
 const {
     ALLOWED_SETTING_PARENTS,
     isAllowedSettingKey,
@@ -464,7 +465,7 @@ describe('POST /guild/:guildId/settings', () => {
     // The gateway facade lives out here so the reschedule hook is a mock the
     // assertions can read, rather than a fresh one built per request and thrown
     // away inside the middleware.
-    const bot = { rescheduleBibleVerse: jest.fn() };
+    const bot = stubBotGateway({ rescheduleBibleVerse: jest.fn(async () => null) });
 
     function makeApp() {
         const app = express();

@@ -14,6 +14,7 @@ const express = require('express');
 jest.mock('../src/models/ItemImage');
 
 const ItemImage = require('../src/models/ItemImage');
+const stubBotGateway = require('./helpers/stubBotGateway');
 
 const PNG = Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
@@ -33,10 +34,10 @@ beforeAll(done => {
     app.use((req, res, next) => {
         req.isAuthenticated = () => session.authenticated !== false;
         req.user = { id: session.userId, guilds: session.guilds };
-        req.bot = {
-            hasGuild: id => session.botGuilds.includes(id),
+        req.bot = stubBotGateway({
+            hasGuild: async id => session.botGuilds.includes(id),
             canManageGuild: async () => session.live,
-        };
+        });
         next();
     });
     app.use('/api', require('../src/dashboard/routes/api/itemImages'));

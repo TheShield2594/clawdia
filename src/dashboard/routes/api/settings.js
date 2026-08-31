@@ -459,7 +459,13 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
         // re-reads profile times from the database on every minute tick.
         const shouldRescheduleBible = Object.keys(updates).some(key => key.startsWith('bibleVerse.'));
         if (shouldRescheduleBible) {
-            req.bot.rescheduleBibleVerse(guildId);
+            // Deliberately not awaited — the save has already succeeded and the
+            // reschedule is a side effect the caller is not waiting on. It does
+            // need a catch now that it can be a call to another process (#876):
+            // an unhandled rejection here counts toward the process-level
+            // rejection guard in src/index.js.
+            req.bot.rescheduleBibleVerse(guildId)
+                .catch(err => console.error(`[DASHBOARD] Bible reschedule for ${guildId} failed:`, err.message));
         }
 
         // Deliberately does not echo the saved document. It carries every shop

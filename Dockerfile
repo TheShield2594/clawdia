@@ -115,8 +115,14 @@ EXPOSE 3000
 # it silently failed forever on any deploy that moved the port — which is how
 # portainer-stack.yml came to run on 7001 with an image healthcheck probing
 # 3000, masked only because the stack overrode the check (#641).
+#
+# BOT_GATEWAY_PORT comes first because it is what says the dashboard has been
+# split out (#876): in that deployment this container serves the gateway facade
+# and nothing else, and /health on that port is the only HTTP it answers. The
+# dashboard container runs the same image with neither variable set, so it falls
+# through to DASHBOARD_PORT exactly as before.
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=90s \
-    CMD node -e "require('http').get('http://127.0.0.1:' + (process.env.DASHBOARD_PORT || 3000) + '/health', r => { let b=''; r.on('data', d => b += d); r.on('end', () => { try { process.exit(JSON.parse(b).status === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"
+    CMD node -e "require('http').get('http://127.0.0.1:' + (process.env.BOT_GATEWAY_PORT || process.env.DASHBOARD_PORT || 3000) + '/health', r => { let b=''; r.on('data', d => b += d); r.on('end', () => { try { process.exit(JSON.parse(b).status === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"
 
 # tini as PID 1 reaps zombies and forwards signals. Exec'ing node directly
 # (rather than `npm start`) means SIGTERM reaches the process that installed

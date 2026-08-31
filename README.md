@@ -134,10 +134,41 @@ SHARD_COUNT=2 npm run start:sharded
 
 Each shard is its own process. Discord routes a guild's events to exactly one of
 them, which is what keeps the live multiplayer rounds — crash lobbies, heists,
-the raid join window — correct without persisting them. Work that must happen
-once per deployment rather than once per shard runs on shard 0 only: the
-dashboard, schema migrations, and the cron scheduler. `src/utils/sharding.js`
-has the full reasoning.
+the raid join window — correct without persisting them.
+
+Background work is classified rather than blanket-pinned. Schema migrations and
+jobs that touch only the database run on shard 0, because running them per shard
+would duplicate them. Jobs that announce into a guild run on every shard, each
+one filtering its work list to the guilds Discord routes to it — pinned to shard
+0 they could not reach a guild on shard 3, and the announcement was dropped in
+silence. `src/services/scheduler/index.js` lists which is which and why;
+`src/utils/sharding.js` has the routing rule they share.
+
+### Running the dashboard as its own process
+
+By default the dashboard runs inside the bot process, which is what a single
+server wants. It also means a heavy dashboard request, a full-collection
+aggregation or a canvas render shares an event loop with the Discord gateway,
+and that a fault in a route can take the bot down with it.
+
+Three variables move it out:
+
+```bash
+BOT_GATEWAY_PORT=3001                          # the bot serves the gateway facade here
+BOT_GATEWAY_URL=http://clawdia:3001            # where the dashboard finds it
+BOT_GATEWAY_TOKEN=$(openssl rand -hex 32)      # the shared secret both present
+```
+
+Then `npm run start:dashboard`, or `docker compose --profile split-dashboard up
+-d`. Setting `BOT_GATEWAY_PORT` is what stops the bot starting its own
+dashboard, so the two never both bind a port; leave all three unset and nothing
+changes.
+
+The dashboard process holds no gateway connection, registers no commands and
+runs no cron jobs. It reads the database directly and calls the bot only for
+what a gateway connection can answer — see `src/bot/gateway.js` for that list
+and `src/bot/remoteGateway.js` for the transport. It is not given
+`DISCORD_TOKEN`, which it has no use for.
 
 ## Development
 

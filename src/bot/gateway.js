@@ -11,11 +11,27 @@
 //
 // Every method here takes ids and returns plain data or performs one action.
 // No discord.js object crosses this boundary, which is the property that lets
-// the cache lookups below be replaced with IPC or `broadcastEval` without a
-// single route changing. Anything the dashboard needs from Discord gets a
-// method here; anything it needs from the database it reads from Mongo itself.
+// the cache lookups below be replaced by a call to another process. Anything
+// the dashboard needs from Discord gets a method here; anything it needs from
+// the database it reads from Mongo itself.
+//
+// #876 took that the rest of the way: src/bot/remoteGateway.js implements the
+// same surface over HTTP, so the dashboard can run in its own container with no
+// gateway connection at all. Two consequences for this file.
+//
+// First, every method is async, including the ones that only read a cache. A
+// route cannot be written against a facade whose methods are synchronous here
+// and asynchronous over the wire — that difference is the whole bug, and it
+// would only appear in the split deployment. So the local implementation pays
+// a microtask to have one shape.
+//
+// Second, the method list is not this file's alone: src/bot/gatewayProtocol.js
+// owns it, and the assertion at the bottom of `createBotGateway` holds this
+// implementation to it. A method added here and not there is one the dashboard
+// cannot call once it is out of process.
 
 const { PermissionFlagsBits } = require('discord.js');
+const { GATEWAY_METHODS, GATEWAY_METHOD_SET } = require('./gatewayProtocol');
 
 // Discord channel type numbers, named so routes filter by meaning.
 const CHANNEL_TYPES = {
@@ -78,10 +94,32 @@ function plainUser(user) {
 function createBotGateway(client) {
     const guildOf = guildId => client.guilds.cache.get(guildId) || null;
 
-    return {
+    const gateway = {
         /** Is the bot in this guild? The check every permission gate makes. */
-        hasGuild(guildId) {
+        async hasGuild(guildId) {
             return client.guilds.cache.has(guildId);
+        },
+
+        /**
+         * The same question for a list, answered in one call.
+         *
+         * Three callers ask it of every guild in a user's OAuth guild list at
+         * once — the guild picker, the access middleware, and /health. In this
+         * process that is a cache lookup per id and the shape does not matter;
+         * across the boundary (src/bot/remoteGateway.js) a per-id method would
+         * be one HTTP request per guild the user is in, on every page load. So
+         * the batch is the method, and the singular one stays for the routes
+         * that genuinely have a single id.
+         *
+         * @returns {Promise<Record<string, boolean>>} keyed by the ids asked
+         *   for, so a caller cannot silently read a missing id as false.
+         */
+        async hasGuilds(guildIds) {
+            const present = {};
+            for (const guildId of guildIds ?? []) {
+                present[guildId] = client.guilds.cache.has(guildId);
+            }
+            return present;
         },
 
         /**
@@ -127,7 +165,7 @@ function createBotGateway(client) {
                 || member.permissions.has(PermissionFlagsBits.ManageGuild);
         },
 
-        getGuild(guildId) {
+        async getGuild(guildId) {
             const guild = guildOf(guildId);
             return guild ? plainGuild(guild) : null;
         },
@@ -154,7 +192,7 @@ function createBotGateway(client) {
          *   nothing has filled it yet rather than because the bot is in no
          *   guilds. Callers must render "we do not know" for that, not zero.
          */
-        reach() {
+        async reach() {
             if (!client?.readyAt) return null;
             const guilds = [...client.guilds.cache.values()];
             return {
@@ -164,20 +202,20 @@ function createBotGateway(client) {
         },
 
         /** @returns {Array<object>|null} null when the bot is not in the guild. */
-        listChannels(guildId) {
+        async listChannels(guildId) {
             const guild = guildOf(guildId);
             if (!guild) return null;
             return [...guild.channels.cache.values()].map(plainChannel);
         },
 
         /** @returns {Array<object>|null} null when the bot is not in the guild. */
-        listRoles(guildId) {
+        async listRoles(guildId) {
             const guild = guildOf(guildId);
             if (!guild) return null;
             return [...guild.roles.cache.values()].map(plainRole);
         },
 
-        hasChannel(guildId, channelId) {
+        async hasChannel(guildId, channelId) {
             return guildOf(guildId)?.channels.cache.has(channelId) === true;
         },
 
@@ -262,7 +300,7 @@ function createBotGateway(client) {
         },
 
         /** Members whose timeout has not yet expired. @returns {Array|null} */
-        listActiveTimeouts(guildId, limit) {
+        async listActiveTimeouts(guildId, limit) {
             const guild = guildOf(guildId);
             if (!guild) return null;
             const now = new Date();
@@ -305,14 +343,38 @@ function createBotGateway(client) {
         // gateway connection can do. Routing them through here too is what
         // keeps `client` out of the routes entirely.
 
-        sendDailyNews(guildId, profileId) {
+        async sendDailyNews(guildId, profileId) {
             return require('../services/rssService').sendDailyNews(client, guildId, profileId);
         },
 
-        rescheduleBibleVerse(guildId) {
+        async rescheduleBibleVerse(guildId) {
             return require('../services/dailyBibleService').rescheduleBibleVerse(client, guildId);
         },
     };
+
+    assertImplementsProtocol(gateway, 'createBotGateway');
+    return gateway;
 }
 
-module.exports = { createBotGateway, CHANNEL_TYPES };
+/**
+ * Holds an implementation to the method list in gatewayProtocol.
+ *
+ * Both implementations call this, which is what makes the list load-bearing
+ * rather than documentation: a method added to one side and not the other
+ * throws where it is built, at boot, rather than 404ing one dashboard route in
+ * the split deployment and nowhere else.
+ */
+function assertImplementsProtocol(implementation, label) {
+    const missing = GATEWAY_METHODS.filter(name => typeof implementation[name] !== 'function');
+    const extra = Object.keys(implementation).filter(name => !GATEWAY_METHOD_SET.has(name));
+    if (missing.length || extra.length) {
+        throw new Error(
+            `${label}: does not match src/bot/gatewayProtocol.js — ` +
+            `${missing.length ? `missing ${missing.join(', ')}` : ''}` +
+            `${missing.length && extra.length ? '; ' : ''}` +
+            `${extra.length ? `not in the protocol: ${extra.join(', ')}` : ''}`
+        );
+    }
+}
+
+module.exports = { createBotGateway, assertImplementsProtocol, CHANNEL_TYPES };

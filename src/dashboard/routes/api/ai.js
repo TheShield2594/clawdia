@@ -19,8 +19,8 @@ router.post('/guild/:guildId/persona', checkAuth, checkGuildAccess, checkWriteRa
     }
 
     try {
-        if (!req.bot.hasGuild(guildId)) return res.status(404).json({ error: 'Guild not found' });
-        if (!req.bot.hasChannel(guildId, channelId.trim())) {
+        if (!await req.bot.hasGuild(guildId)) return res.status(404).json({ error: 'Guild not found' });
+        if (!await req.bot.hasChannel(guildId, channelId.trim())) {
             return res.status(400).json({ error: 'Channel not found in this guild' });
         }
 
