@@ -17,6 +17,10 @@ const { ownedBy } = require('../../utils/collectorOwner');
 const ITEM_META = Object.fromEntries(DEFAULT_SHOP_ITEMS.map(i => [i.itemId, i]));
 
 const MAX_LISTINGS_PER_USER = 5;
+// The slots a seller's listings occupy, 1-based. Each listing carries the one it
+// holds and the unique index on { guildId, sellerId, slot } enforces it — see
+// createListingInFreeSlot and models/MarketListing.js.
+const LISTING_SLOTS = Array.from({ length: MAX_LISTINGS_PER_USER }, (_, i) => i + 1);
 const LISTING_TTL_MS        = 48 * 3_600_000;
 const MARKET_FEE_RATE       = 0.05;
 const MIN_PRICE_PER_ITEM    = 10;
@@ -90,20 +94,26 @@ async function handleList(interaction, currency) {
         { upsert: true, new: true }
     );
 
-    const slot = seller.inventory.find(i => i.itemId === itemId);
-    if (!slot || slot.quantity < qty) {
+    // `stack`, not `slot`: a slot in this file is one of the seller's five
+    // listing slots now, and this is the inventory stack being sold out of.
+    const stack = seller.inventory.find(i => i.itemId === itemId);
+    if (!stack || stack.quantity < qty) {
         return interaction.reply({ content: `You don't have ${qty}x \`${itemId}\` in your inventory.`, flags: MessageFlags.Ephemeral });
     }
 
-    const activeListing = await MarketListing.countDocuments({
-        guildId:  interaction.guild.id,
-        sellerId: interaction.user.id,
-    });
-    if (activeListing >= MAX_LISTINGS_PER_USER) {
+    // The friendly refusal, before any stock moves: a seller who is already full
+    // is told so without their items being taken and handed back. It is not what
+    // enforces the cap — two calls can pass this together — which is what the
+    // slot the insert claims below is for.
+    const openListings = await MarketListing.find(
+        { guildId: interaction.guild.id, sellerId: interaction.user.id },
+        'slot',
+    ).lean();
+    if (openListings.length >= MAX_LISTINGS_PER_USER) {
         return interaction.reply({ content: `You can only have ${MAX_LISTINGS_PER_USER} active listings at a time.`, flags: MessageFlags.Ephemeral });
     }
 
-    // The stock leaves as a compare-and-set, not `slot.quantity -= qty` followed
+    // The stock leaves as a compare-and-set, not `stack.quantity -= qty` followed
     // by a save: the quantity read above is history by now, and two concurrent
     // `/market list` calls for the same stack would each see the full count and
     // both take it — one stack backing two listings. The `$elemMatch` filter
@@ -120,16 +130,24 @@ async function handleList(interaction, currency) {
     if (!debited) {
         return interaction.reply({ content: `You don't have ${qty}x \`${itemId}\` in your inventory.`, flags: MessageFlags.Ephemeral });
     }
-    // Drop slots the decrement above emptied. Advisory: a failure leaves an
-    // empty slot, not wrong quantities.
+    // Drop inventory stacks the decrement above emptied. Advisory: a failure
+    // leaves an empty stack, not wrong quantities.
     await User.updateOne(
         { userId: interaction.user.id, guildId: interaction.guild.id },
         { $pull: { inventory: { quantity: { $lte: 0 } } } },
     ).catch(err => console.error('[market list] inventory cleanup failed:', err));
 
+    // Hand the stock back the same way every other credit lands — one atomic
+    // upsert, so the return can't duplicate an inventory stack a concurrent
+    // credit is creating (src/utils/inventoryGrant.js).
+    const returnStock = () => grantInventoryItem(interaction.user.id, interaction.guild.id, itemId, qty)
+        .catch(restoreErr => console.error(
+            `[market list] returning ${qty}x ${itemId} to ${interaction.user.id} failed — items owed:`, restoreErr,
+        ));
+
     let listing;
     try {
-        listing = await MarketListing.create({
+        listing = await createListingInFreeSlot({
             guildId:      interaction.guild.id,
             sellerId:     interaction.user.id,
             itemId,
@@ -138,15 +156,20 @@ async function handleList(interaction, currency) {
             expiresAt:    new Date(Date.now() + LISTING_TTL_MS),
         });
     } catch (err) {
-        // Hand the stock back the same way every other credit lands — one atomic
-        // upsert, so the return can't duplicate a slot a concurrent credit is
-        // creating (src/utils/inventoryGrant.js).
-        await grantInventoryItem(interaction.user.id, interaction.guild.id, itemId, qty)
-            .catch(restoreErr => console.error(
-                `[market list] returning ${qty}x ${itemId} to ${interaction.user.id} failed — items owed:`, restoreErr,
-            ));
+        await returnStock();
         console.error('[market list] MarketListing.create failed:', err);
         return interaction.reply({ content: 'Failed to create listing. Your item has been returned.', flags: MessageFlags.Ephemeral });
+    }
+
+    // Every slot was taken by the time the insert went in — the check above and
+    // another `/market list` both passed it. The stock is handed straight back,
+    // so losing the race costs the seller nothing but the refusal.
+    if (!listing) {
+        await returnStock();
+        return interaction.reply({
+            content: `You can only have ${MAX_LISTINGS_PER_USER} active listings at a time. Your item has been returned.`,
+            flags: MessageFlags.Ephemeral,
+        });
     }
 
     const embed = new EmbedBuilder()
@@ -161,6 +184,44 @@ async function handleList(interaction, currency) {
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+
+/**
+ * Inserts the listing into the seller's first free slot, or answers null when
+ * they have none left.
+ *
+ * The cap used to be a `countDocuments` followed by an insert (#926), which two
+ * concurrent calls could both pass — cosmetic, but the pattern is the same one
+ * that loses money elsewhere, and the fix is the one the rest of the economy
+ * uses: let the write itself be the check. The unique index on
+ * { guildId, sellerId, slot } means only one insert per slot can land, so the
+ * loser of the race is told no rather than quietly making it six.
+ *
+ * Each attempt re-reads the taken slots, because an E11000 means exactly that
+ * they have changed. One attempt per slot plus one is the most that can be
+ * useful: every retry loses a different slot to somebody, and the read after the
+ * last one finds the seller full.
+ */
+async function createListingInFreeSlot(fields) {
+    for (let attempt = 0; attempt <= MAX_LISTINGS_PER_USER; attempt++) {
+        const open = await MarketListing.find(
+            { guildId: fields.guildId, sellerId: fields.sellerId },
+            'slot',
+        ).lean();
+        const taken = new Set(open.map(l => l.slot));
+        const slot = LISTING_SLOTS.find(s => !taken.has(s));
+        if (slot === undefined) return null;
+
+        try {
+            return await MarketListing.create({ ...fields, slot });
+        } catch (err) {
+            // 11000 is the index doing its job: somebody else took this slot
+            // between the read and the insert. Anything else is a real failure
+            // and belongs to the caller, which hands the stock back.
+            if (err?.code !== 11000) throw err;
+        }
+    }
+    return null;
 }
 
 // Batch-fetches seller rep counts and Discord usernames for a page slice.
