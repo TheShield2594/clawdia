@@ -72,6 +72,14 @@ const MAX_ADJUST_TOTAL  = 1_000_000_000_000_000;  // 1e15 balance, XP or level
  * @returns {{ value: ?number, error: ?string }} exactly one of the two is set
  */
 function readAdjustAmount(amount, { min = 1, max = MAX_ADJUST_AMOUNT, label = 'amount' } = {}) {
+    // `Number()` answers 0 for null, undefined, '', '  ', [] and false, and a
+    // route whose minimum is 0 — set_level — would take that as "level 0" and
+    // wipe the member's level on a request that named no amount at all. Only a
+    // number or a non-blank string is an amount; everything else is a missing
+    // field, not a zero.
+    const isNumeric = typeof amount === 'number' || (typeof amount === 'string' && amount.trim() !== '');
+    if (!isNumeric) return { value: null, error: `${label} must be an integer` };
+
     const amt = Number(amount);
     // isSafeInteger rather than isInteger: it rejects 1e20, Infinity and NaN in
     // one go, and every value it accepts survives the arithmetic below it.

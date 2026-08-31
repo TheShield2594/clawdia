@@ -99,10 +99,18 @@ async function endTournament(tournamentId) {
     const pool   = tournament.prizePool;
 
     tournament.prizes = [];
+    // Each share is rounded on its own, and three independent roundings can add
+    // up to more than there is: a pool of 10 rounds to 6 + 3 + 2 = 11, and the
+    // eleventh coin is minted out of nothing. Tracking what is left and capping
+    // each share against it means the split can never pay out more than the
+    // pool held, whatever the rounding does. A remainder left over by rounding
+    // down stays unpaid, as the places that do not exist always have.
+    let unallocated = pool;
     for (let i = 0; i < Math.min(3, sorted.length); i++) {
         const pct    = PRIZE_SPLITS[i];
-        const amount = Math.round(pool * pct);
+        const amount = Math.min(Math.round(pool * pct), unallocated);
         if (amount > 0) {
+            unallocated -= amount;
             tournament.prizes.push({ place: i + 1, userId: sorted[i].userId, amount, paidOut: false });
         }
     }

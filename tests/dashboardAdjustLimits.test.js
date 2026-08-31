@@ -90,7 +90,7 @@ describe('POST economy/adjust', () => {
         expect(mockUsers.writes).toEqual([]);
     });
 
-    test.each([0, -5, 1.5, 'lots', null])('refuses %p', async amount => {
+    test.each([0, -5, 1.5, 'lots', null, undefined, '', '   ', [], true])('refuses %p', async amount => {
         const res = await adjustEconomy({ userId: USER, action: 'give', amount });
 
         expect(res.status).toBe(400);
@@ -219,6 +219,19 @@ describe('POST leveling/adjust', () => {
         expect(tooBig.status).toBe(400);
         expect(tooBig.body.error).toMatch(/^level /);
         expect(negative.status).toBe(400);
+        expect(mockUsers.writes).toEqual([]);
+    });
+
+    // `Number(null)`, `Number('')` and `Number([])` are all 0, and set_level's
+    // minimum is 0 — so before the input was type-checked, a request that named
+    // no amount at all wiped the member's level instead of being refused.
+    test.each([null, undefined, '', '  ', []])('refuses set_level with %p rather than setting level 0', async amount => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, level: 9 });
+
+        const res = await adjustLeveling({ userId: USER, action: 'set_level', amount });
+
+        expect(res.status).toBe(400);
+        expect(mockUsers.get(USER).level).toBe(9);
         expect(mockUsers.writes).toEqual([]);
     });
 

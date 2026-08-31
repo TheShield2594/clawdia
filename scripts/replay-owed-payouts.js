@@ -98,6 +98,11 @@ async function main() {
         if (!pay) {
             console.log('\nNothing was paid. Re-run with --pay to attempt these.');
             reportExhausted();
+            // Same rule as the no-owed branch above: an exhausted debt is a
+            // non-zero exit however the run reached it, so a listing run in a
+            // monitor answers the same as a paying one. A listing run with
+            // nothing exhausted still exits 0 — it has reported, not failed.
+            if (exhausted.length > 0) process.exitCode = 1;
             return;
         }
 

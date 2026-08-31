@@ -120,6 +120,57 @@ describe('ending a tournament', () => {
         expect(ended.prizes.every(p => Number.isInteger(p.amount))).toBe(true);
     });
 
+    // Three shares rounded independently can exceed what there is: 60/25/15 of a
+    // pool of 10 rounds to 6 + 3 + 2. The eleventh coin would have been minted
+    // out of nothing, on every small tournament.
+    test('a pool too small to divide cleanly is not overpaid', async () => {
+        mockUsers.seed(
+            { userId: 'a', guildId: GUILD }, { userId: 'b', guildId: GUILD }, { userId: 'c', guildId: GUILD },
+        );
+        const tournament = makeTournament({
+            prizePool: 10,
+            entries: [
+                entry('a', 30, '2026-08-31T10:10:00Z'),
+                entry('b', 20, '2026-08-31T10:11:00Z'),
+                entry('c', 10, '2026-08-31T10:12:00Z'),
+            ],
+        });
+        claimYields(tournament);
+
+        const ended = await tournamentService.endTournament(tournament._id);
+
+        const total = ended.prizes.reduce((sum, p) => sum + p.amount, 0);
+        expect(total).toBeLessThanOrEqual(10);
+        expect(total).toBe(10);
+        expect(ended.prizes.map(p => p.amount)).toEqual([6, 3, 1]);
+        expect(mockUsers.get('a').balance + mockUsers.get('b').balance + mockUsers.get('c').balance).toBe(10);
+    });
+
+    // Every pool the arithmetic can be handed, not just the ones that divide
+    // evenly: no split may hand out more than it was given.
+    test.each([1, 2, 3, 7, 10, 33, 99, 100, 999, 1000, 12_345])(
+        'a pool of %i is never overpaid',
+        async prizePool => {
+            mockUsers.seed(
+                { userId: 'a', guildId: GUILD }, { userId: 'b', guildId: GUILD }, { userId: 'c', guildId: GUILD },
+            );
+            const tournament = makeTournament({
+                prizePool,
+                entries: [
+                    entry('a', 30, '2026-08-31T10:10:00Z'),
+                    entry('b', 20, '2026-08-31T10:11:00Z'),
+                    entry('c', 10, '2026-08-31T10:12:00Z'),
+                ],
+            });
+            claimYields(tournament);
+
+            const ended = await tournamentService.endTournament(tournament._id);
+
+            const total = ended.prizes.reduce((sum, p) => sum + p.amount, 0);
+            expect([prizePool, total <= prizePool]).toEqual([prizePool, true]);
+        },
+    );
+
     test('a tie is broken by whoever caught it first', async () => {
         mockUsers.seed({ userId: 'early', guildId: GUILD }, { userId: 'late', guildId: GUILD });
         const tournament = makeTournament({
@@ -146,7 +197,12 @@ describe('ending a tournament', () => {
         const ended = await tournamentService.endTournament(tournament._id);
 
         expect(ended.prizes).toHaveLength(2);
+        // 60/25 of the pool, not a redistributed 70/30: the third share is not
+        // handed to the two who did turn up. That is the payout this service has
+        // always made, and changing it is an economy decision rather than a
+        // rounding fix — recorded here so a change to it is a deliberate one.
         expect(ended.prizes.map(p => p.amount)).toEqual([600, 250]);
+        expect(ended.prizes.reduce((sum, p) => sum + p.amount, 0)).toBe(850);
     });
 
     test('an empty pool pays nobody and writes no prizes', async () => {

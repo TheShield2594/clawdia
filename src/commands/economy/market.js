@@ -11,6 +11,7 @@ const { DEFAULT_SHOP_ITEMS, getItemLore, getItemRarity, RARITY_ORDER } = require
 const { EFFECT_CONFIGS } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
+const { recordOwedPayout } = require('../../utils/owedPayout');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 
@@ -140,10 +141,51 @@ async function handleList(interaction, currency) {
     // Hand the stock back the same way every other credit lands — one atomic
     // upsert, so the return can't duplicate an inventory stack a concurrent
     // credit is creating (src/utils/inventoryGrant.js).
-    const returnStock = () => grantInventoryItem(interaction.user.id, interaction.guild.id, itemId, qty)
-        .catch(restoreErr => console.error(
-            `[market list] returning ${qty}x ${itemId} to ${interaction.user.id} failed — items owed:`, restoreErr,
-        ));
+    //
+    // The debit has already committed by the time anything calls this, so a
+    // return that does not land is an item the player no longer has and no
+    // listing to show for it. Two ways it fails to land: the update rejects, or
+    // it matches no document and resolves null. Both are failures, and neither
+    // may be reported as a return — the credit is written down as owed instead,
+    // the same shape `replayOwedPayout` pays and `npm run payouts:replay` lists
+    // (src/utils/owedPayout.js), which is what utils/balanceDelta.js does for a
+    // credit that will not land in a command.
+    //
+    // Returns whether the stock is actually back.
+    const returnStock = async () => {
+        let failure;
+        try {
+            if (await grantInventoryItem(interaction.user.id, interaction.guild.id, itemId, qty)) return true;
+            failure = new Error(`no user document for ${interaction.user.id} in ${interaction.guild.id}`);
+        } catch (restoreErr) {
+            failure = restoreErr;
+        }
+
+        console.error(
+            `[market list] returning ${qty}x ${itemId} to ${interaction.user.id} failed — items owed:`, failure,
+        );
+        await recordOwedPayout({
+            service: 'market',
+            jobName: 'listItem',
+            guildId: interaction.guild.id,
+            payload: {
+                kind:     'items',
+                userId:   interaction.user.id,
+                guildId:  interaction.guild.id,
+                itemId,
+                quantity: qty,
+            },
+            error: failure,
+        });
+        return false;
+    };
+
+    // What to tell the seller about their stock. Saying it came back when it did
+    // not is the one thing this must never do: they would have no reason to
+    // mention it to anyone.
+    const stockNote = returned => (returned
+        ? 'Your item has been returned.'
+        : 'Your item could not be returned automatically — it is recorded as owed and an operator can restore it.');
 
     let listing;
     try {
@@ -156,18 +198,18 @@ async function handleList(interaction, currency) {
             expiresAt:    new Date(Date.now() + LISTING_TTL_MS),
         });
     } catch (err) {
-        await returnStock();
+        const returned = await returnStock();
         console.error('[market list] MarketListing.create failed:', err);
-        return interaction.reply({ content: 'Failed to create listing. Your item has been returned.', flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: `Failed to create listing. ${stockNote(returned)}`, flags: MessageFlags.Ephemeral });
     }
 
     // Every slot was taken by the time the insert went in — the check above and
     // another `/market list` both passed it. The stock is handed straight back,
     // so losing the race costs the seller nothing but the refusal.
     if (!listing) {
-        await returnStock();
+        const returned = await returnStock();
         return interaction.reply({
-            content: `You can only have ${MAX_LISTINGS_PER_USER} active listings at a time. Your item has been returned.`,
+            content: `You can only have ${MAX_LISTINGS_PER_USER} active listings at a time. ${stockNote(returned)}`,
             flags: MessageFlags.Ephemeral,
         });
     }
@@ -208,8 +250,17 @@ async function createListingInFreeSlot(fields) {
             { guildId: fields.guildId, sellerId: fields.sellerId },
             'slot',
         ).lean();
-        const taken = new Set(open.map(l => l.slot));
-        const slot = LISTING_SLOTS.find(s => !taken.has(s));
+        const slotted = open.filter(l => l.slot != null);
+        const taken   = new Set(slotted.map(l => l.slot));
+        const free    = LISTING_SLOTS.filter(s => !taken.has(s));
+
+        // A listing written before the slot field existed carries none, and the
+        // index skips it — but it is still one of the seller's five, and taking
+        // the lowest free number beside it would let a seller with four legacy
+        // listings open five more. The legacy rows stand in for that many free
+        // slots, so the seller has as many places left as they should and the
+        // unique index still decides who gets each remaining number.
+        const slot = free[open.length - slotted.length];
         if (slot === undefined) return null;
 
         try {

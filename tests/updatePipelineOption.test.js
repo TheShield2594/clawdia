@@ -105,7 +105,16 @@ function pipelineNames(ast) {
     return names;
 }
 
-/** Names the file sets `updatePipeline` on, e.g. `options.updatePipeline = true`. */
+/** True for the literal `true`, which is the only value that opts in. */
+const isTrue = node => node?.type === 'Literal' && node.value === true;
+
+/**
+ * Names the file sets `updatePipeline` on, e.g. `options.updatePipeline = true`.
+ *
+ * Only a literal `true` counts. `updatePipeline: false` is Mongoose's default
+ * spelled out, and a computed value is a promise this scan cannot check — both
+ * would otherwise read as an opt-in on the strength of the property name.
+ */
 function optedInNames(ast) {
     const names = new Set();
     for (const node of walk(ast)) {
@@ -113,7 +122,8 @@ function optedInNames(ast) {
         const target = node.left;
         if (target.type === 'MemberExpression' && !target.computed &&
             target.object.type === 'Identifier' &&
-            target.property.name === 'updatePipeline') {
+            target.property.name === 'updatePipeline' &&
+            isTrue(node.right)) {
             names.add(target.object.name);
         }
     }
@@ -133,7 +143,8 @@ function optsIn(node, optedIn = new Set()) {
     if (node.type === 'ObjectExpression') {
         return node.properties.some(p =>
             p.type === 'Property' && !p.computed &&
-            (p.key.name || p.key.value) === 'updatePipeline');
+            (p.key.name || p.key.value) === 'updatePipeline' &&
+            isTrue(p.value));
     }
     // `cond ? {...} : {...}` — both branches have to opt in.
     if (node.type === 'ConditionalExpression') {
