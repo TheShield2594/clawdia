@@ -9,6 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const {
     parseAll,
@@ -107,16 +108,72 @@ describe('the endpoints it finds', () => {
 });
 
 describe('the generator itself', () => {
-    /** Runs `body` with an extra router file on disk, and removes it after. */
-    function withProbe(source, body) {
-        const file = path.join(API_DIR, '__parser_probe.js');
-        fs.writeFileSync(file, source);
+    /**
+     * Runs `body` against a copy of routes/ that holds every real router plus
+     * one extra, and hands it the `{ apiDir, apiIndex }` the generator reads.
+     *
+     * `mount: true` also appends the probe to the copied api.js, for the cases
+     * that need it mounted rather than orphaned.
+     *
+     * The probe used to be written straight into src/dashboard/routes/api/,
+     * and the mount line appended to the real src/dashboard/routes/api.js and
+     * then undone. Jest runs suites in parallel workers and other suites sweep
+     * that directory: apiEnvelope generates one test per file in it and reads
+     * each in its own test body, and dashboardAuthEnforcement `require()`s
+     * every file it finds — so the probe was a file they could list and then
+     * fail to read, or load and blow up on, and the real api.js could be read
+     * mid-edit. That race is what took out dashboardInlineAttributes on the
+     * views side.
+     *
+     * The real routers are symlinked rather than copied, so the mirror is
+     * content-identical and cannot drift from what ships; the probe and the
+     * index are the only real files. Nothing is written inside src/ at any
+     * point, which is what makes the race impossible rather than unlikely.
+     */
+    function withProbe(source, body, { mount = false } = {}) {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdia-routes-'));
+        const apiDir = path.join(root, 'api');
+        const apiIndex = path.join(root, 'api.js');
         try {
-            body();
+            fs.mkdirSync(apiDir);
+            for (const name of fs.readdirSync(API_DIR)) {
+                fs.symlinkSync(path.join(API_DIR, name), path.join(apiDir, name));
+            }
+            fs.writeFileSync(path.join(apiDir, '__parser_probe.js'), source);
+
+            const index = fs.readFileSync(API_INDEX, 'utf8');
+            fs.writeFileSync(apiIndex, mount
+                ? `${index}\nrouter.use(require('./api/__parser_probe'));\n`
+                : index);
+
+            body({ apiDir, apiIndex });
         } finally {
-            fs.unlinkSync(file);
+            fs.rmSync(root, { recursive: true, force: true });
         }
     }
+
+    // The guard on the paragraph above, asserted *inside* the body while the
+    // probe exists: checking afterwards would pass for the old version too,
+    // which also cleaned up — it is the window in the middle that other workers
+    // could see.
+    test('never puts the probe anywhere the other suites can see it', () => {
+        const before = fs.readdirSync(API_DIR).sort();
+        const index = fs.readFileSync(API_INDEX, 'utf8');
+
+        withProbe("// Probe.\nrouter.get('/probe', handler);\n", sources => {
+            expect(fs.readdirSync(API_DIR).sort()).toEqual(before);
+            expect(fs.existsSync(path.join(API_DIR, '__parser_probe.js'))).toBe(false);
+            expect(fs.readFileSync(API_INDEX, 'utf8')).toBe(index);
+            // …and the mirror really is the whole router set plus the one
+            // extra, or the tests below would be reading a directory of one.
+            expect(fs.readdirSync(sources.apiDir).sort())
+                .toEqual([...before, '__parser_probe.js'].sort());
+            expect(sources.apiDir.startsWith(os.tmpdir())).toBe(true);
+        }, { mount: true });
+
+        expect(fs.readdirSync(API_DIR).sort()).toEqual(before);
+        expect(fs.readFileSync(API_INDEX, 'utf8')).toBe(index);
+    });
 
     test('reads the comment block above a route, to the end of its first sentence', () => {
         const lines = [
@@ -164,8 +221,8 @@ describe('the generator itself', () => {
     // A route written in a shape the regex misses would be silently absent from
     // the table, which is precisely the drift a generated list exists to stop.
     test('refuses a route it cannot read rather than dropping it silently', () => {
-        withProbe("router.get(buildPath(), handler);\n", () => {
-            expect(() => parseRouter('__parser_probe')).toThrow(/cannot read/);
+        withProbe("router.get(buildPath(), handler);\n", sources => {
+            expect(() => parseRouter('__parser_probe', sources)).toThrow(/cannot read/);
         });
     });
 
@@ -173,8 +230,8 @@ describe('the generator itself', () => {
     // the table rather than being quietly dropped by a pattern that never
     // expected it.
     test('reads a HEAD route like any other', () => {
-        withProbe("// Probes whether an export is ready.\nrouter.head('/export', checkAuth, handler);\n", () => {
-            expect(parseRouter('__parser_probe').routes).toEqual([{
+        withProbe("// Probes whether an export is ready.\nrouter.head('/export', checkAuth, handler);\n", sources => {
+            expect(parseRouter('__parser_probe', sources).routes).toEqual([{
                 method: 'HEAD',
                 path: '/api/v1/export',
                 requires: ['session'],
@@ -184,24 +241,19 @@ describe('the generator itself', () => {
     });
 
     test('a new HEAD route makes --check fail until the doc is regenerated', () => {
-        withProbe("// Probes whether an export is ready.\nrouter.head('/export', checkAuth, handler);\n", () => {
-            // parseAll refuses an unmounted router, so mount the probe the way a
-            // real router is mounted and check the doc against what it renders.
-            const index = fs.readFileSync(API_INDEX, 'utf8');
-            fs.writeFileSync(API_INDEX, `${index}\nrouter.use(require('./api/__parser_probe'));\n`);
-            try {
-                const { current, next } = buildDoc();
-                expect(current === next).toBe(false);
-                expect(next).toContain('| `HEAD` | `/api/v1/export` | session | Probes whether an export is ready |');
-            } finally {
-                fs.writeFileSync(API_INDEX, index);
-            }
-        });
+        // parseAll refuses an unmounted router, so the probe is mounted the way
+        // a real router is — in the copied index, never the real one.
+        withProbe("// Probes whether an export is ready.\nrouter.head('/export', checkAuth, handler);\n", sources => {
+            const { current, next } = buildDoc(sources);
+
+            expect(current === next).toBe(false);
+            expect(next).toContain('| `HEAD` | `/api/v1/export` | session | Probes whether an export is ready |');
+        }, { mount: true });
     });
 
     test('refuses a router routes/api.js never mounts', () => {
-        withProbe("// Probe.\nrouter.get('/probe', handler);\n", () => {
-            expect(() => parseAll()).toThrow(/never mounts: __parser_probe/);
+        withProbe("// Probe.\nrouter.get('/probe', handler);\n", sources => {
+            expect(() => parseAll(sources)).toThrow(/never mounts: __parser_probe/);
         });
     });
 });

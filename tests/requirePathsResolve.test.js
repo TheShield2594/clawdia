@@ -32,27 +32,23 @@ function walk(dir) {
 // Browser-side scripts are served to the page, not required by node.
 const BROWSER_SCRIPTS = /^dashboard\/public\//;
 
-// A file that is gone by the time it is read is not a source file. Jest runs
-// suites in parallel workers, and tests/apiDocs.test.js writes a throwaway
-// router into src/dashboard/routes/api/ and deletes it again — so this walk can
-// list a name that no longer exists a moment later, and the whole suite failed
-// to load on the timing rather than on anything in src/.
-const readOrSkip = full => {
-    try {
-        return fs.readFileSync(full, 'utf8');
-    } catch (err) {
-        if (err.code === 'ENOENT') return null;
-        throw err;
-    }
-};
-
+// This used to swallow an ENOENT here, because tests/apiDocs.test.js wrote a
+// throwaway router into src/dashboard/routes/api/ and deleted it again, and
+// Jest runs suites in parallel workers — so the walk could list a name that no
+// longer existed a moment later and the suite failed on the timing rather than
+// on anything in src/. That probe is built in a temp directory now and nothing
+// under src/ is written during a run, so a file listed here and missing a
+// moment later is a real fault and reading it should throw. Swallowing it would
+// turn a deleted module into one this sweep silently stopped checking.
+//
+// The filter runs before the read for the same reason rather than after it:
+// src/dashboard/public is not walked by this suite at all, and tests/assets
+// writes a cache-busting fixture into it, so reading a file only to discard it
+// was borrowing a race for nothing.
 const sourceFiles = walk(SRC)
-    .map(full => ({
-        full,
-        rel: path.relative(SRC, full).split(path.sep).join('/'),
-        text: readOrSkip(full),
-    }))
-    .filter(f => f.text !== null && !BROWSER_SCRIPTS.test(f.rel));
+    .map(full => ({ full, rel: path.relative(SRC, full).split(path.sep).join('/') }))
+    .filter(f => !BROWSER_SCRIPTS.test(f.rel))
+    .map(f => ({ ...f, text: fs.readFileSync(f.full, 'utf8') }));
 
 describe('every relative require in src resolves', () => {
     test('no module requires a path that is not there', () => {

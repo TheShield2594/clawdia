@@ -69,9 +69,23 @@ const ROUTE_RE = /^router\.(get|head|post|put|patch|delete|all)\(\s*'([^']+)'\s*
 // generated list exists to prevent, so it is an error rather than a skip.
 const SUSPECT_RE = /router\.(get|head|post|put|patch|delete|all|route|use)\s*\(/;
 
+/**
+ * Where the routers are read from.
+ *
+ * The two paths are parameters, defaulting to the real ones, only so that a
+ * test can point the readers at a directory of its own. tests/apiDocs used to
+ * write a probe router into `routes/api/` and append a mount line to
+ * `routes/api.js`, then undo both. Jest runs suites in parallel workers, and
+ * other suites sweep that directory — apiEnvelope generates one test per file
+ * in it, and dashboardAuthEnforcement `require()`s every one of them — so a
+ * probe that exists for a few milliseconds is a file they can list, read, or
+ * load half-written. See tests/apiDocs.test.js.
+ */
+const defaultSources = () => ({ apiDir: API_DIR, apiIndex: API_INDEX });
+
 /** Sub-router filenames in the order routes/api.js mounts them. */
-function mountOrder() {
-    const source = fs.readFileSync(API_INDEX, 'utf8');
+function mountOrder({ apiIndex } = defaultSources()) {
+    const source = fs.readFileSync(apiIndex, 'utf8');
     return [...source.matchAll(/require\('\.\/api\/(\w+)'\)/g)].map(m => m[1]);
 }
 
@@ -111,8 +125,8 @@ function requirements(argsText) {
  * @param {string} file basename without extension
  * @returns {{file: string, routes: Array<{method: string, path: string, requires: string[], summary: string}>}}
  */
-function parseRouter(file) {
-    const source = fs.readFileSync(path.join(API_DIR, `${file}.js`), 'utf8');
+function parseRouter(file, { apiDir } = defaultSources()) {
+    const source = fs.readFileSync(path.join(apiDir, `${file}.js`), 'utf8');
     const lines = source.split('\n');
     const routes = [];
 
@@ -154,16 +168,16 @@ function parseRouter(file) {
 }
 
 /** Every sub-router, in mount order. */
-function parseAll() {
-    const mounted = mountOrder();
-    const onDisk = fs.readdirSync(API_DIR).filter(f => f.endsWith('.js')).map(f => f.replace(/\.js$/, ''));
+function parseAll(sources = defaultSources()) {
+    const mounted = mountOrder(sources);
+    const onDisk = fs.readdirSync(sources.apiDir).filter(f => f.endsWith('.js')).map(f => f.replace(/\.js$/, ''));
 
     const unmounted = onDisk.filter(f => !mounted.includes(f));
     if (unmounted.length) {
         throw new Error(`routes/api.js never mounts: ${unmounted.join(', ')}`);
     }
 
-    return mounted.map(parseRouter);
+    return mounted.map(file => parseRouter(file, sources));
 }
 
 function escapeCell(text) {
@@ -205,9 +219,9 @@ function replaceBlock(doc, body) {
     return `${doc.slice(0, start)}${BEGIN}\n\n${body}\n\n${doc.slice(end)}`;
 }
 
-function buildDoc() {
+function buildDoc(sources = defaultSources()) {
     const current = fs.readFileSync(DOC_PATH, 'utf8');
-    return { current, next: replaceBlock(current, renderEndpoints(parseAll())) };
+    return { current, next: replaceBlock(current, renderEndpoints(parseAll(sources))) };
 }
 
 function main(argv) {
