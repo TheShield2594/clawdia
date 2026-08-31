@@ -29,6 +29,25 @@ jest.mock('../src/services/petService', () => ({ getTotalBonus: jest.fn(() => 0)
 jest.mock('../src/services/synergyService', () => ({ getMerchantCoinBonus: jest.fn(() => 0) }));
 jest.mock('../src/services/seasonMissionService', () => ({ advanceMissions: jest.fn(async () => {}) }));
 jest.mock('../src/services/districtService', () => ({ isDistrictActive: jest.fn(() => false) }));
+// The featured crime rotates on the UTC date, and crime.js spends an *extra*
+// `Math.random()` only when that crime is not already among the three it
+// shuffled up ("if (!choices.some(...))"). Every roll this file pins by
+// position therefore moved by one whenever the calendar turned over onto a day
+// whose crime fell outside those three — a test that passes or fails by the
+// date it runs on, and did: green on 30 Aug, red on the 31st, with no commit in
+// between. Pinning the rotation takes the calendar out of it.
+jest.mock('../src/data/featuredRotation', () => {
+    const actual = jest.requireActual('../src/data/featuredRotation');
+    return {
+        ...actual,
+        getDailyFeatured: jest.fn(guildId => ({
+            ...actual.getDailyFeatured(guildId),
+            // The crime these tests already select, so the branch above resolves
+            // the same way on every run and the positions below mean what they say.
+            crime: actual.FEATURED_CRIMES.find(c => c.name === 'pickpocketing'),
+        })),
+    };
+});
 
 const crime = require('../src/commands/economy/crime');
 const { logTransaction } = require('../src/utils/logTransaction');
@@ -76,6 +95,10 @@ beforeEach(() => {
     mockUsers.reset();
     mockGuilds.reset();
     jest.clearAllMocks();
+    // `clearAllMocks` clears calls, not implementations, so the
+    // `mockReturnValue(true)` in the underground-district test below stayed true
+    // for every test that ran after it.
+    isDistrictActive.mockReturnValue(false);
     jest.spyOn(Math, 'random').mockReturnValue(0.5);
 });
 
@@ -206,12 +229,16 @@ describe('getting caught', () => {
     });
 
     it('seizes a share of the wallet on a critical failure', async () => {
-        // The success roll misses and the 8% death check — the ninth roll of
+        // The success roll misses and the 8% death check — the eighth roll of
         // the run — lands. Pinned by position because the two are the same
         // call, `Math.random()`, and nothing else tells them apart; a refactor
         // that moves either one fails this loudly rather than quietly turning
         // it back into the ordinary fine above.
-        rollsUntil(8, 0.99, 0.01);
+        //
+        // The position only means anything because the featured rotation is
+        // mocked at the top of this file. Without that it shifted with the
+        // calendar, which is what made this test fail on 31 Aug.
+        rollsUntil(7, 0.99, 0.01);
         seedUser({ balance: 10_000 });
         seedGuild();
 
