@@ -24,7 +24,10 @@
 // Every attempt goes through retryJob, so the DLQ record carries its own audit
 // trail: attempts, last error, and `resolved`/`exhausted` at the end of it. A
 // record that exhausts its attempts is left for a human — nothing here deletes
-// one.
+// one, and since #896 nothing else does either: the collection's TTL expires
+// `resolved` records only, so an unsettled debt survives until somebody settles
+// it. It is listed separately below, because a debt nobody can see is the same
+// as one that was deleted.
 
 require('dotenv').config();
 require('../src/config/fileSecrets').loadFileSecrets();
@@ -54,8 +57,33 @@ async function main() {
             ...claimableFilter(),
         }).sort({ createdAt: 1 });
 
+        // Exhausted records are not claimable — retryJob refuses one, and the
+        // filter above deliberately excludes them — but they are the entries
+        // that most need looking at: each is a payout that failed every attempt
+        // it had. They are reported, never paid from here; settling one is a
+        // decision about a specific player, taken by the human this queue keeps
+        // it for.
+        const exhausted = await FailedJob.find({
+            jobName: { $regex: `\\${OWED_SUFFIX}$` },
+            status: 'exhausted',
+        }).sort({ createdAt: 1 });
+
+        const reportExhausted = () => {
+            if (exhausted.length === 0) return;
+            console.log(`\n${exhausted.length} exhausted payout(s) — these need a human, ` +
+                `and --pay will not attempt them:\n`);
+            for (const record of exhausted) {
+                console.log(
+                    `  ${record._id}  ${record.jobName}  ${describeOwedPayout(record.payload)}  ` +
+                    `(gave up after ${record.attempts}/${record.maxAttempts}, last error: ${record.errorMessage})`
+                );
+            }
+        };
+
         if (owed.length === 0) {
             console.log('Nothing owed.');
+            reportExhausted();
+            if (exhausted.length > 0) process.exitCode = 1;
             return;
         }
 
@@ -69,6 +97,7 @@ async function main() {
 
         if (!pay) {
             console.log('\nNothing was paid. Re-run with --pay to attempt these.');
+            reportExhausted();
             return;
         }
 
@@ -95,7 +124,8 @@ async function main() {
         }
 
         console.log(`\nPaid ${paid}, still owed ${stillOwed}.`);
-        if (stillOwed > 0) process.exitCode = 1;
+        reportExhausted();
+        if (stillOwed > 0 || exhausted.length > 0) process.exitCode = 1;
     } finally {
         await mongoose.disconnect();
     }
