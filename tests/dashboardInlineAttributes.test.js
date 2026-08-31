@@ -88,6 +88,20 @@ const allViews = views();
 // wrong" as for "nothing was looked at".
 if (!allViews.length) throw new Error('no views found — the sweep would inspect nothing');
 
+// The list is built here, at module load, and each file is read later in its
+// own test body. That gap used to be a race: tests/panelDocs.test.js wrote a
+// probe template into views/partials/panels/ and deleted it again, and Jest
+// runs suites in parallel workers, so this one could list the probe and then
+// read a file that had already vanished — a run with one extra test case and an
+// ENOENT out of counts(), green again on a re-run.
+//
+// It is ruled out rather than tolerated: withProbe builds a mirror directory
+// under os.tmpdir() now and writes nothing inside src/ at all, and a test there
+// fails if that stops being true. So a file listed here and missing at read
+// time is a real fault, and counts() should still throw on it — swallowing an
+// ENOENT would turn a deleted view into a silently skipped one, which is the
+// failure this whole sweep exists to prevent.
+
 describe('inline styles and handlers only ever decrease', () => {
     it.each(allViews)('%s stays within its recorded count', file => {
         const [styles, handlers] = counts(file);

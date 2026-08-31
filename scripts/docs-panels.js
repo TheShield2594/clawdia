@@ -122,10 +122,11 @@ function parseSidebar() {
  * `<p>` inside the panel's `.panel-head`.
  *
  * @param {string} panel basename without extension
+ * @param {string} [panelDir] where the templates are; see panelsOnDisk.
  * @returns {string} may be empty, which the caller treats as an error
  */
-function summaryOf(panel) {
-    const source = fs.readFileSync(path.join(PANEL_DIR, `${panel}.ejs`), 'utf8');
+function summaryOf(panel, panelDir = PANEL_DIR) {
+    const source = fs.readFileSync(path.join(panelDir, `${panel}.ejs`), 'utf8');
 
     const declared = /<%#[\s\S]*?\bsummary:\s*([\s\S]*?)%>/.exec(source);
     const head = /class="panel-head"[\s\S]{0,400}?<p>([\s\S]*?)<\/p>/.exec(source);
@@ -150,19 +151,28 @@ function declaredPanels() {
     return require(PANELS_MODULE).PANELS;
 }
 
-/** Panel template basenames on disk. */
-function panelsOnDisk() {
-    return fs.readdirSync(PANEL_DIR).filter(f => f.endsWith('.ejs')).map(f => f.replace(/\.ejs$/, ''));
+/**
+ * Panel template basenames on disk.
+ *
+ * `panelDir` defaults to the real one and is a parameter only so that a test
+ * can point the three readers at a directory of its own. It used to write a
+ * probe template into `partials/panels/` and delete it again, which the nine
+ * suites that sweep the views tree in other Jest workers could see mid-flight
+ * — one of them read a file that had vanished a millisecond earlier. See
+ * tests/panelDocs.test.js.
+ */
+function panelsOnDisk(panelDir = PANEL_DIR) {
+    return fs.readdirSync(panelDir).filter(f => f.endsWith('.ejs')).map(f => f.replace(/\.ejs$/, ''));
 }
 
 /**
  * Every dashboard section, in sidebar order, with the three sources checked
  * against each other first.
  */
-function parseAll() {
+function parseAll(panelDir = PANEL_DIR) {
     const sidebar = parseSidebar();
     const declared = declaredPanels();
-    const onDisk = panelsOnDisk();
+    const onDisk = panelsOnDisk(panelDir);
 
     const sorted = list => [...list].sort();
     const inSidebar = sidebar.map(item => item.panel);
@@ -199,7 +209,7 @@ function parseAll() {
     }
 
     return sidebar.map(item => {
-        const summary = summaryOf(item.panel);
+        const summary = summaryOf(item.panel, panelDir);
         if (!summary) {
             throw new Error(
                 `partials/panels/${item.panel}.ejs has no description.\n` +
