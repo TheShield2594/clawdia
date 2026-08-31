@@ -172,19 +172,36 @@ describe('claiming a due task', () => {
     });
 
     test('advances a monthly task from the day it meant, not the last clamp', async () => {
-        due([makeTask({
-            repeat: 'monthly', monthDay: 31,
-            fireAt: new Date('2026-02-28T09:00:00Z'), timezone: 'Etc/UTC',
-        })]);
+        // On the real clock this test asserted whatever month it happened to run
+        // in. runDueTasks() reads `new Date()` (unlike nextOccurrence(), which
+        // takes `now`), so the occurrence it lands on moves with the calendar —
+        // and lands on a 30-day month one run in three, where a monthDay of 31
+        // correctly clamps to 30 and the assertion below fails. It ran green for
+        // months and went red on the 31st.
+        //
+        // Pinned to the NOW the rest of this file already uses, which puts the
+        // next occurrence in July: a 31-day month, so the day survives and the
+        // property being tested is the one actually asserted. The clamping
+        // behaviour on a short month is nextOccurrence()'s own business and is
+        // covered above, where `now` is a parameter rather than the wall clock.
+        jest.useFakeTimers().setSystemTime(NOW);
+        try {
+            due([makeTask({
+                repeat: 'monthly', monthDay: 31,
+                fireAt: new Date('2026-02-28T09:00:00Z'), timezone: 'Etc/UTC',
+            })]);
 
-        await runDueTasks(makeClient(textChannel()));
+            await runDueTasks(makeClient(textChannel()));
+        } finally {
+            jest.useRealTimers();
+        }
 
         // Months behind, so the claim skips forward to the next future
         // occurrence — and the day the task meant survives every one of those
         // steps rather than being lost to the first short month it crossed.
         const [, update] = ScheduledTask.findOneAndUpdate.mock.calls[0];
         expect(update.$set.fireAt.getUTCDate()).toBe(31);
-        expect(update.$set.fireAt.getTime()).toBeGreaterThan(Date.now());
+        expect(update.$set.fireAt.getTime()).toBeGreaterThan(NOW.getTime());
     });
 
     test('runs each task inside its own job scope, so one guild cannot drop another', async () => {
