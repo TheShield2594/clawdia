@@ -26,7 +26,7 @@ async function claimStarterKit(userId, guildId) {
                 'onboarding.starterKitClaimed': true,
             } },
         ],
-        { new: true }
+        { updatePipeline: true, new: true }
     );
 
     if (!updated) return null;

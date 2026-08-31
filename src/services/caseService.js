@@ -12,7 +12,7 @@ async function getNextCaseId(guildId) {
     const result = await Guild.findOneAndUpdate(
         { guildId },
         [{ $set: { 'caseSettings.nextCaseId': { $ifNull: [{ $add: ['$caseSettings.nextCaseId', 1] }, 1] } } }],
-        { upsert: true, new: true, projection: { 'caseSettings.nextCaseId': 1 } }
+        { updatePipeline: true, upsert: true, new: true, projection: { 'caseSettings.nextCaseId': 1 } }
     );
     return result.caseSettings.nextCaseId;
 }

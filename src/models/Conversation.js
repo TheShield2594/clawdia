@@ -21,9 +21,8 @@ const conversationSchema = new Schema({
 
 conversationSchema.index({ guildId: 1, channelId: 1, userId: 1 }, { unique: true });
 
-conversationSchema.pre('save', function(next) {
+conversationSchema.pre('save', function() {
     this.updatedAt = Date.now();
-    next();
 });
 
 module.exports = model('Conversation', conversationSchema);

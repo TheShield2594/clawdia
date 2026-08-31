@@ -120,7 +120,8 @@ async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victim
                 }
                 await User.updateOne(
                     { userId: robber.userId, guildId: robber.guildId },
-                    [{ $set: clamped }]
+                    [{ $set: clamped }],
+                    { updatePipeline: true }
                 );
             }
         } catch (rollbackErr) {

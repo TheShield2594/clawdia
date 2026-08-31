@@ -110,7 +110,7 @@ async function grantInventoryItem(userId, guildId, itemId, quantity = 1, options
     return Model.findOneAndUpdate(
         { userId, guildId, ...guard },
         [{ $set: { inventory: inventoryAddExpr(itemId, quantity), ...extraSet } }],
-        { new: returnNew, upsert },
+        { updatePipeline: true, new: returnNew, upsert },
     );
 }
 
