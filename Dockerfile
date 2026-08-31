@@ -67,6 +67,21 @@ USER node
 
 ENV NODE_ENV=production
 
+# 3000 is the container-side port, and it is a constant rather than something
+# DASHBOARD_PORT is expected to move (#650). EXPOSE is image metadata — it
+# publishes nothing and binds nothing — so it cannot follow a value that is only
+# known at `docker run` time, and a build argument would only be right for
+# whoever remembered to pass it. The fix is therefore to hold the convention
+# rather than to parameterize it: both stack files map a chosen *host* port onto
+# this one and leave DASHBOARD_PORT at its 3000 default, which is what the
+# healthcheck below then resolves.
+#
+# This is the line that made #641 possible — the image healthcheck probed a
+# hardcoded 3000 while portainer-stack.yml was read as running the container on
+# 7001, and the mismatch was masked by the stack overriding the check.
+# tests/dashboardPortAlignment.test.js now fails if this number, either stack
+# file's container-side port, or the DASHBOARD_PORT default in either of them
+# stops agreeing with the others.
 EXPOSE 3000
 
 # Declared on the image itself, not only in compose, so `docker run` and any

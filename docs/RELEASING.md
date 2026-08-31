@@ -45,8 +45,10 @@ working.
 ## What the tag does
 
 `.github/workflows/ci.yml` runs on `push: tags: v*`, and the publish job is
-behind `needs: test`, so a tag whose tests fail publishes nothing. On a green
-run `docker/metadata-action` derives these tags from `v4.2.1`:
+behind `needs: [test, image]`, so a tag publishes nothing unless the suite, the
+linter and the dependency audit are green *and* the image builds, boots and
+comes back clean from the vulnerability scan. On a green run
+`docker/metadata-action` derives these tags from `v4.2.1`:
 
 - `ghcr.io/theshield2594/clawdia:4.2.1`
 - `ghcr.io/theshield2594/clawdia:4.2`

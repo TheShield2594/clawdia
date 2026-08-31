@@ -20,9 +20,11 @@ describe('lint gate', () => {
     });
 
     test('CI runs it, in the job the image publish depends on', () => {
-        const testJob = ci.slice(ci.indexOf('\n  test:'), ci.indexOf('\n  publish:'));
+        // Bounded at the next job rather than at `publish:`, which is no longer
+        // the one after it — the image build and scan sit between them (#646).
+        const testJob = ci.slice(ci.indexOf('\n  test:'), ci.indexOf('\n  image:'));
         expect(testJob).toMatch(/run: npm run lint/);
-        expect(ci).toMatch(/needs: test/);
+        expect(ci).toMatch(/needs: \[test, image\]/);
     });
 
     // Without `if: always()` a failing test hides the lint result and vice

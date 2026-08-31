@@ -9,6 +9,15 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Publishing lives in this workflow (see the `publish` job), so this group is
+# also what serializes it. Two pushes landing on `main` a minute apart used to
+# start two independent publish runs with nothing ordering them: whichever
+# finished last won `:latest`, and a slow build of the older commit overwriting
+# a fast build of the newer one left production running code that had already
+# been superseded (#651). Keyed on the ref, one run at a time, newest wins —
+# `cancel-in-progress` stops the older run rather than letting it finish and
+# repoint the tag. Pull requests key on their number instead, so a force-push
+# cancels its own previous run and nobody else's.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -19,6 +28,9 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # The tag the `image` job builds into the runner's own daemon. Never pushed —
+  # it exists so the smoke and the scan below have something to name.
+  SMOKE_IMAGE: clawdia:ci
 
 jobs:
   test:
@@ -124,12 +136,140 @@ jobs:
       # few seconds. After the tests, with `always()`, so the two signals are
       # independent — an unused variable never hides which tests failed, and a
       # failing test never hides the lint result either. Both still fail the
-      # job, which is what `publish: needs: test` is gating on.
+      # job, which is what the publish job's `needs:` is gating on.
       - name: Lint
         if: always()
         run: npm run lint
 
-  # Publishing lives here, behind `needs: test`, rather than in its own
+      # #645: CI gated on the tests and nothing else, so a dependency with a
+      # published advisory reached the image with nothing in the way. Dependabot
+      # raises the bump, but a bump nobody merges is not a control; this is what
+      # notices it is still sitting there.
+      #
+      # `high` is the level, not `moderate`: this is a Discord bot whose
+      # dependency tree is large enough that a moderate-level gate would spend
+      # most of its life red on advisories that do not apply, and a gate that is
+      # normally red is a gate everyone learns to merge past. The whole tree is
+      # audited, dev dependencies included — a compromised build-time package
+      # runs against the checkout with a registry credential nearby, which is
+      # not obviously the smaller problem.
+      #
+      # `always()` for the same reason as lint: a failing suite must not hide
+      # the advisory, and an advisory must not hide which tests failed.
+      - name: Audit dependencies
+        if: always()
+        run: npm audit --audit-level=high
+
+  # #646: the Dockerfile was built in exactly one place — the publish job below,
+  # which runs on `main` after a merge. So a Dockerfile regression was found by
+  # the deploy rather than by the pull request that caused it, and the first
+  # symptom was a failed publish on a branch that was already merged. This image
+  # compiles `canvas` from source against Alpine's cairo/pango headers in one
+  # stage and links it against a separately-installed set of runtime libraries
+  # in the next, which is exactly the shape of thing a base-image bump breaks
+  # without touching a line of JavaScript.
+  #
+  # Built on every event, pull requests included, and never pushed. Alongside
+  # `test` rather than after it: the two answer different questions, and a red
+  # suite should not hide a broken image any more than the reverse. The publish
+  # job needs both, so nothing reaches the registry that has not been built,
+  # booted and scanned here first — and because this job writes the same
+  # `type=gha` cache, that publish is a cache hit rather than a second compile.
+  image:
+    name: Build, boot and scan Docker image
+    runs-on: ubuntu-latest
+    # On a cold cache this compiles canvas from source, which is minutes rather
+    # than seconds; a warm one is a small fraction of that. Matches the publish
+    # job's budget, since it is the same build.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          # The whole point of this job. A pull request has no credentials worth
+          # using and no tag anything deploys.
+          push: false
+          # ...but the steps below need to `docker run` it, and a buildx build
+          # otherwise leaves its result in the builder cache and nowhere else.
+          load: true
+          tags: ${{ env.SMOKE_IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Everything that is true of the image rather than of the source tree: the
+      # native canvas binding actually links, the fonts the card generators
+      # register are installed at the path Alpine puts them, the process is not
+      # root. See scripts/image-smoke.js for why each one is in there.
+      - name: Smoke-test the image
+        timeout-minutes: 5
+        run: |
+          docker run --rm --entrypoint node "$SMOKE_IMAGE" scripts/image-smoke.js
+
+      # The other half: that the image boots. Run with its real entrypoint and
+      # no configuration at all, `src/index.js` loads its entire require graph —
+      # discord.js, mongoose, every command module below it — and is then turned
+      # away by config/validateEnv.js, which is its first statement after the
+      # secrets are read. Reaching that message means every layer resolved;
+      # anything else (a missing module, a broken tini, a bad ENTRYPOINT) fails
+      # before it and says so.
+      #
+      # Deliberately not booted further than this: past the validator it would
+      # want a Discord token and a MongoDB, and a smoke test that needs the
+      # production credentials is a smoke test nobody can run on a fork.
+      - name: Boot the image far enough to reject its own config
+        timeout-minutes: 5
+        run: |
+          set +e
+          output=$(docker run --rm "$SMOKE_IMAGE" 2>&1)
+          status=$?
+          set -e
+
+          echo "$output"
+
+          if [ "$status" -ne 1 ]; then
+            echo "::error::expected the entrypoint to exit 1 on an empty config, got $status"
+            exit 1
+          fi
+
+          if ! printf '%s' "$output" | grep -q 'Missing required environment variables'; then
+            echo "::error::the image did not reach config/validateEnv.js — something below it failed to load"
+            exit 1
+          fi
+
+          echo "image boots and rejects an empty config, as expected"
+
+      # #645: nothing scanned the published image, so a CVE in the base layer or
+      # in an installed apk was only ever found by someone scanning production.
+      #
+      # Two deliberate narrowings, because a scan that is always red is a scan
+      # nobody reads. `ignore-unfixed` drops findings with no fixed version
+      # available — there is no action to take on those beyond changing base
+      # image, and they are the bulk of an Alpine report. HIGH and CRITICAL only,
+      # matching the `--audit-level=high` the npm side uses, so the two halves of
+      # the dependency surface are gated at the same bar.
+      #
+      # The scan runs before anything is pushed, so a finding stops the image
+      # existing rather than being raised against one already deployed.
+      - name: Scan the image for known vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.SMOKE_IMAGE }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+
+  # Publishing lives here, behind `needs: [test, image]`, rather than in its own
   # workflow. It used to be a separate file triggered on `push: main`, which
   # ran alongside the tests instead of after them: a commit that broke the
   # suite still got built and pushed as `:latest`, and `:latest` is the tag
@@ -140,9 +280,10 @@ jobs:
   # simply depends on the one before it in the same run.
   publish:
     name: Build and publish Docker image
-    needs: test
-    # Pull requests build nothing: they have no push credentials worth using
-    # and no tag that anything deploys. Pushes to main and to v* tags do.
+    needs: [test, image]
+    # Pull requests build the image in the `image` job above but publish
+    # nothing: they have no push credentials worth using and no tag that
+    # anything deploys. Pushes to main and to v* tags do.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
