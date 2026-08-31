@@ -34,6 +34,7 @@ const { randomFrom, MINE_CAVE_LINES } = require('../../../utils/copyLines');
 const { PITY_COPY } = require('../../../utils/pityBonus');
 const { buildMineEmbed } = require('./embeds');
 const { ownedBy } = require('../../../utils/collectorOwner');
+const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
 
 // Presentation timings for the pre-dig prompt and the vein read. The ladder itself
 // and the promotion rule live with the rest of the mine's rules, in mineData and
@@ -43,48 +44,6 @@ const INTENSITY_PICK_MS = 20_000;
 const VEIN_FLASH_MS     = 1_400;
 
 const VEIN_ANSWER_MS    = 10_000;
-
-// ─── Staged loot reveal for rare+ drops ──────────────────────────────────────
-async function stagedLootReveal(interaction, tier, finalEmbed) {
-    const tierNum = TIER_NUM[tier] ?? 0;
-    if (tierNum < 3) {
-        await interaction.editReply({ embeds: [finalEmbed] });
-        return;
-    }
-    const wait = ms => new Promise(r => setTimeout(r, ms));
-
-    const fogEmbed = new EmbedBuilder()
-        .setColor('#4a4a4a')
-        .setTitle('🌫️ Your pickaxe strikes something unusual...')
-        .setDescription('━━━━━━━━━━━━━━━\n*The rock face glints in your lantern light.*\n━━━━━━━━━━━━━━━');
-
-    if (tierNum === 3) {
-        await interaction.editReply({ embeds: [fogEmbed] });
-        await wait(1500);
-    } else {
-        await interaction.editReply({ embeds: [fogEmbed] });
-        await wait(1500);
-        const midColor = tierNum === 6 ? '#e74c3c' : tierNum === 4 ? '#9c27b0' : '#ff9800';
-        const midTitle = tierNum === 6 ? '☄️ The rock itself begins to hum...' : tierNum === 4 ? '🔮 A rare vein reveals itself...' : '⚡ The tunnel fills with an impossible glow...';
-        const midTierLabel = tierNum === 6 ? 'EVENT' : tierNum === 4 ? 'EPIC' : 'LEGENDARY';
-        const midEmbed = new EmbedBuilder()
-            .setColor(midColor)
-            .setTitle(midTitle)
-            .setDescription(`━━━━━━━━━━━━━━━\n❓❓❓  **${midTierLabel}**  ❓❓❓\n━━━━━━━━━━━━━━━`);
-        await interaction.editReply({ embeds: [midEmbed] });
-        await wait(1500);
-        if (tierNum >= 5) {
-            const isEvent = tierNum === 6;
-            const fanfareEmbed = new EmbedBuilder()
-                .setColor(isEvent ? '#e74c3c' : '#ff9800')
-                .setTitle(isEvent ? '☄️ 🌋 𝗣 𝗥 𝗜 𝗠 𝗢 𝗥 𝗗 𝗜 𝗔 𝗟 🌋 ☄️' : '⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
-                .setDescription(isEvent ? '━━━━━━━━━━━━━━━\n*This ore has no business existing. Nobody will believe you.*\n━━━━━━━━━━━━━━━' : '━━━━━━━━━━━━━━━\n*Miners dream of this their whole careers.*\n━━━━━━━━━━━━━━━');
-            await interaction.editReply({ embeds: [fanfareEmbed] });
-            await wait(1500);
-        }
-    }
-    await interaction.editReply({ embeds: [finalEmbed] });
-}
 
 // ─── DIG ──────────────────────────────────────────────────────────────────────
 
@@ -557,7 +516,7 @@ async function handleDig(interaction) {
         }
 
         // Staged loot reveal for rare+ drops
-        await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+        await stagedLootReveal(interaction, result.success ? result.tier : null, embed, 'mine');
 
         if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
@@ -693,5 +652,4 @@ module.exports = {
     VEIN_FLASH_MS,
     handleDig,
     replyDigPreflightFailure,
-    stagedLootReveal,
 };

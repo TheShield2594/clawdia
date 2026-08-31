@@ -25,8 +25,6 @@ const { WILDERNESS_YIELD_BONUS } = require('./shared');
 const COLORS = require('../../../utils/embedColors');
 
 function buildHuntEmbed(result, user, zone, weapon, currency, _discordUser) {
-    const h = user.hunt;
-
     if (result.success) {
         const { animal, tier, traits, finalPayout, isCrit, critMultiplier, trophyQuality, specialDrop, xpEarned, levelUp, cappedByHard, traitEffects } = result;
         // An event catch keeps its own colour even on a critical: the tier is the
@@ -36,7 +34,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, _discordUser) {
 
         const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
         const payoutDisplay = cappedByHard
-            ? `~~${currency}${(result.forfeitedPayout ?? 0).toLocaleString()}~~\n*Daily cap reached — resets in ${formatMs(msUntilDailyReset(h))}*`
+            ? `~~${currency}${(result.forfeitedPayout ?? 0).toLocaleString()}~~\n*Daily cap reached — resets in ${formatMs(msUntilDailyReset(user))}*`
             : `**${currency}${finalPayout.toLocaleString()}**`;
 
         const qualityLabel = trophyQuality
@@ -263,7 +261,7 @@ function buildDailyTollField(result, user, currency) {
         lines.push(`🧱 **Hard cap in sight** — only ${currency}${Math.max(0, LIMITS.DAILY_HARD_CAP - h.dailyCoins).toLocaleString()} of headroom left`);
     }
 
-    lines.push(`*Worth ${currency}${report.grossPayout.toLocaleString()} on a fresh day — ${currency}${report.lostToDaily.toLocaleString()} withheld. Resets in ${formatMs(msUntilDailyReset(h))}.*`);
+    lines.push(`*Worth ${currency}${report.grossPayout.toLocaleString()} on a fresh day — ${currency}${report.lostToDaily.toLocaleString()} withheld. Resets in ${formatMs(msUntilDailyReset(user))}.*`);
 
     return { name: '⚖️ Daily Limits', value: lines.join('\n'), inline: false };
 }

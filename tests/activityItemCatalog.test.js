@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { grindCommandFiles } = require('./helpers/grindSources');
 
 const { ACTIVITY_ITEMS, ACTIVITY_ITEM_IDS, isActivityItemId } = require('../src/data/activityItems');
 const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES, ZONE_LIST } = require('../src/data/huntData');
@@ -67,14 +68,16 @@ describe('every id the shop views render is in the catalog', () => {
 // an image into; each group in the catalog is a set of ids that may fill one.
 // The counts have to match, or some slot is rendering an id nothing can upload.
 describe('the catalog covers every image slot the shop views draw', () => {
-    const shopFile = rel => fs.readFileSync(path.join(__dirname, '..', 'src', 'commands', 'economy', rel), 'utf8');
+    // Every file of the grind command, not just the shop's: the shop group is a
+    // folder of its own since #917, and a check that read `<name>/shop.js` would
+    // now read nothing at all.
+    const shopSource = activity => grindCommandFiles(activity)
+        .filter(f => f.split(path.sep).includes('shop'))
+        .map(f => fs.readFileSync(f, 'utf8'))
+        .join('\n');
 
-    test.each([
-        ['hunt', 'hunt/shop.js'],
-        ['fish', 'fish/shop.js'],
-        ['mine', 'mine/shop.js'],
-    ])('%s', (activity, rel) => {
-        const slots = shopFile(rel).match(new RegExp(`imageId:\\s*\`${activity}:`, 'g')) || [];
+    test.each(['hunt', 'fish', 'mine'])('%s', activity => {
+        const slots = shopSource(activity).match(new RegExp(`imageId:\\s*\`${activity}:`, 'g')) || [];
         expect(slots.length).toBeGreaterThan(0);
         expect(Object.keys(ACTIVITY_ITEMS[activity])).toHaveLength(slots.length);
     });

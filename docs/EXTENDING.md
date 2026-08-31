@@ -59,7 +59,19 @@ and `eslint.config.js`.
 
 A command is one file under `src/commands/<category>/`, or a folder with an
 `index.js` when it has outgrown one file. The category comes from the
-directory; nothing else registers a command.
+directory; nothing else registers a command — the loader treats only
+`<category>/<name>/index.js` as a command, so a folder's siblings, and any
+folders nested inside it, never register as commands of their own.
+
+That nesting is how `/hunt`, `/fish` and `/mine` are laid out: `hunt/index.js`
+is the definition and the dispatch, `hunt/start.js` and `hunt/quests.js` are
+verbs, and `hunt/shop/` is a verb group that outgrew a file in turn — its own
+`index.js` plus one file per shop verb.
+
+`eslint-rules/command-file-size.js` caps how long any of these may get and
+fails the lint when one goes over. The two ways past it are splitting the file
+the way above, and moving the logic into the service layer, which is where most
+of what makes a command file long belongs anyway.
 
 ### Basic Command Template
 
@@ -391,6 +403,34 @@ module.exports = {
     scheduledTask
 };
 ```
+
+### The grind engine
+
+`/hunt`, `/fish`, `/mine` and `/explore` are four subsystems built on one
+design, and the parts of that design that are not about animals or fish or ore
+live in `src/services/grindEngine.js`: the stamina bank, the rolling daily
+window, the level ladder, the daily payout throttle and the gathering-yield
+doubling. Each is parameterised by a spec per subsystem — which key on the user
+document it lives under, which tables in `data/<name>Data.js` describe it, which
+synergies feed its stamina bar — and the subsystem's own service supplies the
+`'hunt'` or `'fish'` and keeps the rest: the roll tables, the encounter
+resolution, the quests.
+
+Two rules follow from it, and both exist because they were broken before:
+
+- **A mechanic every grind has belongs in the engine, not in a fourth copy.**
+  The engine exists because `applyStaminaRegen` was written out four times and
+  only one of the four had been fixed to stop writing to the database on every
+  read.
+- **A grind service never requires another grind service.** `fishService`
+  required `huntService` to reach the hunting stamina bar, because an energy
+  drink refills both; that is `grindEngine.restoreStamina(user, 'hunt', n)`
+  now. Reaching a shared mechanic through whichever sibling happens to own it
+  is how four subsystems become one knot. `tests/grindEngine.test.js` fails if
+  one comes back.
+
+The shop half is the same shape: `src/utils/grindShop.js` holds the wallet, the
+charge and the refund that all three gear shops spend through.
 
 ### Using a Service in Commands
 

@@ -12,6 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const {
     parseAll,
@@ -109,45 +110,84 @@ describe('the sections it finds', () => {
 });
 
 describe('the generator itself', () => {
-    /** Runs `body` with an extra panel template on disk, and removes it after. */
+    /**
+     * Runs `body` against a panel directory that holds every real panel plus one
+     * extra, and hands that directory to `body`.
+     *
+     * The extra template used to be written straight into
+     * `src/dashboard/views/partials/panels/` and deleted again. Nine other
+     * suites sweep the views tree — dashboardInlineAttributes, dashboardModals,
+     * dashboardFormLabels, settingsPayload and the rest — and Jest runs suites
+     * in parallel workers, so one of them could list the probe at module load
+     * and then read a file that had vanished a millisecond later. That is
+     * exactly what happened: a run reported one extra test case and an ENOENT
+     * out of dashboardInlineAttributes' file reader, then passed on a re-run.
+     *
+     * The real panels are symlinked rather than copied, so the mirror is
+     * content-identical and cannot drift from what ships; only the probe is a
+     * real file. Nothing is written inside src/ at any point, which is what
+     * makes the race impossible rather than merely unlikely.
+     */
     function withProbe(source, body) {
-        const file = path.join(PANEL_DIR, '__panel_probe.ejs');
-        fs.writeFileSync(file, source);
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdia-panels-'));
         try {
-            body();
+            for (const name of fs.readdirSync(PANEL_DIR)) {
+                fs.symlinkSync(path.join(PANEL_DIR, name), path.join(dir, name));
+            }
+            fs.writeFileSync(path.join(dir, '__panel_probe.ejs'), source);
+            body(dir);
         } finally {
-            fs.unlinkSync(file);
+            fs.rmSync(dir, { recursive: true, force: true });
         }
     }
 
+    // The guard on the paragraph above. Asserted *inside* the body, while the
+    // probe exists: checking afterwards would pass for the old version too,
+    // which also cleaned up — it is the window in the middle that other workers
+    // could see.
+    test('never puts the probe anywhere the other suites can see it', () => {
+        const before = fs.readdirSync(PANEL_DIR).sort();
+
+        withProbe('<div class="panel-head"><p>Probe.</p></div>', dir => {
+            expect(fs.readdirSync(PANEL_DIR).sort()).toEqual(before);
+            expect(fs.existsSync(path.join(PANEL_DIR, '__panel_probe.ejs'))).toBe(false);
+            // …and the mirror really is the whole panel set plus the one extra,
+            // or the tests below would be checking a directory of one file.
+            expect(fs.readdirSync(dir).sort()).toEqual([...before, '__panel_probe.ejs'].sort());
+            expect(dir.startsWith(os.tmpdir())).toBe(true);
+        });
+
+        expect(fs.readdirSync(PANEL_DIR).sort()).toEqual(before);
+    });
+
     test('reads the panel-head paragraph, to the end of its first sentence', () => {
-        withProbe('<div class="panel-head"><h2>Probe</h2><p>Does a thing. And another thing.</p></div>', () => {
-            expect(summaryOf('__panel_probe')).toBe('Does a thing');
+        withProbe('<div class="panel-head"><h2>Probe</h2><p>Does a thing. And another thing.</p></div>', dir => {
+            expect(summaryOf('__panel_probe', dir)).toBe('Does a thing');
         });
     });
 
     test('renders an inline <code> as markdown backticks', () => {
-        withProbe('<div class="panel-head"><p>Run <code>/probe</code> to start.</p></div>', () => {
-            expect(summaryOf('__panel_probe')).toBe('Run `/probe` to start');
+        withProbe('<div class="panel-head"><p>Run <code>/probe</code> to start.</p></div>', dir => {
+            expect(summaryOf('__panel_probe', dir)).toBe('Run `/probe` to start');
         });
     });
 
     test('decodes the entities the panel copy uses', () => {
-        withProbe('<div class="panel-head"><p>Link &amp; invite filtering.</p></div>', () => {
-            expect(summaryOf('__panel_probe')).toBe('Link & invite filtering');
+        withProbe('<div class="panel-head"><p>Link &amp; invite filtering.</p></div>', dir => {
+            expect(summaryOf('__panel_probe', dir)).toBe('Link & invite filtering');
         });
     });
 
     // Overview uses this: it opens on a greeting, not a description.
     test('prefers a declared summary over the panel-head paragraph', () => {
-        withProbe('<%# summary: The declared one. %><div class="panel-head"><p>The paragraph one.</p></div>', () => {
-            expect(summaryOf('__panel_probe')).toBe('The declared one');
+        withProbe('<%# summary: The declared one. %><div class="panel-head"><p>The paragraph one.</p></div>', dir => {
+            expect(summaryOf('__panel_probe', dir)).toBe('The declared one');
         });
     });
 
     test('finds nothing in a panel with neither, which is what fails the build', () => {
-        withProbe('<section id="probe" class="panel"><h2>Probe</h2></section>', () => {
-            expect(summaryOf('__panel_probe')).toBe('');
+        withProbe('<section id="probe" class="panel"><h2>Probe</h2></section>', dir => {
+            expect(summaryOf('__panel_probe', dir)).toBe('');
         });
     });
 
@@ -174,8 +214,8 @@ describe('the generator itself', () => {
     // sidebar is unreachable in the UI. Silently leaving it out of the table
     // would document the bug as if it were the design.
     test('refuses a panel the sidebar has no tab for', () => {
-        withProbe('<div class="panel-head"><p>Probe.</p></div>', () => {
-            expect(() => parseAll()).toThrow(/no tab for them: __panel_probe/);
+        withProbe('<div class="panel-head"><p>Probe.</p></div>', dir => {
+            expect(() => parseAll(dir)).toThrow(/no tab for them: __panel_probe/);
         });
     });
 

@@ -36,10 +36,11 @@ const CLAIMS = [
     { file: 'daily.js',        field: 'lastDaily',        shape: 'floor' },
     { file: 'crime.js',        field: 'lastCrime',        shape: 'floor' },
     { file: 'quiz.js',         field: 'lastQuiz',         shape: 'floor' },
-    { file: 'snowball.js',     field: 'lastSnowball',     shape: 'floor' },
-    { file: 'sandcastle.js',   field: 'lastSandcastle',   shape: 'floor' },
-    { file: 'trickortreat.js', field: 'lastTrickOrTreat', shape: 'floor' },
-    { file: 'trackhunt.js',    field: 'lastTrackHunt',    shape: 'floor' },
+    { file: 'event/snowball.js',     field: 'lastSnowball',     shape: 'floor' },
+    { file: 'event/sandcastle.js',   field: 'lastSandcastle',   shape: 'floor' },
+    { file: 'event/trickortreat.js', field: 'lastTrickOrTreat', shape: 'floor' },
+    { file: 'event/trackhunt.js',    field: 'lastTrackHunt',    shape: 'floor' },
+    { file: 'event/lovenote.js',     field: 'lastLoveNote',     shape: 'floor' },
     { file: 'rob.js',          field: 'lastRob',          shape: 'cas' },
 ];
 

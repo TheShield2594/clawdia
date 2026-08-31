@@ -2,7 +2,6 @@
 
 const {
     LIMITS,
-    EXPLORER_LEVELS,
     EXPLORER_PRESTIGE,
     MAX_EXPLORER_LEVEL,
     MAX_EXPLORER_PRESTIGE,
@@ -15,20 +14,22 @@ const {
     RELIC_INDEX,
     QUIET_LINES,
 } = require('../data/exploreData');
-const { getExploreWayfinderStaminaBonus } = require('./synergyService');
+const grind = require('./grindEngine');
 const { MATERIAL_RARITY } = require('../data/materialRarity');
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
+// Explore's own counters. `xp`, `dailyCoins` and `dailyExpeditions` are the
+// engine's and are seeded there, for every grind at once.
 const EXPLORE_COUNTERS = [
-    'xp', 'totalExpeditions', 'treasuresFound', 'trapsSprung', 'encountersWon',
+    'totalExpeditions', 'treasuresFound', 'trapsSprung', 'encountersWon',
     'secretsFound', 'loreCollected', 'landmarksDiscovered', 'relicsRecovered',
     'totalEarned', 'bestHaul', 'sinceSecret', 'regionsSurveyed',
-    'dailyCoins', 'dailyExpeditions',
 ];
 
-// Timestamps that legitimately sit at null until something happens
-const EXPLORE_TIMESTAMPS = ['staminaLastRegen', 'lastExplore', 'injuryUntil', 'dailyWindowStart'];
+// Timestamps that legitimately sit at null until something happens.
+// `staminaLastRegen` and `dailyWindowStart` are the engine's, likewise.
+const EXPLORE_TIMESTAMPS = ['lastExplore', 'injuryUntil'];
 
 /**
  * Backfill the exploration profile. Reports whether it actually wrote anything,
@@ -38,8 +39,10 @@ const EXPLORE_TIMESTAMPS = ['staminaLastRegen', 'lastExplore', 'injuryUntil', 'd
  * @returns {boolean} true if any field was seeded
  */
 function ensureExploreData(user) {
-    let dirty = false;
-    if (!user.exploration) { user.exploration = {}; dirty = true; }
+    // Stamina, xp, level, prestige, the daily counters and the material bag are
+    // the engine's fields and it seeds them for every grind the same way (#892).
+    // What is below is the rest of an explorer profile, which is explore's own.
+    let dirty = grind.ensureSharedFields(user, 'explore');
     const e = user.exploration;
 
     const seed = (key, value) => {
@@ -49,9 +52,6 @@ function ensureExploreData(user) {
         if (!Array.isArray(e[key])) { e[key] = []; dirty = true; }
     };
 
-    seed('stamina', LIMITS.MAX_STAMINA);
-    seed('level', 1);
-    seed('prestige', 0);
     seed('activeRegion', 'whispering_forest');
     for (const key of EXPLORE_COUNTERS) seed(key, 0);
     for (const key of EXPLORE_TIMESTAMPS) {
@@ -60,12 +60,6 @@ function ensureExploreData(user) {
     seedArray('unlockedRegions');
     seedArray('regions');
     seedArray('journal');
-    // Fieldcraft materials, keyed by material id (#753). Same shape as
-    // hunt/fishing/mining hold, so /pet feed and the inventory tabs read it the
-    // same way. GrindProfile.data is schemaless, so this needs no migration —
-    // an existing explorer picks it up on their next expedition.
-    if (!e.materials || typeof e.materials !== 'object') { e.materials = {}; dirty = true; }
-
     if (!e.unlockedRegions.includes('whispering_forest')) {
         e.unlockedRegions.push('whispering_forest');
         dirty = true;
@@ -103,72 +97,23 @@ function getRegionProgress(user, regionId, { create = false } = {}) {
  * The Permanent Stamina +1 shop item stays out of this on purpose — it is sold
  * as hunt/fish/mine only.
  */
-function getMaxStamina(user) {
-    return LIMITS.MAX_STAMINA
-        + getExploreWayfinderStaminaBonus(user)
-        + getExplorerPrestige(user).staminaBonus;
-}
+// The mechanics below — the stamina bank, the rolling daily window, the level
+// ladder and the countdown format — are the same in all four grinds and live in
+// services/grindEngine.js (#892). What is left here is the `'explore'` in each
+// call: which spec the engine should use.
+const getMaxStamina = user => grind.getMaxStamina(user, 'explore');
 
 /** @returns {boolean} true if anything was written */
-function applyStaminaRegen(user) {
-    const e = user.exploration;
-    const max = getMaxStamina(user);
+const applyStaminaRegen = user => grind.applyStaminaRegen(user, 'explore');
 
-    if (e.stamina >= max) {
-        // Sitting at full: keep the regen anchor fresh so the clock starts from
-        // roughly the moment stamina is next spent — but only rewrite it once
-        // it has actually gone stale, or every read would be a write.
-        const stale = !e.staminaLastRegen
-            || Date.now() - e.staminaLastRegen.getTime() >= LIMITS.STAMINA_REGEN_MS;
-        const overfull = e.stamina > max;
-        e.stamina = max;
-        if (!stale && !overfull) return false;
-        e.staminaLastRegen = new Date();
-        user.markModified('exploration');
-        return true;
-    }
-    if (!e.staminaLastRegen) {
-        e.staminaLastRegen = new Date();
-        user.markModified('exploration');
-        return true;
-    }
-    const elapsed = Date.now() - e.staminaLastRegen.getTime();
-    const intervals = Math.floor(elapsed / LIMITS.STAMINA_REGEN_MS);
-    if (intervals <= 0) return false;
-
-    e.stamina = Math.min(max, e.stamina + intervals);
-    e.staminaLastRegen = new Date(e.staminaLastRegen.getTime() + intervals * LIMITS.STAMINA_REGEN_MS);
-    user.markModified('exploration');
-    return true;
-}
-
-function msUntilNextStamina(user) {
-    const e = user.exploration;
-    if (e.stamina >= getMaxStamina(user)) return 0;
-    if (!e.staminaLastRegen) return LIMITS.STAMINA_REGEN_MS;
-    const elapsed = Date.now() - e.staminaLastRegen.getTime();
-    return Math.max(0, LIMITS.STAMINA_REGEN_MS - (elapsed % LIMITS.STAMINA_REGEN_MS));
-}
+const msUntilNextStamina = user => grind.msUntilNextStamina(user, 'explore');
 
 /** @returns {boolean} true if the window rolled over */
-function applyDailyReset(user) {
-    const e = user.exploration;
-    const now = Date.now();
-    if (!e.dailyWindowStart || now - e.dailyWindowStart.getTime() >= LIMITS.DAILY_WINDOW_MS) {
-        e.dailyCoins       = 0;
-        e.dailyExpeditions = 0;
-        e.dailyWindowStart = new Date(now);
-        user.markModified('exploration');
-        return true;
-    }
-    return false;
-}
+const applyDailyReset = user => grind.applyDailyReset(user, 'explore');
 
 // ─── EXPLORER XP / LEVELS ────────────────────────────────────────────────────
 
-function getLevelData(level) {
-    return EXPLORER_LEVELS[Math.min(level, EXPLORER_LEVELS.length) - 1] ?? EXPLORER_LEVELS[0];
-}
+const getLevelData = level => grind.getLevelData(level, 'explore');
 
 // ─── EXPLORER PRESTIGE ───────────────────────────────────────────────────────
 
@@ -210,28 +155,22 @@ function getExplorerTitle(user) {
     return getLevelData(level).title;
 }
 
-function xpToNextLevel(level, xp) {
-    const next = EXPLORER_LEVELS.find(l => l.level === level + 1);
-    if (!next) return null; // max level
-    return Math.max(0, next.xpRequired - xp);
-}
+const xpToNextLevel = (level, xp) => grind.xpToNextLevel(level, xp, 'explore');
 
 /**
  * Add explorer XP (cumulative), handling multi-level crossings.
  * Returns { leveled, newLevel, newTitle }.
  */
+/**
+ * Credit explorer xp. The ladder itself is the engine's; the title that comes
+ * with the new rank is explore's own, so the return shape stays here.
+ */
 function applyExplorerXp(user, amount) {
-    const e = user.exploration;
-    e.xp += amount;
-    let leveled = false;
-    let next = EXPLORER_LEVELS.find(l => l.level === e.level + 1);
-    while (next && e.xp >= next.xpRequired) {
-        e.level += 1;
-        leveled = true;
-        next = EXPLORER_LEVELS.find(l => l.level === e.level + 1);
-    }
+    const { newLevel, leveledUp } = grind.applyXp(user, amount, 'explore');
+    // The engine marks the subdocument only when the level moved; the xp itself
+    // always did.
     user.markModified('exploration');
-    return { leveled, newLevel: e.level, newTitle: getLevelData(e.level).title };
+    return { leveled: leveledUp, newLevel, newTitle: getLevelData(newLevel).title };
 }
 
 // ─── RNG / UTILS ─────────────────────────────────────────────────────────────
@@ -1052,15 +991,7 @@ function renderMap(user, guildSettings) {
 
 // ─── MISC ────────────────────────────────────────────────────────────────────
 
-function formatMs(ms) {
-    const totalSec = Math.ceil(ms / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    if (h > 0) return `${h}h ${m}m`;
-    if (m > 0) return `${m}m ${s}s`;
-    return `${s}s`;
-}
+const formatMs = grind.formatMs;
 
 module.exports = {
     ensureExploreData,

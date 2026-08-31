@@ -45,48 +45,7 @@ const { FISH_TIER_SCORE } = require('./shared');
 const { buildCastEmbed } = require('./embeds');
 const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
-
-// ─── Staged loot reveal for rare+ drops ──────────────────────────────────────
-async function stagedLootReveal(interaction, tier, finalEmbed) {
-    const tierNum = TIER_NUM[tier] ?? 0;
-    if (tierNum < 3) {
-        await interaction.editReply({ embeds: [finalEmbed] });
-        return;
-    }
-    const wait = ms => new Promise(r => setTimeout(r, ms));
-
-    const fogEmbed = new EmbedBuilder()
-        .setColor('#4a4a4a')
-        .setTitle('🌫️ Something stirs beneath the surface...')
-        .setDescription('━━━━━━━━━━━━━━━\n*The water shimmers. Something extraordinary is here.*\n━━━━━━━━━━━━━━━');
-
-    if (tierNum === 3) {
-        await interaction.editReply({ embeds: [fogEmbed] });
-        await wait(1500);
-    } else {
-        await interaction.editReply({ embeds: [fogEmbed] });
-        await wait(1500);
-        const midColor = tierNum === 6 ? '#e74c3c' : tierNum === 4 ? '#9c27b0' : '#ff9800';
-        const midTitle = tierNum === 6 ? '☄️ The water goes utterly still...' : tierNum === 4 ? '🔮 Something exceptional breaks the surface...' : '⚡ The line pulls taut with impossible force...';
-        const midTierLabel = tierNum === 6 ? 'EVENT' : tierNum === 4 ? 'EPIC' : 'LEGENDARY';
-        const midEmbed = new EmbedBuilder()
-            .setColor(midColor)
-            .setTitle(midTitle)
-            .setDescription(`━━━━━━━━━━━━━━━\n❓❓❓  **${midTierLabel}**  ❓❓❓\n━━━━━━━━━━━━━━━`);
-        await interaction.editReply({ embeds: [midEmbed] });
-        await wait(1500);
-        if (tierNum >= 5) {
-            const isEvent = tierNum === 6;
-            const fanfareEmbed = new EmbedBuilder()
-                .setColor(isEvent ? '#e74c3c' : '#ff9800')
-                .setTitle(isEvent ? '☄️ 🌊 𝗠 𝗬 𝗧 𝗛 𝗜 𝗖 𝗔 𝗟 🌊 ☄️' : '⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
-                .setDescription(isEvent ? '━━━━━━━━━━━━━━━\n*Sailors tell stories about this one. Now you are the story.*\n━━━━━━━━━━━━━━━' : '━━━━━━━━━━━━━━━\n*The ocean holds its breath. This catch defies all odds.*\n━━━━━━━━━━━━━━━');
-            await interaction.editReply({ embeds: [fanfareEmbed] });
-            await wait(1500);
-        }
-    }
-    await interaction.editReply({ embeds: [finalEmbed] });
-}
+const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CAST
@@ -632,7 +591,7 @@ async function handleCast(interaction) {
         }
 
         // Staged loot reveal for rare+ drops
-        await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+        await stagedLootReveal(interaction, result.success ? result.tier : null, embed, 'fish');
 
         if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
@@ -768,5 +727,4 @@ module.exports = {
     checkAndUpdateWorldRecord,
     handleCast,
     replyCastPreflightFailure,
-    stagedLootReveal,
 };

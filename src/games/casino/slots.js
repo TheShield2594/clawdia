@@ -14,82 +14,28 @@ const { randomFrom, SLOTS_LOSE_LINES, SLOTS_WIN_LINES } = require('../../utils/c
 const { claimJackpot, DEFAULT_SEED: JACKPOT_SEED } = require('../../services/casinoJackpotService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const {
+    SYMBOLS,
+    HIGH_VALUE_SYMBOLS,
+    FREE_SPIN_JACKPOT_MULT,
+    spinReel,
+    randomEmoji,
+    evaluate,
+} = require('./slotsReels');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b0.png';
 
-const SYMBOLS = [
-    { emoji: '🍒', name: 'Cherry',   type: 'regular',    weight: 28, payout: 2  },
-    { emoji: '🍋', name: 'Lemon',    type: 'regular',    weight: 22, payout: 3  },
-    { emoji: '🍇', name: 'Grape',    type: 'regular',    weight: 18, payout: 5  },
-    { emoji: '🔔', name: 'Bell',     type: 'regular',    weight: 12, payout: 8  },
-    { emoji: '💎', name: 'Diamond',  type: 'regular',    weight: 8,  payout: 15 },
-    { emoji: '🌟', name: 'Star',     type: 'regular',    weight: 5,  payout: 25 },
-    { emoji: '🃏', name: 'Wild',     type: 'wild',       weight: 4              },
-    { emoji: '⚡', name: '2x Boost', type: 'multiplier', weight: 3, multiplier: 2 },
-    { emoji: '🌸', name: 'Scatter',  type: 'scatter',    weight: 2              },
-];
+const WIN_ANNOUNCE_MULT = 50;
 
-const HIGH_VALUE_SYMBOLS = ['Bell', 'Diamond', 'Star'];
-const WIN_ANNOUNCE_MULT  = 50;
-
-const TOTAL_WEIGHT      = SYMBOLS.reduce((sum, s) => sum + s.weight, 0);
-const SPIN_POOL         = SYMBOLS.filter(s => s.type === 'regular' || s.type === 'wild');
 // The jackpot slots plays for is the shared progressive pool
 // (services/casinoJackpotService) — the same one `/casino jackpot` reports and
 // every casino bet feeds at 0.5%. Slots keeps no pool of its own; a Triple Wild is
 // simply a second, rarer way to claim this one. FREE_SPIN_JACKPOT_MULT is what a
 // Triple Wild pays when it cannot claim the pool: on a free spin (which staked
 // nothing) or if the pool credit failed and was rolled back.
-const FREE_SPIN_JACKPOT_MULT = 25;
-
-function spinReel() {
-    let r = Math.random() * TOTAL_WEIGHT;
-    for (const s of SYMBOLS) {
-        r -= s.weight;
-        if (r <= 0) return s;
-    }
-    return SYMBOLS[0];
-}
-
-function randomEmoji() {
-    return SPIN_POOL[Math.floor(Math.random() * SPIN_POOL.length)].emoji;
-}
 
 function reelDisplay(reels, revealed) {
     return reels.map((s, i) => i < revealed ? s.emoji : randomEmoji()).join('  ┃  ');
-}
-
-function evaluate(reels, bet) {
-    const regulars   = reels.filter(s => s.type === 'regular');
-    const wilds      = reels.filter(s => s.type === 'wild');
-    const mults      = reels.filter(s => s.type === 'multiplier');
-    const scatters   = reels.filter(s => s.type === 'scatter');
-    const wildCount  = wilds.length;
-    const multFactor = mults.reduce((acc, m) => acc * m.multiplier, 1);
-
-    if (wildCount === 3)
-        return { payout: 0, outcome: 'jackpot', symbol: null, wildCount, multFactor, scatterCount: 0 }; // payout filled in by caller
-    if (mults.length === 3)
-        return { payout: bet * 4, outcome: 'mult3', symbol: null, wildCount, multFactor, scatterCount: 0 };
-
-    // Scatter: 2+ triggers free spins (resolved in caller)
-    if (scatters.length >= 2)
-        return { payout: 0, outcome: 'scatter', symbol: null, wildCount, multFactor, scatterCount: scatters.length };
-
-    if (regulars.length > 0) {
-        const freq = {};
-        for (const s of regulars) freq[s.name] = (freq[s.name] || 0) + 1;
-        const [topName, topCount] = Object.entries(freq).sort((a, b) => b[1] - a[1])[0];
-        const effective = topCount + wildCount;
-        const sym = SYMBOLS.find(s => s.name === topName);
-
-        if (effective >= 3)
-            return { payout: bet * sym.payout * multFactor, outcome: 'three', symbol: sym, wildCount, multFactor, scatterCount: 0 };
-        if (effective === 2)
-            return { payout: Math.floor(bet * sym.payout * 0.5 * multFactor), outcome: 'two', symbol: sym, wildCount, multFactor, scatterCount: 0 };
-    }
-
-    return { payout: 0, outcome: 'lose', symbol: null, wildCount, multFactor, scatterCount: 0 };
 }
 
 function embedAuthor(interaction) {
@@ -200,7 +146,7 @@ function paytableEmbed() {
             { name: '🌸🌸🌸 Three Scatters', value: '**5 free spins** with **1.5× multiplier**', inline: true },
             { name: '🔥 Hot Reel', value: 'After 3 losses in a row, reel 1 locks to a high-value symbol', inline: false },
         )
-        .setFooter({ text: 'Two-of-a-kind pays 50% of the three-of-a-kind rate for that symbol' });
+        .setFooter({ text: 'Two-of-a-kind pays 50% of the three-of-a-kind rate for that symbol • a Wild beside two different symbols completes the better-paying one' });
 }
 
 module.exports = {

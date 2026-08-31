@@ -254,10 +254,10 @@ describe('applyPayoutModifiers gathering-yield charges', () => {
         addEffect(user, 'silvered_talisman');
         const before = getEffect(user, 'silvered_talisman').charges;
 
-        const { adjustedPayout, gatherEffectConsumed } = applyPayoutModifiers(user, 0, pond);
+        const { adjustedPayout, gatheringYield } = applyPayoutModifiers(user, 0, pond);
 
         expect(adjustedPayout).toBe(0);
-        expect(gatherEffectConsumed).toBeFalsy();
+        expect(gatheringYield).toBeNull();
         expect(getEffect(user, 'silvered_talisman').charges).toBe(before);
     });
 
@@ -266,10 +266,10 @@ describe('applyPayoutModifiers gathering-yield charges', () => {
         addEffect(user, 'silvered_talisman');
         const before = getEffect(user, 'silvered_talisman').charges;
 
-        const { adjustedPayout, gatherEffectConsumed } = applyPayoutModifiers(user, 100, pond);
+        const { adjustedPayout, gatheringYield } = applyPayoutModifiers(user, 100, pond);
 
         expect(adjustedPayout).toBe(200);
-        expect(gatherEffectConsumed).toBe('silvered_talisman');
+        expect(gatheringYield.effect).toBe('silvered_talisman');
         expect(getEffect(user, 'silvered_talisman').charges).toBe(before - 1);
     });
 
@@ -289,6 +289,23 @@ describe('applyPayoutModifiers gathering-yield charges', () => {
         const user = makeUser({ dailyCoins: LIMITS.DAILY_HARD_CAP - 1 });
         const { adjustedPayout } = applyPayoutModifiers(user, 50_000, pond);
         expect(adjustedPayout).toBeLessThanOrEqual(1);
+    });
+
+    // #892. This copy used to spend a charge whenever the payout was non-zero,
+    // where hunt and mine spent one only when doubling actually paid more — so
+    // an angler one coin under the hard cap lost a charge to a bonus the
+    // headroom clamp then swallowed whole. All three go through the engine's
+    // one rule now.
+    test('spends no charge when the headroom clamp would swallow the bonus', () => {
+        const user = makeUser({ dailyCoins: LIMITS.DAILY_HARD_CAP - 1 });
+        addEffect(user, 'silvered_talisman');
+        const before = getEffect(user, 'silvered_talisman').charges;
+
+        const { adjustedPayout, gatheringYield } = applyPayoutModifiers(user, 50_000, pond);
+
+        expect(adjustedPayout).toBe(1);
+        expect(gatheringYield).toBeNull();
+        expect(getEffect(user, 'silvered_talisman').charges).toBe(before);
     });
 });
 

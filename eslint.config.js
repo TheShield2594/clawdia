@@ -15,6 +15,7 @@ const js = require('@eslint/js');
 const globals = require('globals');
 const prettier = require('eslint-config-prettier/flat');
 const layers = require('./eslint-rules/layer-boundaries');
+const commandSize = require('./eslint-rules/command-file-size');
 
 // The direction dependencies are allowed to run in, lowest layer first (#614).
 // A module may require its own layer and anything below it; requiring anything
@@ -46,6 +47,16 @@ const LAYER_EXCEPTIONS = [
 const DEPRECATED_EPHEMERAL = {
     selector: 'Property[key.name="ephemeral"][value.value=true]',
     message: 'Use `flags: MessageFlags.Ephemeral` — the `ephemeral` option is deprecated in discord.js v14.',
+};
+
+// See the command-file-size block below. Lower `max` as the tree comes down;
+// an entry in GRANDFATHERED_COMMANDS may only ever be lowered or deleted.
+const COMMAND_FILE_MAX_LINES = 900;
+const GRANDFATHERED_COMMANDS = {
+    'src/commands/economy/explore.js':   1655,
+    'src/commands/economy/pet.js':       1490,
+    'src/commands/economy/season.js':    1083,
+    'src/commands/economy/syndicate.js': 1075,
 };
 
 const shared = {
@@ -131,6 +142,29 @@ module.exports = [
                 root: 'src',
                 layers: LAYERS,
                 allow: LAYER_EXCEPTIONS,
+            }],
+        },
+    },
+
+    // ── Command file size ───────────────────────────────────────────────
+    // #721 split /fish, /hunt and /mine out of three files of 3,476, 3,178 and
+    // 2,806 lines, and #917 split their shop groups out of another 2,285. What
+    // held them at that size afterwards was nothing: reviewer memory, and a
+    // joke in utils/embedColors about "a nine-hundred-line command file".
+    //
+    // 900 is that joke's number, and it is where the cap starts rather than
+    // where it should end — the three grind folders are all under 750 now, and
+    // this should follow them down. GRANDFATHERED_COMMANDS is the four commands
+    // that were already over it, each frozen at the length it had when the rule
+    // landed: they may shrink, never grow, and the entry has to go when the
+    // file reaches the cap. See eslint-rules/command-file-size.js.
+    {
+        files: ['src/commands/**/*.js'],
+        plugins: { command: commandSize },
+        rules: {
+            'command/command-file-size': ['error', {
+                max: COMMAND_FILE_MAX_LINES,
+                grandfathered: GRANDFATHERED_COMMANDS,
             }],
         },
     },
