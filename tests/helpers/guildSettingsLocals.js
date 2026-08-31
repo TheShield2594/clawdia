@@ -108,7 +108,7 @@ function populatedGuildSettingsLocals(overrides = {}) {
         cooldowns: [{ command: 'work', roleId: ROLE, seconds: 30 }],
     };
     s.antiNuke = { ...s.antiNuke, whitelistUserIds: [USER] };
-    s.autoRoles = [ROLE];
+    s.autoRoles = [{ roleId: ROLE }];
     s.reactionRoles = [{ messageId: '1', channelId: CHANNEL, emoji: '👍', roleId: ROLE }];
     s.rssFeeds = [{ url: 'https://example.com/feed.xml', channelId: CHANNEL }];
     s.moderation = {

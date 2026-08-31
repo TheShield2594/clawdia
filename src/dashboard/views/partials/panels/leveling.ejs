@@ -33,7 +33,7 @@
                             <% (settings.leveling.noXpRoleIds || []).forEach(function(rId) {
                                var role = roles.find(function(r){ return r.id === rId; });
                                if (role) { %>
-                                <span class="role-tag" data-role-id="<%= rId %>">@<%= role.name %> <button type="button" onclick="removeLevelNoXpRole('<%= rId %>')" title="Remove">&times;</button></span>
+                                <span class="role-tag" data-role-id="<%= rId %>">@<%= role.name %> <button type="button" onclick="removeLevelNoXpRole('<%= rId %>')" title="Remove" aria-label="Remove @<%= role.name %>">&times;</button></span>
                             <% } }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
@@ -47,7 +47,7 @@
                             <% (settings.leveling.noXpChannelIds || []).forEach(function(cId) {
                                var ch = channels.find(function(c){ return c.id === cId; });
                                if (ch) { %>
-                                <span class="role-tag" data-channel-id="<%= cId %>">#<%= ch.name %> <button type="button" onclick="removeLevelNoXpChannel('<%= cId %>')" title="Remove">&times;</button></span>
+                                <span class="role-tag" data-channel-id="<%= cId %>">#<%= ch.name %> <button type="button" onclick="removeLevelNoXpChannel('<%= cId %>')" title="Remove" aria-label="Remove #<%= ch.name %>">&times;</button></span>
                             <% } }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
@@ -62,7 +62,7 @@
                                 <div class="level-reward-row" style="display:flex;gap:.5rem;align-items:center">
                                     <input type="number" class="level-reward-level" value="<%= r.level %>" min="1" max="999" style="width:80px" placeholder="Level" aria-label="Required level">
                                     <%- include('../role-select', { cls: 'level-reward-role', ariaLabel: 'Reward role', placeholder: 'Select a role', selected: r.roleId }) %>
-                                    <button class="btn btn-danger" type="button" onclick="removeLevelRoleReward(this)" title="Remove">&times;</button>
+                                    <button class="btn btn-danger" type="button" onclick="removeLevelRoleReward(this)" title="Remove" aria-label="Remove the level <%= r.level %> reward">&times;</button>
                                 </div>
                             <% }); %>
                         </div>

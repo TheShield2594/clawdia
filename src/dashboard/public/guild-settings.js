@@ -501,7 +501,7 @@ function renderEscalationLadder() {
             <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-duration">Duration (min)</label><input type="number" id="esc-${idx}-duration" min="1" max="40320" value="${step.durationMinutes ?? ''}" ${needsDuration ? '' : 'disabled'} data-esc-idx="${idx}" data-esc-key="durationMinutes"></div>
             <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-dm">DM</label><input type="checkbox" id="esc-${idx}-dm" ${step.dmUser !== false ? 'checked' : ''} data-esc-idx="${idx}" data-esc-key="dmUser"></div>
             <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-reason">Reason (supports {count})</label><input type="text" id="esc-${idx}-reason" value="${escapeHtml(step.reason || '')}" data-esc-idx="${idx}" data-esc-key="reason"></div>
-            <div><button type="button" class="btn btn-sm" onclick="removeEscalationStep(${idx})">✕</button></div>
+            <div><button type="button" class="btn btn-sm" onclick="removeEscalationStep(${idx})" aria-label="Remove escalation step ${idx + 1}">✕</button></div>
         </div>`;
     }).join('');
 
@@ -1245,7 +1245,7 @@ function renderCpRules() {
         return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
             '<span style="flex:1"><strong>' + escHtml(r.command) + '</strong> — <span style="color:' + color + '">' + escHtml(r.effect) + '</span></span>' +
             '<button class="btn btn-sm" onclick="openCpRuleModal(' + i + ')">Edit</button>' +
-            '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpRules.splice(' + i + ',1);renderCpRules()">✕</button></div>';
+            '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpRules.splice(' + i + ',1);renderCpRules()" aria-label="Remove the ' + escHtml(r.command) + ' rule">✕</button></div>';
     }).join('');
 }
 var _cpRoleMap = boot('roleNames');
@@ -1257,7 +1257,7 @@ function renderCpCooldowns() {
         return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
             '<span style="flex:1"><strong>' + escHtml(c.command) + '</strong> — ' + escHtml(roleName) + ' → ' + escHtml(c.cooldownSeconds) + 's</span>' +
             '<button class="btn btn-sm" onclick="openCpCooldownModal(' + i + ')">Edit</button>' +
-            '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpCooldowns.splice(' + i + ',1);renderCpCooldowns()">✕</button></div>';
+            '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpCooldowns.splice(' + i + ',1);renderCpCooldowns()" aria-label="Remove the ' + escHtml(c.command) + ' cooldown override">✕</button></div>';
     }).join('');
 }
 function openCpRuleModal(idx) {
@@ -1324,6 +1324,7 @@ function addCpExcRole() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.title = 'Remove';
+    btn.setAttribute('aria-label', 'Remove ' + roleName);
     btn.textContent = '×';
     btn.onclick = function() { tag.remove(); };
     tag.appendChild(btn);
@@ -1584,8 +1585,8 @@ function renderJobs() {
             (job.emoji ? '<span class="job-chip-emoji">' + escHtml(job.emoji) + '</span>' : '') +
             '<span class="job-name">' + escHtml(job.name) + '</span>' +
             '<span class="job-pay-badge">💰 ' + minPay + '–' + maxPay + '</span>' +
-            '<button class="job-btn" onclick="openJobModal(' + i + ')" title="Edit">✏️</button>' +
-            '<button class="job-btn" onclick="deleteJob(' + i + ')" title="Remove" style="font-size:1rem">×</button>' +
+            '<button class="job-btn" onclick="openJobModal(' + i + ')" title="Edit" aria-label="Edit the ' + escHtml(job.name) + ' job">✏️</button>' +
+            '<button class="job-btn" onclick="deleteJob(' + i + ')" title="Remove" style="font-size:1rem" aria-label="Remove the ' + escHtml(job.name) + ' job">×</button>' +
         '</div>';
     });
     if (lastTier !== null) html += '</div>';
@@ -2027,7 +2028,7 @@ function addRrMapping() {
         '<select class="rr-role" aria-label="Role to assign"><option value="">Select role</option>' +
         rrRoles.map(function(r) { return '<option value="' + r.id + '">@' + escHtml(r.name) + '</option>'; }).join('') +
         '</select>' +
-        '<button class="btn btn-sm btn-danger" type="button" onclick="this.parentElement.remove()">×</button>';
+        '<button class="btn btn-sm btn-danger" type="button" onclick="this.parentElement.remove()" aria-label="Remove this reaction role mapping">×</button>';
     list.appendChild(row);
 }
 
@@ -3446,6 +3447,7 @@ function addLevelNoXpRole() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.title = 'Remove';
+    btn.setAttribute('aria-label', 'Remove ' + roleName);
     btn.textContent = '×';
     btn.onclick = () => tag.remove();
     tag.textContent = roleName + ' ';
@@ -3474,6 +3476,7 @@ function addLevelNoXpChannel() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.title = 'Remove';
+    btn.setAttribute('aria-label', 'Remove ' + channelName);
     btn.textContent = '×';
     btn.onclick = () => tag.remove();
     tag.textContent = channelName + ' ';
@@ -3511,6 +3514,7 @@ function addLevelRoleReward() {
     delBtn.className = 'btn btn-danger';
     delBtn.type = 'button';
     delBtn.title = 'Remove';
+    delBtn.setAttribute('aria-label', 'Remove this level reward');
     delBtn.textContent = '×';
     delBtn.onclick = () => row.remove();
     row.appendChild(levelInput);
@@ -3541,7 +3545,7 @@ function addSeasonTierRow() {
         '<input type="number" class="season-tier-coins" min="0" style="width:90px" placeholder="Coins" aria-label="Coin reward">' +
         '<select class="season-tier-role" aria-label="Reward role">' + roleOptionsHtml + '</select>' +
         '<input type="text" class="season-tier-label" style="flex:1;min-width:100px" placeholder="Label (e.g. Bronze Tier)" aria-label="Tier label">' +
-        '<button class="btn btn-danger" type="button" onclick="this.closest(\'.season-tier-row\').remove()" title="Remove">&times;</button>';
+        '<button class="btn btn-danger" type="button" onclick="this.closest(\'.season-tier-row\').remove()" title="Remove" aria-label="Remove this tier reward">&times;</button>';
     list.appendChild(row);
 }
 
@@ -4604,7 +4608,7 @@ async function ecoAdminAction(action) {
         const safeId   = escHtml(id);
         const safeName = escHtml(name);
         const safeAv   = avatarUrl ? escHtml(avatarUrl) : '';
-        tag.innerHTML  = `${safeAv ? `<img src="${safeAv}" alt="" style="width:16px;height:16px;border-radius:50%" onerror="this.style.display='none'">` : ''}<span title="${safeId}">${safeName}</span><button type="button" title="Remove">&times;</button>`;
+        tag.innerHTML  = `${safeAv ? `<img src="${safeAv}" alt="" style="width:16px;height:16px;border-radius:50%" onerror="this.style.display='none'">` : ''}<span title="${safeId}">${safeName}</span><button type="button" title="Remove" aria-label="Remove ${safeName}">&times;</button>`;
         tag.querySelector('button').addEventListener('click', function() {
             const ta = document.getElementById(widgetId);
             if (ta) ta.value = ta.value.split('\n').map(s => s.trim()).filter(s => s && s !== id).join('\n');

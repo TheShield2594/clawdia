@@ -24,7 +24,7 @@
                                     <input type="number" class="season-tier-coins" value="<%= r.coins %>" min="0" style="width:90px" placeholder="Coins" aria-label="Coin reward">
                                     <%- include('../role-select', { cls: 'season-tier-role', ariaLabel: 'Reward role', placeholder: 'No role', selected: r.roleId }) %>
                                     <input type="text" class="season-tier-label" value="<%= r.label || '' %>" style="flex:1;min-width:100px" placeholder="Label (e.g. Bronze Tier)" aria-label="Tier label">
-                                    <button class="btn btn-danger" type="button" onclick="this.closest('.season-tier-row').remove()" title="Remove">&times;</button>
+                                    <button class="btn btn-danger" type="button" onclick="this.closest('.season-tier-row').remove()" title="Remove" aria-label="Remove the tier <%= r.tier %> reward">&times;</button>
                                 </div>
                             <% }); %>
                         </div>
