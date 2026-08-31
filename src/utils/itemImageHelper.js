@@ -46,10 +46,12 @@ async function getItemImageAttachment(itemId, guildId = null, { label } = {}) {
     // filenames, so sanitize it here without touching the lookups above.
     const safeId = itemId.replace(/[^a-zA-Z0-9_-]/g, '_');
     const filename = `item-${safeId}.${ext}`;
-    const attachment = new AttachmentBuilder(Buffer.from(imageData), {
-        name: filename,
-        description: `Artwork for the item ${label || itemId}.`,
-    });
+    // Discord caps alt text at 1024 characters and rejects the upload over it,
+    // and a shop item's name is whatever an admin typed into the dashboard. The
+    // finished string is what gets cut, not just the label: capping the label
+    // alone would still let the prefix carry the total past the limit.
+    const description = `Artwork for the item ${label || itemId}.`.slice(0, 1024);
+    const attachment = new AttachmentBuilder(Buffer.from(imageData), { name: filename, description });
     return { attachment, url: `attachment://${filename}` };
 }
 

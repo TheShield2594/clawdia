@@ -30,6 +30,7 @@ const fs = require('fs');
 const path = require('path');
 const ejs = require('ejs');
 const { guildSettingsLocals, populatedGuildSettingsLocals } = require('./helpers/guildSettingsLocals');
+const { renderPanel, bootPage, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
 
 const VIEWS = path.join(__dirname, '..', 'src', 'dashboard', 'views');
 const PANELS = path.join(VIEWS, 'partials', 'panels');
@@ -165,10 +166,16 @@ describe('markup the script renders at runtime', () => {
         expect(markupButtons().filter(b => iconOnly(b.text)).length).toBeGreaterThan(5);
     });
 
+    // A repeater row's button is named from the row's own fields, which change
+    // under the user, so its label is written by labelRepeatedRows rather than
+    // baked into the markup. `data-row-remove` is what opts a button into that,
+    // and the DOM suite below is what checks the labels actually arrive.
+    const namedAtRuntime = attrs => /\bdata-row-remove\s*=/.test(attrs);
+
     it('labels every icon-only button it writes as markup', () => {
         const nameless = markupButtons()
             .filter(button => iconOnly(button.text))
-            .filter(button => !/\baria-label\s*=/.test(button.attrs))
+            .filter(button => !/\baria-label\s*=/.test(button.attrs) && !namedAtRuntime(button.attrs))
             .map(button => `<button${button.attrs}>${button.text}`.replace(/\s+/g, ' ').slice(0, 90));
         expect(nameless).toEqual([]);
     });
@@ -190,6 +197,8 @@ describe('markup the script renders at runtime', () => {
             const text = new RegExp(`${name}\\.textContent\\s*=\\s*'([^']*)'`).exec(block);
             if (!text || !iconOnly(text[1])) return;
             if (new RegExp(`${name}\\.(setAttribute\\(['"]aria-label|ariaLabel\\s*=)`).test(block)) return;
+            // Or it opts into being named from its row's contents at runtime.
+            if (new RegExp(`${name}\\.(dataset\\.rowRemove|setAttribute\\(['"]data-row-remove)`).test(block)) return;
             nameless.push(`${name} at line ${i + 1}`);
         });
 
@@ -200,5 +209,130 @@ describe('markup the script renders at runtime', () => {
         const created = script.match(/document\.createElement\(['"]button['"]\)/g) || [];
         expect(created.length).toBeGreaterThan(2);
         expect((script.match(/setAttribute\('aria-label'/g) || []).length).toBeGreaterThan(2);
+    });
+});
+
+// A repeater is where a static label runs out. Every row holds the same button,
+// so "Remove this level reward" five times over names none of them — and the
+// value that would name one is a field the user edits, so the label has to be
+// rewritten as the row changes rather than written once. These drive the real
+// page and read the labels back off it.
+describe('repeated rows name themselves', () => {
+    beforeEach(() => {
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        document.body.innerHTML = '';
+        // The populated fixture, so the server-rendered rows exist: on a fresh
+        // Guild every one of these lists is empty.
+        bootPage({
+            panelFetch: panel => ({
+                ok: true, status: 200,
+                text: async () => renderPanel(panel, populatedGuildSettingsLocals()),
+            }),
+        });
+    });
+
+    afterEach(async () => {
+        await settle();
+        forgetDocumentListeners();
+        jest.restoreAllMocks();
+    });
+
+    const labelsIn = id => [...document.querySelectorAll(`#${id} [data-row-remove]`)]
+        .map(button => button.getAttribute('aria-label'));
+
+    const openPanel = async name => { clickTab(name); await settle(); };
+    const fire = (el, type) => el.dispatchEvent(new window.Event(type, { bubbles: true }));
+    /** The relabel after a removal is scheduled a tick later, as the row goes. */
+    const nextTick = () => new Promise(resolve => setTimeout(resolve, 0));
+
+    describe('level rewards', () => {
+        beforeEach(() => openPanel('leveling'));
+
+        it('names every server-rendered row after its own level', () => {
+            expect(labelsIn('level-role-rewards-list'))
+                .toEqual(['Remove the level 5 reward', 'Remove the level 10 reward']);
+        });
+
+        it('follows the level when it is edited, rather than naming the old one', () => {
+            const input = document.querySelector('#level-role-rewards-list .level-reward-level');
+            input.value = '12';
+            fire(input, 'input');
+
+            expect(labelsIn('level-role-rewards-list')[0]).toBe('Remove the level 12 reward');
+        });
+
+        it('falls back to the row position while a new row has no level yet', () => {
+            window.addLevelRoleReward();
+            expect(labelsIn('level-role-rewards-list')[2])
+                .toBe('Remove reward row 3, which has no level set');
+        });
+
+        // The fallback names a row by position, so a removal above it makes
+        // every label below it wrong until they are rewritten.
+        it('renumbers the rows a removal moved', async () => {
+            window.addLevelRoleReward();
+            window.addLevelRoleReward();
+            expect(labelsIn('level-role-rewards-list')[3]).toBe('Remove reward row 4, which has no level set');
+
+            // The third row — the first of the two just added. jsdom does not
+            // compile the inline onclick the server-rendered rows carry, so the
+            // removal is driven from a row whose handler is a property.
+            document.querySelectorAll('#level-role-rewards-list [data-row-remove]')[2].click();
+            await nextTick();
+
+            expect(labelsIn('level-role-rewards-list')).toEqual([
+                'Remove the level 5 reward',
+                'Remove the level 10 reward',
+                'Remove reward row 3, which has no level set',
+            ]);
+        });
+    });
+
+    describe('season tiers', () => {
+        beforeEach(() => openPanel('season'));
+
+        it('names the server-rendered row after its tier', () => {
+            expect(labelsIn('season-tier-rewards-list')).toEqual(['Remove the tier 1 reward']);
+        });
+
+        it('names a row added in the browser once it has a tier', () => {
+            window.addSeasonTierRow();
+            expect(labelsIn('season-tier-rewards-list')[1])
+                .toBe('Remove tier row 2, which has no tier set');
+
+            const input = document.querySelectorAll('#season-tier-rewards-list .season-tier-num')[1];
+            input.value = '4';
+            fire(input, 'input');
+
+            expect(labelsIn('season-tier-rewards-list')[1]).toBe('Remove the tier 4 reward');
+        });
+    });
+
+    describe('reaction role mappings', () => {
+        beforeEach(() => openPanel('reactionroles'));
+
+        it('names a mapping after the emoji and role it maps', () => {
+            window.addRrMapping();
+            expect(labelsIn('rr-mappings-list')).toEqual(['Remove mapping row 1, which is empty']);
+
+            const emoji = document.querySelector('#rr-mappings-list .rr-emoji');
+            emoji.value = '👍';
+            fire(emoji, 'input');
+
+            const role = document.querySelector('#rr-mappings-list .rr-role');
+            role.value = '40';
+            fire(role, 'change');
+
+            expect(labelsIn('rr-mappings-list')).toEqual(['Remove the 👍 → @Member mapping']);
+        });
+
+        it('says which half is missing rather than going back to a bare Remove', () => {
+            window.addRrMapping();
+            const emoji = document.querySelector('#rr-mappings-list .rr-emoji');
+            emoji.value = '🎉';
+            fire(emoji, 'input');
+
+            expect(labelsIn('rr-mappings-list')).toEqual(['Remove the 🎉 → no role mapping']);
+        });
     });
 });

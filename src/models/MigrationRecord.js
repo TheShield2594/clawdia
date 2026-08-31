@@ -33,6 +33,13 @@ const MigrationRecordSchema = new Schema({
     // its age, so this is what lets another process take one over instead of
     // waiting on a process that is never coming back.
     startedAt: { type: Date, default: null },
+
+    // Which process holds the claim. A claim can change hands, so "this row
+    // says running" and "this process still holds it" are different questions;
+    // every write that completes or releases a claim matches on this as well as
+    // the name, so a runner that lost its claim cannot finish or delete the
+    // record belonging to the one that took over.
+    owner: { type: String, default: null },
 });
 
 module.exports = model('MigrationRecord', MigrationRecordSchema);

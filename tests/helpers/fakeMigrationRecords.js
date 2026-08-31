@@ -24,6 +24,10 @@ const sameValue = (a, b) => {
         if (a == null || b == null) return (a ?? null) === (b ?? null);
         return new Date(a).getTime() === new Date(b).getTime();
     }
+    // Mongo matches `{ field: null }` against a document that has no such field,
+    // which is what the takeover's compare-and-set relies on for records written
+    // before `owner` existed.
+    if (a == null || b == null) return (a ?? null) === (b ?? null);
     return a === b;
 };
 
@@ -62,7 +66,7 @@ function fakeMigrationRecords() {
             if (rows.some(row => row.name === doc.name)) throw duplicateKeyError(doc.name);
             // Mirrors the schema's own defaults: a record written without a
             // state is a finished one.
-            const row = { state: 'complete', startedAt: null, appliedAt: new Date(), durationMs: null, ...doc };
+            const row = { state: 'complete', startedAt: null, owner: null, appliedAt: new Date(), durationMs: null, ...doc };
             rows.push(row);
             return clone(row);
         },
@@ -96,7 +100,7 @@ function fakeMigrationRecords() {
         model,
         rows,
         seed: (fields = {}) => {
-            const row = { state: 'complete', startedAt: null, appliedAt: new Date(), durationMs: null, ...fields };
+            const row = { state: 'complete', startedAt: null, owner: null, appliedAt: new Date(), durationMs: null, ...fields };
             rows.push(row);
             return row;
         },

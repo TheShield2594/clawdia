@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { randomUUID } = require('crypto');
 const MigrationRecord = require('../models/MigrationRecord');
 
 // Wall-clock budget for a single migration. A migration that hangs holds the
@@ -46,7 +47,12 @@ function withTimeout(promise, ms, label) {
     let timerId;
     const timeoutPromise = new Promise((_, reject) => {
         timerId = setTimeout(
-            () => reject(new Error(`[MIGRATIONS] Timed out after ${ms}ms: ${label}`)),
+            // Tagged, because the difference matters to the claim: a migration
+            // that rejected is over, one that timed out is still running.
+            () => reject(Object.assign(
+                new Error(`[MIGRATIONS] Timed out after ${ms}ms: ${label}`),
+                { migrationTimedOut: true },
+            )),
             ms
         ).unref();
     });
@@ -61,11 +67,13 @@ function withTimeout(promise, ms, label) {
 }
 
 // How long past a migration's own budget a claim is trusted before another
-// process treats its holder as dead and takes it over. The holder gives up on
-// its own after `timeoutMs` and deletes the claim, so this only ever elapses
-// for a process that died without unwinding — a SIGKILL, a lost container, an
-// OOM. Generous, because taking a live claim over means running the migration
-// twice concurrently, which is the thing the claim exists to prevent.
+// process treats its holder as dead and takes it over. A holder that fails
+// releases its claim immediately, so this only ever elapses for one that died
+// without unwinding — a SIGKILL, a lost container, an OOM — or one whose
+// migration overran its budget and is still running server-side, which is
+// exactly the case that must not be taken over early. Generous for that reason:
+// taking a live claim over means running the migration twice at once, which is
+// the thing the claim exists to prevent.
 const STALE_CLAIM_GRACE_MS = 60_000;
 
 // How often a process that lost the claim re-checks. Same cadence as
@@ -108,16 +116,25 @@ async function appliedNames(filter = {}) {
  * E11000 from the *bookkeeping* — a migration that had applied perfectly well
  * taking the bot down on the way to writing that it had.
  *
- * @returns {Promise<'claimed'|'applied'>} 'claimed' if this process should run
- *   the migration and complete the record; 'applied' if it is already done.
+ * The `owner` handed back is what makes the claim revocable safely. A claim can
+ * change hands — a holder that died leaves one behind, and the next process
+ * takes it over — so "the record for this migration says running" is not the
+ * same question as "this process still holds it". Every write that completes or
+ * releases a claim matches on the owner as well as the name, so a process that
+ * lost its claim cannot finish or delete its successor's.
+ *
+ * @returns {Promise<{status: 'claimed'|'applied', owner: string|null}>}
+ *   'claimed' if this process should run the migration and complete the record,
+ *   with the owner token to pass back; 'applied' if it is already done.
  */
 async function claimMigration(name, timeoutMs) {
     let waiting = false;
+    const owner = randomUUID();
 
     for (;;) {
         try {
-            await MigrationRecord.create({ name, state: 'running', startedAt: new Date() });
-            return 'claimed';
+            await MigrationRecord.create({ name, state: 'running', startedAt: new Date(), owner });
+            return { status: 'claimed', owner };
         } catch (err) {
             if (!isDuplicateKey(err)) throw err;
         }
@@ -126,7 +143,7 @@ async function claimMigration(name, timeoutMs) {
         // Gone between the insert and the read: the holder failed and cleaned
         // up after itself, so this process is free to try for the claim.
         if (!existing) continue;
-        if (existing.state !== 'running') return 'applied';
+        if (existing.state !== 'running') return { status: 'applied', owner: null };
 
         const heldFor = Date.now() - new Date(existing.startedAt ?? existing.appliedAt ?? 0).getTime();
         if (heldFor >= timeoutMs + STALE_CLAIM_GRACE_MS) {
@@ -134,8 +151,8 @@ async function claimMigration(name, timeoutMs) {
             // read, so a second process racing for the same stale claim finds
             // it already moved and goes round again.
             const taken = await MigrationRecord.findOneAndUpdate(
-                { name, state: 'running', startedAt: existing.startedAt },
-                { $set: { startedAt: new Date() } },
+                { name, state: 'running', startedAt: existing.startedAt, owner: existing.owner ?? null },
+                { $set: { startedAt: new Date(), owner } },
             );
             if (taken) {
                 console.warn(
@@ -143,7 +160,7 @@ async function claimMigration(name, timeoutMs) {
                     `${Math.round(heldFor / 1000)}s without completing, so the process that ` +
                     'took it is presumed gone.'
                 );
-                return 'claimed';
+                return { status: 'claimed', owner };
             }
             continue;
         }
@@ -317,29 +334,64 @@ async function runMigrations({ dir = __dirname } = {}) {
         // Claimed before it runs, so a second process racing this one waits for
         // the result instead of running the migration again and aborting
         // startup on the duplicate key its own bookkeeping would raise (#654).
-        if (await claimMigration(name, timeoutMs) === 'applied') {
+        const { status, owner } = await claimMigration(name, timeoutMs);
+        if (status === 'applied') {
             console.log(`[MIGRATIONS] Applied elsewhere while waiting: ${name}`);
             continue;
         }
 
+        // Every write below matches on the owner as well as the name. A claim
+        // this process no longer holds belongs to whoever took it over, and
+        // completing or deleting *their* record is worse than doing nothing:
+        // it would mark applied a migration still running elsewhere, or drop
+        // the lock out from under it.
+        const release = () => MigrationRecord.deleteOne({ name, state: 'running', owner })
+            .catch(e => console.error(`[MIGRATIONS] Could not release the claim on ${name}:`, e.message));
+
         console.log(`[MIGRATIONS] Applying: ${name} (budget ${timeoutMs}ms)`);
         const start = Date.now();
+        let work = null;
         try {
-            await withTimeout(up({ timeoutMs }), timeoutMs, name);
+            work = up({ timeoutMs });
+            await withTimeout(work, timeoutMs, name);
             const durationMs = Date.now() - start;
-            await MigrationRecord.updateOne(
-                { name },
+            const { matchedCount } = await MigrationRecord.updateOne(
+                { name, owner },
                 { $set: { state: 'complete', durationMs, appliedAt: new Date() } },
             );
-            console.log(`[MIGRATIONS] Applied ${name} in ${durationMs}ms`);
-            count++;
+            if (matchedCount === 0) {
+                // The claim was taken over while this migration ran, so another
+                // process is running it too and owns the record. Saying so is
+                // the useful thing; writing over their row is not.
+                console.warn(
+                    `[MIGRATIONS] ${name} finished here in ${durationMs}ms, but the claim had already ` +
+                    'been taken over — leaving the record to whichever process holds it now.'
+                );
+            } else {
+                console.log(`[MIGRATIONS] Applied ${name} in ${durationMs}ms`);
+                count++;
+            }
         } catch (err) {
             console.error(`[MIGRATIONS] FAILED: ${name}`, err);
-            // Release the claim. Nothing is recorded for a migration that did
-            // not finish — the next boot retries it, as it always has — and a
-            // claim left behind would block that boot until it went stale.
-            await MigrationRecord.deleteOne({ name, state: 'running' })
-                .catch(e => console.error(`[MIGRATIONS] Could not release the claim on ${name}:`, e.message));
+            if (err?.migrationTimedOut && work) {
+                // withTimeout stops waiting; it does not stop the migration.
+                // The work is still running against the server, so releasing
+                // the claim now would let another process start the same
+                // migration alongside it. The release is attached to the work
+                // instead — and if this process dies before that settles, the
+                // claim ages out and is taken over, which is the case
+                // STALE_CLAIM_GRACE_MS exists for.
+                console.warn(
+                    `[MIGRATIONS] Holding the claim on ${name}: it timed out, so it may still be ` +
+                    'running against the server. The claim is released when it settles, or ages out.'
+                );
+                work.then(release, release);
+            } else {
+                // A migration that rejected is over. Nothing is recorded for one
+                // that did not finish — the next boot retries it, as it always
+                // has — and a claim left behind would block that boot.
+                await release();
+            }
             if (!migration.optional) {
                 // Re-throw so startup aborts — running with a partially-applied schema is unsafe.
                 throw err;

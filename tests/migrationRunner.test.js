@@ -86,7 +86,14 @@ describe('timeout budget', () => {
         process.env.MIGRATION_TIMEOUT_MS = '60';
         writeMigration('001_slow.js', "module.exports = { name: 'slow', up: () => new Promise(() => {}) };");
         await expect(runMigrations({ dir })).rejects.toThrow(/Timed out after 60ms: slow/);
-        expect(records).toEqual([]);
+
+        // Nothing is recorded as applied. The claim is still held, though, and
+        // deliberately: the timeout stopped the runner waiting, not the
+        // migration, so releasing it would let another process start the same
+        // migration alongside the one still running. tests/migrationClaim.test.js
+        // covers that, and the claim ageing out afterwards.
+        expect(records.filter(r => r.state !== 'running')).toEqual([]);
+        expect(records.map(r => [r.name, r.state])).toEqual([['slow', 'running']]);
     });
 });
 

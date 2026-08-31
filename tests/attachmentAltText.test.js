@@ -63,7 +63,8 @@ describe('image attachments carry alt text', () => {
 
     it('passes a description on every one', () => {
         const bare = sites
-            .filter(([, call]) => !/\bdescription\s*:/.test(call))
+            // `description: x` or the shorthand `{ name, description }`.
+            .filter(([, call]) => !/\bdescription\s*[:,}]/.test(call))
             .map(([file, call]) => `${file}: ${call.replace(/\s+/g, ' ').slice(0, 80)}`);
         expect(bare).toEqual([]);
     });

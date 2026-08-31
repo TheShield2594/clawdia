@@ -57,12 +57,12 @@
                     </div>
                     <div class="field" role="group" aria-labelledby="level-role-rewards-label">
                         <div class="field-label" id="level-role-rewards-label">Level role rewards</div>
-                        <div id="level-role-rewards-list" style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem">
+                        <div id="level-role-rewards-list" data-row-list style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem">
                             <% (settings.levelRoles || []).forEach(function(r) { %>
                                 <div class="level-reward-row" style="display:flex;gap:.5rem;align-items:center">
                                     <input type="number" class="level-reward-level" value="<%= r.level %>" min="1" max="999" style="width:80px" placeholder="Level" aria-label="Required level">
                                     <%- include('../role-select', { cls: 'level-reward-role', ariaLabel: 'Reward role', placeholder: 'Select a role', selected: r.roleId }) %>
-                                    <button class="btn btn-danger" type="button" onclick="removeLevelRoleReward(this)" title="Remove" aria-label="Remove the level <%= r.level %> reward">&times;</button>
+                                    <button class="btn btn-danger" type="button" onclick="removeLevelRoleReward(this)" title="Remove" data-row-remove="level-reward" aria-label="Remove the level <%= r.level %> reward">&times;</button>
                                 </div>
                             <% }); %>
                         </div>

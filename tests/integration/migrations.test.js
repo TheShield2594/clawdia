@@ -54,6 +54,21 @@ async function appliedInOrder() {
     return (await MigrationRecord.find({}).sort({ _id: 1 }).lean()).map(r => r.name);
 }
 
+/**
+ * Waits for `condition` to hold, polling until it does. A fixed sleep is either
+ * long enough on the machine it was written on or a flake everywhere else, and
+ * the deadline is what turns a condition that never comes into a named failure
+ * rather than a suite-level timeout.
+ */
+async function until(condition, description, { timeoutMs = 10_000, pollMs = 10 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        if (await condition()) return;
+        if (Date.now() >= deadline) throw new Error(`Timed out after ${timeoutMs}ms waiting for ${description}.`);
+        await new Promise(resolve => setTimeout(resolve, pollMs));
+    }
+}
+
 const db = () => mongoose.connection.db;
 const indexNames = async collection => (await db().collection(collection).indexes()).map(i => i.name).sort();
 
@@ -647,21 +662,26 @@ describe('two processes migrating at once', () => {
     }, 30_000);
 
     test('a held claim does not read as applied while the migration is still running', async () => {
-        const dir = migrationsDir({ '001_a.js': migrationSource({ name: 'a', body: 'await new Promise(r => setTimeout(r, 500));' }) });
+        const dir = migrationsDir({ '001_a.js': migrationSource({ name: 'a', body: 'await new Promise(r => setTimeout(r, 2_000));' }) });
 
         const running = runMigrations({ dir });
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Polled rather than slept: a fixed delay is either long enough on this
+        // machine or a flake on a slower one, and the claim landing is the event
+        // this is actually waiting for.
+        await until(async () => await MigrationRecord.countDocuments({ name: 'a' }) === 1,
+            'the claim on a to be taken');
 
         // The record exists — it is the lock — but it is not a record of
         // anything having been applied yet. Every reader of that state has to
         // agree, the shard wait of #732 included, or a second shard starts
         // serving traffic against a half-migrated database.
-        expect(await MigrationRecord.countDocuments({ name: 'a' })).toBe(1);
+        expect(await MigrationRecord.findOne({ name: 'a' }).lean())
+            .toMatchObject({ state: 'running', owner: expect.any(String) });
         expect(await pendingMigrationNames({ dir })).toEqual(['a']);
 
         await running;
         expect(await pendingMigrationNames({ dir })).toEqual([]);
-    });
+    }, 30_000);
 });
 
 describe('waiting for another process to migrate', () => {

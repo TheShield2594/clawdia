@@ -41,6 +41,9 @@ let dir;
 const writeMigration = (file, body) => fs.writeFileSync(path.join(dir, file), body);
 const held = name => mockRecords.rows.find(row => row.name === name);
 
+/** Lets a promise chain the test just unblocked run to its end. */
+const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+
 beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'migration-claim-'));
     mockRecords.reset();
@@ -54,27 +57,35 @@ afterEach(() => {
     jest.useRealTimers();
     jest.restoreAllMocks();
     delete process.env.MIGRATION_BACKUP;
+    delete process.env.MIGRATION_TIMEOUT_MS;
+    delete globalThis.__finishSlow;
+    delete globalThis.__failSlow;
+    delete globalThis.__finishA;
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
 describe('claiming a migration', () => {
     it('takes an unheld one and marks it running, not applied', async () => {
-        await expect(claimMigration('001_a', TIMEOUT_MS)).resolves.toBe('claimed');
+        const { status, owner } = await claimMigration('001_a', TIMEOUT_MS);
 
+        expect(status).toBe('claimed');
         expect(held('001_a').state).toBe('running');
         expect(held('001_a').startedAt).toBeInstanceOf(Date);
+        // The token every later write on this claim has to present.
+        expect(held('001_a').owner).toBe(owner);
+        expect(typeof owner).toBe('string');
     });
 
     it('reports one that is already complete rather than running it again', async () => {
         mockRecords.seed({ name: '001_a', state: 'complete' });
-        await expect(claimMigration('001_a', TIMEOUT_MS)).resolves.toBe('applied');
+        await expect(claimMigration('001_a', TIMEOUT_MS)).resolves.toEqual({ status: 'applied', owner: null });
     });
 
     // Records written before the claim existed have no state field at all, and
     // reading those as "still running" would block every boot after an upgrade.
     it('treats a record from before this field existed as applied', async () => {
         mockRecords.rows.push({ name: '001_a', appliedAt: new Date() });
-        await expect(claimMigration('001_a', TIMEOUT_MS)).resolves.toBe('applied');
+        await expect(claimMigration('001_a', TIMEOUT_MS)).resolves.toEqual({ status: 'applied', owner: null });
     });
 
     it('waits on a live claim, then reports the result the holder wrote', async () => {
@@ -89,7 +100,7 @@ describe('claiming a migration', () => {
         held('001_a').state = 'complete';
         await jest.advanceTimersByTimeAsync(POLL_MS);
 
-        await expect(claim).resolves.toBe('applied');
+        await expect(claim).resolves.toMatchObject({ status: 'applied' });
     });
 
     it('claims it after all if the holder failed and released', async () => {
@@ -104,7 +115,7 @@ describe('claiming a migration', () => {
         mockRecords.reset();
         await jest.advanceTimersByTimeAsync(POLL_MS);
 
-        await expect(claim).resolves.toBe('claimed');
+        await expect(claim).resolves.toMatchObject({ status: 'claimed' });
         expect(held('001_a').state).toBe('running');
     });
 
@@ -112,14 +123,29 @@ describe('claiming a migration', () => {
     // forever is a boot that never completes, so age is what breaks the tie.
     it('takes over a claim whose holder is long past its budget', async () => {
         const startedAt = new Date(Date.now() - (TIMEOUT_MS + GRACE_MS + 1_000));
-        mockRecords.seed({ name: '001_a', state: 'running', startedAt });
+        mockRecords.seed({ name: '001_a', state: 'running', startedAt, owner: 'the-dead-one' });
 
-        await expect(claimMigration('001_a', TIMEOUT_MS)).resolves.toBe('claimed');
+        const { status, owner } = await claimMigration('001_a', TIMEOUT_MS);
 
-        // Restamped, so the next process to come along waits on this one
-        // instead of taking the same claim over a second time.
+        expect(status).toBe('claimed');
+        // Restamped and re-owned, so the next process to come along waits on
+        // this one instead of taking the same claim over a second time — and
+        // the process that lost it can no longer write to the record.
         expect(held('001_a').startedAt.getTime()).toBeGreaterThan(startedAt.getTime());
+        expect(held('001_a').owner).toBe(owner);
+        expect(owner).not.toBe('the-dead-one');
         expect(console.warn.mock.calls.flat().join(' ')).toContain('Taking over the claim');
+    });
+
+    // A record written before `owner` existed has no such field, and Mongo
+    // matches `{ owner: null }` against that — so an upgrade does not leave a
+    // stale claim nobody is allowed to take over.
+    it('takes over a stale claim from before the owner field existed', async () => {
+        const startedAt = new Date(Date.now() - (TIMEOUT_MS + GRACE_MS + 1_000));
+        mockRecords.rows.push({ name: '001_a', state: 'running', startedAt });
+
+        await expect(claimMigration('001_a', TIMEOUT_MS)).resolves.toMatchObject({ status: 'claimed' });
+        expect(held('001_a').owner).toEqual(expect.any(String));
     });
 
     it('does not take over one that is merely slow', async () => {
@@ -137,7 +163,7 @@ describe('claiming a migration', () => {
 
         held('001_a').state = 'complete';
         await jest.advanceTimersByTimeAsync(POLL_MS);
-        await expect(claim).resolves.toBe('applied');
+        await expect(claim).resolves.toMatchObject({ status: 'applied' });
     });
 
     it('does not swallow an insert that failed for some other reason', async () => {
@@ -184,6 +210,98 @@ describe('the run that used to abort', () => {
 
         await expect(runMigrations({ dir })).resolves.toBeUndefined();
         expect(mockRecords.rows).toEqual([]);
+    });
+
+    // withTimeout stops *waiting*; it does not stop the migration, which goes on
+    // running against the server. Releasing the claim at that moment would let
+    // another process start the same migration alongside the one still running —
+    // the exact concurrency the claim exists to prevent, reintroduced by its own
+    // cleanup.
+    it('holds the claim while a migration it timed out on is still running', async () => {
+        process.env.MIGRATION_TIMEOUT_MS = '30';
+        writeMigration('001_slow.js', `
+            module.exports = {
+                name: 'slow',
+                up: () => new Promise(resolve => { globalThis.__finishSlow = resolve; }),
+            };
+        `);
+
+        await expect(runMigrations({ dir })).rejects.toThrow(/Timed out after 30ms: slow/);
+
+        // Still held, well past the budget it overran.
+        expect(held('slow')).toMatchObject({ state: 'running' });
+        expect(console.warn.mock.calls.flat().join(' ')).toContain('Holding the claim on slow');
+
+        // And released once the work it could not wait for finally settles.
+        globalThis.__finishSlow();
+        await settle();
+        expect(held('slow')).toBeUndefined();
+    });
+
+    it('releases the claim when the work it timed out on eventually fails', async () => {
+        process.env.MIGRATION_TIMEOUT_MS = '30';
+        writeMigration('001_slow.js', `
+            module.exports = {
+                name: 'slow',
+                up: () => new Promise((resolve, reject) => { globalThis.__failSlow = reject; }),
+            };
+        `);
+
+        await expect(runMigrations({ dir })).rejects.toThrow(/Timed out/);
+        globalThis.__failSlow(new Error('index build refused'));
+        await settle();
+
+        expect(held('slow')).toBeUndefined();
+    });
+
+    it("does not delete the claim of the process that took over from it", async () => {
+        process.env.MIGRATION_TIMEOUT_MS = '30';
+        writeMigration('001_slow.js', `
+            module.exports = {
+                name: 'slow',
+                up: () => new Promise(resolve => { globalThis.__finishSlow = resolve; }),
+            };
+        `);
+
+        await expect(runMigrations({ dir })).rejects.toThrow(/Timed out/);
+        const first = held('slow').owner;
+
+        // The first runner's process is still alive but its claim has aged out,
+        // so a second one takes it over and starts the migration again.
+        held('slow').startedAt = new Date(Date.now() - (30 + GRACE_MS + 1_000));
+        const { owner: second } = await claimMigration('slow', 30);
+        expect(second).not.toBe(first);
+
+        // Now the first runner's migration finally settles and tries to clean up
+        // after itself. The record it would have deleted is no longer its own.
+        globalThis.__finishSlow();
+        await settle();
+
+        expect(held('slow')).toMatchObject({ state: 'running', owner: second });
+    });
+
+    it("does not mark complete a claim that was taken over while it ran", async () => {
+        writeMigration('001_a.js', `
+            module.exports = {
+                name: 'a',
+                up: () => new Promise(resolve => { globalThis.__finishA = resolve; }),
+            };
+        `);
+
+        const run = runMigrations({ dir });
+        await settle();
+        expect(held('a').state).toBe('running');
+
+        // Taken over mid-run: another process now owns this record and is
+        // running the migration itself.
+        held('a').owner = 'the-successor';
+        globalThis.__finishA();
+        await run;
+
+        // Marking it complete here would announce as applied a migration the
+        // successor is still part-way through.
+        expect(held('a')).toMatchObject({ state: 'running', owner: 'the-successor' });
+        expect(console.warn.mock.calls.flat().join(' ')).toContain('claim had already');
     });
 
     // waitForMigrations polls this; a claimed-but-unfinished record reading as
