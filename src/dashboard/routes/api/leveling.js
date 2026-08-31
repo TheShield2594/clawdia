@@ -3,7 +3,7 @@ const router = express.Router();
 const Guild = require('../../../models/Guild');
 const User = require('../../../models/User');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
-const { isValidDiscordId } = require('../../lib/apiHelpers');
+const { isValidDiscordId, readAdjustAmount, MAX_ADJUST_TOTAL } = require('../../lib/apiHelpers');
 const { readPage, pageEnvelope } = require('../../lib/apiPage');
 
 // One page of members ranked by level then XP, 25 to a page.
@@ -35,34 +35,40 @@ router.post('/guild/:guildId/leveling/adjust', checkAuth, checkGuildAccess, chec
     if (!action || !['give', 'take', 'reset', 'set_level'].includes(action)) {
         return res.status(400).json({ error: 'action must be give, take, reset, or set_level' });
     }
+    // Same ceilings as the economy route (#925): an XP total or a level past
+    // Number.MAX_SAFE_INTEGER stops being exact, and an unbounded XP grant is an
+    // unbounded catch-up loop in applyXpGain the next time the member speaks.
+    let amt = null;
     if (['give', 'take', 'set_level'].includes(action)) {
-        const amt = Number(amount);
-        if (!Number.isFinite(amt) || !Number.isInteger(amt)) {
-            return res.status(400).json({ error: 'amount must be an integer' });
-        }
-        if (['give', 'take'].includes(action) && amt <= 0) {
-            return res.status(400).json({ error: 'amount must be positive for give/take' });
-        }
-        if (action === 'set_level' && amt < 0) {
-            return res.status(400).json({ error: 'level cannot be negative' });
-        }
+        const read = action === 'set_level'
+            ? readAdjustAmount(amount, { min: 0, max: MAX_ADJUST_TOTAL, label: 'level' })
+            : readAdjustAmount(amount);
+        if (read.error) return res.status(400).json({ error: read.error });
+        amt = read.value;
     }
     try {
         const filter = { userId: String(userId), guildId };
         let update;
+        // Mongoose 9 throws on a pipeline update that does not opt in — see
+        // tests/updatePipelineOption.test.js.
+        const options = { new: true };
         if (action === 'give') {
-            update = { $inc: { xp: Number(amount) } };
+            // Clamped inside the update rather than after a read, for the reason
+            // the economy route's give explains.
+            update = [{ $set: { xp: { $min: [MAX_ADJUST_TOTAL, { $add: [{ $ifNull: ['$xp', 0] }, amt] }] } } }];
+            options.updatePipeline = true;
         } else if (action === 'take') {
-            update = [{ $set: { xp: { $max: [0, { $subtract: ['$xp', Number(amount)] }] } } }];
+            update = [{ $set: { xp: { $max: [0, { $subtract: ['$xp', amt] }] } } }];
+            options.updatePipeline = true;
         } else if (action === 'reset') {
             update = { $set: { xp: 0, level: 0 } };
         } else {
-            update = { $set: { level: Number(amount) } };
+            update = { $set: { level: amt } };
         }
         // No upsert (#584) — see the note on the economy adjust route: a mistyped
         // snowflake is still a well-formed one, and upserting turned it into a
         // phantom member document instead of an error the admin could act on.
-        const user = await User.findOneAndUpdate(filter, update, { new: true });
+        const user = await User.findOneAndUpdate(filter, update, options);
         if (!user) return res.status(404).json({ error: 'That member has no leveling record in this server' });
         res.json({ success: true, level: user.level, xp: user.xp });
     } catch (err) {

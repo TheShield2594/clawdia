@@ -80,8 +80,55 @@ function nativeCollectionNames(ast) {
     return names;
 }
 
-/** True when an options AST node sets `updatePipeline` on every branch it can take. */
-function optsIn(node) {
+/**
+ * Names the file binds to a pipeline at some point — `const u = [{ $set: ... }]`
+ * or `let u; ... u = [{ $set: ... }]`.
+ *
+ * The dashboard's two adjust routes built their pipeline into a `let` and passed
+ * the variable, so the scan below walked past both of them and they shipped
+ * without the opt-in: an admin taking coins or XP got a 500 from a call that
+ * threw before it ran (#925). A pipeline is no less a pipeline for having been
+ * assigned to something first.
+ */
+function pipelineNames(ast) {
+    const names = new Set();
+    for (const node of walk(ast)) {
+        if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' &&
+            node.init?.type === 'ArrayExpression') {
+            names.add(node.id.name);
+        }
+        if (node.type === 'AssignmentExpression' && node.left.type === 'Identifier' &&
+            node.right.type === 'ArrayExpression') {
+            names.add(node.left.name);
+        }
+    }
+    return names;
+}
+
+/** Names the file sets `updatePipeline` on, e.g. `options.updatePipeline = true`. */
+function optedInNames(ast) {
+    const names = new Set();
+    for (const node of walk(ast)) {
+        if (node.type !== 'AssignmentExpression') continue;
+        const target = node.left;
+        if (target.type === 'MemberExpression' && !target.computed &&
+            target.object.type === 'Identifier' &&
+            target.property.name === 'updatePipeline') {
+            names.add(target.object.name);
+        }
+    }
+    return names;
+}
+
+/**
+ * True when an options AST node sets `updatePipeline` on every branch it can take.
+ *
+ * An options object held in a variable is answered by `optedIn`: the file has to
+ * assign `updatePipeline` to that name somewhere. That is weaker than the
+ * literal case — it cannot tell which branch the assignment sits on — but it is
+ * the difference between noticing a missing opt-in and not looking at all.
+ */
+function optsIn(node, optedIn = new Set()) {
     if (node == null) return false;
     if (node.type === 'ObjectExpression') {
         return node.properties.some(p =>
@@ -90,8 +137,9 @@ function optsIn(node) {
     }
     // `cond ? {...} : {...}` — both branches have to opt in.
     if (node.type === 'ConditionalExpression') {
-        return optsIn(node.consequent) && optsIn(node.alternate);
+        return optsIn(node.consequent, optedIn) && optsIn(node.alternate, optedIn);
     }
+    if (node.type === 'Identifier') return optedIn.has(node.name);
     return false;
 }
 
@@ -101,6 +149,8 @@ function pipelineUpdates() {
         const source = fs.readFileSync(file, 'utf8');
         const ast = espree.parse(source, { ecmaVersion: 2024, sourceType: 'script', loc: true });
         const native = nativeCollectionNames(ast);
+        const pipelines = pipelineNames(ast);
+        const optedIn = optedInNames(ast);
 
         for (const node of walk(ast)) {
             if (node.type !== 'CallExpression') continue;
@@ -109,13 +159,15 @@ function pipelineUpdates() {
             if (!UPDATE_METHODS.has(callee.property.name)) continue;
 
             const update = node.arguments[1];
-            if (!update || update.type !== 'ArrayExpression') continue;
+            const isPipeline = update?.type === 'ArrayExpression' ||
+                (update?.type === 'Identifier' && pipelines.has(update.name));
+            if (!isPipeline) continue;
             if (callee.object.type === 'Identifier' && native.has(callee.object.name)) continue;
 
             found.push({
                 where: `${path.relative(path.join(SRC, '..'), file)}:${node.loc.start.line}`,
                 method: callee.property.name,
-                optedIn: optsIn(node.arguments[2]),
+                optedIn: optsIn(node.arguments[2], optedIn),
             });
         }
     }
@@ -129,6 +181,15 @@ describe('aggregation-pipeline updates opt in to Mongoose 9', () => {
     // call sites going away — a renamed method or a parse that silently failed.
     it('finds the pipeline updates the economy is built on', () => {
         expect(updates.length).toBeGreaterThanOrEqual(8);
+    });
+
+    // The two dashboard adjust routes are the reason the scan resolves
+    // identifiers: each holds its pipeline in a `let` and passes the variable to
+    // a single findOneAndUpdate (#925), so the literal-only scan saw neither.
+    it('sees a pipeline that was assigned to a variable first', () => {
+        const byVariable = updates.map(u => u.where).filter(where =>
+            where.includes('routes/api/economy.js') || where.includes('routes/api/leveling.js'));
+        expect(byVariable.length).toBe(2);
     });
 
     it('sets `updatePipeline: true` on every one of them', () => {

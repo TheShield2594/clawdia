@@ -129,6 +129,11 @@ function evaluate(expr, doc, vars = {}) {
         }
         case '$max':
             return args().reduce((best, n) => (n === null || n === undefined ? best : Math.max(best, n)), -Infinity);
+        // Mongo's `$min`/`$max` ignore null operands rather than propagating
+        // them, which is what makes `$max: [0, <subtract that went null>]`
+        // answer 0 for a missing field.
+        case '$min':
+            return args().reduce((best, n) => (n === null || n === undefined ? best : Math.min(best, n)), Infinity);
         case '$not':
             return !args()[0];
         case '$and':
