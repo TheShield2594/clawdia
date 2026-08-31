@@ -82,7 +82,14 @@ describe('which drops are worth staging', () => {
         ]);
     });
 
-    test('every stage waits the same beat', () => {
+    // `beforeEach` clears the mock, so this has to stage a reveal itself before
+    // reading the calls — an assertion over an empty array is vacuously true and
+    // would have passed for any beat at all.
+    test('every stage waits the same beat', async () => {
+        const { interaction } = recorder();
+        await stagedLootReveal(interaction, 'legendary', FINAL, 'hunt');
+
+        expect(delay).toHaveBeenCalledTimes(3);
         expect(STAGE_MS).toBe(1500);
         expect(delay.mock.calls.every(([ms]) => ms === STAGE_MS)).toBe(true);
     });

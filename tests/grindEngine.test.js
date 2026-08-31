@@ -369,13 +369,36 @@ describe('all four services go through the engine', () => {
 
     // The point of the engine is that these are not written out per subsystem
     // any more. A service that grows its own copy back has undone it.
-    test.each(GRINDS)('%s defines none of the shared mechanics itself', id => {
+    //
+    // Asserted as "the definition delegates" rather than "no `function name(`
+    // appears": every one of these is now a one-line `const name = … grind.…`,
+    // so a check for the `function` keyword alone would pass a reimplementation
+    // written in the same arrow style the delegations use — which is the form a
+    // regrown copy would actually take.
+    const SHARED = ['getMaxStamina', 'applyStaminaRegen', 'msUntilNextStamina',
+        'applyDailyReset', 'msUntilDailyReset', 'getLevelData', 'xpToNextLevel', 'formatMs'];
+
+    test.each(GRINDS)('%s delegates every shared mechanic it defines', id => {
         const text = source(id);
-        for (const name of ['getMaxStamina', 'applyStaminaRegen', 'msUntilNextStamina',
-            'applyDailyReset', 'msUntilDailyReset', 'getLevelData', 'xpToNextLevel', 'formatMs']) {
-            expect([id, name, new RegExp(`^function ${name}\\(`, 'm').test(text)])
-                .toEqual([id, name, false]);
+
+        for (const name of SHARED) {
+            // Not every grind defines every one — explore has no daily-reset
+            // countdown, for instance. What it defines, it must delegate.
+            const defined = new RegExp(`^(?:const|let|var|async function|function)\\s+${name}\\b.*$`, 'm').exec(text);
+            if (!defined) continue;
+
+            expect([id, name, /\bgrind\./.test(defined[0])]).toEqual([id, name, true]);
         }
+    });
+
+    // …and the assertion above is only worth anything if it is looking at the
+    // real definitions, so this fails if the names stop being found at all.
+    test.each(GRINDS)('%s defines enough of them for that check to mean something', id => {
+        const text = source(id);
+        const found = SHARED.filter(name =>
+            new RegExp(`^(?:const|let|var|async function|function)\\s+${name}\\b`, 'm').test(text));
+
+        expect(found.length).toBeGreaterThanOrEqual(6);
     });
 
     test.each(GRINDS)('%s still exports them, so its callers did not have to move', id => {
