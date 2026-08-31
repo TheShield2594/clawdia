@@ -49,9 +49,17 @@ function shippedMigrations() {
         .map(file => require(path.join(MIGRATIONS_DIR, file)));
 }
 
-/** Recorded migration names, oldest first. ObjectIds order by creation. */
+/**
+ * Migration names recorded as *applied*, oldest first. ObjectIds order by
+ * creation.
+ *
+ * A held claim is a record too — it is the lock — but it is not a record of
+ * anything having been applied, so it is excluded here for the same reason the
+ * runner excludes it from its own skip list (#654).
+ */
 async function appliedInOrder() {
-    return (await MigrationRecord.find({}).sort({ _id: 1 }).lean()).map(r => r.name);
+    return (await MigrationRecord.find({ state: { $ne: 'running' } }).sort({ _id: 1 }).lean())
+        .map(r => r.name);
 }
 
 /**
@@ -533,7 +541,13 @@ describe('failure recovery', () => {
             delete process.env.MIGRATION_TIMEOUT_MS;
         }
 
+        // Nothing after the failure is recorded as applied. `slow` does keep
+        // its claim, and deliberately: the timeout stopped the runner waiting,
+        // not the migration, which is still running against the server — so
+        // releasing the lock now would let another process start it alongside.
+        // It ages out instead.
         expect(await appliedInOrder()).toEqual(['a']);
+        expect(await MigrationRecord.findOne({ name: 'slow' }).lean()).toMatchObject({ state: 'running' });
     });
 
     test('the budget in force is handed to the migration, so it can bound its own queries', async () => {
