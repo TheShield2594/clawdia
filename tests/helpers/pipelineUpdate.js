@@ -129,6 +129,15 @@ function evaluate(expr, doc, vars = {}) {
         }
         case '$max':
             return args().reduce((best, n) => (n === null || n === undefined ? best : Math.max(best, n)), -Infinity);
+        // Mongo's `$min` ignores null operands rather than propagating them,
+        // which is what lets `$min: [<cap>, <add that went null>]` answer the
+        // cap — but an expression whose operands are *all* null answers null,
+        // not the identity the fold started from. Returning Infinity there
+        // would write a number no document should ever hold.
+        case '$min': {
+            const usable = args().filter(n => n !== null && n !== undefined);
+            return usable.length ? Math.min(...usable) : null;
+        }
         case '$not':
             return !args()[0];
         case '$and':

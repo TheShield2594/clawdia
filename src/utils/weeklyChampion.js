@@ -96,14 +96,14 @@ async function addWeeklyChampionProgress({ guildId, category, userId, username, 
     // rather than swallowing it: this is an accumulator, and a swallowed error
     // is a run that silently never counted.
     try {
-        await WeeklyChampion.findOneAndUpdate(filter, update, { upsert: true });
+        await WeeklyChampion.findOneAndUpdate(filter, update, { upsert: true, updatePipeline: true });
     } catch (err) {
         if (err.code !== 11000) {
             console.error('[weekly] progress update failed:', err.message);
             return;
         }
         try {
-            await WeeklyChampion.findOneAndUpdate(filter, update, { upsert: true });
+            await WeeklyChampion.findOneAndUpdate(filter, update, { upsert: true, updatePipeline: true });
         } catch (retryErr) {
             console.error('[weekly] progress update failed on retry:', retryErr.message);
         }

@@ -14,6 +14,58 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.5.1] - 2026-08-31
+
+Migrations through `020_narrow_failed_job_ttl`.
+
+The dead-letter queue stops deleting debts nobody has settled (#896). Its TTL
+expired `resolved` and `exhausted` records alike after 30 days, and an owed
+payout that burns through its three retry attempts is marked `exhausted` and
+left for a human — `scripts/replay-owed-payouts.js` says so, and `retryJob`
+refuses to claim one. So the TTL was the only thing that ever acted on those
+records, and what it did was delete them: a player owed coins by a failed payout
+lost the claim a month later, silently. A resolved record has been paid and is
+history; an exhausted one is an outstanding debt, and a debt does not expire.
+`020` drops the old unnamed `updatedAt_1` index and builds the narrowed one in
+its place, verified before the boot continues — Mongoose never drops an index it
+no longer declares, so the model edit alone would have left the old TTL
+sweeping. The replay script lists exhausted payouts as their own section and
+exits non-zero while any exist; it still never pays one, because settling it is
+a decision about a specific player.
+
+The dashboard's admin adjustments have a ceiling (#925). `Number.isInteger(1e20)`
+is true, so an absurd amount went straight into `$inc`, and past
+`Number.MAX_SAFE_INTEGER` the arithmetic, the stored balance and the amounts the
+Transaction ledger records all stop being exact with nothing reporting a
+problem. Amounts are validated with `Number.isSafeInteger` and bounded at 1e12
+per adjustment, and the give paths clamp the resulting balance, XP or level at
+1e15 inside the update rather than after a read, so two admins adjusting at once
+cannot step over it in between. The XP ceiling does a second job: `applyXpGain`
+spends a total one level at a time, so an unbounded grant was an unbounded loop
+on the member's next message.
+
+Two writes that Mongoose 9 had stopped running are running again. Both dashboard
+adjust routes and `weeklyChampion`'s progress accumulator passed an
+aggregation-pipeline update without the `updatePipeline` opt-in the upgrade
+introduced, which throws rather than executing — `take` on either route answered
+500 to every call, and no weekly champion run had counted since. The static
+check that was supposed to catch this only looked at array literals passed
+inline; it resolves identifiers now, which is how the third one turned up.
+
+The market's per-seller cap is a property of the data rather than a count read a
+moment earlier (#926). Each listing carries the slot it occupies under a unique
+index on `{ guildId, sellerId, slot }`, so two concurrent `/market list` calls
+can no longer both pass the check and leave a seller with six. A slot rides on
+the listing rather than in a counter, so cancelling, selling or expiring one
+frees it by deleting the row — there is nothing to decrement and nothing that
+can drift.
+
+Coverage: the tournament prize split and the seasonal event rewards are tested
+at the service level for the first time (#906) — the 60/25/15 split and its
+payouts, a winner who has left the guild, the claim that stops a second payout,
+the multipliers every earning command scales by, and the hourly sweep that
+writes them.
+
 ## [4.5.0] - 2026-08-28
 
 Migrations through `019_drop_hourly_winners`.

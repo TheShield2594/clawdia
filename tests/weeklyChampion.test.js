@@ -88,7 +88,8 @@ describe('addWeeklyChampionProgress', () => {
 
             const [filter, update, options] = WeeklyChampion.findOneAndUpdate.mock.calls[0];
             expect(filter).toEqual({ guildId: 'g1', week: '2026-W35', category: 'mine', userId: 'u1' });
-            expect(options).toEqual({ upsert: true });
+            // A pipeline update Mongoose 9 will actually run — see tests/updatePipelineOption.test.js.
+            expect(options).toEqual({ upsert: true, updatePipeline: true });
 
             const set = update[0].$set;
             expect(set.total).toEqual({ $add: [{ $ifNull: ['$total', 0] }, 250] });

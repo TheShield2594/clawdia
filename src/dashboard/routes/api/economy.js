@@ -3,7 +3,7 @@ const router = express.Router();
 const GuildAnalytics = require('../../../models/GuildAnalytics');
 const User = require('../../../models/User');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
-const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
+const { isValidDiscordId, logAuditEvent, readAdjustAmount, MAX_ADJUST_TOTAL } = require('../../lib/apiHelpers');
 const { topByNetWorth } = require('../../../utils/netWorth');
 const { cachedAggregate, invalidatePrefix } = require('../../lib/aggregateCache');
 
@@ -78,21 +78,33 @@ router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, check
     if (!action || !['give', 'take', 'reset', 'freeze', 'unfreeze'].includes(action)) {
         return res.status(400).json({ error: 'action must be give, take, reset, freeze, or unfreeze' });
     }
+    let amt = null;
     if (['give', 'take'].includes(action)) {
-        const amt = Number(amount);
-        if (!Number.isFinite(amt) || amt <= 0 || !Number.isInteger(amt)) {
-            return res.status(400).json({ error: 'amount must be a positive integer for give/take' });
-        }
+        const read = readAdjustAmount(amount);
+        if (read.error) return res.status(400).json({ error: `${read.error} for give/take` });
+        amt = read.value;
     }
 
     try {
         const filter = { userId: String(userId), guildId };
         let update;
+        // A pipeline update has to say so under Mongoose 9, or the call throws
+        // rather than running (see tests/updatePipelineOption.test.js).
+        const options = { new: true };
         if (action === 'give') {
-            update = { $inc: { balance: Number(amount) } };
+            // Clamped at MAX_ADJUST_TOTAL inside the update, not by reading the
+            // balance first: the ceiling exists to keep the balance exactly
+            // representable, and a read-then-$inc lets two admins adjusting at
+            // once step over it between the read and the write. `$ifNull` guards
+            // documents written before `balance` had a default — the take below
+            // needs no such guard, since `$max` against 0 already answers 0 for
+            // a missing field.
+            update = [{ $set: { balance: { $min: [MAX_ADJUST_TOTAL, { $add: [{ $ifNull: ['$balance', 0] }, amt] }] } } }];
+            options.updatePipeline = true;
         } else if (action === 'take') {
             // Use aggregation pipeline update to clamp balance at 0 atomically.
-            update = [{ $set: { balance: { $max: [0, { $subtract: ['$balance', Number(amount)] }] } } }];
+            update = [{ $set: { balance: { $max: [0, { $subtract: ['$balance', amt] }] } } }];
+            options.updatePipeline = true;
         } else if (action === 'reset') {
             update = { $set: { balance: 0, bank: 0 } };
         } else if (action === 'freeze') {
@@ -107,12 +119,12 @@ router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, check
         // exist — while reporting success, and the admin's coins went nowhere
         // anyone could see. A member with no row has never run a command here,
         // which is a 404, not a row to create.
-        const user = await User.findOneAndUpdate(filter, update, { new: true });
+        const user = await User.findOneAndUpdate(filter, update, options);
         if (!user) return res.status(404).json({ error: 'That member has no economy record in this server' });
         // An admin who has just moved someone's coins expects to see it, and a
         // thirty-second-old total would read as the adjustment not having applied.
         invalidatePrefix(`${guildId}:`);
-        await logAuditEvent(req, guildId, 'economy_adjust', { targetUserId: String(userId), action, amount: amount ?? null });
+        await logAuditEvent(req, guildId, 'economy_adjust', { targetUserId: String(userId), action, amount: amt });
         res.json({ success: true, balance: user.balance, bank: user.bank, economyFrozen: user.economyFrozen });
     } catch (error) {
         console.error('Economy adjust error:', error);

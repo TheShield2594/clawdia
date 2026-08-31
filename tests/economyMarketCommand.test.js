@@ -29,9 +29,11 @@ jest.mock('../src/utils/inventoryGrant', () => ({
     grantInventoryItem: jest.fn(),
     inventoryAddExpr: jest.fn(() => ({})),
 }));
+jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 
 const market = require('../src/commands/economy/market');
 const { grantInventoryItem } = require('../src/utils/inventoryGrant');
+const { recordOwedPayout } = require('../src/utils/owedPayout');
 const { logTransaction } = require('../src/utils/logTransaction');
 
 const GUILD_ID = 'guild-1';
@@ -154,6 +156,138 @@ describe('listing an item', () => {
         expect(mockUsers.get(BUYER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 9 }]);
     });
 
+    // #926: the cap was a `countDocuments` followed by an insert, which two
+    // concurrent calls could both pass. It is a property of the data now — each
+    // listing claims one of the seller's five slots, and the unique index on
+    // { guildId, sellerId, slot } is what makes a sixth impossible rather than
+    // merely unlikely.
+    it('claims the seller a slot, and the next listing takes the one after it', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 9 }] });
+
+        await run({ subcommand: 'list', options: { item: 'lucky_charm', quantity: 1, price: 100 } });
+        await run({ subcommand: 'list', options: { item: 'lucky_charm', quantity: 1, price: 100 } });
+
+        expect(mockListings.all().map(l => l.slot)).toEqual([1, 2]);
+    });
+
+    it('reuses the slot a cancelled or sold listing left behind', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 9 }] });
+        seedListing({ _id: 'open-1', sellerId: BUYER_ID, slot: 1 });
+        seedListing({ _id: 'open-3', sellerId: BUYER_ID, slot: 3 });
+
+        await run({ subcommand: 'list', options: { item: 'lucky_charm', quantity: 1, price: 100 } });
+
+        expect(mockListings.all().find(l => l._id === 'id-3').slot).toBe(2);
+    });
+
+    it('takes another slot when it loses the race for the one it picked', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 9 }] });
+        // The rival's insert lands first and the index refuses this one, which is
+        // exactly what a lost race looks like from here.
+        mockListings.model.create.mockImplementationOnce(async () => {
+            seedListing({ _id: 'rival', sellerId: BUYER_ID, slot: 1 });
+            throw Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
+        });
+
+        const interaction = await run({
+            subcommand: 'list',
+            options: { item: 'lucky_charm', quantity: 2, price: 100 },
+        });
+
+        expect(repliedText(interaction)).toContain('Item Listed');
+        expect(mockListings.all().find(l => l._id !== 'rival').slot).toBe(2);
+        expect(mockUsers.get(BUYER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 7 }]);
+    });
+
+    it('refuses, and returns the stock, when the race filled the last slot', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 9 }] });
+        for (const slot of [1, 2, 3, 4]) seedListing({ _id: `open-${slot}`, sellerId: BUYER_ID, slot });
+        // Four listings pass the pre-check; the fifth slot goes to somebody else
+        // in the moment between that check and this insert.
+        mockListings.model.create.mockImplementationOnce(async () => {
+            seedListing({ _id: 'rival', sellerId: BUYER_ID, slot: 5 });
+            throw Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
+        });
+
+        const interaction = await run({
+            subcommand: 'list',
+            options: { item: 'lucky_charm', quantity: 2, price: 100 },
+        });
+
+        expect(repliedText(interaction)).toContain('only have 5 active listings');
+        expect(grantInventoryItem).toHaveBeenCalledWith(BUYER_ID, GUILD_ID, 'lucky_charm', 2);
+        expect(mockListings.all().filter(l => l.sellerId === BUYER_ID)).toHaveLength(5);
+    });
+
+    // Legacy rows carry no slot and the unique index skips them, so they have to
+    // be counted against the seller's five some other way — otherwise a seller
+    // holding four of them could open five more.
+    it('counts listings written before slots existed against the seller\'s five', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 9 }] });
+        for (let i = 0; i < 4; i++) seedListing({ _id: `legacy-${i}`, sellerId: BUYER_ID, slot: undefined });
+
+        await run({ subcommand: 'list', options: { item: 'lucky_charm', quantity: 1, price: 100 } });
+
+        expect(mockListings.all().filter(l => l.sellerId === BUYER_ID)).toHaveLength(5);
+        // The one number the four legacy rows have not reserved.
+        expect(mockListings.all().find(l => l.slot != null).slot).toBe(5);
+    });
+
+    it('refuses the seller a sixth when the race for it is against a legacy listing', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 9 }] });
+        for (let i = 0; i < 4; i++) seedListing({ _id: `legacy-${i}`, sellerId: BUYER_ID, slot: undefined });
+        // Four legacy rows pass the pre-check; the one numbered slot they leave
+        // goes to somebody else between that check and this insert.
+        mockListings.model.create.mockImplementationOnce(async () => {
+            seedListing({ _id: 'rival', sellerId: BUYER_ID, slot: 5 });
+            throw Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
+        });
+
+        const interaction = await run({
+            subcommand: 'list',
+            options: { item: 'lucky_charm', quantity: 2, price: 100 },
+        });
+
+        expect(repliedText(interaction)).toContain('only have 5 active listings');
+        expect(mockListings.all().filter(l => l.sellerId === BUYER_ID)).toHaveLength(5);
+        expect(mockUsers.get(BUYER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 9 }]);
+    });
+
+    // The debit has committed by the time the return runs, so a return that does
+    // not land leaves the player without the item and without a listing. Saying
+    // it came back is the one answer that gives them no reason to mention it.
+    it.each([
+        ['the update rejects', () => grantInventoryItem.mockRejectedValueOnce(new Error('write failed'))],
+        ['the update matches no document', () => grantInventoryItem.mockResolvedValueOnce(false)],
+    ])('records the stock as owed, and says so, when %s', async (_case, breakReturn) => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 5 }] });
+        mockListings.model.create.mockRejectedValueOnce(new Error('write failed'));
+        breakReturn();
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({
+            subcommand: 'list',
+            options: { item: 'lucky_charm', quantity: 2, price: 100 },
+        });
+
+        expect(repliedText(interaction)).toContain('recorded as owed');
+        expect(repliedText(interaction)).not.toContain('has been returned');
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'market',
+            payload: {
+                kind: 'items', userId: BUYER_ID, guildId: GUILD_ID, itemId: 'lucky_charm', quantity: 2,
+            },
+        }));
+        console.error.mockRestore();
+    });
+
     it('hands the stock back when the listing cannot be written', async () => {
         seedGuild();
         seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 5 }] });
@@ -168,6 +302,8 @@ describe('listing an item', () => {
         expect(repliedText(interaction)).toContain('item has been returned');
         expect(grantInventoryItem).toHaveBeenCalledWith(BUYER_ID, GUILD_ID, 'lucky_charm', 2);
         expect(mockUsers.get(BUYER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 5 }]);
+        // The stock is back, so there is nothing owed to write down.
+        expect(recordOwedPayout).not.toHaveBeenCalled();
         console.error.mockRestore();
     });
 });
@@ -375,5 +511,30 @@ describe('the economy switch', () => {
 
         expect(repliedText(interaction)).toContain('economy is disabled');
         expect(mockUsers.writes).toEqual([]);
+    });
+});
+
+// The slot allocation above is only half of the cap: the other half is the
+// unique index that makes two listings in one slot impossible, and an index is
+// not something the command can assert about itself. Read off the compiled
+// schema — the real one, past the mock — so a malformed declaration fails here
+// rather than at autoIndex time in production.
+describe('the MarketListing schema backs the cap', () => {
+    const declared = jest.requireActual('../src/models/MarketListing').schema.indexes();
+    const slotIndex = declared.find(([, opts]) => opts?.name === 'idx_market_seller_slot');
+
+    it('keeps one listing per seller slot', () => {
+        expect(slotIndex).toBeDefined();
+        expect(slotIndex[0]).toEqual({ guildId: 1, sellerId: 1, slot: 1 });
+        expect(slotIndex[1].unique).toBe(true);
+    });
+
+    // Rows written before the field existed carry no slot. A sparse index would
+    // still index them — sparse skips a document only when it has none of the
+    // keys, and these have guildId and sellerId — and every one of a seller's
+    // legacy rows would then collide on `slot: null`, failing the index build.
+    it('indexes only the rows that carry a slot', () => {
+        expect(slotIndex[1].partialFilterExpression).toEqual({ slot: { $gte: 1 } });
+        expect(slotIndex[1].sparse).toBeUndefined();
     });
 });
