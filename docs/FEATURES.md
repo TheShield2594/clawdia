@@ -582,15 +582,24 @@ coin and 250 XP bonus, claimable once every 24 hours.
 
 ### Seasonal Commands
 
-These are only usable while their seasonal event is running:
+Each activity is a subcommand of `/event`, and is only usable while its
+seasonal event is running:
 
 ```text
-/trackhunt   - Track game across the Arctic Tundra (Winter Hunt)
-/sandcastle  - Build a sandcastle on the shore (Summer Festival)
-/lovenote    - Send a love note into the Arcade (Valentine's Day)
-/snowball    - Winter snowball throwing
-/trickortreat- Spooky-season treat run
-/eventshop   - Spend event currency
+/event status       - What event is live, its boosts, and its shop
+/event trackhunt    - Track game across the Arctic Tundra (Winter Hunt)
+/event sandcastle   - Build a sandcastle on the shore (Summer Festival)
+/event lovenote     - Send a love note into the Arcade (Valentine's Day)
+/event snowball     - Winter snowball throwing (Winter Wonderland)
+/event trickortreat - Spooky-season treat run (Spooky Season)
+/eventshop          - Spend event currency
+```
+
+Server managers start and end events from the same command:
+
+```text
+/event start [type] - Start a limited-time event (Manage Server)
+/event end          - End the current event early (Manage Server)
 ```
 
 ### World Exploration

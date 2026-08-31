@@ -181,6 +181,31 @@ On `requiredPermissions` that is a security bug rather than an annoyance,
 because `setDefaultMemberPermissions` on the builder is only a default that a
 guild admin can reassign.
 
+### New features ship as subcommands
+
+Discord registers at most **100 global application commands**, and going over is
+not a truncation — it rejects the whole `PUT`, so one command too many
+unregisters every other command at deploy time. `COMMAND_BUDGET` in
+`src/utils/commandDeployer.js` is the ratchet and `tests/commandCap.test.js`
+fails when the count moves, which is the only local signal there is.
+
+So: **a new feature is a subcommand of an existing group unless there is a
+specific reason it cannot be.** `/hunt`, `/fish`, `/mine`, `/explore`, `/casino`,
+`/season` and `/event` are all groups for this reason, and adding to one costs
+nothing from the budget. A command too big for one file becomes
+`commands/<category>/<name>/index.js` plus siblings — the loader counts the
+folder as one command, so its parts never register as commands of their own.
+
+Spending a slot means displacing one: fold or retire a command, then lower
+`COMMAND_BUDGET` to match. Raising the budget to get the suite green is how the
+repo arrives at a deploy that a revert cannot undo.
+
+Permission gating is worth a thought here, because Discord's
+`setDefaultMemberPermissions` applies to the whole command and not to one
+subcommand. `/event` checks Manage Server inside `start` and `end` for exactly
+that reason: gating the command would have hidden the five player activities
+beside them.
+
 For an HTTP endpoint, [API_REFERENCE.md](docs/API_REFERENCE.md) documents what the
 dashboard's API already serves and how its authentication, authorization and
 response envelopes work; the tables in it are generated, so write the route's

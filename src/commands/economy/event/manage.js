@@ -1,8 +1,19 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
-const Guild = require('../../models/Guild');
-const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
-const { buildClearedEvent } = require('../../services/seasonalEventService');
-const COLORS = require('../../utils/embedColors');
+'use strict';
+
+// The management half of /event: start, end and status. This was
+// commands/admin/event.js, a top-level command of its own, until the five
+// single-holiday activities were folded in beside it (#875).
+//
+// `start` and `end` need Manage Server and check for it here rather than
+// through setDefaultMemberPermissions, because that gate is per *command* and
+// this command is mostly player-facing — hiding /event from everyone without
+// Manage Server would hide /event snowball too.
+
+const { EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const Guild = require('../../../models/Guild');
+const { SEASONAL_EVENTS } = require('../../../data/seasonalEvents');
+const { buildClearedEvent } = require('../../../services/seasonalEventService');
+const COLORS = require('../../../utils/embedColors');
 
 const EVENT_TYPE_CHOICES = [
     { name: '❄️ Winter Wonderland',   value: 'winter_wonderland' },
@@ -12,68 +23,6 @@ const EVENT_TYPE_CHOICES = [
     { name: '🏔️ The Winter Hunt',    value: 'winter_hunt' },
     { name: '✨ Custom',              value: 'custom' },
 ];
-
-module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('event')
-        .setDescription('Manage limited-time events')
-        .addSubcommand(sub =>
-            sub.setName('start')
-                .setDescription('Start a limited-time event')
-                .addStringOption(o =>
-                    o.setName('type')
-                        .setDescription('Event type')
-                        .setRequired(true)
-                        .addChoices(...EVENT_TYPE_CHOICES))
-                .addIntegerOption(o =>
-                    o.setName('duration_hours')
-                        .setDescription('Duration in hours (default: 24)')
-                        .setMinValue(1)
-                        .setMaxValue(720)
-                        .setRequired(false))
-                .addStringOption(o =>
-                    o.setName('name')
-                        .setDescription('Custom event name (for "custom" type or override)')
-                        .setRequired(false))
-                .addNumberOption(o =>
-                    o.setName('coin_multiplier')
-                        .setDescription('Coin multiplier (default: 2x for double coins event)')
-                        .setMinValue(1.0)
-                        .setMaxValue(5.0)
-                        .setRequired(false))
-                .addNumberOption(o =>
-                    o.setName('xp_multiplier')
-                        .setDescription('XP multiplier (default: 1.5x for XP boost event)')
-                        .setMinValue(1.0)
-                        .setMaxValue(5.0)
-                        .setRequired(false))
-                .addChannelOption(o =>
-                    o.setName('announcement_channel')
-                        .setDescription('Channel to announce this event in')
-                        .setRequired(false)))
-        .addSubcommand(sub =>
-            sub.setName('end')
-                .setDescription('End the current event early'))
-        .addSubcommand(sub =>
-            sub.setName('status')
-                .setDescription('Show the currently active event')),
-
-    async execute(interaction) {
-        const sub = interaction.options.getSubcommand();
-
-        if (sub === 'status') {
-            return handleStatus(interaction);
-        }
-
-        // start and end require ManageGuild
-        if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-            return interaction.reply({ content: 'You need **Manage Server** permission to manage events.', flags: MessageFlags.Ephemeral });
-        }
-
-        if (sub === 'start') return handleStart(interaction);
-        if (sub === 'end')   return handleEnd(interaction);
-    }
-};
 
 async function handleStatus(interaction) {
     await interaction.deferReply();
@@ -235,4 +184,21 @@ function buildStartDescription(ev, def) {
     lines.push(`⏰ Ends <t:${Math.floor(new Date(ev.endsAt) / 1000)}:R>`);
     lines.push('\nUse `/event status` for info and `/eventshop` to spend event currency!');
     return lines.join('\n');
+}
+
+// EVENT_TYPE_CHOICES is the option list for `/event start`; index.js needs it
+// to build the command.
+module.exports = { EVENT_TYPE_CHOICES, handleStart, handleEnd, handleStatus, requireManageGuild };
+
+/**
+ * The gate on the two subcommands that change what event is running.
+ * @returns {Promise<boolean>} false when the reply has already been sent.
+ */
+async function requireManageGuild(interaction) {
+    if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
+    await interaction.reply({
+        content: 'You need **Manage Server** permission to manage events.',
+        flags: MessageFlags.Ephemeral,
+    });
+    return false;
 }

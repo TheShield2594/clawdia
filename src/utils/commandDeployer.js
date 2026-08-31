@@ -14,8 +14,10 @@ const GLOBAL_COMMAND_LIMIT = 100;
 // have to displace an old one or become a subcommand of an existing group (the
 // shape /hunt, /fish and /explore use).
 // Lower it when a consolidation lands; raising it spends the last of the
-// headroom between here and a deploy that cannot be undone by a revert.
-const COMMAND_BUDGET = 97;
+// headroom between here and a deploy that cannot be undone by a revert. It
+// last moved for #875, which folded five single-holiday commands into the
+// /event group they were already gated by.
+const COMMAND_BUDGET = 92;
 
 /**
  * Serialize the command set that is about to be published, and refuse to
