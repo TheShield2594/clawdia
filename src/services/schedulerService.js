@@ -143,7 +143,11 @@ async function resolveOneWar(client, guildDoc) {
     if (!tied && winnerName) {
         try {
             const buf = await createWarVictoryBanner(winnerName, winnerScore, loserName, loserScore, mvpName);
-            bannerAttachment = new AttachmentBuilder(buf, { name: 'war_victory.png' });
+            bannerAttachment = new AttachmentBuilder(buf, {
+                name: 'war_victory.png',
+                description: `Victory banner: ${winnerName} beat ${loserName} by ${winnerScore} points to ${loserScore}`
+                    + (mvpName ? `, with ${mvpName} as MVP.` : '.'),
+            });
         } catch (err) {
             console.error('[scheduler] war banner generation failed:', err.message);
         }
@@ -363,7 +367,11 @@ async function resolveOneSeason(client, guildDoc) {
 
                     const rank = rankMap.get(u.userId) ?? null;
                     const buf  = await createSeasonRecapCard(u, season.name ?? season.id, rank, totalParticipants);
-                    const file = new AttachmentBuilder(buf, { name: 'season_recap.png' });
+                    const file = new AttachmentBuilder(buf, {
+                        name: 'season_recap.png',
+                        description: `${season.name ?? season.id} recap card for ${member.user.username}`
+                            + (rank ? `, finishing ${rank} of ${totalParticipants}.` : '.'),
+                    });
 
                     await member.send({
                         content: `🏁 **Your ${season.name ?? season.id} recap is here!** Screenshot and share it — see you next season!`,
@@ -671,7 +679,10 @@ async function selectPetOfTheWeek(client) {
             try {
                 const spriteBuf = await generatePetSprite(bestPet.petId, 80, bestPet.evolutionStage ?? 1);
                 embed.setThumbnail('attachment://potw_sprite.png');
-                files = [new AttachmentBuilder(spriteBuf, { name: 'potw_sprite.png' })];
+                files = [new AttachmentBuilder(spriteBuf, {
+                    name: 'potw_sprite.png',
+                    description: `Pixel-art sprite of ${name}, the pet of the week.`,
+                })];
             } catch { /* non-critical */ }
 
             await postAnnouncement(client, guildId, channelId, { embeds: [embed], files });

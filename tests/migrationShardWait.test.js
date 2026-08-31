@@ -10,18 +10,11 @@ const fs   = require('fs');
 const os   = require('os');
 const path = require('path');
 
-const records = [];
-jest.mock('../src/models/MigrationRecord', () => ({
-    find: (filter = {}) => ({
-        lean: async () => {
-            const wanted = filter?.name?.$in;
-            return records
-                .filter(r => !wanted || wanted.includes(r.name))
-                .map(r => ({ name: r.name }));
-        },
-    }),
-    create: async doc => { records.push(doc); return doc; },
-}));
+const { fakeMigrationRecords } = require('./helpers/fakeMigrationRecords');
+
+const mockRecords = fakeMigrationRecords();
+jest.mock('../src/models/MigrationRecord', () => mockRecords.model);
+const records = mockRecords.rows;
 
 const { pendingMigrationNames, waitForMigrations, isRecordableMigration } = require('../src/migrations/runner');
 

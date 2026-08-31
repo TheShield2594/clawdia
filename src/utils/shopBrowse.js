@@ -116,7 +116,16 @@ async function runShopBrowse(interaction, config) {
             currency
         });
         const filename   = `${activity}-shop-${page.id}.png`;
-        const attachment = new AttachmentBuilder(buffer, { name: filename });
+        // Discord caps alt text at 1024 characters and rejects the upload over
+        // it, so the item list — the one part of this that grows with the page —
+        // is trimmed rather than allowed to fail the whole message.
+        const shown = items.map(i => i.name).filter(Boolean).join(', ');
+        const altText = `${title} — ${page.label}: a banner showing `
+            + (shown ? `${shown}.` : 'no items.');
+        const attachment = new AttachmentBuilder(buffer, {
+            name: filename,
+            description: altText.slice(0, 1024),
+        });
 
         const embed = new EmbedBuilder()
             .setColor(colorHex)

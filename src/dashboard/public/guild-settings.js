@@ -501,7 +501,7 @@ function renderEscalationLadder() {
             <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-duration">Duration (min)</label><input type="number" id="esc-${idx}-duration" min="1" max="40320" value="${step.durationMinutes ?? ''}" ${needsDuration ? '' : 'disabled'} data-esc-idx="${idx}" data-esc-key="durationMinutes"></div>
             <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-dm">DM</label><input type="checkbox" id="esc-${idx}-dm" ${step.dmUser !== false ? 'checked' : ''} data-esc-idx="${idx}" data-esc-key="dmUser"></div>
             <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-reason">Reason (supports {count})</label><input type="text" id="esc-${idx}-reason" value="${escapeHtml(step.reason || '')}" data-esc-idx="${idx}" data-esc-key="reason"></div>
-            <div><button type="button" class="btn btn-sm" onclick="removeEscalationStep(${idx})">✕</button></div>
+            <div><button type="button" class="btn btn-sm" onclick="removeEscalationStep(${idx})" aria-label="Remove escalation step ${idx + 1}">✕</button></div>
         </div>`;
     }).join('');
 
@@ -1245,7 +1245,7 @@ function renderCpRules() {
         return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
             '<span style="flex:1"><strong>' + escHtml(r.command) + '</strong> — <span style="color:' + color + '">' + escHtml(r.effect) + '</span></span>' +
             '<button class="btn btn-sm" onclick="openCpRuleModal(' + i + ')">Edit</button>' +
-            '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpRules.splice(' + i + ',1);renderCpRules()">✕</button></div>';
+            '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpRules.splice(' + i + ',1);renderCpRules()" aria-label="Remove the ' + escHtml(r.command) + ' rule">✕</button></div>';
     }).join('');
 }
 var _cpRoleMap = boot('roleNames');
@@ -1257,7 +1257,7 @@ function renderCpCooldowns() {
         return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
             '<span style="flex:1"><strong>' + escHtml(c.command) + '</strong> — ' + escHtml(roleName) + ' → ' + escHtml(c.cooldownSeconds) + 's</span>' +
             '<button class="btn btn-sm" onclick="openCpCooldownModal(' + i + ')">Edit</button>' +
-            '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpCooldowns.splice(' + i + ',1);renderCpCooldowns()">✕</button></div>';
+            '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpCooldowns.splice(' + i + ',1);renderCpCooldowns()" aria-label="Remove the ' + escHtml(c.command) + ' cooldown override">✕</button></div>';
     }).join('');
 }
 function openCpRuleModal(idx) {
@@ -1324,6 +1324,7 @@ function addCpExcRole() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.title = 'Remove';
+    btn.setAttribute('aria-label', 'Remove ' + roleName);
     btn.textContent = '×';
     btn.onclick = function() { tag.remove(); };
     tag.appendChild(btn);
@@ -1584,8 +1585,8 @@ function renderJobs() {
             (job.emoji ? '<span class="job-chip-emoji">' + escHtml(job.emoji) + '</span>' : '') +
             '<span class="job-name">' + escHtml(job.name) + '</span>' +
             '<span class="job-pay-badge">💰 ' + minPay + '–' + maxPay + '</span>' +
-            '<button class="job-btn" onclick="openJobModal(' + i + ')" title="Edit">✏️</button>' +
-            '<button class="job-btn" onclick="deleteJob(' + i + ')" title="Remove" style="font-size:1rem">×</button>' +
+            '<button class="job-btn" onclick="openJobModal(' + i + ')" title="Edit" aria-label="Edit the ' + escHtml(job.name) + ' job">✏️</button>' +
+            '<button class="job-btn" onclick="deleteJob(' + i + ')" title="Remove" style="font-size:1rem" aria-label="Remove the ' + escHtml(job.name) + ' job">×</button>' +
         '</div>';
     });
     if (lastTier !== null) html += '</div>';
@@ -2015,6 +2016,78 @@ async function startBoostEvent() {
     }
 }
 
+// ── Repeated-row remove buttons ────────────────────────────────────────────
+//
+// #670 again. A repeater's remove button is one glyph, and giving every row in
+// a list the same "Remove this level reward" names none of them — a reader
+// tabbing a five-row list hears the identical thing five times. So each one is
+// named after what is in its own row.
+//
+// Which means the label cannot be written once. The values it names are the
+// row's own editable fields, so a label saying "level 5" is worse than a
+// generic one the moment the input says 12. These are rewritten whenever a row
+// changes, and after a removal, because the fallback names a row by position.
+
+const ROW_LABELLERS = {
+    'level-reward': (row, position) => {
+        const level = (row.querySelector('.level-reward-level')?.value || '').trim();
+        return level
+            ? `Remove the level ${level} reward`
+            : `Remove reward row ${position}, which has no level set`;
+    },
+    'season-tier': (row, position) => {
+        const tier = (row.querySelector('.season-tier-num')?.value || '').trim();
+        return tier
+            ? `Remove the tier ${tier} reward`
+            : `Remove tier row ${position}, which has no tier set`;
+    },
+    'rr-mapping': (row, position) => {
+        const emoji  = (row.querySelector('.rr-emoji')?.value || '').trim();
+        const select = row.querySelector('.rr-role');
+        const role   = select?.value ? select.options[select.selectedIndex].text : '';
+        if (!emoji && !role) return `Remove mapping row ${position}, which is empty`;
+        return `Remove the ${emoji || 'no emoji'} → ${role || 'no role'} mapping`;
+    },
+};
+
+/** Renames every remove button in one repeater after its own row's contents. */
+function labelRepeatedRows(list) {
+    if (!list) return;
+    Array.from(list.children).forEach((row, index) => {
+        const button = row.querySelector('[data-row-remove]');
+        const label  = button && ROW_LABELLERS[button.dataset.rowRemove];
+        if (label) button.setAttribute('aria-label', label(row, index + 1));
+    });
+}
+
+/** Every repeater on the page, wherever an edit or a removal landed. */
+function labelAllRepeatedRows() {
+    document.querySelectorAll('[data-row-list]').forEach(labelRepeatedRows);
+}
+
+// Capture, so a label still follows the edit if something downstream stops the
+// event — the same reasoning as the unsaved-changes tracker below.
+document.addEventListener('input', e => {
+    const list = e.target?.closest?.('[data-row-list]');
+    if (list) labelRepeatedRows(list);
+}, true);
+document.addEventListener('change', e => {
+    const list = e.target?.closest?.('[data-row-list]');
+    if (list) labelRepeatedRows(list);
+}, true);
+// Adding or removing a row fires neither input nor change, and a removal
+// renumbers everything after it. The click is the signal; the list it left
+// behind exists a tick later, which is why the row is read from the event
+// rather than from the button — by then the button's row is detached.
+document.addEventListener('click', e => {
+    if (!e.target?.closest?.('[data-row-list]')) return;
+    setTimeout(labelAllRepeatedRows, 0);
+}, true);
+
+onPanel('leveling',      () => labelRepeatedRows(document.getElementById('level-role-rewards-list')));
+onPanel('season',        () => labelRepeatedRows(document.getElementById('season-tier-rewards-list')));
+onPanel('reactionroles', () => labelRepeatedRows(document.getElementById('rr-mappings-list')));
+
 // ── Reaction Roles ─────────────────────────────────────────────────────────
 var rrRoles = boot('roles');
 
@@ -2027,8 +2100,9 @@ function addRrMapping() {
         '<select class="rr-role" aria-label="Role to assign"><option value="">Select role</option>' +
         rrRoles.map(function(r) { return '<option value="' + r.id + '">@' + escHtml(r.name) + '</option>'; }).join('') +
         '</select>' +
-        '<button class="btn btn-sm btn-danger" type="button" onclick="this.parentElement.remove()">×</button>';
+        '<button class="btn btn-sm btn-danger" type="button" onclick="this.parentElement.remove()" data-row-remove="rr-mapping" aria-label="Remove this reaction role mapping">×</button>';
     list.appendChild(row);
+    labelRepeatedRows(list);
 }
 
 // See _rssAddInFlight. This one matters more: a duplicate publish posts a second
@@ -3446,6 +3520,7 @@ function addLevelNoXpRole() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.title = 'Remove';
+    btn.setAttribute('aria-label', 'Remove ' + roleName);
     btn.textContent = '×';
     btn.onclick = () => tag.remove();
     tag.textContent = roleName + ' ';
@@ -3474,6 +3549,7 @@ function addLevelNoXpChannel() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.title = 'Remove';
+    btn.setAttribute('aria-label', 'Remove ' + channelName);
     btn.textContent = '×';
     btn.onclick = () => tag.remove();
     tag.textContent = channelName + ' ';
@@ -3511,12 +3587,14 @@ function addLevelRoleReward() {
     delBtn.className = 'btn btn-danger';
     delBtn.type = 'button';
     delBtn.title = 'Remove';
+    delBtn.dataset.rowRemove = 'level-reward';
     delBtn.textContent = '×';
     delBtn.onclick = () => row.remove();
     row.appendChild(levelInput);
     row.appendChild(newSelect);
     row.appendChild(delBtn);
     list.appendChild(row);
+    labelRepeatedRows(list);
 }
 function removeLevelRoleReward(btn) {
     btn.closest('.level-reward-row').remove();
@@ -3541,8 +3619,9 @@ function addSeasonTierRow() {
         '<input type="number" class="season-tier-coins" min="0" style="width:90px" placeholder="Coins" aria-label="Coin reward">' +
         '<select class="season-tier-role" aria-label="Reward role">' + roleOptionsHtml + '</select>' +
         '<input type="text" class="season-tier-label" style="flex:1;min-width:100px" placeholder="Label (e.g. Bronze Tier)" aria-label="Tier label">' +
-        '<button class="btn btn-danger" type="button" onclick="this.closest(\'.season-tier-row\').remove()" title="Remove">&times;</button>';
+        '<button class="btn btn-danger" type="button" onclick="this.closest(\'.season-tier-row\').remove()" title="Remove" data-row-remove="season-tier">&times;</button>';
     list.appendChild(row);
+    labelRepeatedRows(list);
 }
 
 // ── Getting Started checklist ────────────────────────────────────────
@@ -4604,7 +4683,7 @@ async function ecoAdminAction(action) {
         const safeId   = escHtml(id);
         const safeName = escHtml(name);
         const safeAv   = avatarUrl ? escHtml(avatarUrl) : '';
-        tag.innerHTML  = `${safeAv ? `<img src="${safeAv}" alt="" style="width:16px;height:16px;border-radius:50%" onerror="this.style.display='none'">` : ''}<span title="${safeId}">${safeName}</span><button type="button" title="Remove">&times;</button>`;
+        tag.innerHTML  = `${safeAv ? `<img src="${safeAv}" alt="" style="width:16px;height:16px;border-radius:50%" onerror="this.style.display='none'">` : ''}<span title="${safeId}">${safeName}</span><button type="button" title="Remove" aria-label="Remove ${safeName}">&times;</button>`;
         tag.querySelector('button').addEventListener('click', function() {
             const ta = document.getElementById(widgetId);
             if (ta) ta.value = ta.value.split('\n').map(s => s.trim()).filter(s => s && s !== id).join('\n');

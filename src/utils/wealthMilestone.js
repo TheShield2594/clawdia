@@ -51,7 +51,10 @@ async function checkAndBroadcastWealthMilestone(client, guildSettings, user, cha
             const memberName = (await channel.guild.members.fetch(user.userId).catch(() => null))
                 ?.user?.username ?? 'Someone';
             const bannerBuf = await createWealthTierBanner(memberName, milestone.label, milestone.color);
-            attachment = new AttachmentBuilder(bannerBuf, { name: 'wealth_banner.png' });
+            attachment = new AttachmentBuilder(bannerBuf, {
+                name: 'wealth_banner.png',
+                description: `Banner: ${memberName} reached the ${milestone.label} wealth tier.`,
+            });
         } catch {}
 
         const embed = new EmbedBuilder()

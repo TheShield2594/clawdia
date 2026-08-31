@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { randomUUID } = require('crypto');
 const MigrationRecord = require('../models/MigrationRecord');
 
 // Wall-clock budget for a single migration. A migration that hangs holds the
@@ -46,7 +47,12 @@ function withTimeout(promise, ms, label) {
     let timerId;
     const timeoutPromise = new Promise((_, reject) => {
         timerId = setTimeout(
-            () => reject(new Error(`[MIGRATIONS] Timed out after ${ms}ms: ${label}`)),
+            // Tagged, because the difference matters to the claim: a migration
+            // that rejected is over, one that timed out is still running.
+            () => reject(Object.assign(
+                new Error(`[MIGRATIONS] Timed out after ${ms}ms: ${label}`),
+                { migrationTimedOut: true },
+            )),
             ms
         ).unref();
     });
@@ -58,6 +64,113 @@ function withTimeout(promise, ms, label) {
         ),
         timeoutPromise
     ]);
+}
+
+// How long past a migration's own budget a claim is trusted before another
+// process treats its holder as dead and takes it over. A holder that fails
+// releases its claim immediately, so this only ever elapses for one that died
+// without unwinding — a SIGKILL, a lost container, an OOM — or one whose
+// migration overran its budget and is still running server-side, which is
+// exactly the case that must not be taken over early. Generous for that reason:
+// taking a live claim over means running the migration twice at once, which is
+// the thing the claim exists to prevent.
+const STALE_CLAIM_GRACE_MS = 60_000;
+
+// How often a process that lost the claim re-checks. Same cadence as
+// waitForMigrations, and for the same reason: the wait is measured in whole
+// migrations, so a tighter poll only costs queries.
+const CLAIM_POLL_MS = 2_000;
+
+/**
+ * True for the duplicate-key error a losing `create` gets on `name`.
+ *
+ * Mongoose surfaces the driver's error as-is on `create`, but a write wrapped
+ * in a transaction or a bulk op can arrive with the driver error underneath, so
+ * both shapes are checked.
+ */
+function isDuplicateKey(err) {
+    return err?.code === 11000 || err?.cause?.code === 11000 || err?.writeErrors?.[0]?.code === 11000;
+}
+
+/**
+ * Migration names already recorded as *finished*.
+ *
+ * A claimed-but-unfinished row is deliberately not in here: its migration has
+ * not run yet, and treating it as applied is how a second process skips work
+ * that never happened.
+ */
+async function appliedNames(filter = {}) {
+    const records = await MigrationRecord
+        .find({ ...filter, state: { $ne: 'running' } }, 'name')
+        .lean();
+    return new Set(records.map(r => r.name));
+}
+
+/**
+ * Takes the exclusive right to run `name`, or reports that someone else already
+ * has (#654).
+ *
+ * The record is inserted before the migration runs rather than after it, so the
+ * unique index on `name` is the lock. Without one, a rolling update or a second
+ * replica ran the same migration twice and the loser aborted startup on an
+ * E11000 from the *bookkeeping* — a migration that had applied perfectly well
+ * taking the bot down on the way to writing that it had.
+ *
+ * The `owner` handed back is what makes the claim revocable safely. A claim can
+ * change hands — a holder that died leaves one behind, and the next process
+ * takes it over — so "the record for this migration says running" is not the
+ * same question as "this process still holds it". Every write that completes or
+ * releases a claim matches on the owner as well as the name, so a process that
+ * lost its claim cannot finish or delete its successor's.
+ *
+ * @returns {Promise<{status: 'claimed'|'applied', owner: string|null}>}
+ *   'claimed' if this process should run the migration and complete the record,
+ *   with the owner token to pass back; 'applied' if it is already done.
+ */
+async function claimMigration(name, timeoutMs) {
+    let waiting = false;
+    const owner = randomUUID();
+
+    for (;;) {
+        try {
+            await MigrationRecord.create({ name, state: 'running', startedAt: new Date(), owner });
+            return { status: 'claimed', owner };
+        } catch (err) {
+            if (!isDuplicateKey(err)) throw err;
+        }
+
+        const existing = await MigrationRecord.findOne({ name }).lean();
+        // Gone between the insert and the read: the holder failed and cleaned
+        // up after itself, so this process is free to try for the claim.
+        if (!existing) continue;
+        if (existing.state !== 'running') return { status: 'applied', owner: null };
+
+        const heldFor = Date.now() - new Date(existing.startedAt ?? existing.appliedAt ?? 0).getTime();
+        if (heldFor >= timeoutMs + STALE_CLAIM_GRACE_MS) {
+            // Only one taker wins: the update matches on the startedAt that was
+            // read, so a second process racing for the same stale claim finds
+            // it already moved and goes round again.
+            const taken = await MigrationRecord.findOneAndUpdate(
+                { name, state: 'running', startedAt: existing.startedAt, owner: existing.owner ?? null },
+                { $set: { startedAt: new Date(), owner } },
+            );
+            if (taken) {
+                console.warn(
+                    `[MIGRATIONS] Taking over the claim on ${name}: held for ` +
+                    `${Math.round(heldFor / 1000)}s without completing, so the process that ` +
+                    'took it is presumed gone.'
+                );
+                return { status: 'claimed', owner };
+            }
+            continue;
+        }
+
+        if (!waiting) {
+            console.log(`[MIGRATIONS] ${name} is being applied by another process — waiting.`);
+            waiting = true;
+        }
+        await new Promise(resolve => setTimeout(resolve, CLAIM_POLL_MS).unref());
+    }
 }
 
 // Discovers migration files and requires them, in apply order.
@@ -161,7 +274,13 @@ function preMigrationBackup(irreversibleNames) {
  *              migration optional when running it again later, out of order,
  *              is harmless.
  *
- * Already-applied migrations are skipped (tracked in the MigrationRecord collection).
+ * Already-applied migrations are skipped (tracked in the MigrationRecord
+ * collection). Each record is written in two halves: claimed before the
+ * migration runs, completed after it returns. That claim is the lock — a second
+ * process starting at the same time loses the insert on the unique `name` and
+ * waits for the result instead of applying the migration a second time (#654).
+ * A migration that fails releases its claim and stays unrecorded, so the next
+ * boot retries it exactly as before.
  */
 async function runMigrations({ dir = __dirname } = {}) {
     const loaded = loadMigrations(dir);
@@ -171,9 +290,7 @@ async function runMigrations({ dir = __dirname } = {}) {
         return;
     }
 
-    const applied = new Set(
-        (await MigrationRecord.find({}, 'name').lean()).map(r => r.name)
-    );
+    const applied = await appliedNames();
 
     const baseTimeoutMs = envTimeoutMs() ?? DEFAULT_TIMEOUT_MS;
 
@@ -214,16 +331,67 @@ async function runMigrations({ dir = __dirname } = {}) {
         const { name, up } = migration;
         const timeoutMs = resolveTimeoutMs(migration.timeoutMs, baseTimeoutMs);
 
+        // Claimed before it runs, so a second process racing this one waits for
+        // the result instead of running the migration again and aborting
+        // startup on the duplicate key its own bookkeeping would raise (#654).
+        const { status, owner } = await claimMigration(name, timeoutMs);
+        if (status === 'applied') {
+            console.log(`[MIGRATIONS] Applied elsewhere while waiting: ${name}`);
+            continue;
+        }
+
+        // Every write below matches on the owner as well as the name. A claim
+        // this process no longer holds belongs to whoever took it over, and
+        // completing or deleting *their* record is worse than doing nothing:
+        // it would mark applied a migration still running elsewhere, or drop
+        // the lock out from under it.
+        const release = () => MigrationRecord.deleteOne({ name, state: 'running', owner })
+            .catch(e => console.error(`[MIGRATIONS] Could not release the claim on ${name}:`, e.message));
+
         console.log(`[MIGRATIONS] Applying: ${name} (budget ${timeoutMs}ms)`);
         const start = Date.now();
+        let work = null;
         try {
-            await withTimeout(up({ timeoutMs }), timeoutMs, name);
+            work = up({ timeoutMs });
+            await withTimeout(work, timeoutMs, name);
             const durationMs = Date.now() - start;
-            await MigrationRecord.create({ name, durationMs });
-            console.log(`[MIGRATIONS] Applied ${name} in ${durationMs}ms`);
-            count++;
+            const { matchedCount } = await MigrationRecord.updateOne(
+                { name, owner },
+                { $set: { state: 'complete', durationMs, appliedAt: new Date() } },
+            );
+            if (matchedCount === 0) {
+                // The claim was taken over while this migration ran, so another
+                // process is running it too and owns the record. Saying so is
+                // the useful thing; writing over their row is not.
+                console.warn(
+                    `[MIGRATIONS] ${name} finished here in ${durationMs}ms, but the claim had already ` +
+                    'been taken over — leaving the record to whichever process holds it now.'
+                );
+            } else {
+                console.log(`[MIGRATIONS] Applied ${name} in ${durationMs}ms`);
+                count++;
+            }
         } catch (err) {
             console.error(`[MIGRATIONS] FAILED: ${name}`, err);
+            if (err?.migrationTimedOut && work) {
+                // withTimeout stops waiting; it does not stop the migration.
+                // The work is still running against the server, so releasing
+                // the claim now would let another process start the same
+                // migration alongside it. The release is attached to the work
+                // instead — and if this process dies before that settles, the
+                // claim ages out and is taken over, which is the case
+                // STALE_CLAIM_GRACE_MS exists for.
+                console.warn(
+                    `[MIGRATIONS] Holding the claim on ${name}: it timed out, so it may still be ` +
+                    'running against the server. The claim is released when it settles, or ages out.'
+                );
+                work.then(release, release);
+            } else {
+                // A migration that rejected is over. Nothing is recorded for one
+                // that did not finish — the next boot retries it, as it always
+                // has — and a claim left behind would block that boot.
+                await release();
+            }
             if (!migration.optional) {
                 // Re-throw so startup aborts — running with a partially-applied schema is unsafe.
                 throw err;
@@ -278,9 +446,7 @@ async function rollbackMigration(name, { dir = __dirname } = {}) {
         throw new Error(`[MIGRATIONS] No migration named "${name}" found in ${dir}.`);
     }
 
-    const applied = new Set(
-        (await MigrationRecord.find({}, 'name').lean()).map(r => r.name)
-    );
+    const applied = await appliedNames();
     if (!applied.has(name)) {
         throw new Error(`[MIGRATIONS] ${name} is not recorded as applied — nothing to roll back.`);
     }
@@ -353,9 +519,7 @@ async function pendingMigrationNames({ dir = __dirname } = {}) {
         .map(({ migration }) => migration.name);
     if (declared.length === 0) return [];
 
-    const applied = new Set(
-        (await MigrationRecord.find({ name: { $in: declared } }, 'name').lean()).map(r => r.name)
-    );
+    const applied = await appliedNames({ name: { $in: declared } });
     return declared.filter(name => !applied.has(name));
 }
 
@@ -401,6 +565,7 @@ async function waitForMigrations({ dir = __dirname, timeoutMs = 300_000, pollMs 
 
 module.exports = {
     runMigrations,
+    claimMigration,
     rollbackMigration,
     pendingMigrationNames,
     waitForMigrations,

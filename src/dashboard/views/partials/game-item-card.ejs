@@ -28,6 +28,6 @@
                 onchange="uploadActivityImage('<%= item.id %>', this)"
             >
         </label>
-        <button class="btn btn-sm btn-danger" onclick="removeActivityImage('<%= item.id %>')" title="Remove image">✕</button>
+        <button class="btn btn-sm btn-danger" onclick="removeActivityImage('<%= item.id %>')" title="Remove image" aria-label="Remove the image for <%= item.label %>">✕</button>
     </div>
 </div>

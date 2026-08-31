@@ -17,14 +17,14 @@
                     </div>
                     <div class="field" style="margin-top:.75rem;" role="group" aria-labelledby="season-tier-rewards-label">
                         <div class="field-label" id="season-tier-rewards-label">Tier rewards</div>
-                        <div id="season-tier-rewards-list" style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem">
+                        <div id="season-tier-rewards-list" data-row-list style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem">
                             <% (settings.season?.tierRewards || []).forEach(function(r) { %>
                                 <div class="season-tier-row" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
                                     <input type="number" class="season-tier-num" value="<%= r.tier %>" min="1" style="width:70px" placeholder="Tier" aria-label="Tier number">
                                     <input type="number" class="season-tier-coins" value="<%= r.coins %>" min="0" style="width:90px" placeholder="Coins" aria-label="Coin reward">
                                     <%- include('../role-select', { cls: 'season-tier-role', ariaLabel: 'Reward role', placeholder: 'No role', selected: r.roleId }) %>
                                     <input type="text" class="season-tier-label" value="<%= r.label || '' %>" style="flex:1;min-width:100px" placeholder="Label (e.g. Bronze Tier)" aria-label="Tier label">
-                                    <button class="btn btn-danger" type="button" onclick="this.closest('.season-tier-row').remove()" title="Remove">&times;</button>
+                                    <button class="btn btn-danger" type="button" onclick="this.closest('.season-tier-row').remove()" title="Remove" data-row-remove="season-tier" aria-label="Remove the tier <%= r.tier %> reward">&times;</button>
                                 </div>
                             <% }); %>
                         </div>

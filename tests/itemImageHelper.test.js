@@ -82,4 +82,40 @@ describe('getItemImageAttachment', () => {
         expect(ItemImage.findOne).toHaveBeenNthCalledWith(2, { guildId: null, itemId: 'mine:stone_pickaxe' });
         expect(result.attachment.name).toBe('item-mine_stone_pickaxe.gif');
     });
+
+    // #672's alt text. A shop item's name is whatever an admin typed into the
+    // dashboard, and Discord rejects an upload whose description runs past 1024
+    // characters — so the whole message fails over the caption on the thumbnail.
+    describe('alt text', () => {
+        beforeEach(() => {
+            ItemImage.findOne.mockResolvedValue({ imageData: Buffer.from('fake-png-bytes'), imageType: 'image/png' });
+        });
+
+        test('names the item when the caller passes one', async () => {
+            const result = await getItemImageAttachment('sword', null, { label: 'Iron Sword' });
+            expect(result.attachment.description).toBe('Artwork for the item Iron Sword.');
+        });
+
+        test('falls back to the id, which is all some callers have', async () => {
+            const result = await getItemImageAttachment('hunt:wooden_rifle');
+            expect(result.attachment.description).toBe('Artwork for the item hunt:wooden_rifle.');
+        });
+
+        test('caps an overlong label at what Discord will accept', async () => {
+            const result = await getItemImageAttachment('sword', null, { label: 'A'.repeat(5_000) });
+            expect(result.attachment.description).toHaveLength(1024);
+        });
+
+        // The prefix counts too, so capping the label alone would leave the
+        // finished string 25 characters over the limit.
+        test('counts the prefix against the cap, not just the label', async () => {
+            const result = await getItemImageAttachment('sword', null, { label: 'A'.repeat(1024) });
+            expect(result.attachment.description).toHaveLength(1024);
+        });
+
+        test('caps a fallback id that is overlong too', async () => {
+            const result = await getItemImageAttachment('x'.repeat(5_000));
+            expect(result.attachment.description).toHaveLength(1024);
+        });
+    });
 });

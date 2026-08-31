@@ -96,7 +96,11 @@ module.exports = {
                         }
 
                         if (card) {
-                            const attachment = new AttachmentBuilder(card, { name: 'welcome.png' });
+                            const attachment = new AttachmentBuilder(card, {
+                                name: 'welcome.png',
+                                description: `Welcome card for ${member.user.username}, member number `
+                                    + `${member.guild.memberCount} of ${member.guild.name}.`,
+                            });
 
                             const embed = new EmbedBuilder()
                                 .setColor(COLORS.INFO)

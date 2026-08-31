@@ -266,7 +266,10 @@ async function shake(responder, { quoted, shakes, ownerId }) {
     }
 
     const response = pickResponse();
-    const ball = new AttachmentBuilder(renderEightBall(response.text, response.type), { name: BALL_FILE });
+    const ball = new AttachmentBuilder(renderEightBall(response.text, response.type), {
+        name: BALL_FILE,
+        description: `A magic 8-ball, its window reading "${response.text}".`,
+    });
 
     return responder.editReply({
         components:      [resultView(quoted, response, shakes, ownerId)],

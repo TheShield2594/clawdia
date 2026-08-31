@@ -112,7 +112,10 @@ async function generatePoster(interaction, target) {
             ctx.fillStyle = '#3a1a00';
             ctx.fillText('Contact your local sheriff', W / 2, AVATAR_Y + AVATAR_SIZE + 130);
 
-            const attachment = new AttachmentBuilder(await encodeCanvas(canvas), { name: 'wanted.png' });
+            const attachment = new AttachmentBuilder(await encodeCanvas(canvas), {
+                name: 'wanted.png',
+                description: `A Wild West wanted poster for ${target.username}, reward ${reward}.`,
+            });
             const regenId = `wanted_regen_${interaction.id}_${Date.now()}`;
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(regenId).setLabel('🤠 Wanted: Me').setStyle(ButtonStyle.Secondary),
