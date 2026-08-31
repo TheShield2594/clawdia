@@ -330,12 +330,11 @@ describe('admin adjust endpoints no longer upsert (#584)', () => {
 
         expect(res.status).toBe(404);
         expect(res.body.error).toMatch(/no economy record/i);
-        expect(User.findOneAndUpdate).toHaveBeenCalledWith(
-            { userId: MISTYPED, guildId: 'g1' },
-            { $inc: { balance: 500 } },
-            { new: true },
-        );
-        const [, , options] = User.findOneAndUpdate.mock.calls[0];
+        // The update itself is a clamped pipeline now (#925) and is asserted in
+        // tests/dashboardAdjustLimits.test.js; what belongs here is that it went
+        // to the member the request named and did not offer to create one.
+        const [filter, , options] = User.findOneAndUpdate.mock.calls[0];
+        expect(filter).toEqual({ userId: MISTYPED, guildId: 'g1' });
         expect(options.upsert).toBeUndefined();
     });
 
