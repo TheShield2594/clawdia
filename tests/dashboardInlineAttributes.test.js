@@ -31,7 +31,7 @@ const VIEWS = path.join(__dirname, '..', 'src', 'dashboard', 'views');
 // file (relative to views/) -> [inline style attributes, inline handler attributes]
 const BASELINE = {
     'dashboard.ejs': [4, 0],
-    'guild-settings.ejs': [14, 5],
+    'guild-settings.ejs': [13, 5],
     'index.ejs': [11, 0],
     'partials/game-item-card.ejs': [2, 4],
     'partials/panels/achievements.ejs': [14, 9],

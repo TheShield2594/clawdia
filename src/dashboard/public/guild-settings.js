@@ -15,6 +15,25 @@ function boot(key) {
     return JSON.parse(JSON.stringify(BOOT[key]));
 }
 
+// ── Media queries ────────────────────────────────────────────────────
+// jsdom has no matchMedia, and neither did a handful of browsers this page
+// still loads in. A query nobody can answer reads as "no preference expressed"
+// — the desktop layout, and motion left as authored — which is what the page
+// did before any of this existed.
+function media(query) {
+    return typeof window.matchMedia === 'function' ? window.matchMedia(query) : null;
+}
+
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
+// styles.css answers this for everything it can reach, but `scroll-behavior`
+// in CSS does not govern a `behavior: 'smooth'` passed to scrollIntoView (#675)
+// — that argument wins over the stylesheet — so the one call that scrolls the
+// page has to ask as well.
+function scrollBehavior() {
+    return media(REDUCED_MOTION)?.matches ? 'auto' : 'smooth';
+}
+
 // ── Lazily loaded panels ─────────────────────────────────────────────
 // The page ships only the panel that is open on arrival; the other two dozen
 // come down as HTML fragments the first time their tab is clicked. So nothing
@@ -116,11 +135,117 @@ const topbarSection = document.getElementById('topbar-section');
 // button being held down.
 const mainContent = document.getElementById('dash-main-content');
 
+// ── Narrow-viewport nav toggle (#674) ────────────────────────────────
+// Below 768px the sidebar stops being a column beside the content and becomes
+// a block on top of it, so the 25 nav items, the search box and the user
+// footer all sat between the reader and the panel they had just opened — on
+// every visit, in both directions, because picking a section from the top of
+// the page leaves the settings below the fold.
+//
+// So on a narrow viewport the nav starts folded and the reader unfolds it to
+// move. The width is the same 768px the stylesheet stacks at, and it is asked
+// rather than assumed: a tablet turned sideways crosses it mid-session, and
+// the toggle has to disappear again when it does — a hidden nav with no
+// control to open it is the one state this must never leave behind.
+//
+// Nothing here runs without matchMedia: `media()` answers null, `isNarrow`
+// reads false, the button stays `hidden`, and the sidebar keeps the shape it
+// has always had.
+const dashSide = document.querySelector('.dash-side');
+const navToggle = document.getElementById('dash-nav-toggle');
+const narrowViewport = media('(max-width: 768px)');
+
+function isNarrow() {
+    return !!narrowViewport?.matches;
+}
+
+function setNavOpen(open) {
+    if (!dashSide) return;
+    dashSide.classList.toggle('nav-collapsed', !open);
+    if (navToggle) navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+/** Fold the nav away after the reader has chosen where to go. Narrow only. */
+function collapseNavAfterNavigation() {
+    if (!isNarrow() || !dashSide || dashSide.classList.contains('nav-collapsed')) return;
+    setNavOpen(false);
+    // The nav was the top of the page and is now gone, so without this the
+    // reader is left scrolled to where it used to be — which is now somewhere
+    // in the middle of the panel. Focus has already moved to the main content
+    // with preventScroll, precisely so this is the call that decides where the
+    // page lands. jsdom has no scrollIntoView, and neither did the browsers
+    // that would not have got here anyway.
+    if (mainContent && typeof mainContent.scrollIntoView === 'function') {
+        mainContent.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+    }
+}
+
+function syncNavToggle() {
+    const narrow = isNarrow();
+    if (navToggle) navToggle.hidden = !narrow;
+    // Widening puts the nav back unconditionally: at desktop width the
+    // collapsed class would hide a column that has no control to restore it.
+    setNavOpen(!narrow);
+}
+
+if (navToggle && dashSide && narrowViewport) {
+    navToggle.addEventListener('click', () => {
+        setNavOpen(dashSide.classList.contains('nav-collapsed'));
+    });
+    // addEventListener where it exists, addListener for the Safari versions
+    // where MediaQueryList is still an EventTarget in name only.
+    if (typeof narrowViewport.addEventListener === 'function') {
+        narrowViewport.addEventListener('change', syncNavToggle);
+    } else if (typeof narrowViewport.addListener === 'function') {
+        narrowViewport.addListener(syncNavToggle);
+    }
+    syncNavToggle();
+}
+
+// The section the server rendered active, which is what a Back press onto the
+// entry the page loaded on has to restore.
+const INITIAL_TAB = document.querySelector('.panel.active')?.id || null;
+
 // The tab the reader last asked for. A panel that is still being fetched when
 // the reader moves on must not steal the view when it finally arrives.
-let requestedTab = document.querySelector('.panel.active')?.id || null;
+let requestedTab = INITIAL_TAB;
 
-async function activateTab(tab) {
+// The hashes that name an inner tab rather than a panel, and the panel each one
+// lives in. '#knowledgebase' is a place in the AI panel, so arriving at it — or
+// coming back to it — has to open 'ai' and then the tab inside it.
+const INNER_TO_PARENT = { knowledgebase: 'ai', aisummaries: 'ai', aipersonas: 'ai', dailynews: 'rss' };
+const AI_INNER_TABS = { knowledgebase: 'ai-knowledgebase', aisummaries: 'ai-summaries', aipersonas: 'ai-personas' };
+const RSS_INNER_TABS = { dailynews: 'rss-tab-dailynews' };
+
+/**
+ * Record a section change in the browser's history.
+ *
+ * Every section change used to be a replaceState (#679), so the whole
+ * dashboard occupied a single history entry: Back from the tenth panel a
+ * reader had opened left the dashboard altogether rather than returning to the
+ * ninth. Pushing gives each section an entry, which is what the button is for.
+ *
+ * Still replaced, not pushed, when the URL would not change — re-clicking the
+ * section already open, or opening the panel that an inner tab's hash already
+ * points into. Neither is a place a reader could come back to, and an entry
+ * that restores what is already on screen is a Back press that does nothing.
+ */
+function writeTabHash(tab, mode) {
+    if (!window.history || !history.pushState) return;
+    const curInner = location.hash.slice(1);
+    const newHash = (INNER_TO_PARENT[curInner] === tab) ? location.hash : '#' + tab;
+    if (mode === 'push' && newHash !== location.hash) history.pushState(null, '', newHash);
+    else history.replaceState(null, '', newHash);
+}
+
+/**
+ * Show a section.
+ *
+ * `historyMode` is 'push' for a section the reader just chose, 'replace' for
+ * the one the URL already named on arrival, and 'none' when the browser is
+ * already doing the navigating and writing to history would fight it.
+ */
+async function activateTab(tab, { historyMode = 'push' } = {}) {
     if (!tab) return null;
     const item = document.querySelector(`.nav-item[data-tab="${CSS.escape(tab)}"]`);
     if (!item) return null;
@@ -132,12 +257,7 @@ async function activateTab(tab) {
     item.classList.add('active');
     item.setAttribute('aria-current', 'page');
     if (topbarSection) topbarSection.textContent = item.querySelector('span:last-child')?.textContent || tab;
-    if (history.replaceState) {
-        const innerToParent = { knowledgebase: 'ai', aisummaries: 'ai', aipersonas: 'ai', dailynews: 'rss' };
-        const curInner = location.hash.slice(1);
-        const newHash = (innerToParent[curInner] === tab) ? location.hash : '#' + tab;
-        history.replaceState(null, '', newHash);
-    }
+    if (historyMode !== 'none') writeTabHash(tab, historyMode);
 
     // Leave the stub on screen while its markup is in flight, so the main area
     // shows "Loading…" rather than going blank.
@@ -163,7 +283,6 @@ async function activateTab(tab) {
 
 navItems.forEach(item => {
     item.addEventListener('click', async () => {
-        await activateTab(item.dataset.tab);
         // Land the reader in the section they just opened. Without this, a
         // keyboard user picking the last item in the sidebar has to tab back
         // through every item below it to reach the settings — 25 stops on
@@ -172,6 +291,13 @@ navItems.forEach(item => {
         if (mainContent && document.activeElement === item) {
             mainContent.focus({ preventScroll: true });
         }
+        // Then fold the sidebar away, on a narrow viewport (#674) — before the
+        // panel is fetched, not after, so the fold is not left waiting on a
+        // network round trip. Strictly after the focus move above: folding
+        // first would hide `item` while it is still the active element, and
+        // the browser would drop focus to the body rather than hand it on.
+        collapseNavAfterNavigation();
+        await activateTab(item.dataset.tab);
     });
 });
 
@@ -257,21 +383,35 @@ document.addEventListener('click', e => {
     }
 });
 
-if (location.hash) {
-    // An inner tab can only be selected once its parent panel has arrived.
-    (async function routeFromHash() {
-        const hash = location.hash.slice(1);
-        const aiInnerMap = { knowledgebase: 'ai-knowledgebase', aisummaries: 'ai-summaries', aipersonas: 'ai-personas' };
-        const rssInnerMap = { dailynews: 'rss-tab-dailynews' };
-        if (aiInnerMap[hash]) {
-            if (await activateTab('ai')) switchAiInnerTab(aiInnerMap[hash]);
-        } else if (rssInnerMap[hash]) {
-            if (await activateTab('rss')) switchRssInnerTab(rssInnerMap[hash]);
-        } else {
-            await activateTab(hash);
-        }
-    })();
+// An inner tab can only be selected once its parent panel has arrived, which is
+// why this awaits the panel before reaching into it.
+async function routeToHash(hash, opts) {
+    if (AI_INNER_TABS[hash]) {
+        if (await activateTab('ai', opts)) switchAiInnerTab(AI_INNER_TABS[hash]);
+    } else if (RSS_INNER_TABS[hash]) {
+        if (await activateTab('rss', opts)) switchRssInnerTab(RSS_INNER_TABS[hash]);
+    } else {
+        await activateTab(hash, opts);
+    }
 }
+
+// The section named in the URL on arrival. Replaced rather than pushed: the
+// reader is already here, and an entry for it would put a Back press between
+// them and the page they actually came from.
+if (location.hash) routeToHash(location.hash.slice(1), { historyMode: 'replace' });
+
+// Back and Forward. The browser has already moved the URL by the time this
+// runs, so the section is read out of it and nothing is written back — a push
+// here would append the entry the reader just stepped off, and Back would
+// stop going anywhere.
+//
+// An entry with no hash is the one the page loaded on, whose section is
+// whatever the server rendered active.
+window.addEventListener('popstate', () => {
+    const hash = location.hash.slice(1);
+    if (hash) routeToHash(hash, { historyMode: 'none' });
+    else if (INITIAL_TAB) activateTab(INITIAL_TAB, { historyMode: 'none' });
+});
 
 // ── Sidebar search ────────────────────────────────────────────────────
 (function() {
@@ -909,10 +1049,30 @@ async function addAutoRole() {
 
 async function removeAutoRole(roleId) {
     const guildId = BOOT.guildId;
+    // Every other destructive action on this page goes through showConfirm;
+    // this one fired the DELETE straight off the click (#677). It is a
+    // one-character × sitting against the role name, so the miss is easy and
+    // the undo is not: re-adding the role restores the setting for people who
+    // join later, but nobody who joined in between gets the role.
+    //
+    // Named, because the chips sit in a row and the × the reader hit is not
+    // necessarily the one they meant. BOOT.roleNames is the server's list;
+    // the chip's own text is the fallback for a role added since the page
+    // loaded, and the id is the last resort for one deleted in Discord.
+    const named = document.querySelector(`#autorole-list [data-role-id="${CSS.escape(roleId)}"]`);
+    const roleName = BOOT.roleNames?.[roleId]
+        || named?.textContent.replace(/[\s\u00d7]+$/, '').replace(/^@/, '')
+        || roleId;
+    const ok = await showConfirm({
+        title: 'Remove auto-role',
+        body: `Stop giving @${roleName} to new members? People who already have it keep it.`,
+        okText: 'Remove role'
+    });
+    if (!ok) return;
     try {
         const response = await fetch(`/api/v1/guild/${guildId}/autorole/${roleId}`, { method: 'DELETE' });
         if (response.ok) {
-            const chip = document.querySelector(`#autorole-list [data-role-id="${roleId}"]`);
+            const chip = document.querySelector(`#autorole-list [data-role-id="${CSS.escape(roleId)}"]`);
             if (chip) chip.remove();
             toast('Role removed', 'success');
         } else toast('Failed to remove role', 'error');
@@ -2995,7 +3155,7 @@ function editMcpServer(name) {
     mcpEl('mcp-save-btn').textContent = 'Save changes';
     mcpEl('mcp-cancel-btn').style.display = '';
     updateMcpFormState();
-    mcpEl('mcp-form-title').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    mcpEl('mcp-form-title').scrollIntoView({ behavior: scrollBehavior(), block: 'nearest' });
 }
 
 async function saveMcpServer() {
@@ -4798,7 +4958,12 @@ function registerSaveScopes(root) {
         const section = sectionOfSaveButton(btn);
         const scope = saveScopeOf(btn);
         if (!section || !scope || saveScopes.has(scope)) continue;
-        saveScopes.set(scope, { section, baseline: scopeSignature(scope) });
+        // The button is kept, not just the section it saves: Enter in a field
+        // presses it (#679), and pressing the real control means the save goes
+        // through whatever that button does — the in-flight guard, the
+        // re-baseline, the toast — rather than through a second path that
+        // would have to keep up with it.
+        saveScopes.set(scope, { section, baseline: scopeSignature(scope), saveButton: btn });
     }
     refreshUnsavedMarks();
 }
@@ -4868,6 +5033,56 @@ document.addEventListener('change', noteEdit, true);
 document.addEventListener('click', () => {
     if (saveScopes.size) setTimeout(refreshUnsavedMarks, 0);
 }, true);
+
+// ── Enter saves the section (#679) ───────────────────────────────────
+// There is one <form> in the whole dashboard and it answers `return false`, so
+// Enter did nothing in any of the ~130 text fields across the panels — a key
+// every other settings page in the world responds to, in a page whose save
+// button is often several screens down from the field being edited.
+//
+// What Enter saves is exactly what the unsaved-changes banner tracks: the same
+// save scope, the same exclusions. A field the banner would never light up for
+// is not a setting, and Enter in it does nothing — which is what it did
+// before, so nothing that used to be inert becomes surprising.
+//
+// Fields whose scope has no saveSettings button of its own — the RSS feed URL,
+// the member admin lookups, anything committed by its own POST — are left
+// alone deliberately. Enter there would fire the section save rather than the
+// Add the reader was reaching for, and a key that does the wrong thing is
+// worse than a key that does nothing.
+
+// Types where Enter is not a commit: a checkbox and a radio answer to Space, a
+// file input opens a picker, and the rest are dragged or clicked.
+const NO_ENTER_TYPES = new Set(['checkbox', 'radio', 'file', 'color', 'range', 'button', 'submit', 'reset', 'hidden', 'image']);
+
+function enterSavesFrom(target) {
+    // <textarea> keeps Enter — it is a newline there, and always was. <select>
+    // keeps it too: it commits an open dropdown.
+    if (!target || target.tagName !== 'INPUT') return null;
+    if (NO_ENTER_TYPES.has(target.type) || target.disabled || target.readOnly) return null;
+    // The same three exclusions scopeSignature() applies, for the same
+    // reasons: a modal is a scratch editor with its own commit button, and a
+    // data-no-dirty field is a search box or a "pick one to add", not a
+    // setting.
+    if (target.closest('.modal-overlay') || target.matches(NOT_A_SETTING)) return null;
+    const scope = saveScopeOf(target);
+    const entry = scope && saveScopes.get(scope);
+    return entry?.saveButton || null;
+}
+
+document.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.defaultPrevented) return;
+    // A modifier means the reader asked for something else — Ctrl+Enter is the
+    // prompt editor's commit — and `isComposing` is the Enter that closes an
+    // IME candidate list, which must never reach the page as a keystroke.
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.isComposing) return;
+    const button = enterSavesFrom(event.target);
+    if (!button) return;
+    // Stop the implicit submission the one <form> on the page would otherwise
+    // have to keep swallowing.
+    event.preventDefault();
+    button.click();
+});
 
 // The one place edits are genuinely lost. Browsers ignore any message we pass
 // and show their own wording, but returnValue still has to be set for Chrome

@@ -54,7 +54,54 @@ async function settle() {
     await new Promise(resolve => setTimeout(resolve, 0));
 }
 
-function bootPage({ panelFetch } = {}) {
+// jsdom has no matchMedia at all, so the page's own `media()` helper would
+// answer null for every query and the viewport-dependent behaviour (#674) and
+// the motion preference (#675) would be untestable. This is the smallest thing
+// that behaves like one: queries answer from `state`, and `set()` flips a query
+// and notifies its listeners the way a browser does when the window is resized
+// or the preference is changed mid-session.
+function installMatchMedia(initial) {
+    // `false` is "this browser has no matchMedia" — the fail-safe the page's
+    // own `media()` helper is written around, and worth being able to boot.
+    if (initial === false) {
+        delete window.matchMedia;
+        return { set() {} };
+    }
+
+    const state = new Map(Object.entries(initial || {}));
+    const lists = new Map();
+
+    window.matchMedia = query => {
+        if (lists.has(query)) return lists.get(query);
+        const listeners = [];
+        const mql = {
+            media: query,
+            get matches() { return state.get(query) === true; },
+            addEventListener: (type, fn) => { if (type === 'change') listeners.push(fn); },
+            removeEventListener: (type, fn) => {
+                const at = listeners.indexOf(fn);
+                if (at !== -1) listeners.splice(at, 1);
+            },
+            notify: () => listeners.slice().forEach(fn => fn({ matches: mql.matches, media: query })),
+        };
+        lists.set(query, mql);
+        return mql;
+    };
+
+    return {
+        set(query, matches) {
+            state.set(query, matches);
+            lists.get(query)?.notify();
+        },
+    };
+}
+
+/**
+ * Boot the page. `media` seeds the matchMedia stub — `{ '(max-width: 768px)':
+ * true }` for a phone — and the returned handle flips a query afterwards.
+ * `media: false` boots with no matchMedia at all.
+ */
+function bootPage({ panelFetch, media } = {}) {
     const html = renderPage();
     const body = html.slice(html.indexOf('<body'), html.indexOf('</body>'));
     document.body.innerHTML = body.replace(/^<body[^>]*>/, '');
@@ -62,6 +109,8 @@ function bootPage({ panelFetch } = {}) {
     // jsdom has no CSS.escape; every browser that can run this page does.
     window.CSS = window.CSS || {};
     window.CSS.escape = value => String(value).replace(/[^\w-]/g, c => '\\' + c);
+
+    const mediaControl = installMatchMedia(media);
 
     window.fetch = jest.fn(async url => {
         const panel = /\/panel\/([a-z]+)(?:$|\?)/.exec(String(url));
@@ -101,6 +150,8 @@ function bootPage({ panelFetch } = {}) {
     window.eval(bootstrap);
     window.eval(fs.readFileSync(path.join(PUBLIC, 'settings-payload.js'), 'utf8'));
     window.eval(fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8'));
+
+    return { media: mediaControl };
 }
 
 function clickTab(id) {

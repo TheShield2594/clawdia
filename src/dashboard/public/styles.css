@@ -1359,6 +1359,38 @@ textarea.auto-resize {
 
 /* Sidebar */
 .dash-side { background: var(--ink-900); border-right: 1px solid var(--ink-800); padding: 22px 18px; display: flex; flex-direction: column; min-height: 100vh; position: sticky; top: 0; max-height: 100vh; overflow-y: auto; }
+
+/* Brand row, and the narrow-viewport nav toggle beside it (#674). The padding
+   was an inline style on the brand wrapper; it is a class now so the row can
+   lay two things out, and so guild-settings.ejs spends one less of the inline
+   attributes tests/dashboardInlineAttributes.test.js ratchets down. */
+.dash-side-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 8px 22px; }
+
+/* Never shown by the stylesheet alone: guild-settings.js unhides it once it
+   knows the viewport is narrow, so the collapse cannot strand a reader whose
+   browser never ran the script that would reopen it. */
+.dash-nav-toggle {
+    display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
+    padding: 7px 11px; border-radius: 10px;
+    background: var(--ink-850); border: 1px solid var(--ink-800);
+    color: var(--ink-200); font-family: inherit; font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: border-color .15s, color .15s;
+}
+.dash-nav-toggle[hidden] { display: none; }
+.dash-nav-toggle:hover { border-color: var(--ink-600); color: var(--cream-50); }
+.dash-nav-toggle:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; }
+/* Hamburger while the nav is folded away, X while it is open. Both ship in the
+   markup and CSS picks one, so the state never depends on the script having
+   swapped an icon — aria-expanded on the button is what carries it either way. */
+.dash-nav-toggle-icon { flex-shrink: 0; }
+.dash-nav-toggle-close { display: none; }
+.dash-side:not(.nav-collapsed) .dash-nav-toggle-open { display: none; }
+.dash-side:not(.nav-collapsed) .dash-nav-toggle-close { display: inline; }
+
+/* What the toggle folds away. The server switcher stays: it is one row, and it
+   is the way back out of a server you opened by mistake. */
+.dash-side.nav-collapsed .dash-side-nav,
+.dash-side.nav-collapsed .dash-side-footer { display: none; }
 .dash-server-switch { background: var(--ink-850); border: 1px solid var(--ink-800); border-radius: 14px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 22px; transition: border-color .15s; }
 .dash-server-switch:hover { border-color: var(--ink-600); }
 .dash-server-avatar { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--claw-500), var(--plum-500)); display: flex; align-items: center; justify-content: center; font-family: 'Instrument Serif', serif; color: #fff; font-size: 18px; flex-shrink: 0; }
@@ -1530,7 +1562,13 @@ textarea.auto-resize {
    box, five labelled groups and a user footer, none of which read as a row. It
    stacks above the content instead, which is why max-height is lifted — the
    sticky column's scroll cap would otherwise trap the nav in a short box with
-   the page already scrolling behind it. */
+   the page already scrolling behind it.
+
+   Stacked and expanded, though, that column is a long scroll standing between
+   the reader and the settings they just opened, on every visit (#674). This is
+   the breakpoint the nav toggle above turns itself on at, so the column stacks
+   folded and the reader opens it when they want to move. The two rules have to
+   agree on the width: change one and change the other. */
 @media (max-width: 768px) {
     .dash { grid-template-columns: 1fr; }
     .dash-side { min-height: auto; max-height: none; position: static; }
@@ -1698,3 +1736,44 @@ textarea.auto-resize {
    inline-style budget tests/dashboardInlineAttributes.test.js ratchets down. */
 .pager { display: flex; gap: .5rem; align-items: center; justify-content: center; margin-top: .75rem; }
 .pager-info { font-size: .85rem; opacity: .7; }
+
+/* ── Reduced motion ───────────────────────────────────────────────
+   #675. Three decorative blobs drift behind every page on 18–26s infinite
+   loops, every panel and modal fades up through `panel-in`, and the analytics
+   skeletons pulse until their data lands — none of which the reader asked for,
+   and none of which stopped for anybody. WCAG 2.2.2.
+
+   Last in the file, and stated as one rule over everything rather than as a
+   list of the selectors that animate today: the list would be accurate until
+   the next panel is written, and a decorative animation that is missed here is
+   invisible to the person writing it and unavoidable for the person it makes
+   ill. `.01ms` rather than `0s` because a zero-duration animation never fires
+   `animationend` in some engines, and a listener waiting on one would hang;
+   at this length the reader sees a cut, not a transition.
+
+   Movement is what goes, not feedback. Everything here ends in its finished
+   state — panels at full opacity, the toast in place, the toggle knob thrown —
+   so nothing that reported an outcome by moving stops reporting it. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    /* The background blobs are the exception to "ends in its finished state":
+       run to completion they would settle 120px off where they were authored,
+       having travelled there in no time at all. `none` leaves each one at the
+       position its own rule gives it — which for .blob-3 is the
+       translate(-50%, -50%) that centres it, so this has to be `animation`
+       rather than a duration override. */
+    .mesh-bg::before,
+    .mesh-bg::after,
+    .mesh-bg .blob-3 { animation: none !important; }
+
+    /* Loading skeletons stop pulsing but must still read as "not the content
+       yet", so they hold the mid-point of the shimmer instead of its faintest
+       frame. The panel they sit in is replaced the moment the data arrives. */
+    .skel-tile, .skel-bar, .skel-chart { animation: none !important; opacity: .5; }
+}

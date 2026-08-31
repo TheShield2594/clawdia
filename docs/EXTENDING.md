@@ -649,6 +649,25 @@ Two related conventions worth knowing while writing a panel:
   reaches for the paw mark through `partials/brand-mark.ejs` rather than
   pasting ten ellipses. The cream bar on the landing page and the server
   picker is `partials/nav.ejs`, which takes a `page` local.
+- A settings field gets Enter-saves-the-section for free (#679), and gets it
+  from the same place the unsaved-changes banner gets its answer: the field's
+  save scope, and the `saveSettings()` button in it. So there is nothing to
+  wire — but the two opt-outs are worth knowing. A field that is *not* a
+  setting (a search box, a "pick one to add", a one-shot admin lookup) is
+  marked `data-no-dirty`, which takes it out of the banner and out of Enter
+  together; and a section whose commit is its own POST rather than
+  `saveSettings()` has no save button for Enter to press, so Enter stays inert
+  there on purpose — better than firing a section save at somebody reaching
+  for Add.
+- Anything destructive goes through `showConfirm()` (#677), including the ones
+  that look small. Name the thing in the body — panels put several identical ×
+  buttons in a row, and the one the reader hit is not always the one they
+  meant — and say what the action does not undo.
+- A new animation needs no `prefers-reduced-motion` rule of its own (#675).
+  The block at the end of `public/styles.css` is one universal rule, so it
+  already covers whatever you write. Only add a selector there if stopping the
+  animation mid-flight leaves the element somewhere wrong — the background
+  blobs are the example, since finishing early would strand them off-position.
 
 ### Adding API Endpoints
 
