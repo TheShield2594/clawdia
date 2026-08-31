@@ -78,7 +78,10 @@ module.exports = {
 
             ctx.drawImage(src, 0, captionH, w, h);
 
-            const attachment = new AttachmentBuilder(await encodeCanvas(canvas), { name: 'caption.png' });
+            const attachment = new AttachmentBuilder(await encodeCanvas(canvas), {
+                name: 'caption.png',
+                description: `The supplied image, captioned "${text}" in black on white above it.`,
+            });
             await interaction.editReply({ files: [attachment] });
         } catch (err) {
             console.error('caption: image load or render failed', err);

@@ -187,7 +187,10 @@ async function announceAchievements(client, guildSettings, user, member, achieve
         try {
             const buf = await createAchievementCard(ach.name, ach.description, ach.xpReward);
             revealEmbed.setImage('attachment://achievement.png');
-            files = [new AttachmentBuilder(buf, { name: 'achievement.png' })];
+            files = [new AttachmentBuilder(buf, {
+                name: 'achievement.png',
+                description: `Achievement card: ${ach.name} — ${ach.description}`,
+            })];
         } catch { /* non-critical — send embed without card */ }
 
         await msg.edit({ embeds: [revealEmbed], files }).catch(() => null);

@@ -69,7 +69,10 @@ async function generateWasted(interaction, target) {
             ctx.lineWidth    = 4;
             ctx.strokeText('WASTED', SIZE / 2, SIZE / 2);
 
-            const attachment = new AttachmentBuilder(await encodeCanvas(canvas), { name: 'wasted.png' });
+            const attachment = new AttachmentBuilder(await encodeCanvas(canvas), {
+                name: 'wasted.png',
+                description: `${target.username}'s avatar, greyed out under the word WASTED.`,
+            });
             const regenId = `wasted_regen_${interaction.id}_${Date.now()}`;
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(regenId).setLabel('💀 Waste: Me').setStyle(ButtonStyle.Secondary),

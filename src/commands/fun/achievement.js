@@ -25,7 +25,10 @@ module.exports = {
         try {
             await interaction.deferReply();
             const buf        = await createAchievementCard(text, null, null);
-            const attachment = new AttachmentBuilder(buf, { name: 'achievement.png' });
+            const attachment = new AttachmentBuilder(buf, {
+                name: 'achievement.png',
+                description: `A Minecraft-style achievement popup reading "${text}".`,
+            });
             await interaction.editReply({ files: [attachment] });
         } catch (err) {
             console.error('achievement: render failed', err);

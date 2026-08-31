@@ -157,7 +157,7 @@ async function handleShop(interaction, sub) {
             )
             .setFooter({ text: 'Confirmation expires in 30 seconds' });
 
-        const pickaxeImg = await getItemImageAttachment(`mine:${pickaxeData.slug || pickaxeData.id}`, interaction.guild.id).catch(() => null);
+        const pickaxeImg = await getItemImageAttachment(`mine:${pickaxeData.slug || pickaxeData.id}`, interaction.guild.id, { label: pickaxeData.name }).catch(() => null);
         if (pickaxeImg) confirmEmbed.setThumbnail(pickaxeImg.url);
 
         const row = new ActionRowBuilder().addComponents(

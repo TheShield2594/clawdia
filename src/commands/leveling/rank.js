@@ -72,7 +72,13 @@ module.exports = {
             const rarestCatch     = getRarestCatch(user);
 
             const card       = await createRankCard(targetUser, user, rank, requiredXp, { streakCurrent, hasActiveBoost, rarestCatch });
-            const attachment = new AttachmentBuilder(card, { name: 'rank.png' });
+            const attachment = new AttachmentBuilder(card, {
+                name: 'rank.png',
+                description:
+                    `Rank card for ${targetUser.username}: level ${user.level}, ` +
+                    `${user.xp.toLocaleString()} of ${requiredXp.toLocaleString()} XP ` +
+                    `towards level ${user.level + 1}, ranked #${rank} in the server.`,
+            });
 
             const serverCoinMult = getServerCoinMultiplier(guildSettings);
             const serverXpMult   = getServerXpMultiplier(guildSettings);
@@ -102,35 +108,39 @@ module.exports = {
                 return { name: '🪪 Identity', value: parts.join('\n'), inline: false };
             })();
 
-            if (activeBoosters.length || hasServerBoost) {
-                const lines = [];
-                if (hasServerBoost) {
-                    const boostType = sb.type === 'coin' ? `💰 ${serverCoinMult}x Coins` : `⭐ ${serverXpMult}x XP`;
-                    lines.push(`🌐 **Server Boost** — ${boostType} (${timeRemaining(sb.expiresAt)} remaining)`);
-                }
-                for (const e of activeBoosters) {
-                    const cfg = EFFECT_CONFIGS[e.type];
-                    if (!cfg) continue;
-                    lines.push(`${cfg.emoji} **${cfg.label}** — ${timeRemaining(e.expiresAt)}`);
-                }
-                const boosterEmbed = new EmbedBuilder()
-                    .setColor(COLORS.WARN)
-                    .addFields({ name: '🚀 Active Boosters', value: lines.join('\n'), inline: false });
-                if (identityField) boosterEmbed.addFields(identityField);
-                if (xpHint) boosterEmbed.setFooter({ text: xpHint });
-                await interaction.reply({ files: [attachment], embeds: [boosterEmbed] });
-            } else if (identityField) {
-                const idEmbed = new EmbedBuilder().setColor(COLORS.RARE).addFields(identityField);
-                if (xpHint) idEmbed.setFooter({ text: xpHint });
-                await interaction.reply({ files: [attachment], embeds: [idEmbed] });
-            } else if (xpHint) {
-                const hintEmbed = new EmbedBuilder()
-                    .setColor(COLORS.NEUTRAL)
-                    .setFooter({ text: xpHint });
-                await interaction.reply({ files: [attachment], embeds: [hintEmbed] });
-            } else {
-                await interaction.reply({ files: [attachment] });
+            const boosterLines = [];
+            if (hasServerBoost) {
+                const boostType = sb.type === 'coin' ? `💰 ${serverCoinMult}x Coins` : `⭐ ${serverXpMult}x XP`;
+                boosterLines.push(`🌐 **Server Boost** — ${boostType} (${timeRemaining(sb.expiresAt)} remaining)`);
             }
+            for (const e of activeBoosters) {
+                const cfg = EFFECT_CONFIGS[e.type];
+                if (!cfg) continue;
+                boosterLines.push(`${cfg.emoji} **${cfg.label}** — ${timeRemaining(e.expiresAt)}`);
+            }
+
+            // #672. The three numbers this command exists to report — level, XP
+            // and position — used to live only on the PNG, and in the common
+            // case (no boosters, no prestige, no excluded channels) the reply
+            // was the PNG and nothing else. Anyone reading the message through
+            // a screen reader, or on a client that failed to load the image,
+            // got a rank card with no rank on it. So the embed is unconditional
+            // now and carries the numbers; the card illustrates them.
+            const rankEmbed = new EmbedBuilder()
+                .setColor(boosterLines.length ? COLORS.WARN : identityField ? COLORS.RARE : COLORS.NEUTRAL)
+                .setAuthor({ name: `${targetUser.username} — rank #${rank}`, iconURL: targetUser.displayAvatarURL() })
+                .addFields(
+                    { name: '📊 Level', value: `${user.level}`, inline: true },
+                    { name: '⭐ XP', value: `${user.xp.toLocaleString()} / ${requiredXp.toLocaleString()}`, inline: true },
+                    { name: '🏆 Server rank', value: `#${rank}`, inline: true },
+                );
+            if (boosterLines.length) {
+                rankEmbed.addFields({ name: '🚀 Active Boosters', value: boosterLines.join('\n'), inline: false });
+            }
+            if (identityField) rankEmbed.addFields(identityField);
+            if (xpHint) rankEmbed.setFooter({ text: xpHint });
+
+            await interaction.reply({ files: [attachment], embeds: [rankEmbed] });
         } catch (error) {
             console.error('Rank error:', error);
             await interaction.reply({ content: 'Failed to fetch rank.', flags: MessageFlags.Ephemeral });

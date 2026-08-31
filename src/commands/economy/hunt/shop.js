@@ -231,7 +231,7 @@ async function handleBuyWeapon(interaction, user, currency) {
         });
     }
 
-    const weaponImg = await getItemImageAttachment(`hunt:${weaponData.slug || weaponData.id}`, interaction.guild.id).catch(() => null);
+    const weaponImg = await getItemImageAttachment(`hunt:${weaponData.slug || weaponData.id}`, interaction.guild.id, { label: weaponData.name }).catch(() => null);
     if (weaponImg) confirmEmbed.setThumbnail(weaponImg.url);
 
     const row = new ActionRowBuilder().addComponents(

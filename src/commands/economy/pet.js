@@ -696,7 +696,10 @@ async function executeStatus(interaction) {
                 const spriteBuf = await generatePetSprite(pet.petId, 80, pet.evolutionStage ?? 1);
                 if (spriteBuf) {
                     showcaseEmbed.setThumbnail('attachment://pet_sprite.png');
-                    files = [new AttachmentBuilder(spriteBuf, { name: 'pet_sprite.png' })];
+                    files = [new AttachmentBuilder(spriteBuf, {
+                        name: 'pet_sprite.png',
+                        description: `Pixel-art sprite of ${name}.`,
+                    })];
                 }
             } catch { /* non-critical */ }
 
