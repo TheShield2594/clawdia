@@ -47,7 +47,17 @@ FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a
 # Shared libraries canvas links against at runtime (the -dev headers and the
 # compiler are deliberately left behind in the build stage), plus the DejaVu
 # fonts that utils/shopBanner.js and utils/cardGenerator.js register by path.
-RUN apk add --no-cache \
+#
+# `apk upgrade` first, and it is not redundant with the digest-pinned base. The
+# pin (#644) fixes the starting point, which is what makes a rebuild
+# reproducible; it does not make that starting point *current*. `node:24-alpine`
+# is rebuilt on upstream's schedule, not Alpine's, so between rebuilds the base
+# carries OS packages with published fixes already sitting in Alpine's repo —
+# the image scan in CI found exactly that (giflib and openssl, both fixed
+# upstream, neither yet in a node:24-alpine rebuild). Upgrading here takes the
+# fixes without waiting, and costs no more determinism than the `apk add` below
+# already does: both resolve against whatever Alpine is serving at build time.
+RUN apk upgrade --no-cache && apk add --no-cache \
     cairo \
     jpeg \
     pango \
@@ -57,6 +67,17 @@ RUN apk add --no-cache \
     ttf-dejavu \
     font-noto-emoji \
     tini
+
+# npm ships inside the Node base image and this one never runs it: the build
+# stage does the install, and the runtime entrypoint is `node src/index.js`
+# under tini — nothing in either stack file shells out to npm, and the
+# healthchecks are `node -e`. It is several megabytes of dependency tree that
+# exists only to be scanned: every Node-ecosystem finding in the first scan of
+# this image (brace-expansion, ip-address, tar) came from
+# /usr/local/lib/node_modules/npm and none of it was reachable from anything
+# this container does. Deleting it removes the findings by removing the code,
+# which is the only honest way to clear a CVE you are not going to patch.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 WORKDIR /app
 
