@@ -75,25 +75,38 @@ check('NODE_ENV is production', () => {
     }
 });
 
-// The two required faces, at the Alpine path the ttf-dejavu package uses. A
-// missing file here is the silent downgrade described above, so it is checked
-// by existence rather than by asking canvas whether text rendered — it renders
-// either way, just in the wrong font.
-const REQUIRED_FONTS = [
-    '/usr/share/fonts/ttf-dejavu/DejaVuSans.ttf',
-    '/usr/share/fonts/ttf-dejavu/DejaVuSans-Bold.ttf',
-];
+// Whether every family utils/registerFonts.js asks for is present, checked by
+// asking that module rather than by keeping a second copy of the paths here.
+// The first version of this file did keep its own copy, hardcoded to the Alpine
+// path the package *name* implies — /usr/share/fonts/ttf-dejavu/ — and failed a
+// perfectly good image on its first run: `apk add ttf-dejavu` installs into
+// /usr/share/fonts/dejavu/, and the bot was resolving it there all along
+// through a candidate the table had labelled Fedora/RHEL.
+//
+// Checked by resolution rather than by asking canvas whether text rendered,
+// because it renders either way — just in the wrong font, which is the silent
+// downgrade registerFonts.js exists to make visible.
+const fonts = require(path.join(__dirname, '..', 'src', 'utils', 'registerFonts'));
 
-check('the DejaVu faces the card generators register are installed', () => {
-    const missing = REQUIRED_FONTS.filter(p => !fs.existsSync(p));
-    if (missing.length) throw new Error(`missing ${missing.join(', ')}`);
-});
+check('every font the card generators register resolves', () => {
+    const resolved = fonts.resolveFonts();
+    const label = f => `${f.family}${f.weight === 'bold' ? ' (bold)' : ''}`;
 
-// Emoji are optional to utils/registerFonts.js — a missing family warns and
-// carries on — so a missing one is reported here and does not fail the image.
-check('font-noto-emoji is installed (optional)', () => {
-    if (!fs.existsSync('/usr/share/fonts/noto/NotoColorEmoji.ttf')) {
-        console.warn('  note  emoji will render as fallback glyphs');
+    // Optional families — emoji — warn in the bot rather than failing it, so
+    // they are reported here and do not fail the image either.
+    for (const font of resolved.filter(f => f.optional && !f.path)) {
+        console.warn(`  note  ${label(font)} is not installed; it will render as fallback glyphs`);
+    }
+
+    const missing = resolved.filter(f => !f.optional && !f.path);
+    if (missing.length) {
+        throw new Error(`${missing.map(label).join(', ')} resolved to none of their candidate paths`);
+    }
+
+    // The path each one resolved to, so a move within the image is visible in
+    // the log before it becomes a failure.
+    for (const font of resolved.filter(f => f.path)) {
+        console.log(`        ${label(font)} -> ${font.path}`);
     }
 });
 
@@ -103,7 +116,7 @@ check('font-noto-emoji is installed (optional)', () => {
 // or pixman fails on the encode.
 check('canvas loads, registers fonts and encodes a PNG', () => {
     const { createCanvas } = require('canvas');
-    require(path.join(__dirname, '..', 'src', 'utils', 'registerFonts')).ensureFontsRegistered();
+    fonts.ensureFontsRegistered();
 
     const canvas = createCanvas(160, 48);
     const ctx = canvas.getContext('2d');

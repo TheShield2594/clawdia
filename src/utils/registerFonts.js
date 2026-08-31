@@ -18,14 +18,21 @@
 const fs = require('fs');
 const { registerFont } = require('canvas');
 
+// Ordered most-likely-first per family, which for this repo means Alpine's
+// layout early: the Dockerfile builds on Alpine and installs `ttf-dejavu`,
+// which puts its files in /usr/share/fonts/dejavu/ — *not* the
+// /usr/share/fonts/ttf-dejavu/ the package name suggests, and which the
+// comments here claimed for years. scripts/image-smoke.js checks the real
+// image against this table on every build, which is how the mislabelling was
+// finally noticed; the old path stays as a candidate for Alpine before 3.13.
 const FONTS = [
     {
         family: 'DejaVu Sans',
         weight: 'normal',
         candidates: [
             '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',   // Debian/Ubuntu
-            '/usr/share/fonts/ttf-dejavu/DejaVuSans.ttf',        // Alpine
-            '/usr/share/fonts/dejavu/DejaVuSans.ttf',            // Fedora/RHEL
+            '/usr/share/fonts/dejavu/DejaVuSans.ttf',            // Alpine ttf-dejavu, Fedora/RHEL
+            '/usr/share/fonts/ttf-dejavu/DejaVuSans.ttf',        // Alpine before 3.13
             '/Library/Fonts/DejaVuSans.ttf',                     // macOS (manual install)
         ],
     },
@@ -34,8 +41,8 @@ const FONTS = [
         weight: 'bold',
         candidates: [
             '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-            '/usr/share/fonts/ttf-dejavu/DejaVuSans-Bold.ttf',
             '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+            '/usr/share/fonts/ttf-dejavu/DejaVuSans-Bold.ttf',
             '/Library/Fonts/DejaVuSans-Bold.ttf',
         ],
     },
@@ -53,16 +60,35 @@ const FONTS = [
 
 let registered = false;
 
+/**
+ * Where each family resolved, without registering anything.
+ *
+ * Exported so scripts/image-smoke.js can assert the built container actually
+ * carries the fonts *this table* asks for. It used to hardcode its own copy of
+ * the Alpine paths, which is how it came to fail a perfectly good image over a
+ * path the bot never needed.
+ *
+ * @returns {{ family: string, weight: string, optional: boolean, path: ?string }[]}
+ */
+function resolveFonts() {
+    return FONTS.map(font => ({
+        family: font.family,
+        weight: font.weight,
+        optional: Boolean(font.optional),
+        path: font.candidates.find(p => {
+            try { return fs.existsSync(p); } catch { return false; }
+        }) || null,
+    }));
+}
+
 function ensureFontsRegistered() {
     // registerFont must run before any canvas context is created, and
     // re-registering the same family is wasteful, so do it exactly once.
     if (registered) return;
     registered = true;
 
-    for (const font of FONTS) {
-        const found = font.candidates.find(p => {
-            try { return fs.existsSync(p); } catch { return false; }
-        });
+    for (const font of resolveFonts()) {
+        const found = font.path;
 
         if (!found) {
             const label = `${font.family}${font.weight === 'bold' ? ' (bold)' : ''}`;
@@ -82,4 +108,4 @@ function ensureFontsRegistered() {
     }
 }
 
-module.exports = { ensureFontsRegistered };
+module.exports = { ensureFontsRegistered, resolveFonts, FONTS };
