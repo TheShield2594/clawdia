@@ -5,6 +5,7 @@
 // economy rather than against hunting alone, and the shop says so.
 
 const { LIMITS } = require('../../../../data/huntData');
+
 const CROSS_ECONOMY_DAYS = 30;
 
 function huntingDaysFor(cost) {
