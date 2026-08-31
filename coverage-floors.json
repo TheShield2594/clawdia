@@ -13,10 +13,10 @@
             "lines": 90
         },
         "src/commands/admin": {
-            "statements": 18,
+            "statements": 21,
             "branches": 0,
-            "functions": 77,
-            "lines": 21
+            "functions": 90,
+            "lines": 25
         },
         "src/commands/ai": {
             "statements": 63,
@@ -31,40 +31,64 @@
             "lines": 24
         },
         "src/commands/economy": {
-            "statements": 26,
+            "statements": 27,
             "branches": 12,
-            "functions": 28,
-            "lines": 27
+            "functions": 29,
+            "lines": 28
+        },
+        "src/commands/economy/event": {
+            "statements": 23,
+            "branches": 0,
+            "functions": 47,
+            "lines": 25
         },
         "src/commands/economy/fish": {
-            "statements": 11,
+            "statements": 14,
             "branches": 0,
-            "functions": 24,
-            "lines": 11
+            "functions": 31,
+            "lines": 15
+        },
+        "src/commands/economy/fish/shop": {
+            "statements": 13,
+            "branches": 0,
+            "functions": 0,
+            "lines": 14
         },
         "src/commands/economy/hunt": {
-            "statements": 32,
-            "branches": 15,
-            "functions": 42,
-            "lines": 32
+            "statements": 37,
+            "branches": 18,
+            "functions": 50,
+            "lines": 37
+        },
+        "src/commands/economy/hunt/shop": {
+            "statements": 27,
+            "branches": 7,
+            "functions": 15,
+            "lines": 28
         },
         "src/commands/economy/mine": {
             "statements": 16,
             "branches": 0,
-            "functions": 25,
+            "functions": 30,
             "lines": 17
+        },
+        "src/commands/economy/mine/shop": {
+            "statements": 27,
+            "branches": 6,
+            "functions": 9,
+            "lines": 28
         },
         "src/commands/fun": {
             "statements": 29,
             "branches": 16,
             "functions": 37,
-            "lines": 28
+            "lines": 29
         },
         "src/commands/leveling": {
-            "statements": 20,
-            "branches": 7,
-            "functions": 20,
-            "lines": 21
+            "statements": 41,
+            "branches": 24,
+            "functions": 40,
+            "lines": 42
         },
         "src/commands/moderation": {
             "statements": 71,
@@ -80,21 +104,21 @@
         },
         "src/config": {
             "statements": 94,
-            "branches": 90,
+            "branches": 91,
             "functions": 97,
             "lines": 95
         },
         "src/dashboard": {
-            "statements": 71,
-            "branches": 37,
-            "functions": 39,
-            "lines": 73
+            "statements": 78,
+            "branches": 40,
+            "functions": 60,
+            "lines": 80
         },
         "src/dashboard/lib": {
-            "statements": 86,
-            "branches": 76,
+            "statements": 87,
+            "branches": 78,
             "functions": 89,
-            "lines": 88
+            "lines": 89
         },
         "src/dashboard/public": {
             "statements": 0,
@@ -103,27 +127,27 @@
             "lines": 0
         },
         "src/dashboard/routes": {
-            "statements": 78,
+            "statements": 79,
             "branches": 53,
             "functions": 71,
             "lines": 81
         },
         "src/dashboard/routes/api": {
-            "statements": 64,
-            "branches": 63,
-            "functions": 58,
-            "lines": 65
+            "statements": 66,
+            "branches": 64,
+            "functions": 60,
+            "lines": 67
         },
         "src/data": {
-            "statements": 60,
-            "branches": 25,
+            "statements": 61,
+            "branches": 26,
             "functions": 34,
             "lines": 61
         },
         "src/events": {
             "statements": 63,
             "branches": 50,
-            "functions": 42,
+            "functions": 43,
             "lines": 67
         },
         "src/games/casino": {
@@ -133,22 +157,22 @@
             "lines": 31
         },
         "src/migrations": {
-            "statements": 47,
-            "branches": 40,
+            "statements": 49,
+            "branches": 42,
             "functions": 42,
-            "lines": 49
+            "lines": 51
         },
         "src/models": {
-            "statements": 69,
-            "branches": 0,
-            "functions": 38,
-            "lines": 74
+            "statements": 75,
+            "branches": 4,
+            "functions": 67,
+            "lines": 79
         },
         "src/services": {
-            "statements": 59,
-            "branches": 51,
-            "functions": 56,
-            "lines": 62
+            "statements": 63,
+            "branches": 54,
+            "functions": 59,
+            "lines": 66
         },
         "src/services/ai": {
             "statements": 81,
@@ -188,9 +212,9 @@
         },
         "src/utils": {
             "statements": 69,
-            "branches": 68,
+            "branches": 69,
             "functions": 75,
-            "lines": 70
+            "lines": 71
         },
         "src/views": {
             "statements": 62,
