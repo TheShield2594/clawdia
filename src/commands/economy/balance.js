@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { claimStarterKit } = require('../../utils/starterKit');
@@ -20,7 +20,7 @@ module.exports = {
         try {
             const [user_raw, guildSettings] = await Promise.all([
                 User.findOne({ userId: targetUser.id, guildId: interaction.guild.id }),
-                Guild.findOne({ guildId: interaction.guild.id })
+                getGuildSettings(interaction.guild.id)
             ]);
 
             let user = user_raw;

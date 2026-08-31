@@ -9,7 +9,7 @@ const {
 const { randomInt } = require('crypto');
 const User = require('../../models/User');
 const { advanceMissions } = require('../../services/seasonMissionService');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { isDistrictActive } = require('../../services/districtService');
 const { START_ELO, tierFor, applyElo, makeSeasonId } = require('../../utils/duelElo');
 const COLORS = require('../../utils/embedColors');
@@ -145,7 +145,7 @@ async function revertDuelCooldown(challengerId, opponentId, guildId, prevChallen
 async function finalizeDuel({ interaction, targetUser, challengerId, opponentId, amount, currency, houseCut, challengerWins, tie, game, gameResult, isRanked = false }) {
     const guildId = interaction.guild.id;
     // Escrow already deducted both stakes; compute payout from pot
-    const guildDoc = await Guild.findOne({ guildId }).lean();
+    const guildDoc = await getGuildSettings(guildId);
     const arenaActive = isDistrictActive(guildDoc, 'arena');
     const pot         = 2 * amount;
     const houseAmount = Math.floor(pot * houseCut);
@@ -455,7 +455,7 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
 }
 
 async function runChallenge(interaction, isRanked) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
 
     if (guildSettings?.economy?.enabled === false) {
         return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
@@ -634,7 +634,7 @@ async function runRankView(interaction) {
     const higher = await User.countDocuments({ guildId, 'ranked.elo': { $gt: elo } });
     const rankPosition = higher + 1;
 
-    const guildSettings = await Guild.findOne({ guildId }, 'rankedDuels').lean();
+    const guildSettings = await getGuildSettings(guildId);
     const seasonId = guildSettings?.rankedDuels?.currentSeasonId
         ?? makeSeasonId(guildSettings?.rankedDuels?.seasonNumber ?? 1);
 
@@ -684,7 +684,7 @@ async function runLeaderboard(interaction) {
         return `${medal}  ${tier.icon} **${name}** — ${elo} ELO · ${wl}`;
     }));
 
-    const guildSettings = await Guild.findOne({ guildId }, 'rankedDuels').lean();
+    const guildSettings = await getGuildSettings(guildId);
     const seasonId = guildSettings?.rankedDuels?.currentSeasonId
         ?? makeSeasonId(guildSettings?.rankedDuels?.seasonNumber ?? 1);
     const seasonEnds = guildSettings?.rankedDuels?.seasonEndsAt

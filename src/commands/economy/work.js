@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
@@ -146,7 +146,7 @@ module.exports = {
                     { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
                     { upsert: true, new: true }
                 ),
-                Guild.findOne({ guildId: interaction.guild.id })
+                getGuildSettings(interaction.guild.id)
             ]);
 
             // Synergy requirements read hunt/fishing/mining levels, and those

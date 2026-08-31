@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { getCoinMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
@@ -147,7 +147,7 @@ module.exports = {
                     { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
                     { upsert: true, new: true }
                 ),
-                Guild.findOne({ guildId: interaction.guild.id })
+                getGuildSettings(interaction.guild.id)
             ]);
 
             const now = Date.now();

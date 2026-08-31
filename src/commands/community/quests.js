@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const AiQuest = require('../../models/AiQuest');
 const { ensureQuests, getDailyPool, getWeeklyPool, getCategoryEmojis, getDifficultyColors } = require('../../services/questService');
 const COLORS = require('../../utils/embedColors');
@@ -21,7 +21,7 @@ module.exports = {
         .setDescription('View your active daily and weekly quests'),
 
     async execute(interaction) {
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
 
         if (!guildSettings?.quests?.enabled) {
             return interaction.reply({ content: 'Quests are not enabled on this server.', flags: MessageFlags.Ephemeral });

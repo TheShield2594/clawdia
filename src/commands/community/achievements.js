@@ -2,7 +2,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { ACHIEVEMENTS } = require('../../data/achievements');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
@@ -46,7 +46,7 @@ module.exports = {
 
     async execute(interaction) {
         try {
-            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+            const guildSettings = await getGuildSettings(interaction.guild.id);
 
             if (!guildSettings?.achievements?.enabled) {
                 return interaction.reply({ content: 'Achievements are not enabled on this server.', flags: MessageFlags.Ephemeral });

@@ -2,7 +2,7 @@
 
 // /fish quests — the daily quest board and claiming a finished one.
 
-const Guild = require('../../../models/Guild');
+const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind } = require('../../../utils/grindProfile');
@@ -17,7 +17,7 @@ const COLORS = require('../../../utils/embedColors');
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function handleQuests(interaction, sub) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
         return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }

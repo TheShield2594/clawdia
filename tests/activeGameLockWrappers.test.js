@@ -34,6 +34,8 @@ jest.mock('../src/models/Guild', () => ({
     findOne: jest.fn(),
     findOneAndUpdate: jest.fn().mockResolvedValue({}),
 }));
+jest.mock('../src/utils/guildSettingsCache', () =>
+    require('./helpers/guildSettingsCacheMock')());
 
 jest.mock('../src/services/casinoJackpotService', () => ({
     processJackpotBet: jest.fn().mockResolvedValue(undefined),

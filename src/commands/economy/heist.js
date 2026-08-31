@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const User  = require('../../models/User');
 const {
     getHeist,
@@ -37,7 +37,7 @@ module.exports = {
     cooldownAmount: () => 5,
 
     async execute(interaction, client) {
-        const guildDoc = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildDoc = await getGuildSettings(interaction.guild.id);
 
         if (!guildDoc?.economy?.enabled) {
             return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });

@@ -9,6 +9,8 @@
 // holding a webhook open for eight minutes.
 
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
+jest.mock('../src/utils/guildSettingsCache', () =>
+    require('./helpers/guildSettingsCacheMock')());
 jest.mock('../src/models/User', () => ({ findOne: jest.fn(), create: jest.fn() }));
 jest.mock('../src/models/ScheduledTask', () => ({
     find: jest.fn(),

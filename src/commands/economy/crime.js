@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { hasEffect, consumeEffect } = require('../../services/effectsService');
 const { getMerchantCoinBonus } = require('../../services/synergyService');
 const { advanceMissions } = require('../../services/seasonMissionService');
@@ -112,7 +112,7 @@ module.exports = {
                 flags: MessageFlags.Ephemeral,
             });
         }
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
         if (guildSettings?.economy?.enabled === false) {
             return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }

@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const COLORS = require('../../utils/embedColors');
@@ -23,7 +23,7 @@ module.exports = {
         try {
             const [user, guildSettings] = await Promise.all([
                 User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
-                Guild.findOne({ guildId: interaction.guild.id }),
+                getGuildSettings(interaction.guild.id),
             ]);
 
             const tierInfo = resolveTiers(guildSettings);

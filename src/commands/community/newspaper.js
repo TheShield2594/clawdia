@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { generateNewspaper } = require('../../services/newspaperService');
 
 module.exports = {
@@ -21,7 +21,7 @@ module.exports = {
             return interaction.reply({ content: 'You need the **Manage Server** permission to use this command.', flags: MessageFlags.Ephemeral });
         }
 
-        const guildDoc = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildDoc = await getGuildSettings(interaction.guild.id);
         if (!guildDoc?.newspaper?.enabled) {
             return interaction.reply({
                 content: 'The Server Newspaper is not enabled. Enable it in the Dashboard under **Engagement → Newspaper**.',

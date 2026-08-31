@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const User = require('../../models/User');
 
 const WAR_DURATION_DAYS = 7;
@@ -33,7 +34,12 @@ async function executeChallenge(interaction) {
 
     const inviteCode = interaction.options.getString('invite_code').trim();
 
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    // Read through the model rather than getGuildSettings: this value decides
+    // whether the challenge is created, and a cached read would put up to a TTL
+    // between the check and the write — long enough for a second /war challenge
+    // to pass it and overwrite the first. The projection keeps the read cheap,
+    // which is what routing it through the cache would have been for.
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'activeWar').lean();
     if (guildSettings?.activeWar?.status === 'active' || guildSettings?.activeWar?.status === 'pending') {
         return interaction.reply({ content: 'Your server already has an active or pending war.', flags: MessageFlags.Ephemeral });
     }
@@ -85,16 +91,20 @@ async function executeAccept(interaction) {
 
     const challengerInvite = interaction.options.getString('challenger_invite').trim();
 
-    const myGuild = await Guild.findOne({ guildId: interaction.guild.id });
+    // Uncached and projected, for the reason /war challenge gives.
+    const myGuild = await Guild.findOne({ guildId: interaction.guild.id }, 'activeWar').lean();
     if (myGuild?.activeWar?.status === 'active' || myGuild?.activeWar?.status === 'pending') {
         return interaction.reply({ content: 'Your server already has an active or pending war.', flags: MessageFlags.Ephemeral });
     }
 
     // Find the challenger guild by invite code
+    // Not a guildId lookup, so the settings cache cannot serve it — the whole
+    // point is finding which guild holds this invite code. Projected to the
+    // three fields the acceptance actually reads.
     const challengerGuild = await Guild.findOne({
         'activeWar.inviteCode': challengerInvite,
         'activeWar.status': 'pending'
-    });
+    }, 'guildId name activeWar').lean();
 
     if (!challengerGuild) {
         return interaction.reply({
@@ -170,7 +180,7 @@ async function executeAccept(interaction) {
 }
 
 async function executeStatus(interaction) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     const war = guildSettings?.activeWar;
 
     if (!war?.status || war.status === 'ended') {
@@ -224,7 +234,9 @@ async function executeCancel(interaction) {
         return interaction.reply({ content: 'Administrator only.', flags: MessageFlags.Ephemeral });
     }
 
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    // Uncached and projected: the opponent id read here is what the second
+    // update below is aimed at, and it must be the war that is being cancelled.
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'activeWar').lean();
     const war = guildSettings?.activeWar;
 
     if (!war?.status || war.status === 'ended') {
@@ -257,7 +269,20 @@ async function grantWarPoints(guildId, action) {
     const pts = WAR_POINTS[action];
     if (!pts) return;
 
-    const guildSettings = await Guild.findOne({ guildId });
+    // Two reads, because this one is on the hot path — every /daily, /work and
+    // /hunt calls it — and almost every call is for a guild with no war at all.
+    //
+    // The cached read answers that common case without a round trip. It cannot
+    // answer the other one: the scores below decide who won, and resolving from
+    // a snapshot up to a TTL old could crown the wrong server in a close war.
+    // So an apparently-active war is re-read from the model before anything is
+    // settled on it. The point increments themselves are guarded by
+    // `'activeWar.status': 'active'` in their own filters, so a stale "active"
+    // that has since ended costs a no-op write rather than a wrong one.
+    const cached = await getGuildSettings(guildId);
+    if (cached?.activeWar?.status !== 'active') return;
+
+    const guildSettings = await Guild.findOne({ guildId }, 'activeWar').lean();
     const war = guildSettings?.activeWar;
 
     if (!war || war.status !== 'active') return;

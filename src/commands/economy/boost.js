@@ -50,7 +50,17 @@ module.exports = {
         const sub = interaction.options.getSubcommand();
 
         try {
-            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+            // The one command here that writes the document back, so it reads a
+            // real Mongoose document rather than the cache's shared plain object.
+            // The exclusion is the cache's own projection: nothing on this path
+            // reads a shop image or a giveaway's entrant list, and hydrating up
+            // to 35 × 512 KB of Buffers to set one subdocument is the cost this
+            // issue is about. `save()` writes only the paths it modified, so an
+            // excluded field is untouched rather than cleared.
+            const guildSettings = await Guild.findOne(
+                { guildId: interaction.guild.id },
+                '-shop.imageData -giveaways.entrantIds',
+            );
             if (!guildSettings) {
                 return interaction.reply({ content: 'Guild settings not found.', flags: MessageFlags.Ephemeral });
             }

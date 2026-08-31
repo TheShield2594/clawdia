@@ -4,7 +4,7 @@ const {
     MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const {
@@ -54,7 +54,7 @@ async function handleStatus(interaction) {
     const rank = userDoc?.accountPrestige?.rank ?? 0;
     const tier = tierFor(rank);
     const next = nextTierAfter(rank);
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'accountPrestige').lean();
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     const minLevel = guildSettings?.accountPrestige?.minLevelToPrestige ?? 50;
 
     const unlocks = tier.unlocks?.length
@@ -95,7 +95,7 @@ async function handleInfo(interaction) {
 
 async function handleUp(interaction) {
     const guildId = interaction.guild.id;
-    const guildSettings = await Guild.findOne({ guildId }, 'accountPrestige economy').lean();
+    const guildSettings = await getGuildSettings(guildId);
 
     if (guildSettings?.accountPrestige?.enabled === false) {
         return interaction.reply({ content: 'Account prestige is disabled on this server.', flags: MessageFlags.Ephemeral });

@@ -1,9 +1,9 @@
 'use strict';
 
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const Guild  = require('../../models/Guild');
 const BigWin = require('../../models/BigWin');
 const COLORS = require('../../utils/embedColors');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 
 const SOURCE_LABELS = {
     hunt:         '🏹 Hunt',
@@ -31,7 +31,7 @@ module.exports = {
     cooldown: 10,
 
     async execute(interaction) {
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
         if (guildSettings?.economy?.enabled === false) {
             return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }

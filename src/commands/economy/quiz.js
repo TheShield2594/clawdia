@@ -9,7 +9,7 @@ const {
 const axios = require('axios');
 const User  = require('../../models/User');
 const { advanceMissions } = require('../../services/seasonMissionService');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const FALLBACK_QUESTIONS = require('../../data/quizFallback');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { debitUpTo } = require('../../utils/balanceDebit');
@@ -219,7 +219,7 @@ module.exports = {
                 flags: MessageFlags.Ephemeral,
             });
         }
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
         if (guildSettings?.economy?.enabled === false) {
             return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }

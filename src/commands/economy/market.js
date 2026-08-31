@@ -4,7 +4,6 @@ const {
     MessageFlags,
 } = require('discord.js');
 const User           = require('../../models/User');
-const Guild          = require('../../models/Guild');
 const MarketListing  = require('../../models/MarketListing');
 const Transaction    = require('../../models/Transaction');
 const { DEFAULT_SHOP_ITEMS, getItemLore, getItemRarity, RARITY_ORDER } = require('../../data/defaultShopItems');
@@ -14,6 +13,7 @@ const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { recordOwedPayout } = require('../../utils/owedPayout');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 
 const ITEM_META = Object.fromEntries(DEFAULT_SHOP_ITEMS.map(i => [i.itemId, i]));
 
@@ -65,7 +65,7 @@ module.exports = {
                     o.setName('listing_id').setDescription('Listing ID to cancel.').setRequired(true))),
 
     async execute(interaction) {
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const guildSettings = await getGuildSettings(interaction.guild.id);
         if (guildSettings?.economy?.enabled === false) {
             return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }

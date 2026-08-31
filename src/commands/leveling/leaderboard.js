@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { netWorthOf, topByNetWorth, netWorthRank } = require('../../utils/netWorth');
 const COLORS = require('../../utils/embedColors');
 
@@ -73,7 +73,7 @@ module.exports = {
                 title = '⚔️ Duel Leaderboard';
                 descriptionHeader = 'Top 10 Duelists by Win Count';
             } else if (type === 'achievements') {
-                const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }).select('achievements.enabled').lean();
+                const guildSettings = await getGuildSettings(interaction.guild.id);
                 if (!guildSettings?.achievements?.enabled) {
                     return interaction.reply({ content: 'Achievements are not enabled on this server.', flags: MessageFlags.Ephemeral });
                 }

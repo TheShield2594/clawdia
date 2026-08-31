@@ -31,6 +31,8 @@ jest.mock('../src/models/Case', () => ({
     deleteOne:      jest.fn().mockResolvedValue({ deletedCount: 1 }),
 }));
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn().mockResolvedValue(null) }));
+jest.mock('../src/utils/guildSettingsCache', () =>
+    require('./helpers/guildSettingsCacheMock')());
 jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn().mockResolvedValue({}) }));
 // findStepForCount is a pure function over the configured ladder and is worth
 // running for real; only the half that touches Discord is stubbed.

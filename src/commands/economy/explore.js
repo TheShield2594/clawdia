@@ -7,7 +7,7 @@ const { isVersionError } = require('../../utils/versionRetry');
 const { detachBalanceDelta, commitBalanceDelta } = require('../../utils/balanceDelta');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const GrindProfile = require('../../models/GrindProfile');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const {
     LIMITS, EXPLORER_LEVELS, TIER_COLORS, REGIONS, REGION_LIST,
     RELIC_LIST, RELIC_RARITY_ORDER, TOTAL_CORE_RELICS,
@@ -166,7 +166,7 @@ module.exports = {
 
 // Returns the guild doc, or null after replying if exploration is switched off.
 async function loadGuildOrReply(interaction) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
         await interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         return null;

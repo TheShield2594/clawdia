@@ -2,7 +2,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { hasUnlock } = require('../../utils/prestige');
 const { logTransaction } = require('../../utils/logTransaction');
 const COLORS = require('../../utils/embedColors');
@@ -38,7 +38,7 @@ module.exports = {
     async execute(interaction) {
         const [userDoc, guildSettings] = await Promise.all([
             User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
-            Guild.findOne({ guildId: interaction.guild.id }),
+            getGuildSettings(interaction.guild.id),
         ]);
 
         const rank = userDoc?.accountPrestige?.rank ?? 0;

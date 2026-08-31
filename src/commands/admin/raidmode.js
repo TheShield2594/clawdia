@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { setRaidMode, raidModeActive, raidModeActivatedBy } = require('../../services/raidService');
 const COLORS = require('../../utils/embedColors');
 
@@ -118,7 +119,7 @@ module.exports = {
             const status = interaction.options.getString('status');
             const active = status === 'on';
 
-            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+            const guildSettings = await getGuildSettings(interaction.guild.id);
             if (!guildSettings?.raidDetection?.enabled) {
                 return interaction.editReply({
                     content: 'Raid detection is not enabled. Use `/raidmode raid enabled:true` first.'
@@ -144,7 +145,7 @@ module.exports = {
         if (sub === 'status') {
             await interaction.deferReply();
 
-            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+            const guildSettings = await getGuildSettings(interaction.guild.id);
             const rd = guildSettings?.raidDetection;
 
             if (!rd?.enabled) {

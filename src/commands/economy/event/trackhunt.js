@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
-const Guild = require('../../../models/Guild');
+const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { logTransaction } = require('../../../utils/logTransaction');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const { grantInventoryItem } = require('../../../utils/inventoryGrant');
@@ -33,7 +33,7 @@ const LOST_OUTCOMES = [
 async function handleTrackHunt(interaction) {
     await interaction.deferReply();
 
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
 
     if (!hasActiveEvent(guildSettings) || guildSettings.activeEvent.type !== 'winter_hunt') {
         return interaction.editReply({

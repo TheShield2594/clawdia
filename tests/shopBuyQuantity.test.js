@@ -46,6 +46,8 @@ jest.mock('../src/models/Guild', () => ({
         return {};
     }),
 }));
+jest.mock('../src/utils/guildSettingsCache', () =>
+    require('./helpers/guildSettingsCacheMock')());
 
 jest.mock('../src/models/User', () => ({
     findOneAndUpdate: jest.fn(async (query, update) => {

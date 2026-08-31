@@ -36,6 +36,8 @@ jest.mock('../src/services/aiService', () => ({
 }));
 
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
+jest.mock('../src/utils/guildSettingsCache', () =>
+    require('./helpers/guildSettingsCacheMock')());
 jest.mock('../src/models/User', () => ({
     findOne: jest.fn(async () => ({ pinnedMemories: [] })),
     create: jest.fn(async () => ({ pinnedMemories: [] }))

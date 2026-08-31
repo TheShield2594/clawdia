@@ -5,7 +5,7 @@
 const { WEAPON_BY_TIER, CONSUMABLES, MATERIAL_NAMES } = require('../../../data/huntData');
 const { weaponStatusEmoji, durabilityBar, repairsRemaining, ensureHuntData } = require('../../../services/huntService');
 const { chunkByLength } = require('../../../utils/embedFields');
-const Guild = require('../../../models/Guild');
+const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind } = require('../../../utils/grindProfile');
@@ -51,7 +51,7 @@ function buildWeaponPages(h) {
 }
 
 async function executeInv(interaction, sub) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
         return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
