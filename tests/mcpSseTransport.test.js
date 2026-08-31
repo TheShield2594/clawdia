@@ -309,6 +309,90 @@ describe('talking over the standing stream', () => {
         expect(asked[0].result).toEqual({ action: 'accept', content: { repo: 'Which repo?' } });
     });
 
+    test('refuses a server request it cannot attribute to one turn', async () => {
+        // This client is pooled by (url, credential), and for a tokenless
+        // server that key has no guild in it — so two guilds pointed at the
+        // same public server share one socket. Answering "whichever call is
+        // newest" would put one guild's question in the other's channel and
+        // bill the wrong ledger, so a request arriving while calls from more
+        // than one turn are open is refused instead.
+        const answers = [];
+        const calls = [];
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'tools/call') calls.push(payload.id);
+            if (payload.id === 4242) answers.push(payload);
+            return { status: 202, headers: {}, data: Readable.from([]) };
+        });
+
+        const askedIn = [];
+        const handler = who => async () => { askedIn.push(who); return { action: 'accept', content: {} }; };
+        const first = client.callTool('a', {}, { owner: Symbol('turn-a'), onElicit: handler('a') });
+        const second = client.callTool('b', {}, { owner: Symbol('turn-b'), onElicit: handler('b') });
+        await new Promise(resolve => setImmediate(resolve));
+
+        channel.send({ jsonrpc: '2.0', id: 4242, method: 'elicitation/create', params: { message: 'which?' } });
+        await new Promise(resolve => setImmediate(resolve));
+
+        // Nobody was asked, and the server got the spec's "no choice was made"
+        // rather than an answer belonging to whichever turn happened to be last.
+        expect(askedIn).toEqual([]);
+        expect(answers[0].result).toEqual({ action: 'cancel' });
+
+        calls.forEach(id => channel.send({ jsonrpc: '2.0', id, result: { content: [] } }));
+        await Promise.all([first, second]);
+    });
+
+    test('still answers when the calls in flight are all one turn', async () => {
+        // The same guess is harmless inside a turn: same person, same channel,
+        // same ledger. Only the attribution to one of that turn's calls is
+        // approximate, and nothing depends on it.
+        const turn = Symbol('one-turn');
+        const answers = [];
+        const calls = [];
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'tools/call') calls.push(payload.id);
+            if (payload.id === 4243) answers.push(payload);
+            return { status: 202, headers: {}, data: Readable.from([]) };
+        });
+
+        const onElicit = async () => ({ action: 'accept', content: { ok: true } });
+        const first = client.callTool('a', {}, { owner: turn, onElicit });
+        const second = client.callTool('b', {}, { owner: turn, onElicit });
+        await new Promise(resolve => setImmediate(resolve));
+
+        channel.send({ jsonrpc: '2.0', id: 4243, method: 'elicitation/create', params: { message: 'which?' } });
+        await new Promise(resolve => setImmediate(resolve));
+
+        expect(answers[0].result).toEqual({ action: 'accept', content: { ok: true } });
+
+        calls.forEach(id => channel.send({ jsonrpc: '2.0', id, result: { content: [] } }));
+        await Promise.all([first, second]);
+    });
+
+    test('does not hang when a failed POST stalls its error body', async () => {
+        // responseType 'stream' means the axios timeout bounds the wait for
+        // headers only. A server that answers 500 and then stops writing used
+        // to hang the read forever — before postOverSse installs its own
+        // deadline on the reply — so the waiter sat in `pending` and the
+        // caller's promise never settled either way.
+        const stalled = new PassThrough();   // headers, then silence
+        axios.post.mockImplementation(async (_url, payload) => (
+            payload.method === 'tools/list'
+                ? { status: 500, headers: {}, data: stalled }
+                : { status: 202, headers: {}, data: Readable.from([]) }
+        ));
+
+        jest.useFakeTimers();
+        try {
+            const listing = expect(client.listTools()).rejects.toThrow(McpError);
+            await jest.advanceTimersByTimeAsync(60_000);
+            await listing;
+        } finally {
+            jest.useRealTimers();
+        }
+        expect(client.pending.size).toBe(0);
+    });
+
     test('refuses a method it does not serve rather than leaving the server waiting', async () => {
         const answers = [];
         axios.post.mockImplementation(async (_url, payload) => {

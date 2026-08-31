@@ -515,6 +515,20 @@ async function prepareMcpToolkit(guildServers = [], {
     sweepIdleSessions(Date.now());
     const emit = notifier(onToolEvent);
 
+    // Identity for this turn, carried on every tool call it makes.
+    //
+    // A pooled MCP client is keyed by (url, credential), and for a
+    // static-token or tokenless server that key has no guild in it — so two
+    // guilds pointed at the same public server share one connection. On the
+    // older HTTP+SSE transport they also share one socket, which is the only
+    // place a server-initiated request arrives with nothing saying which call
+    // it belongs to. This is what lets the client tell "another call in the
+    // same turn" from "another tenant entirely" and refuse the second (#838).
+    //
+    // A Symbol rather than an id: it needs to be unique and comparable, never
+    // logged, serialised or looked up.
+    const TURN = Symbol('mcp-turn');
+
     // Every server is dialled at once. One after another, this was a full
     // handshake per server before the model had seen a single token — a guild
     // with five servers paid five round trips on every cold cache, and a server
@@ -1007,7 +1021,16 @@ async function prepareMcpToolkit(guildServers = [], {
                 // after it. Below the call timeout this is the tighter of the
                 // two; above it, the call timeout still wins.
                 return withSession(target.entry, target.server, client =>
-                    client.callTool(target.toolName, args, { onProgress, timeout: remaining, onElicit, onSample }));
+                    client.callTool(target.toolName, args, {
+                        onProgress, timeout: remaining, onElicit, onSample,
+                        // Which turn this call belongs to. The older MCP
+                        // transport carries every call on one socket and a
+                        // pooled client is shared by every guild on a URL, so
+                        // this is what stops a question raised by one guild's
+                        // call being answered in another's channel — see
+                        // dispatchSseMessage.
+                        owner: TURN,
+                    }));
             });
 
             if (!result) {

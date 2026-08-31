@@ -699,23 +699,50 @@ class McpHttpClient {
         // A server request — an elicitation, or a request for a completion.
         // Nothing on the wire says which of this connection's in-flight calls it
         // belongs to: the older transport has one stream and no correlation
-        // field, and the spec adds none. The newest request that brought a
-        // handler is the best available answer, and it is the right one in the
-        // case that actually occurs, which is a server asking about the tool
-        // call it is running right now.
+        // field, and the spec adds none.
         //
-        // Its *deadline* goes with it, and that is the load-bearing part. The
-        // id on this message is the server's own — each side numbers its
-        // requests independently — so looking `pending` up by it finds either
-        // nothing or, worse, an unrelated call of ours that happens to share the
-        // number. Either way `extendDeadline` would move a deadline nobody is
-        // waiting on, and the call the question actually belongs to would be
-        // killed underneath the prompt still sitting in the channel.
+        // Guessing is safe only within one turn. This client is pooled by
+        // (url, credential), and for a static-token or tokenless server that
+        // key has no guild in it — so two guilds pointed at the same public
+        // server share one socket, and answering "whichever call is newest"
+        // could put guild A's question in guild B's channel and bill B's model
+        // budget for it. Inside one turn the same guess is harmless: same
+        // person, same channel, same ledger, and the only thing got wrong is
+        // which of that turn's calls the question is attributed to.
+        //
+        // So the turn is what is compared. Where every in-flight call belongs
+        // to one, the newest is answered; where they span more than one, the
+        // request is refused as unattributable rather than answered by the
+        // wrong tenant — `answerServerRequest` declines an elicitation and
+        // errors a sampling request, both of which a server can read.
+        //
+        // The chosen waiter's *deadline* goes with its handlers, and that is
+        // load-bearing. The id on this message is the server's own — each side
+        // numbers its requests independently — so looking `pending` up by it
+        // finds either nothing or an unrelated call of ours that happens to
+        // share the number. Either way `extendDeadline` would move a deadline
+        // nobody is waiting on, and the call the question actually belongs to
+        // would be killed underneath the prompt still sitting in the channel.
         let chosen = null;
+        const owners = new Set();
         for (const waiter of this.pending.values()) {
             const offered = waiter.onServerRequest;
-            if (offered && (offered.elicit || offered.sample)) chosen = waiter;
+            if (!offered || !(offered.elicit || offered.sample)) continue;
+            // An unstamped caller counts as its own turn rather than merging
+            // with every other unstamped one, so a missing owner can only ever
+            // make this more cautious.
+            owners.add(offered.owner ?? waiter);
+            chosen = waiter;
         }
+
+        if (owners.size > 1) {
+            console.warn(
+                `[MCP] "${this.label}" sent a ${message.method} while calls from more than one turn were in flight; `
+                + 'refusing it rather than answering it as the wrong one'
+            );
+            chosen = null;
+        }
+
         this.answerServerRequest(message, chosen?.onServerRequest ?? null,
             chosen?.deadline ?? { at: Date.now() + CALL_TIMEOUT_MS, reschedule: null });
     }
@@ -768,7 +795,7 @@ class McpHttpClient {
         }
 
         try {
-            await this.deliver(endpoint, payload, { timeout });
+            await this.deliver(endpoint, payload, { timeout, deadline });
         } catch (err) {
             // Nothing is coming back for this one. The entry goes, and the
             // promise nobody will now await is marked handled — the throw below
@@ -815,7 +842,7 @@ class McpHttpClient {
      * under the same id, which is safe precisely because a 429 and a 401 are
      * both the server refusing the message rather than acting on it.
      */
-    async deliver(endpoint, payload, { timeout, retryable = true, authRetried = false }) {
+    async deliver(endpoint, payload, { timeout, deadline, retryable = true, authRetried = false }) {
         await this.authorize();
 
         let response;
@@ -839,19 +866,27 @@ class McpHttpClient {
             if (wait !== null) {
                 response.data?.destroy?.();
                 await new Promise(resolve => setTimeout(resolve, wait));
-                return this.deliver(endpoint, payload, { timeout, retryable: false, authRetried });
+                return this.deliver(endpoint, payload, { timeout, deadline, retryable: false, authRetried });
             }
         }
 
         if (response.status >= 400) {
             // Read before anything decides what to do with it: the body is the
             // server's own explanation and the stream can only be consumed once.
-            const body = await collectText(response.data);
+            //
+            // Under the exchange's deadline, because `responseType: 'stream'`
+            // means the axios timeout above bounded the wait for *headers*
+            // only. A server that answers 500 and then stalls the body would
+            // otherwise hang here forever — and this runs before `postOverSse`
+            // installs its own deadline on the reply, so the waiter would sit
+            // in `pending` and the caller's promise would never settle either
+            // way. `postOverHttp` bounds the identical read.
+            const body = await readWithDeadline(collectText(response.data), response.data, deadline);
             const challenge = response.headers['www-authenticate'] ?? null;
 
             if (response.status === 401 && this.getAccessToken && !authRetried
                 && await this.authorize({ force: true })) {
-                return this.deliver(endpoint, payload, { timeout, retryable, authRetried: true });
+                return this.deliver(endpoint, payload, { timeout, deadline, retryable, authRetried: true });
             }
 
             throw httpError(response.status, body, challenge);
@@ -944,7 +979,7 @@ class McpHttpClient {
      * person — one answering a question, one approving a spend — and a request
      * is the smallest scope that knows which one (#838).
      */
-    async request(method, params, { timeout, onProgress, onElicit, onSample } = {}) {
+    async request(method, params, { timeout, onProgress, onElicit, onSample, owner = null } = {}) {
         const id = ++this.nextId;
         const wantsProgress = typeof onProgress === 'function';
         const body = wantsProgress
@@ -957,7 +992,7 @@ class McpHttpClient {
                 id,
                 timeout,
                 onNotification: wantsProgress ? progressReader(id, onProgress) : null,
-                onServerRequest: { elicit: onElicit, sample: onSample },
+                onServerRequest: { elicit: onElicit, sample: onSample, owner },
             }
         );
         return jsonRpcResult(message);
@@ -1202,7 +1237,7 @@ class McpHttpClient {
      * thrown: "that repository does not exist" is an answer the model should see
      * and work around, not a reason to abandon the reply.
      */
-    async callTool(name, args, { onProgress, timeout, onElicit, onSample } = {}) {
+    async callTool(name, args, { onProgress, timeout, onElicit, onSample, owner } = {}) {
         await this.initialize();
         // A caller with a deadline of its own can ask for less than the call
         // timeout, never more: a tool that answers in forty seconds is still a
@@ -1219,7 +1254,7 @@ class McpHttpClient {
             // connection: a question this tool raises, or a completion it wants
             // paid for, belongs to the message that asked for it, and the
             // pooled client is shared by every guild on this URL.
-            { timeout: limit, onProgress, onElicit, onSample }
+            { timeout: limit, onProgress, onElicit, onSample, owner }
         );
         return {
             content: Array.isArray(result.content) ? result.content : [],
