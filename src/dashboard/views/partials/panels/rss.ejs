@@ -13,6 +13,10 @@
                     <!-- RSS Feeds inner panel -->
                     <div id="rss-tab-feeds" class="ai-inner-panel active">
                         <p class="ai-inner-desc">Pipe any RSS feed straight into a Discord channel.</p>
+                        <%# guild-settings.js re-renders the contents of #rss-feeds from
+                            the API's response after an add or a remove, rather than
+                            reloading the whole page for one row (#689). Keep the markup
+                            below and renderRssFeeds() in step. -%>
                         <div id="rss-feeds" style="margin-bottom:1.5rem;">
                             <% if ((settings.rssFeeds || []).length === 0) { %>
                                 <div class="empty-state" style="padding:2rem 1.5rem;">
@@ -22,11 +26,11 @@
                             <% } %>
                             <% (settings.rssFeeds || []).forEach((feed, index) => { %>
                                 <div class="list-item">
-                                    <div style="min-width:0;flex:1;">
+                                    <div class="rss-feed-main">
                                         <div class="url"><%= feed.url %></div>
-                                        <small style="color:var(--text-mute);font-size:0.78rem;">→ #<%= channels.find(c => c.id === feed.channelId)?.name || 'unknown' %></small>
+                                        <small class="rss-feed-target">→ #<%= channels.find(c => c.id === feed.channelId)?.name || 'unknown' %></small>
                                     </div>
-                                    <button class="btn btn-danger btn-sm" onclick="deleteRssFeed(<%= index %>)">Remove</button>
+                                    <button class="btn btn-danger btn-sm" data-action="rss-remove" data-index="<%= index %>">Remove</button>
                                 </div>
                             <% }); %>
                         </div>

@@ -718,6 +718,16 @@ textarea { resize: vertical; min-height: 80px; }
     white-space: nowrap;
 }
 
+/* The RSS feed row and the reaction-role panel card. Both lists are rendered
+   twice — once by their EJS panel on load, once by guild-settings.js when a
+   mutation patches the list in place instead of reloading the page (#689) —
+   so their layout is here rather than in `style=""` attributes the renderer
+   would have to reproduce line for line. */
+.rss-feed-main { min-width: 0; flex: 1; }
+.rss-feed-target { color: var(--text-mute); font-size: 0.78rem; }
+.rr-panel-mappings { margin-top: .35rem; display: flex; flex-wrap: wrap; gap: .35rem; }
+.rr-panel-message-id { margin-top: .4rem; font-size: .78rem; color: var(--text-dim); }
+
 /* The dashboard's only feedback channel. Success and failure used to differ by
    nothing but a 0.4-alpha border tint, which WCAG 1.4.1 rules out and which
    almost nobody could see either way. The icon below is the signal now; the

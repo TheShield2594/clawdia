@@ -131,7 +131,7 @@ function entryFor(server) {
  * particular is easy to add in one place and forget in the other, which shows
  * up as a connection that works in a channel and 401s in the panel.
  */
-function mcpClientFor(server, { onNotification = null, elicitation = false } = {}) {
+function mcpClientFor(server, { onNotification = null, elicitation = false, sampling = false } = {}) {
     const grant = server.connection.oauth;
     return new McpHttpClient({
         url: server.connection.url,
@@ -139,6 +139,7 @@ function mcpClientFor(server, { onNotification = null, elicitation = false } = {
         label: server.name,
         onNotification,
         elicitation,
+        sampling,
         // Required lazily: the store reaches the Guild model, and this module is
         // loaded by the config layer the model's own schema sits under. A static
         // token connection never touches it.
@@ -165,6 +166,11 @@ function clientFor(entry, server) {
             // sharing a session with the same server, for a capability the
             // digest declines in one line anyway.
             elicitation: true,
+            // Same reasoning, same trade-off: declared on the connection,
+            // answered per call, and refused outright when the call has nobody
+            // behind it — a completion has no "declined" shape, so the honest
+            // answer for an unattended turn is an error rather than a result.
+            sampling: true,
         });
     }
     return entry.client;

@@ -473,6 +473,12 @@ function renderResult(
  *        the client is shared by every guild on that URL and the person to ask
  *        belongs to one message. Absent — a scheduled task, a command parsing
  *        the reply as JSON — means questions are answered "no choice made"
+ * @param {Function} [options.sample] `(server, params, ctx) => result` for a
+ *        server that wants a completion from the guild's own model mid-call
+ *        (#838). Per turn for the same reason `elicit` is, plus one of its own:
+ *        the completion is billed to the guild whose message this turn belongs
+ *        to. Absent means the request is refused rather than answered — see
+ *        mcp/sampling.js
  * @param {boolean} [options.botToolsOnly] build a toolkit from `botTools` and
  *        nothing else, skipping server resolution entirely. `mcpServers: []`
  *        does *not* mean this: `resolveMcpServers` merges the guild's list with
@@ -492,6 +498,7 @@ async function prepareMcpToolkit(guildServers = [], {
     confirmMode = DEFAULT_CONFIRM_MODE,
     confirmTool,
     elicit,
+    sample,
     toolBudget,
     botTools = [],
     botToolsOnly = false,
@@ -507,6 +514,20 @@ async function prepareMcpToolkit(guildServers = [], {
 
     sweepIdleSessions(Date.now());
     const emit = notifier(onToolEvent);
+
+    // Identity for this turn, carried on every tool call it makes.
+    //
+    // A pooled MCP client is keyed by (url, credential), and for a
+    // static-token or tokenless server that key has no guild in it — so two
+    // guilds pointed at the same public server share one connection. On the
+    // older HTTP+SSE transport they also share one socket, which is the only
+    // place a server-initiated request arrives with nothing saying which call
+    // it belongs to. This is what lets the client tell "another call in the
+    // same turn" from "another tenant entirely" and refuse the second (#838).
+    //
+    // A Symbol rather than an id: it needs to be unique and comparable, never
+    // logged, serialised or looked up.
+    const TURN = Symbol('mcp-turn');
 
     // Every server is dialled at once. One after another, this was a full
     // handshake per server before the model had seen a single token — a guild
@@ -965,16 +986,24 @@ async function prepareMcpToolkit(guildServers = [], {
         // Only the wait, and only once it is over: a question that is never
         // answered still costs its own time, so a turn cannot be held open
         // indefinitely by a server that asks and goes away.
-        const onElicit = typeof elicit === 'function'
+        //
+        // A sampling request is the same bargain and gets the same treatment: a
+        // person is reading an approval prompt, and the completion behind it is
+        // this guild's own model answering, neither of which is the far side
+        // being slow.
+        const waitedOut = handler => (typeof handler === 'function'
             ? async (params, ctx) => {
                 const askedAt = Date.now();
                 try {
-                    return await elicit(server, params, ctx);
+                    return await handler(server, params, ctx);
                 } finally {
                     deadline += Date.now() - askedAt;
                 }
             }
-            : undefined;
+            : undefined);
+
+        const onElicit = waitedOut(elicit);
+        const onSample = waitedOut(sample);
 
         try {
             // Queued behind this server's other calls rather than the round's:
@@ -992,7 +1021,16 @@ async function prepareMcpToolkit(guildServers = [], {
                 // after it. Below the call timeout this is the tighter of the
                 // two; above it, the call timeout still wins.
                 return withSession(target.entry, target.server, client =>
-                    client.callTool(target.toolName, args, { onProgress, timeout: remaining, onElicit }));
+                    client.callTool(target.toolName, args, {
+                        onProgress, timeout: remaining, onElicit, onSample,
+                        // Which turn this call belongs to. The older MCP
+                        // transport carries every call on one socket and a
+                        // pooled client is shared by every guild on a URL, so
+                        // this is what stops a question raised by one guild's
+                        // call being answered in another's channel — see
+                        // dispatchSseMessage.
+                        owner: TURN,
+                    }));
             });
 
             if (!result) {
@@ -1088,11 +1126,11 @@ async function prewarmMcpServers(guildServers = [], { concurrency = 4, only = nu
  * `useMcp` is the caller's switch — commands that parse the reply as JSON pass
  * it false — and is checked here so no provider has to remember to.
  */
-async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs } = {}) {
+async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs } = {}) {
     if (useMcp === false) return null;
     try {
         return await prepareMcpToolkit(mcpServers, {
-            onToolEvent, confirmMode: mcpConfirm, confirmTool, elicit, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs
+            onToolEvent, confirmMode: mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs
         });
     } catch (err) {
         // Discovery is best-effort in every direction: an unreadable config or

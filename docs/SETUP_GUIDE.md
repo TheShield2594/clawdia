@@ -219,11 +219,15 @@ A few things worth knowing:
   itself with the service automatically. A server that does not support that
   reports the URL to register by hand.
 
-Any other server that wants a login works the same way, as long as it speaks
-the Streamable HTTP transport — the one the bot's MCP client implements, here
-and for token connections alike. Atlassian is the notable absence: its published
-endpoint uses the older HTTP+SSE transport, which is a separate protocol rather
-than a response format, and is not implemented.
+Any other server that wants a login works the same way, over either of MCP's two
+HTTP transports. The bot's client tries **Streamable HTTP** first — one endpoint,
+every request a POST — and falls back to the older **HTTP+SSE** transport when
+the server answers that POST with a 404 or a 405, which is what a server built
+against the 2024-11-05 revision does. Nothing has to be configured either way;
+paste the endpoint the service publishes.
+
+Local **stdio** servers are still out of reach: they are a subprocess on the
+machine running the server, not an address, and the bot connects over HTTP.
 
 **Tool gating.** *Only these tools* is an allowlist — leave it empty to allow
 everything the server offers. *Never these tools* is a denylist and wins over
@@ -306,7 +310,7 @@ file lives outside the repo checkout.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Unique identifier, letters/digits/`_`/`-`. Appears in Claude's tool calls. |
-| `url` | Yes | The server's HTTPS endpoint, speaking the Streamable HTTP transport. Local stdio servers cannot be reached this way, and neither can the older HTTP+SSE transport — a Streamable HTTP server may still answer in SSE, which is a different thing. |
+| `url` | Yes | The server's HTTPS endpoint. Either HTTP transport works — Streamable HTTP is tried first and the older HTTP+SSE is used if the server refuses the POST. Local stdio servers cannot be reached this way. |
 | `enabled` | No | Set `false` to keep an entry in the file without connecting to it. |
 | `authorization_token` | No | OAuth bearer token, if the server needs one. |
 | `allowed_tools` | No | Allowlist of tool names. Empty means every tool. |
@@ -395,6 +399,16 @@ malformed config disables the connector, it never stops the bot from starting.
   tool decides what to do about it. At most two questions per reply, and the
   prompt says out loud that a real server will not ask for a password, an API
   key or a login code — cancel if one does.
+- **A server asking for a completion** is the third of these, and the one that
+  spends money. A server that needs a judgement rather than a fact — summarise
+  this diff, is this a duplicate — can ask the bot to run *your* model and send
+  the answer back. It is always approved in the channel, whatever Approval is
+  set to, because the request is prose the server wrote and the tokens are
+  billed to this server: they show up in AI → Usage beside the reply that
+  caused them, and count against the same monthly ceilings. At most two per
+  reply, capped at 1,024 generated tokens each, no tools offered, and the
+  conversation is never included — a server asking for the channel's history
+  gets a completion built from its own messages and nothing else.
 - Tool annotations come from the server, so the two middle modes are worth what
   that server is honest about. *Never these tools* and the per-connection
   *Always ask before these tools* list ask the server nothing; use those where

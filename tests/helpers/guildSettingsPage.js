@@ -19,9 +19,12 @@ function renderPage(overrides) {
     return ejs.render(fs.readFileSync(file, 'utf8'), guildSettingsLocals(overrides), { filename: file });
 }
 
-function renderPanel(name) {
+// `overrides` is for the suites that compare a panel rendered by the server
+// against the same list patched in place by guild-settings.js (#689): the two
+// have to be given the same data to be worth comparing.
+function renderPanel(name, overrides) {
     const file = path.join(VIEWS, 'partials', 'panels', `${name}.ejs`);
-    return ejs.render(fs.readFileSync(file, 'utf8'), guildSettingsLocals(), { filename: file });
+    return ejs.render(fs.readFileSync(file, 'utf8'), guildSettingsLocals(overrides), { filename: file });
 }
 
 // The script wires delegated handlers onto `document` and an unsaved-changes

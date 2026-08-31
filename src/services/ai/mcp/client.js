@@ -3,10 +3,11 @@
 const axios = require('axios');
 const { guardedAgents, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
 const { isOAuthChallenge } = require('./oauth');
+const { SseChannel } = require('./sse');
 const { version: CLAWDIA_VERSION } = require('../../../../package.json');
 
 /**
- * A small MCP client speaking the Streamable HTTP transport.
+ * A small MCP client speaking both of MCP's HTTP transports.
  *
  * Anthropic's connector opens these connections on their side, which is why the
  * feature used to be Anthropic-only. To offer the same servers to OpenAI,
@@ -25,16 +26,38 @@ const { version: CLAWDIA_VERSION } = require('../../../../package.json');
  * offering tools and nothing else is never sent a resources/list it would only
  * answer with "method not found".
  *
+ * Two transports, picked by asking rather than by configuration (#838).
+ * Streamable HTTP — one endpoint, every request a POST that is answered on its
+ * own response — is what this client tries first and what a modern server
+ * speaks. A server built against the 2024-11-05 revision answers that POST with
+ * a 404 or a 405, because to it the endpoint is a `GET` that opens a standing
+ * event stream and names a *second* URL to post to; the handshake falls back to
+ * that on those two statuses, and `./sse.js` holds the standing channel. Nothing
+ * above `post` knows which one is in use.
+ *
  * The URL is a dashboard field, so *the bot* now dials somewhere a guild admin
  * chose. That is the SSRF shape src/utils/outboundGuard.js exists for, and every
  * request here goes through it: literal private addresses are refused up front,
  * and hostnames are checked in the resolver at connect time, on the first
- * request and on every redirect hop.
+ * request and on every redirect hop. The older transport adds one more address
+ * the bot did not choose — the endpoint the server names — and sse.js puts that
+ * through the same guard and requires it to be same-origin besides.
  */
 
 // The revision this client implements. A server that negotiates down to an
 // older one is honoured by echoing whatever it returns on later requests.
 const PROTOCOL_VERSION = '2025-06-18';
+
+// The revision that introduced the transport in ./sse.js, offered when the
+// handshake has fallen back to it: a server old enough to speak only HTTP+SSE
+// is a server that may not recognise a later revision string.
+const SSE_PROTOCOL_VERSION = '2024-11-05';
+
+// What a Streamable HTTP POST looks like when the URL is really an HTTP+SSE
+// endpoint. 405 is the server saying POST is not a method it has here; 404 is
+// the same answer from a server that routes the two verbs separately. Either
+// one, on the handshake, is the cue to try the older transport.
+const SSE_FALLBACK_STATUSES = new Set([404, 405]);
 
 const CONNECT_TIMEOUT_MS = 20000;
 // Tool calls do real work on the far side — a repo search, a calendar query —
@@ -390,6 +413,20 @@ class McpHttpClient {
      *        exactly the scope that knows whose channel to ask in — see
      *        `callTool`'s `onElicit`. A request with nobody behind it is
      *        answered `cancel`, which is the spec's "no choice was made".
+     * @param {boolean} [options.sampling] whether to tell servers this client
+     *        will run a completion on their behalf (#838). Declared on the
+     *        connection and answered per request for the same reason
+     *        `elicitation` is: the capability is negotiated once in a handshake
+     *        every guild on this URL shares, and the guild whose model, key and
+     *        budget would pay for it belongs to one Discord message. A request
+     *        with no handler behind it is refused rather than answered, since
+     *        there is no "declined" shape for a completion.
+     * @param {'auto'|'http'|'sse'} [options.transport] which HTTP transport to
+     *        speak (#838). `auto` tries Streamable HTTP and falls back to the
+     *        older HTTP+SSE on the handshake's 404 or 405, which is the
+     *        negotiation the spec describes and the right answer for a URL an
+     *        admin pasted. The two explicit values exist for tests and for a
+     *        server whose behaviour is already known.
      */
     constructor({
         url,
@@ -398,6 +435,8 @@ class McpHttpClient {
         getAccessToken = null,
         onNotification = null,
         elicitation = false,
+        sampling = false,
+        transport = 'auto',
     }) {
         // Throws for anything that is not a plain http(s) URL, and for a literal
         // private address — the one destination that is knowable before DNS.
@@ -409,6 +448,15 @@ class McpHttpClient {
         this.getAccessToken = typeof getAccessToken === 'function' ? getAccessToken : null;
         this.onNotification = typeof onNotification === 'function' ? onNotification : null;
         this.elicitation = Boolean(elicitation);
+        this.sampling = Boolean(sampling);
+        this.transport = ['http', 'sse'].includes(transport) ? transport : 'auto';
+        // The standing GET stream of the older transport, and what is still
+        // waiting for an answer on it. Both stay empty on Streamable HTTP,
+        // where a response arrives on the POST that asked for it.
+        this.sse = null;
+        this.sseEndpoint = null;
+        this.opening = null;
+        this.pending = new Map();
         this.sessionId = null;
         this.protocolVersion = null;
         this.serverInfo = null;
@@ -483,7 +531,22 @@ class McpHttpClient {
         };
     }
 
-    async post(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true, authRetried = false, onNotification = null, onServerRequest = null } = {}) {
+    /**
+     * One message to the server, by whichever transport this connection uses.
+     *
+     * Everything above this — the handshake, the lists, `callTool` — is written
+     * against "send this, get that back" and does not know which of the two it
+     * is on. The split is here because that is the only place the two differ:
+     * Streamable HTTP answers the POST that asked, and HTTP+SSE answers 202 and
+     * puts the response on the standing stream some time later.
+     */
+    async post(payload, options = {}) {
+        return this.transport === 'sse'
+            ? this.postOverSse(payload, options)
+            : this.postOverHttp(payload, options);
+    }
+
+    async postOverHttp(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true, authRetried = false, onNotification = null, onServerRequest = null } = {}) {
         await this.authorize();
 
         // One deadline for the whole exchange, headers and body alike. The
@@ -517,7 +580,7 @@ class McpHttpClient {
             if (wait !== null) {
                 response.data?.destroy?.();
                 await new Promise(resolve => setTimeout(resolve, wait));
-                return this.post(payload, { id, timeout, retryable: false, authRetried, onNotification, onServerRequest });
+                return this.postOverHttp(payload, { id, timeout, retryable: false, authRetried, onNotification, onServerRequest });
             }
         }
 
@@ -535,7 +598,7 @@ class McpHttpClient {
             // token: retrying with the same credential is the same request again.
             if (response.status === 401 && this.getAccessToken && !authRetried
                 && await this.authorize({ force: true })) {
-                return this.post(payload, { id, timeout, retryable, authRetried: true, onNotification, onServerRequest });
+                return this.postOverHttp(payload, { id, timeout, retryable, authRetried: true, onNotification, onServerRequest });
             }
 
             throw httpError(response.status, body, challenge);
@@ -563,6 +626,277 @@ class McpHttpClient {
     }
 
     /**
+     * The standing event stream for the older transport, opened once.
+     *
+     * Coalesced like the handshake is: the first request on a fresh connection
+     * is `initialize`, but a pooled client that lost its stream can have several
+     * callers discover that at the same moment, and two GETs would be two
+     * sessions with the far side answering into whichever stream it opened last.
+     */
+    async openSseChannel() {
+        if (this.sseEndpoint) return this.sseEndpoint;
+        if (this.opening) return this.opening;
+
+        this.opening = (async () => {
+            await this.authorize();
+            const channel = new SseChannel({
+                url: this.url,
+                headers: () => this.headers(),
+                label: this.label,
+                onMessage: message => this.dispatchSseMessage(message),
+                onClosed: error => this.sseClosed(error),
+            });
+            const endpoint = await channel.open();
+            this.sse = channel;
+            this.sseEndpoint = endpoint;
+            return endpoint;
+        })().finally(() => { this.opening = null; });
+
+        return this.opening;
+    }
+
+    /**
+     * Route one message off the standing stream.
+     *
+     * The three shapes are told apart the same way `readEventStream` tells them
+     * apart, and for the same reason: a message carrying a `method` is never a
+     * response, whatever id it has, because the two sides number their requests
+     * independently and will eventually collide.
+     *
+     * A notification goes to every request still waiting as well as to the
+     * connection-level sink. On this transport there is no per-request stream to
+     * scope it with — one socket carries everything — so a progress
+     * notification is offered to all of them and each ignores what is not its
+     * own: `progressReader` already matches on the token, which is exactly the
+     * filter that scoping would otherwise have provided.
+     */
+    dispatchSseMessage(message) {
+        if (typeof message.method !== 'string') {
+            const waiter = this.pending.get(message.id);
+            if (waiter) {
+                this.pending.delete(message.id);
+                waiter.resolve(message);
+            }
+            return;
+        }
+
+        if (message.id === undefined) {
+            for (const waiter of this.pending.values()) {
+                try {
+                    waiter.onNotification?.(message);
+                } catch (err) {
+                    console.warn(`[MCP] notification listener failed: ${err.message}`);
+                }
+            }
+            try {
+                this.onNotification?.(message);
+            } catch (err) {
+                console.warn(`[MCP] notification listener failed: ${err.message}`);
+            }
+            return;
+        }
+
+        // A server request — an elicitation, or a request for a completion.
+        // Nothing on the wire says which of this connection's in-flight calls it
+        // belongs to: the older transport has one stream and no correlation
+        // field, and the spec adds none.
+        //
+        // Guessing is safe only within one turn. This client is pooled by
+        // (url, credential), and for a static-token or tokenless server that
+        // key has no guild in it — so two guilds pointed at the same public
+        // server share one socket, and answering "whichever call is newest"
+        // could put guild A's question in guild B's channel and bill B's model
+        // budget for it. Inside one turn the same guess is harmless: same
+        // person, same channel, same ledger, and the only thing got wrong is
+        // which of that turn's calls the question is attributed to.
+        //
+        // So the turn is what is compared. Where every in-flight call belongs
+        // to one, the newest is answered; where they span more than one, the
+        // request is refused as unattributable rather than answered by the
+        // wrong tenant — `answerServerRequest` declines an elicitation and
+        // errors a sampling request, both of which a server can read.
+        //
+        // The chosen waiter's *deadline* goes with its handlers, and that is
+        // load-bearing. The id on this message is the server's own — each side
+        // numbers its requests independently — so looking `pending` up by it
+        // finds either nothing or an unrelated call of ours that happens to
+        // share the number. Either way `extendDeadline` would move a deadline
+        // nobody is waiting on, and the call the question actually belongs to
+        // would be killed underneath the prompt still sitting in the channel.
+        let chosen = null;
+        const owners = new Set();
+        for (const waiter of this.pending.values()) {
+            const offered = waiter.onServerRequest;
+            if (!offered || !(offered.elicit || offered.sample)) continue;
+            // An unstamped caller counts as its own turn rather than merging
+            // with every other unstamped one, so a missing owner can only ever
+            // make this more cautious.
+            owners.add(offered.owner ?? waiter);
+            chosen = waiter;
+        }
+
+        if (owners.size > 1) {
+            console.warn(
+                `[MCP] "${this.label}" sent a ${message.method} while calls from more than one turn were in flight; `
+                + 'refusing it rather than answering it as the wrong one'
+            );
+            chosen = null;
+        }
+
+        this.answerServerRequest(message, chosen?.onServerRequest ?? null,
+            chosen?.deadline ?? { at: Date.now() + CALL_TIMEOUT_MS, reschedule: null });
+    }
+
+    /**
+     * The stream ended, so nothing still waiting on it can ever be answered.
+     *
+     * On Streamable HTTP a dead socket fails the one request that owned it. Here
+     * it fails all of them, and takes the session with it — the session *is* the
+     * stream, so the next caller has to handshake again rather than posting to
+     * an endpoint the server has forgotten.
+     */
+    sseClosed(error) {
+        this.sse = null;
+        this.sseEndpoint = null;
+        this.initialized = false;
+        this.protocolVersion = null;
+
+        const waiters = [...this.pending.values()];
+        this.pending.clear();
+        for (const waiter of waiters) {
+            waiter.reject(new McpError(
+                error
+                    ? `the server closed the event stream: ${error.message}`
+                    : 'the server closed the event stream before answering',
+                { sessionExpired: true },
+            ));
+        }
+    }
+
+    /**
+     * One message over the older transport: POST to the endpoint the server
+     * named, then wait for the answer to arrive on the standing stream.
+     *
+     * The POST's own response carries nothing — 202 with an empty body is the
+     * expected answer, and a body that does come back is discarded — so the
+     * waiter is registered *before* the POST goes out. A server fast enough to
+     * answer on the stream before its own 202 has been read is otherwise a
+     * response with nobody left to give it to.
+     */
+    async postOverSse(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, onNotification = null, onServerRequest = null } = {}) {
+        const endpoint = await this.openSseChannel();
+
+        const deadline = { at: Date.now() + timeout, reschedule: null };
+        let waiting = null;
+        if (id !== null) {
+            waiting = new Promise((resolve, reject) => {
+                this.pending.set(id, { resolve, reject, onNotification, onServerRequest, deadline });
+            });
+        }
+
+        try {
+            await this.deliver(endpoint, payload, { timeout, deadline });
+        } catch (err) {
+            // Nothing is coming back for this one. The entry goes, and the
+            // promise nobody will now await is marked handled — the throw below
+            // is what the caller sees.
+            if (id !== null) this.pending.delete(id);
+            waiting?.catch(() => {});
+            throw err;
+        }
+
+        if (id === null) return null;
+
+        try {
+            return await readWithDeadline(waiting, null, deadline);
+        } finally {
+            // On the timeout path the entry is still registered, and a late
+            // answer arriving against an id nobody is waiting for would sit in
+            // the map for the life of the session.
+            this.pending.delete(id);
+        }
+    }
+
+    /**
+     * Hand one message to the endpoint the server named, and read nothing back.
+     *
+     * The POST's own response carries no answer — 202 with an empty body is what
+     * a server on this transport returns, and a body that does arrive is
+     * discarded — so this returns as soon as the server has accepted it. The
+     * answer comes down the standing stream, and the waiter for it was
+     * registered before this was called: a server fast enough to answer on the
+     * stream before its own 202 has been read is otherwise a response with
+     * nobody left to give it to.
+     *
+     * The two retries are the same two `postOverHttp` does, for the same
+     * reasons, and they are why this is a function rather than four lines
+     * inline. A 429 naming a wait the turn can afford is worth sitting out
+     * rather than reporting; a 401 on an OAuth connection is the ordinary end
+     * of an access token's life and is worth one forced refresh. Neither is
+     * specific to a transport — the older one carries the same credential to
+     * the same kind of server — and a connection that reconnected only on
+     * Streamable HTTP would be an OAuth server on this transport failing every
+     * time its hourly token expired.
+     *
+     * The pending waiter survives both: the retry re-sends the same payload
+     * under the same id, which is safe precisely because a 429 and a 401 are
+     * both the server refusing the message rather than acting on it.
+     */
+    async deliver(endpoint, payload, { timeout, deadline, retryable = true, authRetried = false }) {
+        await this.authorize();
+
+        let response;
+        try {
+            response = await axios.post(endpoint, payload, {
+                headers: this.headers(),
+                // The body is empty by design, but a server is free to send one
+                // and axios would otherwise buffer it into memory unread.
+                responseType: 'stream',
+                timeout,
+                maxRedirects: 3,
+                validateStatus: () => true,
+                ...guardedAgents()
+            });
+        } catch (err) {
+            throw new McpError(err.message || 'request failed', { code: err.code || null });
+        }
+
+        if (response.status === 429 && retryable) {
+            const wait = retryAfterMs(response.headers['retry-after']);
+            if (wait !== null) {
+                response.data?.destroy?.();
+                await new Promise(resolve => setTimeout(resolve, wait));
+                return this.deliver(endpoint, payload, { timeout, deadline, retryable: false, authRetried });
+            }
+        }
+
+        if (response.status >= 400) {
+            // Read before anything decides what to do with it: the body is the
+            // server's own explanation and the stream can only be consumed once.
+            //
+            // Under the exchange's deadline, because `responseType: 'stream'`
+            // means the axios timeout above bounded the wait for *headers*
+            // only. A server that answers 500 and then stalls the body would
+            // otherwise hang here forever — and this runs before `postOverSse`
+            // installs its own deadline on the reply, so the waiter would sit
+            // in `pending` and the caller's promise would never settle either
+            // way. `postOverHttp` bounds the identical read.
+            const body = await readWithDeadline(collectText(response.data), response.data, deadline);
+            const challenge = response.headers['www-authenticate'] ?? null;
+
+            if (response.status === 401 && this.getAccessToken && !authRetried
+                && await this.authorize({ force: true })) {
+                return this.deliver(endpoint, payload, { timeout, deadline, retryable, authRetried: true });
+            }
+
+            throw httpError(response.status, body, challenge);
+        }
+
+        response.data?.destroy?.();
+        return null;
+    }
+
+    /**
      * Answer a request the *server* sent us, on a POST of its own.
      *
      * The transport has no way to write back up the stream a request arrived
@@ -579,37 +913,53 @@ class McpHttpClient {
      *
      * A method this client does not serve is refused with JSON-RPC's own "no
      * such method" rather than ignored, because a server that gets no answer
-     * waits for one: an unanswered `sampling/createMessage` is a tool call that
-     * hangs until its own deadline instead of failing in a sentence.
+     * waits for one: an unanswered request is a tool call that hangs until its
+     * own deadline instead of failing in a sentence.
+     *
+     * The two methods it does serve differ in what "nobody is here" means. An
+     * elicitation with no handler is answered `cancel` — the spec's "no choice
+     * was made", which is exactly what happened. A sampling request has no such
+     * shape: its result type is a completion, so the only honest way to say "I
+     * will not run one" is an error, which is what `onSample` throwing produces.
+     *
+     * @param {object} request the server's JSON-RPC request
+     * @param {?{elicit: ?Function, sample: ?Function}} handlers the per-request
+     *        handlers, which is the scope that knows whose channel to ask in
+     *        and whose budget would pay
+     * @param {object} deadline the exchange's deadline, pushed out while a
+     *        person is being waited on
      */
-    async answerServerRequest(request, onElicit, deadline) {
+    async answerServerRequest(request, handlers, deadline) {
         const reply = body => this.post({ jsonrpc: '2.0', id: request.id, ...body })
             .catch(err => console.warn(`[MCP] could not answer "${this.label}"'s ${request.method}: ${err.message}`));
 
-        if (request.method !== 'elicitation/create') {
+        // Handed to a handler rather than applied around it: only the handler
+        // knows how long it is about to be, and a fixed extension would be
+        // either too short for a person or long enough to hold a Discord reply
+        // open on a server that asked and then went away.
+        const extendDeadline = ms => {
+            deadline.at = Math.max(deadline.at, Date.now() + ms);
+            deadline.reschedule?.();
+        };
+
+        const handler = request.method === 'elicitation/create' ? handlers?.elicit
+            : request.method === 'sampling/createMessage' ? handlers?.sample
+                : undefined;
+
+        if (handler === undefined && !['elicitation/create', 'sampling/createMessage'].includes(request.method)) {
             return reply({ error: { code: METHOD_NOT_FOUND, message: `${request.method} is not supported by this client` } });
         }
-        if (typeof onElicit !== 'function') {
+        if (typeof handler !== 'function') {
             // The capability is the connection's and the person is the
             // request's, so a scheduled task or a command parsing the reply as
-            // JSON reaches here with nobody to ask. `cancel` is the spec's
-            // "no choice was made", which is exactly true.
-            return reply({ result: { action: 'cancel' } });
+            // JSON reaches here with nobody behind it.
+            return request.method === 'elicitation/create'
+                ? reply({ result: { action: 'cancel' } })
+                : reply({ error: { code: INTERNAL_ERROR, message: 'no user is available to authorise this request' } });
         }
 
         try {
-            const result = await onElicit(request.params ?? {}, {
-                // Handed to the handler rather than applied around it: only the
-                // handler knows how long it is about to be, and a fixed
-                // extension would be either too short for a person or long
-                // enough to hold a Discord reply open on a server that asked
-                // and then went away.
-                extendDeadline: ms => {
-                    deadline.at = Math.max(deadline.at, Date.now() + ms);
-                    deadline.reschedule?.();
-                }
-            });
-            return reply({ result });
+            return reply({ result: await handler(request.params ?? {}, { extendDeadline }) });
         } catch (err) {
             console.warn(`[MCP] "${this.label}" asked for ${request.method} and it failed: ${err.message}`);
             return reply({ error: { code: INTERNAL_ERROR, message: err.message || 'the client could not answer' } });
@@ -625,10 +975,11 @@ class McpHttpClient {
      * The request id doubles as the token — it is already unique per connection,
      * which is what the spec asks of it.
      *
-     * `onElicit` is opt-in for a different reason: it is a person, and a
-     * request is the smallest scope that knows which one (#838).
+     * `onElicit` and `onSample` are opt-in for a different reason: both end at a
+     * person — one answering a question, one approving a spend — and a request
+     * is the smallest scope that knows which one (#838).
      */
-    async request(method, params, { timeout, onProgress, onElicit } = {}) {
+    async request(method, params, { timeout, onProgress, onElicit, onSample, owner = null } = {}) {
         const id = ++this.nextId;
         const wantsProgress = typeof onProgress === 'function';
         const body = wantsProgress
@@ -641,7 +992,7 @@ class McpHttpClient {
                 id,
                 timeout,
                 onNotification: wantsProgress ? progressReader(id, onProgress) : null,
-                onServerRequest: onElicit,
+                onServerRequest: { elicit: onElicit, sample: onSample, owner },
             }
         );
         return jsonRpcResult(message);
@@ -668,16 +1019,64 @@ class McpHttpClient {
         return this.handshake;
     }
 
+    /**
+     * Negotiate the transport, then handshake over whichever one answered.
+     *
+     * The spec's own backwards-compatibility recipe: POST an initialize and, if
+     * the server rejects the method or has nothing at that path for POST, treat
+     * that as "this is the older transport" and open the GET stream instead.
+     * Only on the handshake — a 404 later is a session the server has forgotten,
+     * which is a different thing with a different fix — and only once, because
+     * a second failure is a URL that is not an MCP endpoint at all and the
+     * admin needs told that rather than told about SSE.
+     *
+     * A successful fallback sticks for the life of the client, so the cost is
+     * one refused POST per connection rather than per request. A failed one is
+     * undone, and the error an admin is shown is the *first* one — a URL with
+     * no MCP server behind it fails both ways, and "no MCP endpoint at this
+     * URL" is what is wrong with it. Reporting the second failure instead would
+     * answer a pasted typo with a sentence about event streams.
+     */
     async handshakeOnce() {
+        try {
+            return await this.negotiate();
+        } catch (err) {
+            if (this.transport !== 'auto' || !(err instanceof McpError) || !SSE_FALLBACK_STATUSES.has(err.status)) {
+                throw err;
+            }
+
+            this.transport = 'sse';
+            try {
+                const client = await this.negotiate();
+                console.log(`[MCP] "${this.label}" refused a Streamable HTTP POST (HTTP ${err.status}); connected over the older HTTP+SSE transport instead`);
+                return client;
+            } catch (sseErr) {
+                // The stream may well be up — a server can name an endpoint and
+                // then fail the initialize behind it — and this client is about
+                // to go back to speaking Streamable HTTP, where nothing reads
+                // it. Left open it is a socket held for the life of the pooled
+                // client with no reader and no session behind it.
+                await this.close();
+                this.transport = 'auto';
+                console.warn(`[MCP] "${this.label}" answered neither transport; the HTTP+SSE attempt said: ${sseErr.message}`);
+                throw err;
+            }
+        }
+    }
+
+    async negotiate() {
         const result = await this.request('initialize', {
-            protocolVersion: PROTOCOL_VERSION,
+            // A server old enough to speak only HTTP+SSE predates every later
+            // revision string, and some of them refuse one they do not know
+            // rather than negotiating down.
+            protocolVersion: this.transport === 'sse' ? SSE_PROTOCOL_VERSION : PROTOCOL_VERSION,
             capabilities: this.clientCapabilities(),
             clientInfo: { name: 'clawdia', version: CLAWDIA_VERSION }
         });
 
         this.protocolVersion = typeof result.protocolVersion === 'string'
             ? result.protocolVersion
-            : PROTOCOL_VERSION;
+            : (this.transport === 'sse' ? SSE_PROTOCOL_VERSION : PROTOCOL_VERSION);
         this.serverInfo = result.serverInfo || null;
         // What the server says it has. Only ever read to skip a round trip for
         // something it has already said it does not offer, so a server that
@@ -705,14 +1104,12 @@ class McpHttpClient {
      * client offering a filesystem for a server to work inside, and this client
      * is a Discord bot: there is no project directory a guild's question is
      * being asked about, and the honest answer to "what are your roots" is that
-     * there are none. `sampling` is absent for a different reason — it is a
-     * server asking to spend the guild's model budget, which wants the same
-     * ledger and confirmation the tool loop already has, and that is more than
-     * a capability declaration.
+     * there are none.
      */
     clientCapabilities() {
         const capabilities = {};
         if (this.elicitation) capabilities.elicitation = {};
+        if (this.sampling) capabilities.sampling = {};
         return capabilities;
     }
 
@@ -840,7 +1237,7 @@ class McpHttpClient {
      * thrown: "that repository does not exist" is an answer the model should see
      * and work around, not a reason to abandon the reply.
      */
-    async callTool(name, args, { onProgress, timeout, onElicit } = {}) {
+    async callTool(name, args, { onProgress, timeout, onElicit, onSample, owner } = {}) {
         await this.initialize();
         // A caller with a deadline of its own can ask for less than the call
         // timeout, never more: a tool that answers in forty seconds is still a
@@ -853,10 +1250,11 @@ class McpHttpClient {
         const result = await this.request(
             'tools/call',
             { name, arguments: args && typeof args === 'object' ? args : {} },
-            // `onElicit` rides with the call rather than with the connection:
-            // a question this tool raises belongs to the message that asked for
-            // it, and the pooled client is shared by every guild on this URL.
-            { timeout: limit, onProgress, onElicit }
+            // Both handlers ride with the call rather than with the
+            // connection: a question this tool raises, or a completion it wants
+            // paid for, belongs to the message that asked for it, and the
+            // pooled client is shared by every guild on this URL.
+            { timeout: limit, onProgress, onElicit, onSample, owner }
         );
         return {
             content: Array.isArray(result.content) ? result.content : [],
@@ -867,6 +1265,15 @@ class McpHttpClient {
 
     /** Best-effort session teardown. A server without sessions has nothing to do. */
     async close() {
+        // On the older transport the session *is* the standing stream: there is
+        // no id to DELETE, and dropping the socket is what ends it. Done before
+        // the early return below, since that transport never sets a session id.
+        if (this.sse) {
+            this.sse.close();
+            this.sse = null;
+            this.sseEndpoint = null;
+        }
+
         if (!this.sessionId) {
             this.initialized = false;
             return;
@@ -888,6 +1295,7 @@ class McpHttpClient {
 
 module.exports = {
     McpHttpClient,
+    SSE_PROTOCOL_VERSION,
     McpError,
     INTERNAL_ERROR,
     retryAfterMs,

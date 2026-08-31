@@ -64,7 +64,17 @@ describe('POST /guild/:guildId/reactionrole/panel', () => {
         const res = await createPanel(valid);
 
         expect(res.status).toBe(200);
-        expect(res.body).toEqual({ success: true, messageId: MESSAGE_ID });
+        // The panel list comes back with the response so the page can redraw
+        // its list in place instead of reloading (#689).
+        expect(res.body).toEqual({
+            success: true,
+            messageId: MESSAGE_ID,
+            panels: [{
+                messageId: MESSAGE_ID,
+                channelId: CHANNEL_ID,
+                mappings: [{ emoji: '👍', roleId: ROLE_ID }],
+            }],
+        });
 
         const embed = bot.sendEmbed.mock.calls[0][2];
         expect(embed.title).toBe('Roles');

@@ -91,10 +91,12 @@ describe('discovery', () => {
             // The pool's own listener, which drops a cached list when the
             // server says it changed (#838).
             onNotification: expect.any(Function),
-            // Declared once per pooled connection; the handler that answers it
-            // rides with each tool call, because the person to ask belongs to
-            // one Discord message and this client is shared.
-            elicitation: true
+            // Both declared once per pooled connection; the handlers that
+            // answer them ride with each tool call, because the person to ask
+            // and the guild whose budget pays belong to one Discord message
+            // and this client is shared by every guild on the URL.
+            elicitation: true,
+            sampling: true
         }]);
     });
 

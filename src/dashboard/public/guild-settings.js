@@ -922,22 +922,116 @@ async function removeAutoRole(roleId) {
     }
 }
 
+// ── RSS feeds ──────────────────────────────────────────────────────────
+// Adding or removing one feed used to answer with location.reload(), which
+// re-downloads and re-parses the whole ~450 KB settings page to show one row
+// appearing or disappearing (#689). Both mutations now return the guild's feed
+// list and this redraws #rss-feeds from it.
+//
+// The whole list rather than the one row that changed, because a feed is
+// addressed by its *position*: removing a row in place would leave every row
+// after it carrying an index one too high, and the next Remove would
+// unsubscribe the wrong feed. Rebuilding from the array the server just saved
+// makes that impossible to get wrong.
+//
+// Built with createElement and textContent rather than an innerHTML string.
+// A feed URL is admin-supplied and lands in a list every other admin sees, so
+// it is exactly the kind of value the escaping rules at the top of
+// esc-html.js exist for — and a node whose text is assigned needs no escaping
+// rule to be remembered.
+
+/** One `.list-item` row, matching the markup in partials/panels/rss.ejs. */
+function rssFeedRow(feed, index) {
+    const row = document.createElement('div');
+    row.className = 'list-item';
+
+    const main = document.createElement('div');
+    main.className = 'rss-feed-main';
+
+    const url = document.createElement('div');
+    url.className = 'url';
+    url.textContent = feed.url;
+
+    const target = document.createElement('small');
+    target.className = 'rss-feed-target';
+    target.textContent = '→ #' + (BOOT.channelNames[feed.channelId] || 'unknown');
+
+    main.appendChild(url);
+    main.appendChild(target);
+
+    const remove = document.createElement('button');
+    remove.className = 'btn btn-danger btn-sm';
+    remove.dataset.action = 'rss-remove';
+    remove.dataset.index = String(index);
+    remove.textContent = 'Remove';
+
+    row.appendChild(main);
+    row.appendChild(remove);
+    return row;
+}
+
+function renderRssFeeds(feeds) {
+    const list = document.getElementById('rss-feeds');
+    if (!list) return;
+
+    list.textContent = '';
+
+    if (!feeds.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.style.padding = '2rem 1.5rem';
+        const heading = document.createElement('h3');
+        heading.textContent = 'No feeds yet';
+        const hint = document.createElement('p');
+        hint.textContent = 'Add your first RSS feed below.';
+        empty.appendChild(heading);
+        empty.appendChild(hint);
+        list.appendChild(empty);
+        return;
+    }
+
+    feeds.forEach(function(feed, index) { list.appendChild(rssFeedRow(feed, index)); });
+}
+
+// Add and Publish are the two buttons on this page that create something on a
+// second click rather than overwriting what the first one made. The page used
+// to reload after both, which was never a guard — the reload was on a timer,
+// and a click inside it posted again — but the page it left had no button on it
+// to click twice. Now that it stays, the window is the whole request, so both
+// hold a flag for the length of their POST. Cleared in `finally`: a failed add
+// has to be retryable, and a flag left set by a network error is a button that
+// never works again until the admin reloads.
+let _rssAddInFlight = false;
+
 async function addRssFeed() {
+    if (_rssAddInFlight) return;
     const guildId = BOOT.guildId;
-    const url = document.getElementById('rss-url').value;
-    const channelId = document.getElementById('rss-channel').value;
+    const urlField = document.getElementById('rss-url');
+    const channelField = document.getElementById('rss-channel');
+    const url = urlField.value;
+    const channelId = channelField.value;
     if (!url || !channelId) { toast('Please fill in all fields', 'error'); return; }
+    _rssAddInFlight = true;
     try {
         const response = await fetch(`/api/v1/guild/${guildId}/rss/add`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, channelId })
         });
-        if (response.ok) { toast('RSS feed added', 'success'); setTimeout(() => location.reload(), 600); }
-        else toast('Failed to add RSS feed', 'error');
+        const data = await response.json().catch(() => ({}));
+        if (response.ok) {
+            renderRssFeeds(data.feeds || []);
+            // The reload used to clear these; without it the URL of the feed
+            // that was just added sits in the box inviting a second add.
+            urlField.value = '';
+            channelField.value = '';
+            toast('RSS feed added', 'success');
+        } else toast(data.error || 'Failed to add RSS feed', 'error');
     } catch (error) {
         console.error(error);
         toast('An error occurred', 'error');
+    } finally {
+        _rssAddInFlight = false;
     }
 }
 
@@ -947,8 +1041,11 @@ async function deleteRssFeed(index) {
     const guildId = BOOT.guildId;
     try {
         const response = await fetch(`/api/v1/guild/${guildId}/rss/${index}`, { method: 'DELETE' });
-        if (response.ok) { toast('RSS feed removed', 'success'); setTimeout(() => location.reload(), 600); }
-        else toast('Failed to delete RSS feed', 'error');
+        const data = await response.json().catch(() => ({}));
+        if (response.ok) {
+            renderRssFeeds(data.feeds || []);
+            toast('RSS feed removed', 'success');
+        } else toast(data.error || 'Failed to delete RSS feed', 'error');
     } catch (error) {
         console.error(error);
         toast('An error occurred', 'error');
@@ -1574,6 +1671,11 @@ document.addEventListener('click', function(e) {
     else if (d.action === 'mcp-edit')       editMcpServer(d.serverName);
     else if (d.action === 'mcp-remove')     removeMcpServer(d.serverName);
     else if (d.action === 'autorole-remove') removeAutoRole(d.roleId);
+    // Both lists are redrawn from the API after every mutation (#689), so their
+    // buttons are delegated rather than bound: a row rendered a moment ago by
+    // renderRssFeeds or renderRrPanels has no listener of its own.
+    else if (d.action === 'rss-remove')      deleteRssFeed(Number(d.index));
+    else if (d.action === 'rr-panel-delete') deleteRrPanel(d.messageId);
 });
 
 // mousedown, not click: the dropdown is hidden by the input's blur, which
@@ -1929,7 +2031,13 @@ function addRrMapping() {
     list.appendChild(row);
 }
 
+// See _rssAddInFlight. This one matters more: a duplicate publish posts a second
+// embed to the channel and stores a second set of mappings, so the cost of the
+// double click is a panel an admin has to go and delete.
+let _rrPublishInFlight = false;
+
 async function publishRrPanel() {
+    if (_rrPublishInFlight) return;
     const channelId = document.getElementById('rr-channel').value;
     if (!channelId) { toast('Select a target channel', 'error'); return; }
 
@@ -1944,6 +2052,7 @@ async function publishRrPanel() {
     if (!mappings.length) { toast('Add at least one emoji → role mapping', 'error'); return; }
 
     const guildId = BOOT.guildId;
+    _rrPublishInFlight = true;
     try {
         const response = await fetch('/api/v1/guild/' + guildId + '/reactionrole/panel', {
             method: 'POST',
@@ -1957,14 +2066,20 @@ async function publishRrPanel() {
         });
         const data = await response.json();
         if (response.ok) {
+            renderRrPanels(data.panels || []);
+            // The reload used to empty the create form. Publishing leaves the
+            // admin looking at a form still holding the panel they have just
+            // posted, which is one accidental second click from a duplicate.
+            clearRrForm();
             toast('Panel published', 'success');
-            setTimeout(function() { location.reload(); }, 800);
         } else {
             toast(data.error || 'Failed to publish panel', 'error');
         }
     } catch (error) {
         console.error(error);
         toast('An error occurred', 'error');
+    } finally {
+        _rrPublishInFlight = false;
     }
 }
 
@@ -1973,17 +2088,105 @@ async function deleteRrPanel(messageId) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const response = await fetch('/api/v1/guild/' + guildId + '/reactionrole/panel/' + messageId, { method: 'DELETE' });
+        const response = await fetch('/api/v1/guild/' + guildId + '/reactionrole/panel/' + encodeURIComponent(messageId), { method: 'DELETE' });
+        const data = await response.json().catch(function() { return {}; });
         if (response.ok) {
+            renderRrPanels(data.panels || []);
             toast('Panel deleted', 'success');
-            setTimeout(function() { location.reload(); }, 600);
         } else {
-            toast('Failed to delete panel', 'error');
+            toast(data.error || 'Failed to delete panel', 'error');
         }
     } catch (error) {
         console.error(error);
         toast('An error occurred', 'error');
     }
+}
+
+// ── Reaction role panel list ───────────────────────────────────────────
+// Publishing or deleting a panel used to answer with location.reload() (#689).
+// The API returns the guild's panels grouped by message — the same shape
+// partials/panels/reactionroles.ejs renders on load, produced by the same
+// helper in src/dashboard/lib/reactionRolePanels.js — and this redraws
+// #rr-panels-list from it.
+//
+// createElement and textContent throughout: a mapping's emoji is whatever the
+// admin typed into the field, and a role or channel that has been renamed
+// since the page loaded arrives as a name from the bootstrap map. Neither is
+// concatenated into markup.
+
+/** One `.store-card`, matching the markup in partials/panels/reactionroles.ejs. */
+function rrPanelCard(panel) {
+    const card = document.createElement('div');
+    card.className = 'store-card';
+
+    const body = document.createElement('div');
+    body.className = 'store-card-body';
+
+    const name = document.createElement('div');
+    name.className = 'store-card-name';
+    name.textContent = '#' + (BOOT.channelNames[panel.channelId] || panel.channelId);
+
+    const mappings = document.createElement('div');
+    mappings.className = 'rr-panel-mappings';
+    (panel.mappings || []).forEach(function(m) {
+        const tag = document.createElement('span');
+        tag.className = 'store-meta-tag role-meta';
+        tag.textContent = m.emoji + ' → @' + (BOOT.roleNames[m.roleId] || m.roleId);
+        mappings.appendChild(tag);
+    });
+
+    const messageId = document.createElement('div');
+    messageId.className = 'rr-panel-message-id';
+    messageId.textContent = 'Message ID: ' + panel.messageId;
+
+    body.appendChild(name);
+    body.appendChild(mappings);
+    body.appendChild(messageId);
+
+    const actions = document.createElement('div');
+    actions.className = 'store-card-actions';
+    const remove = document.createElement('button');
+    remove.className = 'btn btn-sm btn-danger';
+    remove.dataset.action = 'rr-panel-delete';
+    remove.dataset.messageId = panel.messageId;
+    remove.textContent = 'Delete panel';
+    actions.appendChild(remove);
+
+    card.appendChild(body);
+    card.appendChild(actions);
+    return card;
+}
+
+function renderRrPanels(panels) {
+    const list = document.getElementById('rr-panels-list');
+    if (!list) return;
+
+    list.textContent = '';
+
+    if (!panels.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        const heading = document.createElement('h3');
+        heading.textContent = 'No reaction role panels yet';
+        const hint = document.createElement('p');
+        hint.textContent = 'Create a panel below and the bot will post it to your chosen channel with reactions automatically added.';
+        empty.appendChild(heading);
+        empty.appendChild(hint);
+        list.appendChild(empty);
+        return;
+    }
+
+    panels.forEach(function(panel) { list.appendChild(rrPanelCard(panel)); });
+}
+
+/** Empties the create-panel form after a successful publish. */
+function clearRrForm() {
+    ['rr-channel', 'rr-title', 'rr-description'].forEach(function(id) {
+        const field = document.getElementById(id);
+        if (field) field.value = '';
+    });
+    const mappings = document.getElementById('rr-mappings-list');
+    if (mappings) mappings.textContent = '';
 }
 
 // ── Knowledge Base ─────────────────────────────────────────────────────
