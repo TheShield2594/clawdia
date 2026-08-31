@@ -393,15 +393,16 @@ userSchema.index({ guildId: 1, syndicateId: 1 });  // used by syndicate member l
 userSchema.index({ guildId: 1, level: -1, xp: -1 });          // leaderboard level sort + rank.js countDocuments
 userSchema.index({ guildId: 1, balance: -1, bank: -1 });      // leaderboard wealth sort
 
-userSchema.pre('save', function(next) {
+// Mongoose 9 calls document middleware with no `next` callback (kareem's
+// execPre is async and awaits whatever the hook returns), so a hook aborts a
+// save by throwing rather than by calling `next(err)`.
+userSchema.pre('save', function() {
     this.updatedAt = Date.now();
 
     const ids = (this.achievements || []).map(a => a.id);
     if (new Set(ids).size !== ids.length) {
-        return next(new Error('User achievements contains duplicate id values'));
+        throw new Error('User achievements contains duplicate id values');
     }
-
-    next();
 });
 
 module.exports = model('User', userSchema);

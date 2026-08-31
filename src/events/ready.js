@@ -114,7 +114,8 @@ module.exports = {
                 for (const u of pending) {
                     await User.findOneAndUpdate(
                         { _id: u._id },
-                        [{ $inc: { balance: '$pendingCrashRefund' } }, { $set: { pendingCrashRefund: 0 } }]
+                        [{ $inc: { balance: '$pendingCrashRefund' } }, { $set: { pendingCrashRefund: 0 } }],
+                        { updatePipeline: true }
                     );
                     logTransaction({ userId: u.userId, guildId: u.guildId, type: 'crash_refund', amount: u.pendingCrashRefund, balance: u.balance + u.pendingCrashRefund, note: 'bot restart refund' });
                 }

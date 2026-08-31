@@ -416,7 +416,8 @@ module.exports = {
                     [{ $set: {
                         ...(droppedItem.streakFlag ? {} : { inventory: inventoryAddExpr(droppedItem.itemId, 1) }),
                         ...dropSet,
-                    } }]
+                    } }],
+                    { updatePipeline: true }
                 );
 
                 logTransaction({

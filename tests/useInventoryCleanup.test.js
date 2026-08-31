@@ -31,7 +31,7 @@ describe('the mongoose contract the cleanup relies on', () => {
     test('a bare filter-then-save rewrites the entire inventory array', () => {
         const doc = hydrate();
         doc.inventory = doc.inventory.filter(e => e.quantity > 0);
-        expect(doc.getChanges().$set).toHaveProperty('inventory');
+        expect(doc.$getChanges().$set).toHaveProperty('inventory');
     });
 
     test('unmarking the path keeps it out of the write', () => {
@@ -41,7 +41,7 @@ describe('the mongoose contract the cleanup relies on', () => {
         doc.inventory = doc.inventory.filter(e => e.quantity > 0);
         doc.unmarkModified('inventory');
 
-        const changes = JSON.stringify(doc.getChanges());
+        const changes = JSON.stringify(doc.$getChanges());
         expect(changes).not.toContain('"inventory"');
         // The mutation the save actually exists for still goes out.
         expect(changes).toContain('pets');
@@ -53,7 +53,7 @@ describe('the mongoose contract the cleanup relies on', () => {
         // The original concern was balance; it was never at risk, and this says so.
         const doc = hydrate();
         doc.inventory = doc.inventory.filter(e => e.quantity > 0);
-        expect(JSON.stringify(doc.getChanges())).not.toContain('balance');
+        expect(JSON.stringify(doc.$getChanges())).not.toContain('balance');
     });
 });
 

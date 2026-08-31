@@ -199,7 +199,8 @@ describe('crash refund sweep', () => {
 
         expect(User.findOneAndUpdate).toHaveBeenCalledWith(
             { _id: 'u1' },
-            [{ $inc: { balance: '$pendingCrashRefund' } }, { $set: { pendingCrashRefund: 0 } }]
+            [{ $inc: { balance: '$pendingCrashRefund' } }, { $set: { pendingCrashRefund: 0 } }],
+            { updatePipeline: true }
         );
         expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({
             type: 'crash_refund', amount: 250, balance: 350,

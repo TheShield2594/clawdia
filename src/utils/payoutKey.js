@@ -162,7 +162,9 @@ async function creditCoinsOnce(filter, amount, key, options = {}) {
                 ...extraSet,
             },
         }],
-        projection ? { new: true, projection } : { new: true },
+        projection
+            ? { updatePipeline: true, new: true, projection }
+            : { updatePipeline: true, new: true },
     );
 
     if (credited) return { status: 'paid', doc: credited };

@@ -1003,9 +1003,8 @@ guildSchema.index(
 // collection every settings save writes is a cost worth measuring first rather
 // than assuming. The pattern to copy is directly above.
 
-guildSchema.pre('save', function(next) {
+guildSchema.pre('save', function() {
     this.updatedAt = Date.now();
-    next();
 });
 
 // --- Guild settings cache invalidation ---------------------------------------

@@ -50,7 +50,7 @@ async function debitUpTo(Model, filter, amount, extraSet = {}) {
     const before = await Model.findOneAndUpdate(
         filter,
         [{ $set: { balance: clampedDebitExpr(wanted), ...extraSet } }],
-        { new: false },
+        { updatePipeline: true, new: false },
     );
 
     if (!before) return { taken: 0, balance: 0, matched: false };

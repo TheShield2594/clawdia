@@ -24,10 +24,9 @@ syndicateSchema.index({ syndicateId: 1 }, { unique: true });
 syndicateSchema.index({ guildId: 1, nameLower: 1 }, { unique: true });
 syndicateSchema.index({ guildId: 1, lifetimeEarnings: -1 });
 
-syndicateSchema.pre('save', function(next) {
+syndicateSchema.pre('save', function() {
     this.nameLower = this.name.toLowerCase();
     this.updatedAt = Date.now();
-    next();
 });
 
 module.exports = model('Syndicate', syndicateSchema);
