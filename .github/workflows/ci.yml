@@ -171,10 +171,22 @@ jobs:
   #
   # Built on every event, pull requests included, and never pushed. Alongside
   # `test` rather than after it: the two answer different questions, and a red
-  # suite should not hide a broken image any more than the reverse. The publish
-  # job needs both, so nothing reaches the registry that has not been built,
-  # booted and scanned here first — and because this job writes the same
-  # `type=gha` cache, that publish is a cache hit rather than a second compile.
+  # suite should not hide a broken image any more than the reverse.
+  #
+  # What `publish: needs: [test, image]` buys is worth stating precisely, because
+  # `needs:` orders the two jobs and nothing more — it does not hand this image
+  # over, and that job builds again before it pushes. So the guarantee is that
+  # the same commit, Dockerfile, lockfile and digest-pinned base produced an
+  # image that booted and scanned clean; it is not byte identity, because
+  # `apk add` resolves whatever Alpine is serving at the moment of each build.
+  # The `type=gha` cache this job writes is what closes that in practice: the
+  # publish build is a cache hit rather than a second compile, and a cache hit is
+  # the same layers. The residue is a cache miss inside a single run.
+  #
+  # Closing it properly means pushing a staging tag from here and promoting it by
+  # digest, which needs `packages: write` in a job that also runs on pull
+  # requests. That is a wider exposure than the gap it closes — the separation is
+  # why publish is a job of its own — so it is deliberately not done here.
   image:
     name: Build, boot and scan Docker image
     runs-on: ubuntu-latest
