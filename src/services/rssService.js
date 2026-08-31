@@ -59,6 +59,40 @@ function recordFeedSuccess(feedUrl) {
     feedLastFailTime.delete(feedUrl);
 }
 
+// Nothing removes a URL from the two maps above when the last guild subscribed
+// to it unsubscribes, so they accumulate every feed ever configured for the
+// life of the process.
+//
+// Pruning against the sweep's live subscription list would look like the
+// obvious fix and would be wrong: daily-news profiles carry their own feed URLs
+// (dailyNewsProfiles[].feeds), which checkRssFeeds never queries, so the sweep
+// would delete the circuit-breaker state of every digest-only feed every five
+// minutes and a dead one would be re-fetched on each digest for good.
+//
+// Age is the property that covers both callers. An entry only changes behaviour
+// while it is inside DEAD_FEED_COOLDOWN_MS of its last failure — past that,
+// shouldSkipDeadFeed retries the feed regardless — and any feed still being
+// polled refreshes its entry on each failed retry. So an entry that has aged
+// well past the cooldown belongs to a URL nothing polls any more. The margin
+// keeps the prune clear of the boundary, so a retry that is about to happen
+// still finds its count for the log line.
+const DEAD_FEED_STATE_TTL_MS = 2 * DEAD_FEED_COOLDOWN_MS;
+
+function pruneFeedFailureState(now = Date.now()) {
+    const cutoff = now - DEAD_FEED_STATE_TTL_MS;
+    for (const url of feedFailCounts.keys()) {
+        const lastFail = feedLastFailTime.get(url);
+        if (lastFail === undefined || lastFail <= cutoff) {
+            feedFailCounts.delete(url);
+            feedLastFailTime.delete(url);
+        }
+    }
+    // Any timestamp with no surviving count is state no reader can act on.
+    for (const url of feedLastFailTime.keys()) {
+        if (!feedFailCounts.has(url)) feedLastFailTime.delete(url);
+    }
+}
+
 function recordFeedFailure(feedUrl, error) {
     const newCount = (feedFailCounts.get(feedUrl) || 0) + 1;
     feedFailCounts.set(feedUrl, newCount);
@@ -345,6 +379,10 @@ async function checkRssFeeds(client) {
         console.log(`[RSS] Sweep: ${urls.length} feed(s), ${posted} posted, ${failed} failed, ${skipped} parked.`);
     } catch (error) {
         console.error('Error checking RSS feeds:', error);
+    } finally {
+        // In `finally` so a sweep that threw halfway still reclaims: the prune
+        // is keyed on age alone and needs nothing the sweep produced.
+        pruneFeedFailureState();
     }
 }
 
@@ -579,6 +617,7 @@ module.exports = {
     checkRssFeeds, scheduleDailyNews, sendDailyNews,
     __test__: {
         feedFailCounts, feedLastFailTime, shouldSkipDeadFeed,
+        pruneFeedFailureState, DEAD_FEED_STATE_TTL_MS,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, RSS_FETCH_CONCURRENCY,
         dailyNewsDue, runDueDailyNews, DAILY_NEWS_REFIRE_GUARD_MS,
         datedItems, MAX_ITEMS_PER_SWEEP,
