@@ -26,7 +26,31 @@
             <%_ } _%>
         </div>
         <%_ if (page === 'home') { _%>
-            <div class="cw-nav-links">
+            <%#
+                #881. Five links, a brand and a call to action in one nowrap
+                `space-between` row, on a body that is `overflow-x: hidden`: on a
+                phone the links ran past the viewport and were clipped away, with
+                no scroll and no other route to them.
+
+                Two halves to the fix, and the order matters. The stylesheet lets
+                the row wrap at <=768px, so the links are reachable on a phone
+                whether or not any script runs. The button below then folds them
+                away behind a disclosure, mirroring `dash-nav-toggle` on the
+                dashboard down to the media query it asks. It ships `hidden` and
+                the script unhides it, so a browser that never runs the script is
+                left with the wrapped row rather than a nav folded shut with
+                nothing to open it.
+
+                The call to action stays out of the disclosure — it is one button
+                and it is what a first-time visitor came for, the same argument
+                that keeps the dashboard's server switcher outside its collapse.
+            -%>
+            <button type="button" class="cw-nav-toggle" id="cw-nav-toggle" aria-expanded="true" aria-controls="cw-nav-links" hidden>
+                <svg class="cw-nav-toggle-icon cw-nav-toggle-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                <svg class="cw-nav-toggle-icon cw-nav-toggle-close" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+                <span>Menu</span>
+            </button>
+            <div class="cw-nav-links" id="cw-nav-links">
                 <a href="#features">Features</a>
                 <a href="#modules">Modules</a>
                 <a href="#insights">Insights</a>
@@ -57,3 +81,47 @@
         <%_ } _%>
     </div>
 </nav>
+<%_ if (page === 'home') { _%>
+<script nonce="<%= locals.cspNonce %>">
+(function () {
+    var nav = document.querySelector('.cw-nav');
+    var toggle = document.getElementById('cw-nav-toggle');
+    // No matchMedia is the fail-safe: the button stays hidden and the wrapped
+    // row from the stylesheet is what the reader gets.
+    if (!nav || !toggle || !window.matchMedia) return;
+    var narrow = window.matchMedia('(max-width: 768px)');
+
+    function setOpen(open) {
+        nav.classList.toggle('nav-collapsed', !open);
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    // Asked rather than assumed, because a tablet turned sideways crosses the
+    // breakpoint mid-session: widening has to put the links back and take the
+    // toggle away, or the wide layout is left folded with no control to open it.
+    function sync() {
+        toggle.hidden = !narrow.matches;
+        setOpen(!narrow.matches);
+    }
+
+    toggle.addEventListener('click', function () {
+        setOpen(nav.classList.contains('nav-collapsed'));
+    });
+
+    // Four of the five are anchors into this page, so an open nav would sit on
+    // top of the section the reader just jumped to.
+    var links = nav.querySelectorAll('.cw-nav-links a');
+    for (var i = 0; i < links.length; i++) {
+        links[i].addEventListener('click', function () {
+            if (narrow.matches) setOpen(false);
+        });
+    }
+
+    // addEventListener where it exists, addListener for the Safari versions
+    // where MediaQueryList is an EventTarget in name only.
+    if (typeof narrow.addEventListener === 'function') narrow.addEventListener('change', sync);
+    else if (typeof narrow.addListener === 'function') narrow.addListener(sync);
+    sync();
+})();
+</script>
+<%_ } _%>

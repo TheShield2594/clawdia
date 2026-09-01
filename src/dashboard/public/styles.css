@@ -1155,6 +1155,27 @@ textarea.auto-resize {
 .cw-nav-links a:hover { color: var(--ink-950); }
 .cw-nav-links a:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 4px; border-radius: 4px; }
 .cw-nav-cta { display: flex; align-items: center; gap: 14px; }
+/* #881. Never shown by the stylesheet alone at any width: nav.ejs ships it
+   `hidden` and its script unhides it once it knows the viewport is narrow, so
+   a browser that never runs the script keeps the wrapped row below rather than
+   a nav folded shut with no control to open it. */
+.cw-nav-toggle {
+    display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
+    padding: 8px 12px; border-radius: 999px;
+    background: transparent; border: 1px solid rgba(0,0,0,.14);
+    color: var(--ink-700); font-family: inherit; font-size: 13.5px; font-weight: 500;
+    cursor: pointer; transition: border-color .15s, color .15s;
+}
+.cw-nav-toggle[hidden] { display: none; }
+.cw-nav-toggle:hover { border-color: var(--ink-600); color: var(--ink-950); }
+.cw-nav-toggle:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; }
+/* Hamburger while the links are folded away, X while they are open. Both ship
+   in the markup and CSS picks one, so the state never depends on the script
+   having swapped an icon — aria-expanded is what carries it either way. */
+.cw-nav-toggle-icon { flex-shrink: 0; }
+.cw-nav-toggle-close { display: none; }
+.cw-nav:not(.nav-collapsed) .cw-nav-toggle-open { display: none; }
+.cw-nav:not(.nav-collapsed) .cw-nav-toggle-close { display: inline; }
 .cw-nav-username { font-size: 14px; color: var(--ink-700); font-weight: 500; }
 .cw-nav-logout-btn { padding: 9px 16px; font-size: 13.5px; }
 .cw-link-quiet { font-size: 14.5px; color: var(--ink-700); cursor: pointer; text-decoration: none; }
@@ -1312,6 +1333,29 @@ textarea.auto-resize {
     .cw-show-inner { grid-template-columns: 1fr; }
     .cw-host-inner { grid-template-columns: 1fr; }
     .cw-footer-inner { grid-template-columns: 1fr 1fr; gap: 32px; }
+}
+/* #881. The nav was one nowrap `space-between` row of brand, five links and a
+   call to action, and `body { overflow-x: hidden }` above means an over-wide
+   row is clipped rather than scrollable — so on a phone the links, and the
+   "Add to Discord" button past them, were simply cut off the right-hand side.
+
+   Wrapping is the half that needs no script: the links drop to a full-width
+   row of their own and nothing is off-screen at any width. `.nav-collapsed`,
+   which only nav.ejs's script sets, is the half that then folds them away
+   behind the Menu button so the fold is not the reader's whole first screen.
+
+   The call to action stays: it is one button, and it is what the page is for.
+   Same breakpoint as the dashboard's own nav collapse, and the same 768px the
+   script asks matchMedia about. */
+@media (max-width: 768px) {
+    .cw-nav-inner { flex-wrap: wrap; row-gap: 14px; }
+    /* `width: 100%` is what takes the links out of the brand's row; the
+       call to action needs no rule of its own, because it then sits beside
+       the brand whenever it fits and wraps under it when it does not — and
+       once the links are `display: none` they are out of the layout, so a
+       folded nav is one row again rather than one row and a gap. */
+    .cw-nav-links { width: 100%; flex-wrap: wrap; gap: 14px 22px; }
+    .cw-nav.nav-collapsed .cw-nav-links { display: none; }
 }
 @media (max-width: 640px) {
     .cw-hero { padding: 48px 24px 36px; }
