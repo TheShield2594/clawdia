@@ -26,6 +26,17 @@ jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 const { creditCoinsOrOwe } = require('../src/utils/creditOrOwe');
 const { recordOwedPayout } = require('../src/utils/owedPayout');
 
+// The store's own implementations, captured before any test replaces one.
+// `mockUsers.reset()` clears call records but leaves a `mockImplementation`
+// standing, so a test that makes a write fail would make it fail for every test
+// after it.
+const storeImpl = new Map(Object.entries(mockUsers.model)
+    .filter(([, fn]) => typeof fn?.getMockImplementation === 'function')
+    .map(([name, fn]) => [name, fn.getMockImplementation()]));
+const restoreStore = () => {
+    for (const [name, impl] of storeImpl) mockUsers.model[name].mockImplementation(impl);
+};
+
 const GUILD = 'guild-1';
 const USER  = 'user-1';
 const WHO   = { userId: USER, guildId: GUILD };
@@ -35,6 +46,7 @@ beforeEach(() => {
     jest.clearAllMocks();
     jest.spyOn(console, 'error').mockImplementation(() => {});
     mockUsers.reset();
+    restoreStore();
     recordOwedPayout.mockResolvedValue(true);
 });
 
@@ -92,11 +104,9 @@ describe('a credit that matched no document', () => {
     });
 
     test('is not retried — the document will still be missing', async () => {
-        const attempts = jest.spyOn(mockUsers.model, 'findOneAndUpdate');
-
         await creditCoinsOrOwe(WHO, 250, OPTS);
 
-        expect(attempts).toHaveBeenCalledTimes(1);
+        expect(mockUsers.model.findOneAndUpdate).toHaveBeenCalledTimes(1);
     });
 });
 
@@ -119,8 +129,7 @@ describe('a credit that rejects', () => {
 
     test('is written down once every attempt has failed', async () => {
         mockUsers.seed({ ...WHO, balance: 100 });
-        jest.spyOn(mockUsers.model, 'findOneAndUpdate')
-            .mockRejectedValue(new Error('mongo is down'));
+        mockUsers.model.findOneAndUpdate.mockRejectedValue(new Error('mongo is down'));
 
         const result = await creditCoinsOrOwe(WHO, 250, OPTS);
 
@@ -131,11 +140,73 @@ describe('a credit that rejects', () => {
     test('reports the debt as unrecorded when the record itself will not write', async () => {
         recordOwedPayout.mockResolvedValue(false);
         mockUsers.seed({ ...WHO, balance: 100 });
-        jest.spyOn(mockUsers.model, 'findOneAndUpdate')
-            .mockRejectedValue(new Error('mongo is down'));
+        mockUsers.model.findOneAndUpdate.mockRejectedValue(new Error('mongo is down'));
 
         // `owed: false` is the sentence a caller must word differently: the
         // coins are neither paid nor recoverable without a human.
+        await expect(creditCoinsOrOwe(WHO, 250, OPTS)).resolves.toMatchObject({
+            credited: false, owed: false,
+        });
+    });
+});
+
+describe('bookkeeping that travels with the credit', () => {
+    test('moves the counters in the same write as the coins', async () => {
+        mockUsers.seed({ ...WHO, balance: 100, lifetimeGambled: 250 });
+
+        await creditCoinsOrOwe(WHO, 250, { ...OPTS, counters: { lifetimeGambled: -250 } });
+
+        expect(mockUsers.get(USER)).toMatchObject({ balance: 350, lifetimeGambled: 0 });
+    });
+
+    test('does not move them when the credit does not land', async () => {
+        mockUsers.seed({ ...WHO, balance: 100, lifetimeGambled: 250 });
+        mockUsers.model.findOneAndUpdate.mockRejectedValue(new Error('mongo is down'));
+
+        await creditCoinsOrOwe(WHO, 250, { ...OPTS, counters: { lifetimeGambled: -250 } });
+
+        expect(mockUsers.get(USER)).toMatchObject({ balance: 100, lifetimeGambled: 250 });
+    });
+
+    test('writes them into the owed record, so a replay reproduces the whole write', async () => {
+        // Without this the replay pays the coins and leaves the counter where
+        // the failed write left it — a stake put back a week later that still
+        // counts as gambled.
+        mockUsers.seed({ ...WHO, balance: 100 });
+        mockUsers.model.findOneAndUpdate.mockRejectedValue(new Error('mongo is down'));
+
+        await creditCoinsOrOwe(WHO, 250, { ...OPTS, counters: { lifetimeGambled: -250 } });
+
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            payload: expect.objectContaining({ counters: { lifetimeGambled: -250 } }),
+        }));
+    });
+
+    test('leaves the field off the record when there are none', async () => {
+        await creditCoinsOrOwe(WHO, 250, OPTS);
+
+        const [{ payload }] = recordOwedPayout.mock.calls[0];
+        expect(payload).not.toHaveProperty('counters');
+    });
+});
+
+describe('never rejecting', () => {
+    // Two sequential crew-payout loops and one `Promise.all` over refunds all
+    // depend on this: one share that could not be written down must not abandon
+    // the shares after it.
+    test('survives a counters value it cannot build a write from', async () => {
+        // Computed inside the retry guard, so a bad one is an owed record
+        // rather than a rejection that abandons the rest of a crew payout.
+        mockUsers.seed({ ...WHO, balance: 100 });
+
+        await expect(creditCoinsOrOwe(WHO, 250, { ...OPTS, counters: null }))
+            .resolves.toMatchObject({ credited: true });
+    });
+
+    test('survives a recording failure that throws rather than returning false', async () => {
+        recordOwedPayout.mockRejectedValue(new Error('the queue is down too'));
+        mockUsers.model.findOneAndUpdate.mockRejectedValue(new Error('mongo is down'));
+
         await expect(creditCoinsOrOwe(WHO, 250, OPTS)).resolves.toMatchObject({
             credited: false, owed: false,
         });

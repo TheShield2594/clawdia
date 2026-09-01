@@ -41,7 +41,7 @@ actually happened to the coins rather than what was hoped for. A duel's money
 handling moves out of the command into `src/utils/duelEscrow.js`, where the
 `lifetimeGambled` reversal is now a parameter of the refund: a tie hands the
 stakes back without the duel having gone unplayed, so the counter stays, as it
-does on a blackjack push. 39 tests across three new suites; `src/commands/economy`
+does on a blackjack push. 50 tests across three new suites; `src/commands/economy`
 coverage floors move from 27% to 33% and the global floors from 49/39/50/50 to
 50/40/53/51.
 

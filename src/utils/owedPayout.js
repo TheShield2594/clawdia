@@ -123,8 +123,14 @@ function payoutKeyForPayload(payload) {
  *
  * Two kinds, one per claim site:
  *
- *   coins  { kind: 'coins', userId, guildId, amount,           payoutKey? }
+ *   coins  { kind: 'coins', userId, guildId, amount,           payoutKey?, counters? }
  *   items  { kind: 'items', userId, guildId, itemId, quantity, payoutKey? }
+ *
+ * `counters` is `{ path: delta }` — bookkeeping the original write was going to
+ * move alongside the coins, carried here so the replay reproduces that write
+ * rather than half of it. A duel refund reverses `lifetimeGambled` with the
+ * stake; paying the stake back a week later without it leaves the player counted
+ * as having gambled coins they were given back.
  */
 async function replayOwedPayout(payload) {
     const kind = payload?.kind;
@@ -144,10 +150,11 @@ async function replayOwedPayout(payload) {
         }
 
         const User = require('../models/User');
+        const counters = payload.counters ?? {};
         if (!key) {
             const credited = await User.findOneAndUpdate(
                 { userId, guildId },
-                { $inc: { balance: amount } },
+                { $inc: { balance: amount, ...counters } },
             );
             if (!credited) {
                 throw new Error(`no user document for ${userId} in ${guildId} — nothing to credit`);
@@ -155,7 +162,10 @@ async function replayOwedPayout(payload) {
             return;
         }
 
-        const { status } = await creditCoinsOnce({ userId, guildId }, amount, key);
+        const { counterSetExpr } = require('./balanceDebit');
+        const { status } = await creditCoinsOnce({ userId, guildId }, amount, key, {
+            extraSet: counterSetExpr(counters),
+        });
         if (status === 'paid') return;
         if (status === 'duplicate') {
             console.log(`[owedPayout] ${key} had already been applied — no coins moved`);

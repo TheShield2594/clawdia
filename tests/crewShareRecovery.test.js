@@ -30,7 +30,10 @@ jest.mock('../src/models/Syndicate', () => ({ findOne: jest.fn(async () => null)
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
-jest.mock('../src/utils/balanceDebit', () => ({ debitUpTo: jest.fn(async () => ({ taken: 0, matched: true })) }));
+jest.mock('../src/utils/balanceDebit', () => ({
+    ...jest.requireActual('../src/utils/balanceDebit'),
+    debitUpTo: jest.fn(async () => ({ taken: 0, matched: true })),
+}));
 jest.mock('../src/utils/guildSettingsCache', () => ({ getGuildSettings: jest.fn(async () => ({})) }));
 jest.mock('../src/services/syndicateService', () => ({
     activeSyndicateHeists: new Map(),

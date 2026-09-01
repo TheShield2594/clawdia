@@ -13,7 +13,6 @@
 
 const User = require('../models/User');
 const { creditCoinsOrOwe } = require('./creditOrOwe');
-const { incExpr } = require('./balanceDebit');
 const { duelPayoutKey } = require('./payoutKey');
 
 // Atomically deduct wagers from both players. Returns { success, reason, returned }.
@@ -42,11 +41,33 @@ async function takeEscrow(challengerId, opponentId, guildId, amount, duelId) {
     );
     if (!challenger) return { success: false, reason: 'challenger', returned: null };
 
-    const opponent = await User.findOneAndUpdate(
-        { userId: opponentId, guildId, balance: { $gte: amount } },
-        { $inc: { balance: -amount, lifetimeGambled: amount } },
-        { new: true }
-    );
+    // The second debit is wrapped because the first one has already committed —
+    // it returned a document — and a rejection here used to travel out to a
+    // caller whose `escrowTaken` was still false, so nothing refunded the
+    // challenger. A stake known to have left an account is reconciled here
+    // rather than left to a handler that does not know it exists (#873).
+    //
+    // Note what this does *not* cover: a rejection from either debit whose own
+    // outcome is unknown — the write may have committed and lost its response.
+    // Refunding on that would mint coins for a debit that never landed, so it
+    // needs a keyed debit the way credits already have one, which is a larger
+    // change than this. See the PR discussion.
+    let opponent;
+    try {
+        opponent = await User.findOneAndUpdate(
+            { userId: opponentId, guildId, balance: { $gte: amount } },
+            { $inc: { balance: -amount, lifetimeGambled: amount } },
+            { new: true }
+        );
+    } catch (err) {
+        console.error(`[duel] opponent escrow for ${opponentId} in ${guildId} failed:`, err.message);
+        const back = await returnStake(challengerId, guildId, amount, duelId, 'escrowRollback');
+        return {
+            success: false,
+            reason: 'error',
+            returned: { refunded: back.credited, owed: back.owed },
+        };
+    }
     if (!opponent) {
         const back = await returnStake(challengerId, guildId, amount, duelId, 'escrowRollback');
         return {
@@ -70,14 +91,15 @@ async function takeEscrow(challengerId, opponentId, guildId, amount, duelId) {
  *
  * The whole thing is one write, so the counter cannot be reversed for a refund
  * that did not land — and when the refund cannot land at all it is recorded as
- * owed rather than lost.
+ * owed, counter included, so a replay a week later puts back the same two
+ * things this write would have.
  */
 function returnStake(userId, guildId, amount, duelId, jobName, { unwager = true } = {}) {
     return creditCoinsOrOwe({ userId, guildId }, amount, {
         payoutKey: duelPayoutKey(duelId, userId, 'refund'),
         service: 'duel',
         jobName,
-        extraSet: unwager ? { lifetimeGambled: incExpr('lifetimeGambled', -amount) } : {},
+        counters: unwager ? { lifetimeGambled: -amount } : {},
     });
 }
 

@@ -622,7 +622,11 @@ async function runChallenge(interaction, isRanked) {
                 // Cooldown was claimed but escrow failed — revert the claim
                 await revertDuelCooldown(interaction.user.id, target.id, interaction.guild.id, cooldownClaim.prevChallengerLastDuel, cooldownClaim.prevOpponentLastDuel);
                 cooldownClaim = null;
-                const who = escrow.reason === 'challenger' ? interaction.user.username : target.username;
+                // 'error' is not "somebody was short" — saying so would send a
+                // player to check a balance that is fine.
+                const why = escrow.reason === 'error'
+                    ? 'Something went wrong taking the bets.'
+                    : `**${escrow.reason === 'challenger' ? interaction.user.username : target.username}** no longer has enough ${currency}.`;
                 // When the challenger's stake was taken and could not be put
                 // back, saying only that the opponent is short leaves them
                 // looking for coins nobody told them about.
@@ -632,7 +636,7 @@ async function runChallenge(interaction, isRanked) {
                         : `\n\n**${interaction.user.username}**'s stake could not be returned. Please contact a server admin.`)
                     : '';
                 return interaction.editReply({
-                    embeds: [new EmbedBuilder().setColor(COLORS.ERROR).setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** no longer has enough ${currency}.${stakeNote}`).setTimestamp()],
+                    embeds: [new EmbedBuilder().setColor(COLORS.ERROR).setTitle('⚔️ Duel Cancelled').setDescription(`${why}${stakeNote}`).setTimestamp()],
                     components: [],
                 });
             }

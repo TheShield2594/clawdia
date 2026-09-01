@@ -132,6 +132,38 @@ describe('taking the escrow', () => {
     });
 });
 
+describe('a debit that rejects mid-escrow', () => {
+    test('gives back the stake the first debit had already taken', async () => {
+        // The first debit returned a document, so it committed. The rejection
+        // used to travel out to a handler whose `escrowTaken` was still false,
+        // which refunded nothing and left that stake gone.
+        seed(CH, 500); seed(OP, 500);
+        const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        let debits = 0;
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (filter, update, options) => {
+            if (!Array.isArray(update) && ++debits === 2) throw new Error('mongo is down');
+            return store(filter, update, options);
+        });
+
+        const result = await takeEscrow(CH, OP, GUILD, BET, DUEL);
+
+        expect(result).toMatchObject({ success: false, reason: 'error', returned: { refunded: true } });
+        expect([balanceOf(CH), balanceOf(OP)]).toEqual([500, 500]);
+    });
+
+    test('does not reject at the caller', async () => {
+        seed(CH, 500); seed(OP, 500);
+        const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        let debits = 0;
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (filter, update, options) => {
+            if (!Array.isArray(update) && ++debits === 2) throw new Error('mongo is down');
+            return store(filter, update, options);
+        });
+
+        await expect(takeEscrow(CH, OP, GUILD, BET, DUEL)).resolves.toBeDefined();
+    });
+});
+
 describe('refunding the escrow', () => {
     test('returns both stakes', async () => {
         seed(CH, 0); seed(OP, 0);

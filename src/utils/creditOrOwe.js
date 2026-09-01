@@ -33,6 +33,7 @@
 
 const DEFAULT_USER = require('../models/User');
 const { creditCoinsOnce } = require('./payoutKey');
+const { counterSetExpr } = require('./balanceDebit');
 const { recordOwedPayout } = require('./owedPayout');
 const { delay } = require('./delay');
 
@@ -49,11 +50,14 @@ const DEFAULT_ATTEMPTS = 3;
  *                                   below nor a replayed record can pay it twice
  * @param {string}   opts.service    for the owed record and the log line
  * @param {string}   opts.jobName
- * @param {object}   [opts.extraSet] further pipeline `$set` fields committed in
- *                                   the same write, so bookkeeping that belongs
- *                                   with the credit cannot land without it
- *                                   (use `incExpr` from utils/balanceDebit for a
- *                                   counter)
+ * @param {object}   [opts.counters] further counters to move in the same write,
+ *                                   as `{ path: delta }`, so bookkeeping that
+ *                                   belongs with the credit cannot land without
+ *                                   it. Stated as plain numbers rather than
+ *                                   pipeline expressions because the owed record
+ *                                   has to carry them: a `$`-keyed expression is
+ *                                   not a thing to store in a document, and the
+ *                                   replay has to rebuild the same write anyway
  * @param {number}   [opts.attempts]
  * @param {object}   [opts.Model]
  * @returns {Promise<{credited: boolean, owed: boolean, doc: ?object, error: ?Error}>}
@@ -63,7 +67,7 @@ const DEFAULT_ATTEMPTS = 3;
  * than announcing a payout that did not happen.
  */
 async function creditCoinsOrOwe(filter, amount, {
-    payoutKey, service = 'economy', jobName = 'credit', extraSet = {},
+    payoutKey, service = 'economy', jobName = 'credit', counters = {},
     attempts = DEFAULT_ATTEMPTS, Model = DEFAULT_USER,
 } = {}) {
     const wanted = Math.floor(amount) || 0;
@@ -72,7 +76,14 @@ async function creditCoinsOrOwe(filter, amount, {
     let lastError = null;
     for (let attempt = 1; attempt <= attempts; attempt++) {
         try {
-            const { status, doc } = await creditCoinsOnce(filter, wanted, payoutKey, { Model, extraSet });
+            // Built inside the guard, not above the loop: this function must
+            // not reject — two sequential crew-payout loops and one
+            // `Promise.all` over refunds depend on it, and one share that could
+            // not be paid must not abandon the shares after it. Anything that
+            // throws in here becomes an owed record like any other failure.
+            const { status, doc } = await creditCoinsOnce(filter, wanted, payoutKey, {
+                Model, extraSet: counterSetExpr(counters),
+            });
 
             // 'duplicate' is a success: an earlier attempt landed and only its
             // response was lost. That is the case the key exists for, and the
@@ -99,6 +110,11 @@ async function creditCoinsOrOwe(filter, amount, {
         'could not be credited:', lastError?.message,
     );
 
+    // `recordOwedPayout` documents that it never throws, and it does not. This
+    // makes that a property of *this* function rather than a fact borrowed from
+    // another module, because two sequential crew-payout loops and one
+    // `Promise.all` over refunds all depend on this call never rejecting: one
+    // share that could not be written down must not abandon the shares after it.
     const owed = await recordOwedPayout({
         service,
         jobName,
@@ -109,8 +125,17 @@ async function creditCoinsOrOwe(filter, amount, {
             guildId:   filter.guildId,
             amount:    wanted,
             payoutKey,
+            // The bookkeeping that was supposed to land with the credit. Without
+            // it the replay pays the coins and leaves the counter where the
+            // failed write left it — a duel refunded a week late by
+            // `payouts:replay` would put the stake back and still count it as
+            // gambled.
+            ...(Object.keys(counters ?? {}).length ? { counters } : {}),
         },
         error: lastError,
+    }).catch(err => {
+        console.error(`[${service}] ${jobName}: recording the owed payout threw:`, err?.message);
+        return false;
     });
 
     return { credited: false, owed, doc: null, error: lastError };

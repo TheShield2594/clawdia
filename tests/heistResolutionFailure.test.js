@@ -11,7 +11,12 @@
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
 jest.mock('../src/models/User', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
-jest.mock('../src/utils/balanceDebit', () => ({ debitUpTo: jest.fn() }));
+// Only `debitUpTo` is stubbed: `counterSetExpr` is a pure expression builder
+// the credit path uses, and a stub of it would break every payout here.
+jest.mock('../src/utils/balanceDebit', () => ({
+    ...jest.requireActual('../src/utils/balanceDebit'),
+    debitUpTo: jest.fn(),
+}));
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 
