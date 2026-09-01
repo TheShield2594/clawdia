@@ -34,6 +34,87 @@ function scrollBehavior() {
     return media(REDUCED_MOTION)?.matches ? 'auto' : 'smooth';
 }
 
+// ── Session expiry ───────────────────────────────────────────────────
+// Sessions idle out after four hours. For this page that is a routine event
+// rather than an edge case — leave a tab open over lunch and every control on
+// it is talking to a server that no longer knows who you are — and nothing here
+// recognised it. The two request shapes failed in two different misleading
+// ways: an API route answers 401 with `{ error: 'Unauthorized' }`, which
+// surfaced as a bare "Unauthorized" toast on a section the user plainly does
+// administer, and a panel fragment comes from a *page* route, which answers 302
+// to /auth/login and on to Discord, where the cross-origin hop dies in CORS and
+// surfaced as "Could not load this section". Neither says what happened, and
+// neither offers a way back — with unsaved edits sitting in the form (#878).
+//
+// Every request the page makes goes through apiFetch(), which recognises both
+// shapes and reports them once, in a banner that stays up until it is acted on.
+// Nothing is discarded and nothing is reloaded: the session cookie is set for
+// the whole site, so signing in again in a second tab is enough to make this
+// tab's next request work. That is what the banner asks for, and it is why a
+// response that succeeds takes the banner back down again.
+const sessionExpiredBanner = document.getElementById('session-expired');
+let sessionExpired = false;
+
+// Following the page routes' 302 lands on Discord's OAuth endpoint, which sends
+// no CORS headers, so a followed redirect fails as a network error
+// indistinguishable from the server being down. `redirect: 'manual'` stops
+// before that hop: the redirect comes back as an opaque response, which is a
+// fact to test rather than an exception to guess at.
+function isSessionExpired(res) {
+    if (res.status === 401) return true;
+    if (res.type === 'opaqueredirect') return true;
+    // A caller that opted back into following redirects still gets the check:
+    // a response that ended up off this origin, or on the login route, is the
+    // same expired session arriving by the other path.
+    if (res.redirected && res.url) {
+        try {
+            const to = new URL(res.url, window.location.href);
+            return to.origin !== window.location.origin || to.pathname.startsWith('/auth/login');
+        } catch {
+            return false;
+        }
+    }
+    return false;
+}
+
+function showSessionExpired() {
+    if (sessionExpired) return;
+    sessionExpired = true;
+    if (sessionExpiredBanner) sessionExpiredBanner.hidden = false;
+}
+
+function clearSessionExpired() {
+    if (!sessionExpired) return;
+    sessionExpired = false;
+    if (sessionExpiredBanner) sessionExpiredBanner.hidden = true;
+}
+
+/**
+ * fetch() for everything this page asks of its own server.
+ *
+ * Returns the response untouched, so every call site keeps reading `ok`,
+ * `status` and `json()` exactly as it did; the only difference is that an
+ * expired session is recognised on the way past. A rejection — an aborted
+ * search, a genuinely offline network — still rejects, and still means what it
+ * meant before.
+ */
+function apiFetch(url, options) {
+    // Whether the banner was already up when this request left. A success only
+    // clears the banner if it is evidence about the session the banner is
+    // describing, and a request dispatched before the banner went up is not:
+    // the page fires requests in parallel — the overview panel asks for stats
+    // and insights at once — so a slow 200 from before the expiry could land
+    // after its neighbour's 401 and take the banner down while the session is
+    // still dead.
+    const expiredWhenSent = sessionExpired;
+
+    return window.fetch(url, { redirect: 'manual', ...(options || {}) }).then(res => {
+        if (isSessionExpired(res)) showSessionExpired();
+        else if (res.ok && (expiredWhenSent || !sessionExpired)) clearSessionExpired();
+        return res;
+    });
+}
+
 // ── Lazily loaded panels ─────────────────────────────────────────────
 // The page ships only the panel that is open on arrival; the other two dozen
 // come down as HTML fragments the first time their tab is clicked. So nothing
@@ -75,7 +156,7 @@ function loadPanel(id) {
     const stub = panelStub(id);
     if (!stub) return Promise.resolve(null);
 
-    const request = fetch(PANEL_URL + encodeURIComponent(id), { headers: { Accept: 'text/html' } })
+    const request = apiFetch(PANEL_URL + encodeURIComponent(id), { headers: { Accept: 'text/html' } })
         .then(res => {
             if (!res.ok) throw new Error('HTTP ' + res.status);
             return res.text();
@@ -99,7 +180,13 @@ function loadPanel(id) {
             // Forget the attempt so the next click retries instead of sticking.
             panelRequests.delete(id);
             const message = stub.querySelector('.panel-stub-message');
-            if (message) message.textContent = 'Could not load this section. Click the tab again to retry.';
+            // The banner overhead says what happened and what to do about it;
+            // the stub only has to stop claiming the section is broken and say
+            // what makes it load. The toast below is suppressed while the
+            // banner is up, so it needs no guard of its own.
+            if (message) message.textContent = sessionExpired
+                ? 'Sign in again in the other tab, then click this tab to load this section.'
+                : 'Could not load this section. Click the tab again to retry.';
             toast('Could not load that section. Please try again.', 'error');
             return null;
         });
@@ -480,7 +567,7 @@ async function sendWelcomeCardPreview() {
     btn.disabled = true;
     btn.textContent = 'Sending…';
     try {
-        const resp = await fetch(`/api/v1/guild/${guildId}/welcome/preview`, {
+        const resp = await apiFetch(`/api/v1/guild/${guildId}/welcome/preview`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ channelId })
@@ -576,6 +663,13 @@ function hideToast() {
 }
 
 function toast(message, kind) {
+    // Once the expired-session banner is up, every failure the page can report
+    // is that same failure, and the banner already says it — along with the one
+    // thing a toast cannot, which is what to do about it. Swallowed here rather
+    // than guarded at fifty call sites. Anything that is not an error still
+    // shows: a success toast while the banner is up would be news.
+    if (sessionExpired && kind === 'error') return;
+
     const style = TOAST_KINDS[kind];
     toastIcon.textContent = style ? style.icon : '';
     // The prefix is what a screen reader hears first, so it carries the
@@ -801,7 +895,7 @@ function updateDailyNewsProfile(index, key, value) {
 }
 
 async function validateFeedUrl(url, guildId) {
-    const resp = await fetch(`/api/v1/guild/${guildId}/validate-feed`, {
+    const resp = await apiFetch(`/api/v1/guild/${guildId}/validate-feed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url })
@@ -872,7 +966,7 @@ async function saveSettings(section) {
     });
 
     try {
-        const response = await fetch(`/api/v1/guild/${guildId}/settings`, {
+        const response = await apiFetch(`/api/v1/guild/${guildId}/settings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -888,12 +982,12 @@ async function saveSettings(section) {
             const uploads = Object.entries(_shopItemPendingImages).map(([itemId, info]) => {
                 const fd = new FormData();
                 fd.append('image', info.file);
-                return fetch(`/api/v1/item-image/shop/${guildId}/${itemId}`, { method: 'POST', body: fd })
+                return apiFetch(`/api/v1/item-image/shop/${guildId}/${itemId}`, { method: 'POST', body: fd })
                     .then(r => r.ok ? null : r.json().then(e => e.error || 'Upload failed'))
                     .catch(() => 'Upload error');
             });
             const deletes = [..._shopItemClearedImages].map(itemId =>
-                fetch(`/api/v1/item-image/shop/${guildId}/${itemId}`, { method: 'DELETE' })
+                apiFetch(`/api/v1/item-image/shop/${guildId}/${itemId}`, { method: 'DELETE' })
                     .then(r => r.ok ? null : 'Delete failed')
                     .catch(() => 'Delete error')
             );
@@ -934,7 +1028,7 @@ async function uploadActivityImage(itemId, input) {
     const fd = new FormData();
     fd.append('image', file);
     try {
-        const r = await fetch(activityImageUrl(itemId), { method: 'POST', body: fd });
+        const r = await apiFetch(activityImageUrl(itemId), { method: 'POST', body: fd });
         if (r.ok) {
             const dataUrl = await new Promise(function(res) {
                 const reader = new FileReader();
@@ -969,7 +1063,7 @@ async function removeActivityImage(itemId) {
     const ok = await showConfirm({ title: 'Remove image', body: 'Remove the image for this activity item?', okText: 'Remove' });
     if (!ok) return;
     try {
-        const r = await fetch(activityImageUrl(itemId), { method: 'DELETE' });
+        const r = await apiFetch(activityImageUrl(itemId), { method: 'DELETE' });
         if (r.ok) {
             const imgEl = document.getElementById('gic-img-' + itemId);
             const emojiEl = document.getElementById('gic-emoji-' + itemId);
@@ -993,7 +1087,7 @@ async function triggerDailyNewsNow() {
     const ok = await showConfirm({ title: 'Send digest now', body: 'Send the daily digest right now to the configured channel?', okText: 'Send' });
     if (!ok) return;
     try {
-        const response = await fetch(`/api/v1/guild/${guildId}/dailynews/trigger`, { method: 'POST' });
+        const response = await apiFetch(`/api/v1/guild/${guildId}/dailynews/trigger`, { method: 'POST' });
         if (response.ok) toast('Digest sent', 'success');
         else {
             const err = await response.json().catch(() => ({}));
@@ -1014,7 +1108,7 @@ async function addAutoRole() {
         toast('Role already added', 'error'); return;
     }
     try {
-        const response = await fetch(`/api/v1/guild/${guildId}/autorole`, {
+        const response = await apiFetch(`/api/v1/guild/${guildId}/autorole`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ roleId })
@@ -1070,7 +1164,7 @@ async function removeAutoRole(roleId) {
     });
     if (!ok) return;
     try {
-        const response = await fetch(`/api/v1/guild/${guildId}/autorole/${roleId}`, { method: 'DELETE' });
+        const response = await apiFetch(`/api/v1/guild/${guildId}/autorole/${roleId}`, { method: 'DELETE' });
         if (response.ok) {
             const chip = document.querySelector(`#autorole-list [data-role-id="${CSS.escape(roleId)}"]`);
             if (chip) chip.remove();
@@ -1173,7 +1267,7 @@ async function addRssFeed() {
     if (!url || !channelId) { toast('Please fill in all fields', 'error'); return; }
     _rssAddInFlight = true;
     try {
-        const response = await fetch(`/api/v1/guild/${guildId}/rss/add`, {
+        const response = await apiFetch(`/api/v1/guild/${guildId}/rss/add`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, channelId })
@@ -1200,7 +1294,7 @@ async function deleteRssFeed(index) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const response = await fetch(`/api/v1/guild/${guildId}/rss/${index}`, { method: 'DELETE' });
+        const response = await apiFetch(`/api/v1/guild/${guildId}/rss/${index}`, { method: 'DELETE' });
         const data = await response.json().catch(() => ({}));
         if (response.ok) {
             renderRssFeeds(data.feeds || []);
@@ -2020,7 +2114,7 @@ async function runMemberSearch() {
     const controller = new AbortController();
     _memberSearchAbort = controller;
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/members/search?q=' + encodeURIComponent(q), { signal: controller.signal });
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/members/search?q=' + encodeURIComponent(q), { signal: controller.signal });
         if (!resp.ok) throw new Error('non-ok');
         const members = (await resp.json()).items || [];
         if (!members.length) {
@@ -2063,7 +2157,7 @@ async function submitAchGrant() {
     if (!userId) { toast('Select a member first', 'error'); return; }
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/achievements/grant', {
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/achievements/grant', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId: userId, achievementId: achId })
@@ -2091,7 +2185,7 @@ function loadLevelLeaderboard(page, force) {
     skel.style.display = ''; err.style.display = 'none';
     content.style.display = 'none'; empty.style.display = 'none';
     const guildId = BOOT.guildId;
-    fetch('/api/v1/guild/' + guildId + '/leveling/leaderboard?page=' + page)
+    apiFetch('/api/v1/guild/' + guildId + '/leveling/leaderboard?page=' + page)
         .then(function(r) { if (!r.ok) throw new Error('non-ok'); return r.json(); })
         .then(function(data) {
             skel.style.display = 'none';
@@ -2149,7 +2243,7 @@ async function levelAdminAction(action) {
     }
     msgEl.style.color = ''; msgEl.textContent = 'Working…';
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/leveling/adjust', {
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/leveling/adjust', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId, action, amount })
@@ -2174,7 +2268,7 @@ async function startBoostEvent() {
     if (!Number.isFinite(hours) || hours < 1) { msgEl.style.color = 'var(--bad)'; msgEl.textContent = 'Duration must be at least 1 hour.'; return; }
     msgEl.style.color = ''; msgEl.textContent = 'Activating…';
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/leveling/xp-event', {
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/leveling/xp-event', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ multiplier, durationHours: hours })
@@ -2303,7 +2397,7 @@ async function publishRrPanel() {
     const guildId = BOOT.guildId;
     _rrPublishInFlight = true;
     try {
-        const response = await fetch('/api/v1/guild/' + guildId + '/reactionrole/panel', {
+        const response = await apiFetch('/api/v1/guild/' + guildId + '/reactionrole/panel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2337,7 +2431,7 @@ async function deleteRrPanel(messageId) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const response = await fetch('/api/v1/guild/' + guildId + '/reactionrole/panel/' + encodeURIComponent(messageId), { method: 'DELETE' });
+        const response = await apiFetch('/api/v1/guild/' + guildId + '/reactionrole/panel/' + encodeURIComponent(messageId), { method: 'DELETE' });
         const data = await response.json().catch(function() { return {}; });
         if (response.ok) {
             renderRrPanels(data.panels || []);
@@ -2455,7 +2549,7 @@ async function loadKnowledgeBase(page) {
     if (skel) skel.style.display = '';
     if (err)  err.style.display  = 'none';
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/knowledge-base?page=' + wanted);
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/knowledge-base?page=' + wanted);
         if (!resp.ok) throw new Error('non-ok');
         const data = await resp.json();
         const pages = data.pages || 1;
@@ -2571,7 +2665,7 @@ async function saveKbEntry(id) {
     const tags = tagsRaw ? tagsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
     if (!title || !content) { toast('Title and content are required', 'error'); return; }
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/knowledge-base/' + id, {
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/knowledge-base/' + id, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: title, content: content, tags: tags })
@@ -2598,7 +2692,7 @@ async function addKbEntry() {
     const tags = tagsRaw ? tagsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
     if (!title || !content) { toast('Title and content are required', 'error'); return; }
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/knowledge-base', {
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/knowledge-base', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: title, content: content, tags: tags })
@@ -2627,7 +2721,7 @@ async function deleteKbEntry(id) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/knowledge-base/' + id, { method: 'DELETE' });
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/knowledge-base/' + id, { method: 'DELETE' });
         if (resp.ok) {
             toast('Entry removed', 'success');
             kbLoaded = false;
@@ -2676,7 +2770,7 @@ async function loadSummaryJobs() {
     if (skel) skel.style.display = '';
     if (err)  err.style.display  = 'none';
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/summary-jobs');
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/summary-jobs');
         if (!resp.ok) throw new Error('non-ok');
         const data = await resp.json();
         summaryJobsLoaded = true;
@@ -2738,7 +2832,7 @@ async function saveDailyDigest() {
     if (!validateTimezoneInput(tzInput)) { toast('Please enter a valid IANA timezone (e.g. UTC, America/New_York)', 'error'); return; }
 
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/daily-digest', {
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/daily-digest', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled, channelId, sourceChannelIds: sourceOpts, hour, minute, timezone })
@@ -2764,7 +2858,7 @@ async function addSummaryJob() {
     const label = document.getElementById('summary-label').value.trim();
     if (!sourceChannelId || !targetChannelId) { toast('Please select both source and target channels', 'error'); return; }
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/summary-jobs', {
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/summary-jobs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sourceChannelId: sourceChannelId, targetChannelId: targetChannelId, hour: hour, minute: minute, label: label })
@@ -2793,7 +2887,7 @@ async function deleteSummaryJob(jobId) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/summary-jobs/' + jobId, { method: 'DELETE' });
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/summary-jobs/' + jobId, { method: 'DELETE' });
         if (resp.ok) {
             toast('Summary job removed', 'success');
             summaryJobsLoaded = false;
@@ -2853,7 +2947,7 @@ async function addPersona() {
     const systemPrompt = document.getElementById('persona-prompt').value.trim();
     if (!channelId || !personaName || !systemPrompt) { toast('All fields are required', 'error'); return; }
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/persona', {
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/persona', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ channelId: channelId, personaName: personaName, systemPrompt: systemPrompt })
@@ -2880,7 +2974,7 @@ async function removePersona(channelId) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/persona/' + encodeURIComponent(channelId), { method: 'DELETE' });
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/persona/' + encodeURIComponent(channelId), { method: 'DELETE' });
         if (resp.ok) {
             toast('Persona removed', 'success');
             _personas = _personas.filter(function(p) { return p.channelId !== channelId; });
@@ -2925,7 +3019,7 @@ async function loadMcpServers(force) {
     if (_mcpServers && !force) { renderMcpServers(); return; }
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/mcp-servers');
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/mcp-servers');
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || 'Failed to load');
         _mcpServers = data.servers || [];
@@ -3194,7 +3288,7 @@ async function saveMcpServer() {
     if (token) body.authorizationToken = token;
 
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), {
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
@@ -3220,7 +3314,7 @@ async function removeMcpServer(name) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), { method: 'DELETE' });
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), { method: 'DELETE' });
         const data = await resp.json();
         if (!resp.ok) { toast(data.error || 'Failed to remove', 'error'); return; }
         toast('Connection removed', 'success');
@@ -3240,7 +3334,7 @@ async function testMcpServer(name, out) {
     const guildId = BOOT.guildId;
     if (out) { out.className = 'mcp-test-result'; out.textContent = 'Testing…'; }
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/test', { method: 'POST' });
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/test', { method: 'POST' });
         const data = await resp.json();
         if (!out) return;
         const okay = resp.ok && data.success;
@@ -3301,7 +3395,7 @@ async function startMcpOAuth(name, out) {
     const guildId = BOOT.guildId;
     if (out) { out.className = 'mcp-test-result'; out.textContent = 'Finding this server\u2019s login…'; }
     try {
-        const resp = await fetch(
+        const resp = await apiFetch(
             '/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/oauth/start',
             { method: 'POST' }
         );
@@ -3359,7 +3453,7 @@ async function disconnectMcpOAuth(name) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch(
+        const resp = await apiFetch(
             '/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/oauth',
             { method: 'DELETE' }
         );
@@ -3407,7 +3501,7 @@ async function loadMcpUsage() {
     if (!box) return;
 
     try {
-        const resp = await fetch('/api/v1/guild/' + BOOT.guildId + '/mcp-servers/usage');
+        const resp = await apiFetch('/api/v1/guild/' + BOOT.guildId + '/mcp-servers/usage');
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || 'failed');
         renderMcpUsage(data.servers || []);
@@ -3631,7 +3725,7 @@ async function loadAiUsage() {
     const guildId = BOOT.guildId;
     const statusEl = document.getElementById('ai-usage-status');
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/ai/usage?days=14');
+        const resp = await apiFetch('/api/v1/guild/' + guildId + '/ai/usage?days=14');
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const data = await resp.json();
         document.getElementById('ai-usage-today-tokens').textContent = formatTokens(data.today.tokens);
@@ -3839,8 +3933,8 @@ async function loadOverviewStats() {
     const guildId = BOOT.guildId;
     try {
         const [statsResp, insightsResp] = await Promise.all([
-            fetch(`/api/v1/guild/${guildId}/stats`),
-            fetch(`/api/v1/guild/${guildId}/insights`)
+            apiFetch(`/api/v1/guild/${guildId}/stats`),
+            apiFetch(`/api/v1/guild/${guildId}/insights`)
         ]);
         if (!statsResp.ok || !insightsResp.ok) throw new Error('stats fetch failed');
         const stats = await statsResp.json();
@@ -4339,8 +4433,8 @@ async function loadAnalytics() {
 
     try {
         const [statsResp, insightsResp] = await Promise.all([
-            fetch(`/api/v1/guild/${guildId}/stats`),
-            fetch(`/api/v1/guild/${guildId}/insights`)
+            apiFetch(`/api/v1/guild/${guildId}/stats`),
+            apiFetch(`/api/v1/guild/${guildId}/insights`)
         ]);
         if (!statsResp.ok || !insightsResp.ok) throw new Error('Non-OK response');
         const data = await statsResp.json();
@@ -4512,7 +4606,7 @@ async function loadActiveSanctions() {
     document.getElementById('sanctions-empty').style.display = 'none';
     setTableVisible('sanctions-table', false);
     try {
-        const resp = await fetch(`/api/v1/guild/${guildId}/sanctions/active`);
+        const resp = await apiFetch(`/api/v1/guild/${guildId}/sanctions/active`);
         if (!resp.ok) throw new Error('Non-OK');
         _sanctionsData = await resp.json();
         document.getElementById('sanctions-loading').style.display = 'none';
@@ -4528,7 +4622,7 @@ async function doUnban(userId) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch(`/api/v1/guild/${guildId}/sanctions/unban/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        const resp = await apiFetch(`/api/v1/guild/${guildId}/sanctions/unban/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
         const data = await resp.json();
         if (!resp.ok) return alert(data.error || 'Failed to unban');
         await loadActiveSanctions();
@@ -4540,7 +4634,7 @@ async function doRemoveTimeout(userId) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch(`/api/v1/guild/${guildId}/sanctions/untimeout/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        const resp = await apiFetch(`/api/v1/guild/${guildId}/sanctions/untimeout/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
         const data = await resp.json();
         if (!resp.ok) return alert(data.error || 'Failed to remove timeout');
         await loadActiveSanctions();
@@ -4565,7 +4659,7 @@ async function loadCaseHistory(page = 1) {
         const params = new URLSearchParams({ page, limit: 20 });
         if (type) params.set('type', type);
         if (status) params.set('status', status);
-        const resp = await fetch(`/api/v1/guild/${guildId}/cases?${params}`);
+        const resp = await apiFetch(`/api/v1/guild/${guildId}/cases?${params}`);
         if (!resp.ok) throw new Error('Non-OK');
         const { items, total, pages } = await resp.json();
         document.getElementById('cases-loading').style.display = 'none';
@@ -4637,7 +4731,7 @@ async function submitCaseAction() {
         : { action: 'add_note', note };
     if (mode === 'add_note' && !note) return alert('Note cannot be empty');
     try {
-        const resp = await fetch(`/api/v1/guild/${guildId}/cases/${caseId}`, {
+        const resp = await apiFetch(`/api/v1/guild/${guildId}/cases/${caseId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
@@ -4663,7 +4757,7 @@ async function loadEcoHealth() {
     document.getElementById('eco-top-earners-empty').style.display = 'none';
     setTableVisible('eco-top-earners-table', false);
     try {
-        const resp = await fetch(`/api/v1/guild/${guildId}/economy/stats`);
+        const resp = await apiFetch(`/api/v1/guild/${guildId}/economy/stats`);
         if (!resp.ok) throw new Error('Non-OK');
         const stats = await resp.json();
         document.getElementById('eco-stat-total-coins').textContent = (stats.totalCoins || 0).toLocaleString();
@@ -4743,7 +4837,7 @@ async function ecoAdminAction(action) {
     try {
         const body = { userId, action };
         if (['give', 'take'].includes(action)) body.amount = amount;
-        const resp = await fetch(`/api/v1/guild/${guildId}/economy/adjust`, {
+        const resp = await apiFetch(`/api/v1/guild/${guildId}/economy/adjust`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
@@ -4781,7 +4875,7 @@ async function ecoAdminAction(action) {
 
         const existingIds = textarea.value.split('\n').map(s => s.trim()).filter(Boolean);
         if (existingIds.length) {
-            fetch(`/api/v1/guild/${_gId}/members/resolve?ids=${existingIds.join(',')}`)
+            apiFetch(`/api/v1/guild/${_gId}/members/resolve?ids=${existingIds.join(',')}`)
                 .then(r => r.json())
                 .then(map => {
                     for (const id of existingIds) {
@@ -4809,7 +4903,7 @@ async function ecoAdminAction(action) {
                 const controller = new AbortController();
                 _inFlight = controller;
                 try {
-                    const results = await fetch(`/api/v1/guild/${_gId}/members/search?q=${encodeURIComponent(q)}`, { signal: controller.signal })
+                    const results = await apiFetch(`/api/v1/guild/${_gId}/members/search?q=${encodeURIComponent(q)}`, { signal: controller.signal })
                         .then(r => r.json())
                         .then(d => d.items);
                     if (!Array.isArray(results) || !results.length) { dropdown.style.display = 'none'; return; }

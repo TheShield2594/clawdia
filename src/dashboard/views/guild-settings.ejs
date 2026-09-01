@@ -181,6 +181,25 @@
 
 </div><!-- /.dash -->
 
+    <%# A session that idled out is not an error the page can retry its way past,
+        so it does not report through the toast below: a toast is transient, and
+        this has to stay on screen until it is acted on. `role="alert"` so a
+        screen reader hears it the moment it appears rather than whenever the
+        user next tabs past it — unlike the toast, this does interrupt, because
+        every control on the page has just stopped working.
+
+        The link opens in a new tab deliberately. This tab is holding unsaved
+        edits, and navigating it to Discord's OAuth flow would throw them away;
+        the session cookie is set for the whole site, so signing in beside this
+        tab is enough to make its next request work. guild-settings.js takes the
+        banner back down as soon as one does (#878). %>
+    <div class="session-expired" id="session-expired" role="alert" hidden>
+        <span class="session-expired-icon" aria-hidden="true">⚠</span>
+        <span class="session-expired-message">
+            Your session expired. <a href="/auth/login" target="_blank" rel="noopener">Sign in again in a new tab</a>, then come back here and retry — nothing you have typed has been lost.
+        </span>
+    </div>
+
     <%# Every save, delete and failure in the dashboard reports through this
         one element, so it has to be announced: without a live region a screen
         reader user gets no confirmation that anything happened at all. The

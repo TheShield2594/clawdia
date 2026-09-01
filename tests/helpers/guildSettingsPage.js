@@ -7,7 +7,9 @@
 // own copy of the setup.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const ejs = require('ejs');
 const { guildSettingsLocals } = require('./guildSettingsLocals');
 
@@ -96,12 +98,47 @@ function installMatchMedia(initial) {
     };
 }
 
+// The image serves the minified twins scripts/build-assets.js produces, not the
+// files in this directory (#905), and the one thing minification could break on
+// this page is invisible until something is clicked: it is a classic script, so
+// the inline handlers reach its top-level functions by name. Booting the whole
+// page from the minified files is what turns that into a test failure.
+//
+// The build runs in a child process rather than in-process, because esbuild
+// refuses to load inside jsdom: the suites that boot this page shim Node's
+// TextEncoder into the jsdom global, which then produces a Uint8Array from the
+// wrong realm and fails an invariant esbuild checks on require. The child gets
+// a plain Node global. It runs once per worker, on the first suite that asks
+// for it, and writes into a temp directory rather than into src/.
+let minifiedDir = null;
+
+function minifiedPublic() {
+    if (minifiedDir) return minifiedDir;
+    minifiedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdia-min-'));
+    execFileSync(
+        process.execPath,
+        [path.join(__dirname, '..', '..', 'scripts', 'build-assets.js'), '--out', minifiedDir],
+        { stdio: 'ignore' },
+    );
+    // The worker owns the directory for its lifetime; nothing outside reads it.
+    process.on('exit', () => fs.rmSync(minifiedDir, { recursive: true, force: true }));
+    return minifiedDir;
+}
+
+function script(file, minified) {
+    if (!minified) return fs.readFileSync(path.join(PUBLIC, file), 'utf8');
+    const ext = path.extname(file);
+    const twin = `${file.slice(0, -ext.length)}.min${ext}`;
+    return fs.readFileSync(path.join(minifiedPublic(), twin), 'utf8');
+}
+
 /**
  * Boot the page. `media` seeds the matchMedia stub — `{ '(max-width: 768px)':
  * true }` for a phone — and the returned handle flips a query afterwards.
- * `media: false` boots with no matchMedia at all.
+ * `media: false` boots with no matchMedia at all. `minified: true` runs the
+ * page's scripts through the minifier the image build uses first.
  */
-function bootPage({ panelFetch, media } = {}) {
+function bootPage({ panelFetch, media, minified } = {}) {
     const html = renderPage();
     const body = html.slice(html.indexOf('<body'), html.indexOf('</body>'));
     document.body.innerHTML = body.replace(/^<body[^>]*>/, '');
@@ -146,10 +183,10 @@ function bootPage({ panelFetch, media } = {}) {
         document.addEventListener = addDocumentListener;
         window.addEventListener = addWindowListener;
     };
-    window.eval(fs.readFileSync(path.join(PUBLIC, 'esc-html.js'), 'utf8'));
+    window.eval(script('esc-html.js', minified));
     window.eval(bootstrap);
-    window.eval(fs.readFileSync(path.join(PUBLIC, 'settings-payload.js'), 'utf8'));
-    window.eval(fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8'));
+    window.eval(script('settings-payload.js', minified));
+    window.eval(script('guild-settings.js', minified));
 
     return { media: mediaControl };
 }

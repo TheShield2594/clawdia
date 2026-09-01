@@ -50,20 +50,46 @@ function assetVersion(urlPath, publicDir = PUBLIC_DIR) {
 }
 
 /**
- * Stamp a static asset URL with its content hash.
+ * The minified twin of an asset path: "/styles.css" -> "/styles.min.css".
+ *
+ * @param {string} urlPath - root-relative URL
+ * @returns {string} the twin's URL, whether or not it exists
+ */
+function minifiedTwin(urlPath) {
+    const ext = path.extname(urlPath);
+    return ext ? `${urlPath.slice(0, -ext.length)}.min${ext}` : urlPath;
+}
+
+/**
+ * Stamp a static asset URL with its content hash, preferring a minified build.
  *
  * The dashboard's own responses are per-request and uncacheable, but the assets
- * they pull in are not — and guild-settings.js alone is ~200 KB. Hashing the
+ * they pull in are not — and guild-settings.js alone is ~250 KB. Hashing the
  * URL lets `express.static` serve them with a one-year immutable cache while a
  * deploy still busts the cache automatically, because changed content means a
  * changed URL.
  *
+ * That is the transfer sorted for a returning visitor and does nothing for a
+ * first load, where the file arrives gzipped but is still parsed in full.
+ * scripts/build-assets.js writes a `.min` twin beside each of the dashboard's
+ * own files, and this prefers it whenever one is present (#905). Present is the
+ * whole condition: the twins are generated rather than committed, so a checkout
+ * run straight with `npm start` finds none and serves the readable files it
+ * always did, while the Docker image builds them and serves those. The views
+ * ask for the same URL either way, and the hash below is taken from whichever
+ * file is actually being served, so the cache key still describes the bytes.
+ *
  * @param {string} urlPath - root-relative URL, e.g. "/guild-settings.js"
  * @param {string} [publicDir] - see assetVersion; the views never pass it.
- * @returns {string} the same URL with a `?v=` cache key, or unchanged if the
- *   file is missing (a 404 is better surfaced than papered over).
+ * @returns {string} the URL to serve with a `?v=` cache key, or the requested
+ *   URL unchanged if the file is missing (a 404 is better surfaced than
+ *   papered over).
  */
 function asset(urlPath, publicDir = PUBLIC_DIR) {
+    const twin = minifiedTwin(urlPath);
+    const twinVersion = twin === urlPath ? null : assetVersion(twin, publicDir);
+    if (twinVersion) return `${twin}?v=${twinVersion}`;
+
     const version = assetVersion(urlPath, publicDir);
     return version ? `${urlPath}?v=${version}` : urlPath;
 }
@@ -104,4 +130,4 @@ function staticCacheControl(req, filePath, publicDir = PUBLIC_DIR) {
         : `public, max-age=${UNVERSIONED_MAX_AGE}`;
 }
 
-module.exports = { asset, assetVersion, staticCacheControl, UNVERSIONED_MAX_AGE, PUBLIC_DIR };
+module.exports = { asset, assetVersion, minifiedTwin, staticCacheControl, UNVERSIONED_MAX_AGE, PUBLIC_DIR };

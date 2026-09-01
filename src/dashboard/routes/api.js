@@ -3,6 +3,26 @@ const router = express.Router();
 const { computeRetention } = require('../lib/apiHelpers');
 const { checkCsrfOrigin, checkReadRateLimit } = require('../lib/middleware');
 
+// Every response below is one guild's private data read through a session
+// cookie — member lists, moderation cases, economy balances — and none of it
+// said so. The HTML pages that display it have sent `private, no-store` since
+// they were written (routes/dashboard.js), but the JSON they fetch it from sent
+// no Cache-Control at all, which leaves it to whatever a browser or an
+// intermediary decides a cookie-authenticated 200 may be kept for: the disk
+// cache, the bfcache, a proxy that was configured without much thought. On a
+// shared machine that outlives the session it was fetched in (#904).
+//
+// Mounted here for the same reason the two checks below are: a per-route opt-in
+// is a list someone has to remember to add to, and this one had been missed by
+// every route in the router. First, so that the responses those checks
+// short-circuit with carry it too. A route that genuinely wants its response
+// cached sets its own header in the handler and overwrites this one — which is
+// what the two item-image reads in routes/api/itemImages.js do.
+router.use((req, res, next) => {
+    res.set('Cache-Control', 'private, no-store');
+    next();
+});
+
 // Origin validation for every state-changing API request, and a rate limit on
 // every read, applied once here rather than per-route. Origin validation was
 // previously listed on a handful of routes and silently missing from the rest

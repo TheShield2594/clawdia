@@ -15,6 +15,7 @@
     "docs:commands": "node scripts/docs-commands.js",
     "docs:api": "node scripts/docs-api.js",
     "docs:panels": "node scripts/docs-panels.js",
+    "build:assets": "node scripts/build-assets.js",
     "favicon": "node scripts/make-favicon.js",
     "image:smoke": "node scripts/image-smoke.js",
     "og-image": "node scripts/make-og-image.js",
@@ -57,6 +58,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "chart.js": "4.5.1",
+    "esbuild": "0.28.2",
     "eslint": "^10.9.0",
     "eslint-config-prettier": "^10.1.8",
     "espree": "^11.2.0",

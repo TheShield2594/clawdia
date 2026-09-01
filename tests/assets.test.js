@@ -4,8 +4,19 @@ const path = require('path');
 const { asset, assetVersion, PUBLIC_DIR } = require('../src/dashboard/lib/assets');
 
 describe('asset()', () => {
+    // Against a root of this test's own rather than the real public/, because
+    // asset() prefers a `.min` twin when one is there (#905) and whether one is
+    // there depends on whether the developer has run `npm run build:assets`.
+    // A suite that answers differently on the same commit is worse than no
+    // suite; the preference itself is covered in dashboardMinifiedAssets.
     it('stamps a public file with a hash of its contents', () => {
-        expect(asset('/styles.css')).toMatch(/^\/styles\.css\?v=[0-9a-f]{10}$/);
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdia-assets-'));
+        try {
+            fs.writeFileSync(path.join(dir, 'styles.css'), 'body { color: red }\n');
+            expect(asset('/styles.css', dir)).toMatch(/^\/styles\.css\?v=[0-9a-f]{10}$/);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     it('gives the same URL for unchanged content', () => {
