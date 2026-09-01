@@ -14,6 +14,52 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.5.2] - 2026-09-01
+
+Migrations through `021_market_listing_ttl_grace`.
+
+Expired market listings no longer lose their items on the ordinary expiry path
+(#867). The `marketlistings` TTL index carried `expireAfterSeconds: 0`, and
+MongoDB's TTL monitor wakes about once a minute, so a listing was hard-deleted
+within roughly a minute of expiring — while `returnExpiredMarketListings`, the
+job that gives the seller their items back and the only thing that does, runs
+every ten minutes. The monitor won that race for nearly every expiry, and a TTL
+delete fires no Mongoose hook: no items returned, no owed-payout record, nothing
+in the logs. The seller's stock simply ceased to exist, on the success path.
+The grace is now seven days, sized against a backlog rather than a single tick
+(the sweep claims 50 listings a tick), and the sweep's `expiresAt <= now` filter
+is unchanged so it still claims a listing the moment it expires, hours before
+the TTL monitor is entitled to look at it. `021` applies the same figure to
+databases that already built the index, with `collMod` so the index is never
+absent and never rebuilt, verified before the boot continues. A capped sweep
+tick now says so in the log — that backlog was invisible, and it is what the
+grace is sized against. The remaining TTL indexes were reviewed as a set:
+`ActiveLock` and `McpOAuthState` are zero-grace by design, both comparing the
+timestamp in code and using the TTL only to reclaim space, and the rest are
+retention windows well clear of any job that reads them.
+
+Casino settlement math is testable and tested (#883). The arithmetic that turns
+an outcome and a stake into the number that goes into `$inc: { balance }` — the
+3:2 natural, insurance, the split and double-down credit, roulette's table odds,
+poker's five payout sites — sat inline behind button collectors at 10-27%
+statement coverage, the largest block of untested code in the repo that decides
+what a player is paid. It is now `src/games/casino/settlement.js`, pure and at
+100%, and the games call it. No payout changed: where the three games disagreed
+they still disagree, and the disagreements are the tested part. Blackjack boosts
+a whole profit unguarded; poker boosts only what is above the stake and only
+above 1x, which is what stops an admin-set `serverBoost.multiplier` below 1 from
+cutting payouts; roulette takes no multiplier at all, because its odds are the
+wheel's. The natural's `Math.floor` runs before the booster and not after —
+worth a coin a hand on an odd bet, and the ordering a refactor would most
+plausibly have changed.
+
+The timezone picker uses canonical IANA names (#942). `Asia/Kolkata` was listed
+twice, `Europe/Kiev` and `Asia/Rangoon` have been superseded by `Europe/Kyiv`
+and `Asia/Yangon`, and `America/Honolulu` was never a zone — canonical
+`Pacific/Honolulu` was already in the list, so that entry is dropped rather than
+renamed. Cosmetic: the old names survive as backward-compatibility links, so
+nothing a guild had saved stopped resolving.
+
 ## [4.5.1] - 2026-08-31
 
 Migrations through `020_narrow_failed_job_ttl`.

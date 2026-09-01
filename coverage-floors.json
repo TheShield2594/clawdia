@@ -227,7 +227,6 @@
         "src/dashboard/public/guild-settings.js",
         "src/deploy-commands.js",
         "src/index.js",
-        "src/models/AuditLog.js",
         "src/shard.js"
     ],
     "coveredOnlyByIntegration": [

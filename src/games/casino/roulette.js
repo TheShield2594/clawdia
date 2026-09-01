@@ -12,6 +12,7 @@ const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { rouletteSettlement } = require('./settlement');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3a1.png';
 const MIN_BET = 10;
@@ -253,8 +254,7 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock, onWag
             won    = betDef.matches(result, target);
             charmTriggered = true;
         }
-        const profit   = won ? bet * betDef.payout : -bet;
-        const credit   = won ? bet + profit : 0;
+        const { profit, credit } = rouletteSettlement(bet, betDef.payout, won);
         const delay    = ms => new Promise(r => setTimeout(r, ms));
 
         // Spinning animation

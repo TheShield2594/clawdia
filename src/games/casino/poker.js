@@ -21,6 +21,11 @@ const {
     bestHand,
     compareHands,
 } = require('./pokerHands');
+const {
+    pokerFoldWinPayout,
+    pokerPotPayout,
+    pokerShowdownPayout,
+} = require('./settlement');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -137,9 +142,9 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             const coinMult   = getCoinMultiplier(debited);
             const serverMult = getServerCoinMultiplier(guildSettings);
             const totalMult  = coinMult * serverMult;
-            const baseWin    = Math.floor(bet * 1.5); // small early-exit bonus
-            let winAmount    = baseWin;
-            if (totalMult > 1.0) winAmount = bet + Math.round((baseWin - bet) * totalMult);
+            // A flat 3:2 on the opening bet — a small consolation for a hand
+            // that ended before it started.
+            const winAmount  = pokerFoldWinPayout(bet, totalMult);
 
             const updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: winAmount } }, { new: true });
             releaseLock?.();
@@ -274,8 +279,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             const coinMult   = getCoinMultiplier(debited);
             const serverMult = getServerCoinMultiplier(guildSettings);
             const totalMult  = coinMult * serverMult;
-            let winPayout    = pot;
-            if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
+            const winPayout  = pokerPotPayout(playerStake, pot, totalMult);
 
             await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
             releaseLock?.();
@@ -403,8 +407,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             const coinMult   = getCoinMultiplier(debited);
             const serverMult = getServerCoinMultiplier(guildSettings);
             const totalMult  = coinMult * serverMult;
-            let winPayout    = pot;
-            if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
+            const winPayout  = pokerPotPayout(playerStake, pot, totalMult);
             await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
             releaseLock?.();
             return interaction.editReply({
@@ -524,8 +527,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             const coinMult   = getCoinMultiplier(debited);
             const serverMult = getServerCoinMultiplier(guildSettings);
             const totalMult  = coinMult * serverMult;
-            let winPayout    = pot;
-            if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
+            const winPayout  = pokerPotPayout(playerStake, pot, totalMult);
             await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
             releaseLock?.();
             return interaction.editReply({
@@ -637,20 +639,15 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
         const totalCoinMult = coinMult * serverMult;
         const streakBonus   = getLuckyStreakBonus(debited);
 
-        let grossPayout = 0;
-        let outcome     = result;
-
-        if (result === 'win')  grossPayout = playerStake * 2;
-        if (result === 'push') grossPayout = playerStake;
+        // The lucky streak turns a loss into a push before the payout is
+        // computed, so the settled outcome is what both the money and the embed
+        // are read off.
+        let outcome = result;
         if (result === 'lose' && luckySaveEligible(playerStake) && streakBonus > 0 && Math.random() < streakBonus) {
-            grossPayout = playerStake;
             outcome = 'push';
         }
 
-        let adjustedPayout = grossPayout;
-        if (grossPayout > playerStake && totalCoinMult > 1.0) {
-            adjustedPayout = playerStake + Math.round((grossPayout - playerStake) * totalCoinMult);
-        }
+        const adjustedPayout = pokerShowdownPayout(outcome, playerStake, totalCoinMult);
 
         let updated = debited;
         if (adjustedPayout > 0) {
