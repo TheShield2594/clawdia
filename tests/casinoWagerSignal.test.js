@@ -76,7 +76,10 @@ describe('placeWager — the debit is the signal', () => {
         return placeWager(filter, BET).then(() => {
             expect(User.findOneAndUpdate).toHaveBeenCalledWith(
                 { userId: USER_ID, guildId: GUILD_ID, balance: { $gte: BET } },
-                { $inc: { balance: -BET } },
+                // The wagering counter moved into this write when it turned out
+                // seven of the eight games never wrote it — see
+                // tests/achievementTracking.test.js for what depends on it.
+                { $inc: { balance: -BET, lifetimeGambled: BET } },
                 { new: true },
             );
         });
@@ -84,10 +87,10 @@ describe('placeWager — the debit is the signal', () => {
 
     test('commits a stake and its bookkeeping in one write', async () => {
         User.findOneAndUpdate.mockResolvedValue(walletDoc());
-        await placeWager(filter, BET, { extraInc: { lifetimeGambled: BET } });
+        await placeWager(filter, BET, { extraInc: { pendingCrashRefund: BET } });
 
         const [, update] = User.findOneAndUpdate.mock.calls[0];
-        expect(update).toEqual({ $inc: { balance: -BET, lifetimeGambled: BET } });
+        expect(update).toEqual({ $inc: { balance: -BET, lifetimeGambled: BET, pendingCrashRefund: BET } });
     });
 
     test('reports the wager once the coins have moved', async () => {
@@ -97,7 +100,9 @@ describe('placeWager — the debit is the signal', () => {
         await placeWager(filter, BET, { onWager });
 
         expect(onWager).toHaveBeenCalledTimes(1);
-        expect(onWager).toHaveBeenCalledWith({ amount: BET, user: null, source: null });
+        expect(onWager).toHaveBeenCalledWith(
+            { amount: BET, user: null, source: null, doc: expect.objectContaining({ userId: USER_ID }) },
+        );
     });
 
     test('says nothing when the guard misses — the whole point', async () => {
@@ -120,7 +125,9 @@ describe('placeWager — the debit is the signal', () => {
 
         await placeWager({ userId: joiner.id, guildId: GUILD_ID }, BET, { onWager, user: joiner, source });
 
-        expect(onWager).toHaveBeenCalledWith({ amount: BET, user: joiner, source });
+        expect(onWager).toHaveBeenCalledWith(
+            { amount: BET, user: joiner, source, doc: expect.objectContaining({ userId: USER_ID }) },
+        );
     });
 
     test('refuses a non-positive stake without touching the database', async () => {
@@ -364,7 +371,9 @@ describe('/crash — a joiner is counted only once the seat is theirs', () => {
         // counting a bet nobody ended up making.
         expect(User.findOneAndUpdate).toHaveBeenCalledWith(
             { userId: 'user-2', guildId: GUILD_ID },
-            { $inc: { balance: BET, pendingCrashRefund: -BET } },
+            // The stake was counted as gambled when it was taken, so a refund
+            // that hands it straight back has to un-count it.
+            { $inc: { balance: BET, pendingCrashRefund: -BET, lifetimeGambled: -BET } },
         );
         expect(press.reply).toHaveBeenCalledWith(expect.objectContaining({
             content: expect.stringMatching(/refunded/i),

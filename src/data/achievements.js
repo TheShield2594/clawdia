@@ -18,6 +18,17 @@ const { CORE_REGION_IDS, TOTAL_CORE_SECRETS } = require('./exploreData');
 // never re-checked and never taken back.
 const RARE_COMPANION_IDS = ['eagle', 'shark', 'crystal_fox', 'lantern_owl'];
 
+// Days a member has gone without a warning: since their last one, or since the
+// account was first recorded when they have never had one. Returns 0 when
+// neither date is available, so a document without either stays locked rather
+// than unlocking on an epoch-zero timestamp.
+function daysSinceLastWarning(user) {
+    const since = user.lastWarnedAt ?? user.createdAt;
+    if (!since) return 0;
+    const ms = Date.now() - new Date(since).getTime();
+    return ms > 0 ? ms / 864e5 : 0;
+}
+
 const ACHIEVEMENTS = [
     // ── Economy ──────────────────────────────────────────────────────────────
     {
@@ -462,16 +473,17 @@ const ACHIEVEMENTS = [
         category: 'moderation',
         xpReward: 150,
         coinReward: 500,
-        check: (user) => {
-            if (!user.lastWarnedAt) return false;
-            const daysSince = (Date.now() - new Date(user.lastWarnedAt).getTime()) / 864e5;
-            return daysSince >= 30;
-        },
-        progress: (user) => {
-            if (!user.lastWarnedAt) return [0, 30];
-            const daysSince = Math.min(Math.floor((Date.now() - new Date(user.lastWarnedAt).getTime()) / 864e5), 30);
-            return [daysSince, 30];
-        }
+        // The clock runs from the last warning, or from when the account was
+        // first seen if there has never been one. It used to `return false` on a
+        // missing `lastWarnedAt`, which made the achievement unreachable for
+        // exactly the players it describes: a member who has never been warned
+        // has, self-evidently, gone 30 days without receiving a warning, but
+        // could only earn Clean Record by first being warned and then waiting.
+        // `createdAt` is schema-defaulted to now on insert, so a brand-new
+        // member still has to serve the 30 days rather than earning it on their
+        // first message.
+        check: (user) => daysSinceLastWarning(user) >= 30,
+        progress: (user) => [Math.min(Math.floor(daysSinceLastWarning(user)), 30), 30]
     },
 
     // ── Pets ─────────────────────────────────────────────────────────────────

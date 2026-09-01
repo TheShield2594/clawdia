@@ -54,30 +54,43 @@ function drawCard() {
 
 // Atomically deduct wagers from both players. Returns { success, reason }.
 // If opponent deduction fails after challenger succeeded, challenger is refunded.
+//
+// The stake also advances `lifetimeGambled`, the counter behind Lucky, Gambler,
+// High Roller and the three Wager badges. A duel is a coin bet on a coin flip
+// dressed up as rock-paper-scissors, and it is the only wager outside the
+// casino that puts a player's own coins at risk on an outcome — leaving it out
+// meant those achievements measured "coins staked at /casino" while claiming to
+// measure coins gambled. Every path that hands a stake back (both branches
+// here, and refundEscrow) takes the counter back with it, so a duel that never
+// resolved — declined, expired, errored — counts for nothing.
 async function takeEscrow(challengerId, opponentId, guildId, amount) {
     const challenger = await User.findOneAndUpdate(
         { userId: challengerId, guildId, balance: { $gte: amount } },
-        { $inc: { balance: -amount } },
+        { $inc: { balance: -amount, lifetimeGambled: amount } },
         { new: true }
     );
     if (!challenger) return { success: false, reason: 'challenger' };
 
     const opponent = await User.findOneAndUpdate(
         { userId: opponentId, guildId, balance: { $gte: amount } },
-        { $inc: { balance: -amount } },
+        { $inc: { balance: -amount, lifetimeGambled: amount } },
         { new: true }
     );
     if (!opponent) {
-        await User.updateOne({ userId: challengerId, guildId }, { $inc: { balance: amount } });
+        await User.updateOne(
+            { userId: challengerId, guildId },
+            { $inc: { balance: amount, lifetimeGambled: -amount } },
+        );
         return { success: false, reason: 'opponent' };
     }
     return { success: true };
 }
 
 async function refundEscrow(challengerId, opponentId, guildId, amount) {
+    const give = { $inc: { balance: amount, lifetimeGambled: -amount } };
     await Promise.all([
-        User.updateOne({ userId: challengerId, guildId }, { $inc: { balance: amount } }),
-        User.updateOne({ userId: opponentId,   guildId }, { $inc: { balance: amount } }),
+        User.updateOne({ userId: challengerId, guildId }, give),
+        User.updateOne({ userId: opponentId,   guildId }, give),
     ]);
 }
 
@@ -752,3 +765,10 @@ module.exports = {
         if (sub === 'leaderboard') return runLeaderboard(interaction);
     },
 };
+
+// The escrow pair is the whole of /duel's money handling, and the
+// `lifetimeGambled` bookkeeping it carries has to stay exactly inverse between
+// them or a declined duel would leave a player credited for coins they got
+// straight back. Exported so tests can hold the two against each other without
+// driving a full challenge through its button collectors.
+module.exports.__test__ = { takeEscrow, refundEscrow };
