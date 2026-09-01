@@ -94,4 +94,18 @@ function refundCharge(Model, filter, cost, tag = 'balance') {
         .catch(err => console.error(`[${tag}] refund error:`, err));
 }
 
-module.exports = { clampedDebitExpr, incExpr, debitUpTo, chargeExact, refundCharge };
+/**
+ * `{ path: delta }` as the pipeline `$set` that moves each of them.
+ *
+ * The plain-number form is what a durable record can carry: a `$`-keyed
+ * expression is not a thing to store in a document, and an owed payout that has
+ * to reproduce the write it failed to make needs the counters written down
+ * alongside the coins. See `counters` in src/utils/creditOrOwe.js.
+ */
+function counterSetExpr(counters) {
+    return Object.fromEntries(
+        Object.entries(counters ?? {}).map(([path, delta]) => [path, incExpr(path, delta)]),
+    );
+}
+
+module.exports = { clampedDebitExpr, incExpr, counterSetExpr, debitUpTo, chargeExact, refundCharge };

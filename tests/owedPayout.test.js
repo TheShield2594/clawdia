@@ -265,6 +265,50 @@ describe('replayOwedPayout with a payout key', () => {
     });
 });
 
+// #873. A duel refund moves coins *and* reverses `lifetimeGambled`, in one
+// write. When that write fails the coins are recorded as owed — and if the
+// record does not carry the counter too, the replay pays the stake back a week
+// later and leaves the player counted as having gambled coins they were given
+// back. The two have to travel together or the replay reproduces half a write.
+describe('replayOwedPayout with bookkeeping counters', () => {
+    const refund = {
+        kind: 'coins', userId: 'u1', guildId: 'g1', amount: 250,
+        payoutKey: 'duel:d1:refund:u1', counters: { lifetimeGambled: -250 },
+    };
+
+    test('moves the counters in the same guarded write as the coins', async () => {
+        User.findOne.mockReturnValue({ lean: async () => null });
+
+        await replayOwedPayout(refund);
+
+        const [, update] = User.findOneAndUpdate.mock.calls[0];
+        expect(update[0].$set.lifetimeGambled)
+            .toEqual({ $add: [{ $ifNull: ['$lifetimeGambled', 0] }, -250] });
+        expect(update[0].$set.balance)
+            .toEqual({ $add: [{ $ifNull: ['$balance', 0] }, 250] });
+    });
+
+    test('carries them on the unguarded path too', async () => {
+        const { payoutKey: _dropped, ...unkeyed } = refund;
+
+        await replayOwedPayout(unkeyed);
+
+        expect(User.findOneAndUpdate).toHaveBeenCalledWith(
+            { userId: 'u1', guildId: 'g1' },
+            { $inc: { balance: 250, lifetimeGambled: -250 } },
+        );
+    });
+
+    test('a payout with no counters writes only the coins', async () => {
+        User.findOne.mockReturnValue({ lean: async () => null });
+
+        await replayOwedPayout({ ...refund, counters: undefined });
+
+        const [, update] = User.findOneAndUpdate.mock.calls[0];
+        expect(update[0].$set).not.toHaveProperty('lifetimeGambled');
+    });
+});
+
 describe('describeOwedPayout', () => {
     test('names who is owed what', () => {
         expect(describeOwedPayout({ kind: 'coins', userId: 'u1', guildId: 'g1', amount: 500 }))

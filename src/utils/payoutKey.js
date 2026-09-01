@@ -274,6 +274,34 @@ function marketSalePayoutKey(listingId) {
 }
 
 /**
+ * One player's stake coming back out of a duel escrow, or the pot going to its
+ * winner (#873).
+ *
+ * `duelId` is `${challengerId}_${Date.now()}`, built when the challenge is
+ * posted, so it names this duel and nothing else. The phase is in the key
+ * because a duel can owe a player at two different moments — the escrow rollback
+ * when the second stake could not be taken, and the settlement that pays the
+ * winner — and the guard is a string comparison on the user document with
+ * nothing on it to say which of the two wrote it. A shared key would let a
+ * replay of the refund silently satisfy the payout.
+ */
+function duelPayoutKey(duelId, userId, phase) {
+    return `duel:${duelId}:${phase}:${userId}`;
+}
+
+/**
+ * One crew member's share of a group job — a `/heist` or a `/syndicate` raid
+ * (#873).
+ *
+ * Both are keyed by the run's own id rather than by the guild and the hour: a
+ * crew that fails a job and immediately runs another is owed two separate
+ * shares, and a key that could not tell the runs apart would drop the second.
+ */
+function crewSharePayoutKey(jobId, userId) {
+    return `crew:${jobId}:${userId}`;
+}
+
+/**
  * The sender's refund when a coin transfer could not be completed (#868).
  *
  * Keyed by the interaction, which is the one identifier that names *this*
@@ -287,7 +315,7 @@ function transferRefundPayoutKey(interactionId) {
 
 module.exports = {
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
-    marketSalePayoutKey, transferRefundPayoutKey,
+    marketSalePayoutKey, transferRefundPayoutKey, duelPayoutKey, crewSharePayoutKey,
     payoutKeyGuard, payoutKeyAppendExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, isDuplicateKeyError,
     RETENTION_DAYS, RETENTION_MS, KEY_CAP,

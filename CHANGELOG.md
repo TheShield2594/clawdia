@@ -18,6 +18,33 @@ whose schema predates a migration that has already run.
 
 Migrations through `021_market_listing_ttl_grace`.
 
+The economy audit starts where coins leave a balance without arriving anywhere:
+the `/duel` escrow and the crew splits in `/heist` and `/syndicate` (#873).
+Six ways coins could be created or destroyed, all of them on live paths. A duel
+that failed *after* paying its winner — the two balance reads for the result
+embed were enough — reached a caller whose only recovery is to refund the
+escrow, so both stakes went back on top of a settled duel and `2 x` the bet was
+minted; settlement is now the last thing that can fail a duel, with the result
+screen contained behind it. The escrow rollback, when the second player could
+not cover their stake, was an unchecked `updateOne` whose rejection escaped to a
+handler that believed no escrow had been taken: the first player's stake was
+simply gone. A tie refunded both stakes through one `Promise.all`, which
+abandons the second write on the first failure. `/syndicate` set `credited` from
+whether the write threw, so an update that matched no document counted as a
+paid share, and its three retries of an unguarded `$inc` could pay twice; the
+recovery record it wrote for the case it did catch was invisible to
+`npm run payouts:replay` and unpayable by it. `/heist` had no record at all.
+All three now credit through one keyed, verified helper that writes what it
+cannot pay into the same owed-payout queue everything else uses, and every
+message — the refund line, the win announcement, the crew results — says what
+actually happened to the coins rather than what was hoped for. A duel's money
+handling moves out of the command into `src/utils/duelEscrow.js`, where the
+`lifetimeGambled` reversal is now a parameter of the refund: a tie hands the
+stakes back without the duel having gone unplayed, so the counter stays, as it
+does on a blackjack push. 50 tests across three new suites; `src/commands/economy`
+coverage floors move from 27% to 33% and the global floors from 49/39/50/50 to
+50/40/53/51.
+
 Expired market listings no longer lose their items on the ordinary expiry path
 (#867). The `marketlistings` TTL index carried `expireAfterSeconds: 0`, and
 MongoDB's TTL monitor wakes about once a minute, so a listing was hard-deleted
