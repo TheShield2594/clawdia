@@ -42,13 +42,13 @@
 
                         <!-- Gifting -->
                         <div class="eco-section-head eco-section-gap">
-                            <div class="toggle-text eco-section-title"><strong>Gifting limits</strong><span>How much value one member can hand another per day with /gift. Set any limit to 0 to turn it off.</span></div>
+                            <div class="toggle-text eco-section-title"><strong>Gifting limits</strong><span>How much value one member can hand another per day. The coin limits cover /gift and /bank transfer together, so neither is a way around the other. Set any limit to 0 to turn it off.</span></div>
                         </div>
                         <div class="field field-pair">
                             <div>
                                 <label class="field-label" for="economy-gift-coin-cap">Coins sent per day</label>
                                 <input type="number" id="economy-gift-coin-cap" value="<%= settings.economy.giftCoinCapDaily ?? 10000 %>" min="0">
-                                <small>Most one member can gift away in 24 hours</small>
+                                <small>Most one member can hand away in 24 hours, by gift or transfer</small>
                             </div>
                             <div>
                                 <label class="field-label" for="economy-gift-coin-receive-cap">Coins received per day</label>

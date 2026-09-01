@@ -23,7 +23,7 @@
  * own declarations and refuses a factory that closes over anything else.
  */
 
-const { applyPipelineUpdate } = require('./pipelineUpdate');
+const { applyPipelineUpdate, evaluate } = require('./pipelineUpdate');
 
 const isPlainObject = v => v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date);
 
@@ -128,6 +128,13 @@ function matches(doc, query, state) {
             if (!condition.every(clause => matches(doc, clause, state))) return false;
         } else if (field === '$nor') {
             if (condition.some(clause => matches(doc, clause, state))) return false;
+        } else if (field === '$expr') {
+            // Evaluated for real, with the same evaluator that applies a
+            // pipeline update. `$expr` is how the daily gift and transfer caps
+            // are enforced — the cap check lives in the write's own filter so a
+            // concurrent transfer cannot slip past a check it invalidated — so a
+            // mock that waved it through would report every cap as working.
+            if (!evaluate(condition, doc)) return false;
         } else if (field.startsWith('$')) {
             throw new Error(`fakeCollection: unsupported top-level operator ${field}`);
         } else if (!matchesField(doc, field, condition, state)) {
