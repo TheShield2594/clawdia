@@ -15,24 +15,26 @@ const User = require('../models/User');
 const { creditCoinsOrOwe } = require('./creditOrOwe');
 const { duelPayoutKey } = require('./payoutKey');
 
-// Atomically deduct wagers from both players. Returns { success, reason, returned }.
-//
-// The stake also advances `lifetimeGambled`, the counter behind Lucky, Gambler,
-// High Roller and the three Wager badges. A duel is a coin bet on a coin flip
-// dressed up as rock-paper-scissors, and it is the only wager outside the
-// casino that puts a player's own coins at risk on an outcome — leaving it out
-// meant those achievements measured "coins staked at /casino" while claiming to
-// measure coins gambled. Every path that hands a stake back for a duel that
-// never happened (both branches here, and refundEscrow) takes the counter back
-// with it, so a declined or expired duel counts for nothing.
-//
-// The rollback when the opponent's stake cannot be taken used to be a bare
-// `await User.updateOne(...)`: unchecked, so an update that matched no document
-// looked exactly like one that moved coins, and unguarded, so a rejection
-// travelled out to a caller that had already decided no escrow was taken and
-// refunded nothing. Either way the challenger's stake was simply gone (#873).
-// It goes through the same credit-or-write-it-down path as every other refund
-// here now, and what actually happened comes back with the result.
+/**
+ * Atomically deducts both players' wagers. Returns `{ success, reason, returned }`.
+ *
+ * The stake also advances `lifetimeGambled`, the counter behind Lucky, Gambler,
+ * High Roller and the three Wager badges. A duel is a coin bet on a coin flip
+ * dressed up as rock-paper-scissors, and it is the only wager outside the
+ * casino that puts a player's own coins at risk on an outcome — leaving it out
+ * meant those achievements measured "coins staked at /casino" while claiming to
+ * measure coins gambled. Every path that hands a stake back for a duel that
+ * never happened (both branches here, and `refundEscrow`) takes the counter back
+ * with it, so a declined or expired duel counts for nothing.
+ *
+ * The rollback when the opponent's stake cannot be taken used to be a bare
+ * `await User.updateOne(...)`: unchecked, so an update that matched no document
+ * looked exactly like one that moved coins, and unguarded, so a rejection
+ * travelled out to a caller that had already decided no escrow was taken and
+ * refunded nothing. Either way the challenger's stake was simply gone (#873).
+ * It goes through the same credit-or-write-it-down path as every other refund
+ * here now, and what actually happened comes back with the result.
+ */
 async function takeEscrow(challengerId, opponentId, guildId, amount, duelId) {
     const challenger = await User.findOneAndUpdate(
         { userId: challengerId, guildId, balance: { $gte: amount } },
@@ -103,14 +105,17 @@ function returnStake(userId, guildId, amount, duelId, jobName, { unwager = true 
     });
 }
 
-// Hands both escrowed stakes back, and reports which of them actually arrived.
-// Never rejects: both credits are independent, so one failing must not cancel
-// the other, and every caller is already on an error path where losing the
-// refund to a second error would be the worse outcome.
-//
-// Keyed per duel and player, which makes a second call for the same duel a
-// no-op rather than a second refund. `settled` in runRPS is what is supposed to
-// stop that happening; the key is what makes it not matter if it ever does not.
+/**
+ * Hands both escrowed stakes back, and reports which of them actually arrived.
+ *
+ * Never rejects: both credits are independent, so one failing must not cancel
+ * the other, and every caller is already on an error path where losing the
+ * refund to a second error would be the worse outcome.
+ *
+ * Keyed per duel and player, which makes a second call for the same duel a
+ * no-op rather than a second refund. `settled` in runRPS is what is supposed to
+ * stop that happening; the key is what makes it not matter if it ever does not.
+ */
 async function refundEscrow(challengerId, opponentId, guildId, amount, duelId, opts) {
     const [challenger, opponent] = await Promise.all([
         returnStake(challengerId, guildId, amount, duelId, 'escrowRefund', opts),
@@ -122,10 +127,13 @@ async function refundEscrow(challengerId, opponentId, guildId, amount, duelId, o
     };
 }
 
-// What to tell the players about a refund that was attempted. All seven of
-// /duel's refund messages used to end in "Both bets have been refunded."
-// whatever the two writes did, which is the sentence a player reads instead of
-// checking their balance.
+/**
+ * What to tell the players about a refund that was attempted.
+ *
+ * All seven of `/duel`'s refund messages used to end in "Both bets have been
+ * refunded." whatever the two writes did, which is the sentence a player reads
+ * instead of checking their balance.
+ */
 function refundNote(returned) {
     if (returned.refunded) return ' Both bets have been refunded.';
     // "At least one", because one of the two may well have landed — saying the
