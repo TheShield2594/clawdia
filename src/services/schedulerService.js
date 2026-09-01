@@ -1461,17 +1461,53 @@ async function applyBankInterest(client) {
  * whose listing expired unclaimed would vanish from the economy permanently.
  * The one job here that needs no client: it posts nothing.
  *
+ * "Before the TTL index deletes them" was not achievable until #867: the index
+ * carried no grace period, MongoDB's TTL monitor wakes about once a minute, and
+ * this runs every ten — so the monitor won nearly every race and the items were
+ * gone before this job ever saw the listing. The grace is now a week
+ * (models/MarketListing.js), which is what makes selecting on `expiresAt <= now`
+ * here the claim it reads as rather than a hope.
+ *
  * @returns {Promise<void>}
  */
 async function returnExpiredMarketListings() {
     const MarketListing = require('../models/MarketListing');
+    const BATCH_SIZE = 50;
     const now = new Date();
     let processed = 0;
     let failed = 0;
     let unrecordedReturns = 0;
 
-    // Process in batches of 50 to avoid large memory spikes
-    const expired = await MarketListing.find({ expiresAt: { $lte: now } }).limit(50).lean();
+    // Batched to avoid large memory spikes, and oldest first.
+    //
+    // The sort is not cosmetic. Without one MongoDB returns natural order,
+    // which is an implementation detail and not insertion order — so a capped
+    // tick took an arbitrary 50 of the expired listings, and a listing could be
+    // passed over tick after tick while newer ones went ahead of it. Every
+    // listing has a deadline now (#867): the TTL grace deletes it seven days
+    // after it expires, whether or not the sweep ever chose it. Oldest first is
+    // what turns "the backlog drains" into "no individual listing starves",
+    // which is the claim the grace period is sized against.
+    //
+    // Free, as it happens: the sort key is the TTL index, so this walks that
+    // index in order rather than sorting anything in memory.
+    const expired = await MarketListing.find({ expiresAt: { $lte: now } })
+        .sort({ expiresAt: 1 })
+        .limit(BATCH_SIZE)
+        .lean();
+
+    // A full batch means the tick hit its cap — there may be more behind it, or
+    // there may have been exactly fifty. Either way it is the state worth
+    // saying out loud, because a *sustained* cap means listings are expiring
+    // faster than 50 per ten minutes, and the backlog that builds is the thing
+    // the TTL grace is sized against. It used to be invisible.
+    if (expired.length === BATCH_SIZE) {
+        console.warn(
+            `[scheduler] returnExpiredMarketListings: batch capped at ${BATCH_SIZE} — there may be more expired ` +
+            'listings waiting. Any are returned on later ticks, oldest first; a cap that persists for days is a ' +
+            'backlog outliving the TTL grace, and the batch needs raising.',
+        );
+    }
 
     for (const listing of expired) {
         try {

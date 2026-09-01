@@ -22,6 +22,14 @@ const {
     settleHand,
     isNaturalBlackjack,
 } = require('./blackjackHands');
+const {
+    naturalBlackjackProfit,
+    blackjackWinProfit,
+    blackjackHandCredit,
+    insuranceCredit,
+    insuranceProfit,
+    insuranceCost: halfBet,
+} = require('./settlement');
 const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
@@ -237,7 +245,7 @@ module.exports = {
             }
             const bjCoinMult   = getCoinMultiplier(user);
             const bjServerMult = getServerCoinMultiplier(guildSettings);
-            const payout = Math.round(Math.floor(bet * 1.5) * bjCoinMult * bjServerMult);
+            const payout = naturalBlackjackProfit(bet, bjCoinMult * bjServerMult);
             const bjWinUser = await User.findOneAndUpdate(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
                 { $inc: { balance: bet + payout } },
@@ -262,7 +270,7 @@ module.exports = {
         }
 
         const dealerShowsAce  = dealerHand[0].value === 'A';
-        const insuranceCost   = Math.floor(bet / 2);
+        const insuranceCost   = halfBet(bet);
 
         // Dealer peek: if dealer shows Ace and has natural blackjack, resolve before player acts
         if (dealerShowsAce && isNaturalBlackjack(dealerHand)) {
@@ -306,8 +314,8 @@ module.exports = {
             let peekStatus = `❌ Dealer Blackjack! -${currency}${bet.toLocaleString()}`;
             let peekCredit = 0;
             if (peekInsuranceBet > 0) {
-                peekCredit = peekInsuranceBet * 3;
-                peekStatus += `\n🛡️ Insurance paid! +${currency}${(peekInsuranceBet * 2).toLocaleString()}`;
+                peekCredit = insuranceCredit(peekInsuranceBet);
+                peekStatus += `\n🛡️ Insurance paid! +${currency}${insuranceProfit(peekInsuranceBet).toLocaleString()}`;
             }
             if (peekCredit > 0) {
                 await User.updateOne(
@@ -517,12 +525,12 @@ module.exports = {
                 if (insuranceBet > 0 && isNaturalBlackjack(dealerHand.slice(0, 2))) {
                     await User.updateOne(
                         { userId: interaction.user.id, guildId: interaction.guild.id },
-                        { $inc: { balance: insuranceBet * 3 } },
+                        { $inc: { balance: insuranceCredit(insuranceBet) } },
                     );
                     const insUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
                     const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, activeBet,
                         '🃏 Blackjack — Bust',
-                        `Went over. The house collects.\n🛡️ Insurance paid! +${currency}${(insuranceBet * 2).toLocaleString()}`,
+                        `Went over. The house collects.\n🛡️ Insurance paid! +${currency}${insuranceProfit(insuranceBet).toLocaleString()}`,
                         '#e74c3c', insUser?.balance ?? 0);
                     await interaction.editReply({ embeds: [embed], components: buildButtons(gameId, true) }).catch(() => {});
                 }
@@ -567,18 +575,18 @@ module.exports = {
                     if (outcome === 'bust') {
                         handResults.push(`Hand ${h + 1}: 💥 Bust (-${currency}${hBet.toLocaleString()})`);
                     } else if (outcome === 'win') {
-                        const netProfit = Math.round(hBet * totalCoinMult);
-                        totalCredit += hBet + netProfit;
+                        const netProfit = blackjackWinProfit(hBet, totalCoinMult);
+                        totalCredit += blackjackHandCredit('win', hBet, totalCoinMult);
                         const boostNote = totalCoinMult > 1.0 ? ` *(🚀 ${totalCoinMult.toFixed(1)}x)*` : '';
                         handResults.push(`Hand ${h + 1}: ✅ Win (+${currency}${netProfit.toLocaleString()}${boostNote})`);
                     } else if (outcome === 'push') {
-                        totalCredit += hBet;
+                        totalCredit += blackjackHandCredit('push', hBet, totalCoinMult);
                         handResults.push(`Hand ${h + 1}: 🤝 Push`);
                     } else if (luckySaveEligible(hBet) && luckyActive && Math.random() < 0.20) {
-                        totalCredit += hBet;
+                        totalCredit += blackjackHandCredit('lose', hBet, totalCoinMult, true);
                         handResults.push(`Hand ${h + 1}: 🍀 Lucky Push`);
                     } else if (luckySaveEligible(hBet) && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
-                        totalCredit += hBet;
+                        totalCredit += blackjackHandCredit('lose', hBet, totalCoinMult, true);
                         handResults.push(`Hand ${h + 1}: 🎯 Lucky Push`);
                     } else {
                         handResults.push(`Hand ${h + 1}: ❌ Loss (-${currency}${hBet.toLocaleString()})`);
@@ -596,23 +604,23 @@ module.exports = {
                 const outcome     = settleHand(playerTotal, dealerTotal);
 
                 if (outcome === 'win') {
-                    const netProfit = Math.round(activeBet * totalCoinMult);
-                    totalCredit = activeBet + netProfit;
+                    const netProfit = blackjackWinProfit(activeBet, totalCoinMult);
+                    totalCredit = blackjackHandCredit('win', activeBet, totalCoinMult);
                     title       = '🃏 Blackjack — You Win';
                     description = `${randomFrom(BJ_WIN_LINES)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💰 Payout: ${currency}${(activeBet + netProfit).toLocaleString()}  (+${currency}${netProfit.toLocaleString()} net)${boostNote}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
                     color       = '#2ecc71';
                 } else if (outcome === 'push') {
-                    totalCredit = activeBet;
+                    totalCredit = blackjackHandCredit('push', activeBet, totalCoinMult);
                     title       = '🃏 Blackjack — Push';
                     description = `${randomFrom(BJ_PUSH_LINES)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
                     color       = '#f39c12';
                 } else if (luckySaveEligible(activeBet) && luckyActive && Math.random() < 0.20) {
-                    totalCredit = activeBet;
+                    totalCredit = blackjackHandCredit('lose', activeBet, totalCoinMult, true);
                     title       = '🃏 Blackjack — Lucky Push';
                     description = `🍀 Lucky Charm saved you. Bet returned.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
                     color       = '#f39c12';
                 } else if (luckySaveEligible(activeBet) && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
-                    totalCredit = activeBet;
+                    totalCredit = blackjackHandCredit('lose', activeBet, totalCoinMult, true);
                     title       = '🃏 Blackjack — Lucky Push';
                     description = `🎯 Lucky Streak saved you. Bet returned.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
                     color       = '#f39c12';
@@ -627,8 +635,8 @@ module.exports = {
             if (insuranceBet > 0) {
                 const dealerNaturalBJ = isNaturalBlackjack(dealerHand.slice(0, 2));
                 if (dealerNaturalBJ) {
-                    totalCredit += insuranceBet * 3;
-                    description += `\n🛡️ Insurance paid! +${currency}${(insuranceBet * 2).toLocaleString()}`;
+                    totalCredit += insuranceCredit(insuranceBet);
+                    description += `\n🛡️ Insurance paid! +${currency}${insuranceProfit(insuranceBet).toLocaleString()}`;
                 } else {
                     description += `\n🛡️ Insurance lost (-${currency}${insuranceBet.toLocaleString()})`;
                 }
