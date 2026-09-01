@@ -1,13 +1,41 @@
-node_modules
-npm-debug.log*
-.env
-.env.local
-.env.*.local
-logs
-.git
-.gitignore
-*.md
-tests
-.github
-backups
+# The build context is a separate list from .gitignore, and this is the file
+# that governs it. A path git ignores is still sent to the daemon and still
+# lands in the image through `COPY . .` — which is how ./secrets/, the
+# directory docker-compose.yml tells you to put your live Discord token,
+# session secret and provider keys in, would have been baked into a locally
+# built image and published by the documented `docker compose push` (#871).
+#
+# So this is an allowlist rather than a denylist: everything is excluded, and
+# the few paths the build actually needs are added back below. The next
+# directory of credentials someone adds is then out of the image because it was
+# never named here, rather than because whoever added it remembered to come and
+# name it — which is the half that failed.
+#
+# tests/dockerignoreContext.test.js holds the shape: it fails if this file
+# stops being an allowlist, if an exception names something sensitive, or if
+# the Dockerfile starts copying a path from the context that is not listed.
+*
+
+# The install in the build and asset stages, and the version string
+# services/ai/mcp/client.js and dashboard/server.js read at runtime.
+!package.json
+!package-lock.json
+
+# The application, and the dashboard assets the asset stage minifies.
+!src
+
+# Runtime config. config/mcp-servers.json is re-excluded below.
+!config
+
+# scripts/build-assets.js is copied by the asset stage; the rest is here so a
+# Portainer deploy with no checkout can still run the operational ones
+# (`docker exec clawdia node scripts/rollback-migration.js …`).
+!scripts
+
+# After the allowlist, because `!config` would otherwise bring it back: this
+# file can hold MCP OAuth tokens, and both stack files mount it from the host.
 config/mcp-servers.json
+
+# A node_modules under an allowlisted directory would be sent as-is; the build
+# stage installs its own from the lockfile.
+**/node_modules
