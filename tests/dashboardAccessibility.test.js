@@ -244,6 +244,72 @@ describe('inner tab strips', () => {
     );
 });
 
+// #880. Shop and game item images are uploaded through a <label> wrapping a
+// `display: none` file input. A label is not a tab stop and a hidden input
+// cannot take focus, and there was no other control bound to either action —
+// so for a keyboard-only or screen-reader user the feature was not awkward,
+// it was unreachable. WCAG 2.1.1.
+describe('image upload controls', () => {
+    const styles = fs.readFileSync(path.join(PUBLIC, 'styles.css'), 'utf8');
+
+    /** Every file input in a panel, with the label that wraps it. */
+    const uploads = panel => {
+        document.body.innerHTML = renderPanel(panel);
+        return [...document.querySelectorAll('input[type="file"]')]
+            .map(input => [input, input.closest('label')]);
+    };
+
+    it.each(['economy'])('leaves no file input in the %s panel hidden', panel => {
+        const found = uploads(panel);
+        expect(found.length).toBeGreaterThan(0);
+
+        for (const [input] of found) {
+            // The two shapes that take an element out of the tab order. Either
+            // one puts the upload back out of reach.
+            expect([input.id, /display\s*:\s*none/.test(input.getAttribute('style') || '')])
+                .toEqual([input.id, false]);
+            expect([input.id, input.hasAttribute('hidden')]).toEqual([input.id, false]);
+            // Clipped instead, which is invisible and still focusable.
+            expect([input.id, input.classList.contains('sr-only')]).toEqual([input.id, true]);
+        }
+    });
+
+    it('gives every upload a name of its own, not a column of "Upload"', () => {
+        for (const [input, label] of uploads('economy')) {
+            const name = input.getAttribute('aria-label') || label?.textContent.trim();
+            expect([input.id, Boolean(name)]).toEqual([input.id, true]);
+        }
+        // The per-item cards all read "Upload", so the item is what tells them
+        // apart — and it has to be on the input, where the name is read from.
+        const cards = [...document.querySelectorAll('.game-item-card input[type="file"]')];
+        expect(cards.length).toBeGreaterThan(1);
+        const names = cards.map(input => input.getAttribute('aria-label'));
+        expect(names.every(Boolean)).toBe(true);
+        expect(new Set(names).size).toBe(names.length);
+    });
+
+    it('keeps the input inside the label that labels it', () => {
+        // The click target and the focus target are the same control; a label
+        // that lost its input would leave a button that does nothing.
+        for (const [input, label] of uploads('economy')) {
+            expect([input.id, label !== null]).toEqual([input.id, true]);
+        }
+    });
+
+    it('shows the focus on the label, since the input itself is invisible', () => {
+        // `.sr-only` is a 1px clipped box — a ring drawn on it is a ring nobody
+        // sees, which is WCAG 2.4.7 failed a second way.
+        for (const cls of ['game-item-upload-btn', 'shop-img-upload-btn']) {
+            const rule = new RegExp(`\\.${cls}:focus-within[^{]*\\{([^}]*)\\}`);
+            const match = rule.exec(styles) || new RegExp(
+                `\\.${cls}:focus-within\\s*,[\\s\\S]{0,200}?\\{([^}]*)\\}`,
+            ).exec(styles);
+            expect([cls, match !== null]).toEqual([cls, true]);
+            expect([cls, /outline/.test(match[1])]).toEqual([cls, true]);
+        }
+    });
+});
+
 // #668. `.cases-table` is up to seven columns wide and `body` is
 // `overflow-x: hidden`, so on a narrow screen the right-hand columns — the
 // Actions column on three of these four — were clipped with nothing that could

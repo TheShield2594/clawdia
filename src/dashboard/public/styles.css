@@ -1678,7 +1678,22 @@ textarea.auto-resize {
 .game-item-name { font-size: .95rem; font-weight: 700; color: var(--text-primary, #cdd6f4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .game-item-id { font-size: .75rem; color: var(--text-mute, #6c7086); font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .game-item-actions { display: flex; gap: .4rem; flex-shrink: 0; }
-.game-item-upload-btn { cursor: pointer; }
+/* #880. Both of these labels wrap the file input that does the work. The input
+   used to be `display: none`, which is not focusable, and a <label> is not a
+   tab stop either — so between them there was no way to reach the control
+   without a mouse. The input is `.sr-only` now: invisible, still focusable,
+   still in the tab order.
+
+   The ring goes on the label because the input is a clipped 1px box nobody can
+   see, and `position: relative` keeps that box inside the label so focusing it
+   does not scroll the page somewhere else. `:focus-within` rather than
+   `:has(input:focus-visible)`: it works in every browser this page supports,
+   and the cost is a ring after a mouse click too, which is the harmless half
+   of the trade. */
+.game-item-upload-btn,
+.shop-img-upload-btn { cursor: pointer; position: relative; }
+.game-item-upload-btn:focus-within,
+.shop-img-upload-btn:focus-within { outline: 2px solid var(--claw-500); outline-offset: 2px; }
 
 /* ── Cases / Sanctions tables ────────────────────────────────── */
 /* #668. `body { overflow-x: hidden }` above kills page-level horizontal
