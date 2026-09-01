@@ -28,14 +28,20 @@ describe('guild-settings view', () => {
         expect(fs.statSync(SCRIPT).size).toBeGreaterThan(100_000);
     });
 
+    // `.min` is optional throughout: asset() serves the minified twin when the
+    // build has written one and the readable file when it has not (#905), so
+    // which of the two a checkout renders says only whether `npm run
+    // build:assets` has been run. What is being asserted either way is that the
+    // URL carries the hash.
     it('loads that file through a content-hashed URL', () => {
-        expect(html).toMatch(/<script src="\/guild-settings\.js\?v=[0-9a-f]{10}"><\/script>/);
-        expect(html).toMatch(/href="\/styles\.css\?v=[0-9a-f]{10}"/);
-        expect(html).toMatch(/src="\/esc-html\.js\?v=[0-9a-f]{10}"/);
+        expect(html).toMatch(/<script src="\/guild-settings(\.min)?\.js\?v=[0-9a-f]{10}"><\/script>/);
+        expect(html).toMatch(/href="\/styles(\.min)?\.css\?v=[0-9a-f]{10}"/);
+        expect(html).toMatch(/src="\/esc-html(\.min)?\.js\?v=[0-9a-f]{10}"/);
     });
 
     it('bootstraps the script before loading it', () => {
-        expect(html.indexOf('window.CLAWDIA_BOOTSTRAP')).toBeLessThan(html.indexOf('/guild-settings.js?v='));
+        expect(html.indexOf('window.CLAWDIA_BOOTSTRAP'))
+            .toBeLessThan(html.search(/\/guild-settings(\.min)?\.js\?v=/));
     });
 
     it('hands the script every value it reads off the bootstrap', () => {

@@ -9,3 +9,11 @@ config/mcp-servers.json
 # Secret files mounted via the compose `secrets:` block (see docker-compose.yml).
 secrets/
 coverage/
+
+# The minified dashboard assets scripts/build-assets.js writes beside their
+# sources. Generated from files in this repo, built into the image rather than
+# committed: a checked-in minified twin is a 150 KB artifact that has to be
+# regenerated in step with every edit to the file it came from, and is stale
+# and serving last week's JavaScript the first time someone forgets (#905).
+src/dashboard/public/*.min.js
+src/dashboard/public/*.min.css

@@ -145,6 +145,35 @@ check('canvas loads and encodes a PNG', () => {
     if (png.subarray(0, 4).toString('hex') !== '89504e47') throw new Error('not a PNG');
 });
 
+// The dashboard's own JavaScript and CSS are minified in a stage of their own
+// and copied over the sources they were built from (#905). Nothing in the
+// source tree can tell you whether that stage ran: lib/assets.js falls back to
+// the readable file when there is no twin, which is exactly right for a
+// checkout and is indistinguishable from a build that quietly produced nothing.
+// So this is the only place the assets stage is actually verified — asked
+// through asset(), because what matters is not that the files exist but that
+// the views resolve to them.
+check('the dashboard resolves to its minified assets', () => {
+    const { asset, PUBLIC_DIR } = require(path.join(__dirname, '..', 'src', 'dashboard', 'lib', 'assets'));
+    const served = ['/esc-html.js', '/settings-payload.js', '/guild-settings.js', '/styles.css'];
+
+    const twinOf = url => {
+        const ext = path.extname(url);
+        return `${url.slice(0, -ext.length)}.min${ext}`;
+    };
+
+    const unminified = served.filter(url => !asset(url).startsWith(`${twinOf(url)}?`));
+    if (unminified.length) throw new Error(`${unminified.join(', ')} resolved to the unminified file`);
+
+    for (const url of served) {
+        const size = file => fs.statSync(path.join(PUBLIC_DIR, file.slice(1))).size;
+        const source = size(url);
+        const minified = size(twinOf(url));
+        if (minified >= source) throw new Error(`${twinOf(url)} is not smaller than ${url}`);
+        console.log(`        ${url} -> ${twinOf(url)} (${source} -> ${minified} bytes)`);
+    }
+});
+
 if (failures.length) {
     console.error(`\nimage smoke failed (${failures.length}):`);
     for (const f of failures) console.error(`  - ${f}`);

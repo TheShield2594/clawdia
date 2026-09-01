@@ -88,6 +88,20 @@ npm run docs:api        # docs/API_REFERENCE.md's endpoint tables, from the rout
 npm run docs:panels     # the panel reference in docs/FEATURES.md
 ```
 
+The dashboard's own JavaScript and CSS are minified before they ship, and that
+one is *not* something you have to keep in step:
+
+```bash
+npm run build:assets    # write the .min twins into src/dashboard/public/
+```
+
+The twins are gitignored and the Docker image builds them in a stage of its
+own, so a checkout run with `npm start` has none and serves the readable files
+— which is what you want while working on them. `asset()` prefers a twin when
+one is there and falls back when it is not, so the views are the same either
+way. Run it if you want to see what production serves; delete the `*.min.*`
+files to go back.
+
 ## Tests
 
 Every `*.test.js` under `tests/`, run by Jest.

@@ -28,7 +28,7 @@ global.TextDecoder = global.TextDecoder || TextDecoder;
 // the actual cause, no generic error on top of it, nothing thrown away, and the
 // banner gone again once a request succeeds.
 
-const { bootPage, renderPanel, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
+const { bootPage, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
 
 const fs = require('fs');
 const path = require('path');

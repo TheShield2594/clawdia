@@ -40,6 +40,38 @@ COPY package*.json ./
 # --omit=dev replaces the deprecated --only=production (removed in npm v12).
 RUN npm ci --omit=dev && npm cache clean --force
 
+# ---- asset stage -------------------------------------------------------------
+# Minifies the dashboard's own JavaScript and CSS (#905). The files are served
+# exactly as authored otherwise: a quarter-megabyte of guild-settings.js, an
+# 88 KB stylesheet, comments and all. `compression` gzips that on the way out,
+# which shrinks the transfer and not the parse — the browser still expands and
+# compiles every byte of it, on whatever phone is being used to change one
+# setting.
+#
+# Its own stage because the minifier is a devDependency and the build stage
+# above installs with --omit=dev. Doing it here keeps that true: neither stage
+# below inherits a development tree, and this one is discarded once the four
+# files have been copied out of it.
+#
+# `--ignore-scripts` is what makes the install cheap: nothing here needs a
+# postinstall, and without it this stage would compile `canvas` a second time —
+# with no toolchain installed, since none of it is needed to run esbuild. The
+# lockfile still supplies the integrity hash for every package, which is the
+# check that matters.
+#
+# package*.json is copied on its own first, so editing a stylesheet does not
+# invalidate the install layer.
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS assets
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --ignore-scripts && npm cache clean --force
+
+COPY scripts/build-assets.js ./scripts/
+COPY src/dashboard/public ./src/dashboard/public
+RUN node scripts/build-assets.js
+
 # ---- runtime stage -----------------------------------------------------------
 # Same major as the build stage and as .nvmrc — see the note above.
 FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf
@@ -103,6 +135,12 @@ WORKDIR /app
 
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node . .
+
+# The minified twins, on top of the sources they were built from. Both ship:
+# lib/assets.js serves a `.min` twin when one is present and the readable file
+# when it is not, which is what keeps a plain `npm start` checkout — where this
+# stage never ran — working exactly as it did.
+COPY --from=assets --chown=node:node /app/src/dashboard/public ./src/dashboard/public
 
 USER node
 
