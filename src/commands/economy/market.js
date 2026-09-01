@@ -11,6 +11,7 @@ const { EFFECT_CONFIGS } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { recordOwedPayout } = require('../../utils/owedPayout');
+const { creditCoinsOnce, marketSalePayoutKey } = require('../../utils/payoutKey');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
@@ -613,24 +614,94 @@ async function handleBuy(interaction, currency) {
             return editReply({ content: 'Something went wrong crediting the item. Your coins have been refunded.', embeds: [], components: [] });
         }
 
-        // Credit seller and capture their new balance for accurate logging
-        const updatedSeller = await User.findOneAndUpdate(
-            { userId: listing.sellerId, guildId: interaction.guild.id },
-            { $inc: { balance: sellerReceives } },
-            { new: true }
-        );
+        // The seller's proceeds, and the one credit in this flow nothing was
+        // watching (#869). By the time it runs the buyer has paid, the item has
+        // moved and the listing is deleted, so there is nothing left to retry
+        // against — and it was an unguarded write whose two failure modes were
+        // both swallowed. A `null` return (a seller with no user document) was
+        // ignored, and logged as `balance: 0` for good measure; a throw escaped
+        // the purchase entirely, with the buyer already charged.
+        //
+        // Keyed by the listing, which this flow has just deleted and so cannot
+        // be reused, making the credit exactly-once: a write that committed
+        // without its response arriving is not paid a second time by
+        // `npm run payouts:replay`. Anything that still will not land is written
+        // down as owed, which is what the expiry sweep does with a return it
+        // cannot make.
+        const saleKey = marketSalePayoutKey(listing._id);
+        let sellerStatus = null;
+        let sellerDoc    = null;
+        let sellerErr    = null;
+        try {
+            ({ status: sellerStatus, doc: sellerDoc } = await creditCoinsOnce(
+                { userId: listing.sellerId, guildId: interaction.guild.id },
+                sellerReceives,
+                saleKey,
+                { projection: { balance: 1 } },
+            ));
+        } catch (err) {
+            sellerErr = err;
+        }
 
-        logTransaction({ userId: listing.sellerId, guildId: interaction.guild.id, type: 'market_sell', amount: sellerReceives, balance: updatedSeller?.balance ?? 0, note: listing.itemId });
+        // 'duplicate' is a success whose response was lost on an earlier attempt
+        // — the coins are there. It comes back with no document though, and a
+        // failure has none either, so in both cases the balance for the audit
+        // log is read rather than assumed. `balance` is required on the
+        // Transaction schema, so guessing is not an option and neither is
+        // leaving it out: the row simply would not be written.
+        const sellerPaid = sellerStatus === 'paid' || sellerStatus === 'duplicate';
+        const sellerBalance = sellerDoc?.balance ?? (await User.findOne(
+            { userId: listing.sellerId, guildId: interaction.guild.id }, { balance: 1 },
+        ).lean().catch(() => null))?.balance ?? 0;
+
+        if (!sellerPaid) {
+            const reason = sellerErr?.message
+                ?? `credit for ${listing.sellerId} in ${interaction.guild.id} matched nothing (${sellerStatus})`;
+            const recorded = await recordOwedPayout({
+                service: 'market',
+                jobName: 'buyListing',
+                guildId: interaction.guild.id,
+                payload: {
+                    kind:      'coins',
+                    userId:    listing.sellerId,
+                    guildId:   interaction.guild.id,
+                    amount:    sellerReceives,
+                    listingId: String(listing._id),
+                    payoutKey: saleKey,
+                },
+                error: sellerErr ?? new Error(reason),
+            });
+            console.error(
+                `[market buy] listing ${listing._id} sold but crediting ${sellerReceives} to ` +
+                `${listing.sellerId} failed — ${recorded ? 'recorded as owed' : 'NOT RECORDED'}:`, reason,
+            );
+        }
+
+        // Logged either way: the sale happened, and a row that only appears when
+        // the credit lands leaves the coins unaccounted for exactly when someone
+        // goes looking for them. The note says which it was, so an operator
+        // reading a `market_sell` whose balance did not move has the reason in
+        // front of them rather than a discrepancy to work out.
+        logTransaction({
+            userId: listing.sellerId, guildId: interaction.guild.id, type: 'market_sell',
+            amount: sellerReceives, balance: sellerBalance,
+            note: sellerPaid ? listing.itemId : `${listing.itemId} — payout owed (${saleKey})`,
+        });
         logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'market_buy', amount: -totalCost, balance: buyer.balance, note: listing.itemId });
 
+        // The buyer's side of the trade is complete whatever happened above, so
+        // this is still a success — but the receipt does not claim the seller
+        // was paid when they were not.
         return editReply({
             embeds: [new EmbedBuilder()
                 .setColor(COLORS.SUCCESS)
                 .setTitle('✅ Purchase Complete!')
                 .setDescription(`You bought **${listing.quantity}x \`${listing.itemId}\`** for **${currency}${totalCost.toLocaleString()}**.`)
                 .addFields(
-                    { name: 'Fee Burned',      value: `${currency}${feeAmount.toLocaleString()}`, inline: true },
-                    { name: 'Seller Received', value: `${currency}${sellerReceives.toLocaleString()}`, inline: true },
+                    { name: 'Fee Burned', value: `${currency}${feeAmount.toLocaleString()}`, inline: true },
+                    sellerPaid
+                        ? { name: 'Seller Received', value: `${currency}${sellerReceives.toLocaleString()}`, inline: true }
+                        : { name: 'Seller Payout',   value: `${currency}${sellerReceives.toLocaleString()} — delayed, recorded as owed`, inline: true },
                 )
                 .setTimestamp()
             ],

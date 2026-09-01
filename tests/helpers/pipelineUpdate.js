@@ -172,6 +172,22 @@ function evaluate(expr, doc, vars = {}) {
         }
         case '$size':
             return (args()[0] ?? []).length;
+        case '$filter': {
+            const input = evaluate(arg.input, doc, vars) ?? [];
+            const as = arg.as ?? 'this';
+            return input.filter(el => Boolean(evaluate(arg.cond, doc, { ...vars, [as]: el })));
+        }
+        // `{ $slice: [<array>, <n>] }` and the three-argument form. A negative
+        // `n` in the two-argument form counts from the end, which is what the
+        // payout-key cap in src/utils/payoutKey.js relies on to evict the
+        // oldest keys rather than the newest.
+        case '$slice': {
+            const [array, a, b] = args();
+            const list = array ?? [];
+            if (b === undefined) return a < 0 ? list.slice(a) : list.slice(0, a);
+            const from = a < 0 ? Math.max(0, list.length + a) : a;
+            return list.slice(from, from + b);
+        }
         default:
             throw new Error(`pipelineUpdate: unsupported operator ${op}`);
     }
@@ -188,12 +204,18 @@ function sameValue(a, b) {
  * accumulate in a single update.
  */
 function applyPipelineUpdate(doc, stages) {
+    // `$$NOW` is the server's clock, and Mongo holds it fixed for the whole
+    // update — every stage of one update sees the same instant. Bound once here
+    // for the same reason: the payout-key append stamps an entry with it and
+    // prunes by it in the same expression, and two clocks there would be a
+    // window, however small, in which an entry could be written already expired.
+    const vars = { NOW: new Date() };
     for (const stage of stages) {
         const set = stage.$set ?? stage.$addFields;
         if (!set) throw new Error(`pipelineUpdate: unsupported stage ${Object.keys(stage).join(', ')}`);
         // Every field of one stage reads the document as it was before that
         // stage, so the values are computed first and written afterwards.
-        const computed = Object.entries(set).map(([path, expr]) => [path, evaluate(expr, doc)]);
+        const computed = Object.entries(set).map(([path, expr]) => [path, evaluate(expr, doc, vars)]);
         for (const [path, value] of computed) setPath(doc, path, value);
     }
     return doc;
