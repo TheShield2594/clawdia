@@ -99,9 +99,18 @@ function clearSessionExpired() {
  * meant before.
  */
 function apiFetch(url, options) {
+    // Whether the banner was already up when this request left. A success only
+    // clears the banner if it is evidence about the session the banner is
+    // describing, and a request dispatched before the banner went up is not:
+    // the page fires requests in parallel — the overview panel asks for stats
+    // and insights at once — so a slow 200 from before the expiry could land
+    // after its neighbour's 401 and take the banner down while the session is
+    // still dead.
+    const expiredWhenSent = sessionExpired;
+
     return window.fetch(url, { redirect: 'manual', ...(options || {}) }).then(res => {
         if (isSessionExpired(res)) showSessionExpired();
-        else if (res.ok) clearSessionExpired();
+        else if (res.ok && (expiredWhenSent || !sessionExpired)) clearSessionExpired();
         return res;
     });
 }

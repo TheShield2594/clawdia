@@ -194,6 +194,29 @@ describe('nothing is thrown away, and the retry clears it', () => {
         expect(banner().hidden).toBe(true);
     });
 
+    // The page fires requests in parallel — the overview panel asks for stats
+    // and insights at once — so a request dispatched while the session was
+    // still good can land after a neighbour's 401. Its 200 describes the
+    // session as it was before the expiry, not the one the banner is about.
+    it('is not taken down by a success that was already in flight when it went up', async () => {
+        bootPage();
+        await settle();
+
+        let releaseSlow;
+        const slow = new Promise(resolve => { releaseSlow = resolve; });
+
+        window.fetch = jest.fn(async url => (String(url).includes('slow') ? slow : unauthorized()));
+
+        const inFlight = window.apiFetch('/api/v1/guild/1/slow');
+        await window.apiFetch('/api/v1/guild/1/stats');
+        expect(banner().hidden).toBe(false);
+
+        releaseSlow(ok({}));
+        await inFlight;
+
+        expect(banner().hidden).toBe(false);
+    });
+
     it('does not raise the banner for a plain server error', async () => {
         bootPage();
         await settle();
