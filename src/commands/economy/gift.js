@@ -13,7 +13,9 @@ const {
     BUDGETS, giftLimits, budgetState, spendBudget, spendBudgetPipeline,
     refundBudgetPipeline,
 } = require('../../utils/giftCaps');
-const { accountAgeRefusal, coinBudgets, commitCoinTransfer } = require('../../utils/coinTransfer');
+const {
+    accountAgeRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
+} = require('../../utils/coinTransfer');
 const { isSoulbound } = require('../../data/soulboundItems');
 const { resolveEffectType } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
@@ -286,18 +288,11 @@ module.exports = {
                 refundKey: interaction.id, service: 'gift', jobName: 'giftCoins',
             });
 
-            if (moved.status === 'debit_failed') {
-                return deny('Could not complete the transfer — your balance or daily gift cap may have changed.');
-            }
-            if (moved.status !== 'ok') {
-                const why = moved.status === 'receive_cap'
-                    ? `<@${target.id}> just reached their daily gift-receiving cap`
-                    : 'something went wrong sending your coins';
-                if (moved.refunded) return deny(`Could not complete the transfer — ${why}. Your coins were returned.`);
-                return deny(moved.owed
-                    ? `Could not complete the transfer — ${why}, and returning your **${currency}${amount.toLocaleString()}** failed too. It is recorded and an admin can restore it.`
-                    : `Could not complete the transfer — ${why}, and returning your coins failed. Please contact a server admin.`);
-            }
+            const refusal = transferRefusal(moved, {
+                mention: `<@${target.id}>`, currency, amount,
+                sendCapLabel: 'daily gift cap', receiveCapLabel: 'daily gift-receiving cap',
+            });
+            if (refusal) return deny(refusal);
 
             const { sender: deducted, receiver: credited } = moved;
 

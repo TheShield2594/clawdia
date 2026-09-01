@@ -171,11 +171,20 @@ async function commitCoinTransfer({
     const status = creditError ? 'credit_failed' : 'receive_cap';
     let rollbackError;
     try {
-        await Model.updateOne(
+        const refund = await Model.updateOne(
             { userId: senderId, guildId },
             { $inc: { balance: amount, ...refundBudget({ ...BUDGETS.coinSend, cap: limits.coinSend, amount }) } },
         );
-        return { status, refunded: true, owed: false, error: creditError ?? null };
+        // A filter that matches nothing resolves without rejecting, so the
+        // result has to be read rather than the absence of a throw taken as
+        // success: if the sender's document went away between the debit and
+        // here, an unchecked `updateOne` refunds nothing and still looks like
+        // it worked. That is the silent loss this module exists to prevent, so
+        // an unmatched refund is treated exactly like a rejected one.
+        if ((refund?.matchedCount ?? refund?.n ?? 0) > 0) {
+            return { status, refunded: true, owed: false, error: creditError ?? null };
+        }
+        rollbackError = new Error(`refund for ${senderId} in ${guildId} matched no document`);
     } catch (err) {
         rollbackError = err;
     }
@@ -206,4 +215,47 @@ async function commitCoinTransfer({
     return { status, refunded: false, owed, error: creditError ?? rollbackError };
 }
 
-module.exports = { MIN_ACCOUNT_AGE_MS, accountAgeRefusal, coinBudgets, commitCoinTransfer };
+/**
+ * What to tell the sender when `commitCoinTransfer` did not move the coins.
+ *
+ * Both commands had their own copy of this decision tree over `status`,
+ * `refunded` and `owed`, differing only in what they call the two caps and who
+ * they name as the recipient. A status added to `commitCoinTransfer` would have
+ * had to be handled in both, and one of them would have been missed — which
+ * matters here more than it usually does, because the branch most likely to be
+ * forgotten is the one that says the coins are neither sent nor returned.
+ *
+ * Returns null for a successful transfer, so a caller can treat a string as
+ * "there is something to say".
+ *
+ * @param {object} moved   the `commitCoinTransfer` result
+ * @param {object} opts
+ * @param {string} opts.mention          how to name the recipient, already formatted
+ * @param {string} opts.currency
+ * @param {number} opts.amount
+ * @param {string} opts.sendCapLabel     e.g. 'daily gift cap'
+ * @param {string} opts.receiveCapLabel  e.g. 'daily gift-receiving cap'
+ */
+function transferRefusal(moved, { mention, currency, amount, sendCapLabel, receiveCapLabel }) {
+    if (moved.status === 'ok') return null;
+
+    if (moved.status === 'debit_failed') {
+        return `Could not complete the transfer — your balance or ${sendCapLabel} may have changed.`;
+    }
+
+    const why = moved.status === 'receive_cap'
+        ? `${mention} just reached their ${receiveCapLabel}`
+        : 'something went wrong sending your coins';
+
+    if (moved.refunded) return `Could not complete the transfer — ${why}. Your coins were returned.`;
+
+    // Neither sent nor returned. `owed` decides whether that is recoverable,
+    // and the two must not be worded the same.
+    return moved.owed
+        ? `Could not complete the transfer — ${why}, and returning your **${currency}${amount.toLocaleString()}** failed too. It is recorded and an admin can restore it.`
+        : `Could not complete the transfer — ${why}, and returning your coins failed. Please contact a server admin.`;
+}
+
+module.exports = {
+    MIN_ACCOUNT_AGE_MS, accountAgeRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
+};

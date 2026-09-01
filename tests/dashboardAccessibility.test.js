@@ -500,6 +500,20 @@ describe('the Getting Started collapse', () => {
         expect([btn.getAttribute('aria-expanded'), body.style.display]).toEqual(['true', '']);
     });
 
+    it('toggles from a click anywhere in the header, subtitle included', () => {
+        // The whole header was the click target before this was a button, so a
+        // subtitle left outside it would be the one part of the header that
+        // silently stopped working.
+        const btn = toggle();
+        const subtitle = document.getElementById('gs-subtitle');
+        expect(subtitle).not.toBeNull();
+        expect(btn.contains(subtitle)).toBe(true);
+
+        subtitle.click();
+        expect(btn.getAttribute('aria-expanded')).toBe('false');
+        expect(document.getElementById('getting-started-body').style.display).toBe('none');
+    });
+
     it('leaves the glyph to the eye only', () => {
         // ▾/▸ is the state for a sighted reader and noise for everyone else —
         // aria-expanded above is what carries it now, so the glyph is hidden

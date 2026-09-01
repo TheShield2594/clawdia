@@ -654,10 +654,11 @@ async function handleBuy(interaction, currency) {
             { userId: listing.sellerId, guildId: interaction.guild.id }, { balance: 1 },
         ).lean().catch(() => null))?.balance ?? 0;
 
+        let owedRecorded = false;
         if (!sellerPaid) {
             const reason = sellerErr?.message
                 ?? `credit for ${listing.sellerId} in ${interaction.guild.id} matched nothing (${sellerStatus})`;
-            const recorded = await recordOwedPayout({
+            owedRecorded = await recordOwedPayout({
                 service: 'market',
                 jobName: 'buyListing',
                 guildId: interaction.guild.id,
@@ -673,7 +674,7 @@ async function handleBuy(interaction, currency) {
             });
             console.error(
                 `[market buy] listing ${listing._id} sold but crediting ${sellerReceives} to ` +
-                `${listing.sellerId} failed — ${recorded ? 'recorded as owed' : 'NOT RECORDED'}:`, reason,
+                `${listing.sellerId} failed — ${owedRecorded ? 'recorded as owed' : 'NOT RECORDED'}:`, reason,
             );
         }
 
@@ -691,7 +692,9 @@ async function handleBuy(interaction, currency) {
 
         // The buyer's side of the trade is complete whatever happened above, so
         // this is still a success — but the receipt does not claim the seller
-        // was paid when they were not.
+        // was paid when they were not, nor that the payout is recorded when the
+        // queue write failed too: `recordOwedPayout` returns false for that, and
+        // an unrecorded payout is the one case a human has to be told about.
         return editReply({
             embeds: [new EmbedBuilder()
                 .setColor(COLORS.SUCCESS)
@@ -701,7 +704,13 @@ async function handleBuy(interaction, currency) {
                     { name: 'Fee Burned', value: `${currency}${feeAmount.toLocaleString()}`, inline: true },
                     sellerPaid
                         ? { name: 'Seller Received', value: `${currency}${sellerReceives.toLocaleString()}`, inline: true }
-                        : { name: 'Seller Payout',   value: `${currency}${sellerReceives.toLocaleString()} — delayed, recorded as owed`, inline: true },
+                        : {
+                            name: 'Seller Payout',
+                            value: owedRecorded
+                                ? `${currency}${sellerReceives.toLocaleString()} — delayed, recorded as owed`
+                                : `${currency}${sellerReceives.toLocaleString()} — delayed and not recorded, please contact a server admin`,
+                            inline: true,
+                        },
                 )
                 .setTimestamp()
             ],

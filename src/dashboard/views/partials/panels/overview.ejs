@@ -33,11 +33,18 @@
                             <button type="button" id="gs-toggle" class="gs-toggle"
                                     aria-expanded="true" aria-controls="getting-started-body"
                                     onclick="toggleGettingStarted()">
-                                <span>Getting started</span>
+                                <%# The subtitle sits inside the button, not beside it: the whole
+                                    header used to be the click target and a subtitle left outside
+                                    would be the one part of it that stopped working. It joins the
+                                    button's accessible name, which reads well for a disclosure —
+                                    "Getting started, 2 of 5 steps complete". %>
+                                <span class="gs-toggle-text">
+                                    <span>Getting started</span>
+                                    <span class="dash-card-sub" id="gs-subtitle">Complete these steps to finish setting up Clawdia</span>
+                                </span>
                                 <span id="gs-toggle-icon" class="gs-toggle-icon" aria-hidden="true">▾</span>
                             </button>
                         </h2>
-                        <div class="dash-card-sub" id="gs-subtitle">Complete these steps to finish setting up Clawdia</div>
                     </div>
                     <div id="getting-started-body">
                         <div class="dash-module-list" style="display:flex;flex-direction:column;gap:.35rem;padding-top:.25rem">

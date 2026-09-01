@@ -58,6 +58,15 @@ beforeEach(() => {
     jest.clearAllMocks();
 });
 
+// Some tests below replace a method on the model outright — the only way to make
+// a specific write reject. `jest.clearAllMocks()` clears call history but leaves
+// the replacement in place, so a patch that outlives its test (a failed assertion
+// skipping an in-body restore, or a stub that never had one) is inherited by
+// everything after it. That is an order-dependent failure which reproduces only
+// in a full run, so the whole method table is snapshotted and put back.
+const pristineUserModel = { ...mockUsers.model };
+afterEach(() => { Object.assign(mockUsers.model, pristineUserModel); });
+
 describe('/bank transfer', () => {
     it('moves the coins and logs both sides', async () => {
         seedGuild();
@@ -72,6 +81,25 @@ describe('/bank transfer', () => {
         expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ type: 'transfer_send', amount: -1_000 }));
         expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ type: 'transfer_receive', amount: 1_000 }));
         expectNonNegativeBalance([mockUsers.get(SENDER_ID), mockUsers.get(RECIPIENT_ID)], 'bank transfer');
+    });
+
+    it('acknowledges the interaction before touching the database', async () => {
+        // Two reads and up to three writes against Discord's three-second
+        // acknowledgement window: without a defer a slow database shows the
+        // member "the application did not respond" with the coins already moved.
+        seedGuild();
+        seedUser(SENDER_ID, { balance: 5_000 });
+        seedUser(RECIPIENT_ID, { balance: 0 });
+
+        const interaction = await run({ user: recipient(), amount: 1_000 });
+
+        expect(interaction.deferReply).toHaveBeenCalledWith(expect.objectContaining({
+            flags: expect.anything(),
+        }));
+        expect(interaction.reply).not.toHaveBeenCalled();
+        // The transfer is still announced in the channel the way it always was;
+        // only the sender's receipt and the refusals are private.
+        expect(interaction.followUp).toHaveBeenCalled();
     });
 
     it('spends the same daily budget /gift does, rather than one of its own', async () => {
@@ -198,7 +226,6 @@ describe('/bank transfer', () => {
         expect(mockUsers.get(SENDER_ID).dailyGiftSent).toBe(0);
         expect(mockUsers.get(RECIPIENT_ID).balance).toBe(0);
 
-        mockUsers.model.findOneAndUpdate = real;
         console.error.mockRestore();
     });
 
@@ -221,7 +248,6 @@ describe('/bank transfer', () => {
         // the difference between a bug report and a silent loss.
         expect(repliedText(interaction)).toContain('It is recorded and an admin can restore it');
 
-        mockUsers.model.findOneAndUpdate = real;
         console.error.mockRestore();
     });
 });

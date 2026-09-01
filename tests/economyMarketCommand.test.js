@@ -96,6 +96,15 @@ beforeEach(() => {
     });
 });
 
+// Some tests below replace a method on the model outright — the only way to make
+// a specific write reject. `jest.clearAllMocks()` clears call history but leaves
+// the replacement in place, so a patch that outlives its test (a failed assertion
+// skipping an in-body restore, or a stub that never had one) is inherited by
+// everything after it. That is an order-dependent failure which reproduces only
+// in a full run, so the whole method table is snapshotted and put back.
+const pristineUserModel = { ...mockUsers.model };
+afterEach(() => { Object.assign(mockUsers.model, pristineUserModel); });
+
 describe('listing an item', () => {
     it('takes the stock out of the bag and creates the listing', async () => {
         seedGuild();
@@ -692,7 +701,6 @@ describe('paying the seller', () => {
         expect(mockUsers.get(BUYER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 2 }]);
         expect(repliedText(interaction)).toContain('Purchase Complete');
 
-        mockUsers.model.findOneAndUpdate = real;
         console.error.mockRestore();
     });
 
@@ -706,6 +714,23 @@ describe('paying the seller', () => {
 
         expect(repliedText(interaction)).toContain('recorded as owed');
         expect(repliedText(interaction)).not.toContain('Seller Received');
+        console.error.mockRestore();
+    });
+
+    it('does not claim the payout is recorded when the queue write failed too', async () => {
+        // recordOwedPayout returns false when the FailedJob write fails. Saying
+        // "recorded as owed" then would tell the buyer the seller's coins are
+        // tracked when nothing is tracking them.
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        recordOwedPayout.mockResolvedValueOnce(false);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('not recorded');
+        expect(repliedText(interaction)).not.toContain('recorded as owed');
         console.error.mockRestore();
     });
 

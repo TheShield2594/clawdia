@@ -134,7 +134,12 @@ function matches(doc, query, state) {
             // are enforced — the cap check lives in the write's own filter so a
             // concurrent transfer cannot slip past a check it invalidated — so a
             // mock that waved it through would report every cap as working.
-            if (!evaluate(condition, doc)) return false;
+            //
+            // `$$NOW` is bound the way applyPipelineUpdate binds it, because
+            // the real server resolves it in an `$expr` filter too — without it
+            // a cap filter that reached for the clock would throw "unbound
+            // variable" here and match on the server.
+            if (!evaluate(condition, doc, { NOW: new Date() })) return false;
         } else if (field.startsWith('$')) {
             throw new Error(`fakeCollection: unsupported top-level operator ${field}`);
         } else if (!matchesField(doc, field, condition, state)) {

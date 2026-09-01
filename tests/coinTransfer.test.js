@@ -56,6 +56,15 @@ beforeEach(() => {
     jest.clearAllMocks();
 });
 
+// Some tests below replace a method on the model outright — the only way to make
+// a specific write reject. `jest.clearAllMocks()` clears call history but leaves
+// the replacement in place, so a patch that outlives its test (a failed assertion
+// skipping an in-body restore, or a stub that never had one) is inherited by
+// everything after it. That is an order-dependent failure which reproduces only
+// in a full run, so the whole method table is snapshotted and put back.
+const pristineUserModel = { ...mockUsers.model };
+afterEach(() => { Object.assign(mockUsers.model, pristineUserModel); });
+
 describe('a transfer that works', () => {
     it('moves the coins and opens both daily windows', async () => {
         seed(SENDER, { balance: 5_000 });
@@ -156,7 +165,10 @@ describe('the daily caps', () => {
 });
 
 describe('a credit that will not land', () => {
-    /** Make the receiver's guarded credit fail, leaving every other write alone. */
+    /**
+     * Make the receiver's guarded credit fail, leaving every other write alone.
+     * The afterEach above puts the method back, so no test has to remember to.
+     */
     const breakCredit = (error, { times = Infinity } = {}) => {
         const real = mockUsers.model.findOneAndUpdate;
         let left = times;
@@ -164,7 +176,6 @@ describe('a credit that will not land', () => {
             if (query.userId === RECEIVER && left > 0) { left -= 1; throw error; }
             return real(query, update, options);
         });
-        return () => { mockUsers.model.findOneAndUpdate = real; };
     };
 
     beforeEach(() => { jest.spyOn(console, 'error').mockImplementation(() => {}); });
@@ -173,7 +184,7 @@ describe('a credit that will not land', () => {
     it('rolls the sender back rather than destroying their coins', async () => {
         seed(SENDER, { balance: 5_000 });
         seed(RECEIVER, { balance: 0 });
-        const restore = breakCredit(new Error('connection reset'));
+        breakCredit(new Error('connection reset'));
 
         const result = await transfer(1_000);
 
@@ -182,7 +193,6 @@ describe('a credit that will not land', () => {
         expect(mockUsers.get(SENDER).dailyGiftSent).toBe(0);
         expect(mockUsers.get(RECEIVER).balance).toBe(0);
         expect(recordOwedPayout).not.toHaveBeenCalled();
-        restore();
     });
 
     it('retries once on the duplicate-key error an upsert race raises', async () => {
@@ -191,26 +201,24 @@ describe('a credit that will not land', () => {
         seed(SENDER, { balance: 5_000 });
         seed(RECEIVER, { balance: 0 });
         const e11000 = Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
-        const restore = breakCredit(e11000, { times: 1 });
+        breakCredit(e11000, { times: 1 });
 
         const result = await transfer(1_000);
 
         expect(result.status).toBe('ok');
         expect(mockUsers.get(RECEIVER).balance).toBe(1_000);
-        restore();
     });
 
     it('does not retry an error that is not a duplicate key', async () => {
         // Repeating a write whose outcome is unknown is how a credit lands twice.
         seed(SENDER, { balance: 5_000 });
         seed(RECEIVER, { balance: 0 });
-        const restore = breakCredit(new Error('connection reset'), { times: 1 });
+        breakCredit(new Error('connection reset'), { times: 1 });
 
         const result = await transfer(1_000);
 
         expect(result.status).toBe('credit_failed');
         expect(mockUsers.get(RECEIVER).balance).toBe(0);
-        restore();
     });
 
     it('records the refund as owed when the rollback fails too', async () => {
@@ -218,7 +226,7 @@ describe('a credit that will not land', () => {
         // credit did not, and the refund could not be written either.
         seed(SENDER, { balance: 5_000 });
         seed(RECEIVER, { balance: 0 });
-        const restore = breakCredit(new Error('connection reset'));
+        breakCredit(new Error('connection reset'));
         mockUsers.model.updateOne = jest.fn(async () => { throw new Error('still down'); });
 
         const result = await transfer(1_000, { refundKey: 'interaction-77' });
@@ -235,7 +243,32 @@ describe('a credit that will not land', () => {
                 payoutKey: 'transfer:interaction-77:refund',
             },
         }));
-        restore();
+    });
+
+    it('records the refund as owed when the rollback matches no document', async () => {
+        // `updateOne` resolves without rejecting when its filter matches nothing,
+        // so an unchecked refund is indistinguishable from one that landed. If
+        // the sender's document went away between the debit and the rollback,
+        // reporting `refunded: true` would tell them their coins came back and
+        // leave the replay job with nothing to settle — the silent loss this
+        // module exists to prevent, one layer further in.
+        seed(SENDER, { balance: 5_000 });
+        seed(RECEIVER, { balance: 0 });
+        breakCredit(new Error('connection reset'));
+        const real = mockUsers.model.updateOne;
+        mockUsers.model.updateOne = jest.fn(async (query, update, options) => {
+            if (query.userId === SENDER) return { matchedCount: 0, modifiedCount: 0 };
+            return real(query, update, options);
+        });
+
+        const result = await transfer(1_000, { refundKey: 'interaction-88' });
+
+        expect(result).toMatchObject({ status: 'credit_failed', refunded: false, owed: true });
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            payload: expect.objectContaining({
+                amount: 1_000, payoutKey: 'transfer:interaction-88:refund',
+            }),
+        }));
     });
 
     it('reports the payout unrecorded when even the queue write fails', async () => {
@@ -243,14 +276,13 @@ describe('a credit that will not land', () => {
         // "recoverable" from "gone", and only one of the two is worth promising.
         seed(SENDER, { balance: 5_000 });
         seed(RECEIVER, { balance: 0 });
-        const restore = breakCredit(new Error('connection reset'));
+        breakCredit(new Error('connection reset'));
         mockUsers.model.updateOne = jest.fn(async () => { throw new Error('still down'); });
         recordOwedPayout.mockResolvedValueOnce(false);
 
         const result = await transfer(1_000);
 
         expect(result).toMatchObject({ refunded: false, owed: false });
-        restore();
     });
 });
 

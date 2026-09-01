@@ -3,7 +3,7 @@ const User = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { logTransaction } = require('../../utils/logTransaction');
 const { giftLimits } = require('../../utils/giftCaps');
-const { accountAgeRefusal, coinBudgets, commitCoinTransfer } = require('../../utils/coinTransfer');
+const { accountAgeRefusal, coinBudgets, commitCoinTransfer, transferRefusal } = require('../../utils/coinTransfer');
 const COLORS = require('../../utils/embedColors');
 
 async function getCurrency(guildId) {
@@ -144,7 +144,16 @@ async function handleTransfer(interaction) {
         return interaction.reply({ content: 'You cannot transfer coins to yourself!', flags: MessageFlags.Ephemeral });
     }
 
-    const deny = content => interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    // Deferred before any database work, and ephemerally. Everything below is
+    // up to two reads and three writes against Discord's three-second
+    // acknowledgement window, and a slow database turned that into "the
+    // application did not respond" with the coins already moved. gift.js
+    // defers first for exactly this reason; the public announcement is a
+    // followUp at the end, so the transfer is still posted in the channel the
+    // way it always was, and the refusals stay private the way they always
+    // were.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const deny = content => interaction.editReply({ content, embeds: [], components: [] });
 
     const guildSettings = await getGuildSettings(guildId);
     const currency = guildSettings?.economy?.currency ?? '💰';
@@ -178,20 +187,11 @@ async function handleTransfer(interaction) {
         refundKey: interaction.id, service: 'bank', jobName: 'bankTransfer',
     });
 
-    if (moved.status === 'debit_failed') {
-        return deny('Could not complete the transfer — your balance or daily transfer cap may have changed.');
-    }
-    if (moved.status !== 'ok') {
-        const why = moved.status === 'receive_cap'
-            ? `<@${recipient.id}> just reached their daily receiving cap`
-            : 'something went wrong sending your coins';
-        if (moved.refunded) return deny(`Could not complete the transfer — ${why}. Your coins were returned.`);
-        // The case that used to destroy the coins in silence. They are neither
-        // sent nor returned, so say that, and say it is recoverable.
-        return deny(moved.owed
-            ? `Could not complete the transfer — ${why}, and returning your **${currency}${amount.toLocaleString()}** failed too. It is recorded and an admin can restore it.`
-            : `Could not complete the transfer — ${why}, and returning your coins failed. Please contact a server admin.`);
-    }
+    const refusal = transferRefusal(moved, {
+        mention: `<@${recipient.id}>`, currency, amount,
+        sendCapLabel: 'daily transfer cap', receiveCapLabel: 'daily receiving cap',
+    });
+    if (refusal) return deny(refusal);
 
     const { sender, receiver } = moved;
 
@@ -222,7 +222,11 @@ async function handleTransfer(interaction) {
         )
         .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({
+        content: `✅ Sent **${currency}${amount.toLocaleString()}** to **${recipient.username}**.`,
+        embeds: [], components: [],
+    });
+    return interaction.followUp({ embeds: [embed] });
 }
 
 module.exports = {
