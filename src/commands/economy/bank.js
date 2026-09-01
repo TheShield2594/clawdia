@@ -2,6 +2,8 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const User = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { logTransaction } = require('../../utils/logTransaction');
+const { giftLimits } = require('../../utils/giftCaps');
+const { accountAgeRefusal, coinBudgets, commitCoinTransfer, transferRefusal } = require('../../utils/coinTransfer');
 const COLORS = require('../../utils/embedColors');
 
 async function getCurrency(guildId) {
@@ -117,9 +119,23 @@ async function handleWithdraw(interaction) {
     await interaction.reply({ embeds: [embed] });
 }
 
+/**
+ * `/bank transfer` — the same coin movement `/gift type:coins` performs, and now
+ * literally the same code (#897).
+ *
+ * It used to be its own implementation and a poorer one: no daily cap, no
+ * account-age gate, no accounting, so the anti-alt caps `/gift` enforces were
+ * decorative — anyone who hit the gift cap simply transferred instead. It also
+ * debited the sender and then credited the receiver with nothing watching the
+ * second write, so a credit that threw destroyed the coins outright (#868).
+ *
+ * Both are properties of moving coins rather than of having typed `/gift`, so
+ * they live in utils/coinTransfer.js and this is the wording around them.
+ */
 async function handleTransfer(interaction) {
     const recipient = interaction.options.getUser('user');
     const amount = interaction.options.getInteger('amount');
+    const guildId = interaction.guild.id;
 
     if (recipient.bot) {
         return interaction.reply({ content: 'You cannot transfer coins to bots!', flags: MessageFlags.Ephemeral });
@@ -128,51 +144,89 @@ async function handleTransfer(interaction) {
         return interaction.reply({ content: 'You cannot transfer coins to yourself!', flags: MessageFlags.Ephemeral });
     }
 
-    // Standalone MongoDB doesn't support multi-doc transactions; use atomic $inc
-    // to debit only if the sender has the funds, then credit the receiver.
-    try {
-        const sender = await User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: amount } },
-            { $inc: { balance: -amount } },
-            { new: true }
-        );
+    // Deferred before any database work, and ephemerally. Everything below is
+    // up to two reads and three writes against Discord's three-second
+    // acknowledgement window, and a slow database turned that into "the
+    // application did not respond" with the coins already moved. gift.js
+    // defers first for exactly this reason; the public announcement is a
+    // followUp at the end, so the transfer is still posted in the channel the
+    // way it always was, and the refusals stay private the way they always
+    // were.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const deny = content => interaction.editReply({ content, embeds: [], components: [] });
 
-        if (!sender) {
-            const existing = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            const currentBal = existing ? existing.balance : 0;
-            return interaction.reply({
-                content: `You don't have enough coins! Your balance: ${currentBal.toLocaleString()} coins`,
-                flags: MessageFlags.Ephemeral
-            });
-        }
+    const guildSettings = await getGuildSettings(guildId);
+    const currency = guildSettings?.economy?.currency ?? '💰';
+    const limits = giftLimits(guildSettings);
 
-        const receiver = await User.findOneAndUpdate(
-            { userId: recipient.id, guildId: interaction.guild.id },
-            { $inc: { balance: amount }, $setOnInsert: { userId: recipient.id, guildId: interaction.guild.id } },
-            { upsert: true, new: true }
-        );
+    const tooNew = accountAgeRefusal(interaction.user, recipient);
+    if (tooNew) return deny(tooNew);
 
-        logTransaction({
-            userId: interaction.user.id, guildId: interaction.guild.id, type: 'transfer_send',
-            amount: -amount, balance: sender.balance, relatedUserId: recipient.id
-        });
-        logTransaction({
-            userId: recipient.id, guildId: interaction.guild.id, type: 'transfer_receive',
-            amount, balance: receiver.balance, relatedUserId: interaction.user.id
-        });
+    // Read both sides for the refusal messages below. The atomic filters inside
+    // commitCoinTransfer are what actually enforce the balance and the caps.
+    const [senderNow, receiverNow] = await Promise.all([
+        User.findOne({ userId: interaction.user.id, guildId }),
+        User.findOne({ userId: recipient.id, guildId }),
+    ]);
 
-        const embed = new EmbedBuilder()
-            .setColor(COLORS.SUCCESS)
-            .setTitle('Transfer Successful')
-            .setDescription(`You transferred **${amount.toLocaleString()}** coins to ${recipient}`)
-            .addFields({ name: 'Your New Balance', value: `${sender.balance.toLocaleString()} coins` })
-            .setTimestamp();
-
-        await interaction.reply({ embeds: [embed] });
-    } catch (error) {
-        console.error('Transfer error:', error);
-        await interaction.reply({ content: 'Failed to transfer coins.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    if (!senderNow || senderNow.balance < amount) {
+        return deny(`You don't have enough coins! Your balance: ${(senderNow?.balance ?? 0).toLocaleString()} coins`);
     }
+
+    const budgets = coinBudgets(senderNow, receiverNow, limits);
+    if (amount > budgets.send.remaining) {
+        return deny(`Daily transfer cap reached. You can still send up to **${currency}${budgets.send.remaining.toLocaleString()}** today.`);
+    }
+    if (amount > budgets.receive.remaining) {
+        return deny(`<@${recipient.id}> has reached their daily receiving cap. They can receive up to **${currency}${budgets.receive.remaining.toLocaleString()}** more today.`);
+    }
+
+    const moved = await commitCoinTransfer({
+        senderId: interaction.user.id, receiverId: recipient.id, guildId,
+        amount, limits, budgets,
+        refundKey: interaction.id, service: 'bank', jobName: 'bankTransfer',
+    });
+
+    const refusal = transferRefusal(moved, {
+        mention: `<@${recipient.id}>`, currency, amount,
+        sendCapLabel: 'daily transfer cap', receiveCapLabel: 'daily receiving cap',
+    });
+    if (refusal) return deny(refusal);
+
+    const { sender, receiver } = moved;
+
+    logTransaction({
+        userId: interaction.user.id, guildId, type: 'transfer_send',
+        amount: -amount, balance: sender.balance, relatedUserId: recipient.id
+    });
+    logTransaction({
+        userId: recipient.id, guildId, type: 'transfer_receive',
+        amount, balance: receiver.balance, relatedUserId: interaction.user.id
+    });
+
+    const capLeft = limits.coinSend
+        ? Math.max(0, limits.coinSend - (sender.dailyGiftSent ?? 0))
+        : Infinity;
+
+    const embed = new EmbedBuilder()
+        .setColor(COLORS.SUCCESS)
+        .setTitle('Transfer Successful')
+        .setDescription(`You transferred **${amount.toLocaleString()}** coins to ${recipient}`)
+        .addFields(
+            { name: 'Your New Balance', value: `${currency}${sender.balance.toLocaleString()}`, inline: true },
+            {
+                name: 'Daily Cap Left',
+                value: Number.isFinite(capLeft) ? `${currency}${capLeft.toLocaleString()}` : 'no limit',
+                inline: true,
+            },
+        )
+        .setTimestamp();
+
+    await interaction.editReply({
+        content: `✅ Sent **${currency}${amount.toLocaleString()}** to **${recipient.username}**.`,
+        embeds: [], components: [],
+    });
+    return interaction.followUp({ embeds: [embed] });
 }
 
 module.exports = {

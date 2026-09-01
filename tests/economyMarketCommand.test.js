@@ -96,6 +96,15 @@ beforeEach(() => {
     });
 });
 
+// Some tests below replace a method on the model outright — the only way to make
+// a specific write reject. `jest.clearAllMocks()` clears call history but leaves
+// the replacement in place, so a patch that outlives its test (a failed assertion
+// skipping an in-body restore, or a stub that never had one) is inherited by
+// everything after it. That is an order-dependent failure which reproduces only
+// in a full run, so the whole method table is snapshotted and put back.
+const pristineUserModel = { ...mockUsers.model };
+afterEach(() => { Object.assign(mockUsers.model, pristineUserModel); });
+
 describe('listing an item', () => {
     it('takes the stock out of the bag and creates the listing', async () => {
         seedGuild();
@@ -595,6 +604,151 @@ describe('buying a listing', () => {
 
         expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ type: 'market_sell', amount: 190 }));
         expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ type: 'market_buy', amount: -200 }));
+    });
+});
+
+/**
+ * #869. The seller's proceeds were an unguarded, unretried write with no upsert
+ * and no check on its result. It ran last — after the buyer had paid, after the
+ * item had moved, after the listing was deleted — so both of its failure modes
+ * lost the coins outright: a `null` return was ignored (and logged as
+ * `balance: 0`), and a throw escaped with the trade already done.
+ *
+ * Neither left an owed record, so unlike every other credit in the economy there
+ * was nothing for `npm run payouts:replay` to settle, and unlike `/bank transfer`
+ * there was not even a failure message — the purchase looked successful.
+ */
+describe('paying the seller', () => {
+    const sellerCredit = () => mockUsers.writes.find(w =>
+        w.query?.userId === SELLER_ID && Array.isArray(w.update));
+
+    it('is guarded by a key, so a replay cannot pay it twice', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0 });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        // Keyed by the listing, which this flow has just deleted, so the id can
+        // never come round again.
+        expect(sellerCredit().query['paidPayouts.key']).toEqual({ $ne: 'listing:listing-1:sale' });
+        expect(mockUsers.get(SELLER_ID).paidPayouts.map(p => p.key)).toEqual(['listing:listing-1:sale']);
+        expect(mockUsers.get(SELLER_ID).balance).toBe(190);
+    });
+
+    it('moves no coins a second time when the key is already on the document', async () => {
+        // The write that committed without its response arriving, replayed.
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 190, paidPayouts: [{ key: 'listing:listing-1:sale', at: new Date() }] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(mockUsers.get(SELLER_ID).balance).toBe(190);
+        // A duplicate is a success, not an owed payout: the coins are there.
+        expect(recordOwedPayout).not.toHaveBeenCalled();
+        expect(repliedText(interaction)).toContain('Purchase Complete');
+    });
+
+    it('records the payout as owed when the seller has no document to credit', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        // No seller document at all — the `null` return that used to be dropped.
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'market',
+            jobName: 'buyListing',
+            guildId: GUILD_ID,
+            payload: expect.objectContaining({
+                kind: 'coins', userId: SELLER_ID, guildId: GUILD_ID,
+                amount: 190, payoutKey: 'listing:listing-1:sale',
+            }),
+        }));
+        // No document is created for them: crediting a user who has never
+        // played would resurrect a pruned account.
+        expect(mockUsers.get(SELLER_ID)).toBeNull();
+        console.error.mockRestore();
+    });
+
+    it('records the payout as owed when the credit throws', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0 });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const real = mockUsers.model.findOneAndUpdate;
+        mockUsers.model.findOneAndUpdate = jest.fn(async (query, update, options) => {
+            if (query.userId === SELLER_ID) throw new Error('connection reset');
+            return real(query, update, options);
+        });
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            payload: expect.objectContaining({ amount: 190, payoutKey: 'listing:listing-1:sale' }),
+            error: expect.objectContaining({ message: 'connection reset' }),
+        }));
+        // The buyer's side stands — they paid and they have the item — so the
+        // throw must not take the whole purchase with it.
+        expect(mockUsers.get(BUYER_ID).balance).toBe(800);
+        expect(mockUsers.get(BUYER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 2 }]);
+        expect(repliedText(interaction)).toContain('Purchase Complete');
+
+        console.error.mockRestore();
+    });
+
+    it('does not tell the buyer the seller was paid when they were not', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('recorded as owed');
+        expect(repliedText(interaction)).not.toContain('Seller Received');
+        console.error.mockRestore();
+    });
+
+    it('does not claim the payout is recorded when the queue write failed too', async () => {
+        // recordOwedPayout returns false when the FailedJob write fails. Saying
+        // "recorded as owed" then would tell the buyer the seller's coins are
+        // tracked when nothing is tracking them.
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        recordOwedPayout.mockResolvedValueOnce(false);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('not recorded');
+        expect(repliedText(interaction)).not.toContain('recorded as owed');
+        console.error.mockRestore();
+    });
+
+    it('still writes the sale to the audit log, saying the payout is owed', async () => {
+        // A row that only appears when the credit lands leaves the coins
+        // unaccounted for exactly when someone goes looking for them.
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'market_sell', amount: 190,
+            note: expect.stringContaining('payout owed'),
+        }));
+        console.error.mockRestore();
     });
 });
 

@@ -23,7 +23,7 @@
  * own declarations and refuses a factory that closes over anything else.
  */
 
-const { applyPipelineUpdate } = require('./pipelineUpdate');
+const { applyPipelineUpdate, evaluate } = require('./pipelineUpdate');
 
 const isPlainObject = v => v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date);
 
@@ -128,6 +128,18 @@ function matches(doc, query, state) {
             if (!condition.every(clause => matches(doc, clause, state))) return false;
         } else if (field === '$nor') {
             if (condition.some(clause => matches(doc, clause, state))) return false;
+        } else if (field === '$expr') {
+            // Evaluated for real, with the same evaluator that applies a
+            // pipeline update. `$expr` is how the daily gift and transfer caps
+            // are enforced — the cap check lives in the write's own filter so a
+            // concurrent transfer cannot slip past a check it invalidated — so a
+            // mock that waved it through would report every cap as working.
+            //
+            // `$$NOW` is bound the way applyPipelineUpdate binds it, because
+            // the real server resolves it in an `$expr` filter too — without it
+            // a cap filter that reached for the clock would throw "unbound
+            // variable" here and match on the server.
+            if (!evaluate(condition, doc, { NOW: new Date() })) return false;
         } else if (field.startsWith('$')) {
             throw new Error(`fakeCollection: unsupported top-level operator ${field}`);
         } else if (!matchesField(doc, field, condition, state)) {
@@ -222,6 +234,14 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
     let docs = [];
     const writes = [];
 
+    // A fresh copy of the defaults per document. `{ ...defaults }` is shallow,
+    // so every document that did not name its own `inventory` shared one array
+    // — and a flow that pushes an item into a user's bag was pushing into every
+    // other seeded user's bag as well, across tests, since the defaults outlive
+    // reset(). It surfaced as a stray quantity in an unrelated assertion, which
+    // is the worst way for it to surface.
+    const freshDefaults = () => structuredClone(defaults);
+
     const uniqueKey = doc => (unique.length ? unique.map(field => getPath(doc, field)).join('\u0000') : null);
 
     /** A document as the caller gets it: a deep copy, plus a save() that writes back. */
@@ -252,7 +272,7 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
      * E11000 the real server answers with rather than as a silent second row.
      */
     function insert(query, update) {
-        const stored = { ...defaults };
+        const stored = freshDefaults();
         for (const [field, condition] of Object.entries(query)) {
             if (!field.startsWith('$') && !isPlainObject(condition)) setPath(stored, field, condition);
         }
@@ -369,7 +389,7 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
         }),
 
         create: jest.fn(async fields => {
-            const stored = { _id: `id-${docs.length + 1}`, ...defaults, ...fields };
+            const stored = { _id: `id-${docs.length + 1}`, ...freshDefaults(), ...fields };
             docs.push(stored);
             writes.push({ op: 'create', doc: stored._id });
             return hydrate(stored);
@@ -384,7 +404,7 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
         writes,
         /** Put documents in. Each is merged over `defaults`. */
         seed(...seeded) {
-            for (const doc of seeded.flat()) docs.push({ ...defaults, ...doc });
+            for (const doc of seeded.flat()) docs.push({ ...freshDefaults(), ...doc });
             return this;
         },
         /** The stored document, by userId — the live one, not a copy. */

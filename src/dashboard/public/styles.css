@@ -1246,11 +1246,14 @@ textarea.auto-resize {
 .cw-show-stat .delta { font-size: 11.5px; color: var(--good); margin-top: 6px; font-family: 'JetBrains Mono', monospace; }
 .cw-show-stat .delta.bad { color: var(--bad); }
 
-/* Compare table */
-.cw-compare { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; border: 1px solid rgba(20,17,13,.1); border-radius: 22px; overflow: hidden; background: #fff; }
-.cw-compare > div { padding: 18px 22px; border-bottom: 1px solid rgba(20,17,13,.06); font-size: 14.5px; }
-.cw-compare > div:nth-child(4n) { border-right: none; }
-.cw-compare > div:nth-child(-n+4) { background: var(--cream-100); font-family: 'JetBrains Mono', monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-600); }
+/* Compare table (#912). The markup is a real <table>; the grid keeps the look
+   it had as a pile of divs. `display: contents` on the row groups and rows
+   drops them out of the box tree so the cells become grid items of the table
+   itself, which is what lets one four-column track list span every row. */
+.cw-compare { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; border: 1px solid rgba(20,17,13,.1); border-radius: 22px; overflow: hidden; background: #fff; border-collapse: collapse; width: 100%; }
+.cw-compare thead, .cw-compare tbody, .cw-compare tr { display: contents; }
+.cw-compare th, .cw-compare td { padding: 18px 22px; border-bottom: 1px solid rgba(20,17,13,.06); font-size: 14.5px; text-align: left; font-weight: 400; vertical-align: top; }
+.cw-compare thead th { background: var(--cream-100); font-family: 'JetBrains Mono', monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-600); }
 .cw-compare .hi { background: rgba(217,119,66,.06); border-left: 2px solid var(--claw-500); }
 .cw-compare-yes { color: var(--good); font-weight: 600; }
 .cw-compare-no { color: var(--ink-400); }
@@ -1497,6 +1500,23 @@ textarea.auto-resize {
 .dash-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; gap: 16px; }
 .dash-card-title { font-family: 'Instrument Serif', serif; font-size: 22px; margin: 0; line-height: 1.1; color: var(--cream-50); }
 .dash-card-sub { font-size: 13px; color: var(--ink-400); margin-top: 4px; }
+
+/* Getting Started collapse (#882). The header is a heading with a full-width
+   button inside it, so the click target is the row it always was while the
+   keyboard and the accessibility tree get a control they can actually use.
+   `display: block` undoes .dash-card-header's flex row — the button does the
+   title/glyph spacing itself now. */
+.gs-header { display: block; }
+.gs-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 16px;
+             background: none; border: 0; padding: 0; margin: 0; cursor: pointer;
+             font: inherit; color: inherit; text-align: left; }
+.gs-toggle-text { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+/* The subtitle is inside the button now, and the button inherits the h2's
+   serif display face — which is not what this line is. Put the body font back
+   on it, and drop the margin the flex `gap` above already provides. */
+.gs-toggle .dash-card-sub { font-family: 'Inter Tight', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin-top: 0; }
+.gs-toggle-icon { font-size: 1.2rem; line-height: 1; flex: none; }
+.gs-toggle:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 4px; border-radius: 4px; }
 .dash-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--ink-850); font-size: 12px; color: var(--ink-200); border: 1px solid var(--ink-800); font-family: 'JetBrains Mono', monospace; }
 
 /* Modules grid */
@@ -1705,10 +1725,12 @@ textarea.auto-resize {
 .analytics-rec-link:hover { text-decoration: underline; }
 .analytics-chart-card { background: var(--surface-2, #1a1510); border: 1px solid var(--border); border-radius: 8px; padding: .85rem 1rem; }
 .analytics-chart-title { font-size: .8rem; font-weight: 600; color: var(--text-dim); margin-bottom: .5rem; text-transform: uppercase; letter-spacing: .04em; }
-/* #669. The numbers behind each chart, as a real table beside the canvas.
+/* Text for a screen reader and no one else — the numbers behind each chart
+   beside the canvas (#669), the compare table's caption (#912).
    Clipped rather than `display: none` — a hidden element is dropped from the
    accessibility tree along with everything in it, which is the very thing this
    is here to avoid. */
+.sr-only,
 .chart-a11y-data {
     position: absolute;
     width: 1px;

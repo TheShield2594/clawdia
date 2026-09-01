@@ -28,6 +28,23 @@
 const DAY_MS = 86_400_000;
 
 /**
+ * The four rolling budgets, by the fields that hold them. Paired here so a call
+ * site names a budget rather than restating a pair of field names each time.
+ *
+ * They live in this module rather than in gift.js because the coin pair is no
+ * longer gift.js's alone: `/bank transfer` spends against the same two windows
+ * through utils/coinTransfer.js (#897), and two tables of field names is exactly
+ * the arrangement in which one of them ends up naming `dailyGiftReset` for the
+ * receive window.
+ */
+const BUDGETS = Object.freeze({
+    coinSend:         { usedField: 'dailyGiftSent',              resetField: 'dailyGiftReset' },
+    coinReceive:      { usedField: 'dailyGiftReceived',          resetField: 'dailyGiftReceivedReset' },
+    itemValueSend:    { usedField: 'dailyGiftItemValueSent',     resetField: 'dailyGiftItemValueReset' },
+    itemValueReceive: { usedField: 'dailyGiftItemValueReceived', resetField: 'dailyGiftItemValueReceivedReset' },
+});
+
+/**
  * Defaults for every configurable gift limit, used when a guild has no value
  * stored. These are the constants that used to live at the top of gift.js.
  */
@@ -189,6 +206,7 @@ function refundBudget({ usedField, cap, amount }) {
 
 module.exports = {
     DAY_MS,
+    BUDGETS,
     GIFT_LIMIT_DEFAULTS,
     LIMIT_KEYS,
     giftLimits,

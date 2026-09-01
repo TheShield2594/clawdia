@@ -259,8 +259,35 @@ function listingPayoutKey(listingId) {
     return `listing:${listingId}`;
 }
 
+/**
+ * The seller's proceeds from a completed sale (#869), as opposed to the stock
+ * `listingPayoutKey` returns when the listing expires unsold.
+ *
+ * Two credits against one listing id, and only one of them can ever happen —
+ * `/market buy` and the expiry sweep both delete the listing to claim it. They
+ * are still keyed apart rather than sharing a key, because the guard is a string
+ * comparison on the user document and nothing there records which of the two
+ * wrote it; a shared key would let a replay of one silently satisfy the other.
+ */
+function marketSalePayoutKey(listingId) {
+    return `listing:${listingId}:sale`;
+}
+
+/**
+ * The sender's refund when a coin transfer could not be completed (#868).
+ *
+ * Keyed by the interaction, which is the one identifier that names *this*
+ * transfer: the same two users moving the same amount a second later is a
+ * different transfer and must refund separately, so a key built from the pair
+ * and the amount would collide and drop the second one.
+ */
+function transferRefundPayoutKey(interactionId) {
+    return `transfer:${interactionId}:refund`;
+}
+
 module.exports = {
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
+    marketSalePayoutKey, transferRefundPayoutKey,
     payoutKeyGuard, payoutKeyAppendExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, isDuplicateKeyError,
     RETENTION_DAYS, RETENTION_MS, KEY_CAP,

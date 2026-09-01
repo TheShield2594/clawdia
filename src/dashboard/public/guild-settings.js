@@ -3914,12 +3914,17 @@ function initGettingStarted() {
 }
 onPanel('overview', initGettingStarted);
 function toggleGettingStarted() {
-    const body = document.getElementById('getting-started-body');
-    const icon = document.getElementById('gs-toggle-icon');
+    const body   = document.getElementById('getting-started-body');
+    const toggle = document.getElementById('gs-toggle');
+    const icon   = document.getElementById('gs-toggle-icon');
     if (!body) return;
-    const isHidden = body.style.display === 'none';
-    body.style.display = isHidden ? '' : 'none';
-    if (icon) icon.textContent = isHidden ? '▾' : '▸';
+    const open = body.style.display === 'none';
+    body.style.display = open ? '' : 'none';
+    // The glyph is decorative (aria-hidden in the view), so aria-expanded is the
+    // only thing reporting the state to anyone not looking at it (#882). The two
+    // move together or the button lies.
+    if (toggle) toggle.setAttribute('aria-expanded', String(open));
+    if (icon) icon.textContent = open ? '▾' : '▸';
 }
 function dismissGettingStarted() {
     const guildId = BOOT.guildId;

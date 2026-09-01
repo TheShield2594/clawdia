@@ -262,47 +262,70 @@
                 <h2 class="cw-section-title">Things other bots<br>charge $9/mo for.</h2>
             </div>
         </div>
-        <div class="cw-compare">
-            <div>Feature</div>
-            <div class="hi">Clawdia</div>
-            <div>MEE6 Pro</div>
-            <div>Carl-bot Premium</div>
+        <%# A real table, because the comparison is the page's main argument and a
+            grid of bare divs reads as a flat run of disconnected words: nothing
+            ties "● included" to either its feature row or its bot column (#912).
 
-            <div>Self-hosted, your data</div>
-            <div class="hi"><span class="cw-compare-yes">● included</span></div>
-            <div><span class="cw-compare-no">— not available</span></div>
-            <div><span class="cw-compare-no">— not available</span></div>
-
-            <div>AI chat (OpenAI / Gemini / Ollama)</div>
-            <div class="hi"><span class="cw-compare-yes">● included</span></div>
-            <div><span class="cw-compare-warn">◐ limited</span></div>
-            <div><span class="cw-compare-no">— not available</span></div>
-
-            <div>Insights &amp; retention cohorts</div>
-            <div class="hi"><span class="cw-compare-yes">● included</span></div>
-            <div><span class="cw-compare-no">— not available</span></div>
-            <div><span class="cw-compare-no">— not available</span></div>
-
-            <div>Daily news digest from multi-feed</div>
-            <div class="hi"><span class="cw-compare-yes">● included</span></div>
-            <div><span class="cw-compare-no">— not available</span></div>
-            <div><span class="cw-compare-no">— not available</span></div>
-
-            <div>Custom welcome cards</div>
-            <div class="hi"><span class="cw-compare-yes">● included</span></div>
-            <div><span class="cw-compare-yes">● included</span></div>
-            <div><span class="cw-compare-yes">● included</span></div>
-
-            <div>Source code · MIT</div>
-            <div class="hi"><span class="cw-compare-yes">● included</span></div>
-            <div><span class="cw-compare-no">— not available</span></div>
-            <div><span class="cw-compare-no">— not available</span></div>
-
-            <div>Monthly cost</div>
-            <div class="hi"><b>free</b></div>
-            <div><b>$11.95</b></div>
-            <div><b>$5</b></div>
-        </div>
+            The explicit `role` on every part is not belt and braces. The layout
+            is still CSS grid — `display: grid` on the table, `display: contents`
+            on its rows — and a browser that is not laying an element out as a
+            table stops reporting it as one. The elements are what a reader of the
+            markup sees; the roles are what keep that true after the CSS. %>
+        <table class="cw-compare" role="table">
+            <caption class="sr-only">Clawdia compared with MEE6 Pro and Carl-bot Premium, feature by feature.</caption>
+            <thead role="rowgroup">
+                <tr role="row">
+                    <th scope="col" role="columnheader">Feature</th>
+                    <th scope="col" role="columnheader" class="hi">Clawdia</th>
+                    <th scope="col" role="columnheader">MEE6 Pro</th>
+                    <th scope="col" role="columnheader">Carl-bot Premium</th>
+                </tr>
+            </thead>
+            <tbody role="rowgroup">
+                <tr role="row">
+                    <th scope="row" role="rowheader">Self-hosted, your data</th>
+                    <td role="cell" class="hi"><span class="cw-compare-yes">● included</span></td>
+                    <td role="cell"><span class="cw-compare-no">— not available</span></td>
+                    <td role="cell"><span class="cw-compare-no">— not available</span></td>
+                </tr>
+                <tr role="row">
+                    <th scope="row" role="rowheader">AI chat (OpenAI / Gemini / Ollama)</th>
+                    <td role="cell" class="hi"><span class="cw-compare-yes">● included</span></td>
+                    <td role="cell"><span class="cw-compare-warn">◐ limited</span></td>
+                    <td role="cell"><span class="cw-compare-no">— not available</span></td>
+                </tr>
+                <tr role="row">
+                    <th scope="row" role="rowheader">Insights &amp; retention cohorts</th>
+                    <td role="cell" class="hi"><span class="cw-compare-yes">● included</span></td>
+                    <td role="cell"><span class="cw-compare-no">— not available</span></td>
+                    <td role="cell"><span class="cw-compare-no">— not available</span></td>
+                </tr>
+                <tr role="row">
+                    <th scope="row" role="rowheader">Daily news digest from multi-feed</th>
+                    <td role="cell" class="hi"><span class="cw-compare-yes">● included</span></td>
+                    <td role="cell"><span class="cw-compare-no">— not available</span></td>
+                    <td role="cell"><span class="cw-compare-no">— not available</span></td>
+                </tr>
+                <tr role="row">
+                    <th scope="row" role="rowheader">Custom welcome cards</th>
+                    <td role="cell" class="hi"><span class="cw-compare-yes">● included</span></td>
+                    <td role="cell"><span class="cw-compare-yes">● included</span></td>
+                    <td role="cell"><span class="cw-compare-yes">● included</span></td>
+                </tr>
+                <tr role="row">
+                    <th scope="row" role="rowheader">Source code &middot; MIT</th>
+                    <td role="cell" class="hi"><span class="cw-compare-yes">● included</span></td>
+                    <td role="cell"><span class="cw-compare-no">— not available</span></td>
+                    <td role="cell"><span class="cw-compare-no">— not available</span></td>
+                </tr>
+                <tr role="row">
+                    <th scope="row" role="rowheader">Monthly cost</th>
+                    <td role="cell" class="hi"><b>free</b></td>
+                    <td role="cell"><b>$11.95</b></td>
+                    <td role="cell"><b>$5</b></td>
+                </tr>
+            </tbody>
+        </table>
     </section>
 
     <!-- SELF-HOST -->

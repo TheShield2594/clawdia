@@ -10,24 +10,15 @@ const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { describeItem } = require('../../utils/itemDisplay');
 const { ownedBy } = require('../../utils/collectorOwner');
 const {
-    giftLimits, budgetState, spendBudget, spendBudgetPipeline,
-    refundBudget, refundBudgetPipeline,
+    BUDGETS, giftLimits, budgetState, spendBudget, spendBudgetPipeline,
+    refundBudgetPipeline,
 } = require('../../utils/giftCaps');
+const {
+    accountAgeRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
+} = require('../../utils/coinTransfer');
 const { isSoulbound } = require('../../data/soulboundItems');
 const { resolveEffectType } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
-
-// Fresh Discord accounts can't send gifts — blocks throwaway-alt funnels.
-const MIN_ACCOUNT_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-
-// The four rolling budgets, by the fields that hold them. Paired here so a call
-// site names a budget rather than restating a pair of field names each time.
-const BUDGETS = {
-    coinSend:         { usedField: 'dailyGiftSent',                  resetField: 'dailyGiftReset' },
-    coinReceive:      { usedField: 'dailyGiftReceived',              resetField: 'dailyGiftReceivedReset' },
-    itemValueSend:    { usedField: 'dailyGiftItemValueSent',         resetField: 'dailyGiftItemValueReset' },
-    itemValueReceive: { usedField: 'dailyGiftItemValueReceived',     resetField: 'dailyGiftItemValueReceivedReset' },
-};
 
 // Add `qty` of `itemId` to a user's inventory without reading it first. The
 // three-step bump/guarded-push/bump dance this used to spell out is now one
@@ -237,12 +228,8 @@ module.exports = {
 
         if (target.id === interaction.user.id) return deny("You can't gift yourself.");
         if (target.bot)                        return deny("You can't gift a bot.");
-        if (Date.now() - interaction.user.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
-            return deny('Your Discord account is too new to send gifts. Try again in a few days.');
-        }
-        if (Date.now() - target.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
-            return deny(`${target.username}'s Discord account is too new to receive gifts.`);
-        }
+        const tooNew = accountAgeRefusal(interaction.user, target, { noun: 'gifts' });
+        if (tooNew) return deny(tooNew);
 
         // The two halves of this command each ignore the other's options, and
         // silently: `/gift type:item amount:500` used to move nothing and say
@@ -270,14 +257,13 @@ module.exports = {
                 return deny(`You only have **${currency}${(senderNow?.balance ?? 0).toLocaleString()}** in your wallet.`);
             }
 
-            const sendState = budgetState(senderNow,   { ...BUDGETS.coinSend,    cap: limits.coinSend });
-            const rxState   = budgetState(receiverNow, { ...BUDGETS.coinReceive, cap: limits.coinReceive });
+            const budgets = coinBudgets(senderNow, receiverNow, limits);
 
-            if (amount > sendState.remaining) {
-                return deny(`Daily gift cap reached. You can still gift up to **${currency}${sendState.remaining.toLocaleString()}** today.`);
+            if (amount > budgets.send.remaining) {
+                return deny(`Daily gift cap reached. You can still gift up to **${currency}${budgets.send.remaining.toLocaleString()}** today.`);
             }
-            if (amount > rxState.remaining) {
-                return deny(`<@${target.id}> has reached their daily gift-receiving cap. They can receive up to **${currency}${rxState.remaining.toLocaleString()}** more today.`);
+            if (amount > budgets.receive.remaining) {
+                return deny(`<@${target.id}> has reached their daily gift-receiving cap. They can receive up to **${currency}${budgets.receive.remaining.toLocaleString()}** more today.`);
             }
 
             // A gift is irreversible, so a large one asks first — the same
@@ -293,48 +279,22 @@ module.exports = {
                 if (!ok) return;
             }
 
-            // Atomic deduction: the filter enforces the balance and the daily cap
-            // in the same write, so concurrent gifts can't race past either.
-            const sendSpend = spendBudget({ ...BUDGETS.coinSend, cap: limits.coinSend, expired: sendState.expired, amount });
-            const deducted = await User.findOneAndUpdate(
-                { userId: interaction.user.id, guildId, balance: { $gte: amount }, ...sendSpend.filter },
-                {
-                    $inc: { balance: -amount, ...sendSpend.inc },
-                    ...(Object.keys(sendSpend.set).length ? { $set: sendSpend.set } : {}),
-                },
-                { new: true }
-            );
-            if (!deducted) {
-                return deny('Could not complete the transfer — your balance or daily gift cap may have changed.');
-            }
+            // The move itself, and every guard on it, in utils/coinTransfer.js —
+            // shared with `/bank transfer`, which used to do the same thing with
+            // none of them (#897).
+            const moved = await commitCoinTransfer({
+                senderId: interaction.user.id, receiverId: target.id, guildId,
+                amount, limits, budgets,
+                refundKey: interaction.id, service: 'gift', jobName: 'giftCoins',
+            });
 
-            // Ensure the receiver document exists, then credit with the receive-cap
-            // enforced atomically (no upsert here — an unmatched conditional upsert
-            // would try to insert a duplicate userId+guildId document).
-            await User.updateOne({ userId: target.id, guildId }, {}, { upsert: true });
+            const refusal = transferRefusal(moved, {
+                mention: `<@${target.id}>`, currency, amount,
+                sendCapLabel: 'daily gift cap', receiveCapLabel: 'daily gift-receiving cap',
+            });
+            if (refusal) return deny(refusal);
 
-            const rxSpend = spendBudget({ ...BUDGETS.coinReceive, cap: limits.coinReceive, expired: rxState.expired, amount });
-            const credited = await User.findOneAndUpdate(
-                { userId: target.id, guildId, ...rxSpend.filter },
-                {
-                    $inc: { balance: amount, ...rxSpend.inc },
-                    ...(Object.keys(rxSpend.set).length ? { $set: rxSpend.set } : {}),
-                },
-                { new: true }
-            );
-            if (!credited) {
-                // Receiver hit their cap in a race — roll the sender back
-                try {
-                    await User.updateOne(
-                        { userId: interaction.user.id, guildId },
-                        { $inc: { balance: amount, ...refundBudget({ ...BUDGETS.coinSend, cap: limits.coinSend, amount }) } }
-                    );
-                } catch (rollbackErr) {
-                    console.error(`[gift] CRITICAL: sender rollback failed — sender=${interaction.user.id} guild=${guildId} amount=${amount}:`, rollbackErr);
-                    return deny('Something went wrong returning your coins — please contact a server admin.');
-                }
-                return deny(`Could not complete the transfer — <@${target.id}> just reached their daily gift-receiving cap. Your coins were returned.`);
-            }
+            const { sender: deducted, receiver: credited } = moved;
 
             logTransaction({ userId: interaction.user.id, guildId, type: 'gift_send',    amount: -amount, balance: deducted.balance, relatedUserId: target.id, note: 'Coin gift' });
             logTransaction({ userId: target.id,           guildId, type: 'gift_receive', amount,          balance: credited.balance, relatedUserId: interaction.user.id, note: 'Coin gift' });

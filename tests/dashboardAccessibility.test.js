@@ -445,6 +445,87 @@ describe('analytics charts', () => {
     });
 });
 
+// #882. The Getting Started collapse was a `.dash-card-header` div with
+// `cursor:pointer` and an onclick: not focusable, not announced as a control,
+// and its open/closed state carried only by a ▾/▸ glyph. Keyboard users could
+// not toggle it at all (WCAG 2.1.1), and a screen reader had nothing to report
+// (4.1.2).
+describe('the Getting Started collapse', () => {
+    beforeEach(() => {
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        document.body.innerHTML = '';
+        bootPage();
+    });
+
+    afterEach(async () => {
+        await settle();
+        forgetDocumentListeners();
+        jest.restoreAllMocks();
+    });
+
+    const toggle = () => document.getElementById('gs-toggle');
+
+    it('is a button that owns the section it opens', () => {
+        const btn = toggle();
+        expect(btn).not.toBeNull();
+        expect([btn.tagName, btn.getAttribute('type')]).toEqual(['BUTTON', 'button']);
+        // A button is focusable and activated by Enter and Space for free; the
+        // runtime role/tabindex patch-up the sidebar had to shed must not
+        // reappear here.
+        expect(btn.getAttribute('role')).toBeNull();
+        expect(btn.getAttribute('tabindex')).toBeNull();
+
+        expect(btn.getAttribute('aria-controls')).toBe('getting-started-body');
+        expect(document.getElementById('getting-started-body')).not.toBeNull();
+    });
+
+    it('keeps the heading a heading rather than swallowing it into the control', () => {
+        // The card still has to appear in a heading list; the disclosure lives
+        // inside the h2 rather than replacing it.
+        const heading = toggle().closest('h2');
+        expect(heading).not.toBeNull();
+        expect(heading.textContent).toMatch(/Getting started/);
+    });
+
+    it('reports its state with aria-expanded, and moves it on every toggle', () => {
+        const btn = toggle();
+        const body = document.getElementById('getting-started-body');
+
+        expect(btn.getAttribute('aria-expanded')).toBe('true');
+
+        btn.click();
+        expect([btn.getAttribute('aria-expanded'), body.style.display]).toEqual(['false', 'none']);
+
+        btn.click();
+        expect([btn.getAttribute('aria-expanded'), body.style.display]).toEqual(['true', '']);
+    });
+
+    it('toggles from a click anywhere in the header, subtitle included', () => {
+        // The whole header was the click target before this was a button, so a
+        // subtitle left outside it would be the one part of the header that
+        // silently stopped working.
+        const btn = toggle();
+        const subtitle = document.getElementById('gs-subtitle');
+        expect(subtitle).not.toBeNull();
+        expect(btn.contains(subtitle)).toBe(true);
+
+        subtitle.click();
+        expect(btn.getAttribute('aria-expanded')).toBe('false');
+        expect(document.getElementById('getting-started-body').style.display).toBe('none');
+    });
+
+    it('leaves the glyph to the eye only', () => {
+        // ▾/▸ is the state for a sighted reader and noise for everyone else —
+        // aria-expanded above is what carries it now, so the glyph is hidden
+        // rather than read out as a symbol with no name.
+        const icon = document.getElementById('gs-toggle-icon');
+        expect(icon.getAttribute('aria-hidden')).toBe('true');
+
+        toggle().click();
+        expect(icon.textContent).toBe('\u25b8');
+    });
+});
+
 // #678. Six avatars were injected without an alt attribute, so a screen reader
 // fell back to reading the CDN URL out beside the username already sitting next
 // to it. They are decorative — the name is the content — which makes `alt=""`
