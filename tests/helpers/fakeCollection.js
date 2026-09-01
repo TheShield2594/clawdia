@@ -107,6 +107,12 @@ function matchesField(doc, field, condition, state) {
         return true;
     }
     const value = getPath(doc, field);
+    // A RegExp condition tests the string, the way Mongo matches a field against
+    // a regex literal. Falling through to `equals` compared the regex object
+    // with the string and answered false for every document.
+    if (condition instanceof RegExp) {
+        return anyMatch(value, v => typeof v === 'string' && condition.test(v));
+    }
     // An array-crossing path matches when any element does; a scalar `null`
     // condition also matches a field that is simply absent, as Mongo's does.
     if (Array.isArray(value) && field.includes('.')) return value.some(v => equals(v, condition ?? null));
@@ -348,6 +354,19 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
 
         countDocuments: jest.fn(async (query = {}) =>
             docs.filter(doc => matches(doc, query, { positional: {} })).length),
+
+        // The distinct values of one field across the matching documents, in
+        // first-seen order. Autocomplete handlers use it to offer only the
+        // values a collection actually holds.
+        distinct: jest.fn(async (field, query = {}) => {
+            const seen = [];
+            for (const doc of docs) {
+                if (!matches(doc, query, { positional: {} })) continue;
+                const value = doc[field];
+                if (value !== undefined && !seen.includes(value)) seen.push(value);
+            }
+            return seen;
+        }),
 
         create: jest.fn(async fields => {
             const stored = { _id: `id-${docs.length + 1}`, ...defaults, ...fields };

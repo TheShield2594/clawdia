@@ -70,6 +70,11 @@ function mockApplyUpdate(doc, update, options = {}) {
             }
         }
     }
+    if (update.$set) {
+        // The daily gift-value budget opens its 24h window with a `$set` on the
+        // same write as the inventory decrement, so the mock has to apply one.
+        for (const [path, value] of Object.entries(update.$set)) doc[path] = value;
+    }
     if (update.$push?.inventory) {
         const { itemId, quantity } = update.$push.inventory;
         doc.inventory.push({ itemId, quantity });
@@ -122,6 +127,11 @@ jest.mock('../src/models/Guild', () => ({
     findOne: jest.fn(async () => ({ guildId: 'g1', economy: { currency: '💰', enabled: true } })),
 }));
 
+// The gift embed shows the item's artwork where a server has uploaded some.
+// No image in these fixtures — the point here is that the lookup does not reach
+// for a database connection the suite does not have.
+jest.mock('../src/models/ItemImage', () => ({ findOne: jest.fn(async () => null) }));
+
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 
 const giftCommand = require('../src/commands/economy/gift.js');
@@ -150,6 +160,11 @@ function buildInteraction({ itemId = 'pet_food', quantity = 1 } = {}) {
             getString: (name) => (name === 'type' ? 'item' : name === 'item' ? itemId : null),
             getInteger: (name) => (name === 'quantity' ? quantity : null),
         },
+        // /gift defers ephemerally before touching the database, so every
+        // refusal and the sender's receipt arrive through editReply and only
+        // the public announcement through followUp.
+        deferReply: jest.fn(async () => {}),
+        editReply: jest.fn(async (p) => { state.replies.push(p); return { awaitMessageComponent: async () => { throw new Error('no component'); } }; }),
         reply: jest.fn(async (p) => { state.replies.push(p); }),
         followUp: jest.fn(async (p) => { state.followUps.push(p); }),
     };
@@ -214,7 +229,7 @@ test('a failed credit rolls the debit back instead of duplicating the item', asy
     expect(mockStore.recipient.inventory).toEqual([]);
     expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
     expect(mockTotalHeld('pet_food')).toBe(3); // no duplication, no loss
-    expect(state.replies.at(-1).content).toContain('your item was returned');
+    expect(state.replies.at(-1).content).toContain('Your item was returned');
 });
 
 test('a rolled-back gift of a whole stack restores the slot', async () => {

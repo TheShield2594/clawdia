@@ -486,12 +486,34 @@ right now — each entry shows its display name, how many are held and its rarit
 — so nobody has to know that the Pet Slot Expansion is stored as
 `pet_slot_expansion`. The list already excludes anything the command would
 refuse: soulbound items, items whose effect is currently running, and empty
-stacks. Coin gifts are capped at 10,000 sent and 25,000 received per account per
-day, and accounts under 7 days old can neither send nor receive.
+stacks. Accounts under 7 days old can neither send nor receive, and a gift at or
+above the confirmation threshold asks the sender to confirm before anything
+moves, since a gift cannot be reversed.
+
+Four daily budgets bound how much value one account can hand another, all
+configurable per server on the dashboard (Economy → Settings & Store → Gifting
+limits), with **0** meaning no limit:
+
+| Limit | Default | What it bounds |
+|---|---|---|
+| Coins sent per day | 10,000 | One member's outgoing coin gifts |
+| Coins received per day | 25,000 | Funnelling into a single account |
+| Item value sent per day | 250,000 | Outgoing item gifts, valued at your shop prices |
+| Item value received per day | 500,000 | Funnelling items into a single account |
+| Confirm gifts at or above | 5,000 | Where the "are you sure" prompt starts |
+
+Item gifts are valued at the guild's own shop price, or the relic payout, or
+what the rarity cost to forge — so "buy the item, gift the item, sell it on the
+market" is bounded by the same kind of budget the coin caps apply. An item worth
+more than the whole daily cap cannot be gifted at all until an admin raises the
+limit.
 
 **Market:** 5 listings per user, 48-hour listing TTL, 5% sale fee, 10-coin
 minimum unit price, and a confirmation prompt above 500 coins. `lifesaver` and
-`streak_shield` are soulbound and cannot be listed or gifted.
+`streak_shield` are soulbound and cannot be listed or gifted. Every option is
+autocompleted: `item` on `list` from the seller's inventory, `item` on `browse`
+from the items actually listed, and `listing_id` on `buy` and `cancel` from the
+listings the caller can act on.
 
 **Districts** are server-wide goals funded collectively. Each has a 1,000,000
 coin goal and, once funded, activates its benefit for **7 days**:

@@ -336,6 +336,18 @@ const userSchema = new Schema({
     dailyGiftReceived:      { type: Number, default: 0 },
     dailyGiftReceivedReset: { type: Date,   default: null },
 
+    // Gift cap tracking (daily gifted *item* value, in coins, both directions).
+    //
+    // Counted separately from the coin budget rather than folded into it: coins
+    // are printed by the economy and items are bought out of it, so one shared
+    // ceiling would either be too tight to gift a prestige item at all or too
+    // loose to bound coin funneling. Items were previously capped by nothing,
+    // which left the coin cap trivially routed around — buy, gift, sell.
+    dailyGiftItemValueSent:          { type: Number, default: 0 },
+    dailyGiftItemValueReset:         { type: Date,   default: null },
+    dailyGiftItemValueReceived:      { type: Number, default: 0 },
+    dailyGiftItemValueReceivedReset: { type: Date,   default: null },
+
     // Crime syndicate membership
     syndicateId: { type: String, default: null },
 

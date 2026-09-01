@@ -23,19 +23,40 @@ const { getRelicMeta } = require('../data/exploreData');
 // Matches /shop's rarity swatches so an item wears the same colour wherever it
 // is named.
 const RARITY_EMOJIS = {
-    Common:   '⚪',
-    Uncommon: '🟢',
-    Rare:     '🔵',
-    Epic:     '🟣',
-    Mythic:   '🟠',
+    Common:    '⚪',
+    Uncommon:  '🟢',
+    Rare:      '🔵',
+    Epic:      '🟣',
+    Mythic:    '🟠',
+    // The forge mints a sixth tier above Mythic that the shop has no equivalent
+    // for, so a forged Legendary would otherwise render with no swatch at all.
+    Legendary: '⭐',
 };
 
 const RARITY_HEX = {
-    Common:   '#95a5a6',
-    Uncommon: '#2ecc71',
-    Rare:     '#3498db',
-    Epic:     '#9b59b6',
-    Mythic:   '#e67e22',
+    Common:    '#95a5a6',
+    Uncommon:  '#2ecc71',
+    Rare:      '#3498db',
+    Epic:      '#9b59b6',
+    Mythic:    '#e67e22',
+    Legendary: '#ffd700',
+};
+
+/**
+ * What a forged item is worth.
+ *
+ * There is no price on an AiItem — it was forged, not sold — so its worth is
+ * what it cost to forge, which is the one figure the economy has already
+ * committed to for that rarity. Kept in step with RARITY_CONFIG in
+ * commands/economy/forge.js.
+ */
+const FORGE_COST_BY_RARITY = {
+    Common:    500,
+    Uncommon:  1_000,
+    Rare:      2_500,
+    Epic:      5_000,
+    Mythic:    10_000,
+    Legendary: 25_000,
 };
 
 // Relic rarities are lowercase and only span three tiers; map them onto the
@@ -56,8 +77,11 @@ function leadingEmoji(str) {
  * @param {object} [options]
  * @param {Array}  [options.shopItems] the guild's `shop` array, for custom items
  * @param {object} [options.aiItem]    the AiItem document, for an `ai_` id
- * @returns {{ itemId, name, emoji, rarity, rarityEmoji, color, lore, kind }}
+ * @returns {{ itemId, name, emoji, rarity, rarityEmoji, color, lore, value, kind }}
  *          `name` always falls back to the id, so this never renders empty.
+ *          `value` is the item's worth in coins — the guild's shop price, the
+ *          relic's payout, or what the rarity cost to forge — and is 0 for an
+ *          item nothing in the game puts a number on.
  */
 function describeItem(itemId, { shopItems = [], aiItem = null } = {}) {
     const id = String(itemId ?? '');
@@ -73,6 +97,7 @@ function describeItem(itemId, { shopItems = [], aiItem = null } = {}) {
             rarityEmoji: RARITY_EMOJIS[rarity] ?? '',
             color: RARITY_HEX[rarity],
             lore: relic.lore ?? '',
+            value: relic.value ?? 0,
             kind: 'relic',
         };
     }
@@ -89,6 +114,7 @@ function describeItem(itemId, { shopItems = [], aiItem = null } = {}) {
             rarityEmoji: rarity ? (RARITY_EMOJIS[rarity] ?? '✨') : '',
             color: (rarity && RARITY_HEX[rarity]) ?? '#f1c40f',
             lore: aiItem?.lore ?? '',
+            value: FORGE_COST_BY_RARITY[rarity] ?? FORGE_COST_BY_RARITY.Legendary,
             kind: 'forged',
         };
     }
@@ -120,8 +146,11 @@ function describeItem(itemId, { shopItems = [], aiItem = null } = {}) {
         rarityEmoji: RARITY_EMOJIS[rarity] ?? '',
         color: RARITY_HEX[rarity],
         lore: shopItem?.lore ?? getItemLore(lower) ?? '',
+        // The guild's own price when it has one, so a server that discounted an
+        // item is judged against the price its players actually pay.
+        value: Math.max(0, Number(shopItem?.price) || 0),
         kind: 'shop',
     };
 }
 
-module.exports = { describeItem, RARITY_EMOJIS, RARITY_HEX };
+module.exports = { describeItem, RARITY_EMOJIS, RARITY_HEX, FORGE_COST_BY_RARITY };

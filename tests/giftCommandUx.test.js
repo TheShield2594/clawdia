@@ -33,6 +33,7 @@ jest.mock('../src/models/Guild', () => ({
         shop: [{ itemId: 'pet_food', name: 'Pet Food', price: 250, description: '🍖 Feeds any pet.' }],
     })),
 }));
+jest.mock('../src/models/ItemImage', () => ({ findOne: jest.fn(async () => null) }));
 jest.mock('../src/utils/guildSettingsCache', () => require('./helpers/guildSettingsCacheMock')());
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 
@@ -55,8 +56,12 @@ function buildAutocomplete(focusedValue = '') {
     };
 }
 
-function buildExecute({ item = null, type = 'item', quantity = null, amount = null } = {}) {
-    const state = { replies: [] };
+/**
+ * `confirm` decides what the sender does with the confirmation prompt a
+ * high-value gift raises — press Send it, press Cancel, or let it expire.
+ */
+function buildExecute({ item = null, type = 'item', quantity = null, amount = null, confirm = 'confirm' } = {}) {
+    const state = { replies: [], followUps: [], prompted: false };
     return {
         state,
         interaction: {
@@ -79,8 +84,22 @@ function buildExecute({ item = null, type = 'item', quantity = null, amount = nu
                 getString: (name) => (name === 'type' ? type : name === 'item' ? item : null),
                 getInteger: (name) => (name === 'quantity' ? quantity : name === 'amount' ? amount : null),
             },
+            deferReply: jest.fn(async () => {}),
+            editReply: jest.fn(async (p) => {
+                state.replies.push(p);
+                return {
+                    awaitMessageComponent: async () => {
+                        state.prompted = true;
+                        if (confirm === 'timeout') throw new Error('collector ended');
+                        return {
+                            customId: confirm === 'cancel' ? 'gift_cancel' : 'gift_confirm',
+                            update: async (payload) => { state.replies.push(payload); },
+                        };
+                    },
+                };
+            }),
             reply: jest.fn(async (p) => { state.replies.push(p); }),
-            followUp: jest.fn(async () => {}),
+            followUp: jest.fn(async (p) => { state.followUps.push(p); }),
         },
     };
 }
@@ -229,7 +248,6 @@ describe('mismatched options', () => {
         const { interaction, state } = buildExecute({ type: 'item', item: 'pet_food', amount: 500 });
         await giftCommand.execute(interaction);
         expect(state.replies.at(-1).content).toContain('`amount`');
-        expect(state.replies.at(-1).flags).toBeDefined();
     });
 
     test('an item filled in on a coin gift is called out, not ignored', async () => {

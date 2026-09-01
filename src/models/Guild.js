@@ -194,6 +194,32 @@ const guildSchema = new Schema({
         duelHouseCut: { type: Number, default: 0.05, min: 0, max: 0.5 },
         betConfirmThreshold: { type: Number, default: 10000, min: 0 },
         casinoMaxBet: { type: Number, default: 0, min: 0 },
+
+        // ── /gift limits ─────────────────────────────────────────────────────
+        // All four were hardcoded constants in commands/economy/gift.js. They
+        // are the anti-funnel budget — how much value one account can hand to
+        // another in a day — and what the right number is depends entirely on
+        // how fast a given server's economy runs, which is exactly the sort of
+        // thing every other economy dial here is already configurable for.
+        //
+        // 0 means unlimited on all four, matching betConfirmThreshold's
+        // convention for "turn this off".
+        giftCoinCapDaily:             { type: Number, default: 10_000,  min: 0 },
+        // Higher than the outgoing cap because several friends can legitimately
+        // gift one person, but low enough to bound a farm of alts.
+        giftCoinReceiveCapDaily:      { type: Number, default: 25_000,  min: 0 },
+        // Items were capped by nothing at all, which made "buy an item, gift the
+        // item, sell it on the market" the coin cap with one extra step. Valued
+        // at the guild's own shop price (or the relic payout / forge cost), so a
+        // server that discounted an item is judged against what it charges.
+        // The default clears every standard and prestige item and stops at the
+        // endgame cosmetics, which are personal trophies rather than presents.
+        giftItemValueCapDaily:        { type: Number, default: 250_000, min: 0 },
+        giftItemValueReceiveCapDaily: { type: Number, default: 500_000, min: 0 },
+        // Coin gifts at or above this ask the sender to confirm first. A gift is
+        // irreversible and there is no undo, which is the same reason
+        // betConfirmThreshold exists for wagers.
+        giftConfirmThreshold:         { type: Number, default: 5_000,   min: 0 },
         announcementChannelId: { type: String, default: null },
         announceRareDrops: { type: Boolean, default: true },
         announceStreakMilestones: { type: Boolean, default: true }
