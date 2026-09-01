@@ -302,8 +302,17 @@ services:
     image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
     container_name: clawdia-backup
     restart: unless-stopped
-    env_file:
-      - .env
+    # Two variables, named one at a time — no `env_file: .env` here (#901). This
+    # is a stock mongo image that dumps a database; handing it the whole .env
+    # put the Discord bot token, the session secret and every AI provider key
+    # into a container with no use for any of them, readable from `docker
+    # inspect` and from the container's own environment. portainer-stack.yml
+    # always passed just these two, so this is the parity gap as well as the
+    # exposure. tests/deployStackParity.test.js holds both files to it.
+    #
+    # The `${...}` defaults below still read .env — Compose interpolates the
+    # file it finds beside docker-compose.yml whatever any service declares —
+    # so nothing about how a deploy is configured changes.
     environment:
       # .env normally supplies this; the default matches portainer-stack.yml so
       # a checkout without MONGODB_URI still backs up the right database

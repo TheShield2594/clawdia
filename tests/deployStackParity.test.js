@@ -168,6 +168,34 @@ describe('the two files agree where they must', () => {
         expect(composeMounts).toContain('./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro');
     });
 
+    // #901. The compose backup service carried `env_file: .env` on top of the
+    // two variables it needs, so a stock mongo container that dumps a database
+    // also held the Discord bot token, the session secret and every AI provider
+    // key — readable from `docker inspect` and from inside the container. The
+    // Portainer stack had always passed just the two, which made this a parity
+    // gap as well as an exposure, and parity is the thing that keeps it closed.
+    it('gives the backup service only the two variables it needs, in both', () => {
+        const names = env => (Array.isArray(env)
+            ? env.map(e => String(e).split('=')[0])
+            : Object.keys(env || {}));
+
+        for (const [name, doc] of stacks) {
+            const backup = doc.services.backup;
+            // No wholesale .env. The `${...}` defaults in `environment:` still
+            // read it — Compose interpolates the .env beside the file whatever
+            // a service declares — so this costs the deploy nothing.
+            expect([name, backup.env_file]).toEqual([name, undefined]);
+            // And what it does name is the dump's two inputs and nothing else.
+            expect([name, names(backup.environment).sort()])
+                .toEqual([name, ['BACKUP_RETENTION_DAYS', 'MONGODB_URI']]);
+        }
+
+        // The bot is the service that legitimately wants the whole file, and
+        // the contrast is the point: this is not an argument against env_file,
+        // it is an argument against giving it to a container with no use for it.
+        expect(compose.services.bot.env_file).toEqual(['.env']);
+    });
+
     it('gives the two services the same MONGODB_URI default', () => {
         const defaultOf = text => /\$\{MONGODB_URI:-([^}]+)\}/.exec(String(text))?.[1];
         const botDefault = defaultOf(JSON.stringify(stack.services.bot.environment));
