@@ -189,13 +189,14 @@ before your first command is
 [the full module contract](docs/EXTENDING.md#the-full-module-contract).
 
 A command is one object. `data` and `execute` are required and the loader
-refuses to start without them. Four optional hooks are read by name and
-validated by nothing: `cooldownAmount`, `cooldownKey`, `autocomplete` and
-`requiredPermissions`. A typo in any of them is not an error — it is a key
-nobody reads, so the command loads, deploys, runs, and your hook never fires.
-On `requiredPermissions` that is a security bug rather than an annoyance,
-because `setDefaultMemberPermissions` on the builder is only a default that a
-guild admin can reassign.
+refuses to start without them. Four optional hooks are read by exact name:
+`cooldownAmount`, `cooldownKey`, `autocomplete` and `requiredPermissions`. A
+typo in one of those used to be invisible — a key nobody reads, so the command
+loaded, deployed and ran with your hook never firing, and on
+`requiredPermissions` that meant a gate that silently stopped existing. The
+loader now fails startup on a key that is a near miss of a contract one and
+tells you which it thinks you meant; prefix a deliberate extra field with an
+underscore to keep it out of that check.
 
 ### New features ship as subcommands
 

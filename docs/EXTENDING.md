@@ -121,18 +121,33 @@ refuses to come up with an incomplete set, because the deploy publishes exactly
 the collection startup builds, and a command that quietly failed to load would
 otherwise *unregister* itself from Discord on the next boot.
 
-#### A typo in an optional key fails silently
+#### A typo in an optional key stops startup
 
-Nothing validates the optional keys. They are read as `command.cooldownKey`,
-`command.autocomplete` and so on, so `cooldownkey` or `autoComplete` is not an
-error — it is a key nobody reads. The command loads, deploys and runs, and the
-hook you wrote never fires. `requiredPermissions` is the one where that is a
-security bug rather than an annoyance, so grep an existing user of the key and
-copy the spelling:
+The optional keys are read by exact name — `command.cooldownKey`,
+`command.autocomplete` and so on — so `cooldownkey` or `autoComplete` is not an
+error at the language level, it is a key nobody reads. Left to itself the
+command would load, deploy and run with the hook you wrote never firing, and on
+`requiredPermissions` that is a security bug rather than an annoyance: the gate
+silently stops existing, and `setDefaultMemberPermissions` on the builder is
+only a default a guild admin can reassign (#874).
+
+So the loader checks. `contractKeyTypos` in `utils/commandLoader.js` compares
+every exported key against the table above and fails startup on a near miss —
+within two edits of one of the longer names, one of the shorter — naming the
+key it thinks you meant:
 
 ```
-cooldownAmount   cooldownKey   autocomplete   requiredPermissions
+[STARTUP] 1 command file(s) failed to load:
+  - moderation/ban.js exports `requiredPermissons`, which nothing reads — did
+    you mean `requiredPermissions`? (rename it, or prefix it with _ if it is
+    deliberate)
 ```
+
+A command is free to export anything else beside the contract; several export
+the button and modal handlers their own `interactionCreate` branch imports, and
+those are nowhere near a contract key. When something deliberate *is* close to
+one, give it a leading underscore — `_meta`, `__test__` — and the check leaves
+it alone.
 
 #### Cooldowns
 

@@ -14,6 +14,8 @@
 const fs = require('fs');
 const path = require('path');
 
+const { CONTRACT_KEYS } = require('../src/utils/commandLoader');
+
 const GUIDE = path.join(__dirname, '../docs/EXTENDING.md');
 const SOURCES = [
     path.join(__dirname, '../src/events/interactionCreate.js'),
@@ -71,4 +73,12 @@ describe('command-module contract', () => {
         'documents %s',
         key => expect(documentedKeys().has(key)).toBe(true),
     );
+
+    // The loader's typo check (#874) is an allowlist, and an allowlist that has
+    // drifted from the table is worse than none: a key missing from it fails
+    // startup on a spelling the guide says is correct, and a key wrongly on it
+    // waves through the typo the check exists to catch.
+    test('the loader allowlist is exactly the documented table', () => {
+        expect([...CONTRACT_KEYS].sort()).toEqual([...documentedKeys()].sort());
+    });
 });

@@ -73,6 +73,86 @@ function isCommandModule(command) {
 }
 
 /**
+ * Every key a command module may export that something reads. `data` and
+ * `execute` are the two isCommandModule enforces; the rest are the optional
+ * hooks events/interactionCreate.js looks up by exact name, plus `category`,
+ * which the loader stamps on below.
+ *
+ * docs/EXTENDING.md has the table, and tests/commandContractDocs.test.js holds
+ * this list and that table to each other.
+ */
+const CONTRACT_KEYS = [
+    'data',
+    'execute',
+    'cooldown',
+    'cooldownAmount',
+    'cooldownKey',
+    'autocomplete',
+    'requiredPermissions',
+    'category',
+];
+
+// Distance in single-character edits between two strings. Small and iterative
+// rather than recursive, because it runs over every exported key of every
+// command file at startup.
+function editDistance(a, b) {
+    let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+
+    for (let i = 1; i <= a.length; i++) {
+        const current = [i];
+        for (let j = 1; j <= b.length; j++) {
+            current[j] = a[i - 1] === b[j - 1]
+                ? previous[j - 1]
+                : 1 + Math.min(previous[j - 1], previous[j], current[j - 1]);
+        }
+        previous = current;
+    }
+
+    return previous[b.length];
+}
+
+/**
+ * The optional hooks are read by exact key name and validated by nothing, so a
+ * one-character slip is not an error — it is a key nobody reads. The command
+ * loads, deploys and runs, and the hook never fires. On `requiredPermissions`
+ * that is a security bug rather than an annoyance (#874): the gate silently
+ * stops existing, and `setDefaultMemberPermissions` on the builder is only a
+ * default a guild admin is free to reassign. Nothing surfaces it until someone
+ * notices the command working for a member who should not have it.
+ *
+ * A command may still export whatever else it likes — several export helpers
+ * their own button and modal handlers import — so an unknown key is only a
+ * problem when it is a *near miss* of a contract key. Anything under a leading
+ * underscore is left alone entirely, which is the escape hatch for a deliberate
+ * field that happens to read like one.
+ *
+ * @returns {string[]} one message per suspected typo, empty when there is none
+ */
+function contractKeyTypos(command) {
+    const contract = new Set(CONTRACT_KEYS);
+    const problems = [];
+
+    for (const key of Object.keys(command)) {
+        if (contract.has(key) || key.startsWith('_')) continue;
+
+        for (const valid of CONTRACT_KEYS) {
+            // Two edits on the longer names, one on the short ones: `execute`
+            // and up are long enough that a transposition (two edits, in this
+            // metric) is a likelier explanation than a deliberate export, while
+            // on `data` that budget would start flagging ordinary words.
+            const budget = valid.length >= 7 ? 2 : 1;
+            if (editDistance(key.toLowerCase(), valid.toLowerCase()) > budget) continue;
+
+            problems.push(`exports \`${key}\`, which nothing reads — did you mean \`${valid}\`? `
+                + '(rename it, or prefix it with _ if it is deliberate)');
+            break;
+        }
+    }
+
+    return problems;
+}
+
+/**
  * Require every command once and hand back both the loaded modules and the
  * files that would not load. Callers decide what a failure means: startup logs
  * and carries on with the rest, the deploy refuses to publish a truncated set.
@@ -98,6 +178,18 @@ function loadCommandModules(foldersPath = COMMANDS_ROOT) {
             continue;
         }
 
+        // A failure rather than a warning, for the same reason the check above
+        // is one: a permission gate that is not spelled the way the handler
+        // reads it does not exist, and a line in the startup log is not what
+        // stands between a reassigned /ban and an ordinary member. Startup
+        // refuses to come up, which is a deploy that never happens rather than
+        // a command that quietly runs ungated.
+        const typos = contractKeyTypos(command);
+        if (typos.length) {
+            for (const typo of typos) failures.push(`${entry.rel} ${typo}`);
+            continue;
+        }
+
         // The folder a command lives in is its category, and it is the only
         // record of that: `client.commands` is keyed by name, so by the time
         // /help reads the collection the directory walk is long gone. Stamping
@@ -112,4 +204,11 @@ function loadCommandModules(foldersPath = COMMANDS_ROOT) {
     return { commands, failures };
 }
 
-module.exports = { listCommandFiles, loadCommandModules, isCommandModule, COMMANDS_ROOT };
+module.exports = {
+    listCommandFiles,
+    loadCommandModules,
+    isCommandModule,
+    contractKeyTypos,
+    CONTRACT_KEYS,
+    COMMANDS_ROOT,
+};
