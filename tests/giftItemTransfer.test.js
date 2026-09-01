@@ -70,6 +70,11 @@ function mockApplyUpdate(doc, update, options = {}) {
             }
         }
     }
+    if (update.$set) {
+        // The daily gift-value budget opens its 24h window with a `$set` on the
+        // same write as the inventory decrement, so the mock has to apply one.
+        for (const [path, value] of Object.entries(update.$set)) doc[path] = value;
+    }
     if (update.$push?.inventory) {
         const { itemId, quantity } = update.$push.inventory;
         doc.inventory.push({ itemId, quantity });
@@ -122,6 +127,11 @@ jest.mock('../src/models/Guild', () => ({
     findOne: jest.fn(async () => ({ guildId: 'g1', economy: { currency: '💰', enabled: true } })),
 }));
 
+// The gift embed shows the item's artwork where a server has uploaded some.
+// No image in these fixtures — the point here is that the lookup does not reach
+// for a database connection the suite does not have.
+jest.mock('../src/models/ItemImage', () => ({ findOne: jest.fn(async () => null) }));
+
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 
 const giftCommand = require('../src/commands/economy/gift.js');
@@ -133,12 +143,28 @@ function buildInteraction({ itemId = 'pet_food', quantity = 1 } = {}) {
     const interaction = {
         guild: { id: 'g1' },
         guildId: 'g1',
-        user: { id: 'sender', username: 'sender', createdTimestamp: OLD_ACCOUNT },
+        user: {
+            id: 'sender',
+            username: 'sender',
+            createdTimestamp: OLD_ACCOUNT,
+            displayAvatarURL: () => 'https://cdn.example/sender.png',
+        },
         options: {
-            getUser: () => ({ id: 'recipient', username: 'recipient', bot: false, createdTimestamp: OLD_ACCOUNT }),
+            getUser: () => ({
+                id: 'recipient',
+                username: 'recipient',
+                bot: false,
+                createdTimestamp: OLD_ACCOUNT,
+                displayAvatarURL: () => 'https://cdn.example/recipient.png',
+            }),
             getString: (name) => (name === 'type' ? 'item' : name === 'item' ? itemId : null),
             getInteger: (name) => (name === 'quantity' ? quantity : null),
         },
+        // /gift defers ephemerally before touching the database, so every
+        // refusal and the sender's receipt arrive through editReply and only
+        // the public announcement through followUp.
+        deferReply: jest.fn(async () => {}),
+        editReply: jest.fn(async (p) => { state.replies.push(p); return { awaitMessageComponent: async () => { throw new Error('no component'); } }; }),
         reply: jest.fn(async (p) => { state.replies.push(p); }),
         followUp: jest.fn(async (p) => { state.followUps.push(p); }),
     };
@@ -203,7 +229,7 @@ test('a failed credit rolls the debit back instead of duplicating the item', asy
     expect(mockStore.recipient.inventory).toEqual([]);
     expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
     expect(mockTotalHeld('pet_food')).toBe(3); // no duplication, no loss
-    expect(state.replies.at(-1).content).toContain('your item was returned');
+    expect(state.replies.at(-1).content).toContain('Your item was returned');
 });
 
 test('a rolled-back gift of a whole stack restores the slot', async () => {
@@ -222,7 +248,7 @@ test('gifting more than you hold moves nothing', async () => {
     expect(mockWrites).toEqual([]);
     expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
     expect(mockStore.recipient.inventory).toEqual([]);
-    expect(state.replies.at(-1).content).toContain("don't have 9x");
+    expect(state.replies.at(-1).content).toContain('not enough to gift 9');
 });
 
 test('a duplicate slot for the same item is not double-debited', async () => {

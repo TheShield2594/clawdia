@@ -135,6 +135,14 @@ function buildSettingsPayload(section, ctx = {}) {
             'economy.quizEnabled': document.getElementById('economy-quiz-enabled').checked,
             'economy.jobsEnabled': document.getElementById('economy-jobs-enabled').checked,
             'economy.announcementChannelId': document.getElementById('economy-announcement-channel').value || null,
+            // Gifting limits. `safeInt` keeps a blank or unparseable box on the
+            // schema default rather than on 0, which here would mean "no limit"
+            // and quietly remove the anti-funnel cap.
+            'economy.giftCoinCapDaily': safeInt('economy-gift-coin-cap', 10000),
+            'economy.giftCoinReceiveCapDaily': safeInt('economy-gift-coin-receive-cap', 25000),
+            'economy.giftItemValueCapDaily': safeInt('economy-gift-item-cap', 250000),
+            'economy.giftItemValueReceiveCapDaily': safeInt('economy-gift-item-receive-cap', 500000),
+            'economy.giftConfirmThreshold': safeInt('economy-gift-confirm', 5000),
             shop: storeItems,
             jobs: jobsList,
             jobTiers: jobTiersList

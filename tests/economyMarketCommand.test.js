@@ -81,6 +81,10 @@ beforeEach(() => {
     mockListings.reset();
     mockTransactions.reset();
     jest.clearAllMocks();
+    // `/market browse` renders a seller-reputation column from a Transaction
+    // aggregation. Nothing here is about reputation, and the fake collections
+    // do not run pipelines, so it answers empty.
+    mockTransactions.model.aggregate = jest.fn(async () => []);
     // The default: the credit lands. Individual tests make it fail.
     grantInventoryItem.mockImplementation(async (userId, guildId, itemId, quantity) => {
         const doc = mockUsers.get(userId);
@@ -307,6 +311,137 @@ describe('listing an item', () => {
         // The stock is back, so there is nothing owed to write down.
         expect(recordOwedPayout).not.toHaveBeenCalled();
         console.error.mockRestore();
+    });
+});
+
+describe('naming the item', () => {
+    // Inventory ids are not uniformly cased. Relics are stored under their prose
+    // name and a custom guild item under whatever an admin called it, because
+    // shop.js stores an item as `itemId || name`. `handleList` lowercased what
+    // was typed and compared it with `===`, so those items could not be listed
+    // at all, whatever the seller wrote.
+    it('lists a relic despite its capitalisation', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'The Tenth Owl', quantity: 1 }] });
+
+        await run({ subcommand: 'list', options: { item: 'the tenth owl', quantity: 1, price: 5000 } });
+
+        expect(mockUsers.get(BUYER_ID).inventory).toEqual([]);
+        expect(await mockListings.model.countDocuments({})).toBe(1);
+    });
+
+    it('stores the canonical id, so the item comes back as itself', async () => {
+        // A listing that recorded the lowercased spelling handed the stock back
+        // into a second stack under a name the player never had.
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'The Tenth Owl', quantity: 1 }] });
+
+        await run({ subcommand: 'list', options: { item: 'THE TENTH OWL', quantity: 1, price: 5000 } });
+
+        const listing = await mockListings.model.findOne({});
+        expect(listing.itemId).toBe('The Tenth Owl');
+    });
+
+    it('refuses a soulbound item however it is typed', async () => {
+        // The check ran on the raw string, so `Lifesaver` missed it and was
+        // refused several lines later as "you don't have it".
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lifesaver', quantity: 1 }] });
+
+        const interaction = await run({ subcommand: 'list', options: { item: 'LifeSaver', quantity: 1, price: 5000 } });
+
+        expect(repliedText(interaction)).toContain('soulbound');
+        expect(await mockListings.model.countDocuments({})).toBe(0);
+    });
+
+    it('browses for a relic without exact capitalisation', async () => {
+        seedGuild();
+        seedListing({ itemId: 'The Tenth Owl', quantity: 1, pricePerUnit: 5000 });
+
+        const interaction = await run({ subcommand: 'browse', options: { item: 'the tenth owl' } });
+
+        expect(repliedText(interaction)).not.toContain('No listings found');
+    });
+
+    it('a regex metacharacter in the browse filter is matched literally', async () => {
+        seedGuild();
+        seedListing({ itemId: 'lucky_charm' });
+
+        const interaction = await run({ subcommand: 'browse', options: { item: 'lucky_charm)' } });
+
+        expect(repliedText(interaction)).toContain('No listings found');
+    });
+});
+
+describe('the option pickers', () => {
+    const autocomplete = async (subcommand, name, value = '') => {
+        const responses = [];
+        await market.autocomplete({
+            guild: { id: GUILD_ID },
+            user: { id: BUYER_ID },
+            options: {
+                getSubcommand: () => subcommand,
+                getFocused: (withDetail) => (withDetail ? { name, value } : value),
+            },
+            respond: async (choices) => { responses.push(choices); },
+        });
+        return responses[0];
+    };
+
+    it('offers what the seller is holding, by name and count', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [
+            { itemId: 'lucky_charm', quantity: 5 },
+            { itemId: 'lifesaver',   quantity: 1 },   // soulbound
+            { itemId: 'padlock',     quantity: 0 },   // an emptied stack
+        ] });
+
+        const choices = await autocomplete('list', 'item');
+
+        expect(choices.map(c => c.value)).toEqual(['lucky_charm']);
+        expect(choices[0].name).toContain('Lucky Charm');
+        expect(choices[0].name).toContain('5 held');
+    });
+
+    it('offers only items that are actually listed, for browse', async () => {
+        seedGuild();
+        seedListing({ _id: 'l1', itemId: 'lucky_charm' });
+        seedListing({ _id: 'l2', itemId: 'lucky_charm' });
+        seedListing({ _id: 'l3', itemId: 'pet_food' });
+
+        const choices = await autocomplete('browse', 'item');
+
+        expect(choices.map(c => c.value).sort()).toEqual(['lucky_charm', 'pet_food']);
+    });
+
+    it('offers other people listings to buy, and never your own', async () => {
+        // The picker must not offer what handleBuy would refuse on submit.
+        seedGuild();
+        seedListing({ _id: 'theirs', sellerId: SELLER_ID });
+        seedListing({ _id: 'mine',   sellerId: BUYER_ID });
+
+        const choices = await autocomplete('buy', 'listing_id');
+
+        expect(choices.map(c => c.value)).toEqual(['theirs']);
+        expect(choices[0].name).toContain('Lucky Charm');
+    });
+
+    it('offers your own listings to cancel, and only yours', async () => {
+        seedGuild();
+        seedListing({ _id: 'theirs', sellerId: SELLER_ID });
+        seedListing({ _id: 'mine',   sellerId: BUYER_ID });
+
+        const choices = await autocomplete('cancel', 'listing_id');
+
+        expect(choices.map(c => c.value)).toEqual(['mine']);
+    });
+
+    it('an empty response, not a crash, when the lookup fails', async () => {
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        mockListings.model.distinct.mockRejectedValueOnce(new Error('db down'));
+
+        expect(await autocomplete('browse', 'item')).toEqual([]);
+        errorSpy.mockRestore();
     });
 });
 

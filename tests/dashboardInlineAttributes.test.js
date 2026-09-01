@@ -41,7 +41,7 @@ const BASELINE = {
     'partials/panels/bibleverses.ejs': [4, 2],
     'partials/panels/birthdays.ejs': [0, 2],
     'partials/panels/commandpolicies.ejs': [21, 11],
-    'partials/panels/economy.ejs': [42, 22],
+    'partials/panels/economy.ejs': [40, 22],
     'partials/panels/eventlog.ejs': [6, 1],
     'partials/panels/exploration.ejs': [5, 1],
     'partials/panels/farewell.ejs': [0, 2],

@@ -30,7 +30,7 @@
                             <label class="field-label" for="economy-daily">Daily reward amount</label>
                             <input type="number" id="economy-daily" value="<%= settings.economy.dailyAmount %>" min="0">
                         </div>
-                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div class="field field-pair">
                             <div><label class="field-label" for="economy-work-min">Work payout (min)</label><input type="number" id="economy-work-min" value="<%= settings.economy.workMin %>" min="0"></div>
                             <div><label class="field-label" for="economy-work-max">Work payout (max)</label><input type="number" id="economy-work-max" value="<%= settings.economy.workMax %>" min="0"></div>
                         </div>
@@ -38,6 +38,40 @@
                             <label class="field-label" for="economy-announcement-channel">Announcements channel</label>
                             <%- include('../channel-select', { id: 'economy-announcement-channel', placeholder: 'None (no announcements)', selected: settings.economy.announcementChannelId }) %>
                             <small>Channel where shop purchases and economy events are announced</small>
+                        </div>
+
+                        <!-- Gifting -->
+                        <div class="eco-section-head eco-section-gap">
+                            <div class="toggle-text eco-section-title"><strong>Gifting limits</strong><span>How much value one member can hand another per day with /gift. Set any limit to 0 to turn it off.</span></div>
+                        </div>
+                        <div class="field field-pair">
+                            <div>
+                                <label class="field-label" for="economy-gift-coin-cap">Coins sent per day</label>
+                                <input type="number" id="economy-gift-coin-cap" value="<%= settings.economy.giftCoinCapDaily ?? 10000 %>" min="0">
+                                <small>Most one member can gift away in 24 hours</small>
+                            </div>
+                            <div>
+                                <label class="field-label" for="economy-gift-coin-receive-cap">Coins received per day</label>
+                                <input type="number" id="economy-gift-coin-receive-cap" value="<%= settings.economy.giftCoinReceiveCapDaily ?? 25000 %>" min="0">
+                                <small>Caps how much can be funnelled into one account</small>
+                            </div>
+                        </div>
+                        <div class="field field-pair">
+                            <div>
+                                <label class="field-label" for="economy-gift-item-cap">Item value sent per day</label>
+                                <input type="number" id="economy-gift-item-cap" value="<%= settings.economy.giftItemValueCapDaily ?? 250000 %>" min="0">
+                                <small>Valued at your shop prices — stops the coin cap being routed around by gifting items instead</small>
+                            </div>
+                            <div>
+                                <label class="field-label" for="economy-gift-item-receive-cap">Item value received per day</label>
+                                <input type="number" id="economy-gift-item-receive-cap" value="<%= settings.economy.giftItemValueReceiveCapDaily ?? 500000 %>" min="0">
+                                <small>An item worth more than this can never be gifted</small>
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="economy-gift-confirm">Confirm gifts at or above</label>
+                            <input type="number" id="economy-gift-confirm" value="<%= settings.economy.giftConfirmThreshold ?? 5000 %>" min="0">
+                            <small>Gifts worth this much ask the sender to confirm first, since a gift cannot be reversed</small>
                         </div>
 
                         <!-- Store -->
@@ -403,7 +437,7 @@
                         </label>
 
                         <div class="panel-head" style="margin-top:1.25rem"><h3>Timing &amp; Limits</h3></div>
-                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div class="field field-pair">
                             <div>
                                 <label class="field-label" for="heist-cooldown">Cooldown between heists <small>(hours, 1–168)</small></label>
                                 <input type="number" id="heist-cooldown" value="<%= settings.heist?.cooldownHours ?? 6 %>" min="1" max="168">

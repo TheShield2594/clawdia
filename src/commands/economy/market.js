@@ -14,6 +14,8 @@ const { recordOwedPayout } = require('../../utils/owedPayout');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
+const { isSoulbound } = require('../../data/soulboundItems');
+const { describeItem } = require('../../utils/itemDisplay');
 
 const ITEM_META = Object.fromEntries(DEFAULT_SHOP_ITEMS.map(i => [i.itemId, i]));
 
@@ -28,8 +30,6 @@ const MIN_PRICE_PER_ITEM    = 10;
 const PAGE_SIZE             = 10;
 const CONFIRM_BUY_THRESHOLD = 500;
 
-const SOULBOUND_ITEMS = new Set(['lifesaver', 'streak_shield']);
-
 const SORT_RARITY = 'rarity';
 const SORT_PRICE  = 'price';
 
@@ -43,7 +43,10 @@ module.exports = {
             sub.setName('list')
                 .setDescription('List an item for sale.')
                 .addStringOption(o =>
-                    o.setName('item').setDescription('Item ID to sell.').setRequired(true))
+                    o.setName('item')
+                        .setDescription('Item to sell — start typing to pick from your inventory.')
+                        .setRequired(true)
+                        .setAutocomplete(true))
                 .addIntegerOption(o =>
                     o.setName('quantity').setDescription('How many to sell.').setRequired(true).setMinValue(1))
                 .addIntegerOption(o =>
@@ -52,17 +55,52 @@ module.exports = {
             sub.setName('browse')
                 .setDescription('Browse active listings.')
                 .addStringOption(o =>
-                    o.setName('item').setDescription('Filter by item ID (optional).').setRequired(false)))
+                    o.setName('item')
+                        .setDescription('Filter by item — start typing to pick one that is actually listed.')
+                        .setRequired(false)
+                        .setAutocomplete(true)))
         .addSubcommand(sub =>
             sub.setName('buy')
                 .setDescription('Buy a listing by its ID.')
                 .addStringOption(o =>
-                    o.setName('listing_id').setDescription('Listing ID from /market browse.').setRequired(true)))
+                    o.setName('listing_id')
+                        .setDescription('Listing to buy — start typing to pick one.')
+                        .setRequired(true)
+                        .setAutocomplete(true)))
         .addSubcommand(sub =>
             sub.setName('cancel')
                 .setDescription('Cancel one of your active listings and get your item back.')
                 .addStringOption(o =>
-                    o.setName('listing_id').setDescription('Listing ID to cancel.').setRequired(true))),
+                    o.setName('listing_id')
+                        .setDescription('Which of your listings to cancel — start typing to pick one.')
+                        .setRequired(true)
+                        .setAutocomplete(true))),
+
+    /**
+     * Every option on this command was an id typed from memory.
+     *
+     * `item` is the worse half of that: inventory ids are not uniformly cased —
+     * a relic is stored under its prose name and a custom shop item under its
+     * display name, because shop.js stores an item as `itemId || name` — so
+     * `/market list item:The Tenth Owl` was a spelling test, and the handler's
+     * `.toLowerCase()` meant a relic could not be listed at all. `listing_id` is
+     * a 24-character hex string that had to be copied out of `/market browse`.
+     */
+    async autocomplete(interaction) {
+        try {
+            const sub     = interaction.options.getSubcommand();
+            const focused = interaction.options.getFocused(true);
+            const typed   = (focused?.value ?? '').toLowerCase();
+
+            if (focused?.name === 'item' && sub === 'list')   return interaction.respond(await inventoryChoices(interaction, typed));
+            if (focused?.name === 'item' && sub === 'browse') return interaction.respond(await listedItemChoices(interaction, typed));
+            if (focused?.name === 'listing_id')               return interaction.respond(await listingChoices(interaction, typed, sub));
+            return interaction.respond([]);
+        } catch (err) {
+            console.error('[market] autocomplete error:', err);
+            await interaction.respond([]).catch(() => {});
+        }
+    },
 
     async execute(interaction) {
         const guildSettings = await getGuildSettings(interaction.guild.id);
@@ -80,14 +118,86 @@ module.exports = {
     },
 };
 
-async function handleList(interaction, currency) {
-    const itemId = interaction.options.getString('item').toLowerCase();
-    const qty    = interaction.options.getInteger('quantity');
-    const price  = interaction.options.getInteger('price');
+/** Prefix matches first, then substring, then alphabetical — as /shop buy ranks. */
+function rankByName(items, typed) {
+    if (!typed) return [...items].sort((a, b) => a.name.localeCompare(b.name));
+    return [...items].sort((a, b) => {
+        const aPre = a.name.toLowerCase().startsWith(typed) ? 0 : 1;
+        const bPre = b.name.toLowerCase().startsWith(typed) ? 0 : 1;
+        return aPre - bPre || a.name.localeCompare(b.name);
+    });
+}
 
-    if (SOULBOUND_ITEMS.has(itemId)) {
-        return interaction.reply({ content: `\`${itemId}\` is soulbound and cannot be listed.`, flags: MessageFlags.Ephemeral });
-    }
+/** What the seller is holding and is allowed to list, for `/market list`. */
+async function inventoryChoices(interaction, typed) {
+    const [seller, guildSettings] = await Promise.all([
+        User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'inventory').lean(),
+        getGuildSettings(interaction.guild.id),
+    ]);
+    const shopItems = guildSettings?.shop ?? [];
+
+    const items = (seller?.inventory ?? [])
+        .filter(e => e.quantity > 0 && !isSoulbound(e.itemId))
+        .map(e => ({ quantity: e.quantity, ...describeItem(e.itemId, { shopItems }) }))
+        .filter(i => !typed || i.name.toLowerCase().includes(typed) || i.itemId.toLowerCase().includes(typed));
+
+    return rankByName(items, typed).slice(0, 25).map(i => ({
+        name: `${i.emoji} ${i.name} — ${i.quantity} held`.slice(0, 100),
+        value: i.itemId.slice(0, 100),
+    }));
+}
+
+/** The items that actually have listings, for the `/market browse` filter. */
+async function listedItemChoices(interaction, typed) {
+    const [itemIds, guildSettings] = await Promise.all([
+        MarketListing.distinct('itemId', { guildId: interaction.guild.id }),
+        getGuildSettings(interaction.guild.id),
+    ]);
+    const shopItems = guildSettings?.shop ?? [];
+
+    const items = itemIds
+        .map(id => describeItem(id, { shopItems }))
+        .filter(i => !typed || i.name.toLowerCase().includes(typed) || i.itemId.toLowerCase().includes(typed));
+
+    return rankByName(items, typed).slice(0, 25).map(i => ({
+        name: `${i.emoji} ${i.name}`.slice(0, 100),
+        value: i.itemId.slice(0, 100),
+    }));
+}
+
+/**
+ * Listings addressable by the caller: their own for `cancel`, everyone else's
+ * for `buy` — the same split the handlers enforce, so the picker never offers a
+ * listing that would be refused on submit.
+ */
+async function listingChoices(interaction, typed, sub) {
+    const query = sub === 'cancel'
+        ? { guildId: interaction.guild.id, sellerId: interaction.user.id }
+        : { guildId: interaction.guild.id, sellerId: { $ne: interaction.user.id } };
+
+    const [listings, guildSettings] = await Promise.all([
+        MarketListing.find(query).sort({ pricePerUnit: 1 }).limit(100).lean(),
+        getGuildSettings(interaction.guild.id),
+    ]);
+    const shopItems = guildSettings?.shop ?? [];
+    const currency  = guildSettings?.economy?.currency ?? '';
+
+    return listings
+        .map(l => ({ listing: l, ...describeItem(l.itemId, { shopItems }) }))
+        .filter(i => !typed
+            || i.name.toLowerCase().includes(typed)
+            || String(i.listing._id).toLowerCase().startsWith(typed))
+        .slice(0, 25)
+        .map(i => ({
+            name: `${i.emoji} ${i.listing.quantity}× ${i.name} — ${currency}${(i.listing.pricePerUnit * i.listing.quantity).toLocaleString()} total`.slice(0, 100),
+            value: String(i.listing._id).slice(0, 100),
+        }));
+}
+
+async function handleList(interaction, currency) {
+    const typedItem = interaction.options.getString('item');
+    const qty       = interaction.options.getInteger('quantity');
+    const price     = interaction.options.getInteger('price');
 
     const seller = await User.findOneAndUpdate(
         { userId: interaction.user.id, guildId: interaction.guild.id },
@@ -95,11 +205,42 @@ async function handleList(interaction, currency) {
         { upsert: true, new: true }
     );
 
+    // Resolve what was typed against the seller's own bag, case-insensitively.
+    //
+    // This used to be `getString('item').toLowerCase()` compared with `===`
+    // against the stored id, which is only ever right for the snake_cased shop
+    // items. Relics are stored under their prose name ("The Tenth Owl") and a
+    // custom guild item under whatever an admin called it, since shop.js stores
+    // an item as `itemId || name` — so neither could be listed at all, whatever
+    // the seller typed. Same resolution /gift and /use do.
+    //
     // `stack`, not `slot`: a slot in this file is one of the seller's five
     // listing slots now, and this is the inventory stack being sold out of.
-    const stack = seller.inventory.find(i => i.itemId === itemId);
-    if (!stack || stack.quantity < qty) {
-        return interaction.reply({ content: `You don't have ${qty}x \`${itemId}\` in your inventory.`, flags: MessageFlags.Ephemeral });
+    const wanted = typedItem.trim().toLowerCase();
+    const owned  = (seller.inventory ?? []).filter(i => i.itemId.toLowerCase() === wanted && i.quantity > 0);
+    // The same predicate as the atomic debit below: a duplicate stack too small
+    // to cover the sale must not reject one that can.
+    const stack  = owned.find(i => i.quantity >= qty);
+
+    if (!owned.length) {
+        return interaction.reply({
+            content: `You don't have **${typedItem}** in your inventory. Start typing in the \`item\` box to pick from what you're holding.`,
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
+    // Canonical casing, for every database match and every label from here down
+    // — including the soulbound test, which on the raw string let `Lifesaver`
+    // past and refused it several lines later with the wrong reason.
+    const itemId = (stack ?? owned[0]).itemId;
+
+    if (isSoulbound(itemId)) {
+        return interaction.reply({ content: `\`${itemId}\` is soulbound and cannot be listed.`, flags: MessageFlags.Ephemeral });
+    }
+
+    if (!stack) {
+        const held = owned.reduce((n, i) => n + i.quantity, 0);
+        return interaction.reply({ content: `You don't have ${qty}x \`${itemId}\` in your inventory — you hold ${held}.`, flags: MessageFlags.Ephemeral });
     }
 
     // The friendly refusal, before any stock moves: a seller who is already full
@@ -316,10 +457,14 @@ function formatLine(l, currency, repMap, tagMap) {
 }
 
 async function handleBrowse(interaction, currency) {
-    const filterItem = interaction.options.getString('item')?.toLowerCase() ?? null;
+    const filterItem = interaction.options.getString('item')?.trim() || null;
 
     const query = { guildId: interaction.guild.id };
-    if (filterItem) query.itemId = filterItem;
+    // Anchored and case-insensitive rather than an equality on the lowercased
+    // string: a listed relic's itemId is "The Tenth Owl", so the old filter
+    // matched nothing for exactly the items hardest to type. Escaped because the
+    // value is whatever the member sent, and a stray `(` would otherwise throw.
+    if (filterItem) query.itemId = new RegExp(`^${filterItem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
 
     const total = await MarketListing.countDocuments(query);
     if (total === 0) {

@@ -616,6 +616,12 @@ body {
 .field { margin-bottom: 1.4rem; }
 .field .field-label { display: block; font-weight: 600; font-size: 0.88rem; margin-bottom: 0.5rem; color: var(--text); }
 .field small { display: block; margin-top: 0.4rem; color: var(--text-mute); font-size: 0.8rem; }
+/* Two inputs that belong together on one row. Was retyped as an inline
+   `style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem"` at each use;
+   inline styles are what keep `style-src 'unsafe-inline'` in the CSP, and
+   tests/dashboardInlineAttributes.test.js only lets their number fall. */
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+@media (max-width: 620px) { .field-pair { grid-template-columns: 1fr; } }
 
 input[type="text"],
 input[type="number"],
@@ -826,6 +832,9 @@ textarea { resize: vertical; min-height: 80px; }
     border-bottom: 1px solid var(--border);
 }
 .eco-section-head .toggle { margin: 0; flex: 1; }
+/* A section head that opens a new group below an existing one. */
+.eco-section-head.eco-section-gap { margin-top: 1.5rem; }
+.eco-section-head .eco-section-title { flex: 1; }
 .store-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
