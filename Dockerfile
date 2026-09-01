@@ -118,7 +118,21 @@ RUN apk upgrade --no-cache && apk add --no-cache \
     freetype \
     ttf-dejavu \
     font-noto-emoji \
-    tini
+    tini \
+    mongodb-tools
+
+# mongodb-tools is the odd one out above: nothing this image *runs* links
+# against it. It is there for `mongodump`, which src/migrations/runner.js shells
+# out to immediately before an irreversible migration — the dump into
+# /app/backups that both stack files present as the only way back from one, and
+# that migrations here are forward-only makes it the only way back there is.
+#
+# Without the package that dump could never be taken in this image. The runner
+# would log a warning that mongodump was not on PATH and apply the destructive
+# migration anyway, which is precisely the sequence an operator reading either
+# stack file believes cannot happen (#872). It also brings mongorestore, so
+# scripts/restore.sh works from inside the container on a Portainer deploy that
+# has no checkout to run it from.
 
 # npm ships inside the Node base image and this one never runs it: the build
 # stage does the install, and the runtime entrypoint is `node src/index.js`

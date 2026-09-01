@@ -191,9 +191,15 @@ function loadMigrations(dir) {
  *   'require'  a failed or impossible backup aborts startup rather than
  *              letting the destructive step run unprotected
  *   unset      attempt it; if mongodump is missing or fails, warn loudly and
- *              carry on, because a bot that cannot boot without a tool its
- *              container may not ship is a worse default than no backup —
- *              operators who want the guarantee set 'require'.
+ *              carry on, because a bot that cannot boot without a tool the
+ *              host may not have is a worse default for a bare checkout than
+ *              no backup — operators who want the guarantee set 'require'.
+ *
+ * That default is for the checkout case only. The published image ships
+ * mongodb-tools and both stack files set MIGRATION_BACKUP=require, so a Docker
+ * deploy gets the guarantee without asking: the image the dump is documented as
+ * the recovery path for used to have no mongodump in it at all, which made the
+ * warn-and-continue default the only branch it could ever take (#872).
  *
  * The archive lands in MIGRATION_BACKUP_DIR (default ./backups, same place as
  * scripts/backup.sh) and is restored with scripts/restore.sh.

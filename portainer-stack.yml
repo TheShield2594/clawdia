@@ -160,6 +160,15 @@ services:
       - DASHBOARD_PORT=${DASHBOARD_PORT:-3000}
       - AUDIT_LOG_RETENTION_DAYS=${AUDIT_LOG_RETENTION_DAYS:-90}
       - NODE_ENV=${NODE_ENV:-production}
+      # An irreversible migration is forward-only, so the mongodump the runner
+      # takes immediately before one is the only way back from it — which is
+      # what the `backups` volume below is for, and what the note on it says it
+      # is for. Unset, that dump is best-effort: a failure is a warning in the
+      # log and the destructive step runs anyway, which leaves this stack
+      # promising a recovery path it did not take. `require` makes a failed or
+      # impossible backup abort the boot instead. Override to `skip` only if
+      # you are taking the dump yourself.
+      - MIGRATION_BACKUP=${MIGRATION_BACKUP:-require}
       #
       # --- Secrets as files (recommended) ---------------------------------
       # Uncomment these *and* the matching `secrets:` entries below, then leave

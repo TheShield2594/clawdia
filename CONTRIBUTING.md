@@ -145,8 +145,10 @@ land a change.
 `src/migrations/` in order before the bot logs in and before the dashboard opens
 its port. There is no separate migrate step and no way to start without them.
 Some are irreversible and none roll back on their own, so the runner takes a
-`mongodump` before an irreversible one — set `MIGRATION_BACKUP=require` to make
-a failed backup abort startup rather than warn. Writing one:
+`mongodump` before an irreversible one. Both stack files set
+`MIGRATION_BACKUP=require`, which makes a failed backup abort startup rather
+than warn; a bare checkout defaults to the warning and needs `mongodump` on
+your PATH. Writing one:
 [docs/EXTENDING.md](docs/EXTENDING.md#schema-migrations).
 
 **The bot registers its own slash commands.** It publishes the command set to

@@ -732,8 +732,9 @@ Two things happen on that first boot without being asked for, and both are worth
 knowing about before an upgrade rather than during one:
 
 - **Schema migrations run**, before the dashboard opens its port. Some are
-  irreversible. See [Schema migrations](#schema-migrations) — in particular
-  `MIGRATION_BACKUP=require`, which is the setting you want here.
+  irreversible. See [Schema migrations](#schema-migrations) — the
+  `MIGRATION_BACKUP=require` both stack files set is what makes the
+  pre-migration dump a guarantee rather than an attempt.
 - **Slash commands re-register** if the command set changed, so a release that
   adds or renames a command needs no separate step. Newly registered global
   commands can take up to an hour to appear.
@@ -893,13 +894,15 @@ That matters more than it usually would, because of what these migrations do:
   marked `optional` (a performance index, not a schema change): that one is
   logged, left unapplied, and retried next boot.
 
-**Before the first upgrade of a deployment that has data in it, set
-`MIGRATION_BACKUP=require`.** Immediately before any irreversible migration the
-runner takes a `mongodump` into `MIGRATION_BACKUP_DIR` (default `./backups`,
-which both stack files mount) named `pre-migration-<timestamp>.gz` — and with
-`MIGRATION_BACKUP` unset, a `mongodump` that is missing from `PATH` or fails is
-a loud warning and the destructive step runs anyway. `require` turns that into
-an aborted startup instead. `skip` does not attempt one.
+**Both stack files set `MIGRATION_BACKUP=require` for you.** Immediately before
+any irreversible migration the runner takes a `mongodump` into
+`MIGRATION_BACKUP_DIR` (default `./backups`, which both stack files mount) named
+`pre-migration-<timestamp>.gz`. Under `require` a backup that fails or cannot be
+taken aborts the startup, so the destructive step never runs unprotected; the
+image ships `mongodb-tools`, so `mongodump` is on `PATH` there. With
+`MIGRATION_BACKUP` unset — which is what a bare checkout gets — a missing or
+failing `mongodump` is a loud warning and the migration proceeds anyway, so set
+it yourself if you run outside Docker. `skip` does not attempt one.
 
 Restore it with `scripts/restore.sh`, the same as any nightly archive. These
 dumps are pruned on the same `BACKUP_RETENTION_DAYS` schedule as the rest.
