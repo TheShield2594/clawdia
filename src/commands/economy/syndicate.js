@@ -9,8 +9,9 @@ const {
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const User = require('../../models/User');
 const Syndicate = require('../../models/Syndicate');
-const FailedJob = require('../../models/FailedJob');
 const { logTransaction } = require('../../utils/logTransaction');
+const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
+const { crewSharePayoutKey } = require('../../utils/payoutKey');
 const { buildSkillCheck } = require('../../services/heistService');
 const {
     activeSyndicateHeists,
@@ -160,43 +161,25 @@ async function resolveHeist(client, heist) {
 
         const wins = (outcome === 'full_success') || (outcome === 'partial_success' && passed);
         if (wins && perPlayer > 0) {
-            let credited = false;
-            for (let attempt = 1; attempt <= 3; attempt++) {
-                try {
-                    await User.findOneAndUpdate(
-                        { userId, guildId: heist.guildId },
-                        { $inc: { balance: perPlayer } }
-                    );
-                    credited = true;
-                    break;
-                } catch (err) {
-                    console.error(`[syndicate] Credit attempt ${attempt}/3 failed for userId=${userId} guildId=${heist.guildId} amount=${perPlayer}:`, err.message);
-                    if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 200));
-                }
-            }
-            if (!credited) {
-                console.error(`[syndicate] CRITICAL: all credit attempts failed — userId=${userId} guildId=${heist.guildId} amount=${perPlayer} heistId=${heist.heistId}`);
-                // Record for recovery so the unpaid share isn't lost when the log
-                // scrolls by. Status 'pending' keeps it retriable via retryJob()
-                // (which refuses 'exhausted' records). Await so the embed below can
-                // honestly say whether the recovery record was written.
-                let recoveryLogged = false;
-                try {
-                    await FailedJob.create({
-                        service:      'syndicateService',
-                        jobName:      'heist_credit',
-                        guildId:      heist.guildId,
-                        payload:      { userId, amount: perPlayer, heistId: heist.heistId, target: heist.target },
-                        errorMessage: `Failed to credit ${perPlayer} coins after 3 attempts`,
-                        attempts:     3,
-                        maxAttempts:  6,
-                        status:       'pending',
-                    });
-                    recoveryLogged = true;
-                } catch (err) {
-                    console.error('[syndicate] failed to record FailedJob:', err.message);
-                }
-                failedCredits.push({ userId, username: player.username, amount: perPlayer, recoveryLogged });
+            // This was three hand-rolled attempts around an unguarded `$inc`,
+            // and it had both halves of the problem (#873). The retry could
+            // double-credit — a `$inc` that commits and loses its response is
+            // indistinguishable from one that never ran, and the next attempt
+            // pays again — and `credited` was set from whether the call threw,
+            // so a `findOneAndUpdate` that matched no document (which does not
+            // throw) counted as paid and walked straight past the recovery
+            // record written for exactly that case.
+            //
+            // The shared helper keys the credit, which is what makes the retry
+            // safe, and files the debt where `npm run payouts:replay` can settle
+            // it — the old record's `jobName` had no `.owed` suffix and its
+            // payload no `kind`, so the replay could neither see it nor pay it.
+            const paid = await creditCoinsOrOwe({ userId, guildId: heist.guildId }, perPlayer, {
+                payoutKey: crewSharePayoutKey(heist.heistId, userId),
+                service: 'syndicateService', jobName: 'syndicatePayout',
+            });
+            if (!paid.credited) {
+                failedCredits.push({ userId, username: player.username, amount: perPlayer, recoveryLogged: paid.owed });
             } else {
                 const u = await User.findOne({ userId, guildId: heist.guildId }, 'balance').lean();
                 logTransaction({
@@ -1073,3 +1056,4 @@ module.exports = {
 
     handleSyndicateButton,
 };
+module.exports.__test__ = { resolveHeist };  // where the crew's shares are paid

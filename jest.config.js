@@ -32,12 +32,12 @@ module.exports = {
     // for the step summary below and for anything reading coverage later.
     coverageReporters: ['text-summary', 'json-summary', 'lcov'],
 
-    // Measured over the suite at the commit that raised these — 323 suites,
-    // 6,498 tests, integration excluded: statements 50.15, branches 40.14,
-    // functions 51.81, lines 51.39. Raised from 47/37/48/48 by the settings-cache
-    // conversion of #877, the scheduler scope tests of #889 and the gateway split
-    // of #876; the measurement excludes the two integration suites, so the number
-    // CI sees is this or better.
+    // Measured over the suite at the commit that raised these — 349 suites,
+    // 6,893 tests, integration excluded: statements 51.49, branches 41.60,
+    // functions 54.10, lines 52.77. Raised from 49/39/50/50 by the achievement
+    // audit's suite and the economy audit of #873, which added the duel escrow,
+    // crew-share and credit-or-owe suites; the measurement excludes the three
+    // integration suites, so the number CI sees is this or better.
     //
     // Each floor is the whole percent below its measurement, which is not the
     // arbitrary rounding it looks like: because the four denominators differ by
@@ -53,10 +53,10 @@ module.exports = {
     // fail the run after the one that set it.
     coverageThreshold: {
         global: {
-            statements: 49,
-            branches: 39,
-            functions: 50,
-            lines: 50,
+            statements: 50,
+            branches: 40,
+            functions: 53,
+            lines: 51,
         },
     },
 };

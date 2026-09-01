@@ -99,62 +99,84 @@ describe('placeWager counts every stake as gambled', () => {
 });
 
 describe('/duel — an escrowed stake is gambled, a refunded one is not', () => {
-    let User, duel;
+    // Driven against the in-memory store rather than by inspecting update
+    // shapes: #873 moved the refund onto a keyed pipeline write, so what these
+    // have to hold is the counter's resulting value, not the operator that got
+    // it there.
+    let users, duel;
 
     beforeEach(() => {
         jest.resetModules();
-        jest.doMock('../src/models/User', () => ({
-            findOneAndUpdate: jest.fn(),
-            updateOne: jest.fn().mockResolvedValue({}),
-        }));
-        User = require('../src/models/User');
+        // `doMock`, not `mock`: it is not hoisted, so the factory may close over
+        // the store built here.
+        const { fakeCollection } = require('./helpers/fakeCollection');
+        users = fakeCollection('User', { balance: 0, lifetimeGambled: 0, paidPayouts: [] });
+        jest.doMock('../src/models/User', () => users.model);
+        jest.doMock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
+        jest.doMock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
         duel = require('../src/commands/economy/duel').__test__;
+        users.seed({ userId: 'a', guildId: 'g', balance: 1000 });
+        users.seed({ userId: 'b', guildId: 'g', balance: 1000 });
     });
 
     afterEach(() => {
         jest.dontMock('../src/models/User');
+        jest.dontMock('../src/utils/owedPayout');
+        jest.dontMock('../src/utils/delay');
         jest.resetModules();
     });
 
-    const incsFor = mockFn => mockFn.mock.calls.map(([, update]) => update.$inc);
+    const gambled = userId => users.get(userId).lifetimeGambled;
+    const balance = userId => users.get(userId).balance;
 
     test('both players are charged and counted when the escrow holds', async () => {
-        User.findOneAndUpdate.mockResolvedValue({ userId: 'x' });
+        expect(await duel.takeEscrow('a', 'b', 'g', 250, 'd1')).toMatchObject({ success: true });
 
-        expect(await duel.takeEscrow('a', 'b', 'g', 250)).toEqual({ success: true });
-        expect(incsFor(User.findOneAndUpdate)).toEqual([
-            { balance: -250, lifetimeGambled: 250 },
-            { balance: -250, lifetimeGambled: 250 },
-        ]);
-        expect(User.updateOne).not.toHaveBeenCalled();
+        expect([gambled('a'), gambled('b')]).toEqual([250, 250]);
+        expect([balance('a'), balance('b')]).toEqual([750, 750]);
     });
 
     test('a challenger refunded because the opponent could not pay is un-counted', async () => {
-        User.findOneAndUpdate
-            .mockResolvedValueOnce({ userId: 'a' })
-            .mockResolvedValueOnce(null);
+        users.get('b').balance = 10;
 
-        expect(await duel.takeEscrow('a', 'b', 'g', 250)).toEqual({ success: false, reason: 'opponent' });
-        expect(incsFor(User.updateOne)).toEqual([{ balance: 250, lifetimeGambled: -250 }]);
+        expect(await duel.takeEscrow('a', 'b', 'g', 250, 'd1'))
+            .toMatchObject({ success: false, reason: 'opponent' });
+        expect(gambled('a')).toBe(0);
+        expect(balance('a')).toBe(1000);
     });
 
     test('a duel that never resolves gives back the coins and the count', async () => {
-        await duel.refundEscrow('a', 'b', 'g', 250);
+        await duel.takeEscrow('a', 'b', 'g', 250, 'd1');
+        await duel.refundEscrow('a', 'b', 'g', 250, 'd1');
 
-        expect(incsFor(User.updateOne)).toEqual([
-            { balance: 250, lifetimeGambled: -250 },
-            { balance: 250, lifetimeGambled: -250 },
-        ]);
+        expect([gambled('a'), gambled('b')]).toEqual([0, 0]);
+        expect([balance('a'), balance('b')]).toEqual([1000, 1000]);
     });
 
     test('escrow and refund are exactly inverse, so a cancelled duel nets to zero', async () => {
-        User.findOneAndUpdate.mockResolvedValue({ userId: 'x' });
-        await duel.takeEscrow('a', 'b', 'g', 250);
-        await duel.refundEscrow('a', 'b', 'g', 250);
+        await duel.takeEscrow('a', 'b', 'g', 250, 'd1');
+        await duel.refundEscrow('a', 'b', 'g', 250, 'd1');
 
-        const net = [...incsFor(User.findOneAndUpdate), ...incsFor(User.updateOne)]
-            .reduce((sum, inc) => sum + inc.lifetimeGambled, 0);
-        expect(net).toBe(0);
+        expect(gambled('a') + gambled('b')).toBe(0);
+    });
+
+    test('a tie keeps the count — the duel was fought, the stakes were at risk', async () => {
+        await duel.takeEscrow('a', 'b', 'g', 250, 'd1');
+        await duel.refundEscrow('a', 'b', 'g', 250, 'd1', { unwager: false });
+
+        expect([gambled('a'), gambled('b')]).toEqual([250, 250]);
+        expect([balance('a'), balance('b')]).toEqual([1000, 1000]);
+    });
+
+    test('a refund that ran twice returns one stake, not two', async () => {
+        // The payout key is in the write's own filter, so the second call
+        // matches nothing. `settled` in runRPS is meant to make this
+        // unreachable; the key is what makes it harmless if it ever is not.
+        await duel.takeEscrow('a', 'b', 'g', 250, 'd1');
+        await duel.refundEscrow('a', 'b', 'g', 250, 'd1');
+        await duel.refundEscrow('a', 'b', 'g', 250, 'd1');
+
+        expect([balance('a'), gambled('a')]).toEqual([1000, 0]);
     });
 });
 

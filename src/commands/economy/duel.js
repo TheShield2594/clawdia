@@ -14,6 +14,7 @@ const { isDistrictActive } = require('../../services/districtService');
 const { START_ELO, tierFor, applyElo, makeSeasonId } = require('../../utils/duelElo');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { takeEscrow, refundEscrow, payWinner, refundNote } = require('../../utils/duelEscrow');
 
 const DUEL_COOLDOWN_MS = 5 * 60_000;
 const ACCEPT_TIMEOUT_MS = 60_000;
@@ -50,48 +51,6 @@ const RPS_EMOJI = { rock: '✊', paper: '🖐️', scissors: '✌️' };
 
 function drawCard() {
     return { suit: SUITS[randomInt(SUITS.length)], value: VALUES[randomInt(VALUES.length)] };
-}
-
-// Atomically deduct wagers from both players. Returns { success, reason }.
-// If opponent deduction fails after challenger succeeded, challenger is refunded.
-//
-// The stake also advances `lifetimeGambled`, the counter behind Lucky, Gambler,
-// High Roller and the three Wager badges. A duel is a coin bet on a coin flip
-// dressed up as rock-paper-scissors, and it is the only wager outside the
-// casino that puts a player's own coins at risk on an outcome — leaving it out
-// meant those achievements measured "coins staked at /casino" while claiming to
-// measure coins gambled. Every path that hands a stake back (both branches
-// here, and refundEscrow) takes the counter back with it, so a duel that never
-// resolved — declined, expired, errored — counts for nothing.
-async function takeEscrow(challengerId, opponentId, guildId, amount) {
-    const challenger = await User.findOneAndUpdate(
-        { userId: challengerId, guildId, balance: { $gte: amount } },
-        { $inc: { balance: -amount, lifetimeGambled: amount } },
-        { new: true }
-    );
-    if (!challenger) return { success: false, reason: 'challenger' };
-
-    const opponent = await User.findOneAndUpdate(
-        { userId: opponentId, guildId, balance: { $gte: amount } },
-        { $inc: { balance: -amount, lifetimeGambled: amount } },
-        { new: true }
-    );
-    if (!opponent) {
-        await User.updateOne(
-            { userId: challengerId, guildId },
-            { $inc: { balance: amount, lifetimeGambled: -amount } },
-        );
-        return { success: false, reason: 'opponent' };
-    }
-    return { success: true };
-}
-
-async function refundEscrow(challengerId, opponentId, guildId, amount) {
-    const give = { $inc: { balance: amount, lifetimeGambled: -amount } };
-    await Promise.all([
-        User.updateOne({ userId: challengerId, guildId }, give),
-        User.updateOne({ userId: opponentId,   guildId }, give),
-    ]);
 }
 
 // customId: rpsc_{duelId}_{move}  or  rpso_{duelId}_{move}
@@ -155,7 +114,22 @@ async function revertDuelCooldown(challengerId, opponentId, guildId, prevChallen
     ]).catch(console.error);
 }
 
-async function finalizeDuel({ interaction, targetUser, challengerId, opponentId, amount, currency, houseCut, challengerWins, tie, game, gameResult, isRanked = false }) {
+/**
+ * Settles a finished duel: the coins first, then everything that only describes
+ * them.
+ *
+ * The split is the point. Both stakes are already in escrow, so the settlement
+ * is the write that puts them somewhere; anything after it is presentation. That
+ * used to be one flat sequence which threw out to callers whose only recovery is
+ * `refundEscrow` — and a rejection *after* the pot had been paid (the two
+ * balance reads for the result embed were enough) handed both stakes back on top
+ * of it, minting `2 x amount` out of a duel that had already been settled (#873).
+ *
+ * So settlement is the last thing here that can fail the duel. Past it, nothing
+ * rejects: the presentation is contained, and a caller's catch can only ever see
+ * a failure from before the coins moved, where refunding the escrow is correct.
+ */
+async function finalizeDuel({ interaction, targetUser, challengerId, opponentId, amount, currency, houseCut, challengerWins, tie, game, gameResult, isRanked = false, duelId }) {
     const guildId = interaction.guild.id;
     // Escrow already deducted both stakes; compute payout from pot
     const guildDoc = await getGuildSettings(guildId);
@@ -169,19 +143,34 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
 
     let description;
     let eloLine = '';
+    let paidOut = false;
     if (tie) {
-        // Refund both stakes and record cooldown
-        await Promise.all([
-            User.updateOne({ userId: challengerId, guildId }, { $inc: { balance: amount }, $set: { lastDuel: new Date() } }),
-            User.updateOne({ userId: opponentId,   guildId }, { $inc: { balance: amount }, $set: { lastDuel: new Date() } }),
-        ]);
-        description = `${gameResult}\n\n**It's a tie!** Both bets returned.`;
+        // Refund both stakes, then stamp the cooldown. Two writes rather than
+        // the one they used to share: `Promise.all` over a pair of `$inc`s
+        // rejects on the first failure and abandons the second, so one player
+        // could keep their stake while the other lost theirs, and the rejection
+        // then reached a caller that refunded the pair all over again.
+        // `unwager: false`: the duel was fought, so the stakes were gambled even
+        // though they came back. Reversing `lifetimeGambled` here would make a
+        // tie the one played duel that does not count, which is not what a
+        // blackjack push does either.
+        const returned = await refundEscrow(challengerId, opponentId, guildId, amount, duelId, { unwager: false });
+        await Promise.allSettled([
+            User.updateOne({ userId: challengerId, guildId }, { $set: { lastDuel: new Date() } }),
+            User.updateOne({ userId: opponentId,   guildId }, { $set: { lastDuel: new Date() } }),
+        ]).then(results => {
+            for (const r of results) {
+                if (r.status === 'rejected') console.error('[duel] tie cooldown stamp failed:', r.reason?.message ?? r.reason);
+            }
+        });
+        description = `${gameResult}\n\n**It's a tie!**${refundNote(returned)}`;
     } else {
         const winnerId   = challengerWins ? challengerId : opponentId;
         const loserId    = challengerWins ? opponentId   : challengerId;
         const winnerName = challengerWins ? interaction.user.username : targetUser.username;
 
-        const baseWinnerInc = { $inc: { balance: winnerPayout, duelWins: 1 }, $set: { lastDuel: new Date() } };
+        // The pot moves on its own write; see payWinner.
+        const baseWinnerInc = { $inc: { duelWins: 1 }, $set: { lastDuel: new Date() } };
         const baseLoserInc  = { $inc: { duelLosses: 1 }, $set: { lastDuel: new Date() } };
 
         if (isRanked) {
@@ -240,20 +229,55 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
                 `Loser:  ${loserTier.icon} ${loserNewElo} (${loserDelta})`;
         }
 
-        await Promise.all([
+        const paid = await payWinner(winnerId, guildId, winnerPayout, duelId);
+
+        // Records after the money, and never allowed to fail the duel: both
+        // stakes have left their owners by now, so a rejection here that escaped
+        // would reach a caller whose recovery is to refund an escrow that has
+        // already been paid out.
+        await Promise.allSettled([
             User.updateOne({ userId: winnerId, guildId }, baseWinnerInc),
             User.updateOne({ userId: loserId,  guildId }, baseLoserInc),
-        ]);
+        ]).then(results => {
+            for (const r of results) {
+                if (r.status === 'rejected') console.error('[duel] duel record update failed:', r.reason?.message ?? r.reason);
+            }
+        });
 
         // Season pass: "Win a duel" — the winner only, and only once the payout
         // has actually settled. Fire-and-forget; a mission that fails to tick
         // must not take the duel result down with it.
-        advanceMissions(User, { userId: winnerId, guildId }, 'duel_win', 1, guildDoc)
-            .catch(err => console.error('[duel] season mission error:', err));
+        if (paid.credited) {
+            advanceMissions(User, { userId: winnerId, guildId }, 'duel_win', 1, guildDoc)
+                .catch(err => console.error('[duel] season mission error:', err));
+        }
         const arenaStr = arenaActive ? ` + ⚔️ Arena bonus: ${currency}${arenaBonus.toLocaleString()}` : '';
-        description = `${gameResult}\n\n**${winnerName}** wins **${currency}${netGain.toLocaleString()}** net (${Math.round(houseCut * 100)}% house cut${arenaStr})!${eloLine}`;
+        // A pot that could not be delivered is not announced as a win. The
+        // stakes are gone from both players either way, so the only honest
+        // wording is the one that says where they went.
+        description = paid.credited
+            ? `${gameResult}\n\n**${winnerName}** wins **${currency}${netGain.toLocaleString()}** net (${Math.round(houseCut * 100)}% house cut${arenaStr})!${eloLine}`
+            : `${gameResult}\n\n**${winnerName}** won, but the **${currency}${winnerPayout.toLocaleString()}** pot could not be paid out. ` +
+              (paid.owed
+                  ? 'It is recorded and an admin can restore it.'
+                  : 'Please contact a server admin.') + eloLine;
+        paidOut = paid.credited;
     }
 
+    // Everything below is the result screen, and the coins are already settled,
+    // so none of it may reject: see the note on this function. `presentResult`
+    // swallows its own failures — a duel that paid out correctly and could not
+    // draw its embed is a cosmetic loss, not a reason to hand the stakes back.
+    await presentResult({
+        interaction, targetUser, challengerId, opponentId, guildId,
+        currency, description, tie, game, challengerWins, winnerPayout, paidOut,
+    }).catch(err => console.error('[duel] result presentation failed:', err.message));
+}
+
+async function presentResult({
+    interaction, targetUser, challengerId, opponentId, guildId,
+    currency, description, tie, game, challengerWins, winnerPayout, paidOut,
+}) {
     const [challenger, opponent] = await Promise.all([
         User.findOne({ userId: challengerId, guildId }),
         User.findOne({ userId: opponentId,   guildId }),
@@ -278,8 +302,11 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
 
     await interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
 
-    // Post the victory card as a separate channel follow-up (non-ephemeral)
-    if (!tie) {
+    // Post the victory card as a separate channel follow-up (non-ephemeral).
+    // Only for a pot that was actually delivered — the card's whole content is
+    // "won ${currency}${winnerPayout}", which is the one thing an undelivered
+    // payout must not say twice.
+    if (!tie && paidOut) {
         const winnerUser = challengerWins ? interaction.user : targetUser;
         const loserUser  = challengerWins ? targetUser       : interaction.user;
         const flavor     = VICTORY_FLAVOR[game] ?? 'A clean win.';
@@ -299,7 +326,7 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
                 `> *${flavor}*\n` +
                 `> ${lossLine}`
             )
-            .setThumbnail(winnerUser.displayAvatarURL({ dynamic: true }))
+            .setThumbnail(winnerUser.displayAvatarURL())
             .setFooter({ text: `Challenged by ${loserUser.username}` })
             .setTimestamp();
 
@@ -311,7 +338,7 @@ function errorEmbed(title, description) {
     return new EmbedBuilder().setColor(COLORS.ERROR).setTitle(title).setDescription(description).setTimestamp();
 }
 
-async function runInstantGame(interaction, targetUser, amount, currency, houseCut, game, isRanked = false) {
+async function runInstantGame(interaction, targetUser, amount, currency, houseCut, game, duelId, isRanked = false) {
     let challengerWins = false;
     let tie = false;
     let gameResult = '';
@@ -335,11 +362,14 @@ async function runInstantGame(interaction, targetUser, amount, currency, houseCu
     }
 
     try {
-        await finalizeDuel({ interaction, targetUser, challengerId: interaction.user.id, opponentId: targetUser.id, amount, currency, houseCut, challengerWins, tie, game, gameResult, isRanked });
+        await finalizeDuel({ interaction, targetUser, challengerId: interaction.user.id, opponentId: targetUser.id, amount, currency, houseCut, challengerWins, tie, game, gameResult, isRanked, duelId });
     } catch (err) {
+        // Only reachable before the settlement write — `finalizeDuel` contains
+        // everything after it — so the escrow is still intact and refunding it
+        // is the right move rather than a second payout on top of the first.
         console.error('Duel finalizeDuel error:', err);
-        await refundEscrow(interaction.user.id, targetUser.id, interaction.guild.id, amount).catch(console.error);
-        await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', 'Something went wrong settling the duel. Both bets have been refunded.')], components: [] }).catch(() => {});
+        const returned = await refundEscrow(interaction.user.id, targetUser.id, interaction.guild.id, amount, duelId);
+        await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', `Something went wrong settling the duel.${refundNote(returned)}`)], components: [] }).catch(() => {});
     }
 }
 
@@ -361,7 +391,7 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
         });
     } catch (err) {
         console.error('Duel RPS editReply error:', err);
-        await refundEscrow(interaction.user.id, targetUser.id, guildId, amount).catch(console.error);
+        await refundEscrow(interaction.user.id, targetUser.id, guildId, amount, duelId);
         return;
     }
 
@@ -418,18 +448,19 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
 
                     await settle(async () => {
                         try {
-                            await finalizeDuel({ interaction, targetUser, challengerId: interaction.user.id, opponentId: targetUser.id, amount, currency, houseCut, challengerWins, tie, game: 'rps', gameResult, isRanked });
+                            await finalizeDuel({ interaction, targetUser, challengerId: interaction.user.id, opponentId: targetUser.id, amount, currency, houseCut, challengerWins, tie, game: 'rps', gameResult, isRanked, duelId });
                         } catch (err) {
+                            // Pre-settlement only; see runInstantGame.
                             console.error('Duel RPS finalizeDuel error:', err);
-                            await refundEscrow(interaction.user.id, targetUser.id, guildId, amount).catch(console.error);
-                            await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', 'Something went wrong settling the duel. Both bets have been refunded.')], components: [] }).catch(() => {});
+                            const returned = await refundEscrow(interaction.user.id, targetUser.id, guildId, amount, duelId);
+                            await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', `Something went wrong settling the duel.${refundNote(returned)}`)], components: [] }).catch(() => {});
                         }
                     });
                 } catch (err) {
                     console.error('Duel RPS opponent collect error:', err);
                     await settle(async () => {
-                        await refundEscrow(interaction.user.id, targetUser.id, guildId, amount).catch(console.error);
-                        await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', 'Something went wrong. Both bets have been refunded.')], components: [] }).catch(() => {});
+                        const returned = await refundEscrow(interaction.user.id, targetUser.id, guildId, amount, duelId);
+                        await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', `Something went wrong.${refundNote(returned)}`)], components: [] }).catch(() => {});
                     });
                 }
             });
@@ -437,9 +468,9 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
             opponentCollector.on('end', async (collected, reason) => {
                 if (reason === 'time' && collected.size === 0) {
                     await settle(async () => {
-                        await refundEscrow(interaction.user.id, targetUser.id, guildId, amount).catch(console.error);
+                        const returned = await refundEscrow(interaction.user.id, targetUser.id, guildId, amount, duelId);
                         await interaction.editReply({
-                            embeds: [new EmbedBuilder().setColor(COLORS.NEUTRAL).setTitle('⚔️ Duel Expired').setDescription(`**${targetUser.username}** didn't pick a move in time. Both bets refunded.`).setTimestamp()],
+                            embeds: [new EmbedBuilder().setColor(COLORS.NEUTRAL).setTitle('⚔️ Duel Expired').setDescription(`**${targetUser.username}** didn't pick a move in time.${refundNote(returned)}`).setTimestamp()],
                             components: [],
                         }).catch(() => {});
                     });
@@ -448,8 +479,8 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
         } catch (err) {
             console.error('Duel RPS challenger collect error:', err);
             await settle(async () => {
-                await refundEscrow(interaction.user.id, targetUser.id, guildId, amount).catch(console.error);
-                await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', 'Something went wrong. Both bets have been refunded.')], components: [] }).catch(() => {});
+                const returned = await refundEscrow(interaction.user.id, targetUser.id, guildId, amount, duelId);
+                await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', `Something went wrong.${refundNote(returned)}`)], components: [] }).catch(() => {});
             });
         }
     });
@@ -457,9 +488,9 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
     challengerCollector.on('end', async (collected, reason) => {
         if (reason === 'time' && collected.size === 0) {
             await settle(async () => {
-                await refundEscrow(interaction.user.id, targetUser.id, guildId, amount).catch(console.error);
+                const returned = await refundEscrow(interaction.user.id, targetUser.id, guildId, amount, duelId);
                 await interaction.editReply({
-                    embeds: [new EmbedBuilder().setColor(COLORS.NEUTRAL).setTitle('⚔️ Duel Expired').setDescription(`**${interaction.user.username}** didn't pick a move in time. Both bets refunded.`).setTimestamp()],
+                    embeds: [new EmbedBuilder().setColor(COLORS.NEUTRAL).setTitle('⚔️ Duel Expired').setDescription(`**${interaction.user.username}** didn't pick a move in time.${refundNote(returned)}`).setTimestamp()],
                     components: [],
                 }).catch(() => {});
             });
@@ -586,14 +617,22 @@ async function runChallenge(interaction, isRanked) {
                 });
             }
 
-            const escrow = await takeEscrow(interaction.user.id, target.id, interaction.guild.id, amount);
+            const escrow = await takeEscrow(interaction.user.id, target.id, interaction.guild.id, amount, duelId);
             if (!escrow.success) {
                 // Cooldown was claimed but escrow failed — revert the claim
                 await revertDuelCooldown(interaction.user.id, target.id, interaction.guild.id, cooldownClaim.prevChallengerLastDuel, cooldownClaim.prevOpponentLastDuel);
                 cooldownClaim = null;
                 const who = escrow.reason === 'challenger' ? interaction.user.username : target.username;
+                // When the challenger's stake was taken and could not be put
+                // back, saying only that the opponent is short leaves them
+                // looking for coins nobody told them about.
+                const stakeNote = escrow.returned && !escrow.returned.refunded
+                    ? (escrow.returned.owed
+                        ? `\n\n**${interaction.user.username}**'s stake could not be returned automatically. It is recorded and an admin can restore it.`
+                        : `\n\n**${interaction.user.username}**'s stake could not be returned. Please contact a server admin.`)
+                    : '';
                 return interaction.editReply({
-                    embeds: [new EmbedBuilder().setColor(COLORS.ERROR).setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** no longer has enough ${currency}.`).setTimestamp()],
+                    embeds: [new EmbedBuilder().setColor(COLORS.ERROR).setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** no longer has enough ${currency}.${stakeNote}`).setTimestamp()],
                     components: [],
                 });
             }
@@ -602,20 +641,28 @@ async function runChallenge(interaction, isRanked) {
             const game = (gameChoice === 'random')
                 ? MINI_GAMES[randomInt(MINI_GAMES.length)]
                 : gameChoice;
+            // From here the escrow belongs to the game runner, which refunds or
+            // settles it on every path of its own. Leaving the flag set would
+            // let the catch below refund a duel that had already paid out.
+            escrowTaken = false;
             if (game === 'rps') {
                 await runRPS(interaction, msg, target, amount, currency, houseCut, duelId, isRanked);
             } else {
-                await runInstantGame(interaction, target, amount, currency, houseCut, game, isRanked);
+                await runInstantGame(interaction, target, amount, currency, houseCut, game, duelId, isRanked);
             }
         } catch (err) {
             console.error('Duel accept collect error:', err);
+            let returned = null;
             if (escrowTaken) {
-                await refundEscrow(interaction.user.id, target.id, interaction.guild.id, amount).catch(console.error);
+                returned = await refundEscrow(interaction.user.id, target.id, interaction.guild.id, amount, duelId);
             }
             if (cooldownClaim?.ok) {
                 await revertDuelCooldown(interaction.user.id, target.id, interaction.guild.id, cooldownClaim.prevChallengerLastDuel, cooldownClaim.prevOpponentLastDuel);
             }
-            await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', 'Something went wrong. Any escrowed bets have been refunded.')], components: [] }).catch(() => {});
+            await interaction.editReply({
+                embeds: [errorEmbed('⚔️ Duel Error', `Something went wrong.${returned ? refundNote(returned) : ''}`)],
+                components: [],
+            }).catch(() => {});
         }
     });
 
@@ -654,7 +701,7 @@ async function runRankView(interaction) {
     const embed = new EmbedBuilder()
         .setColor(COLORS.RARE)
         .setTitle(`${tier.icon} ${target.username} — ${tier.label}`)
-        .setThumbnail(target.displayAvatarURL({ dynamic: true }))
+        .setThumbnail(target.displayAvatarURL())
         .setDescription(`Current **${elo}** ELO · Server rank **#${rankPosition}**`)
         .addFields(
             { name: 'Peak Rating',  value: `${peakTier.icon} ${peak} (${peakTier.label})`, inline: true },
@@ -766,9 +813,9 @@ module.exports = {
     },
 };
 
-// The escrow pair is the whole of /duel's money handling, and the
-// `lifetimeGambled` bookkeeping it carries has to stay exactly inverse between
-// them or a declined duel would leave a player credited for coins they got
-// straight back. Exported so tests can hold the two against each other without
-// driving a full challenge through its button collectors.
-module.exports.__test__ = { takeEscrow, refundEscrow };
+// The settlement, for tests: it and utils/duelEscrow hold every coin a duel
+// touches, and #873 found three ways the pot could be lost or minted between
+// them. Exported so it can be driven without a full challenge and its button
+// collectors; the escrow half is re-exported here because that is where the
+// tests holding escrow and refund against each other already reach for it.
+module.exports.__test__ = { takeEscrow, refundEscrow, refundNote, finalizeDuel };

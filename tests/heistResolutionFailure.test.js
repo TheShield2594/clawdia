@@ -12,10 +12,13 @@ jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
 jest.mock('../src/models/User', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 jest.mock('../src/utils/balanceDebit', () => ({ debitUpTo: jest.fn() }));
+jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
+jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 
 const Guild = require('../src/models/Guild');
 const User = require('../src/models/User');
 const { logTransaction } = require('../src/utils/logTransaction');
+const { recordOwedPayout } = require('../src/utils/owedPayout');
 const {
     resolveHeist, createLobby, joinLobby, getHeist, clearHeist,
 } = require('../src/services/heistService');
@@ -43,6 +46,7 @@ beforeEach(() => {
     Guild.findOne.mockReturnValue(lean({ economy: { currency: '💰' }, heist: {} }));
     User.findOne.mockReturnValue(lean({ balance: 100 }));
     User.findOneAndUpdate.mockResolvedValue({});
+    recordOwedPayout.mockResolvedValue(true);
 });
 
 afterEach(() => { clearHeist(GUILD); jest.restoreAllMocks(); });
@@ -66,7 +70,10 @@ describe('when resolution cannot finish', () => {
 });
 
 describe('when one player\'s economy write fails', () => {
-    test('it is reported rather than swallowed, and the rest are still paid', async () => {
+    // #873 moved the share onto the shared credit-or-owe helper, which keys the
+    // credit — so a write that rejected after committing cannot pay twice, and
+    // a retry is safe to make. A transient failure no longer costs a share.
+    test('a transient failure is retried rather than costing the share', async () => {
         const heist = liveHeist();
         User.findOneAndUpdate
             .mockRejectedValueOnce(new Error('write failed'))
@@ -74,10 +81,26 @@ describe('when one player\'s economy write fails', () => {
 
         await resolveHeist(client, heist);
 
-        expect(console.error).toHaveBeenCalledWith(
-            expect.stringContaining('payout'), expect.any(String));
-        // The second player's payout still went through and was recorded.
-        expect(User.findOneAndUpdate).toHaveBeenCalledTimes(2);
+        // Three writes for two shares: the first player's failed attempt, its
+        // retry, and the second player's. Both were paid, and both logged.
+        expect(User.findOneAndUpdate).toHaveBeenCalledTimes(3);
+        expect(logTransaction).toHaveBeenCalledTimes(2);
+        expect(recordOwedPayout).not.toHaveBeenCalled();
+        expect(getHeist(GUILD)).toBeNull();
+    });
+
+    test('a share that cannot be credited at all is written down, and the rest are still paid', async () => {
+        const heist = liveHeist();
+        User.findOneAndUpdate
+            .mockRejectedValueOnce(new Error('write failed'))
+            .mockRejectedValueOnce(new Error('write failed'))
+            .mockRejectedValueOnce(new Error('write failed'))
+            .mockResolvedValue({});
+
+        await resolveHeist(client, heist);
+
+        expect(recordOwedPayout).toHaveBeenCalledTimes(1);
+        // The second player's share still went through and was recorded.
         expect(logTransaction).toHaveBeenCalledTimes(1);
         expect(getHeist(GUILD)).toBeNull();
     });

@@ -15,6 +15,8 @@ const User  = require('../models/User');
 const { assertGuildAffinity } = require('../utils/sharding');
 const { logTransaction } = require('../utils/logTransaction');
 const { debitUpTo } = require('../utils/balanceDebit');
+const { creditCoinsOrOwe } = require('../utils/creditOrOwe');
+const { crewSharePayoutKey } = require('../utils/payoutKey');
 const { ROLES, TARGETS } = require('../data/heistData');
 const { makeSkillRow, buildLobbyEmbed, buildLobbyRows } = require('../views/heistView');
 const COLORS = require('../utils/embedColors');
@@ -284,6 +286,7 @@ async function runResolution(client, heist) {
 
     const players = [...heist.players.entries()];
     const resultLines = [];
+    const unpaid = [];
 
     for (const [userId, player] of players) {
         const roleMeta = ROLES[player.role];
@@ -292,23 +295,26 @@ async function runResolution(client, heist) {
         resultLines.push(`${roleMeta.emoji} **${player.username}** (${roleMeta.label}) — ${icon} ${passed ? 'Passed' : 'Failed'}`);
 
         if (outcome === 'full_success' || (outcome === 'partial_success' && passed)) {
-            // Logged rather than swallowed. A payout that does not land is a
-            // player short of coins they were shown winning, and a silent catch
-            // left no trace of it anywhere. It still does not fail the
-            // resolution: the rest of the crew has to be paid either way, and
-            // making this durable needs a per-player ledger the heist has no
-            // way to keep today.
-            try {
-                await User.findOneAndUpdate(
-                    { userId, guildId },
-                    { $inc: { balance: share } }
-                );
-                if (share > 0) {
-                    const u = await User.findOne({ userId, guildId }, 'balance').lean();
-                    logTransaction({ userId, guildId, type: 'heist_payout', amount: share, balance: u?.balance ?? share, note: `Heist: ${TARGETS[heist.target]?.label}` });
-                }
-            } catch (err) {
-                console.error(`[heist] payout of ${share} to ${userId} in ${guildId} failed:`, err.message);
+            // A share that does not land is a player short of coins they were
+            // just shown winning. This used to log the rejection and move on —
+            // and to treat an unmatched write, which does not reject at all, as
+            // a payout — so the "per-player ledger the heist has no way to keep"
+            // was the missing half of it. It has one now: the same owed-payout
+            // record every other claimed-then-failed credit writes, replayable
+            // with `npm run payouts:replay` (#873).
+            //
+            // It still does not fail the resolution. The rest of the crew has to
+            // be paid either way, and a share that is written down is not a
+            // share that is lost.
+            const paid = await creditCoinsOrOwe({ userId, guildId }, share, {
+                payoutKey: crewSharePayoutKey(heist.heistId, userId),
+                service: 'heistService', jobName: 'heistPayout',
+            });
+            if (paid.credited && share > 0) {
+                const u = await User.findOne({ userId, guildId }, 'balance').lean();
+                logTransaction({ userId, guildId, type: 'heist_payout', amount: share, balance: u?.balance ?? share, note: `Heist: ${TARGETS[heist.target]?.label}` });
+            } else if (!paid.credited) {
+                unpaid.push({ username: player.username, owed: paid.owed });
             }
         } else if (outcome === 'failure' || (outcome === 'partial_success' && !passed)) {
             // Jail the caught players: lock economy commands and apply a fine.
@@ -345,6 +351,19 @@ async function runResolution(client, heist) {
         .setDescription(desc)
         .addFields({ name: '👥 Crew Results', value: resultLines.join('\n') || '*No players*' })
         .setTimestamp();
+
+    // A crew member whose share did not land is named here rather than left to
+    // notice on their own. The embed above has just told the whole channel what
+    // everyone earned; saying nothing about the one who did not is how an
+    // unpaid share turns into "the bot ate my coins" a week later.
+    if (unpaid.length) {
+        embed.addFields({
+            name: '⚠️ Unpaid Shares',
+            value: unpaid.map(u => `**${u.username}** — ${u.owed
+                ? 'the payout failed and is recorded; an admin can restore it'
+                : 'the payout failed. Please contact a server admin'}`).join('\n'),
+        });
+    }
 
     try {
         const dg = await client.guilds.fetch(guildId).catch(() => null);

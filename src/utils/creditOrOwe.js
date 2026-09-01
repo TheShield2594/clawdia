@@ -1,0 +1,119 @@
+'use strict';
+
+/**
+ * Pay a player, or write down that they were not paid.
+ *
+ * Three group payouts wrote their own version of this and each got a different
+ * part of it wrong (#873).
+ *
+ * `/duel` refunded an escrowed stake with a bare `updateOne` and read the
+ * absence of a throw as success — but an update whose filter matches nothing
+ * resolves just as happily as one that moved coins, so a duel whose challenger
+ * document had gone away told both players "both bets have been refunded" over a
+ * stake that was still missing. `/syndicate` retried its share three times and
+ * then set `credited = true` on whatever `findOneAndUpdate` returned, `null`
+ * included, so the same unmatched write counted as paid and never reached the
+ * recovery record sitting directly below it. `/heist` logged a rejected share
+ * and moved on, leaving no record of it anywhere but the console.
+ *
+ * All three want what src/utils/coinTransfer.js already does for a two-party
+ * transfer: attempt the credit, decide whether it landed by looking at what came
+ * back, and — when it did not — file the debt where `npm run payouts:replay` can
+ * settle it rather than letting it end at a log line.
+ *
+ * The credit is keyed, and the retry is why. A `$inc` is not idempotent, so
+ * retrying one whose outcome is unknown (a write that committed and lost its
+ * response) is how a credit lands twice; `/syndicate`'s three attempts were
+ * exactly that. Putting the key in the write's own filter — src/utils/payoutKey.js
+ * — makes the second attempt a no-op instead, so the retry is safe and the owed
+ * record it eventually writes replays under the same key. That is the shape
+ * `commitBalanceDelta` in src/utils/balanceDelta.js already uses, for the same
+ * reason.
+ */
+
+const DEFAULT_USER = require('../models/User');
+const { creditCoinsOnce } = require('./payoutKey');
+const { recordOwedPayout } = require('./owedPayout');
+const { delay } = require('./delay');
+
+const DEFAULT_ATTEMPTS = 3;
+
+/**
+ * Credits `amount` coins exactly once, and records the payout as owed when it
+ * will not land.
+ *
+ * @param {object}   filter          the user's `{ userId, guildId }`
+ * @param {number}   amount          coins to credit; a non-positive amount is a no-op
+ * @param {object}   opts
+ * @param {string}   opts.payoutKey  names *this* payout, so neither the retry
+ *                                   below nor a replayed record can pay it twice
+ * @param {string}   opts.service    for the owed record and the log line
+ * @param {string}   opts.jobName
+ * @param {object}   [opts.extraSet] further pipeline `$set` fields committed in
+ *                                   the same write, so bookkeeping that belongs
+ *                                   with the credit cannot land without it
+ *                                   (use `incExpr` from utils/balanceDebit for a
+ *                                   counter)
+ * @param {number}   [opts.attempts]
+ * @param {object}   [opts.Model]
+ * @returns {Promise<{credited: boolean, owed: boolean, doc: ?object, error: ?Error}>}
+ *
+ * `credited: false` with `owed: true` means the coins are neither paid nor lost
+ * but written down for an operator to settle — the caller has to say so rather
+ * than announcing a payout that did not happen.
+ */
+async function creditCoinsOrOwe(filter, amount, {
+    payoutKey, service = 'economy', jobName = 'credit', extraSet = {},
+    attempts = DEFAULT_ATTEMPTS, Model = DEFAULT_USER,
+} = {}) {
+    const wanted = Math.floor(amount) || 0;
+    if (wanted <= 0) return { credited: true, owed: false, doc: null, error: null };
+
+    let lastError = null;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+            const { status, doc } = await creditCoinsOnce(filter, wanted, payoutKey, { Model, extraSet });
+
+            // 'duplicate' is a success: an earlier attempt landed and only its
+            // response was lost. That is the case the key exists for, and the
+            // reason this loop is allowed to exist at all.
+            if (status === 'paid')      return { credited: true, owed: false, doc, error: null };
+            if (status === 'duplicate') return { credited: true, owed: false, doc: null, error: null };
+
+            lastError = new Error(
+                status === 'missing'
+                    ? `no user document to credit (${JSON.stringify(filter)})`
+                    : `credit matched nothing but ${payoutKey} is absent`,
+            );
+            // A missing document will still be missing next time round, so
+            // there is nothing to retry — go straight to recording it as owed.
+            if (status === 'missing') break;
+        } catch (err) {
+            lastError = err;
+        }
+        if (attempt < attempts) await delay(attempt * 200);
+    }
+
+    console.error(
+        `[${service}] ${jobName}: ${wanted} coins to ${filter.userId} in ${filter.guildId} ` +
+        'could not be credited:', lastError?.message,
+    );
+
+    const owed = await recordOwedPayout({
+        service,
+        jobName,
+        guildId: filter.guildId ?? null,
+        payload: {
+            kind:      'coins',
+            userId:    filter.userId,
+            guildId:   filter.guildId,
+            amount:    wanted,
+            payoutKey,
+        },
+        error: lastError,
+    });
+
+    return { credited: false, owed, doc: null, error: lastError };
+}
+
+module.exports = { creditCoinsOrOwe, DEFAULT_ATTEMPTS };

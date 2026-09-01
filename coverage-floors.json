@@ -31,10 +31,10 @@
             "lines": 24
         },
         "src/commands/economy": {
-            "statements": 27,
-            "branches": 12,
-            "functions": 29,
-            "lines": 28
+            "statements": 33,
+            "branches": 18,
+            "functions": 36,
+            "lines": 34
         },
         "src/commands/economy/event": {
             "statements": 23,
@@ -169,10 +169,10 @@
             "lines": 79
         },
         "src/services": {
-            "statements": 63,
-            "branches": 54,
-            "functions": 59,
-            "lines": 66
+            "statements": 65,
+            "branches": 56,
+            "functions": 62,
+            "lines": 68
         },
         "src/services/ai": {
             "statements": 81,
@@ -211,10 +211,10 @@
             "lines": 15
         },
         "src/utils": {
-            "statements": 69,
-            "branches": 69,
-            "functions": 75,
-            "lines": 71
+            "statements": 73,
+            "branches": 71,
+            "functions": 78,
+            "lines": 74
         },
         "src/views": {
             "statements": 62,

@@ -1,10 +1,11 @@
 # Feature Audit Log
 
 A record of the subsystems that have been through a line-by-line audit, and what
-was found and fixed in each. **It is not a survey of the whole bot.** Nine
-subsystems have been audited — all of them long-stable, low-churn ones. The
-majority of the codebase, including every economy subsystem, has never been
-audited; see [Not yet reviewed](#not-yet-reviewed) for the full list.
+was found and fixed in each. **It is not a survey of the whole bot.** Ten
+subsystems have been audited: nine long-stable, low-churn ones, and the first
+pass over the economy — the escrow and payout paths of `/duel`, `/heist` and
+`/syndicate` (#873). The majority of the codebase, and most of the economy, has
+never been audited; see [Not yet reviewed](#not-yet-reviewed) for the full list.
 
 A subsystem appearing here means it was audited on the date at the bottom of
 this file and the findings were resolved. A subsystem *not* appearing here means
@@ -365,6 +366,77 @@ release gate.
 
 ---
 
+## Economy — Duel Escrow and Crew Payouts
+
+**Status: Audited — all findings resolved** ✓
+
+The first pass of the economy audit #873 asks for, taken over the money-moving
+paths that hold coins on someone's behalf and then have to put them somewhere:
+the `/duel` escrow and settlement, and the crew splits in `/heist` and
+`/syndicate`. These were picked first because escrow is the only shape in the
+economy where coins exist outside anybody's balance, so a failure there does not
+merely misreport a number — it destroys or mints one.
+
+The rest of the economy remains unaudited and is still listed under
+[Not yet reviewed](#not-yet-reviewed).
+
+**Files reviewed/fixed:**
+- `src/commands/economy/duel.js`
+- `src/commands/economy/syndicate.js`
+- `src/services/heistService.js`
+- `src/utils/duelEscrow.js` (added)
+- `src/utils/creditOrOwe.js` (added)
+- `src/utils/payoutKey.js`
+- `tests/duelEscrowSettlement.test.js` (added)
+- `tests/crewShareRecovery.test.js` (added)
+- `tests/creditCoinsOrOwe.test.js` (added)
+- `tests/heistResolutionFailure.test.js`
+- `tests/achievementTracking.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | A duel that failed *after* paying its winner minted the pot. `finalizeDuel` paid out and then read both balances for the result embed; a rejection from that read — or from anything else past the payout — reached a caller whose only recovery is `refundEscrow`, which handed both stakes back on top of a settled duel. `2 × amount` created per failure | Settlement is now the last thing in `finalizeDuel` that can fail: the result embed and victory card moved into `presentResult`, which swallows its own errors. The accept handler also clears `escrowTaken` when it hands the escrow to the game runner, so its catch cannot refund a duel somebody else has already settled | `duel.js` |
+| 2 | `takeEscrow`'s rollback destroyed the challenger's stake. When the opponent's stake could not be taken, the challenger's refund was a bare unchecked `await User.updateOne(...)`: an update matching no document resolved as success, and a rejection escaped to a caller that had already decided no escrow was taken and refunded nothing | The rollback goes through `creditCoinsOrOwe` — verified, never throwing, and recorded as an owed payout when it will not land — and reports what happened back to the caller, which now names the stranded stake in the cancellation message | `duel.js`, `creditOrOwe.js` |
+| 3 | A tie refunded both stakes through one `Promise.all` of two `$inc`s. The first failure abandoned the second write and rejected into the caller's catch, so one player could keep their stake, the other lose theirs, and the pair then be refunded again | Both refunds are independent and individually verified; the cooldown stamp they used to share is a separate best-effort write | `duel.js` |
+| 4 | `/syndicate` counted an unmatched write as a paid share. `findOneAndUpdate` returning `null` — no user document in that guild — does not throw, so `credited = true` was set on it and the recovery record directly below was never reached. Its three retries of an unguarded `$inc` could also pay twice: a write that commits and loses its response is indistinguishable from one that never ran | Both go through the shared helper: the credit carries a payout key, which is what makes the retry safe, and an unmatched write is a failure rather than a payout | `syndicate.js`, `creditOrOwe.js` |
+| 5 | `/syndicate`'s recovery record could not be replayed by anything. `jobName: 'heist_credit'` has no `.owed` suffix, so `npm run payouts:replay` never lists it, and the payload carried no `kind`, so `replayOwedPayout` could not have paid it either. The share was written down where nobody could settle it | Records go through `recordOwedPayout` with a `coins` payload and a `crew:{heistId}:{userId}` key, which is the shape the replay script already understands | `syndicate.js`, `payoutKey.js` |
+| 6 | `/heist` lost a failed share entirely. A rejected payout was logged to the console and the resolution moved on; an unmatched one was not noticed at all. Either way the channel was told what everyone earned | Same helper, same owed record. The result embed names any crew member whose share did not arrive and says whether it is recoverable | `heistService.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 7 | Every duel refund path told both players "Both bets have been refunded" regardless of what the two writes did | `refundNote` words the message from the actual outcome — returned, recorded for an admin, or lost — and all seven refund sites use it | `duel.js` |
+| 8 | A duel whose payout failed still announced the win, posted the victory card naming the amount, and ticked the "Win a duel" season mission | The result says the pot could not be paid and whether it was recorded; the card and the mission tick are conditional on the payout landing | `duel.js` |
+| 9 | The winner's pot shared one write with `duelWins` and the ranked ELO `$set`, so the money's fate was tied to a counter's | The pot moves on its own verified write; the records follow as best-effort `allSettled` writes that cannot fail the duel | `duel.js`, `duelEscrow.js` |
+| 10 | Deprecated `displayAvatarURL({ dynamic: true })` in the victory card and the rank view — the same finding as #4 in the Welcome audit, in code written after it | Removed the option; v14 returns animated URLs by default | `duel.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 11 | Three subsystems had three hand-written versions of "credit this player, cope if it fails", and each got a different part of it wrong | One `creditCoinsOrOwe`, keyed and verified, recording what it could not pay | `creditOrOwe.js` |
+| 12 | A duel's money handling was spread through the command file, which the 900-line cap would not hold | Escrow, refund, winner payout and the refund wording moved to `src/utils/duelEscrow.js`; the command keeps the collectors and the wording around them. The `lifetimeGambled` reversal added by the achievement audit is now a parameter of the refund rather than a property of it, because a tie hands the stakes back without the duel having gone unplayed — the counter stays, as it does on a blackjack push | `duel.js`, `duelEscrow.js` |
+| 13 | No tests over any of it | 39 tests across three suites: the escrow, the settlement and the refund wording (`duelEscrowSettlement`); both crew splits driven through the same table (`crewShareRecovery`); and the helper against a store that evaluates the payout-key guard for real (`creditCoinsOrOwe`). `src/commands/economy` coverage rose from a 27% floor to 35%, and the global floors from 49/39/50/50 to 50/40/53/51 | `tests/`, `coverage-floors.json`, `jest.config.js` |
+
+**Reviewed and found sound** — no change needed, recorded so the next pass does
+not re-derive it: `utils/coinTransfer.js` (the two-party transfer, already
+verified-and-recorded end to end), `utils/balanceDebit.js` (the clamp is inside
+the update), `utils/balanceDelta.js` and its `save()`-detaching callers,
+`utils/payoutKey.js`, `commands/economy/rob.js` (deltas, not absolute writes,
+with both sides guarded and reversed on failure), `utils/placeWager.js`, and the
+`explore` travel toll. `casinoJackpotService.awardPool` restores the pool and
+clears the winner fields when a credit fails, which is sound; it does not write
+an owed record, and is left for the casino pass.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -382,7 +454,7 @@ wide, and it is widest exactly where the risk is.
 - exploration (`exploreService.js`, `explore.js`, `map.js`)
 - casino (`src/games/casino/*`, `casino.js`, `casinoJackpotService.js`)
 - core currency (`balance.js`, `bank.js`, `daily.js`, `work.js`, `jobs.js`, `crime.js`, `rob.js`, `invest.js`, `market.js`, `gift.js`)
-- group and PvP systems (`heistService.js`, `syndicateService.js`, `war.js`, `duel.js`, `rivalryService.js`, `tournamentService.js`)
+- group and PvP systems (`war.js`, `rivalryService.js`, `tournamentService.js`, and everything in `heistService.js`, `syndicateService.js` and `duel.js` other than the escrow and payout paths audited above)
 - progression (`prestige.js`, `season.js`, `synergyService.js`, `dailychallenge.js`)
 - seasonal events (`seasonalEventService.js`, `eventshop.js`, and the seasonal commands)
 
@@ -400,5 +472,6 @@ wide, and it is widest exactly where the risk is.
 
 ---
 
-*The audited subsystems — and only those — were last reviewed on 2026-05-28.
-"Not yet reviewed" carries no review date, because nothing in it has been reviewed.*
+*The nine non-economy subsystems above were last reviewed on 2026-05-28; the
+economy escrow and payout paths on 2026-09-01. "Not yet reviewed" carries no
+review date, because nothing in it has been reviewed.*
