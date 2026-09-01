@@ -212,6 +212,38 @@ describe('toast', () => {
     });
 });
 
+// #879. `.ai-inner-tabs` was a nowrap flex row and `body` is
+// `overflow-x: hidden`, so the Economy panel's nine tabs ran past a phone's
+// viewport and the rightmost ones were clipped away — no scroll, no wrap, and
+// no other route to the panels behind them. Same bug class as the wide tables
+// below; a different fix, because a wrapped row needs no scroll affordance.
+describe('inner tab strips', () => {
+    const styles = fs.readFileSync(path.join(PUBLIC, 'styles.css'), 'utf8');
+
+    it('wraps rather than running off the side of the screen', () => {
+        const rule = /\.ai-inner-tabs\s*\{([^}]*)\}/.exec(styles);
+        expect(rule).not.toBeNull();
+        expect(rule[1]).toMatch(/flex-wrap:\s*wrap/);
+    });
+
+    it.each(['economy', 'moderation', 'ai', 'rss'])(
+        'puts every tab in the %s panel inside one of those strips',
+        panel => {
+            document.body.innerHTML = renderPanel(panel);
+
+            const strips = [...document.querySelectorAll('.ai-inner-tabs')];
+            expect(strips.length).toBeGreaterThan(0);
+
+            // A strip that reaches for its own layout instead of the class is
+            // back outside the rule above, which is how the clipping got in.
+            for (const tab of document.querySelectorAll('[class*="-inner-tab"]:not(.ai-inner-tabs)')) {
+                expect([tab.textContent.trim(), tab.closest('.ai-inner-tabs') !== null])
+                    .toEqual([tab.textContent.trim(), true]);
+            }
+        },
+    );
+});
+
 // #668. `.cases-table` is up to seven columns wide and `body` is
 // `overflow-x: hidden`, so on a narrow screen the right-hand columns — the
 // Actions column on three of these four — were clipped with nothing that could
