@@ -248,7 +248,11 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
         res.locals.asset = asset;
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('X-Frame-Options', 'DENY');
-        res.setHeader('X-XSS-Protection', '1; mode=block');
+        // Explicitly off, not on. The header is deprecated and ignored by
+        // current browsers, and the legacy auditor it enables has itself been
+        // a source of XS-Leaks and injection — `0` is the modern guidance, and
+        // the nonce-based CSP below is what actually does this job (#921).
+        res.setHeader('X-XSS-Protection', '0');
         res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
         res.setHeader('Content-Security-Policy', [
             "default-src 'self'",
