@@ -9,6 +9,15 @@ const COLORS = require('../utils/embedColors');
  * Check all applicable achievements for a user and award any newly earned ones.
  * Call this after any stat-changing operation, before user.save().
  *
+ * The scan repeats until a pass awards nothing. One achievement reads what the
+ * others have earned — Completionist wants 20 non-secret unlocks — and a single
+ * ordered pass only sees the ones defined *above* it in the list. The tiered
+ * hunt/angler/miner/gambler badges were appended below Completionist, so a
+ * player whose twentieth unlock was Hunter Gold stayed locked out of it until
+ * some later, unrelated check happened to run. Iterating to a fixed point makes
+ * the award independent of where a definition sits in the array, which is not a
+ * property anything should have to remember when adding one.
+ *
  * @param {object} user           - Mongoose user document (already modified, not yet saved)
  * @param {object} guildSettings  - Mongoose guild document
  * @returns {Array} newly earned achievement definitions (built-in + custom)
@@ -22,28 +31,80 @@ async function checkAndAward(user, guildSettings) {
     const newlyEarned = [];
 
     // ── Built-in achievements ─────────────────────────────────────────────
-    for (const def of ACHIEVEMENTS) {
-        if (disabled.has(def.id)) continue;
-        if (earnedIds.has(def.id)) continue;
+    // Bounded by the definition count: every pass after the first is entered
+    // only because the one before it awarded something, and nothing is awarded
+    // twice, so this cannot run more times than there are achievements.
+    let awardedThisPass = true;
+    while (awardedThisPass) {
+        awardedThisPass = false;
 
-        let earned = false;
-        try {
-            earned = def.check(user, guildSettings);
-        } catch {
-            // silently skip a broken check
+        for (const def of ACHIEVEMENTS) {
+            if (disabled.has(def.id)) continue;
+            if (earnedIds.has(def.id)) continue;
+
+            let earned = false;
+            try {
+                earned = def.check(user, guildSettings);
+            } catch {
+                // silently skip a broken check
+            }
+
+            if (!earned) continue;
+
+            user.achievements = user.achievements || [];
+            user.achievements.push({ id: def.id, earnedAt: new Date(), claimed: false });
+            user.achievementsCount = (user.achievementsCount || 0) + 1;
+            earnedIds.add(def.id);
+            newlyEarned.push(def);
+            awardedThisPass = true;
         }
-
-        if (!earned) continue;
-
-        user.achievements = user.achievements || [];
-        user.achievements.push({ id: def.id, earnedAt: new Date(), claimed: false });
-        user.achievementsCount = (user.achievementsCount || 0) + 1;
-        earnedIds.add(def.id);
-        newlyEarned.push(def);
     }
 
     // Announcement is deferred — callers must call announceAchievements after user.save()
     return newlyEarned;
+}
+
+/**
+ * checkAndAward for a caller that must not save the whole user document.
+ *
+ * The casino is the case this exists for. A hand's stake is debited with an
+ * atomic `$inc` while the player's balance is moving under several other
+ * writers, and `user.save()` writes `balance` back as an absolute `$set` — so
+ * saving the document a wager was read from is exactly the "a casino debit
+ * landing between this read and that save would simply be erased" hazard
+ * messageCreate already guards against. Awarding through a targeted update
+ * writes the two achievement fields and nothing else.
+ *
+ * The filter refuses to write if any of the ids are already on the document, so
+ * two hands settling at once cannot both award the same achievement; the loser
+ * of that race gets an empty array back and announces nothing.
+ *
+ * `user` is still mutated by the checkAndAward inside, so the caller must not
+ * also save it — the whole point is that this write is the only one.
+ *
+ * @param {object} User           the User model
+ * @param {object} filter         `{ userId, guildId }` for the update
+ * @param {object} user           the document to evaluate (not saved)
+ * @param {object} guildSettings
+ * @returns {Promise<Array>} newly earned definitions that this call persisted
+ */
+async function checkAndAwardAtomic(User, filter, user, guildSettings) {
+    const newlyEarned = await checkAndAward(user, guildSettings);
+    if (!newlyEarned.length) return [];
+
+    const ids = newlyEarned.map(def => def.id);
+    const entries = ids.map(id => ({ id, earnedAt: new Date(), claimed: false }));
+
+    const res = await User.updateOne(
+        { ...filter, 'achievements.id': { $nin: ids } },
+        {
+            $push: { achievements: { $each: entries } },
+            $inc:  { achievementsCount: entries.length },
+        },
+    );
+
+    const wrote = res?.modifiedCount ?? res?.nModified ?? 0;
+    return wrote > 0 ? newlyEarned : [];
 }
 
 // XP → embed color tier
@@ -213,4 +274,4 @@ async function grantCustomAchievement(user, achievementId) {
     return true;
 }
 
-module.exports = { checkAndAward, announceAchievements, grantCustomAchievement };
+module.exports = { checkAndAward, checkAndAwardAtomic, announceAchievements, grantCustomAchievement };

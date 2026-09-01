@@ -217,7 +217,7 @@ module.exports = {
         const debited = await placeWager(
             { userId: interaction.user.id, guildId: interaction.guild.id },
             bet,
-            { extraInc: { lifetimeGambled: bet }, onWager },
+            { onWager },
         );
         if (!debited) {
             releaseLock?.();
@@ -303,7 +303,6 @@ module.exports = {
                     const peekUpdated = await placeWager(
                         { userId: interaction.user.id, guildId: interaction.guild.id },
                         insuranceCost,
-                        { extraInc: { lifetimeGambled: insuranceCost } },
                     );
                     if (peekUpdated) peekInsuranceBet = insuranceCost;
                 } catch {
@@ -372,7 +371,6 @@ module.exports = {
                 const updated = await placeWager(
                     { userId: interaction.user.id, guildId: interaction.guild.id },
                     insuranceCost,
-                    { extraInc: { lifetimeGambled: insuranceCost } },
                 );
                 if (updated) insuranceBet = insuranceCost;
                 const statusMsg = updated
@@ -389,7 +387,6 @@ module.exports = {
                 const updated = await placeWager(
                     { userId: interaction.user.id, guildId: interaction.guild.id },
                     bet,
-                    { extraInc: { lifetimeGambled: bet } },
                 );
                 if (!updated) {
                     const embed = buildEmbed(interaction, playerHand, dealerHand, activeBet, currency, `⚠️ Not enough balance for double down · Your turn`, '#5865F2', true);
@@ -419,7 +416,6 @@ module.exports = {
                 const updated = await placeWager(
                     { userId: interaction.user.id, guildId: interaction.guild.id },
                     bet,
-                    { extraInc: { lifetimeGambled: bet } },
                 );
                 if (!updated) {
                     const embed = buildEmbed(interaction, playerHand, dealerHand, activeBet, currency, `⚠️ Not enough balance for split · Your turn`, '#5865F2', true);

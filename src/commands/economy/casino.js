@@ -5,6 +5,7 @@ const User  = require('../../models/User');
 const { processJackpotBet, getJackpotDisplay } = require('../../services/casinoJackpotService');
 const { advanceMissions } = require('../../services/seasonMissionService');
 const { tryAcquire, release } = require('../../utils/activeGameLock');
+const { checkAndAwardAtomic, announceAchievements } = require('../../services/achievementService');
 const { economyLockKey, busyMessage } = require('../../utils/economyLock');
 
 const games = [
@@ -17,6 +18,28 @@ const games = [
     require('../../games/casino/roulette'),
     require('../../games/casino/slots'),
 ];
+
+/**
+ * Award and announce whatever the coins just staked unlocked.
+ *
+ * Split out of `onWager` so the async work is one awaited chain the caller can
+ * attach a single `.catch` to. `guildSettings` is re-read rather than closed
+ * over so a crash lobby's joiner — who may be in a different guild's cache
+ * entry than the invoker was when the lobby opened — is judged against the
+ * settings that apply to them.
+ */
+async function awardWagerAchievements(doc, better, source) {
+    const settings = await getGuildSettings(doc.guildId);
+    if (!settings?.achievements?.enabled) return;
+
+    const earned = await checkAndAwardAtomic(
+        User, { userId: doc.userId, guildId: doc.guildId }, doc, settings,
+    );
+    if (!earned.length) return;
+
+    const member = source?.guild?.members?.cache?.get(better.id) ?? null;
+    await announceAchievements(source.client, settings, doc, member, earned);
+}
 
 // Discord rejects a command description longer than this.
 const DESCRIPTION_LIMIT = 100;
@@ -167,7 +190,7 @@ module.exports = {
         // not another game played. `user` and `source` are the player and the
         // interaction to announce through, which differ from the invoker for a
         // crash lobby: joiners stake their own coins on someone else's command.
-        const onWager = ({ amount, user = null, source = null }) => {
+        const onWager = ({ amount, user = null, source = null, doc = null }) => {
             const better = user ?? interaction.user;
 
             // Fire-and-forget — the service handles pool reset, user credit, and logging.
@@ -185,6 +208,22 @@ module.exports = {
                 { userId: better.id, guildId: interaction.guild.id },
                 'casino', 1, guildSettings,
             ).catch(err => console.error('[casino] season mission error:', err));
+
+            // The wagering achievements. `doc` is the document placeWager's own
+            // `$inc` returned, so `lifetimeGambled` on it already includes this
+            // stake — nothing else has to be read back.
+            //
+            // Without this the casino awarded nothing at all: the only checks
+            // that ran were the ones on the grind commands and on messageCreate,
+            // so crossing a million coins wagered unlocked High Roller whenever
+            // the player next happened to type in chat, which is a strange place
+            // for a casino achievement to appear. The award is atomic (see
+            // checkAndAwardAtomic) precisely because this document was read
+            // mid-hand and must not be saved back wholesale.
+            if (doc) {
+                awardWagerAchievements(doc, better, source ?? interaction)
+                    .catch(err => console.error('[casino] achievement check error:', err));
+            }
         };
 
         try {

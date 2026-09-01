@@ -288,7 +288,8 @@ describe('a stake that is available is taken exactly once', () => {
         const interaction = makeInteraction({ bet: BET });
         await load('slots').execute(interaction, { releaseLock: jest.fn() });
 
-        expect(debits).toEqual([{ $inc: { balance: -BET } }]);
+        // The wagering counter rides in the same write — one debit, still.
+        expect(debits).toEqual([{ $inc: { balance: -BET, lifetimeGambled: BET } }]);
     });
 });
 

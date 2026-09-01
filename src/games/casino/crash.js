@@ -364,9 +364,12 @@ async function openLobby(interaction, bet, hostAutoCashout, releaseLock, onWager
 
         const joined = addPlayer(channelId, i.user.id, null, i.user.username); // no auto cash-out for non-host joiners
         if (!joined) {
+            // The stake goes back, and so does the `lifetimeGambled` placeWager
+            // counted with the debit: coins handed straight back were never
+            // risked, and the wagering achievements must not count them.
             await User.findOneAndUpdate(
                 { userId: i.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: bet, pendingCrashRefund: -bet } }
+                { $inc: { balance: bet, pendingCrashRefund: -bet, lifetimeGambled: -bet } }
             ).catch(err => console.error('[crash] join refund failed:', err));
             return i.reply({ content: 'Could not join the lobby (it may have just filled up). Your coins have been refunded.', flags: MessageFlags.Ephemeral });
         }
@@ -598,7 +601,9 @@ async function startCrashGame(interaction, lobby, lobbyId) {
                 if (unresolvedIds.length > 0) {
                     await User.updateMany(
                         { userId: { $in: unresolvedIds }, guildId, pendingCrashRefund: { $gt: 0 } },
-                        { $inc: { balance: bet }, $set: { pendingCrashRefund: 0 } }
+                        // As with the join refund: a returned stake is an
+                        // uncounted one, so the wager counter comes back too.
+                        { $inc: { balance: bet, lifetimeGambled: -bet }, $set: { pendingCrashRefund: 0 } }
                     ).catch(e => console.error('[crash] emergency refund failed:', e));
                 }
                 deleteLobby(channelId);

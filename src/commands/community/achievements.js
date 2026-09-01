@@ -6,6 +6,7 @@ const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { ACHIEVEMENTS } = require('../../data/achievements');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { attachGrind } = require('../../utils/grindProfile');
 
 const CATEGORY_ORDER = ['economy', 'leveling', 'hunt', 'fishing', 'exploration', 'community', 'moderation', 'custom'];
 
@@ -64,6 +65,16 @@ module.exports = {
                 if (!user) {
                     user = await User.create({ userId: target.id, guildId: interaction.guild.id });
                 }
+                // Hunt, fishing, mining and exploration stats live in GrindProfile
+                // now, not on the user document. Thirty-three of the definitions below
+                // read them through the legacy `user.hunt` / `user.fishing` /
+                // `user.mining` / `user.exploration` names, so without this every
+                // one of their progress bars rendered a flat 0/N no matter how
+                // much the player had hunted — the numbers the grind commands
+                // award off were simply not on the document being measured.
+                await attachGrind(user).catch(err => {
+                    console.error('[achievements] grind profile load failed:', err);
+                });
 
                 const disabled = new Set(guildSettings.achievements?.disabledAchievements || []);
                 const earnedMap = new Map((user.achievements || []).map(a => [a.id, a]));
