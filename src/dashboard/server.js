@@ -10,7 +10,7 @@ const { getStatus, httpStatusFor } = require('../health');
 const { withContext: withLogContext, addContext: addLogContext } = require('../utils/logger');
 const { hasManagePermission } = require('./lib/permissions');
 const { jsonForScript } = require('./lib/jsonForScript');
-const { asset } = require('./lib/assets');
+const { asset, staticCacheControl } = require('./lib/assets');
 const { createBotGateway } = require('../bot/gateway');
 const { instanceStats } = require('./lib/instanceStats');
 // The DASHBOARD_URL and SESSION_SECRET rules used to be defined here, which is
@@ -194,9 +194,22 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
     // Assets are requested through the asset() helper, which stamps each URL
     // with a hash of the file's contents — a deploy changes the URL, so a long
     // immutable cache never serves stale JavaScript or CSS.
-    app.use(express.static(path.join(__dirname, 'public'), {
-        maxAge: '1y',
-        immutable: true,
+    //
+    // That guarantee only holds for URLs that actually carry the hash, and
+    // express.static knows nothing about `?v=`. Not every request does: fonts
+    // are named by bare filename inside public/fonts/fonts.css, and
+    // scripts/fetch-fonts.sh rewrites those same filenames with new bytes. An
+    // unconditional year of `immutable` would leave a regenerated font stale in
+    // every returning browser with no way to bust it short of a rename (#903).
+    //
+    // So the policy is decided per request: a `v` that matches the file's
+    // current hash gets the immutable year, and anything else — no `v`, or a
+    // stale one — gets a short cache it can revalidate out of.
+    const staticDir = path.join(__dirname, 'public');
+    app.use(express.static(staticDir, {
+        setHeaders(res, filePath) {
+            res.setHeader('Cache-Control', staticCacheControl(res.req, filePath, staticDir));
+        },
     }));
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
