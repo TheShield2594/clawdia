@@ -514,12 +514,12 @@
                             </div>
                             <div class="field">
                                 <label class="field-label" for="modal-job-tier">Career tier *</label>
-                                <select id="modal-job-tier">
-                                    <option value="1">Tier 1 — Intern (0 shifts)</option>
-                                    <option value="2">Tier 2 — Skilled Worker (10 shifts)</option>
-                                    <option value="3">Tier 3 — Senior Specialist (25 shifts)</option>
-                                    <option value="4">Tier 4 — Executive (50 shifts)</option>
-                                </select>
+                                <!-- Options are built by renderJobTierOptions() when the
+                                     modal opens. They cannot be static markup: the Careers
+                                     tab above lets an admin rename every tier and change its
+                                     shift threshold, and stock names here contradicted the
+                                     configuration the same page had just saved (#911). -->
+                                <select id="modal-job-tier"></select>
                                 <small>Members unlock this job when they reach the required shift count.</small>
                             </div>
                             <div style="display:flex;gap:.75rem">
