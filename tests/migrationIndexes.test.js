@@ -77,3 +77,40 @@ describe('014_scope_item_images_per_guild', () => {
         expect(source).toContain("codeName !== 'IndexNotFound'");
     });
 });
+
+// 021 gives the marketlistings TTL a grace period so `returnExpiredMarketListings`
+// can claim an expired listing and return its items before MongoDB destroys the
+// document (#867). Two numbers have to agree and neither file can see the other:
+// the migration's collMod sets the grace on the index that exists, and the
+// model's declaration is what a fresh database — and any later createIndex —
+// builds. A migration that set a different figure would be quietly undone.
+describe('021_market_listing_ttl_grace', () => {
+    const source = read('021_market_listing_ttl_grace.js');
+    const model = fs.readFileSync(path.join(__dirname, '..', 'src', 'models', 'MarketListing.js'), 'utf8');
+    const { EXPIRED_LISTING_GRACE_SECONDS } = require('../src/models/MarketListing');
+
+    // Read off the migration rather than required from it: requiring it pulls in
+    // mongoose, and the value is the thing under test.
+    const migrationGrace = Number(
+        source.match(/const GRACE_SECONDS = ([\d\s*]+);/)[1].split('*').reduce((a, b) => a * Number(b), 1),
+    );
+
+    test('sets the same grace the model declares', () => {
+        expect(migrationGrace).toBe(EXPIRED_LISTING_GRACE_SECONDS);
+    });
+
+    test('the model no longer declares the zero-grace TTL that lost the items', () => {
+        expect(model).not.toContain('expireAfterSeconds: 0');
+        expect(model).toContain('expireAfterSeconds: EXPIRED_LISTING_GRACE_SECONDS');
+    });
+
+    test('the grace far outlasts the sweep that has to win the race', () => {
+        // The sweep runs every ten minutes and takes 50 listings a tick, so the
+        // margin has to cover a backlog rather than a single tick. Asserted
+        // against the schedule itself so a change to either is caught here.
+        const { JOBS } = require('../src/services/scheduler');
+        const sweep = JOBS.find(j => j.name === 'returnExpiredMarketListings');
+        expect(sweep.schedule).toBe('*/10 * * * *');
+        expect(EXPIRED_LISTING_GRACE_SECONDS).toBeGreaterThan(100 * 10 * 60);
+    });
+});

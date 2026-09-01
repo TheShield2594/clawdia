@@ -1461,17 +1461,38 @@ async function applyBankInterest(client) {
  * whose listing expired unclaimed would vanish from the economy permanently.
  * The one job here that needs no client: it posts nothing.
  *
+ * "Before the TTL index deletes them" was not achievable until #867: the index
+ * carried no grace period, MongoDB's TTL monitor wakes about once a minute, and
+ * this runs every ten — so the monitor won nearly every race and the items were
+ * gone before this job ever saw the listing. The grace is now a week
+ * (models/MarketListing.js), which is what makes selecting on `expiresAt <= now`
+ * here the claim it reads as rather than a hope.
+ *
  * @returns {Promise<void>}
  */
 async function returnExpiredMarketListings() {
     const MarketListing = require('../models/MarketListing');
+    const BATCH_SIZE = 50;
     const now = new Date();
     let processed = 0;
     let failed = 0;
     let unrecordedReturns = 0;
 
     // Process in batches of 50 to avoid large memory spikes
-    const expired = await MarketListing.find({ expiresAt: { $lte: now } }).limit(50).lean();
+    const expired = await MarketListing.find({ expiresAt: { $lte: now } }).limit(BATCH_SIZE).lean();
+
+    // A full batch means the tick was capped, not that it cleared the queue —
+    // the rest wait for the next one, and the one after that if it is full too.
+    // That backlog used to be invisible and harmless-looking; since #867 it is
+    // the thing the TTL grace is sized against, so it says so. Sustained, it
+    // means listings are expiring faster than 50 per ten minutes and the batch
+    // needs raising before the grace runs out and MongoDB deletes the tail.
+    if (expired.length === BATCH_SIZE) {
+        console.warn(
+            `[scheduler] returnExpiredMarketListings: batch capped at ${BATCH_SIZE} — more expired listings are ` +
+            'waiting. Items are returned on later ticks; a backlog that persists for days outlives the TTL grace.',
+        );
+    }
 
     for (const listing of expired) {
         try {

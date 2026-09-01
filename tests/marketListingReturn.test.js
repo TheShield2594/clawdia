@@ -39,6 +39,7 @@ function stubFind(docs) {
 
 let errorLog;
 let infoLog;
+let warnLog;
 
 beforeEach(() => {
     jest.clearAllMocks();
@@ -47,9 +48,10 @@ beforeEach(() => {
     recordOwedPayout.mockResolvedValue(true);
     errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
     infoLog  = jest.spyOn(console, 'log').mockImplementation(() => {});
+    warnLog  = jest.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
-afterEach(() => { errorLog.mockRestore(); infoLog.mockRestore(); });
+afterEach(() => { errorLog.mockRestore(); infoLog.mockRestore(); warnLog.mockRestore(); });
 
 describe('returnExpiredMarketListings', () => {
     test('sweeps expired listings in bounded batches', async () => {
@@ -62,6 +64,26 @@ describe('returnExpiredMarketListings', () => {
         // Unbounded, one backlog of expiries pulls the whole collection into
         // the process at once.
         expect(seen.limit).toBe(50);
+    });
+
+    test('says so when the batch cap leaves listings behind', async () => {
+        // Before #867 a capped tick was invisible and looked harmless: the rest
+        // waited for the next one. Now the TTL grace is what those stragglers
+        // are living on, so a backlog is something an operator has to be able
+        // to see coming.
+        stubFind(Array.from({ length: 50 }, (_, i) => listing({ _id: `l${i}` })));
+
+        await returnExpiredMarketListings();
+
+        expect(warnLog.mock.calls.flat().join(' ')).toMatch(/batch capped at 50/);
+    });
+
+    test('says nothing about a backlog on a tick that cleared the queue', async () => {
+        stubFind(Array.from({ length: 49 }, (_, i) => listing({ _id: `l${i}` })));
+
+        await returnExpiredMarketListings();
+
+        expect(warnLog.mock.calls.flat().join(' ')).not.toMatch(/batch capped/);
     });
 
     test('claims the listing by deleting it before it credits anything', async () => {

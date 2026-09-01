@@ -38,6 +38,12 @@ const {
     runMigrations, rollbackMigration, pendingMigrationNames, waitForMigrations,
 } = require('../../src/migrations/runner');
 const MigrationRecord = require('../../src/models/MigrationRecord');
+// Required for its exported grace period, and so that `marketlistings` is
+// registered on the connection: useMongo's afterEach clears the collections
+// Mongoose knows about, and `seed()` creates this one through the raw driver,
+// which does not register anything. Without this the seeded listing and its TTL
+// index would survive into the next test.
+const { EXPIRED_LISTING_GRACE_SECONDS } = require('../../src/models/MarketListing');
 
 const MIGRATIONS_DIR = path.resolve(__dirname, '..', '..', 'src', 'migrations');
 
@@ -263,6 +269,15 @@ describe('the data migrations, over pre-migration documents', () => {
         // The single-field index 016 exists to drop.
         await db().collection('fishingtournaments').insertOne({ guildId: 'g1', status: 'ended' });
         await db().collection('fishingtournaments').createIndex({ guildId: 1 }, { name: 'guildId_1' });
+
+        // The zero-grace TTL 021 exists to widen, on a listing that has already
+        // expired — the state in which the old index destroyed the seller's
+        // items before the sweep could return them (#867).
+        await db().collection('marketlistings').insertOne({
+            guildId: 'g1', sellerId: 'u1', itemId: 'sword', quantity: 2,
+            pricePerUnit: 10, listedAt: new Date('2024-01-01T00:00:00Z'), expiresAt: new Date('2024-01-03T00:00:00Z'),
+        });
+        await db().collection('marketlistings').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
     }
 
     const user = id => db().collection('users').findOne({ userId: id });
@@ -384,6 +399,25 @@ describe('the data migrations, over pre-migration documents', () => {
         expect(names).toContain('idx_tournament_guild_status');
     }, 60_000);
 
+    test('021 widens the market TTL in place, without dropping the listing it protects', async () => {
+        await seed();
+
+        expect((await db().collection('marketlistings').indexes())
+            .find(i => i.name === 'expiresAt_1').expireAfterSeconds).toBe(0);
+
+        await runMigrations({ dir: MIGRATIONS_DIR });
+
+        // collMod, so the index keeps its name and key and there is never an
+        // instant with no TTL on the collection at all.
+        const ttl = (await db().collection('marketlistings').indexes()).find(i => i.name === 'expiresAt_1');
+        expect(ttl.key).toEqual({ expiresAt: 1 });
+        expect(ttl.expireAfterSeconds).toBe(EXPIRED_LISTING_GRACE_SECONDS);
+
+        // And the already-expired listing is still there for the sweep to
+        // claim, which is the entire point.
+        expect(await db().collection('marketlistings').countDocuments({})).toBe(1);
+    }, 60_000);
+
     // The claim every one of the above rests on: applying twice is applying
     // once. Here the second pass is forced past the MigrationRecord skip, so
     // the migrations themselves have to be idempotent rather than merely
@@ -404,6 +438,7 @@ describe('the data migrations, over pre-migration documents', () => {
             profiles: await db().collection('grindprofiles').find({}).sort({ system: 1 }).toArray(),
             analytics: await db().collection('guildanalytics').find({}).toArray(),
             images: await db().collection('itemimages').find({}).toArray(),
+            listings: await db().collection('marketlistings').find({}).toArray(),
         });
 
         const before = await snapshot();
