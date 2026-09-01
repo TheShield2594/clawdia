@@ -1083,6 +1083,28 @@ example. For the same reason the directory floors are recorded from the
 integration-excluded run, matching what `jest.config.js` does, so the number CI
 sees is that or better: `src/migrations` measures 45.8% locally and 81.8% in CI.
 
+`loadedButNeverRun` is the third list, and it exists because "no executed line"
+is a narrower net than it reads as (#908). A `require` runs a file's imports,
+its constants and its `module.exports`, and each of those counts as an executed
+statement — so a file no test ever calls into sits at 1-10%, not 0, which put it
+on no list at all and made it small enough to hide under a directory floor's
+three points of slack. Eighty-three files were in that state. This list asks the
+other question: did any function or branch in the file run? It may shrink and
+must not grow, and it has one deliberate difference from the list above — an
+entry that runs its own code now is *reported* at the end of a run rather than
+failed, because the twenty files under `src/migrations` are inert without
+`tests/integration/` and fully executed with it, and a hard rule would put a
+local run and CI into permanent disagreement over every one of them. Pruning one
+is a hand edit; `--update` will not drop it for you.
+
+`files` is the last section: a floor per file, for the money primitives under
+`src/utils`. `src/utils` is seventy-odd files, so three points of slack on its
+directory floor is room enough for one of them to lose its coverage outright —
+which is close to what `chargeExact`/`refundCharge` in `src/utils/balanceDebit.js`
+were already doing. The set is hand-maintained on purpose: `--update` refreshes
+the numbers but never adds a file, so widening it stays a decision somebody made
+in a diff.
+
 Both are ratchets, not targets. When coverage genuinely rises:
 
 ```bash

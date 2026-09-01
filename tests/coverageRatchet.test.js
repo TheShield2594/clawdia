@@ -218,6 +218,215 @@ describe('the files with no executed line', () => {
     });
 });
 
+// #908. The list above catches a file at *exactly* zero statements, and that is
+// a narrower net than it reads as. A `require` executes a file's imports, its
+// constants and its `module.exports`, and Istanbul counts each of those, so a
+// file no test ever calls into sits at 1-10% rather than 0 — off that list, and
+// small enough inside a large directory to hide under the three points of slack
+// a directory floor carries. Eighty-three files were in that state, several of
+// them money primitives.
+describe('the files that are loaded but never run', () => {
+    const floors = JSON.parse(read('coverage-floors.json'));
+    const { check, update, inertFiles } = require('../scripts/check-coverage.js');
+
+    const file = (stmt, fn, branch) => ({
+        statements: { covered: stmt, total: 100, pct: stmt },
+        functions: { covered: fn, total: 10, pct: fn * 10 },
+        branches: { covered: branch, total: 20, pct: branch * 5 },
+        lines: { covered: stmt, total: 100, pct: stmt },
+    });
+
+    const dirs = { src: { statements: 0, branches: 0, functions: 0, lines: 0 } };
+    const floorsFor = overrides => ({
+        directories: dirs, neverExecuted: [], loadedButNeverRun: [], ...overrides,
+    });
+
+    test('the recorded list names real files', () => {
+        expect(floors.loadedButNeverRun.length).toBeGreaterThan(0);
+        for (const name of floors.loadedButNeverRun) {
+            expect([name, fs.existsSync(path.join(root, name))]).toEqual([name, true]);
+        }
+    });
+
+    test('a file is not on it twice — the two lists do not overlap', () => {
+        for (const name of floors.loadedButNeverRun) {
+            expect(floors.neverExecuted).not.toContain(name);
+            expect(floors.coveredOnlyByIntegration).not.toContain(name);
+        }
+    });
+
+    test('a required-but-uncalled file counts, even at 10% statements', () => {
+        // The exact shape the old check missed.
+        expect(inertFiles(new Map([['src/a.js', file(10, 0, 0)]]))).toEqual(['src/a.js']);
+    });
+
+    test('one executed function is enough to be off it', () => {
+        expect(inertFiles(new Map([['src/a.js', file(10, 1, 0)]]))).toEqual([]);
+    });
+
+    test('so is one executed branch, for a file whose work is a branch', () => {
+        expect(inertFiles(new Map([['src/a.js', file(10, 0, 1)]]))).toEqual([]);
+    });
+
+    test('a file with no function to call is not on it', () => {
+        // A table of constants has nothing to run, which is not the same as
+        // having something to run that nothing ran.
+        const table = { ...file(10, 0, 0), functions: { covered: 0, total: 0, pct: 100 } };
+        expect(inertFiles(new Map([['src/data/table.js', table]]))).toEqual([]);
+    });
+
+    test('a newly inert file fails', () => {
+        const files = new Map([['src/fresh.js', file(10, 0, 0)]]);
+        const { failures } = check(files, floorsFor());
+        expect(failures.join('\n')).toMatch(/src\/fresh.js is loaded but none of its functions or branches ever run/);
+    });
+
+    test('a recorded one does not', () => {
+        const files = new Map([['src/known.js', file(10, 0, 0)]]);
+        const { failures } = check(files, floorsFor({ loadedButNeverRun: ['src/known.js'] }));
+        expect(failures).toEqual([]);
+    });
+
+    test('an integration-only file does not, either', () => {
+        const files = new Map([['src/only.js', file(10, 0, 0)]]);
+        const { failures } = check(files, floorsFor({ coveredOnlyByIntegration: ['src/only.js'] }));
+        expect(failures).toEqual([]);
+    });
+
+    test('an entry naming a file that is gone fails', () => {
+        const files = new Map([['src/a.js', file(10, 5, 5)]]);
+        const { failures } = check(files, floorsFor({ loadedButNeverRun: ['src/gone.js'] }));
+        expect(failures.join('\n')).toMatch(/src\/gone.js is listed as never run but was not measured/);
+    });
+
+    // The one place this list differs from `neverExecuted`, and the reason is
+    // the same one `coveredOnlyByIntegration` exists for: the twenty files under
+    // src/migrations are inert without tests/integration/ and fully executed
+    // with it. A "covered now" failure would make CI and a local run contradict
+    // each other over every one of them, so it is reported, not failed.
+    test('a recorded file that runs its own code now is reported, not failed', () => {
+        const files = new Map([['src/known.js', file(80, 8, 16)]]);
+        const { failures, staleInert } = check(files, floorsFor({ loadedButNeverRun: ['src/known.js'] }));
+        expect(failures).toEqual([]);
+        expect(staleInert).toEqual(['src/known.js']);
+    });
+
+    test('an update run keeps an entry it happened to see covered', () => {
+        // The same asymmetry from the writing side: re-recording from a run that
+        // did include tests/integration/ must not drop the migrations, or the
+        // next run without it fails on twenty files nobody touched.
+        const spy = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
+        const files = new Map([['src/known.js', file(80, 8, 16)], ['src/b.js', file(10, 0, 0)]]);
+        const next = update(files, floorsFor({ loadedButNeverRun: ['src/known.js'] }));
+        expect(next.loadedButNeverRun).toEqual(['src/b.js', 'src/known.js']);
+        spy.mockRestore();
+    });
+});
+
+// The other half of #908: three points of slack on a directory floor is, inside
+// a seventy-file directory like src/utils, enough room to absorb one file losing
+// its coverage outright. The money primitives are the files where that matters
+// and are few enough to name, so they carry a floor each.
+describe('per-file floors', () => {
+    const floors = JSON.parse(read('coverage-floors.json'));
+    const { check, update, METRICS } = require('../scripts/check-coverage.js');
+
+    const file = pct => Object.fromEntries(
+        METRICS.map(m => [m, { covered: pct, total: 100, pct }]),
+    );
+
+    test('the money primitives are the ones floored', () => {
+        // Named rather than derived: the point of a hand-maintained list is
+        // that adding to it is a decision, so the test is the decision written
+        // down. `chargeExact`/`refundCharge` live in balanceDebit.js — the pair
+        // #884 named, and the closest thing in the tree to this bug's shape.
+        expect(Object.keys(floors.files).sort()).toEqual([
+            'src/utils/balanceDebit.js',
+            'src/utils/balanceDelta.js',
+            'src/utils/coinTransfer.js',
+            'src/utils/creditOrOwe.js',
+            'src/utils/duelEscrow.js',
+            'src/utils/owedPayout.js',
+            'src/utils/payoutKey.js',
+            'src/utils/placeWager.js',
+            'src/utils/refundWager.js',
+        ]);
+    });
+
+    test('each one names a real file and floors every metric above zero', () => {
+        for (const [name, required] of Object.entries(floors.files)) {
+            expect([name, fs.existsSync(path.join(root, name))]).toEqual([name, true]);
+            for (const metric of METRICS) {
+                // A floor of zero is not a floor; these files are all well
+                // covered, and the numbers are what says so.
+                expect([name, metric, required[metric] > 0]).toEqual([name, metric, true]);
+            }
+        }
+    });
+
+    test('a file below its own floor fails, whatever its directory is doing', () => {
+        // The bug: one file collapsing inside a directory big enough to dilute
+        // it. The directory here is passing; the file is not.
+        const files = new Map([
+            ['src/utils/money.js', file(2)],
+            ['src/utils/big.js', file(99)],
+        ]);
+        const { failures } = check(files, {
+            directories: { 'src/utils': { statements: 50, branches: 50, functions: 50, lines: 50 } },
+            neverExecuted: [], loadedButNeverRun: [],
+            files: { 'src/utils/money.js': { statements: 90, branches: 90, functions: 90, lines: 90 } },
+        });
+        expect(failures.join('\n')).toMatch(/src\/utils\/money.js statements 2.00% is below its floor of 90%/);
+    });
+
+    test('a file at or above its floor passes', () => {
+        const files = new Map([['src/utils/money.js', file(90)]]);
+        const { failures } = check(files, {
+            directories: { 'src/utils': { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            neverExecuted: [], loadedButNeverRun: [],
+            files: { 'src/utils/money.js': { statements: 90, branches: 90, functions: 90, lines: 90 } },
+        });
+        expect(failures).toEqual([]);
+    });
+
+    test('a floor for a file that no longer exists fails', () => {
+        const files = new Map([['src/utils/money.js', file(90)]]);
+        const { failures } = check(files, {
+            directories: { 'src/utils': { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            neverExecuted: [], loadedButNeverRun: [],
+            files: { 'src/utils/gone.js': { statements: 90, branches: 90, functions: 90, lines: 90 } },
+        });
+        expect(failures.join('\n')).toMatch(/src\/utils\/gone.js has a per-file floor but was not measured/);
+    });
+
+    test('an update refreshes the numbers but never widens the set', () => {
+        const spy = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
+        const files = new Map([['src/utils/money.js', file(99)], ['src/utils/other.js', file(99)]]);
+        const next = update(files, {
+            directories: { 'src/utils': { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            neverExecuted: [], loadedButNeverRun: [],
+            files: { 'src/utils/money.js': { statements: 10, branches: 10, functions: 10, lines: 10 } },
+        });
+        // Raised to the measurement less the usual slack, and nothing else
+        // joined the set on its own.
+        expect(Object.keys(next.files)).toEqual(['src/utils/money.js']);
+        expect(next.files['src/utils/money.js'].statements).toBe(96);
+        spy.mockRestore();
+    });
+
+    test('a per-file floor is never lowered by an update', () => {
+        const spy = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
+        const files = new Map([['src/utils/money.js', file(5)]]);
+        const next = update(files, {
+            directories: { 'src/utils': { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            neverExecuted: [], loadedButNeverRun: [],
+            files: { 'src/utils/money.js': { statements: 90, branches: 90, functions: 90, lines: 90 } },
+        });
+        expect(next.files['src/utils/money.js'].statements).toBe(90);
+        spy.mockRestore();
+    });
+});
+
 // The check runs against whichever suites the run included, and that is not one
 // fixed set: tests/integration/ needs a real mongod, so a contributor whose
 // machine cannot fetch one runs without it while CI runs with it. A file only

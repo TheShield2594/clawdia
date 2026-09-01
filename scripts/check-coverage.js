@@ -13,7 +13,7 @@
  * and the run would stay green. A whole subsystem can go to zero without the
  * one number that guards it moving far enough to notice.
  *
- * So this checks two more things, from the same coverage-summary.json the CI
+ * So this checks four more things, from the same coverage-summary.json the CI
  * step already reads:
  *
  *   1. A floor per directory. Each one sits a few points under what the suite
@@ -32,6 +32,32 @@
  *      reach is zero-coverage in the first run and covered in the second.
  *      Listing it separately makes both runs agree instead of one of them
  *      being wrong.
+ *
+ *   3. A list of the files something loads but nothing runs (#908). "No executed
+ *      statement" is a narrower thing than it sounds: a file a test only
+ *      `require`s has its `const` declarations and its `module.exports` counted
+ *      as executed statements, so it sits at 1-10% with no function and no
+ *      branch ever entered — off list 2, and inside a large directory small
+ *      enough to hide under list 1's slack. Eighty-three files were in exactly
+ *      that state when this was written. So this asks a different question of
+ *      the same summary: did any of the file's own logic run at all?
+ *
+ *      This list has no "it is covered now" rule, and that is the one place it
+ *      differs from list 2. The twenty files under src/migrations are inert
+ *      without tests/integration/ and fully executed with it, so a strict rule
+ *      here would put CI and a local run into permanent disagreement over them
+ *      — the failure `coveredOnlyByIntegration` exists to prevent, twenty times
+ *      over. A stale entry is reported at the end of a run instead, and
+ *      `--update` prunes nothing on its own: dropping one is a hand edit, which
+ *      is the reviewable diff that says a file grew tests.
+ *
+ *   4. Per-file floors, for the few files where a directory floor is too coarse
+ *      to say anything. `src/utils` is seventy-odd files, so three points of
+ *      directory slack is room enough for one of them to lose its coverage
+ *      outright; the money primitives under it are few enough to list by hand
+ *      and are the ones where that matters. The set is hand-maintained on
+ *      purpose — `--update` refreshes the numbers but never adds or drops a
+ *      file, so widening it stays a decision somebody made in a diff.
  *
  * One consequence worth naming: the directory floors are recorded from the
  * integration-excluded run, the same baseline jest.config.js uses, so the
@@ -110,6 +136,32 @@ function zeroCoverageFiles(files) {
         .sort();
 }
 
+/**
+ * Files something loaded but nothing ran (#908).
+ *
+ * A `require` executes the file's top level — its imports, its constants, the
+ * `module.exports` at the bottom — and Istanbul counts every one of those as an
+ * executed statement. So "has an executed statement" is satisfied by a file no
+ * test has ever called into, which is what let a money primitive sit at 1% and
+ * appear on no list. Functions and branches are the parts only a call reaches,
+ * and both have to be untouched: a file whose only function is an arrow inside
+ * a `.map` at module level is doing its work at require time, and is not what
+ * this is looking for.
+ *
+ * A file with no function to call — a table of constants — is not on this list
+ * for the same reason it is not on the zero-coverage one: there is nothing
+ * there to run.
+ */
+function inertFiles(files) {
+    return [...files.entries()]
+        .filter(([, entry]) => entry.statements.covered > 0
+            && entry.functions.total > 0
+            && entry.functions.covered === 0
+            && entry.branches.covered === 0)
+        .map(([file]) => file)
+        .sort();
+}
+
 function measure(files, directories) {
     return Object.fromEntries(directories.map(dir => [
         dir,
@@ -135,10 +187,36 @@ function update(files, floors) {
     // re-recording from one would move it onto `neverExecuted` and lose the
     // distinction. Keep it where it is.
     const integrationOnly = new Set(floors.coveredOnlyByIntegration ?? []);
+
+    // The per-file floors are a hand-maintained set: refreshed here, never
+    // extended here. Adding a file is the point at which somebody decided it
+    // was worth guarding one file at a time, and that belongs in a diff.
+    const perFile = {};
+    for (const [file, required] of Object.entries(floors.files ?? {})) {
+        const entry = files.get(file);
+        perFile[file] = Object.fromEntries(METRICS.map(m => [
+            m,
+            entry
+                ? Math.max(required[m] ?? 0, Math.max(0, Math.floor(entry[m].pct) - SLACK))
+                : required[m] ?? 0,
+        ]));
+    }
+
+    // Union, not replacement. An update run that included tests/integration/
+    // sees the twenty migration files run their functions and would drop them,
+    // and the next run without it would fail on twenty files nobody touched.
+    // Shrinking this list is a hand edit, deliberately.
+    const inert = new Set([
+        ...(floors.loadedButNeverRun ?? []).filter(file => files.has(file)),
+        ...inertFiles(files).filter(file => !integrationOnly.has(file)),
+    ]);
+
     const next = {
         ...floors,
         directories,
+        files: perFile,
         neverExecuted: zeroCoverageFiles(files).filter(file => !integrationOnly.has(file)),
+        loadedButNeverRun: [...inert].sort(),
         coveredOnlyByIntegration: [...integrationOnly].sort(),
     };
     fs.writeFileSync(FLOORS_PATH, `${JSON.stringify(next, null, 4)}\n`);
@@ -167,6 +245,23 @@ function check(files, floors) {
             if (actual + 1e-9 < required[metric]) {
                 failures.push(
                     `${dir} ${metric} ${actual.toFixed(2)}% is below its floor of ${required[metric]}%`
+                );
+            }
+        }
+    }
+
+    // Per-file floors. Same rule as a directory's, on a file that a directory
+    // floor is too coarse to say anything about.
+    for (const [file, required] of Object.entries(floors.files ?? {})) {
+        const entry = files.get(file);
+        if (!entry) {
+            failures.push(`${file} has a per-file floor but was not measured — drop it from coverage-floors.json`);
+            continue;
+        }
+        for (const metric of METRICS) {
+            if (entry[metric].pct + 1e-9 < required[metric]) {
+                failures.push(
+                    `${file} ${metric} ${entry[metric].pct.toFixed(2)}% is below its floor of ${required[metric]}%`
                 );
             }
         }
@@ -206,7 +301,32 @@ function check(files, floors) {
         }
     }
 
-    return { failures, measured, zero };
+    // The third list (#908): a file something loads but nothing runs. It may
+    // shrink and must not grow, and unlike the list above it has no "covered
+    // now" failure — src/migrations reads as inert without tests/integration/
+    // and as covered with it, so a strict rule would make the two runs
+    // contradict each other over twenty files. `stale` is reported instead.
+    const inertRecorded = new Set(floors.loadedButNeverRun ?? []);
+    const inert = inertFiles(files);
+
+    for (const file of inert) {
+        if (!inertRecorded.has(file) && !integrationOnly.has(file)) {
+            failures.push(
+                `${file} is loaded but none of its functions or branches ever run — ` +
+                'give it a test, or record it if that is genuinely all it does'
+            );
+        }
+    }
+    // An entry naming a file that is gone is noise on a list whose whole value
+    // is that somebody reads it.
+    for (const file of inertRecorded) {
+        if (!files.has(file)) {
+            failures.push(`${file} is listed as never run but was not measured — drop it`);
+        }
+    }
+    const staleInert = [...inertRecorded].filter(file => files.has(file) && !inert.includes(file));
+
+    return { failures, measured, zero, inert, staleInert };
 }
 
 function main() {
@@ -227,13 +347,21 @@ function main() {
         return;
     }
 
-    const { failures, measured, zero } = check(files, floors);
+    const { failures, measured, zero, inert, staleInert } = check(files, floors);
 
     for (const [dir, pcts] of Object.entries(measured)) {
         const shown = METRICS.map(m => `${m[0]}${pcts[m].toFixed(1)}`).join(' ');
         console.log(`[coverage] ${dir.padEnd(28)} ${shown}`);
     }
-    console.log(`[coverage] ${zero.length} file(s) with no executed line.`);
+    console.log(`[coverage] ${zero.length} file(s) with no executed line, ` +
+        `${inert.length} loaded but never run.`);
+    if (staleInert.length) {
+        // Not a failure: see the note on list 3 at the top of this file. It is
+        // said out loud because a list nobody prunes is a list nobody reads.
+        console.log(`[coverage] ${staleInert.length} recorded file(s) run their own code now — ` +
+            'drop them from loadedButNeverRun:');
+        for (const file of staleInert) console.log(`  - ${file}`);
+    }
 
     if (failures.length) {
         console.error('\n[coverage] the per-subsystem ratchet failed:');
@@ -247,6 +375,6 @@ function main() {
 if (require.main === module) main();
 
 module.exports = {
-    aggregate, check, update, zeroCoverageFiles, measure, directoriesIn, dirOf,
+    aggregate, check, update, zeroCoverageFiles, inertFiles, measure, directoriesIn, dirOf,
     METRICS, SLACK, FLOORS_PATH,
 };

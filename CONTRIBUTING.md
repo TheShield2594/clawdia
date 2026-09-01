@@ -139,6 +139,17 @@ a floor per directory, and also fails on a file that stops being executed at
 all. Raise a floor when you raise the coverage under it; do not lower one to
 land a change.
 
+It keeps three lists beside those floors, all of which may shrink and none of
+which may grow: `neverExecuted` (nothing loads the file), `loadedButNeverRun`
+(something loads it, but no function or branch in it ever runs — a file a test
+only `require`s reads as 1-10% covered, not 0), and `coveredOnlyByIntegration`
+(the files that only `tests/integration/` reaches, which read as uncovered
+without a mongod and covered with one). `files` is a fourth section: per-file
+floors for the money primitives under `src/utils`, where a directory floor is
+too coarse to notice one file collapsing. That set is maintained by hand —
+`npm run coverage:check -- --update` refreshes every number but never adds a
+file to it, and never lowers a floor.
+
 ## Things that will surprise you
 
 **Migrations run themselves, on every boot.** `src/index.js` runs everything in
