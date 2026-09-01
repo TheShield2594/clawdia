@@ -48,7 +48,7 @@ const BASELINE = {
     'partials/panels/leveling.ejs': [28, 14],
     'partials/panels/moderation.ejs': [28, 19],
     'partials/panels/newspaper.ejs': [4, 1],
-    'partials/panels/overview.ejs': [20, 7],
+    'partials/panels/overview.ejs': [18, 7],
     'partials/panels/progressiontracks.ejs': [2, 1],
     'partials/panels/quests.ejs': [5, 1],
     'partials/panels/raiddetection.ejs': [1, 1],

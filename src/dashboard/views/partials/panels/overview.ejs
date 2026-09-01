@@ -22,12 +22,22 @@
             %>
             <div id="getting-started-wrap" style="margin-bottom:1.5rem;<%= setupDone ? 'display:none' : '' %>">
                 <div class="dash-card" id="getting-started-card">
-                    <div class="dash-card-header" style="cursor:pointer" onclick="toggleGettingStarted()">
-                        <div>
-                            <h2 class="dash-card-title">Getting started</h2>
-                            <div class="dash-card-sub" id="gs-subtitle">Complete these steps to finish setting up Clawdia</div>
-                        </div>
-                        <span id="gs-toggle-icon" style="font-size:1.2rem;line-height:1">▾</span>
+                    <%# The collapse is a real button, not a div with a click handler
+                        (#882): a keyboard user could not reach the old one at all, and
+                        the only sign it was expanded was the ▾/▸ glyph, which a screen
+                        reader has no reason to read out. The glyph is decorative now
+                        and aria-expanded carries the state. The button stretches across
+                        the header so the click target stays the whole row it was. %>
+                    <div class="dash-card-header gs-header">
+                        <h2 class="dash-card-title">
+                            <button type="button" id="gs-toggle" class="gs-toggle"
+                                    aria-expanded="true" aria-controls="getting-started-body"
+                                    onclick="toggleGettingStarted()">
+                                <span>Getting started</span>
+                                <span id="gs-toggle-icon" class="gs-toggle-icon" aria-hidden="true">▾</span>
+                            </button>
+                        </h2>
+                        <div class="dash-card-sub" id="gs-subtitle">Complete these steps to finish setting up Clawdia</div>
                     </div>
                     <div id="getting-started-body">
                         <div class="dash-module-list" style="display:flex;flex-direction:column;gap:.35rem;padding-top:.25rem">
