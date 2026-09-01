@@ -63,31 +63,43 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    # Everything in .env arrives as a plain container environment variable, and
-    # those are readable by anyone who can reach the Docker API: `docker inspect
-    # clawdia` prints the bot token and every provider key in full, no shell in
-    # the container required. To keep them out of it, deliver each secret as a
-    # file instead — every secret variable also accepts a <NAME>_FILE form
-    # naming a file to read the value from (src/config/fileSecrets.js).
-    #
-    # To switch over: create ./secrets/discord_token (etc.), remove the plain
-    # variable from .env, and uncomment the matching lines here and the
-    # top-level `secrets:` block at the bottom of this file. If both forms are
-    # set the plain variable wins and the file is ignored, so the migration can
-    # be done one secret at a time.
-    # environment:
-    #   DISCORD_TOKEN_FILE: /run/secrets/discord_token
-    #   CLIENT_SECRET_FILE: /run/secrets/client_secret
-    #   SESSION_SECRET_FILE: /run/secrets/session_secret
-    #   # The `backup` service reads MONGODB_URI too; uncomment the matching
-    #   # lines on it so both sides come from the same secret.
-    #   MONGODB_URI_FILE: /run/secrets/mongodb_uri
-    #   # Opens the per-guild AI provider keys stored in the database (#564).
-    #   SECRET_ENCRYPTION_KEY_FILE: /run/secrets/secret_encryption_key
-    #   ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
-    #   OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
-    #   GEMINI_API_KEY_FILE: /run/secrets/gemini_api_key
-    #   OPENROUTER_API_KEY_FILE: /run/secrets/openrouter_api_key
+    environment:
+      # An irreversible migration is forward-only, so the mongodump the runner
+      # takes immediately before one is the only way back from it — which is
+      # what the `backups` mount below is for. Unset, that dump is best-effort:
+      # a failure is a warning and the destructive step runs anyway. `require`
+      # makes a failed or impossible backup abort the boot instead, which is
+      # the setting to want when the dump is your rollback plan.
+      #
+      # Defaulted here rather than in .env.example so an operator who never
+      # opened that section still gets it. Set MIGRATION_BACKUP in .env to
+      # override — including back to the warn-and-continue behaviour.
+      MIGRATION_BACKUP: ${MIGRATION_BACKUP:-require}
+      # Everything in .env arrives as a plain container environment variable,
+      # and those are readable by anyone who can reach the Docker API: `docker
+      # inspect clawdia` prints the bot token and every provider key in full,
+      # no shell in the container required. To keep them out of it, deliver
+      # each secret as a file instead — every secret variable also accepts a
+      # <NAME>_FILE form naming a file to read the value from
+      # (src/config/fileSecrets.js).
+      #
+      # To switch over: create ./secrets/discord_token (etc.), remove the plain
+      # variable from .env, and uncomment the matching lines here and the
+      # top-level `secrets:` block at the bottom of this file. If both forms
+      # are set the plain variable wins and the file is ignored, so the
+      # migration can be done one secret at a time.
+      # DISCORD_TOKEN_FILE: /run/secrets/discord_token
+      # CLIENT_SECRET_FILE: /run/secrets/client_secret
+      # SESSION_SECRET_FILE: /run/secrets/session_secret
+      # The `backup` service reads MONGODB_URI too; uncomment the matching
+      # lines on it so both sides come from the same secret.
+      # MONGODB_URI_FILE: /run/secrets/mongodb_uri
+      # Opens the per-guild AI provider keys stored in the database (#564).
+      # SECRET_ENCRYPTION_KEY_FILE: /run/secrets/secret_encryption_key
+      # ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
+      # OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
+      # GEMINI_API_KEY_FILE: /run/secrets/gemini_api_key
+      # OPENROUTER_API_KEY_FILE: /run/secrets/openrouter_api_key
     # secrets:
     #   - discord_token
     #   - client_secret

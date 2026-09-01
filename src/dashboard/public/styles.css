@@ -546,9 +546,26 @@ body {
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* AI inner tabs */
+/* AI inner tabs
+ *
+ * `flex-wrap` here is load-bearing rather than cosmetic. The Economy strip
+ * carries nine tabs, with hunt/fish/mine strips nested inside it, and `body` is
+ * `overflow-x: hidden` — so on a phone a nowrap strip ran its rightmost tabs
+ * (Dynamic Pricing, Economy Health) past the viewport and had them clipped
+ * away. No scroll, no wrap, and no other route to those panels: the settings
+ * behind them were simply unreachable on mobile (#879). Same bug class as the
+ * wide tables in #668.
+ *
+ * Wrapping rather than the `overflow-x: auto` those tables got, because a
+ * second row is reachable by touch, mouse and keyboard as it stands — no
+ * scroll affordance to draw, and no scroll container to make focusable. The
+ * `margin-bottom: -1px` below then lands the last row on the strip's border
+ * and leaves the earlier rows carrying their own underline, which is what a
+ * wrapped tab strip is supposed to look like.
+ */
 .ai-inner-tabs {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.25rem;
     margin-bottom: 1.75rem;
     border-bottom: 1px solid var(--border);
