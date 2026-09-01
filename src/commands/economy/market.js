@@ -14,6 +14,7 @@ const { recordOwedPayout } = require('../../utils/owedPayout');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
+const { isSoulbound } = require('../../data/soulboundItems');
 
 const ITEM_META = Object.fromEntries(DEFAULT_SHOP_ITEMS.map(i => [i.itemId, i]));
 
@@ -27,8 +28,6 @@ const MARKET_FEE_RATE       = 0.05;
 const MIN_PRICE_PER_ITEM    = 10;
 const PAGE_SIZE             = 10;
 const CONFIRM_BUY_THRESHOLD = 500;
-
-const SOULBOUND_ITEMS = new Set(['lifesaver', 'streak_shield']);
 
 const SORT_RARITY = 'rarity';
 const SORT_PRICE  = 'price';
@@ -85,7 +84,7 @@ async function handleList(interaction, currency) {
     const qty    = interaction.options.getInteger('quantity');
     const price  = interaction.options.getInteger('price');
 
-    if (SOULBOUND_ITEMS.has(itemId)) {
+    if (isSoulbound(itemId)) {
         return interaction.reply({ content: `\`${itemId}\` is soulbound and cannot be listed.`, flags: MessageFlags.Ephemeral });
     }
 

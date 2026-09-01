@@ -481,9 +481,17 @@ evolution track.
 /invest status             - District funding progress and active benefits
 ```
 
+**Gifting:** the `item` option is autocompleted from what the sender is holding
+right now — each entry shows its display name, how many are held and its rarity
+— so nobody has to know that the Pet Slot Expansion is stored as
+`pet_slot_expansion`. The list already excludes anything the command would
+refuse: soulbound items, items whose effect is currently running, and empty
+stacks. Coin gifts are capped at 10,000 sent and 25,000 received per account per
+day, and accounts under 7 days old can neither send nor receive.
+
 **Market:** 5 listings per user, 48-hour listing TTL, 5% sale fee, 10-coin
 minimum unit price, and a confirmation prompt above 500 coins. `lifesaver` and
-`streak_shield` are soulbound and cannot be listed.
+`streak_shield` are soulbound and cannot be listed or gifted.
 
 **Districts** are server-wide goals funded collectively. Each has a 1,000,000
 coin goal and, once funded, activates its benefit for **7 days**:

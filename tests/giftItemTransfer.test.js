@@ -133,9 +133,20 @@ function buildInteraction({ itemId = 'pet_food', quantity = 1 } = {}) {
     const interaction = {
         guild: { id: 'g1' },
         guildId: 'g1',
-        user: { id: 'sender', username: 'sender', createdTimestamp: OLD_ACCOUNT },
+        user: {
+            id: 'sender',
+            username: 'sender',
+            createdTimestamp: OLD_ACCOUNT,
+            displayAvatarURL: () => 'https://cdn.example/sender.png',
+        },
         options: {
-            getUser: () => ({ id: 'recipient', username: 'recipient', bot: false, createdTimestamp: OLD_ACCOUNT }),
+            getUser: () => ({
+                id: 'recipient',
+                username: 'recipient',
+                bot: false,
+                createdTimestamp: OLD_ACCOUNT,
+                displayAvatarURL: () => 'https://cdn.example/recipient.png',
+            }),
             getString: (name) => (name === 'type' ? 'item' : name === 'item' ? itemId : null),
             getInteger: (name) => (name === 'quantity' ? quantity : null),
         },
@@ -222,7 +233,7 @@ test('gifting more than you hold moves nothing', async () => {
     expect(mockWrites).toEqual([]);
     expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
     expect(mockStore.recipient.inventory).toEqual([]);
-    expect(state.replies.at(-1).content).toContain("don't have 9x");
+    expect(state.replies.at(-1).content).toContain('not enough to gift 9');
 });
 
 test('a duplicate slot for the same item is not double-debited', async () => {
