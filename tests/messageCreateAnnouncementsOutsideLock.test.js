@@ -239,8 +239,16 @@ describe('Discord sends and the user lock', () => {
     test('a rate-limited send does not delay the same user\'s next message', async () => {
         // The shape of the bug: with the send inside the lock, the second
         // message's document read queues behind Discord's response.
-        let releaseSend;
-        announceLevelUp.mockImplementation(() => new Promise(resolve => { releaseSend = resolve; }));
+        //
+        // Every resolver is kept, not just the last one. Only one send is
+        // queued as this stands — both flows are handed the same document
+        // object, so the `lastXpGain` the first stamps puts the second inside
+        // handleLeveling's 60-second XP cooldown, which returns before a
+        // level-up can be queued. A fixture that ever gave each flow its own
+        // document would queue two, and holding a single `releaseSend` would
+        // then leave one promise pending and hang the test rather than fail it.
+        const releaseSends = [];
+        announceLevelUp.mockImplementation(() => new Promise(resolve => { releaseSends.push(resolve); }));
 
         const first = run(makeMessage('one'));
         // Let the first flow reach its (now post-lock) announcement.
@@ -255,7 +263,8 @@ describe('Discord sends and the user lock', () => {
         // waiting on a Discord call that has not answered.
         expect(User.findOne).toHaveBeenCalled();
 
-        releaseSend();
+        expect(releaseSends).not.toEqual([]);
+        for (const releaseSend of releaseSends) releaseSend();
         await Promise.all([first, second]);
     });
 });
