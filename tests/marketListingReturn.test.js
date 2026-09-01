@@ -27,12 +27,17 @@ function listing(over = {}) {
     return { _id: 'l1', guildId: 'g1', sellerId: 'u1', itemId: 'sword', quantity: 2, expiresAt: new Date(0), ...over };
 }
 
-/** Records the `limit` the sweep asked for alongside the docs it gets back. */
+/** Records the `sort` and `limit` the sweep asked for, alongside the docs it gets back. */
 function stubFind(docs) {
     const seen = {};
     MarketListing.find.mockImplementation(filter => {
         seen.filter = filter;
-        return { limit: n => { seen.limit = n; return { lean: async () => docs }; } };
+        return {
+            sort: order => {
+                seen.sort = order;
+                return { limit: n => { seen.limit = n; return { lean: async () => docs }; } };
+            },
+        };
     });
     return seen;
 }
@@ -66,6 +71,21 @@ describe('returnExpiredMarketListings', () => {
         expect(seen.limit).toBe(50);
     });
 
+    test('takes the oldest expiries first, so a capped tick cannot starve one', async () => {
+        // Without a sort MongoDB returns natural order, which is not insertion
+        // order and not stable — so a capped tick took an arbitrary 50 and a
+        // listing could be passed over indefinitely while newer ones went
+        // ahead. Since #867 every listing has a deadline: the TTL grace deletes
+        // it seven days after it expires whether the sweep chose it or not.
+        // Oldest first is what makes "the backlog drains" true of each listing
+        // rather than only of the queue.
+        const seen = stubFind([]);
+
+        await returnExpiredMarketListings();
+
+        expect(seen.sort).toEqual({ expiresAt: 1 });
+    });
+
     test('says so when the batch cap leaves listings behind', async () => {
         // Before #867 a capped tick was invisible and looked harmless: the rest
         // waited for the next one. Now the TTL grace is what those stragglers
@@ -75,7 +95,12 @@ describe('returnExpiredMarketListings', () => {
 
         await returnExpiredMarketListings();
 
-        expect(warnLog.mock.calls.flat().join(' ')).toMatch(/batch capped at 50/);
+        const warned = warnLog.mock.calls.flat().join(' ');
+        expect(warned).toMatch(/batch capped at 50/);
+        // Hitting the cap does not prove anything is behind it — fifty expiries
+        // and an empty queue look identical from here — so the wording says
+        // "may" rather than asserting a backlog it has not observed.
+        expect(warned).toMatch(/there may be more/);
     });
 
     test('says nothing about a backlog on a tick that cleared the queue', async () => {

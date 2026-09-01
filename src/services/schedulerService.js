@@ -1478,19 +1478,34 @@ async function returnExpiredMarketListings() {
     let failed = 0;
     let unrecordedReturns = 0;
 
-    // Process in batches of 50 to avoid large memory spikes
-    const expired = await MarketListing.find({ expiresAt: { $lte: now } }).limit(BATCH_SIZE).lean();
+    // Batched to avoid large memory spikes, and oldest first.
+    //
+    // The sort is not cosmetic. Without one MongoDB returns natural order,
+    // which is an implementation detail and not insertion order — so a capped
+    // tick took an arbitrary 50 of the expired listings, and a listing could be
+    // passed over tick after tick while newer ones went ahead of it. Every
+    // listing has a deadline now (#867): the TTL grace deletes it seven days
+    // after it expires, whether or not the sweep ever chose it. Oldest first is
+    // what turns "the backlog drains" into "no individual listing starves",
+    // which is the claim the grace period is sized against.
+    //
+    // Free, as it happens: the sort key is the TTL index, so this walks that
+    // index in order rather than sorting anything in memory.
+    const expired = await MarketListing.find({ expiresAt: { $lte: now } })
+        .sort({ expiresAt: 1 })
+        .limit(BATCH_SIZE)
+        .lean();
 
-    // A full batch means the tick was capped, not that it cleared the queue —
-    // the rest wait for the next one, and the one after that if it is full too.
-    // That backlog used to be invisible and harmless-looking; since #867 it is
-    // the thing the TTL grace is sized against, so it says so. Sustained, it
-    // means listings are expiring faster than 50 per ten minutes and the batch
-    // needs raising before the grace runs out and MongoDB deletes the tail.
+    // A full batch means the tick hit its cap — there may be more behind it, or
+    // there may have been exactly fifty. Either way it is the state worth
+    // saying out loud, because a *sustained* cap means listings are expiring
+    // faster than 50 per ten minutes, and the backlog that builds is the thing
+    // the TTL grace is sized against. It used to be invisible.
     if (expired.length === BATCH_SIZE) {
         console.warn(
-            `[scheduler] returnExpiredMarketListings: batch capped at ${BATCH_SIZE} — more expired listings are ` +
-            'waiting. Items are returned on later ticks; a backlog that persists for days outlives the TTL grace.',
+            `[scheduler] returnExpiredMarketListings: batch capped at ${BATCH_SIZE} — there may be more expired ` +
+            'listings waiting. Any are returned on later ticks, oldest first; a cap that persists for days is a ' +
+            'backlog outliving the TTL grace, and the batch needs raising.',
         );
     }
 
