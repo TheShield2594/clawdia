@@ -57,6 +57,26 @@ FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a
 # upstream, neither yet in a node:24-alpine rebuild). Upgrading here takes the
 # fixes without waiting, and costs no more determinism than the `apk add` below
 # already does: both resolve against whatever Alpine is serving at build time.
+#
+# What that reasoning missed is the layer cache. CI builds with
+# `cache-from: type=gha`, so this `RUN` is *restored* rather than executed
+# whenever the Dockerfile text at or above it is unchanged — and the base above
+# it is digest-pinned, so it changes only when someone edits this file. The
+# upgrade was therefore frozen at whatever Alpine was serving the day the layer
+# was first cached, which is how the scan came to fail on a libexpat with a
+# published fix (#961). `--no-cache` is apk's own index cache and does nothing
+# about this.
+#
+# APK_REFRESH is the cache key that unfreezes it: CI passes the current UTC
+# date, so the layer is rebuilt once a day and the upgrade actually re-resolves.
+# It is declared here, inside the runtime stage, so a new day costs one `apk`
+# layer and not a fresh `canvas` compile up in the build stage.
+#
+# It costs no determinism that `apk add` had not already spent — both resolve
+# against whatever Alpine is serving at build time, which is exactly what the
+# paragraph above says this layer is for. The default keeps a local
+# `docker build` with no build argument working and cacheable.
+ARG APK_REFRESH=unset
 RUN apk upgrade --no-cache && apk add --no-cache \
     cairo \
     jpeg \

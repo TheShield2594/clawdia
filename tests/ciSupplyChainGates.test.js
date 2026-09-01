@@ -142,6 +142,64 @@ describe('#646 — the Dockerfile is built on pull requests', () => {
     });
 });
 
+describe('#961 — the apk upgrade layer is not frozen by the cache', () => {
+    // The runtime stage runs `apk upgrade` so the image carries Alpine's
+    // published fixes without waiting for a node:24-alpine rebuild. With
+    // `cache-from: type=gha` and a digest-pinned base, that RUN is restored
+    // rather than executed until someone edits the Dockerfile — so the upgrade
+    // was pinned to whatever Alpine served the day the layer was first built,
+    // and the scan above eventually failed on a libexpat that had a fix. The
+    // ARG is the cache key that unfreezes it, and it is worth nothing unless
+    // both builds actually pass it.
+    const dockerfile = fs.readFileSync(path.join(ROOT, 'Dockerfile'), 'utf8');
+    const buildArgsOf = job => {
+        const step = stepsOf(job).find(s => /build-push-action/.test(s.uses || ''));
+        return String((step.with || {})['build-args'] || '');
+    };
+
+    test('the Dockerfile declares the refresh argument', () => {
+        expect(dockerfile).toMatch(/^ARG APK_REFRESH=/m);
+    });
+
+    test('it sits above the upgrade, which is the layer it is there to bust', () => {
+        const arg = dockerfile.search(/^ARG APK_REFRESH=/m);
+        const upgrade = dockerfile.search(/^RUN apk upgrade\b/m);
+        expect(arg).toBeGreaterThan(-1);
+        expect(upgrade).toBeGreaterThan(arg);
+    });
+
+    test('and inside the runtime stage, so a new day is not a fresh canvas compile', () => {
+        // Declared before the first FROM it would be a global argument, which
+        // invalidates the build stage too — and that stage compiles the native
+        // canvas binding from source. Minutes a day, for an upgrade that only
+        // affects the runtime stage's packages.
+        const lastFrom = dockerfile.lastIndexOf('\nFROM ');
+        expect(dockerfile.search(/^ARG APK_REFRESH=/m)).toBeGreaterThan(lastFrom);
+    });
+
+    test('the build job passes it, and not as a constant', () => {
+        // A literal would be a key that never moves, which is the bug with an
+        // ARG in front of it.
+        expect(buildArgsOf(buildJob)).toMatch(/APK_REFRESH=\$\{\{\s*steps\./);
+    });
+
+    test('from a UTC date, so two jobs in one run agree on the day', () => {
+        expect(runScript(buildJob)).toMatch(/date -u\b/);
+    });
+
+    test('the publish build takes the build job\'s value rather than its own', () => {
+        // Recomputing it here would publish an image built from different
+        // inputs than the one the scan passed — and miss the cache to do it.
+        const outputs = jobs[buildJob].outputs || {};
+        const names = Object.keys(outputs);
+        expect(names).not.toEqual([]);
+
+        const published = buildArgsOf(publishJob);
+        expect(published).toMatch(/APK_REFRESH=/);
+        expect(names.some(name => published.includes(`needs.${buildJob}.outputs.${name}`))).toBe(true);
+    });
+});
+
 describe('#651 — publishing is serialized', () => {
     test('the workflow that publishes declares a concurrency group', () => {
         // The publish job lives in this workflow, so the workflow-level group
