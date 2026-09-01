@@ -1697,13 +1697,6 @@ function updateTierField(el) {
     jobTiersList[idx][field] = field === 'minShifts' ? (parseInt(el.value, 10) || 0) : el.value;
 }
 
-var JOB_TIER_META = [
-    { tier: 1, label: 'Tier 1 · Intern',            color: '#2ecc71', badge: '🟢' },
-    { tier: 2, label: 'Tier 2 · Skilled Worker',    color: '#3498db', badge: '🔵' },
-    { tier: 3, label: 'Tier 3 · Senior Specialist', color: '#9b59b6', badge: '🟣' },
-    { tier: 4, label: 'Tier 4 · Executive',         color: '#f39c12', badge: '🟡' },
-];
-
 function renderJobs() {
     const list = document.getElementById('jobs-list');
     if (!jobsList.length) {
@@ -1753,13 +1746,35 @@ function renderJobs() {
     list.innerHTML = html;
 }
 
+// The tier select cannot be static markup. The Careers tab lets an admin rename
+// every tier and change how many shifts unlock it, so shipping "Tier 2 — Skilled
+// Worker (10 shifts)" in the view meant the job modal contradicted the
+// configuration the same page had just saved (#911). Built here instead, from
+// the same jobTiersList the Careers tab edits — so an unsaved rename shows up
+// too, rather than only after a round trip.
+function renderJobTierOptions(selectedTier) {
+    const select = document.getElementById('modal-job-tier');
+    select.innerHTML = jobTiersList.map(function(t) {
+        const shifts = t.minShifts || 0;
+        const name = t.name || ('Tier ' + t.tier);
+        return '<option value="' + escHtml(String(t.tier)) + '">' +
+            escHtml('Tier ' + t.tier + ' — ' + name + ' (' + shifts + ' shift' + (shifts === 1 ? '' : 's') + ')') +
+            '</option>';
+    }).join('');
+
+    select.value = String(selectedTier);
+    // Assigning a value no option carries leaves the select on '', which would
+    // then save as tier 1 without the admin ever seeing which tier was picked.
+    if (!select.value && jobTiersList.length) select.value = String(jobTiersList[0].tier);
+}
+
 function openJobModal(idx) {
     editingJobIdx = idx;
     document.getElementById('job-modal-title').textContent = idx === -1 ? 'Add Job' : 'Edit Job';
     const job = idx === -1 ? {} : jobsList[idx];
     document.getElementById('modal-job-name').value = job.name || '';
     document.getElementById('modal-job-emoji').value = job.emoji || '';
-    document.getElementById('modal-job-tier').value = String(job.tier || 1);
+    renderJobTierOptions(job.tier || 1);
     document.getElementById('modal-job-min-pay').value = job.minPay != null ? job.minPay : '';
     document.getElementById('modal-job-max-pay').value = job.maxPay != null ? job.maxPay : '';
     openModal('job-modal', { initialFocus: 'modal-job-name' });

@@ -186,12 +186,23 @@ module.exports = {
             // from the same user overlapping in that window is one message's worth of
             // XP, quest progress and streak state written back to what it was before.
             // See utils/userMutex.js for why an in-process lock is the right size here.
-            const { blocked, sideWork } = await withUserLock(
+            //
+            // What the lock must not contain is a Discord REST call. The lock
+            // exists to serialise this user's document writes; awaiting a
+            // `channel.send` inside it makes the hold time include Discord's
+            // rate-limit queueing, and a holder stuck behind a 429 can reach
+            // the 15-second timeout override — which exists to break deadlocks,
+            // so hitting it reintroduces the very lost update the lock is here
+            // to prevent (#894). Level-up embeds, quest notifications and
+            // streak messages are therefore *queued* under the lock and sent
+            // after it, the way `sideWork` already settles outside it.
+            const { blocked, sideWork, announcements } = await withUserLock(
                 `${message.guild.id}:${message.author.id}`,
                 async () => {
+                    const announcements = [];
                     let sharedUser = null;
                     if (guildSettings?.leveling.enabled) {
-                        sharedUser = await handleLeveling(message, guildSettings);
+                        sharedUser = await handleLeveling(message, guildSettings, announcements);
                     }
 
                     if (guildSettings?.moderation.enabled) {
@@ -200,7 +211,10 @@ module.exports = {
                         // XP handleLeveling applied has nothing to ride along on.
                         if (stopped) {
                             await flushPendingUser(sharedUser);
-                            return { blocked: true, sideWork: [] };
+                            // Any level-up queued above still goes out: it did
+                            // before this message was blocked, and blocking the
+                            // message is not a reason to swallow the promotion.
+                            return { blocked: true, sideWork: [], announcements };
                         }
                     }
 
@@ -227,15 +241,19 @@ module.exports = {
                     // when it bailed out early or threw before saving, the XP still has
                     // to be persisted.
                     try {
-                        const persisted = await handleStreakAndQuests(message, guildSettings, sharedUser);
+                        const persisted = await handleStreakAndQuests(message, guildSettings, sharedUser, announcements);
                         if (!persisted) await flushPendingUser(sharedUser);
                     } catch (err) {
                         console.error('Error in messageCreate:', err);
                     }
 
-                    return { blocked: false, sideWork };
+                    return { blocked: false, sideWork, announcements };
                 },
             );
+
+            // The lock is released by here, so a slow or rate-limited Discord
+            // response delays only these messages — not this user's next one.
+            await sendAnnouncements(announcements);
 
             for (const outcome of await Promise.all(sideWork)) {
                 if (outcome.status === 'rejected') console.error('Error in messageCreate:', outcome.reason);
@@ -251,6 +269,24 @@ module.exports = {
     }
 };
 
+// Dispatches the Discord sends collected while the user lock was held, in the
+// order they were queued — which is the order they were awaited in before they
+// moved out of the lock, so a level-up embed still precedes the quest
+// completion it triggered.
+//
+// Sequential rather than parallel for the same reason: these land in one
+// channel, and firing them together lets Discord order them however it likes.
+// One failing send must not skip the rest, so each is guarded.
+async function sendAnnouncements(announcements) {
+    for (const announce of announcements ?? []) {
+        try {
+            await announce();
+        } catch (err) {
+            console.error('Announcement error:', err);
+        }
+    }
+}
+
 // Backstop for the paths that never reach the streak/quest write: the XP applied
 // by handleLeveling lives only in memory until something saves the document.
 // Only called when that write is known not to have happened, so it can never race
@@ -264,7 +300,7 @@ async function flushPendingUser(user) {
     }
 }
 
-async function handleStreakAndQuests(message, guildSettings, existingUser = null) {
+async function handleStreakAndQuests(message, guildSettings, existingUser = null, announcements = []) {
     // Reported back to the caller so it knows whether the XP handleLeveling
     // applied has been persisted. Set only once the write has actually landed —
     // a failure after that point still leaves the document saved.
@@ -354,25 +390,31 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
             announceAchievements(message.client, guildSettings, user, message.member, newlyEarned).catch(() => null);
         }
 
-        await notifyQuestComplete(guildSettings, message.member, completedQuests, message.channel, user);
-        await notifyQuestNearComplete(guildSettings, message.member, nearCompleteQuests, message.channel);
+        // Everything below is a Discord send. Queued in the order it used to be
+        // awaited in, and dispatched by the caller once the user lock is
+        // released — see the note at the withUserLock call (#894). The message
+        // text is built here, while the values it reports are the ones this
+        // pass computed, rather than read back at send time.
+        announcements.push(
+            () => notifyQuestComplete(guildSettings, message.member, completedQuests, message.channel, user),
+            () => notifyQuestNearComplete(guildSettings, message.member, nearCompleteQuests, message.channel),
+        );
         if (assignedNewDaily) {
-            await notifyDailyQuestReset(guildSettings, message.member, user, message.channel);
+            announcements.push(() => notifyDailyQuestReset(guildSettings, message.member, user, message.channel));
         }
 
         if (shieldActivated) {
-            await message.channel.send(
-                `🔥🛡️ <@${message.author.id}> Your **Streak Shield** protected your streak! (consumed)`
-            ).catch(() => {});
+            const text = `🔥🛡️ <@${message.author.id}> Your **Streak Shield** protected your streak! (consumed)`;
+            announcements.push(() => message.channel.send(text).catch(() => {}));
         }
 
         for (const milestone of newMilestones) {
             const multiplier = getStreakMultiplier(user.streak.current);
-            await message.channel.send(
+            const text =
                 `🔥 <@${message.author.id}> **${milestone.days}-day streak milestone!** ` +
                 `You earned **${milestone.coins.toLocaleString()} coins** and the **${milestone.badge}** badge! ` +
-                `You're now earning **${multiplier}x** coins and XP.`
-            ).catch(() => {});
+                `You're now earning **${multiplier}x** coins and XP.`;
+            announcements.push(() => message.channel.send(text).catch(() => {}));
         }
     } catch (err) {
         console.error('Streak/quest error:', err);
@@ -384,7 +426,7 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
 // The caller hands the same document to handleStreakAndQuests, which mutates it
 // further and issues the one write that covers both — a second fetch and a second
 // save of the same user on every message is what this avoids.
-async function handleLeveling(message, guildSettings) {
+async function handleLeveling(message, guildSettings, announcements = []) {
     if (!guildSettings?.leveling?.rewardsEnabled) return null;
     if (guildSettings.leveling?.noXpChannelIds?.includes(message.channel.id)) return null;
     if (message.member?.roles?.cache?.some(role => guildSettings.leveling?.noXpRoleIds?.includes(role.id))) return null;
@@ -436,7 +478,10 @@ async function handleLeveling(message, guildSettings) {
         user.messages += 1;
         user.lastXpGain = new Date();
         if (leveled) {
-            await announceLevelUp(user, guildSettings, message.member, message.guild, message.channel);
+            // Queued, not awaited: the embed and the level-role grant are both
+            // REST calls, and the caller sends them once the lock is released.
+            announcements.push(() =>
+                announceLevelUp(user, guildSettings, message.member, message.guild, message.channel));
         }
 
         // Standings are computed from the in-memory values, so they do not need

@@ -194,11 +194,30 @@ jobs:
     # than seconds; a warm one is a small fraction of that. Matches the publish
     # job's budget, since it is the same build.
     timeout-minutes: 30
+    outputs:
+      # Read by `publish` so both builds carry the same value — see the step
+      # that computes it, and the note on the publish build.
+      apk-refresh: ${{ steps.apk.outputs.key }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # The cache key for the Dockerfile's `apk upgrade` layer (#961). Without
+      # one, `cache-from: type=gha` restores that layer instead of running it,
+      # and the upgrade the runtime stage exists to perform is frozen at
+      # whatever Alpine was serving when the layer was first built — a package
+      # with a published fix stays vulnerable in the image, and the scan below
+      # is what eventually says so.
+      #
+      # A UTC date rather than the commit SHA or `github.run_id`: those change
+      # every build, which would mean a cold apk layer on every push for a
+      # freshness nobody needs. A day is well inside the window that matters and
+      # keeps the cache doing its job the rest of the time.
+      - name: Compute the apk refresh key
+        id: apk
+        run: echo "key=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -207,6 +226,8 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          build-args: |
+            APK_REFRESH=${{ steps.apk.outputs.key }}
           # The whole point of this job. A pull request has no credentials worth
           # using and no tag anything deploys.
           push: false
@@ -353,6 +374,14 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          # Taken from the `image` job rather than recomputed, for the same
+          # reason that job's cache is reused here: a different value is a
+          # different build, so this would publish an image the scan never
+          # looked at — and it would miss the cache and rebuild to do it. Two
+          # `date` calls in one run normally agree; the one run that straddles
+          # midnight UTC is exactly the case worth not leaving to chance.
+          build-args: |
+            APK_REFRESH=${{ needs.image.outputs.apk-refresh }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -367,9 +396,12 @@ jobs:
           # CI rather than from someone's laptop with push access.
           #
           # mode=max records the full build definition, including build
-          # arguments. Nothing secret goes through build args here (the
-          # Dockerfile takes none), which is the condition for max being safe;
-          # if one is ever added, drop this back to mode=min before it lands.
+          # arguments. The condition for max being safe is that no build
+          # argument carries a secret. The Dockerfile takes exactly one,
+          # APK_REFRESH, and it is a UTC date — recording it is a small gain,
+          # since the provenance then says which day's Alpine packages the
+          # image resolved against. Adding a build argument that carries
+          # anything sensitive means dropping this back to mode=min first.
           provenance: mode=max
           sbom: true
 

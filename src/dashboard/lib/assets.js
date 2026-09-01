@@ -68,4 +68,40 @@ function asset(urlPath, publicDir = PUBLIC_DIR) {
     return version ? `${urlPath}?v=${version}` : urlPath;
 }
 
-module.exports = { asset, assetVersion, PUBLIC_DIR };
+/**
+ * How long an asset reached without a matching `?v=` may be cached.
+ *
+ * Short enough that a regenerated file — a font rewritten under the same name
+ * by scripts/fetch-fonts.sh, say — is picked up the same day, long enough that
+ * a page's own assets are not re-fetched while a user clicks around it.
+ */
+const UNVERSIONED_MAX_AGE = 300;
+
+/**
+ * The `Cache-Control` express.static should send for one file.
+ *
+ * `express.static` cannot tell a hashed URL from a bare one, so an
+ * unconditional `immutable` year covers URLs that carry no hash to bust —
+ * public/fonts/fonts.css names every face by plain filename (#903). This
+ * grants the year only to a request whose `v` matches what the file hashes to
+ * right now, which is exactly the case asset() produces.
+ *
+ * @param {object} req - the Express request being served
+ * @param {string} filePath - absolute path of the file about to be sent
+ * @param {string} [publicDir] - the root it was resolved under
+ * @returns {string} the Cache-Control header value
+ */
+function staticCacheControl(req, filePath, publicDir = PUBLIC_DIR) {
+    const requested = req && req.query ? req.query.v : undefined;
+    const relative = path.relative(publicDir, filePath);
+    const versioned = typeof requested === 'string'
+        && Boolean(relative)
+        && !relative.startsWith('..')
+        && requested === assetVersion(`/${relative.split(path.sep).join('/')}`, publicDir);
+
+    return versioned
+        ? 'public, max-age=31536000, immutable'
+        : `public, max-age=${UNVERSIONED_MAX_AGE}`;
+}
+
+module.exports = { asset, assetVersion, staticCacheControl, UNVERSIONED_MAX_AGE, PUBLIC_DIR };
