@@ -95,10 +95,17 @@ function makeInteraction({
         createMessageComponentCollector: (opts = {}) => {
             const handlers = {};
             let ended = false;
+            // discord.js hands 'end' a Collection of what was collected, and
+            // commands branch on `collected.size` to tell "nobody pressed" from
+            // "somebody did". An array has no `.size`, so that check read
+            // `undefined === 0` and the timeout branch of every collector was
+            // unreachable from a test. A Map is the Collection surface that
+            // matters here.
+            const collected = new Map();
             const end = reason => {
                 if (ended) return;
                 ended = true;
-                (handlers.end ?? []).forEach(fn => fn([], reason));
+                (handlers.end ?? []).forEach(fn => fn(collected, reason));
             };
             const collector = {
                 on(event, fn) { (handlers[event] ??= []).push(fn); return this; },
@@ -113,6 +120,7 @@ function makeInteraction({
                     // A rejected press is dropped and the next one tried, the
                     // way a real collector goes on listening.
                     if (!accepts(opts.filter, press)) continue;
+                    collected.set(`${collected.size}`, press);
                     (handlers.collect ?? []).forEach(fn => fn(press));
                 }
                 end('time');
@@ -144,6 +152,11 @@ function makeInteraction({
         replies,
         id: 'interaction-1',
         guildId,
+        // The real interaction carries this beside `channel`, and commands
+        // compare it against a configured channel to decide whether announcing
+        // would just repeat themselves in place. Absent, that comparison was
+        // always true and the branch could not be tested.
+        channelId: DEFAULTS.channelId,
         user: {
             id: userId,
             username: DEFAULTS.username,
