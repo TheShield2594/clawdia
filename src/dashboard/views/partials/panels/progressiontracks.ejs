@@ -17,5 +17,5 @@
                         <%- include('../channel-select', { id: 'pt-helper-channels', multiple: true, size: 6, selected: settings.progressionTracks?.helperChannels || [] }) %>
                         <small>Hold Ctrl/Cmd to select multiple channels</small>
                     </div>
-                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('progressiontracks')">Save changes</button></div>
+                    <div class="actions-row"><button class="btn btn-primary" data-action="save" data-section="progressiontracks">Save changes</button></div>
                 </section>

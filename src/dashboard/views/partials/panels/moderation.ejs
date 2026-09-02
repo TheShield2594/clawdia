@@ -64,7 +64,7 @@
                     <label class="toggle"><span class="toggle-text"><strong>Filter excessive mentions</strong></span><span class="switch"><input type="checkbox" id="mod-mentions" <%= settings.moderation.excessiveMentionsFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <div class="field"><label class="field-label" for="mod-mention-threshold">Mention threshold</label><input type="number" id="mod-mention-threshold" value="<%= settings.moderation.mentionThreshold || 5 %>" min="1" max="25"></div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="moderation">Save changes</button>
                     </div>
                     </div><!-- end mod-tab-automod -->
 
@@ -84,8 +84,8 @@
                     </label>
                     <div id="mod-escalation-ladder"></div>
                     <div class="actions-row" style="margin-top:.5rem;">
-                        <button type="button" class="btn btn-sm" onclick="addEscalationStep()">+ Add step</button>
-                        <button type="button" class="btn btn-sm" onclick="resetEscalationLadder()">Reset to defaults</button>
+                        <button type="button" class="btn btn-sm" data-action="add-escalation-step">+ Add step</button>
+                        <button type="button" class="btn btn-sm" data-action="reset-escalation-ladder">Reset to defaults</button>
                     </div>
 
                     <div class="panel-head" style="margin-top:1.5rem"><h3>Behavior Score Escalation</h3><p>Separate score system that decays over time. Each automod violation adds to the score.</p></div>
@@ -96,7 +96,7 @@
                         <div><label class="field-label" for="mod-score-decay">Decay (days)</label><input type="number" id="mod-score-decay" value="<%= settings.moderation.behaviorScoreDecayDays ?? 7 %>" min="1"><small>Score halves every N days</small></div>
                     </div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="moderation">Save changes</button>
                     </div>
                     </div><!-- end mod-tab-escalation -->
 
@@ -117,7 +117,7 @@
                         <small>Assigned when a member is muted. Leave empty to use Discord's native timeout.</small>
                     </div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="moderation">Save changes</button>
                     </div>
                     </div><!-- end moderation scope -->
                     <div data-save-scope="casesettings">
@@ -134,7 +134,7 @@
                         </div>
                     </div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('casesettings')">Save case settings</button>
+                        <button class="btn btn-primary" data-action="save" data-section="casesettings">Save case settings</button>
                     </div>
                     </div><!-- end casesettings scope -->
                     </div><!-- end mod-tab-logging -->
@@ -150,7 +150,7 @@
                         <%- include('../channel-select', { id: 'mod-appeal-channel', placeholder: 'Select a channel', selected: settings.moderation.appealChannelId }) %>
                     </div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="moderation">Save changes</button>
                     </div>
                     </div><!-- end mod-tab-appeals -->
 
@@ -158,11 +158,11 @@
                     <div id="mod-tab-sanctions" class="ai-inner-panel">
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
                             <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-                                <button class="btn btn-sm sanctions-filter active" data-filter="all" onclick="setSanctionsFilter('all',this)">All</button>
-                                <button class="btn btn-sm sanctions-filter" data-filter="ban" onclick="setSanctionsFilter('ban',this)">Bans</button>
-                                <button class="btn btn-sm sanctions-filter" data-filter="timeout" onclick="setSanctionsFilter('timeout',this)">Timeouts</button>
+                                <button class="btn btn-sm sanctions-filter active" data-filter="all" data-action="sanctions-filter" data-filter="all">All</button>
+                                <button class="btn btn-sm sanctions-filter" data-filter="ban" data-action="sanctions-filter" data-filter="ban">Bans</button>
+                                <button class="btn btn-sm sanctions-filter" data-filter="timeout" data-action="sanctions-filter" data-filter="timeout">Timeouts</button>
                             </div>
-                            <button class="btn btn-sm" onclick="loadActiveSanctions()">↻ Refresh</button>
+                            <button class="btn btn-sm" data-action="load-active-sanctions">↻ Refresh</button>
                         </div>
                         <div id="sanctions-loading">
                             <div class="skel-bar" style="width:90%"></div>
@@ -171,7 +171,7 @@
                         </div>
                         <div id="sanctions-error" style="display:none" class="analytics-error-card">
                             <span>⚠ Could not load sanctions</span>
-                            <button class="btn btn-sm" onclick="loadActiveSanctions()">Retry</button>
+                            <button class="btn btn-sm" data-action="load-active-sanctions">Retry</button>
                         </div>
                         <div id="sanctions-empty" style="display:none" class="empty-state"><h3>No active sanctions</h3><p>There are no active bans or timeouts in this server right now.</p></div>
                         <div class="table-scroll" role="region" tabindex="0" aria-label="Active sanctions" style="display:none">
@@ -186,7 +186,7 @@
                     <div id="mod-tab-cases" class="ai-inner-panel">
                         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
                             <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-                                <select id="cases-filter-type" class="cases-filter-select" aria-label="Filter cases by type" onchange="loadCaseHistory(1)">
+                                <select id="cases-filter-type" class="cases-filter-select" aria-label="Filter cases by type" data-change="case-page" data-page="1">
                                     <option value="">All types</option>
                                     <option value="warn">Warn</option>
                                     <option value="mute">Mute</option>
@@ -197,7 +197,7 @@
                                     <option value="note">Note</option>
                                     <option value="appeal">Appeal</option>
                                 </select>
-                                <select id="cases-filter-status" class="cases-filter-select" aria-label="Filter cases by status" onchange="loadCaseHistory(1)">
+                                <select id="cases-filter-status" class="cases-filter-select" aria-label="Filter cases by status" data-change="case-page" data-page="1">
                                     <option value="">All statuses</option>
                                     <option value="open">Open</option>
                                     <option value="closed">Closed</option>
@@ -206,7 +206,7 @@
                                     <option value="appeal_denied">Appeal denied</option>
                                 </select>
                             </div>
-                            <button class="btn btn-sm" onclick="loadCaseHistory(1)">↻ Refresh</button>
+                            <button class="btn btn-sm" data-action="case-page" data-page="1">↻ Refresh</button>
                         </div>
                         <div id="cases-loading">
                             <div class="skel-bar" style="width:90%"></div>
@@ -215,7 +215,7 @@
                         </div>
                         <div id="cases-error" style="display:none" class="analytics-error-card">
                             <span>⚠ Could not load cases</span>
-                            <button class="btn btn-sm" onclick="loadCaseHistory(1)">Retry</button>
+                            <button class="btn btn-sm" data-action="case-page" data-page="1">Retry</button>
                         </div>
                         <div id="cases-empty" style="display:none" class="empty-state"><h3>No cases found</h3><p>No moderation cases match the current filters.</p></div>
                         <div class="table-scroll" role="region" tabindex="0" aria-label="Moderation case history" style="display:none">
@@ -234,7 +234,7 @@
                     <div class="modal-box" style="max-width:440px">
                         <div class="modal-head">
                             <h3 id="case-note-modal-title">Add Note to Case</h3>
-                            <button class="modal-close" onclick="closeCaseNoteModal()" aria-label="Close the case note dialog">&times;</button>
+                            <button class="modal-close" data-action="close-case-note-modal" aria-label="Close the case note dialog">&times;</button>
                         </div>
                         <div class="modal-body">
                             <input type="hidden" id="case-note-case-id">
@@ -245,8 +245,8 @@
                             </div>
                         </div>
                         <div class="modal-actions">
-                            <button class="btn" onclick="closeCaseNoteModal()">Cancel</button>
-                            <button class="btn btn-primary" id="case-note-submit-btn" onclick="submitCaseAction()">Save note</button>
+                            <button class="btn" data-action="close-case-note-modal">Cancel</button>
+                            <button class="btn btn-primary" id="case-note-submit-btn" data-action="submit-case-action">Save note</button>
                         </div>
                     </div>
                 </div>

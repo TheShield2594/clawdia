@@ -1050,6 +1050,53 @@ docker compose up -d --scale backup=0
 `--scale` is Compose-only. On a Portainer stack, delete the `backup` service
 from the stack definition and redeploy.
 
+### Knowing When Backups Stop
+
+A backup that fails is worth nothing and looks like nothing: the loop used to
+log `[backup] FAILED` and sleep until the next day, and with no healthcheck on
+the container, `docker ps` and every Portainer dashboard went on reporting it
+`Up`. Three things now make that visible.
+
+**The container reports unhealthy.** Its healthcheck asserts an artifact, not a
+process — a run that finished *and* was read back in the last 26 hours. The
+process is a `sleep` and survives every failure it can have, so liveness would
+never have caught this. If you run the optional `autoheal` service, note that
+the backup container deliberately does not carry the `autoheal` label: restarting
+it mid-dump would not help.
+
+**Every archive is read back before it counts.** `mongodump` exiting 0 says the
+command ran, not that what it wrote is usable — a dump truncated by a full disk
+is the failure that stays hidden until the restore. Each new archive is parsed
+with `mongorestore --dryRun`, which writes nothing; one that fails is renamed to
+`clawdia-<timestamp>.gz.unverified` so neither the healthcheck nor
+`verify-backup.sh --latest` mistakes it for the day's backup. It is still pruned
+on the normal retention schedule.
+
+**Failures post to `ERROR_WEBHOOK_URL`.** The same sink the bot sends crashes to,
+the same shapes — a Discord webhook URL gets a Discord message, anything else
+gets flat JSON — and the same rule about which URLs are usable at all:
+`https://` anywhere, `http://` only to loopback (`localhost`, `127.0.0.1`,
+`[::1]`). Anything else is refused rather than downgraded, with a line in the log
+saying so; the report names a database host and an archive path, and over
+cleartext to a third party that is readable on the wire. Unset — the default —
+the loop logs and does nothing more.
+
+Two files in the backup directory carry the state, both readable from the host:
+
+| File | What it holds |
+| --- | --- |
+| `.backup-status` | `ok`, `dump-failed` or `verify-failed`, with the timestamp and archive |
+| `.backup-ok` | empty; its mtime is the last good run, and is what the healthcheck reads |
+
+A dump that fails part-way leaves whatever it had written behind — `mongodump`
+has no rollback — so that file is renamed `.gz.unverified` too. Under its real
+name it would be exactly what the catch-up and `--latest` reach for: a failure
+that reads as a success.
+
+A container that was down at 03:00 — a host reboot, an image pull, a stack
+redeploy — no longer skips the day in silence: on boot, if the newest archive is
+over 24 hours old, it dumps immediately rather than waiting.
+
 ### Backup on Demand
 
 ```bash
@@ -1078,9 +1125,20 @@ enough that a healthy restore trips it.
 ./scripts/verify-backup.sh ./backups/clawdia-20260101T030000Z.gz
 ```
 
-It exits non-zero if any collection comes back empty, so it can be wired into a
-host cron and monitored like any other job. Run it after any change to the
-backup service, and periodically thereafter.
+This is the deeper check, and it is the one to schedule. The backup container
+proves each archive *parses*; only a real restore proves it *restores*, and that
+needs write access to a second database — which the backup container is
+deliberately not given (its MongoDB user has `readWrite` on the bot's database
+and nothing else). So it runs from the host, weekly is plenty:
+
+```cron
+0 4 * * 1  cd /opt/clawdia && ./scripts/verify-backup.sh --latest >> /var/log/clawdia-verify.log 2>&1
+```
+
+It exits non-zero if any collection comes back short or empty, and a failing run
+posts to `ERROR_WEBHOOK_URL` the same way the backup container does — so a
+scheduled run that starts failing is not something you have to go and read a log
+file to discover. Run it after any change to the backup service too.
 
 ### Restore Database
 

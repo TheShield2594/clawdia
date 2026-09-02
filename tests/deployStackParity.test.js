@@ -92,6 +92,102 @@ describe.each(stacks)('%s', (name, doc) => {
         expect([name, /sleep\s+\$+SLEEP/.test(loop)]).toEqual([name, true]);
     });
 
+    // #899. The loop's own failure handling was `|| echo "[backup] FAILED"`
+    // into a log stream nobody tails, after which it slept until the next day.
+    // Nothing else noticed: no healthcheck, so the container stayed Up and
+    // every dashboard showed green while the archives went stale. These four
+    // are the pieces that make a stale backup visible.
+    describe('backup failures are visible (#899)', () => {
+        // Comments are stripped throughout: this file and the YAML both discuss
+        // the thing being asserted in prose that would otherwise match.
+        const entrypoint = String(doc.services.backup.entrypoint)
+            .split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
+
+        it('health-checks the artifact rather than the process', () => {
+            const check = doc.services.backup.healthcheck;
+            expect([name, check]).not.toEqual([name, undefined]);
+            const test = String(check.test);
+            // A liveness probe here would always pass — the loop is a `sleep`,
+            // and it survives every failure it can have. The freshness of a
+            // written archive is the only thing worth asserting.
+            expect(test).toContain('.backup-ok');
+            // 26h: a day's schedule plus room for the dump itself to run long.
+            expect(test).toMatch(/-mmin\s+-1560\b/);
+            // Long enough for the boot catch-up below to finish a first dump,
+            // so a cold start does not report unhealthy on its way up.
+            expect([name, check.start_period]).toEqual([name, '1h']);
+        });
+
+        it('only marks healthy for a run that produced a usable archive', () => {
+            // The marker the healthcheck reads must be written after the
+            // verification, not after mongodump — a dump that exits 0 having
+            // written a truncated file is the failure this is guarding.
+            const ok = entrypoint.indexOf('touch "$$OK_MARKER"');
+            const verified = entrypoint.indexOf('--dryRun');
+            expect([name, ok]).not.toEqual([name, -1]);
+            expect([name, verified]).not.toEqual([name, -1]);
+            expect([name, verified < ok]).toEqual([name, true]);
+            // And an archive that fails it is moved out of the way, so neither
+            // the catch-up below nor `verify-backup.sh --latest` picks it up as
+            // the day's backup.
+            expect(entrypoint).toContain('mv "$$ARCHIVE" "$$ARCHIVE.unverified"');
+            // Still pruned, or a quarantined archive would live forever.
+            expect(entrypoint).toContain('-name "clawdia-*.gz.unverified"');
+        });
+
+        it('reports a failure somewhere a human is', () => {
+            expect(entrypoint).toContain('ERROR_WEBHOOK_URL');
+            // Both failure paths, not just the dump: an archive that will not
+            // parse back is the one that stays invisible until the restore.
+            const notifies = entrypoint.match(/notify "/g) || [];
+            expect([name, notifies.length]).toEqual([name, 2]);
+            // Never fatal and never slow — the next run matters more than the
+            // post landing, and this runs in a container with no supervisor.
+            expect(entrypoint).toMatch(/curl -fsS --max-time 10/);
+        });
+
+        it('vets the sink the way the bot vets the same variable', () => {
+            // src/utils/errorReporter.js allows https anywhere and http only to
+            // loopback, and refuses anything else rather than downgrading it.
+            // The report names a database host and an archive path; a sink the
+            // bot refuses must not be honoured here because the poster happens
+            // to be curl in a shell.
+            expect(entrypoint).toContain('sink_allowed');
+            expect(entrypoint).toMatch(/https:\/\/\*\)/);
+            for (const loopback of ['localhost', '127.0.0.1', '::1']) {
+                expect([name, loopback, entrypoint.includes(loopback)]).toEqual([name, loopback, true]);
+            }
+            // The refusal is said out loud; a silently dropped report is the
+            // failure mode this whole section exists to remove.
+            expect(entrypoint).toMatch(/Ignoring ERROR_WEBHOOK_URL/);
+        });
+
+        it('quarantines what a failed dump left behind', () => {
+            // mongodump has no rollback: killed part-way it leaves whatever it
+            // wrote under the real name. Left there, that partial file is what
+            // the boot catch-up counts as the day's backup and what
+            // `verify-backup.sh --latest` picks up — a failure that reads as a
+            // success. It goes under the same suffix a failed verification uses,
+            // so it stays off both globs and inside the prune.
+            const dumpFailure = entrypoint.slice(
+                entrypoint.indexOf('if ! mongodump'),
+                entrypoint.indexOf('--dryRun'));
+            expect(dumpFailure).toContain('mv "$$ARCHIVE" "$$ARCHIVE.unverified"');
+            // Guarded: a dump that failed before creating the file at all must
+            // not turn the failure into a `mv` error on top of it.
+            expect(dumpFailure).toContain('if [ -e "$$ARCHIVE" ]');
+        });
+
+        it('catches up on boot instead of skipping the day', () => {
+            // A container that was not running at 03:00 used to wait a full day
+            // and say nothing; with the healthcheck above, that gap would read
+            // as a fault. Closed rather than reported.
+            const beforeLoop = entrypoint.slice(0, entrypoint.indexOf('while true'));
+            expect(beforeLoop).toMatch(/-mmin\s+-1440\b/);
+            expect(beforeLoop).toContain('run_backup');
+        });
+    });
+
     it('serves the dashboard on the port the image exposes', () => {
         const env = doc.services.bot.environment;
         const asMap = Array.isArray(env)
@@ -174,7 +270,7 @@ describe('the two files agree where they must', () => {
     // key — readable from `docker inspect` and from inside the container. The
     // Portainer stack had always passed just the two, which made this a parity
     // gap as well as an exposure, and parity is the thing that keeps it closed.
-    it('gives the backup service only the two variables it needs, in both', () => {
+    it('gives the backup service only the variables it needs, in both', () => {
         const names = env => (Array.isArray(env)
             ? env.map(e => String(e).split('=')[0])
             : Object.keys(env || {}));
@@ -185,9 +281,12 @@ describe('the two files agree where they must', () => {
             // read it — Compose interpolates the .env beside the file whatever
             // a service declares — so this costs the deploy nothing.
             expect([name, backup.env_file]).toEqual([name, undefined]);
-            // And what it does name is the dump's two inputs and nothing else.
+            // And what it does name is the dump's two inputs, plus the sink
+            // its failures go to (#899), and nothing else. The rule is "no
+            // variable this container has no use for" — not a count — so a
+            // fourth name here needs a reason of the same kind, not a bump.
             expect([name, names(backup.environment).sort()])
-                .toEqual([name, ['BACKUP_RETENTION_DAYS', 'MONGODB_URI']]);
+                .toEqual([name, ['BACKUP_RETENTION_DAYS', 'ERROR_WEBHOOK_URL', 'MONGODB_URI']]);
         }
 
         // The bot is the service that legitimately wants the whole file, and

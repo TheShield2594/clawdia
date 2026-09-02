@@ -42,8 +42,7 @@ async function openPanel(id = 'starboard') {
     await settle();
 
     const panel = document.getElementById(id);
-    const save = Array.from(panel.querySelectorAll('[onclick]'))
-        .find(el => /saveSettings\(/.test(el.getAttribute('onclick')));
+    const save = panel.querySelector('[data-action="save"][data-section]');
     expect(save).toBeTruthy();
     const clicked = jest.fn();
     save.addEventListener('click', clicked);

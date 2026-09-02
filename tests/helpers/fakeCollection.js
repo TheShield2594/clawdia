@@ -74,7 +74,7 @@ function setPath(doc, path, value) {
     cur[last] = value;
 }
 
-const OPERATORS = new Set(['$gte', '$gt', '$lte', '$lt', '$ne', '$in', '$nin', '$eq', '$elemMatch', '$exists']);
+const OPERATORS = new Set(['$gte', '$gt', '$lte', '$lt', '$ne', '$in', '$nin', '$eq', '$elemMatch', '$exists', '$not']);
 
 /** One `{ field: condition }` clause. Records the positional index for `$elemMatch`. */
 function matchesField(doc, field, condition, state) {
@@ -92,6 +92,20 @@ function matchesField(doc, field, condition, state) {
                 case '$in':  if (!anyMatch(value, v => operand.some(o => equals(v, o)))) return false; break;
                 case '$nin': if (anyMatch(value, v => operand.some(o => equals(v, o)))) return false; break;
                 case '$exists': if ((value !== undefined) !== operand) return false; break;
+                // `{ field: { $not: { $gt: x } } }`. Mongo's `$not` also
+                // matches a document where the field is absent, which is what
+                // falling through to matchesField gives: a missing value fails
+                // the inner operator, so negating it succeeds. `/invest`
+                // filters on `activeUntil: { $not: { $gt: now } }` — "not
+                // currently active", where never-activated is null — so a mock
+                // without this cannot run the command at all.
+                case '$not': {
+                    // Its own state: a nested $elemMatch here binds nothing, and
+                    // letting it write into the caller's would aim a positional
+                    // update at an element the query did not match.
+                    if (matchesField(doc, field, operand, { positional: {} })) return false;
+                    break;
+                }
                 case '$elemMatch': {
                     const array = value ?? [];
                     const index = array.findIndex(element =>
@@ -259,6 +273,16 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
         // Mongoose documents carry these and several flows call them.
         copy.markModified = jest.fn();
         copy.unmarkModified = jest.fn();
+        // `isModified` decides whether a caller bothers to save — /invest fills
+        // in missing districts and saves only if that changed something — so a
+        // stub that always answered one way would either skip the write under
+        // test or add one that would not happen live. Compared against the
+        // document as it was handed over, which is what Mongoose tracks.
+        // Snapshotted here, not on the first call: a lazy capture would take
+        // its "before" after the mutation it is being asked about.
+        const asLoaded = JSON.parse(JSON.stringify(stored));
+        copy.isModified = jest.fn(path =>
+            JSON.stringify(getPath(copy, path) ?? null) !== JSON.stringify(getPath(asLoaded, path) ?? null));
         copy.toObject = () => ({ ...copy });
         return copy;
     };
@@ -408,8 +432,10 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
             return this;
         },
         /** The stored document, by userId — the live one, not a copy. */
-        get(userId) {
-            return docs.find(d => d.userId === userId) ?? null;
+        // By `userId` or by `guildId`: the store is used for Guild documents
+        // too, and `writes` already identifies a document by the same pair.
+        get(id) {
+            return docs.find(d => d.userId === id || d.guildId === id) ?? null;
         },
         all() { return docs; },
         reset() {

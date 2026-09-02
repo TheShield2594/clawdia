@@ -654,41 +654,67 @@ process with the gateway and an escaped error exits it.
 
 ### Styles and handlers in dashboard views
 
-New views and panels use a class in `public/styles.css` and `addEventListener`
-— not a `style=""` attribute and not an `onclick=""` attribute.
+New views and panels use a class in `public/styles.css` and a delegated handler
+— not a `style=""` attribute and **never** an `onclick=""` attribute.
 
-This is a security rule, not a taste one. The dashboard's CSP gives each
-request its own nonce, but an HTML *attribute* cannot carry a nonce, so the
-hundreds of inline styles and handlers already in the views are why the policy
-in `src/dashboard/server.js` still has to say `style-src 'unsafe-inline'` and
-`script-src-attr 'unsafe-inline'`. The second is the expensive one: it is what
-would turn a stored-XSS bug from blocked into exploitable.
+This is a security rule, not a taste one. The dashboard's CSP gives each request
+its own nonce, but an HTML *attribute* cannot carry a nonce, so an inline
+handler only runs if the policy says `script-src-attr 'unsafe-inline'` — the one
+directive that decides whether an injected event handler executes or is blocked.
 
-Rewriting every existing view at once is not worth doing (#692), so the count
-is ratcheted instead. `tests/dashboardInlineAttributes.test.js` records what
-each view has today; a file may lower its count but never raise it, and a view
-not in that table must have none at all. So:
+**It no longer does.** Every inline handler in the views and in the renderers
+was converted in #887, and `src/dashboard/server.js` now says
+`script-src-attr 'none'`. So an `onclick=""` you add today is not a slipped
+standard, it is a button that silently does nothing: the browser will refuse to
+run it. `tests/dashboardInlineAttributes.test.js` fails on one before you find
+that out the hard way.
+
+Inline **styles** are still a ratchet rather than a ban — `style-src
+'unsafe-inline'` is a much smaller thing, and untangling 327 of them is a large
+change with no visible result (#692). That test records what each view and each
+browser script has today; a file may lower its count but never raise it, and a
+file not in that table must have none at all.
 
 ```html
-<!-- No: neither can carry a nonce, and both hold the CSP open. -->
+<!-- No: the style holds the CSP open, and the handler will not run at all. -->
 <button class="btn" style="margin-top:1rem" onclick="saveThing()">Save</button>
 ```
 
 ```html
-<!-- Yes: the class carries the layout, and the id carries the wiring. -->
-<button class="btn panel-save" id="thing-save">Save</button>
+<!-- Yes: the class carries the layout, the data attribute carries the intent. -->
+<button class="btn panel-save" data-action="save-thing">Save</button>
 ```
 
 ```javascript
-// public/guild-settings.js — panels arrive after the page does, so wire them
-// from the panel's own init callback rather than at file scope.
+// public/guild-settings.js — add the name to CLICK_ACTIONS beside the others.
+// It is a table rather than a lookup into `window`, so an injected data-action
+// can only ever name something already on the list.
+const CLICK_ACTIONS = {
+    // …
+    'save-thing': () => saveThing(),
+    // An argument rides in its own data-* attribute and arrives as the second
+    // parameter, which is the element's dataset:
+    'thing-edit': (el, d) => openThingModal(Number(d.idx)),
+};
+```
+
+`data-input` and `data-change` have their own tables (`INPUT_ACTIONS`,
+`CHANGE_ACTIONS`) for fields rather than buttons.
+`tests/dashboardActionCoverage.test.js` holds the two sides together: an action
+the markup names but nothing dispatches fails, and so does a case nothing uses.
+
+Binding directly is still right where an element is not rendered from a string:
+
+```javascript
+// Panels arrive after the page does, so wire them from the panel's own init
+// callback rather than at file scope.
 onPanel('thing', panel => {
     panel.querySelector('#thing-save').addEventListener('click', () => saveSettings('thing'));
 });
 ```
 
-If you remove some inline attributes from an existing view, lower its numbers
-in that test in the same commit. A stale count is a budget nobody is spending.
+If you remove some inline styles from an existing view, lower its number in that
+test in the same commit. A stale count is a budget nobody is spending.
 
 Two related conventions worth knowing while writing a panel:
 

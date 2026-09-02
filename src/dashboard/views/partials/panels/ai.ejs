@@ -22,7 +22,7 @@
                         </label>
                         <div class="field">
                             <label class="field-label" for="ai-provider">Provider</label>
-                            <select id="ai-provider" onchange="updateAiProviderUI()">
+                            <select id="ai-provider" data-change="ai-provider">
                                 <option value="openai" <%= settings.ai.provider === 'openai' || !settings.ai.provider ? 'selected' : '' %>>OpenAI</option>
                                 <option value="anthropic" <%= settings.ai.provider === 'anthropic' ? 'selected' : '' %>>Anthropic (Claude)</option>
                                 <option value="gemini" <%= settings.ai.provider === 'gemini' ? 'selected' : '' %>>Google Gemini</option>
@@ -35,7 +35,7 @@
                             <input type="text" id="ai-model" value="<%= settings.ai.model || '' %>" placeholder="Leave empty for provider default">
                             <small id="ai-model-hint">Default: gpt-4o-mini</small>
                         </div>
-                        <form class="ai-keys-form" autocomplete="off" onsubmit="return false">
+                        <form class="ai-keys-form" autocomplete="off" data-no-submit>
                         <div class="field ai-key-field" data-provider="openai">
                             <label class="field-label" for="ai-openai-key">OpenAI API key</label>
                             <input type="password" id="ai-openai-key" value="" autocomplete="new-password" placeholder="<%= settings.ai.openaiKey ? '••••••••••••' : 'sk-…' %>">
@@ -71,14 +71,14 @@
                                 <label class="field-label" for="ai-prompt" style="margin:0;">System prompt</label>
                                 <div class="prompt-field-meta">
                                     <span class="prompt-char-count" id="ai-prompt-count">0 / 4000</span>
-                                    <button type="button" class="prompt-expand-btn" onclick="openPromptEditor('ai-prompt', 'System prompt')">⛶ Full-screen</button>
+                                    <button type="button" class="prompt-expand-btn" data-action="prompt-edit" data-prompt-target="ai-prompt" data-prompt-title="System prompt">⛶ Full-screen</button>
                                 </div>
                             </div>
-                            <textarea id="ai-prompt" class="auto-resize" rows="8" maxlength="4000" oninput="updatePromptCount('ai-prompt')"><%= settings.ai.systemPrompt %></textarea>
+                            <textarea id="ai-prompt" class="auto-resize" rows="8" maxlength="4000" data-input="prompt-count" data-prompt-target="ai-prompt"><%= settings.ai.systemPrompt %></textarea>
                         </div>
                         <div class="field">
                             <label class="field-label" for="ai-temperature">Temperature (<span id="ai-temp-display"><%= settings.ai.temperature ?? 0.7 %></span>)</label>
-                            <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="<%= settings.ai.temperature ?? 0.7 %>" oninput="document.getElementById('ai-temp-display').textContent = this.value">
+                            <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="<%= settings.ai.temperature ?? 0.7 %>" data-input="mirror-value" data-mirror-target="ai-temp-display">
                         </div>
                         <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
                             <div><label class="field-label" for="ai-max-tokens">Max output tokens</label><input type="number" id="ai-max-tokens" min="32" max="8192" value="<%= settings.ai.maxTokens ?? 1024 %>"></div>
@@ -112,7 +112,7 @@
                         </label>
                         <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
                         <div class="actions-row">
-                            <button class="btn btn-primary" onclick="saveSettings('ai')">Save changes</button>
+                            <button class="btn btn-primary" data-action="save" data-section="ai">Save changes</button>
                         </div>
 
                         <!-- Token Usage Stats -->
@@ -211,12 +211,12 @@
                             </div>
                             <div>
                                 <label class="field-label" for="digest-timezone">Timezone</label>
-                                <input type="text" id="digest-timezone" list="tz-datalist" placeholder="UTC" value="<%= settings.ai?.dailyDigest?.timezone ?? 'UTC' %>" autocomplete="off" onblur="validateTimezoneInput(this)">
+                                <input type="text" id="digest-timezone" list="tz-datalist" placeholder="UTC" value="<%= settings.ai?.dailyDigest?.timezone ?? 'UTC' %>" autocomplete="off" data-validate-timezone>
                                 <small id="digest-timezone-err" class="field-error" style="display:none"></small>
                             </div>
                         </div>
                         <div class="actions-row" style="margin-bottom:1.5rem;">
-                            <button class="btn btn-primary" onclick="saveDailyDigest()">Save digest settings</button>
+                            <button class="btn btn-primary" data-action="save-daily-digest">Save digest settings</button>
                         </div>
                         <hr style="border:none;border-top:1px solid var(--border);margin:1.5rem 0;">
 
@@ -230,7 +230,7 @@
                             </div>
                             <div id="summary-jobs-error" style="display:none" class="analytics-error-card">
                                 <span>⚠ Couldn't load summary jobs</span>
-                                <button class="btn btn-sm" onclick="retryLoadSummaryJobs()">Retry</button>
+                                <button class="btn btn-sm" data-action="retry-load-summary-jobs">Retry</button>
                             </div>
                         </div>
                         <div class="panel-head" style="margin-top:1rem"><h3>Add summary job</h3></div>
@@ -258,7 +258,7 @@
                             <small>Defaults to "Daily Summary of #channel" if left empty.</small>
                         </div>
                         <div class="actions-row">
-                            <button class="btn btn-primary" onclick="addSummaryJob()">Add summary job</button>
+                            <button class="btn btn-primary" data-action="add-summary-job">Add summary job</button>
                         </div>
                     </div>
 
@@ -289,13 +289,13 @@
                                 <label class="field-label" for="persona-prompt" style="margin:0;">System prompt</label>
                                 <div class="prompt-field-meta">
                                     <span class="prompt-char-count" id="persona-prompt-count">0 / 4000</span>
-                                    <button type="button" class="prompt-expand-btn" onclick="openPromptEditor('persona-prompt', 'Persona system prompt')">⛶ Full-screen</button>
+                                    <button type="button" class="prompt-expand-btn" data-action="prompt-edit" data-prompt-target="persona-prompt" data-prompt-title="Persona system prompt">⛶ Full-screen</button>
                                 </div>
                             </div>
-                            <textarea id="persona-prompt" class="auto-resize" rows="8" maxlength="4000" placeholder="You are a helpful support assistant…" oninput="updatePromptCount('persona-prompt')"></textarea>
+                            <textarea id="persona-prompt" class="auto-resize" rows="8" maxlength="4000" placeholder="You are a helpful support assistant…" data-input="prompt-count" data-prompt-target="persona-prompt"></textarea>
                         </div>
                         <div class="actions-row">
-                            <button class="btn btn-primary" onclick="addPersona()">Save persona</button>
+                            <button class="btn btn-primary" data-action="add-persona">Save persona</button>
                         </div>
                     </div>
 
@@ -352,7 +352,7 @@
                         <div class="panel-head" style="margin-top:1.25rem"><h3 id="mcp-form-title">Add a connection</h3></div>
                         <div class="field">
                             <label class="field-label" for="mcp-preset">Service</label>
-                            <select id="mcp-preset" onchange="applyMcpPreset()">
+                            <select id="mcp-preset" data-change="mcp-preset">
                                 <option value="">Custom server…</option>
                             </select>
                             <small id="mcp-preset-hint">Pick a known service to prefill its endpoint, or enter any remote MCP server URL yourself.</small>
@@ -367,7 +367,7 @@
                             <input type="text" id="mcp-url" maxlength="2048" placeholder="https://api.example.com/mcp/">
                             <small>Must be https. Local <code>stdio</code> servers cannot be reached this way.</small>
                         </div>
-                        <form class="ai-keys-form" autocomplete="off" onsubmit="return false">
+                        <form class="ai-keys-form" autocomplete="off" data-no-submit>
                         <div class="field">
                             <label class="field-label" for="mcp-token">Authorization token <span style="font-weight:400;color:var(--muted,#888)">(optional)</span></label>
                             <input type="password" id="mcp-token" value="" autocomplete="new-password" placeholder="Bearer token, if the server needs one">
@@ -400,8 +400,8 @@
                             <span class="switch"><input type="checkbox" id="mcp-resources"><span class="slider"></span></span>
                         </label>
                         <div class="actions-row">
-                            <button class="btn btn-primary" id="mcp-save-btn" onclick="saveMcpServer()">Add connection</button>
-                            <button class="btn" id="mcp-cancel-btn" onclick="resetMcpForm()" style="display:none;">Cancel</button>
+                            <button class="btn btn-primary" id="mcp-save-btn" data-action="save-mcp-server">Add connection</button>
+                            <button class="btn" id="mcp-cancel-btn" data-action="reset-mcp-form" style="display:none;">Cancel</button>
                         </div>
                     </div>
 
@@ -410,17 +410,17 @@
                         <div class="modal-box modal-box-wide">
                             <div class="modal-head">
                                 <h3 id="prompt-editor-title">Edit prompt</h3>
-                                <button class="modal-close" onclick="closePromptEditor(false)" aria-label="Close the prompt editor">&times;</button>
+                                <button class="modal-close" data-action="close-prompt-editor" aria-label="Close the prompt editor">&times;</button>
                             </div>
                             <div class="modal-body">
-                                <textarea id="prompt-editor-textarea" maxlength="4000" aria-labelledby="prompt-editor-title" oninput="updatePromptEditorCount()"></textarea>
+                                <textarea id="prompt-editor-textarea" maxlength="4000" aria-labelledby="prompt-editor-title" data-input="prompt-editor-count"></textarea>
                                 <div style="display:flex;justify-content:flex-end;margin-top:.5rem;font-size:.78rem;color:var(--text-mute);">
                                     <span id="prompt-editor-count">0 / 4000</span>
                                 </div>
                             </div>
                             <div class="modal-actions">
-                                <button class="btn" onclick="closePromptEditor(false)">Cancel</button>
-                                <button class="btn btn-primary" onclick="closePromptEditor(true)">Done</button>
+                                <button class="btn" data-action="close-prompt-editor">Cancel</button>
+                                <button class="btn btn-primary" data-action="save-prompt-editor">Done</button>
                             </div>
                         </div>
                     </div>

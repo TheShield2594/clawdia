@@ -54,4 +54,19 @@ describe('baseline security headers', () => {
         // What actually replaces the auditor.
         expect(res.headers['content-security-policy']).toMatch(/script-src 'self' 'nonce-/);
     });
+
+    test('the response really refuses an inline event handler (#887)', async () => {
+        // tests/dashboardInlineAttributes asserts this against the source; this
+        // asserts it against the header a browser is actually sent, which is
+        // what a middleware reordering or an overwriting header would break.
+        const csp = (await request(buildApp()).get('/')).headers['content-security-policy'];
+
+        expect(csp).toContain("script-src-attr 'none'");
+        expect(csp).not.toContain("script-src-attr 'unsafe-inline'");
+        // The nonce directive must not gain 'unsafe-inline' either: with it,
+        // script-src-attr would still say 'none', but every inline <script> on
+        // the page would stop needing its nonce, which is the other half of
+        // what makes the nonce worth having.
+        expect(csp).not.toMatch(/script-src [^;]*'unsafe-inline'/);
+    });
 });

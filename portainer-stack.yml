@@ -296,6 +296,9 @@ services:
       # backs up the database the bot is actually writing to.
       - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
       - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
+      # Where the entrypoint sends a failed dump or an archive that will not
+      # parse back (#899). Unset — the default — it logs and nothing else.
+      - ERROR_WEBHOOK_URL=${ERROR_WEBHOOK_URL:-}
       # Mirrors the bot's MONGODB_URI_FILE. This is a stock mongo image with no
       # loader of its own, so the entrypoint below reads the file itself — and
       # prefers it over MONGODB_URI, so unlike the bot's mapping the
@@ -327,6 +330,111 @@ services:
           echo "[backup] Neither MONGODB_URI nor MONGODB_URI_FILE is set"; exit 1;
         fi;
         RETAIN=$${BACKUP_RETENTION_DAYS:-30};
+        # Two files the loop keeps in the backup volume, both of them for
+        # something outside the container to read (#899). STATUS is for a human
+        # asking "what happened last night"; OK_MARKER carries no content at all
+        # and exists only so the healthcheck below has an mtime to compare
+        # against. They are separate because the healthcheck must not go green
+        # for a run that failed, and a single file would have to be parsed to
+        # tell those apart.
+        STATUS=/backups/.backup-status;
+        OK_MARKER=/backups/.backup-ok;
+        # A failure that only reaches the log reaches nobody: this container is
+        # not the one anybody tails. ERROR_WEBHOOK_URL is the sink the bot
+        # already reports crashes to (src/utils/errorReporter.js), and a Discord
+        # webhook gets Discord shape for the same reason it does there — that is
+        # the sink the operator of a Discord bot already has.
+        # The same rule src/utils/errorReporter.js applies to the same variable:
+        # https anywhere, http only to loopback, everything else refused rather
+        # than downgraded. The report names a database host and an archive path,
+        # and over cleartext to a third party that is readable on the wire; a
+        # sink that is refused there must not be honoured here.
+        sink_allowed() {
+          case "$$1" in
+            https://*) return 0;;
+            http://localhost|http://localhost/*|http://localhost:*) return 0;;
+            http://127.0.0.1|http://127.0.0.1/*|http://127.0.0.1:*) return 0;;
+            "http://[::1]"|"http://[::1]/"*|"http://[::1]:"*) return 0;;
+            *) return 1;;
+          esac;
+        };
+        notify() {
+          echo "[backup] $$1";
+          if [ -z "$$ERROR_WEBHOOK_URL" ]; then return 0; fi;
+          if ! sink_allowed "$$ERROR_WEBHOOK_URL"; then
+            echo "[backup] Ignoring ERROR_WEBHOOK_URL: expected an https:// URL (or http:// to loopback)"; return 0;
+          fi;
+          if ! command -v curl >/dev/null 2>&1; then
+            echo "[backup] curl is not present in this image; ERROR_WEBHOOK_URL not posted"; return 0;
+          fi;
+          case "$$ERROR_WEBHOOK_URL" in
+            https://discord.com/api/webhooks/*|https://discordapp.com/api/webhooks/*)
+              BODY="{\"content\":\"**backup failed** on clawdia-backup: $$1\"}";;
+            *)
+              BODY="{\"kind\":\"backup_failed\",\"service\":\"clawdia-backup\",\"message\":\"$$1\"}";;
+          esac;
+          # Never fatal, and never blocking for long: the next run matters more
+          # than this post landing.
+          curl -fsS --max-time 10 -X POST -H "content-type: application/json" -d "$$BODY" "$$ERROR_WEBHOOK_URL" >/dev/null 2>&1 ||
+            echo "[backup] posting to ERROR_WEBHOOK_URL failed";
+        };
+        prune() {
+          # Prunes the old ultrabot-* prefix too, so archives written before the
+          # rename are still aged out instead of accumulating forever. The bot
+          # lands pre-migration-*.gz in the same volume; those are pruned
+          # on the same schedule.
+          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" \) -mtime +$$RETAIN -delete;
+        };
+        run_backup() {
+          TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
+          ARCHIVE=/backups/clawdia-$$TIMESTAMP.gz;
+          echo "[backup] Starting backup at $$TIMESTAMP";
+          if ! mongodump --uri="$$MONGODB_URI" --gzip --archive="$$ARCHIVE"; then
+            # mongodump has no rollback: a dump killed part-way through leaves
+            # whatever it had written under the real name. Left there, that
+            # partial file is what the boot catch-up counts as the day's backup
+            # and what `verify-backup.sh --latest` picks up — a failure that
+            # reads as a success. Quarantined under the same suffix a failed
+            # verification uses, so it is still pruned and still there to look at.
+            if [ -e "$$ARCHIVE" ]; then mv "$$ARCHIVE" "$$ARCHIVE.unverified"; fi;
+            echo "dump-failed $$TIMESTAMP" > "$$STATUS";
+            notify "mongodump exited non-zero at $$TIMESTAMP; any partial archive was quarantined";
+            return 1;
+          fi;
+          # Exit status 0 says mongodump ran, not that what it wrote can be read
+          # back — a truncated archive from a full disk or a killed process is
+          # the failure that stays invisible until the restore. --dryRun reads
+          # and parses the whole archive and writes nothing, so every archive is
+          # at least known to be parseable on the day it was taken. It is not a
+          # restore rehearsal: for that, scripts/verify-backup.sh restores into a
+          # scratch database and compares document counts, which needs
+          # privileges this container deliberately does not have.
+          if ! mongorestore --uri="$$MONGODB_URI" --gzip --archive="$$ARCHIVE" --dryRun --quiet; then
+            # Renamed rather than kept or deleted. Kept under its own name, an
+            # unreadable archive is what --latest picks up and what the boot
+            # catch-up counts as this day's backup; deleted, an operator has
+            # nothing to look at, and the check can fail for reasons that are
+            # not the archive (mongorestore has to reach the server for --dryRun
+            # too). The suffix keeps it off both globs and inside the prune.
+            mv "$$ARCHIVE" "$$ARCHIVE.unverified";
+            echo "verify-failed $$TIMESTAMP $$ARCHIVE.unverified" > "$$STATUS";
+            notify "archive $$TIMESTAMP did not parse back; kept as $$ARCHIVE.unverified and not counted as a backup";
+            return 1;
+          fi;
+          echo "ok $$TIMESTAMP $$ARCHIVE" > "$$STATUS";
+          touch "$$OK_MARKER";
+          echo "[backup] Done: $$ARCHIVE";
+        };
+        # A container that was not running at 03:00 — a host reboot, an image
+        # pull, a stack redeploy — used to skip the whole day and say nothing.
+        # With the healthcheck now asserting a fresh archive, that gap would
+        # read as a fault, so close it instead of reporting it: catch up on
+        # boot whenever the newest archive is over a day old.
+        if [ -z "$$(find /backups -name "clawdia-*.gz" -mmin -1440 2>/dev/null)" ]; then
+          echo "[backup] No archive from the last 24h; backing up now instead of waiting for 03:00";
+          run_backup || true;
+          prune;
+        fi;
         while true; do
           # Recomputed every iteration. A fixed `sleep 86400` after the dump
           # would start each run later than the last by however long the dump
@@ -338,17 +446,24 @@ services:
           SLEEP=$$(( $$TARGET - $$NOW ));
           echo "[backup] Sleeping $${SLEEP}s until next 03:00 UTC";
           sleep $$SLEEP;
-          TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
-          echo "[backup] Starting backup at $$TIMESTAMP";
-          mongodump --uri="$$MONGODB_URI" --gzip --archive="/backups/clawdia-$$TIMESTAMP.gz" &&
-            echo "[backup] Done: /backups/clawdia-$$TIMESTAMP.gz" ||
-            echo "[backup] FAILED";
-          # Prunes the old ultrabot-* prefix too, so archives written before the
-          # rename are still aged out instead of accumulating forever. The
-          # bot lands pre-migration-*.gz in the same volume; those are pruned
-          # on the same schedule.
-          find /backups \( -name "clawdia-*.gz" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" \) -mtime +$$RETAIN -delete;
+          run_backup || true;
+          prune;
         done'
+    healthcheck:
+      # Not "is the process alive" — it always is. The loop caught its own
+      # failures with an `|| echo FAILED` into a log nobody reads, and the
+      # container stayed Up, so `docker ps` and every dashboard showed green
+      # while the backups rotted (#899). What is worth asserting is the
+      # artifact, not the process: a run that finished AND parsed back inside
+      # the last 26h. 26 rather than 24 leaves the dump itself room to run long
+      # without flapping the container between healthy and unhealthy.
+      test: ["CMD-SHELL", "find /backups/.backup-ok -mmin -1560 2>/dev/null | grep -q ."]
+      interval: 1h
+      timeout: 10s
+      retries: 2
+      # Only has to cover the boot catch-up above, which starts within seconds
+      # of the container coming up. An hour is for the dump, not the wait.
+      start_period: 1h
 
   # Optional container-level self-healing. Uncomment the whole block to enable.
   #

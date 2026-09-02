@@ -20,7 +20,7 @@
                         </div>
                         <div>
                             <label class="field-label" for="bv-timezone">Timezone</label>
-                            <input type="text" id="bv-timezone" list="tz-datalist" placeholder="UTC" value="<%= (settings.bibleVerse && settings.bibleVerse.timezone) || 'UTC' %>" autocomplete="off" onblur="validateTimezoneInput(this)">
+                            <input type="text" id="bv-timezone" list="tz-datalist" placeholder="UTC" value="<%= (settings.bibleVerse && settings.bibleVerse.timezone) || 'UTC' %>" autocomplete="off" data-validate-timezone>
                             <small id="bv-timezone-err" class="field-error" style="display:none"></small>
                         </div>
                     </div>
@@ -46,6 +46,6 @@
                     </div>
 
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('bibleverses')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="bibleverses">Save changes</button>
                     </div>
                 </section>

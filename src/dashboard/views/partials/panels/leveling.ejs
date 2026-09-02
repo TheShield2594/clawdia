@@ -33,12 +33,12 @@
                             <% (settings.leveling.noXpRoleIds || []).forEach(function(rId) {
                                var role = roles.find(function(r){ return r.id === rId; });
                                if (role) { %>
-                                <span class="role-tag" data-role-id="<%= rId %>">@<%= role.name %> <button type="button" onclick="removeLevelNoXpRole('<%= rId %>')" title="Remove" aria-label="Remove @<%= role.name %>">&times;</button></span>
+                                <span class="role-tag" data-role-id="<%= rId %>">@<%= role.name %> <button type="button" data-action="level-no-xp-role-remove" data-no-xp-role-id="<%= rId %>" title="Remove" aria-label="Remove @<%= role.name %>">&times;</button></span>
                             <% } }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
                             <%- include('../role-select', { id: 'level-no-xp-roles-select', ariaLabel: 'Role to exclude from XP', noDirty: true, placeholder: 'Select a role' }) %>
-                            <button class="btn btn-primary" type="button" onclick="addLevelNoXpRole()">Add role</button>
+                            <button class="btn btn-primary" type="button" data-action="add-level-no-xp-role">Add role</button>
                         </div>
                     </div>
                     <div class="field" role="group" aria-labelledby="level-no-xp-channels-label">
@@ -47,12 +47,12 @@
                             <% (settings.leveling.noXpChannelIds || []).forEach(function(cId) {
                                var ch = channels.find(function(c){ return c.id === cId; });
                                if (ch) { %>
-                                <span class="role-tag" data-channel-id="<%= cId %>">#<%= ch.name %> <button type="button" onclick="removeLevelNoXpChannel('<%= cId %>')" title="Remove" aria-label="Remove #<%= ch.name %>">&times;</button></span>
+                                <span class="role-tag" data-channel-id="<%= cId %>">#<%= ch.name %> <button type="button" data-action="level-no-xp-channel-remove" data-channel-id="<%= cId %>" title="Remove" aria-label="Remove #<%= ch.name %>">&times;</button></span>
                             <% } }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
                             <%- include('../channel-select', { id: 'level-no-xp-channels-select', ariaLabel: 'Channel to exclude from XP', noDirty: true, placeholder: 'Select a channel' }) %>
-                            <button class="btn btn-primary" type="button" onclick="addLevelNoXpChannel()">Add channel</button>
+                            <button class="btn btn-primary" type="button" data-action="add-level-no-xp-channel">Add channel</button>
                         </div>
                     </div>
                     <div class="field" role="group" aria-labelledby="level-role-rewards-label">
@@ -62,11 +62,11 @@
                                 <div class="level-reward-row" style="display:flex;gap:.5rem;align-items:center">
                                     <input type="number" class="level-reward-level" value="<%= r.level %>" min="1" max="999" style="width:80px" placeholder="Level" aria-label="Required level">
                                     <%- include('../role-select', { cls: 'level-reward-role', ariaLabel: 'Reward role', placeholder: 'Select a role', selected: r.roleId }) %>
-                                    <button class="btn btn-danger" type="button" onclick="removeLevelRoleReward(this)" title="Remove" data-row-remove="level-reward" aria-label="Remove the level <%= r.level %> reward">&times;</button>
+                                    <button class="btn btn-danger" type="button" data-action="row-remove" data-row-selector=".level-reward-row" title="Remove" data-row-remove="level-reward" aria-label="Remove the level <%= r.level %> reward">&times;</button>
                                 </div>
                             <% }); %>
                         </div>
-                        <button class="btn" type="button" onclick="addLevelRoleReward()">+ Add reward</button>
+                        <button class="btn" type="button" data-action="add-level-role-reward">+ Add reward</button>
                     </div>
 
                     <div class="panel-head" style="margin-top:1.5rem"><h3>Voice XP</h3><p>Award XP for time spent in voice channels (3 XP/minute × rate).</p></div>
@@ -79,7 +79,7 @@
                         <input type="number" id="level-voice-rate" value="<%= settings.leveling.voiceXpRate ?? 1.0 %>" min="0.1" max="10" step="0.1">
                     </div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('leveling')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="leveling">Save changes</button>
                     </div>
 
                     <!-- Admin XP Actions -->
@@ -94,10 +94,10 @@
                     </div>
                     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem;align-items:center">
                         <input type="number" id="level-admin-amount" placeholder="Amount / Level" aria-label="Amount or level" min="0" style="width:130px">
-                        <button class="btn btn-sm btn-primary" onclick="levelAdminAction('give')">Give XP</button>
-                        <button class="btn btn-sm" onclick="levelAdminAction('take')">Take XP</button>
-                        <button class="btn btn-sm" onclick="levelAdminAction('set_level')">Set level</button>
-                        <button class="btn btn-sm btn-danger" onclick="levelAdminAction('reset')">Reset XP</button>
+                        <button class="btn btn-sm btn-primary" data-action="level-admin" data-level-action="give">Give XP</button>
+                        <button class="btn btn-sm" data-action="level-admin" data-level-action="take">Take XP</button>
+                        <button class="btn btn-sm" data-action="level-admin" data-level-action="set_level">Set level</button>
+                        <button class="btn btn-sm btn-danger" data-action="level-admin" data-level-action="reset">Reset XP</button>
                     </div>
                     <div id="level-admin-msg" style="min-height:1.4em;font-size:.85em"></div>
                     </div><!-- end Admin XP Actions -->
@@ -118,7 +118,7 @@
                             <label class="field-label" for="boost-duration">Duration (hours)</label>
                             <input type="number" id="boost-duration" value="24" min="1" max="168" step="1">
                         </div>
-                        <button class="btn btn-primary" onclick="startBoostEvent()">Activate boost</button>
+                        <button class="btn btn-primary" data-action="start-boost-event">Activate boost</button>
                     </div>
                     <div id="level-boost-msg" style="min-height:1.4em;font-size:.85em"></div>
                     </div><!-- end Boost Events -->
@@ -126,7 +126,7 @@
                     <!-- Leaderboard -->
                     <div class="panel-head" style="margin-top:1.75rem">
                         <h3>XP Leaderboard</h3>
-                        <button class="btn btn-sm" onclick="loadLevelLeaderboard(1,true)">↻ Refresh</button>
+                        <button class="btn btn-sm" data-action="level-leaderboard">↻ Refresh</button>
                     </div>
                     <div id="level-leaderboard-skeleton" style="display:none">
                         <div class="skel-bar" style="width:90%"></div>
@@ -137,7 +137,7 @@
                     </div>
                     <div id="level-leaderboard-error" style="display:none" class="analytics-error-card">
                         <span>⚠ Couldn't load leaderboard</span>
-                        <button class="btn btn-sm" onclick="loadLevelLeaderboard(1,true)">Retry</button>
+                        <button class="btn btn-sm" data-action="level-leaderboard">Retry</button>
                     </div>
                     <div id="level-leaderboard-content" style="display:none">
                         <div class="table-scroll" role="region" tabindex="0" aria-label="Level leaderboard">

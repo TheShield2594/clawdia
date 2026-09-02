@@ -6,8 +6,11 @@
                 id="gic-img-<%= item.id %>"
                 src="/api/v1/item-image/activity/<%= guild.id %>/<%= item.id %>"
                 alt=""
-                onerror="this.style.display='none';document.getElementById('gic-emoji-<%= item.id %>').style.display='flex'"
-                onload="document.getElementById('gic-emoji-<%= item.id %>').style.display='none'"
+                <%# If the upload 404s, the image hides itself and the emoji
+                    below takes its place. guild-settings.js listens for the
+                    error in the capture phase (#887); `error` does not bubble,
+                    and an on* attribute is what the CSP no longer allows. -%>
+                data-emoji-fallback="gic-emoji-<%= item.id %>"
             >
             <span class="game-item-emoji" id="gic-emoji-<%= item.id %>" style="display:none"><%= item.emoji %></span>
         <% } else { %>
@@ -38,9 +41,9 @@
                 class="sr-only"
                 aria-label="Upload an image for <%= item.label %> (<%= item.id %>)"
                 accept="image/png,image/jpeg,image/gif,image/webp"
-                onchange="uploadActivityImage('<%= item.id %>', this)"
+                data-change="activity-image-upload" data-item-id="<%= item.id %>"
             >
         </label>
-        <button class="btn btn-sm btn-danger" onclick="removeActivityImage('<%= item.id %>')" title="Remove image" aria-label="Remove the image for <%= item.label %> (<%= item.id %>)">✕</button>
+        <button class="btn btn-sm btn-danger" data-action="activity-image-remove" data-item-id="<%= item.id %>" title="Remove image" aria-label="Remove the image for <%= item.label %> (<%= item.id %>)">✕</button>
     </div>
 </div>

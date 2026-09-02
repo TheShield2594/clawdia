@@ -31,10 +31,10 @@
             "lines": 24
         },
         "src/commands/economy": {
-            "statements": 33,
-            "branches": 18,
-            "functions": 36,
-            "lines": 34
+            "statements": 35,
+            "branches": 20,
+            "functions": 37,
+            "lines": 36
         },
         "src/commands/economy/event": {
             "statements": 23,
@@ -233,6 +233,24 @@
         "src/models/MigrationRecord.js"
     ],
     "files": {
+        "src/commands/economy/bank.js": {
+            "statements": 97,
+            "branches": 85,
+            "functions": 97,
+            "lines": 97
+        },
+        "src/commands/economy/duel.js": {
+            "statements": 47,
+            "branches": 36,
+            "functions": 40,
+            "lines": 48
+        },
+        "src/commands/economy/invest.js": {
+            "statements": 93,
+            "branches": 84,
+            "functions": 86,
+            "lines": 93
+        },
         "src/utils/balanceDebit.js": {
             "statements": 70,
             "branches": 47,

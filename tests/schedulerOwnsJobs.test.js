@@ -49,6 +49,12 @@ const NON_JOB_TIMERS = new Set([
     'utils/imageRateLimit.js',          // in-memory rate-limit bucket sweep
     'utils/cardRenderQueue.js',         // in-memory welcome-card budget sweep (#592)
     'utils/commandCooldowns.js',        // in-memory cooldown map sweep (#621)
+    // In-memory analytics buffer flush (#895). Not job-table work: it has to
+    // run on every shard rather than the primary one, and at a cadence cron
+    // cannot express — the table's finest grain is a minute, and the point of
+    // the buffer is that a crash costs at most one interval of counts. It is
+    // unref'd and self-arming, and the shutdown path flushes it.
+    'utils/commandMetricsBuffer.js',
     'services/pollService.js',          // one poll's expiry, re-armed in 24-day hops
     'games/casino/crash.js',            // per-lobby round tick
     'commands/fun/meme.js',             // in-memory meme cache sweep

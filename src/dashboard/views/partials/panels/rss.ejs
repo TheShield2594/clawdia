@@ -43,7 +43,7 @@
                             <%- include('../channel-select', { id: 'rss-channel', placeholder: 'Select a channel' }) %>
                         </div>
                         <div class="actions-row">
-                            <button class="btn btn-primary" onclick="addRssFeed()">Add feed</button>
+                            <button class="btn btn-primary" data-action="add-rss-feed">Add feed</button>
                         </div>
                     </div>
 
@@ -65,7 +65,7 @@
                             </div>
                             <div>
                                 <label class="field-label" for="dailynews-timezone">Timezone</label>
-                                <input type="text" id="dailynews-timezone" list="tz-datalist" value="<%= settings.dailyNews?.timezone || 'UTC' %>" placeholder="America/New_York" autocomplete="off" onblur="validateTimezoneInput(this)">
+                                <input type="text" id="dailynews-timezone" list="tz-datalist" value="<%= settings.dailyNews?.timezone || 'UTC' %>" placeholder="America/New_York" autocomplete="off" data-validate-timezone>
                                 <small id="dailynews-timezone-err" class="field-error" style="display:none"></small>
                                 <small>IANA timezone — e.g. <code>UTC</code>, <code>America/New_York</code>, <code>Europe/London</code>.</small>
                             </div>
@@ -82,17 +82,17 @@
                             <label class="field-label" for="dailynews-feeds">RSS feed URLs (one per line)</label>
                             <textarea id="dailynews-feeds" rows="6" placeholder="https://example.com/feed1.xml&#10;https://example.com/feed2.xml"><%= settings.dailyNews?.feeds?.join('\n') || '' %></textarea>
                             <div id="main-feed-status" style="font-size:.8rem;margin-top:.35rem;"></div>
-                            <button class="btn btn-sm" type="button" style="margin-top:.35rem;" onclick="validateMainFeeds()">Validate feeds</button>
+                            <button class="btn btn-sm" type="button" style="margin-top:.35rem;" data-action="validate-main-feeds">Validate feeds</button>
                         </div>
                         <div class="field">
                             <div class="field-label" id="dailynews-profiles-label">Additional delivery profiles</div>
                             <div id="dailynews-profiles-list" role="group" aria-labelledby="dailynews-profiles-label"></div>
-                            <button class="btn btn-sm" type="button" onclick="addDailyNewsProfile()">+ Add profile</button>
+                            <button class="btn btn-sm" type="button" data-action="add-daily-news-profile">+ Add profile</button>
                             <small>Create multiple independent digests (e.g., AI news to one channel, gaming news to another).</small>
                         </div>
                         <div class="actions-row">
-                            <button class="btn btn-primary" onclick="saveSettings('dailynews')">Save changes</button>
-                            <button class="btn" type="button" onclick="triggerDailyNewsNow()">Send digest now</button>
+                            <button class="btn btn-primary" data-action="save" data-section="dailynews">Save changes</button>
+                            <button class="btn" type="button" data-action="trigger-daily-news-now">Send digest now</button>
                         </div>
                     </div>
                 </section>

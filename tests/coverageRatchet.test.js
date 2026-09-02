@@ -326,7 +326,8 @@ describe('the files that are loaded but never run', () => {
 // The other half of #908: three points of slack on a directory floor is, inside
 // a seventy-file directory like src/utils, enough room to absorb one file losing
 // its coverage outright. The money primitives are the files where that matters
-// and are few enough to name, so they carry a floor each.
+// and are few enough to name, so they carry a floor each — and so, since #890,
+// do the three economy commands that move coins between wallets themselves.
 describe('per-file floors', () => {
     const floors = JSON.parse(read('coverage-floors.json'));
     const { check, update, METRICS } = require('../scripts/check-coverage.js');
@@ -340,7 +341,15 @@ describe('per-file floors', () => {
         // that adding to it is a decision, so the test is the decision written
         // down. `chargeExact`/`refundCharge` live in balanceDebit.js — the pair
         // #884 named, and the closest thing in the tree to this bug's shape.
+        //
+        // The three commands joined them in #890 for the same reason one file
+        // down: they mutate wallets directly, they had branch coverage at or
+        // near zero, and src/commands/economy is a hundred-file directory whose
+        // floor cannot notice one of them going back to that.
         expect(Object.keys(floors.files).sort()).toEqual([
+            'src/commands/economy/bank.js',
+            'src/commands/economy/duel.js',
+            'src/commands/economy/invest.js',
             'src/utils/balanceDebit.js',
             'src/utils/balanceDelta.js',
             'src/utils/coinTransfer.js',

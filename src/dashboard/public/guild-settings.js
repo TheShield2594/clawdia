@@ -735,7 +735,7 @@ function renderEscalationLadder() {
             <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-duration">Duration (min)</label><input type="number" id="esc-${idx}-duration" min="1" max="40320" value="${step.durationMinutes ?? ''}" ${needsDuration ? '' : 'disabled'} data-esc-idx="${idx}" data-esc-key="durationMinutes"></div>
             <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-dm">DM</label><input type="checkbox" id="esc-${idx}-dm" ${step.dmUser !== false ? 'checked' : ''} data-esc-idx="${idx}" data-esc-key="dmUser"></div>
             <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-reason">Reason (supports {count})</label><input type="text" id="esc-${idx}-reason" value="${escapeHtml(step.reason || '')}" data-esc-idx="${idx}" data-esc-key="reason"></div>
-            <div><button type="button" class="btn btn-sm" onclick="removeEscalationStep(${idx})" aria-label="Remove escalation step ${idx + 1}">✕</button></div>
+            <div><button type="button" class="btn btn-sm" data-action="escalation-remove" data-idx="${idx}" aria-label="Remove escalation step ${idx + 1}">✕</button></div>
         </div>`;
     }).join('');
 
@@ -848,22 +848,22 @@ function renderDailyNewsProfiles() {
             <div style="display:grid;gap:.5rem;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <strong>${escHtml(displayName)}</strong>
-                    <button class="btn btn-danger btn-sm" type="button" onclick="removeDailyNewsProfile(${idx})">Remove</button>
+                    <button class="btn btn-danger btn-sm" type="button" data-action="dn-remove" data-idx="${idx}">Remove</button>
                 </div>
                 <label for="dn-${idx}-name">Profile name</label>
-                <input id="dn-${idx}-name" type="text" value="${escHtml(profile.name || '')}" placeholder="e.g. Tech News" oninput="updateDailyNewsProfile(${idx}, 'name', this.value); this.closest('.list-item').querySelector('strong').textContent = this.value || 'Profile ${idx + 1}';">
+                <input id="dn-${idx}-name" type="text" value="${escHtml(profile.name || '')}" placeholder="e.g. Tech News" data-dn-idx="${idx}" data-dn-field="name" data-dn-label="Profile ${idx + 1}">
                 <label for="dn-${idx}-channel">Channel</label>
-                <select id="dn-${idx}-channel" onchange="updateDailyNewsProfile(${idx}, 'channelId', this.value)">${dailyNewsChannelOptions(profile.channelId)}</select>
+                <select id="dn-${idx}-channel" data-dn-idx="${idx}" data-dn-field="channelId">${dailyNewsChannelOptions(profile.channelId)}</select>
                 <label for="dn-${idx}-time">Time (24h)</label>
-                <input id="dn-${idx}-time" type="text" value="${escHtml(profile.time || '09:00')}" onchange="updateDailyNewsProfile(${idx}, 'time', this.value)">
+                <input id="dn-${idx}-time" type="text" value="${escHtml(profile.time || '09:00')}" data-dn-idx="${idx}" data-dn-field="time">
                 <label for="dn-${idx}-timezone">Timezone <small style="font-weight:normal;opacity:.7;">(IANA, e.g. UTC, America/New_York, Europe/London)</small></label>
-                <input id="dn-${idx}-timezone" type="text" list="tz-datalist" value="${escHtml(profile.timezone || '')}" placeholder="UTC" autocomplete="off" onblur="validateTimezoneInput(this)" onchange="updateDailyNewsProfile(${idx}, 'timezone', this.value)">
+                <input id="dn-${idx}-timezone" type="text" list="tz-datalist" value="${escHtml(profile.timezone || '')}" placeholder="UTC" autocomplete="off" data-validate-timezone data-dn-idx="${idx}" data-dn-field="timezone">
                 <label for="dn-${idx}-title">Digest title</label>
-                <input id="dn-${idx}-title" type="text" value="${escHtml(profile.title || '📰 Daily News Digest')}" onchange="updateDailyNewsProfile(${idx}, 'title', this.value)">
+                <input id="dn-${idx}-title" type="text" value="${escHtml(profile.title || '📰 Daily News Digest')}" data-dn-idx="${idx}" data-dn-field="title">
                 <label for="dn-${idx}-feeds">Feeds (one URL per line)</label>
-                <textarea id="dn-${idx}-feeds" rows="3" onchange="updateDailyNewsProfile(${idx}, 'feeds', this.value)">${escHtml((profile.feeds || []).join('\n'))}</textarea>
+                <textarea id="dn-${idx}-feeds" rows="3" data-dn-idx="${idx}" data-dn-field="feeds">${escHtml((profile.feeds || []).join('\n'))}</textarea>
                 <div id="feed-status-${idx}" style="font-size:.8rem;"></div>
-                <button class="btn btn-sm" type="button" onclick="validateProfileFeeds(${idx})">Validate feeds</button>
+                <button class="btn btn-sm" type="button" data-action="dn-validate" data-idx="${idx}">Validate feeds</button>
             </div>
         `;
         container.appendChild(card);
@@ -1498,8 +1498,8 @@ function renderCpRules() {
         const color = r.effect === 'allow' ? '#2ecc71' : '#e74c3c';
         return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
             '<span style="flex:1"><strong>' + escHtml(r.command) + '</strong> — <span style="color:' + color + '">' + escHtml(r.effect) + '</span></span>' +
-            '<button class="btn btn-sm" onclick="openCpRuleModal(' + i + ')">Edit</button>' +
-            '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpRules.splice(' + i + ',1);renderCpRules()" aria-label="Remove the ' + escHtml(r.command) + ' rule">✕</button></div>';
+            '<button class="btn btn-sm" data-action="cp-rule-edit" data-idx="' + i + '">Edit</button>' +
+            '<button class="btn btn-sm" style="color:#e74c3c" data-action="cp-rule-remove" data-idx="' + i + '" aria-label="Remove the ' + escHtml(r.command) + ' rule">✕</button></div>';
     }).join('');
 }
 var _cpRoleMap = boot('roleNames');
@@ -1510,8 +1510,8 @@ function renderCpCooldowns() {
         const roleName = _cpRoleMap[c.roleId] ? '@' + _cpRoleMap[c.roleId] : escHtml(c.roleId);
         return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
             '<span style="flex:1"><strong>' + escHtml(c.command) + '</strong> — ' + escHtml(roleName) + ' → ' + escHtml(c.cooldownSeconds) + 's</span>' +
-            '<button class="btn btn-sm" onclick="openCpCooldownModal(' + i + ')">Edit</button>' +
-            '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpCooldowns.splice(' + i + ',1);renderCpCooldowns()" aria-label="Remove the ' + escHtml(c.command) + ' cooldown override">✕</button></div>';
+            '<button class="btn btn-sm" data-action="cp-cooldown-edit" data-idx="' + i + '">Edit</button>' +
+            '<button class="btn btn-sm" style="color:#e74c3c" data-action="cp-cooldown-remove" data-idx="' + i + '" aria-label="Remove the ' + escHtml(c.command) + ' cooldown override">✕</button></div>';
     }).join('');
 }
 function openCpRuleModal(idx) {
@@ -1618,7 +1618,7 @@ function renderStoreItems() {
         const imgSrc = (item.itemId && _shopItemPendingImages[item.itemId])
             ? _shopItemPendingImages[item.itemId].dataUrl
             : (item.itemId ? '/api/v1/item-image/shop/' + _guildId + '/' + escHtml(item.itemId) : '');
-        const thumbHtml = imgSrc ? '<img class="store-card-thumb" src="' + imgSrc + '" alt="" onerror="this.style.display=\'none\'">' : '';
+        const thumbHtml = imgSrc ? '<img class="store-card-thumb" src="' + imgSrc + '" alt="" data-hide-on-error>' : '';
         return '<div class="store-card">' +
             (thumbHtml ? '<div class="store-card-thumb-wrap">' + thumbHtml + '</div>' : '') +
             '<div class="store-card-body">' +
@@ -1631,8 +1631,8 @@ function renderStoreItems() {
                 '</div>' +
             '</div>' +
             '<div class="store-card-actions">' +
-                '<button class="btn btn-sm" onclick="openItemModal(' + i + ')">Edit</button>' +
-                '<button class="btn btn-sm btn-danger" onclick="deleteItem(' + i + ')">Remove</button>' +
+                '<button class="btn btn-sm" data-action="item-edit" data-idx="' + i + '">Edit</button>' +
+                '<button class="btn btn-sm btn-danger" data-action="item-delete" data-idx="' + i + '">Remove</button>' +
             '</div>' +
         '</div>';
     }).join('');
@@ -1776,9 +1776,9 @@ function renderJobTiers() {
         const isFirst = t.minShifts === 0;
         return '<div class="job-tier-row" style="border-left:3px solid ' + color + '">' +
             '<span class="job-tier-row-badge">' + badge + ' Tier ' + t.tier + '</span>' +
-            '<input class="job-tier-name-input" data-tier-idx="' + i + '" data-field="name" value="' + escHtml(t.name) + '" placeholder="Tier name" oninput="updateTierField(this)">' +
+            '<input class="job-tier-name-input" data-tier-idx="' + i + '" data-field="name" value="' + escHtml(t.name) + '" placeholder="Tier name">' +
             '<div class="job-tier-row-shifts">' +
-                '<input type="number" class="job-tier-shifts-input" data-tier-idx="' + i + '" data-field="minShifts" value="' + t.minShifts + '" min="0"' + (isFirst ? ' disabled title="Tier 1 always starts at 0 shifts"' : '') + ' oninput="updateTierField(this)">' +
+                '<input type="number" class="job-tier-shifts-input" data-tier-idx="' + i + '" data-field="minShifts" value="' + t.minShifts + '" min="0"' + (isFirst ? ' disabled title="Tier 1 always starts at 0 shifts"' : '') + '>' +
                 '<span class="job-tier-shifts-label">shifts to unlock</span>' +
             '</div>' +
         '</div>';
@@ -1832,8 +1832,8 @@ function renderJobs() {
             (job.emoji ? '<span class="job-chip-emoji">' + escHtml(job.emoji) + '</span>' : '') +
             '<span class="job-name">' + escHtml(job.name) + '</span>' +
             '<span class="job-pay-badge">💰 ' + minPay + '–' + maxPay + '</span>' +
-            '<button class="job-btn" onclick="openJobModal(' + i + ')" title="Edit" aria-label="Edit the ' + escHtml(job.name) + ' job">✏️</button>' +
-            '<button class="job-btn" onclick="deleteJob(' + i + ')" title="Remove" style="font-size:1rem" aria-label="Remove the ' + escHtml(job.name) + ' job">×</button>' +
+            '<button class="job-btn" data-action="job-edit" data-idx="' + i + '" title="Edit" aria-label="Edit the ' + escHtml(job.name) + ' job">✏️</button>' +
+            '<button class="job-btn" data-action="job-delete" data-idx="' + i + '" title="Remove" style="font-size:1rem" aria-label="Remove the ' + escHtml(job.name) + ' job">×</button>' +
         '</div>';
     });
     if (lastTier !== null) html += '</div>';
@@ -1925,10 +1925,83 @@ document.addEventListener('click', function(e) {
 // an on*="" attribute is HTML-decoded before it is parsed as JS, so a
 // `&#39;` from escHtml turns back into a quote and closes the string it
 // was meant to sit inside.
+// Actions that are a bare call with no argument, or with one the action name
+// itself supplies. Written as thunks rather than bare references so this can
+// sit next to the dispatcher regardless of where each function is declared, and
+// as a table rather than another forty `else if` lines because the point of
+// #887 is that there are forty of them.
+//
+// It is a table, not a lookup into `window`: an injected `data-action` can only
+// name something on this list, which is the difference between a data attribute
+// and the `onclick=""` it replaced.
+const CLICK_ACTIONS = {
+    'add-auto-role':              () => addAutoRole(),
+    'add-cp-exc-role':            () => addCpExcRole(),
+    'add-daily-news-profile':     () => addDailyNewsProfile(),
+    'add-escalation-step':        () => addEscalationStep(),
+    'add-level-no-xp-channel':    () => addLevelNoXpChannel(),
+    'add-level-no-xp-role':       () => addLevelNoXpRole(),
+    'add-level-role-reward':      () => addLevelRoleReward(),
+    'add-persona':                () => addPersona(),
+    'add-rr-mapping':             () => addRrMapping(),
+    'add-rss-feed':               () => addRssFeed(),
+    'add-season-tier-row':        () => addSeasonTierRow(),
+    'add-summary-job':            () => addSummaryJob(),
+    'clear-shop-item-image':      () => clearShopItemImage(),
+    'close-ach-grant-modal':      () => closeAchGrantModal(),
+    'close-ach-modal':            () => closeAchModal(),
+    'close-case-note-modal':      () => closeCaseNoteModal(),
+    'close-cp-cooldown-modal':    () => closeCpCooldownModal(),
+    'close-cp-rule-modal':        () => closeCpRuleModal(),
+    'close-item-modal':           () => closeItemModal(),
+    'close-job-modal':            () => closeJobModal(),
+    'close-prompt-editor':        () => closePromptEditor(false),
+    'confirm-cancel':             () => _confirmResolve(false),
+    'confirm-ok':                 () => _confirmResolve(true),
+    'dismiss-getting-started':    () => dismissGettingStarted(),
+    'level-leaderboard':          () => loadLevelLeaderboard(1, true),
+    'load-active-sanctions':      () => loadActiveSanctions(),
+    'load-analytics':             () => loadAnalytics(),
+    'load-eco-health':            () => loadEcoHealth(),
+    'publish-rr-panel':           () => publishRrPanel(),
+    'reset-escalation-ladder':    () => resetEscalationLadder(),
+    'reset-mcp-form':             () => resetMcpForm(),
+    'retry-load-summary-jobs':    () => retryLoadSummaryJobs(),
+    'save-ach-modal':             () => saveAchModal(),
+    'save-cp-cooldown-modal':     () => saveCpCooldownModal(),
+    'save-cp-rule-modal':         () => saveCpRuleModal(),
+    'save-daily-digest':          () => saveDailyDigest(),
+    'save-item-modal':            () => saveItemModal(),
+    'save-job-modal':             () => saveJobModal(),
+    'save-mcp-server':            () => saveMcpServer(),
+    'save-prompt-editor':         () => closePromptEditor(true),
+    'send-welcome-card-preview':  () => sendWelcomeCardPreview(),
+    'start-boost-event':          () => startBoostEvent(),
+    'submit-ach-grant':           () => submitAchGrant(),
+    'submit-case-action':         () => submitCaseAction(),
+    'toggle-getting-started':     () => toggleGettingStarted(),
+    'trigger-daily-news-now':     () => triggerDailyNewsNow(),
+    'validate-main-feeds':        () => validateMainFeeds(),
+    // One action, the argument in a data attribute. `saveSettings` alone was
+    // twenty-five `onclick=""` across twenty-five panels.
+    'save':              (el, d) => saveSettings(d.section),
+    'eco-admin':         (el, d) => ecoAdminAction(d.ecoAction),
+    'level-admin':       (el, d) => levelAdminAction(d.levelAction),
+    'sanctions-filter':  (el, d) => setSanctionsFilter(d.filter, el),
+    'analytics-range':   (el, d) => setAnalyticsRange(Number(d.days), el),
+    'prompt-edit':       (el, d) => openPromptEditor(d.promptTarget, d.promptTitle),
+    'level-no-xp-channel-remove': (el, d) => removeLevelNoXpChannel(d.channelId),
+    'level-no-xp-role-remove':    (el, d) => removeLevelNoXpRole(d.noXpRoleId),
+    'activity-image-remove':      (el, d) => removeActivityImage(d.itemId),
+};
+
 document.addEventListener('click', function(e) {
     const el = e.target.closest && e.target.closest('[data-action]');
     if (!el) return;
     const d = el.dataset;
+
+    const simple = CLICK_ACTIONS[d.action];
+    if (simple) { simple(el, d); return; }
     if (d.action === 'ach-grant')      openAchGrantModal(d.achId, d.achName);
     else if (d.action === 'summary-delete') deleteSummaryJob(d.jobId);
     else if (d.action === 'persona-remove') removePersona(d.channelId);
@@ -1946,7 +2019,135 @@ document.addEventListener('click', function(e) {
     // renderRssFeeds or renderRrPanels has no listener of its own.
     else if (d.action === 'rss-remove')      deleteRssFeed(Number(d.index));
     else if (d.action === 'rr-panel-delete') deleteRrPanel(d.messageId);
+    // Everything below was an `onclick=""` in the markup these renderers build
+    // (#887). None of it needed to be: the argument is always an index, an id or
+    // a tab name, all of which travel perfectly well in a data-* attribute.
+    // Moving them here is what lets the CSP drop `script-src-attr
+    // 'unsafe-inline'`, the one directive that decides whether an injected
+    // handler attribute runs or is blocked.
+    else if (d.action === 'escalation-remove')  removeEscalationStep(Number(d.idx));
+    else if (d.action === 'dn-remove')          removeDailyNewsProfile(Number(d.idx));
+    else if (d.action === 'dn-validate')        validateProfileFeeds(Number(d.idx));
+    else if (d.action === 'cp-rule-edit')       openCpRuleModal(Number(d.idx));
+    else if (d.action === 'cp-rule-remove')     { _cpRules.splice(Number(d.idx), 1); renderCpRules(); }
+    else if (d.action === 'cp-cooldown-edit')   openCpCooldownModal(Number(d.idx));
+    else if (d.action === 'cp-cooldown-remove') { _cpCooldowns.splice(Number(d.idx), 1); renderCpCooldowns(); }
+    else if (d.action === 'item-edit')          openItemModal(Number(d.idx));
+    else if (d.action === 'item-delete')        deleteItem(Number(d.idx));
+    else if (d.action === 'job-edit')           openJobModal(Number(d.idx));
+    else if (d.action === 'job-delete')         deleteJob(Number(d.idx));
+    else if (d.action === 'ach-edit')           openAchModal(Number(d.idx));
+    else if (d.action === 'ach-delete')         deleteCustomAch(Number(d.idx));
+    else if (d.action === 'case-note')          openCaseNoteModal(Number(d.caseId));
+    else if (d.action === 'case-close')         closeCase(Number(d.caseId));
+    else if (d.action === 'case-page')          loadCaseHistory(Number(d.page));
+    // A row builder's own delete button. `data-row-selector` names the row when
+    // the button is nested inside it; without one the row is the button's
+    // parent, which is what `this.parentElement.remove()` meant.
+    else if (d.action === 'row-remove') {
+        const row = d.rowSelector ? el.closest(d.rowSelector) : el.parentElement;
+        const list = row && row.parentElement;
+        if (row) row.remove();
+        // The rows are numbered "Reward 1, Reward 2, …" for screen readers, so
+        // removing one in the middle renumbers the rest.
+        if (list) labelRepeatedRows(list);
+    }
+    // Jumps to another settings tab. The nav item is the thing that knows how to
+    // switch panels, so this clicks it rather than reimplementing the switch.
+    else if (d.action === 'goto-tab') {
+        const nav = document.querySelector('.nav-item[data-tab="' + CSS.escape(d.tab || '') + '"]');
+        if (nav) nav.click();
+        // These are `<a href="#">` as often as buttons, and the inline versions
+        // all ended in `return false` to stop the jump to the top of the page.
+        e.preventDefault();
+    }
 });
+
+// The Daily News profile editor, which was seven inline handlers across one
+// rendered card (#887). Every field carries the profile index and the key it
+// writes, so one pair of listeners replaces all of them.
+function dailyNewsFieldEdit(e) {
+    const el = e.target.closest && e.target.closest('[data-dn-idx]');
+    if (!el) return;
+    updateDailyNewsProfile(Number(el.dataset.dnIdx), el.dataset.dnField, el.value);
+    // The card's heading echoes the name as it is typed.
+    if (el.dataset.dnLabel !== undefined) {
+        const heading = el.closest('.list-item') && el.closest('.list-item').querySelector('strong');
+        if (heading) heading.textContent = el.value || el.dataset.dnLabel;
+    }
+}
+document.addEventListener('input', dailyNewsFieldEdit);
+document.addEventListener('change', dailyNewsFieldEdit);
+
+document.addEventListener('input', function(e) {
+    const el = e.target.closest && e.target.closest('[data-tier-idx][data-field]');
+    if (el) updateTierField(el);
+});
+
+// The rest of the views' `oninput=""` and `onchange=""` (#887). Two tables in
+// the shape of CLICK_ACTIONS above, each keyed on the element's own data-input
+// or data-change, so an element carries what it does rather than how to do it.
+const INPUT_ACTIONS = {
+    'member-search':        () => debouncedMemberSearch(),
+    'prompt-editor-count':  () => updatePromptEditorCount(),
+    'prompt-count':  (el, d) => updatePromptCount(d.promptTarget),
+    'msg-preview':   (el, d) => updateMsgPreview(d.previewSource, d.previewTarget),
+    // A range input echoing its own value into a label beside it.
+    'mirror-value':  (el, d) => {
+        const target = document.getElementById(d.mirrorTarget);
+        if (target) target.textContent = el.value;
+    },
+};
+
+const CHANGE_ACTIONS = {
+    'ai-provider':      () => updateAiProviderUI(),
+    'mcp-preset':       () => applyMcpPreset(),
+    'shop-item-image':  el => previewShopItemImage(el),
+    'stock-toggle':     el => toggleStockInput(el),
+    'case-page': (el, d) => loadCaseHistory(Number(d.page)),
+    'activity-image-upload': (el, d) => uploadActivityImage(d.itemId, el),
+};
+
+function runTableAction(table, attribute, e) {
+    const el = e.target.closest && e.target.closest('[' + attribute + ']');
+    if (!el) return;
+    const fn = table[el.getAttribute(attribute)];
+    if (fn) fn(el, el.dataset);
+}
+
+document.addEventListener('input',  e => runTableAction(INPUT_ACTIONS, 'data-input', e));
+document.addEventListener('change', e => runTableAction(CHANGE_ACTIONS, 'data-change', e));
+
+// Forms that exist for their layout and their Enter-to-submit behaviour, never
+// to navigate. This was `onsubmit="return false"`.
+document.addEventListener('submit', function(e) {
+    if (e.target.closest && e.target.closest('form[data-no-submit]')) e.preventDefault();
+});
+
+// The activity-item cards: when the uploaded image 404s, it hides itself and
+// the emoji underneath takes its place. Capture phase, because `error` does not
+// bubble — the same reason the data-hide-on-error listener below captures.
+document.addEventListener('error', function(e) {
+    const el = e.target;
+    if (!el || !el.matches || !el.matches('img[data-emoji-fallback]')) return;
+    el.style.display = 'none';
+    const emoji = document.getElementById(el.dataset.emojiFallback);
+    if (emoji) emoji.style.display = 'flex';
+}, true);
+
+// `blur` does not bubble, so it is listened for in the capture phase — the same
+// reason the `error` handler below captures.
+document.addEventListener('blur', function(e) {
+    const el = e.target;
+    if (el && el.matches && el.matches('[data-validate-timezone]')) validateTimezoneInput(el);
+}, true);
+
+// An avatar or shop thumbnail whose URL 404s hides itself rather than showing a
+// broken-image glyph. `error` does not bubble either, hence the capture phase.
+document.addEventListener('error', function(e) {
+    const el = e.target;
+    if (el && el.matches && el.matches('img[data-hide-on-error]')) el.style.display = 'none';
+}, true);
 
 // mousedown, not click: the dropdown is hidden by the input's blur, which
 // fires first on a click.
@@ -2015,8 +2216,8 @@ function renderCustomAchievements() {
             '</div>' +
             '<div class="store-card-actions">' +
                 '<button class="btn btn-sm" data-action="ach-grant" data-ach-id="' + escHtml(a.id) + '" data-ach-name="' + escHtml(a.name) + '">Grant</button>' +
-                '<button class="btn btn-sm" onclick="openAchModal(' + i + ')">Edit</button>' +
-                '<button class="btn btn-sm btn-danger" onclick="deleteCustomAch(' + i + ')">Remove</button>' +
+                '<button class="btn btn-sm" data-action="ach-edit" data-idx="' + i + '">Edit</button>' +
+                '<button class="btn btn-sm btn-danger" data-action="ach-delete" data-idx="' + i + '">Remove</button>' +
             '</div>' +
         '</div>';
     }).join('');
@@ -2369,7 +2570,7 @@ function addRrMapping() {
         '<select class="rr-role" aria-label="Role to assign"><option value="">Select role</option>' +
         rrRoles.map(function(r) { return '<option value="' + r.id + '">@' + escHtml(r.name) + '</option>'; }).join('') +
         '</select>' +
-        '<button class="btn btn-sm btn-danger" type="button" onclick="this.parentElement.remove()" data-row-remove="rr-mapping" aria-label="Remove this reaction role mapping">×</button>';
+        '<button class="btn btn-sm btn-danger" type="button" data-action="row-remove" data-row-remove="rr-mapping" aria-label="Remove this reaction role mapping">×</button>';
     list.appendChild(row);
     labelRepeatedRows(list);
 }
@@ -3888,7 +4089,7 @@ function addSeasonTierRow() {
         '<input type="number" class="season-tier-coins" min="0" style="width:90px" placeholder="Coins" aria-label="Coin reward">' +
         '<select class="season-tier-role" aria-label="Reward role">' + roleOptionsHtml + '</select>' +
         '<input type="text" class="season-tier-label" style="flex:1;min-width:100px" placeholder="Label (e.g. Bronze Tier)" aria-label="Tier label">' +
-        '<button class="btn btn-danger" type="button" onclick="this.closest(\'.season-tier-row\').remove()" title="Remove" data-row-remove="season-tier">&times;</button>';
+        '<button class="btn btn-danger" type="button" data-action="row-remove" data-row-selector=".season-tier-row" title="Remove" data-row-remove="season-tier">&times;</button>';
     list.appendChild(row);
     labelRepeatedRows(list);
 }
@@ -4012,8 +4213,8 @@ async function loadOverviewStats() {
         }
         if (actionsEl) {
             actionsEl.innerHTML = `
-                <button class="dash-bot-btn" onclick="document.querySelector('.nav-item[data-tab=analytics]').click()">Open Analytics →</button>
-                <button class="dash-bot-btn" onclick="document.querySelector('.nav-item[data-tab=moderation]').click()" style="background:transparent;">Configure Moderation</button>
+                <button class="dash-bot-btn" data-action="goto-tab" data-tab="analytics">Open Analytics →</button>
+                <button class="dash-bot-btn" data-action="goto-tab" data-tab="moderation" style="background:transparent;">Configure Moderation</button>
             `;
         }
 
@@ -4048,9 +4249,9 @@ async function loadOverviewStats() {
         }
     } catch {
         const msgEl = document.getElementById('clawdia-msg');
-        if (msgEl) msgEl.innerHTML = `Open <a href="#" onclick="document.querySelector('.nav-item[data-tab=analytics]').click();return false">Analytics</a> to review server health.`;
+        if (msgEl) msgEl.innerHTML = `Open <a href="#" data-action="goto-tab" data-tab="analytics">Analytics</a> to review server health.`;
         const actionsEl = document.getElementById('clawdia-actions');
-        if (actionsEl) actionsEl.innerHTML = `<button class="dash-bot-btn" onclick="document.querySelector('.nav-item[data-tab=analytics]').click()">Open Analytics →</button>`;
+        if (actionsEl) actionsEl.innerHTML = `<button class="dash-bot-btn" data-action="goto-tab" data-tab="analytics">Open Analytics →</button>`;
         const memberVal = document.getElementById('kpi-members-value');
         const modVal = document.getElementById('kpi-mod-value');
         const botVal2 = document.getElementById('kpi-bot-value');
@@ -4518,12 +4719,12 @@ async function loadAnalytics() {
         const activeRecs = a.recommendations || [];
         if (!activeRecs.length) {
             for (const r of defaultRecs) {
-                recCont.insertAdjacentHTML('beforeend', `<div class="analytics-rec-card"><span>💡 ${escHtml(r.text)}</span><a href="#" class="analytics-rec-link" onclick="document.querySelector('.nav-item[data-tab=${r.tab}]')?.click();return false">Configure →</a></div>`);
+                recCont.insertAdjacentHTML('beforeend', `<div class="analytics-rec-card"><span>💡 ${escHtml(r.text)}</span><a href="#" class="analytics-rec-link" data-action="goto-tab" data-tab="${escHtml(r.tab)}">Configure →</a></div>`);
             }
         } else {
             for (const rec of activeRecs) {
                 const navTarget = Object.keys(navMap).find(k => rec.toLowerCase().includes(k));
-                const linkHtml = navTarget ? `<a href="#" class="analytics-rec-link" onclick="document.querySelector('.nav-item[data-tab=${navMap[navTarget]}]')?.click();return false">Configure →</a>` : '';
+                const linkHtml = navTarget ? `<a href="#" class="analytics-rec-link" data-action="goto-tab" data-tab="${escHtml(navMap[navTarget])}">Configure →</a>` : '';
                 recCont.insertAdjacentHTML('beforeend', `<div class="analytics-rec-card"><span>💡 ${escHtml(rec)}</span>${linkHtml}</div>`);
             }
         }
@@ -4681,7 +4882,7 @@ async function loadCaseHistory(page = 1) {
         for (const c of items) {
             const date = new Date(c.createdAt).toLocaleDateString();
             const targetCell = c.targetUserTag
-                ? `<span title="${escHtml(c.targetUserId)}">${c.targetAvatarUrl ? `<img src="${escHtml(c.targetAvatarUrl)}" alt="" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" onerror="this.style.display='none'">` : ''}${escHtml(c.targetUserTag)}</span>`
+                ? `<span title="${escHtml(c.targetUserId)}">${c.targetAvatarUrl ? `<img src="${escHtml(c.targetAvatarUrl)}" alt="" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" data-hide-on-error>` : ''}${escHtml(c.targetUserTag)}</span>`
                 : `<span style="font-size:.8em">${escHtml(c.targetUserId)}</span>`;
             const modCell = c.moderatorTag
                 ? `<span title="${escHtml(c.moderatorId)}">${escHtml(c.moderatorTag)}</span>`
@@ -4694,8 +4895,8 @@ async function loadCaseHistory(page = 1) {
                 <td>${date}</td>
                 <td><span class="case-status-badge status-${c.status}">${c.status}</span></td>
                 <td style="display:flex;gap:.35rem;flex-wrap:wrap">
-                    <button class="btn btn-sm" onclick="openCaseNoteModal(${c.caseId})">Add note</button>
-                    ${c.status === 'open' ? `<button class="btn btn-sm btn-danger" onclick="closeCase(${c.caseId})">Close</button>` : ''}
+                    <button class="btn btn-sm" data-action="case-note" data-case-id="${c.caseId}">Add note</button>
+                    ${c.status === 'open' ? `<button class="btn btn-sm btn-danger" data-action="case-close" data-case-id="${c.caseId}">Close</button>` : ''}
                 </td>
             </tr>`);
         }
@@ -4703,9 +4904,9 @@ async function loadCaseHistory(page = 1) {
         if (pages > 1) {
             paginEl.style.display = 'flex';
             paginEl.innerHTML = '';
-            if (page > 1) paginEl.insertAdjacentHTML('beforeend', `<button class="btn btn-sm" onclick="loadCaseHistory(${page-1})">‹ Prev</button>`);
+            if (page > 1) paginEl.insertAdjacentHTML('beforeend', `<button class="btn btn-sm" data-action="case-page" data-page="${page - 1}">‹ Prev</button>`);
             paginEl.insertAdjacentHTML('beforeend', `<span style="font-size:.85em;opacity:.7">Page ${page} of ${pages} (${total} total)</span>`);
-            if (page < pages) paginEl.insertAdjacentHTML('beforeend', `<button class="btn btn-sm" onclick="loadCaseHistory(${page+1})">Next ›</button>`);
+            if (page < pages) paginEl.insertAdjacentHTML('beforeend', `<button class="btn btn-sm" data-action="case-page" data-page="${page + 1}">Next ›</button>`);
         }
     } catch {
         document.getElementById('cases-loading').style.display = 'none';
@@ -4786,7 +4987,7 @@ async function loadEcoHealth() {
         for (let i = 0; i < topEarners.length; i++) {
             const u = topEarners[i];
             const userCell = u.userTag
-                ? `<span title="${escHtml(u.userId)}">${u.avatarUrl ? `<img src="${escHtml(u.avatarUrl)}" alt="" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" onerror="this.style.display='none'">` : ''}${escHtml(u.userTag)}</span>`
+                ? `<span title="${escHtml(u.userId)}">${u.avatarUrl ? `<img src="${escHtml(u.avatarUrl)}" alt="" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" data-hide-on-error>` : ''}${escHtml(u.userTag)}</span>`
                 : `<span style="font-size:.8em">${escHtml(u.userId)}</span>`;
             tbody.insertAdjacentHTML('beforeend', `<tr><td>#${i+1}</td><td>${userCell}</td><td>${(u.balance||0).toLocaleString()}</td><td>${(u.bank||0).toLocaleString()}</td><td>${(u.total||0).toLocaleString()}</td></tr>`);
         }
@@ -4924,7 +5125,7 @@ async function ecoAdminAction(action) {
                         const id   = escHtml(u.id);
                         const av   = u.avatarURL ? escHtml(u.avatarURL) : '';
                         return `<div class="user-search-item" data-id="${id}" data-name="${name}" data-avatar="${av}">
-                            ${av ? `<img src="${av}" alt="" style="width:20px;height:20px;border-radius:50%" onerror="this.style.display='none'">` : ''}
+                            ${av ? `<img src="${av}" alt="" style="width:20px;height:20px;border-radius:50%" data-hide-on-error>` : ''}
                             <span>${name}</span>
                             <span style="opacity:.5;font-size:.75em;margin-left:auto">${escHtml(u.username)}</span>
                         </div>`;
@@ -4964,7 +5165,7 @@ async function ecoAdminAction(action) {
         const safeId   = escHtml(id);
         const safeName = escHtml(name);
         const safeAv   = avatarUrl ? escHtml(avatarUrl) : '';
-        tag.innerHTML  = `${safeAv ? `<img src="${safeAv}" alt="" style="width:16px;height:16px;border-radius:50%" onerror="this.style.display='none'">` : ''}<span title="${safeId}">${safeName}</span><button type="button" title="Remove" aria-label="Remove ${safeName}">&times;</button>`;
+        tag.innerHTML  = `${safeAv ? `<img src="${safeAv}" alt="" style="width:16px;height:16px;border-radius:50%" data-hide-on-error>` : ''}<span title="${safeId}">${safeName}</span><button type="button" title="Remove" aria-label="Remove ${safeName}">&times;</button>`;
         tag.querySelector('button').addEventListener('click', function() {
             const ta = document.getElementById(widgetId);
             if (ta) ta.value = ta.value.split('\n').map(s => s.trim()).filter(s => s && s !== id).join('\n');
@@ -5002,14 +5203,13 @@ async function ecoAdminAction(action) {
 // deleting it again leaves the settings exactly as they were, and a warning
 // there is how people learn to click through warnings.
 
-// Matched by reading the attribute rather than with [onclick*="saveSettings("]:
-// a bare "(" inside an attribute selector's quoted value is legal CSS that not
-// every selector engine parses, and one that quietly matches nothing would
-// leave every panel looking permanently saved.
-const SAVE_CALL = /saveSettings\(\s*'([^']+)'/;
+// A save button used to be found by reading `onclick` and matching
+// `saveSettings('x')` out of it. Both the attribute and the parse are gone with
+// #887: the button carries `data-action="save" data-section="x"`, so the
+// section is read rather than extracted, and the selector is a plain one.
+const SAVE_BUTTON = '[data-action="save"][data-section]';
 function saveButtonsIn(root) {
-    return Array.from(root.querySelectorAll('[onclick]'))
-        .filter(el => SAVE_CALL.test(el.getAttribute('onclick') || ''));
+    return Array.from(root.querySelectorAll(SAVE_BUTTON));
 }
 // Search boxes, "pick one to add" selects and one-shot admin fields live
 // inside panels but are not settings — saveSettings() never reads them.
@@ -5034,8 +5234,7 @@ function saveScopeOf(el) {
 function sectionOfSaveButton(btn) {
     const scoped = btn.closest('[data-save-scope]');
     if (scoped) return scoped.dataset.saveScope;
-    const match = SAVE_CALL.exec(btn.getAttribute('onclick') || '');
-    return match ? match[1] : null;
+    return btn.dataset.section || null;
 }
 
 function scopeSignature(scope) {
@@ -5266,10 +5465,7 @@ const SAVING_LABEL = 'Saving…';
 
 /** The save buttons whose click calls saveSettings() for this section. */
 function saveButtonsForSection(section) {
-    return saveButtonsIn(document).filter(btn => {
-        const match = SAVE_CALL.exec(btn.getAttribute('onclick') || '');
-        return !!match && match[1] === section;
-    });
+    return saveButtonsIn(document).filter(btn => btn.dataset.section === section);
 }
 
 /**

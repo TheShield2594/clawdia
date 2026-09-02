@@ -55,10 +55,10 @@
                     <div class="field" role="group" aria-labelledby="rr-mappings-label">
                         <div class="field-label" id="rr-mappings-label">Emoji → Role mappings</div>
                         <div id="rr-mappings-list" data-row-list style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.5rem;"></div>
-                        <button class="btn btn-sm" type="button" onclick="addRrMapping()">+ Add mapping</button>
+                        <button class="btn btn-sm" type="button" data-action="add-rr-mapping">+ Add mapping</button>
                         <small style="display:block;margin-top:.4rem">Use a standard emoji (e.g. <code>👍</code>) or a custom Discord emoji (<code>&lt;:name:id&gt;</code>).</small>
                     </div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="publishRrPanel()">Publish to channel</button>
+                        <button class="btn btn-primary" data-action="publish-rr-panel">Publish to channel</button>
                     </div>
                 </section>

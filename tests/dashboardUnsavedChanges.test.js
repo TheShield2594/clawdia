@@ -353,9 +353,8 @@ describe('the markup the tracking rests on', () => {
 
     function scopesIn(doc) {
         const scopes = new Map();
-        for (const btn of doc.querySelectorAll('[onclick]')) {
-            const onclick = btn.getAttribute('onclick') || '';
-            const match = /saveSettings\(\s*'([^']+)'/.exec(onclick);
+        for (const btn of doc.querySelectorAll('[data-action="save"][data-section]')) {
+            const match = [null, btn.dataset.section];
             if (!match) continue;
             const scope = btn.closest('[data-save-scope]')
                 || btn.closest('.ai-inner-panel')
@@ -383,7 +382,7 @@ describe('the markup the tracking rests on', () => {
             }
         }
         // The scopes are discovered by walking the rendered panels, so a
-        // changed class or a move from inline onclick to addEventListener
+        // changed class or a change in how the save button is marked up
         // would empty the set and leave this reporting clean forever. The
         // panels carry 28 save buttons; a floor well under that still catches
         // the sweep going blind.

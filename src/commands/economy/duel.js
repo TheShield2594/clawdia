@@ -822,4 +822,12 @@ module.exports = {
 // them. Exported so it can be driven without a full challenge and its button
 // collectors; the escrow half is re-exported here because that is where the
 // tests holding escrow and refund against each other already reach for it.
-module.exports.__test__ = { takeEscrow, refundEscrow, refundNote, finalizeDuel };
+//
+// The cooldown pair is here for the same reason (#890). It is two writes with a
+// rollback between them — the same shape as the escrow, one field down — and
+// reaching its "opponent claimed first" branch through the challenge means
+// racing two button presses against each other.
+module.exports.__test__ = {
+    takeEscrow, refundEscrow, refundNote, finalizeDuel,
+    claimDuelCooldown, revertDuelCooldown,
+};

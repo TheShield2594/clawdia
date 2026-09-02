@@ -11,13 +11,18 @@
 // lib/assets.js serves the twin when there is one. Two things have to hold for
 // that to be safe, and both are checked here:
 //
-//   * the minifier must not rename anything the page reaches by name. This page
-//     is a classic script, not a module: the inline bootstrap block and the
-//     EJS `onclick` attributes call its top-level functions off the global
-//     object, so a renamed top-level binding is a dead button rather than a
+//   * the minifier must not rename anything the page reaches by name. These are
+//     classic scripts, not modules: they share one global scope, and
+//     guild-settings.js calls into esc-html.js and settings-payload.js across
+//     that scope, so a renamed top-level binding is a dead page rather than a
 //     failing build. esbuild only renames top-level identifiers when bundling,
 //     which is exactly why the script does not bundle — asserted rather than
 //     trusted, because it is one option away either way.
+//
+//     Until #887 the same rule was carried by the views' `onclick=""`
+//     attributes, which named top-level functions in markup the minifier never
+//     sees. Those are gone — the handlers are delegated now — so what is left
+//     to protect is the cross-script calls, which is what this checks.
 //
 //   * the twins must stay optional. They are generated, not committed, so a
 //     checkout run with `npm start` has none and has to behave as it did.
@@ -81,32 +86,40 @@ describe('the minifier keeps every name the page reaches by name', () => {
     // rename breaks silently — nothing fails until someone clicks. Sampled from
     // the markup rather than listed by hand, so a handler added later is
     // covered without anyone remembering this file.
-    test('every function an inline handler names survives minification', async () => {
-        const views = path.join(ROOT, 'src', 'dashboard', 'views');
-        const files = [];
-        (function walk(dir) {
-            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-                const full = path.join(dir, entry.name);
-                if (entry.isDirectory()) walk(full);
-                else if (entry.name.endsWith('.ejs')) files.push(full);
-            }
-        })(views);
+    test('every name one script borrows from another survives minification', async () => {
+        // The three scripts share one global scope and call across it: the
+        // renderers use escHtml from esc-html.js, and the settings payload
+        // builders are their own file. A rename inside the declaring script is
+        // invisible at its own call sites and fatal at everyone else's.
+        const sources = Object.fromEntries(SOURCES
+            .filter(file => file.endsWith('.js'))
+            .map(file => [file, read(file)]));
 
-        const called = new Set();
-        for (const file of files) {
-            const markup = fs.readFileSync(file, 'utf8');
-            for (const [, name] of markup.matchAll(/\bon\w+="\s*([A-Za-z_$][\w$]*)\s*\(/g)) called.add(name);
+        const declaredBy = new Map();
+        for (const [file, source] of Object.entries(sources)) {
+            for (const name of topLevelNames(source)) declaredBy.set(name, file);
         }
 
-        const minified = await minify(read('guild-settings.js'), 'guild-settings.js');
-        const after = topLevelNames(minified);
-        const declared = topLevelNames(read('guild-settings.js'));
+        // Every identifier each file mentions, so "borrowed" is whatever it
+        // uses that some other file declares.
+        const borrowed = new Map();  // declaring file -> Set of names
+        for (const [file, source] of Object.entries(sources)) {
+            for (const [, name] of source.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)) {
+                const owner = declaredBy.get(name);
+                if (!owner || owner === file) continue;
+                if (!borrowed.has(owner)) borrowed.set(owner, new Set());
+                borrowed.get(owner).add(name);
+            }
+        }
 
-        // Only the ones this file actually owns; the rest come from the other
-        // scripts or are browser built-ins.
-        const owned = [...called].filter(name => declared.has(name));
-        expect(owned.length).toBeGreaterThan(5);
-        expect(owned.filter(name => !after.has(name))).toEqual([]);
+        // A sweep that finds nothing reports the same green as one that finds
+        // everything intact.
+        expect([...borrowed.values()].reduce((n, set) => n + set.size, 0)).toBeGreaterThan(0);
+
+        for (const [file, names] of borrowed) {
+            const after = topLevelNames(await minify(sources[file], file));
+            expect([file, [...names].filter(name => !after.has(name))]).toEqual([file, []]);
+        }
     });
 });
 

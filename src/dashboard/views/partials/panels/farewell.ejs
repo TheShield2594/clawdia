@@ -13,11 +13,11 @@
                     </div>
                     <div class="field">
                         <label class="field-label" for="farewell-message">Farewell message</label>
-                        <textarea id="farewell-message" rows="3" oninput="updateMsgPreview('farewell-message','farewell-preview')"><%= settings.farewell?.message || '' %></textarea>
+                        <textarea id="farewell-message" rows="3" data-input="msg-preview" data-preview-source="farewell-message" data-preview-target="farewell-preview"><%= settings.farewell?.message || '' %></textarea>
                         <small>Variables: <code>{user}</code> · <code>{username}</code> · <code>{tag}</code> · <code>{server}</code> · <code>{memberCount}</code></small>
                         <div class="msg-preview" id="farewell-preview"></div>
                     </div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('farewell')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="farewell">Save changes</button>
                     </div>
                 </section>

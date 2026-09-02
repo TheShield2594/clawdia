@@ -24,12 +24,12 @@
                     <!-- Custom achievements -->
                     <div class="eco-section-head" style="margin-top:1.75rem">
                         <span class="toggle-text"><strong>Custom Achievements</strong><span>Server-specific achievements admins can manually grant</span></span>
-                        <button class="btn btn-sm btn-primary" onclick="openAchModal(-1)">+ Add achievement</button>
+                        <button class="btn btn-sm btn-primary" data-action="ach-edit" data-idx="-1">+ Add achievement</button>
                     </div>
                     <div id="custom-ach-list" style="margin-top:.5rem"></div>
 
                     <div class="actions-row" style="margin-top:1.5rem">
-                        <button class="btn btn-primary" onclick="saveSettings('achievements')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="achievements">Save changes</button>
                     </div>
                 </section>
 
@@ -38,7 +38,7 @@
                     <div class="modal-box" style="max-width:480px">
                         <div class="modal-head">
                             <h3 id="ach-modal-title">Add Achievement</h3>
-                            <button class="modal-close" onclick="closeAchModal()" aria-label="Close the achievement editor">&times;</button>
+                            <button class="modal-close" data-action="close-ach-modal" aria-label="Close the achievement editor">&times;</button>
                         </div>
                         <div class="modal-body">
                             <div class="field">
@@ -79,8 +79,8 @@
                             </div>
                         </div>
                         <div class="modal-actions">
-                            <button class="btn" onclick="closeAchModal()">Cancel</button>
-                            <button class="btn btn-primary" onclick="saveAchModal()">Save achievement</button>
+                            <button class="btn" data-action="close-ach-modal">Cancel</button>
+                            <button class="btn btn-primary" data-action="save-ach-modal">Save achievement</button>
                         </div>
                     </div>
                 </div>
@@ -90,22 +90,22 @@
                     <div class="modal-box" style="max-width:420px">
                         <div class="modal-head">
                             <h3 id="ach-grant-modal-title">Grant Achievement</h3>
-                            <button class="modal-close" onclick="closeAchGrantModal()" aria-label="Close the grant achievement dialog">&times;</button>
+                            <button class="modal-close" data-action="close-ach-grant-modal" aria-label="Close the grant achievement dialog">&times;</button>
                         </div>
                         <div class="modal-body">
                             <input type="hidden" id="grant-ach-id">
                             <p id="grant-ach-name" style="font-weight:600;margin-bottom:.75rem"></p>
                             <div class="field">
                                 <label class="field-label" for="grant-member-search">Search member</label>
-                                <input type="text" id="grant-member-search" placeholder="Type a username…" autocomplete="off" oninput="debouncedMemberSearch()">
+                                <input type="text" id="grant-member-search" placeholder="Type a username…" autocomplete="off" data-input="member-search">
                                 <div id="grant-member-results" style="display:none;border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;max-height:180px;overflow-y:auto;background:var(--surface-1)"></div>
                                 <input type="hidden" id="grant-member-id">
                                 <div id="grant-selected-member" style="display:none;margin-top:.5rem;font-size:.88rem;color:var(--text-mute)"></div>
                             </div>
                         </div>
                         <div class="modal-actions">
-                            <button class="btn" onclick="closeAchGrantModal()">Cancel</button>
-                            <button class="btn btn-primary" onclick="submitAchGrant()">Grant</button>
+                            <button class="btn" data-action="close-ach-grant-modal">Cancel</button>
+                            <button class="btn btn-primary" data-action="submit-ach-grant">Grant</button>
                         </div>
                     </div>
                 </div>

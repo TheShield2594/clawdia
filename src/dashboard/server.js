@@ -229,18 +229,24 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
     // A fresh nonce is generated per request and made available to EJS templates
     // via res.locals.cspNonce so inline <script> tags can opt in safely.
     //
-    // Two directives below still carry 'unsafe-inline', and both are the same
-    // fact about the views rather than two decisions: an HTML *attribute*
-    // cannot carry a nonce, and the views hold hundreds of `style=""` and
-    // `onclick=""` attributes. `script-src-attr 'unsafe-inline'` is the one
-    // that costs the most — it is what makes a stored-XSS finding exploitable
-    // rather than blocked.
+    // One directive below still carries 'unsafe-inline', and the reason is that
+    // an HTML *attribute* cannot carry a nonce while the views hold hundreds of
+    // `style=""` attributes.
+    //
+    // There used to be two. The other was `script-src-attr 'unsafe-inline'`,
+    // and it was the one that cost something: it is what would have made an
+    // injected event-handler attribute run rather than be blocked, which is the
+    // difference between a stored-XSS finding being hypothetical and being
+    // exploitable (#887). Every `onclick=""` it existed for is gone — the views
+    // and the renderers carry `data-action` and the page delegates — so it is
+    // `'none'` now, and the test named below holds it there.
     //
     // Rewriting all of them at once is not worth doing (#692), so instead the
     // count is ratcheted: tests/dashboardInlineAttributes.test.js records what
-    // every view has today and fails on any increase, and a new view must have
-    // none. New panels use classes in styles.css and addEventListener — see
-    // docs/EXTENDING.md — so these two allowances can eventually be dropped.
+    // every view and every browser script has today and fails on any increase.
+    // New panels use classes in styles.css — see docs/EXTENDING.md — so this
+    // allowance can eventually be dropped the way its `script-src-attr` twin
+    // was in #887, once the last of the inline styles is gone.
     app.use((req, res, next) => {
         const nonce = crypto.randomBytes(16).toString('base64');
         res.locals.cspNonce = nonce;
@@ -262,8 +268,14 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
             // package-lock's integrity hash at install time, which is the
             // guarantee the CDN tag's missing SRI attribute would have given.
             `script-src 'self' 'nonce-${nonce}'`,
-            // Both ratcheted down rather than fixed outright; see the note above.
-            "script-src-attr 'unsafe-inline'",
+            // Not inherited from script-src, stated (#887). script-src-attr
+            // falls back to script-src when it is absent, and a nonce cannot be
+            // put on an attribute, so the fallback would already refuse an
+            // injected `onclick=""` — but only by implication, and the next
+            // person to add `'unsafe-inline'` to script-src for an unrelated
+            // reason would reopen this without noticing. 'none' says it outright.
+            "script-src-attr 'none'",
+            // Still ratcheted rather than fixed outright; see the note above.
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: https: cdn.discordapp.com",
             "connect-src 'self'",

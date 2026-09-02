@@ -30,8 +30,7 @@ function deferred() {
 }
 
 function saveButtons(section) {
-    return Array.from(document.querySelectorAll('[onclick]'))
-        .filter(el => new RegExp(`saveSettings\\(\\s*'${section}'`).test(el.getAttribute('onclick') || ''));
+    return Array.from(document.querySelectorAll(`[data-action="save"][data-section="${section}"]`));
 }
 
 describe('save button in-flight guard', () => {
@@ -90,7 +89,7 @@ describe('save button in-flight guard', () => {
 
     // Driven through window.saveSettings rather than by clicking, the way the
     // rest of the dashboard suites drive a save: loadPanel() moves panel markup
-    // in through a <template>, and jsdom never compiles the onclick attributes
+    // in through a <template>, and the buttons are delegated (#887), so
     // of elements that arrive from a document with no browsing context. The
     // hooked global is what those attributes call in the browser, so it is the
     // same entry point either way.

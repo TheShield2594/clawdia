@@ -42,6 +42,6 @@
                         <%- include('../channel-select', { id: 'raid-alert-channel', placeholder: 'Select a channel', selected: settings.raidDetection?.alertChannelId }) %>
                     </div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('raiddetection')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="raiddetection">Save changes</button>
                     </div>
                 </section>
