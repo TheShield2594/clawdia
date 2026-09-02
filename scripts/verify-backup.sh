@@ -13,8 +13,40 @@
 # Usage: ./scripts/verify-backup.sh <path-to-archive.gz>
 #        ./scripts/verify-backup.sh --latest [backup-dir]
 #
+# Meant to be scheduled, not only run by hand (#899). The backup container
+# checks every archive it writes is parseable, but a full restore rehearsal
+# needs privileges on a second database that the container deliberately does
+# not have, so it runs from the host instead. A weekly host crontab line is
+# enough, and it is not silent: a failure here posts to ERROR_WEBHOOK_URL, the
+# same sink the bot reports crashes to.
+#
+#   0 4 * * 1  cd /opt/clawdia && ./scripts/verify-backup.sh --latest >> /var/log/clawdia-verify.log 2>&1
+#
 # Requires: mongorestore and mongosh on PATH, or the clawdia-mongodb container.
 set -euo pipefail
+
+# A scheduled run that fails into a log file nobody reads is the failure mode
+# this script exists to close, so route it to the same place src/index.js sends
+# a crash. Unset — the default — this does nothing at all.
+notify_failure() {
+    echo "[verify] FAILED: $1" >&2
+    [ -n "${ERROR_WEBHOOK_URL:-}" ] || return 0
+    command -v curl >/dev/null 2>&1 || { echo "[verify] curl not found; ERROR_WEBHOOK_URL not posted" >&2; return 0; }
+    local body
+    case "${ERROR_WEBHOOK_URL}" in
+        https://discord.com/api/webhooks/*|https://discordapp.com/api/webhooks/*)
+            body=$(printf '{"content":"**backup verification failed** on %s: %s"}' "$(hostname)" "$1") ;;
+        *)
+            body=$(printf '{"kind":"backup_verify_failed","service":"clawdia-backup-verify","message":"%s"}' "$1") ;;
+    esac
+    curl -fsS --max-time 10 -X POST -H 'content-type: application/json' \
+        -d "${body}" "${ERROR_WEBHOOK_URL}" >/dev/null 2>&1 \
+        || echo "[verify] posting to ERROR_WEBHOOK_URL failed" >&2
+}
+
+# Installed before anything can fail. Replaced further down by the trap that
+# also drops the scratch database, once there is one to drop.
+trap 'status=$?; [ "${status}" -eq 0 ] || notify_failure "verification of ${ARCHIVE:-<no archive>} exited ${status}"; exit "${status}"' EXIT
 
 ARCHIVE="${1:-}"
 if [ -z "${ARCHIVE}" ]; then
@@ -114,6 +146,10 @@ cleanup() {
     if [ "${IN_DOCKER:-0}" -eq 1 ] && [ -n "${REMOTE_DIR:-}" ]; then
         docker exec clawdia-mongodb rm -rf "${REMOTE_DIR}" >/dev/null 2>&1 || true
     fi
+    # This trap replaces the reporting one installed at the top, so it has to
+    # carry the reporting itself — otherwise every failure from here on, which
+    # is every interesting one, goes back to being silent.
+    [ "${status}" -eq 0 ] || notify_failure "restore rehearsal of ${ARCHIVE} exited ${status}"
     return "${status}"
 }
 trap cleanup EXIT
