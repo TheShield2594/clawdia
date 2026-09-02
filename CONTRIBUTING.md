@@ -210,14 +210,15 @@ before your first command is
 [the full module contract](docs/EXTENDING.md#the-full-module-contract).
 
 A command is one object. `data` and `execute` are required and the loader
-refuses to start without them. Four optional hooks are read by exact name:
-`cooldownAmount`, `cooldownKey`, `autocomplete` and `requiredPermissions`. A
-typo in one of those used to be invisible — a key nobody reads, so the command
-loaded, deployed and ran with your hook never firing, and on
-`requiredPermissions` that meant a gate that silently stopped existing. The
-loader now fails startup on a key that is a near miss of a contract one and
-tells you which it thinks you meant; prefix a deliberate extra field with an
-underscore to keep it out of that check.
+refuses to start without them; the optional hooks are read by exact name, and
+the contract table linked above is the one place they are enumerated — a second
+list here is what drifted last time, and `tests/commandContractDocs.test.js`
+holds that table to the keys the code actually reads. A typo in a hook used to
+be invisible: a key nobody reads, so the command loaded, deployed and ran with
+your hook never firing, and on `requiredPermissions` that meant a gate that
+silently stopped existing. The loader now fails startup on a key that is a near
+miss of a contract one and tells you which it thinks you meant; prefix a
+deliberate extra field with an underscore to keep it out of that check.
 
 ### New features ship as subcommands
 
