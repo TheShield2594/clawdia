@@ -139,16 +139,26 @@ a floor per directory, and also fails on a file that stops being executed at
 all. Raise a floor when you raise the coverage under it; do not lower one to
 land a change.
 
-It keeps three lists beside those floors, all of which may shrink and none of
-which may grow: `neverExecuted` (nothing loads the file), `loadedButNeverRun`
-(something loads it, but no function or branch in it ever runs — a file a test
-only `require`s reads as 1-10% covered, not 0), and `coveredOnlyByIntegration`
-(the files that only `tests/integration/` reaches, which read as uncovered
-without a mongod and covered with one). `files` is a fourth section: per-file
-floors for the money primitives under `src/utils`, where a directory floor is
-too coarse to notice one file collapsing. That set is maintained by hand —
-`npm run coverage:check -- --update` refreshes every number but never adds a
-file to it, and never lowers a floor.
+It keeps three lists beside those floors: `neverExecuted` (nothing loads the
+file), `loadedButNeverRun` (something loads it, but no function or branch in it
+ever runs — a file a test only `require`s reads as 1-10% covered, not 0), and
+`coveredOnlyByIntegration` (the files only `tests/integration/` reaches, which
+read as uncovered without a mongod and covered with one).
+
+A check run fails when a file belongs on one of the first two and is not
+recorded there. `npm run coverage:check -- --update` is what records it: it
+rewrites `neverExecuted` from the run, and adds any newly inert file to
+`loadedButNeverRun` while keeping the entries already on it (bar any whose
+file is gone). So both lists
+can grow in an `--update` diff, and a list that grew is the part of that diff
+to justify in the commit rather than skim — the guard is the failing run,
+not the file. `coveredOnlyByIntegration` is carried through untouched;
+that one is only ever edited by hand.
+
+`files` is a fourth section: per-file floors for the money primitives under
+`src/utils`, where a directory floor is too coarse to notice one file
+collapsing. That set is maintained by hand too — `--update` refreshes every
+number in it but never adds a file, and never lowers a floor.
 
 ## Things that will surprise you
 

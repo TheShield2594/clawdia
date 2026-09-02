@@ -1089,13 +1089,20 @@ its constants and its `module.exports`, and each of those counts as an executed
 statement — so a file no test ever calls into sits at 1-10%, not 0, which put it
 on no list at all and made it small enough to hide under a directory floor's
 three points of slack. Eighty-three files were in that state. This list asks the
-other question: did any function or branch in the file run? It may shrink and
-must not grow, and it has one deliberate difference from the list above — an
-entry that runs its own code now is *reported* at the end of a run rather than
-failed, because the twenty files under `src/migrations` are inert without
-`tests/integration/` and fully executed with it, and a hard rule would put a
-local run and CI into permanent disagreement over every one of them. Pruning one
-is a hand edit; `--update` will not drop it for you.
+other question: did any function or branch in the file run? A file that belongs
+on it and is not recorded there fails the run, and `--update` is what records
+it — newly inert files are added to the list, so it grows in that diff, which is
+where a new entry gets noticed and argued about rather than slipping in.
+
+What it will not do is drop a file that is still there, and that is the one
+deliberate difference from the list above. An entry that runs its own code now is
+*reported* at the end of a run rather than failed, because the twenty files
+under `src/migrations` are inert without `tests/integration/` and fully executed
+with it, and a hard rule would put a local run and CI into permanent
+disagreement over every one of them. For the same reason `--update` unions
+rather than replaces: re-recording from a run that did include the integration
+suites would otherwise drop all twenty, and the next run without them would fail
+on twenty files nobody touched. Pruning an entry is a hand edit.
 
 `files` is the last section: a floor per file, for the money primitives under
 `src/utils`. `src/utils` is seventy-odd files, so three points of slack on its
