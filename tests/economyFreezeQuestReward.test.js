@@ -80,6 +80,18 @@ test('an unfrozen member is tracked and paid as before', async () => {
     expect(saveWithBalanceDelta).toHaveBeenCalled();
 });
 
+// The early return is a read, and the credit lands a few round trips later. A
+// freeze committed in between has to be refused by the write itself, which is
+// the same rule every debit follows.
+test('the reward write carries the freeze guard, not just the check', async () => {
+    mockUser.findOne.mockResolvedValue({ userId: 'player-1', guildId: 'guild-1', balance: 100 });
+
+    await trackQuestCommandUse(interaction);
+
+    const [, , , context] = saveWithBalanceDelta.mock.calls[0];
+    expect(context.guard).toEqual({ economyFrozen: { $ne: true } });
+});
+
 test('a member with no document yet is tracked, not refused', async () => {
     // The row is created empty, so `economyFrozen` is absent rather than false
     // — the same case the `$ne: true` guard exists for everywhere else.

@@ -495,3 +495,43 @@ describe('/fish uses the helper', () => {
         expect(source).toMatch(/payoutOwed: payout\.credited \? 0 : balanceDelta/);
     });
 });
+
+/**
+ * #870. `context.guard` — further filter clauses ANDed onto the member, so a
+ * condition and the credit it gates are evaluated in one write.
+ *
+ * It exists because a freeze checked before a flow began is stale by the time
+ * the credit lands, and only the filter can refuse one that arrived in between.
+ * The quest reward in events/interactionCreate.js is the caller.
+ */
+describe('saveWithBalanceDelta guard', () => {
+    const { fakeCollection } = require('./helpers/fakeCollection');
+
+    /** A saved document backed by a store the guard can actually be evaluated against. */
+    function guardedSave({ frozen, guard }) {
+        const users = fakeCollection('User', { balance: 0 });
+        users.seed({ userId: 'u', guildId: 'g', balance: 100, ...(frozen ? { economyFrozen: true } : {}) });
+
+        const doc = {
+            userId: 'u', guildId: 'g', balance: 150,
+            save: async () => {},
+            unmarkModified: () => {},
+        };
+        return saveWithBalanceDelta(users.model, doc, 100, { guard })
+            .then(() => users.get('u').balance);
+    }
+
+    test('refuses the credit when the guard rejects', async () => {
+        // Silently, and that is the point: this path is unkeyed, so a filter
+        // miss is a refusal rather than a payout deferred to a replay.
+        expect(await guardedSave({ frozen: true, guard: { economyFrozen: { $ne: true } } })).toBe(100);
+    });
+
+    test('credits when the guard passes', async () => {
+        expect(await guardedSave({ frozen: false, guard: { economyFrozen: { $ne: true } } })).toBe(150);
+    });
+
+    test('credits a frozen member when no guard is passed, leaving every other caller alone', async () => {
+        expect(await guardedSave({ frozen: true, guard: undefined })).toBe(150);
+    });
+});

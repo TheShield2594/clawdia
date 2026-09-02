@@ -218,7 +218,18 @@ async function saveWithBalanceDelta(Model, user, balanceAtLoad, context = {}) {
     await user.save();
     return commitBalanceDelta(
         Model,
-        { userId: user.userId, guildId: user.guildId },
+        // `context.guard` is further filter clauses ANDed onto the member, so a
+        // condition and the credit it gates are one write. It exists for the
+        // economy freeze (#870): a check read before the flow began is stale by
+        // the time the credit lands, and only the filter can refuse a freeze
+        // that arrived in between.
+        //
+        // Safe to refuse silently *here* because this path is unkeyed — a credit
+        // with no `payoutKey` that matches nothing is not recorded as owed, so
+        // a guard that rejects is a refusal and not a deferral. A caller that
+        // passes a `payoutKey` must not use `guard` for a sanction: there the
+        // miss is classified and filed for replay, which pays it out later.
+        { userId: user.userId, guildId: user.guildId, ...(context.guard ?? {}) },
         user,
         delta,
         context,

@@ -14,7 +14,7 @@ const {
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const {
-    commandIsFreezeGated, isEconomyFrozen, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
+    commandIsFreezeGated, isEconomyFrozen, NOT_FROZEN, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
 } = require('../utils/economyFreeze');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const cooldownStore = require('../utils/commandCooldowns');
@@ -97,12 +97,8 @@ async function trackQuestCommandUse(interaction) {
     // member finishes "use 5 commands" on `/help` and is paid for it, which is
     // the whole of what the freeze is supposed to stop.
     //
-    // Refused here rather than by guarding the credit's filter: a credit that
-    // matches nothing is indistinguishable from one that failed, and this path
-    // records a failed credit as an owed payout — so guarding it would queue the
-    // reward for an operator to pay out later instead of refusing it. Progress
-    // is withheld along with the coins, since a quest that ticks while frozen
-    // just pays out the moment the freeze lifts.
+    // Progress is withheld along with the coins, since a quest that ticks while
+    // frozen just pays out the moment the freeze lifts.
     if (user.economyFrozen) return;
 
     // A quest completing here pays coins, and this runs after every command —
@@ -116,6 +112,17 @@ async function trackQuestCommandUse(interaction) {
         service: 'interactionCreate',
         jobName: 'commandQuestReward',
         guildId: interaction.guild.id,
+        // The check above is a read, and by here it is a few round trips old: an
+        // admin freezing the member in between would still be paid out. The
+        // guard rides in the credit's own filter so that window closes, which is
+        // the same reason every debit carries it rather than checking beside it.
+        //
+        // This credit is unkeyed, so a filter that matches nothing refuses the
+        // coins outright rather than filing them as owed. What it cannot undo is
+        // the `save()` above, so a freeze landing inside that window still
+        // persists the quest progress and still shows the completion notice —
+        // both cosmetic, and neither pays anything.
+        guard: NOT_FROZEN,
     });
 
     await notifyQuestComplete(guildSettings, interaction.member, completed, interaction.channel, user);
