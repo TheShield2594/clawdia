@@ -42,15 +42,17 @@ const { isAllowedSettingKey } = require('../src/dashboard/routes/api/settings');
 
 const PANELS = path.join(__dirname, '..', 'src', 'dashboard', 'views', 'partials', 'panels');
 
-// The same pattern guild-settings.js uses to find its own save buttons.
-const SAVE_CALL = /saveSettings\(\s*'([^']+)'/g;
+// The same marker guild-settings.js uses to find its own save buttons. It was
+// an `onclick="saveSettings('x')"` to parse out of; since #887 the section is
+// an attribute of its own, so this reads it rather than extracting it.
+const SAVE_SECTION = /data-action="save"\s+data-section="([^"]+)"/g;
 
 /** panel id -> the saveSettings() sections its markup can trigger. */
 function sectionsByPanel() {
     const map = new Map();
     for (const file of fs.readdirSync(PANELS).filter(f => f.endsWith('.ejs'))) {
         const id = path.basename(file, '.ejs');
-        const sections = [...new Set([...renderPanel(id).matchAll(SAVE_CALL)].map(m => m[1]))];
+        const sections = [...new Set([...renderPanel(id).matchAll(SAVE_SECTION)].map(m => m[1]))];
         if (sections.length) map.set(id, sections.sort());
     }
     return map;

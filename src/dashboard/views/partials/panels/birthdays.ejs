@@ -21,11 +21,11 @@
                     </div>
                     <div class="field">
                         <label class="field-label" for="birthday-message">Birthday message template</label>
-                        <textarea id="birthday-message" rows="2" oninput="updateMsgPreview('birthday-message','birthday-preview')"><%= settings.birthdays?.message || "It's the birthday of {user} ({age}) ! 🎂" %></textarea>
+                        <textarea id="birthday-message" rows="2" data-input="msg-preview" data-preview-source="birthday-message" data-preview-target="birthday-preview"><%= settings.birthdays?.message || "It's the birthday of {user} ({age}) ! 🎂" %></textarea>
                         <small>Variables: <code>{user}</code> · <code>{age}</code></small>
                         <div class="msg-preview" id="birthday-preview"></div>
                     </div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('birthdays')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="birthdays">Save changes</button>
                     </div>
                 </section>

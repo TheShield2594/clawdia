@@ -164,7 +164,7 @@
                 <span class="unsaved-dot" aria-hidden="true"></span>
                 Unsaved changes in <strong id="unsaved-banner-sections"></strong>
             </p>
-            <a href="/dashboard" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;background:var(--ink-850);border:1px solid var(--ink-800);color:var(--ink-200);font-size:13px;font-family:inherit;text-decoration:none;transition:border-color .15s,color .15s;" onmouseover="this.style.color='var(--cream-50)'" onmouseout="this.style.color='var(--ink-200)'">← All servers</a>
+            <a href="/dashboard" class="all-servers-link">← All servers</a>
         </div>
 
         <%# Only the active panel ships with the page. The rest are stubs that
@@ -216,7 +216,7 @@
     <!-- Generic confirm modal -->
     <div id="confirm-modal" class="modal-overlay" style="display:none;" aria-modal="true" aria-hidden="true" role="dialog" aria-labelledby="confirm-modal-title">
         <div class="modal-box" style="max-width:440px;">
-            <div class="modal-head"><span id="confirm-modal-title">Confirm</span><button class="modal-close" onclick="_confirmResolve(false)" aria-label="Close the confirmation dialog">✕</button></div>
+            <div class="modal-head"><span id="confirm-modal-title">Confirm</span><button class="modal-close" data-action="confirm-cancel" aria-label="Close the confirmation dialog">✕</button></div>
             <div class="modal-body">
                 <p id="confirm-modal-body" style="margin:0;line-height:1.5"></p>
                 <div id="confirm-modal-type-reset" style="display:none;margin-top:.75rem;">
@@ -225,8 +225,8 @@
                 </div>
             </div>
             <div class="modal-actions">
-                <button class="btn" onclick="_confirmResolve(false)">Cancel</button>
-                <button class="btn btn-danger" id="confirm-modal-ok" onclick="_confirmResolve(true)">Confirm</button>
+                <button class="btn" data-action="confirm-cancel">Cancel</button>
+                <button class="btn btn-danger" id="confirm-modal-ok" data-action="confirm-ok">Confirm</button>
             </div>
         </div>
     </div>

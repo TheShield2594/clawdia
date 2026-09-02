@@ -18,7 +18,7 @@
                     <!-- Error state -->
                     <div id="analytics-error" style="display:none" class="analytics-error-card">
                         <span>⚠ Couldn't load analytics. Check that the bot is online and retry.</span>
-                        <button class="btn btn-sm" onclick="loadAnalytics()">Retry</button>
+                        <button class="btn btn-sm" data-action="load-analytics">Retry</button>
                     </div>
 
                     <!-- Loaded content -->
@@ -28,8 +28,8 @@
 
                         <!-- Time-range toggles for charts -->
                         <div style="display:flex;gap:.4rem;margin-bottom:.75rem" id="analytics-range-btns">
-                            <button class="btn btn-sm analytics-range active" data-days="7" onclick="setAnalyticsRange(7,this)">7d</button>
-                            <button class="btn btn-sm analytics-range" data-days="30" onclick="setAnalyticsRange(30,this)">30d</button>
+                            <button class="btn btn-sm analytics-range active" data-days="7" data-action="analytics-range" data-days="7">7d</button>
+                            <button class="btn btn-sm analytics-range" data-days="30" data-action="analytics-range" data-days="30">30d</button>
                         </div>
 
                         <!-- Charts row -->

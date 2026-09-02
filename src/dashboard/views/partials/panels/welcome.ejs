@@ -13,7 +13,7 @@
                     </div>
                     <div class="field">
                         <label class="field-label" for="welcome-message">Welcome message</label>
-                        <textarea id="welcome-message" rows="3" oninput="updateMsgPreview('welcome-message','welcome-preview')"><%= settings.welcome?.message || '' %></textarea>
+                        <textarea id="welcome-message" rows="3" data-input="msg-preview" data-preview-source="welcome-message" data-preview-target="welcome-preview"><%= settings.welcome?.message || '' %></textarea>
                         <small>Variables: <code>{user}</code> · <code>{username}</code> · <code>{tag}</code> · <code>{server}</code> · <code>{memberCount}</code></small>
                         <div class="msg-preview" id="welcome-preview"></div>
                     </div>
@@ -22,7 +22,7 @@
                         <span class="switch"><input type="checkbox" id="welcome-card" <%= settings.welcome?.cardEnabled ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
                     <div style="margin:.1rem 0 .75rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
-                        <button class="btn btn-sm" type="button" id="welcome-preview-btn" onclick="sendWelcomeCardPreview()">Send card preview to channel</button>
+                        <button class="btn btn-sm" type="button" id="welcome-preview-btn" data-action="send-welcome-card-preview">Send card preview to channel</button>
                         <small style="color:var(--text-dim)">Sends a sample welcome card using your Discord profile to the configured channel.</small>
                     </div>
                     <label class="toggle">
@@ -49,10 +49,10 @@
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
                             <%- include('../role-select', { id: 'autorole-select', ariaLabel: 'Role to add on join', noDirty: true, placeholder: 'Select a role' }) %>
-                            <button class="btn btn-primary" onclick="addAutoRole()">Add role</button>
+                            <button class="btn btn-primary" data-action="add-auto-role">Add role</button>
                         </div>
                     </div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('welcome')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="welcome">Save changes</button>
                     </div>
                 </section>

@@ -80,12 +80,12 @@
                                 <span class="toggle-text"><strong>Store</strong><span>Items available for purchase with /shop buy</span></span>
                                 <span class="switch"><input type="checkbox" id="economy-shop-enabled" <%= settings.economy.shopEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
                             </label>
-                            <button class="btn btn-sm btn-primary" onclick="openItemModal(-1)">+ Add item</button>
+                            <button class="btn btn-sm btn-primary" data-action="item-edit" data-idx="-1">+ Add item</button>
                         </div>
                         <div id="store-items-grid" class="store-grid"></div>
 
                         <div class="actions-row">
-                            <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
+                            <button class="btn btn-primary" data-action="save" data-section="economy">Save changes</button>
                         </div>
                     </div>
 
@@ -166,7 +166,7 @@
                         </div>
 
                         <div class="actions-row">
-                            <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
+                            <button class="btn btn-primary" data-action="save" data-section="economy">Save changes</button>
                         </div>
                     </div>
 
@@ -184,12 +184,12 @@
                                 <span class="toggle-text"><strong>Jobs</strong><span>Jobs shown when members use /work</span></span>
                                 <span class="switch"><input type="checkbox" id="economy-jobs-enabled" <%= settings.economy.jobsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
                             </label>
-                            <button class="btn btn-sm btn-primary" onclick="openJobModal(-1)">+ Add job</button>
+                            <button class="btn btn-sm btn-primary" data-action="job-edit" data-idx="-1">+ Add job</button>
                         </div>
                         <div id="jobs-list" class="jobs-list"></div>
 
                         <div class="actions-row">
-                            <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
+                            <button class="btn btn-primary" data-action="save" data-section="economy">Save changes</button>
                         </div>
                     </div>
 
@@ -233,7 +233,7 @@
                         </div>
 
                         <div class="actions-row">
-                            <button class="btn btn-primary" onclick="saveSettings('dynamicPricing')">Save changes</button>
+                            <button class="btn btn-primary" data-action="save" data-section="dynamicPricing">Save changes</button>
                         </div>
                     </div>
 
@@ -253,11 +253,11 @@
                         </div>
                         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
                             <input type="number" id="eco-admin-amount" placeholder="Amount" aria-label="Amount" min="1" style="width:120px">
-                            <button class="btn btn-sm btn-primary" onclick="ecoAdminAction('give')">Give coins</button>
-                            <button class="btn btn-sm" onclick="ecoAdminAction('take')">Take coins</button>
-                            <button class="btn btn-sm btn-danger" onclick="ecoAdminAction('reset')">Reset balance</button>
-                            <button class="btn btn-sm" onclick="ecoAdminAction('freeze')">Freeze account</button>
-                            <button class="btn btn-sm" onclick="ecoAdminAction('unfreeze')">Unfreeze account</button>
+                            <button class="btn btn-sm btn-primary" data-action="eco-admin" data-eco-action="give">Give coins</button>
+                            <button class="btn btn-sm" data-action="eco-admin" data-eco-action="take">Take coins</button>
+                            <button class="btn btn-sm btn-danger" data-action="eco-admin" data-eco-action="reset">Reset balance</button>
+                            <button class="btn btn-sm" data-action="eco-admin" data-eco-action="freeze">Freeze account</button>
+                            <button class="btn btn-sm" data-action="eco-admin" data-eco-action="unfreeze">Unfreeze account</button>
                         </div>
                         <div id="eco-admin-msg" style="min-height:1.4em;font-size:.85em"></div>
 
@@ -271,7 +271,7 @@
                         </div>
                         <div id="eco-top-earners-error" style="display:none" class="analytics-error-card">
                             <span>⚠ Could not load economy stats</span>
-                            <button class="btn btn-sm" onclick="loadEcoHealth()">Retry</button>
+                            <button class="btn btn-sm" data-action="load-eco-health">Retry</button>
                         </div>
                         <div id="eco-top-earners-empty" style="display:none" class="empty-state"><h3>No economy activity yet</h3><p>Once members earn coins, the richest users will appear here.</p></div>
                         <div class="table-scroll" role="region" tabindex="0" aria-label="Top earners" style="display:none">
@@ -468,7 +468,7 @@
                         </div>
 
                         <div class="actions-row">
-                            <button class="btn btn-primary" onclick="saveSettings('heist')">Save changes</button>
+                            <button class="btn btn-primary" data-action="save" data-section="heist">Save changes</button>
                         </div>
                     </div>
                 </section>
@@ -478,7 +478,7 @@
                     <div class="modal-box">
                         <div class="modal-head">
                             <h3 id="item-modal-title">Add Store Item</h3>
-                            <button class="modal-close" onclick="closeItemModal()" aria-label="Close the store item editor">&times;</button>
+                            <button class="modal-close" data-action="close-item-modal" aria-label="Close the store item editor">&times;</button>
                         </div>
                         <div class="modal-body">
                             <div class="field">
@@ -500,7 +500,7 @@
                             <div class="field" role="group" aria-labelledby="modal-item-stock-label">
                                 <div class="field-label" id="modal-item-stock-label">Stock</div>
                                 <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem;cursor:pointer">
-                                    <input type="checkbox" id="modal-item-unlimited" onchange="toggleStockInput(this)" checked>
+                                    <input type="checkbox" id="modal-item-unlimited" data-change="stock-toggle" checked>
                                     <span>Unlimited stock</span>
                                 </label>
                                 <input type="number" id="modal-item-stock" placeholder="100" min="1" aria-label="Stock quantity" style="display:none">
@@ -517,17 +517,17 @@
                                             stop — see game-item-card.ejs for why (#880). -%>
                                         <label class="btn btn-sm btn-primary shop-img-upload-btn" style="width:fit-content">
                                             Upload image
-                                            <input type="file" id="modal-item-image-file" class="sr-only" accept="image/png,image/jpeg,image/gif,image/webp" onchange="previewShopItemImage(this)">
+                                            <input type="file" id="modal-item-image-file" class="sr-only" accept="image/png,image/jpeg,image/gif,image/webp" data-change="shop-item-image">
                                         </label>
-                                        <button class="btn btn-sm btn-danger" type="button" id="shop-img-clear-btn" onclick="clearShopItemImage()" style="display:none;width:fit-content">Remove image</button>
+                                        <button class="btn btn-sm btn-danger" type="button" id="shop-img-clear-btn" data-action="clear-shop-item-image" style="display:none;width:fit-content">Remove image</button>
                                     </div>
                                 </div>
                                 <small>64×64 px PNG recommended (max). Shown in <code>/shop view</code> tiles and on purchase confirmation.</small>
                             </div>
                         </div>
                         <div class="modal-actions">
-                            <button class="btn" onclick="closeItemModal()">Cancel</button>
-                            <button class="btn btn-primary" onclick="saveItemModal()">Save item</button>
+                            <button class="btn" data-action="close-item-modal">Cancel</button>
+                            <button class="btn btn-primary" data-action="save-item-modal">Save item</button>
                         </div>
                     </div>
                 </div>
@@ -537,7 +537,7 @@
                     <div class="modal-box" style="max-width:460px">
                         <div class="modal-head">
                             <h3 id="job-modal-title">Add Job</h3>
-                            <button class="modal-close" onclick="closeJobModal()" aria-label="Close the job editor">&times;</button>
+                            <button class="modal-close" data-action="close-job-modal" aria-label="Close the job editor">&times;</button>
                         </div>
                         <div class="modal-body">
                             <div class="field">
@@ -571,8 +571,8 @@
                             <small style="color:var(--text-dim)">Coins earned per /work shift for this job. Performance ratings apply a multiplier on top.</small>
                         </div>
                         <div class="modal-actions">
-                            <button class="btn" onclick="closeJobModal()">Cancel</button>
-                            <button class="btn btn-primary" onclick="saveJobModal()">Save job</button>
+                            <button class="btn" data-action="close-job-modal">Cancel</button>
+                            <button class="btn btn-primary" data-action="save-job-modal">Save job</button>
                         </div>
                     </div>
                 </div>

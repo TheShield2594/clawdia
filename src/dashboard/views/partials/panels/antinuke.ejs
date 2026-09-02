@@ -57,5 +57,5 @@
                         </div>
                         <div><label class="field-label" for="an-whitelist-roles">Role IDs</label><textarea id="an-whitelist-roles" rows="3" placeholder="One role ID per line"><%= (settings.antiNuke?.whitelistRoleIds||[]).join('\n') %></textarea></div>
                     </div>
-                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('antinuke')">Save changes</button></div>
+                    <div class="actions-row"><button class="btn btn-primary" data-action="save" data-section="antinuke">Save changes</button></div>
                 </section>

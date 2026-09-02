@@ -50,6 +50,6 @@
                     <label class="toggle"><span class="toggle-text"><strong>Thread archived / unarchived</strong></span><span class="switch"><input type="checkbox" id="log-thread-archive" <%= settings.eventLog?.logThreadArchive !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
 
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('eventlog')">Save changes</button>
+                        <button class="btn btn-primary" data-action="save" data-section="eventlog">Save changes</button>
                     </div>
                 </section>
