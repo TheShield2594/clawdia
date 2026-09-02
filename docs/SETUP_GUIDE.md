@@ -1052,6 +1052,15 @@ docker logs clawdia-mongo-replset-init
 docker exec -it clawdia-mongodb mongosh --quiet --eval 'rs.status().myState'   # 1 = primary
 ```
 
+One ordering detail for a fresh volume: the mongo image runs its first-boot
+initialization (the root user, then `scripts/mongo-init.js`) against a temporary
+`mongod`, and it drops `--replSet` from that temporary server only when
+`MONGODB_ROOT_USERNAME` and `MONGODB_ROOT_PASSWORD` are both set. So set the app
+variables **with** the root ones, as the authentication section above already
+says — `MONGODB_APP_USERNAME` on its own, with no root user, would have the init
+script try to create a user against a replica set that has not been initiated
+yet, and fail.
+
 **With authentication also on:** MongoDB requires *internal* authentication for
 an authenticated replica set, and `mongod` refuses to start without a key file.
 Create one, then name it in the same variable:
