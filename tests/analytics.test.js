@@ -36,7 +36,7 @@ jest.mock('discord.js', () => {
 // factory executes (jest.mock is hoisted above const declarations).
 const mockGuild = { findOne: jest.fn(), updateOne: jest.fn() };
 jest.mock('../src/models/Guild', () => mockGuild);
-const mockGuildAnalytics = { findOne: jest.fn(), updateOne: jest.fn() };
+const mockGuildAnalytics = { findOne: jest.fn(), updateOne: jest.fn(), bulkWrite: jest.fn() };
 jest.mock('../src/models/GuildAnalytics', () => mockGuildAnalytics);
 jest.mock('../src/services/raidService', () => ({ handleMemberJoin: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../src/services/antiNukeService', () => ({
@@ -249,7 +249,26 @@ describe('trackMemberEvent (guildMemberRemove)', () => {
 // logCommandMetric (interactionCreate)
 // ---------------------------------------------------------------------------
 
+// Command metrics are buffered and flushed in batches now (#895), so these
+// assert on the batch write rather than on a per-command updateOne — and each
+// one has to flush first, because the point of the change is that nothing on
+// the interaction path waits for the write.
 describe('logCommandMetric (interactionCreate)', () => {
+    const metrics = require('../src/utils/commandMetricsBuffer');
+
+    /** Flush the buffer and return the ops the batch write was given. */
+    async function flushedOps() {
+        await metrics.flushCommandMetrics();
+        const call = mockGuildAnalytics.bulkWrite.mock.calls.at(-1);
+        return call ? call[0] : [];
+    }
+
+    /** The commandUsage entries a flush pushed for the one test guild. */
+    async function flushedEntries() {
+        const ops = await flushedOps();
+        return ops.flatMap(op => op.updateOne.update.$push.commandUsage.$each);
+    }
+
     const mockCommand = {
         data: { name: 'ping' },
         cooldown: 3,
@@ -289,10 +308,14 @@ describe('logCommandMetric (interactionCreate)', () => {
         require('../src/utils/guildSettingsCache').clearGuildSettingsCache();
         mockGuild.updateOne.mockResolvedValue({});
         mockGuildAnalytics.updateOne.mockResolvedValue({});
+        mockGuildAnalytics.bulkWrite.mockResolvedValue({});
         mockGuild.findOne.mockResolvedValue(makeGuildSettings());
         mockCommand.execute.mockResolvedValue(undefined);
         // Reset cooldown state so tests don't block each other via the 3s cooldown.
         mockClient.cooldowns.clear();
+        // Module-level state, like the settings cache above: entries left by a
+        // previous test would otherwise ride along in the next one's flush.
+        metrics.resetCommandMetrics();
     });
 
     it('does not crash when a globally-registered command is used in a DM', async () => {
@@ -308,21 +331,31 @@ describe('logCommandMetric (interactionCreate)', () => {
             expect.objectContaining({ content: expect.stringContaining('only works inside a server') })
         );
         expect(mockCommand.execute).not.toHaveBeenCalled();
-        expect(mockGuildAnalytics.updateOne).not.toHaveBeenCalled();
+        await metrics.flushCommandMetrics();
+        expect(mockGuildAnalytics.bulkWrite).not.toHaveBeenCalled();
     });
 
     it('logs a success metric after successful command execution', async () => {
         const interaction = makeInteraction();
         await interactionCreate.execute(interaction, mockClient);
 
-        const call = mockGuildAnalytics.updateOne.mock.calls.find(c =>
-            c[1]?.$push?.commandUsage !== undefined
-        );
-        expect(call).toBeDefined();
-        const entry = call[1].$push.commandUsage.$each[0];
+        const [entry] = await flushedEntries();
+        expect(entry).toBeDefined();
         expect(entry.command).toBe('ping');
         expect(entry.success).toBe(true);
         expect(entry.reason).toBeNull();
+    });
+
+    it('does not make the reply wait for the metric write', async () => {
+        // The whole point of #895: the handler returns having touched no
+        // database at all for analytics. A regression here is silent — the
+        // metric still lands, just back in front of the user's reply.
+        const interaction = makeInteraction();
+        await interactionCreate.execute(interaction, mockClient);
+
+        expect(mockGuildAnalytics.bulkWrite).not.toHaveBeenCalled();
+        expect(mockGuildAnalytics.updateOne).not.toHaveBeenCalled();
+        expect(metrics.getCommandMetricsStats().pendingEntries).toBe(1);
     });
 
     it('logs a failure metric when command throws', async () => {
@@ -330,44 +363,51 @@ describe('logCommandMetric (interactionCreate)', () => {
         const interaction = makeInteraction({ replied: false, deferred: false });
         await interactionCreate.execute(interaction, mockClient);
 
-        const calls = mockGuildAnalytics.updateOne.mock.calls.filter(c =>
-            c[1]?.$push?.commandUsage !== undefined
-        );
-        const failCall = calls.find(c => c[1].$push.commandUsage.$each[0].success === false);
-        expect(failCall).toBeDefined();
+        const entries = await flushedEntries();
+        expect(entries.some(e => e.success === false)).toBe(true);
     });
 
     it('caps commandUsage array at 3000 entries via $slice', async () => {
         const interaction = makeInteraction();
         await interactionCreate.execute(interaction, mockClient);
 
-        const call = mockGuildAnalytics.updateOne.mock.calls.find(c =>
-            c[1]?.$push?.commandUsage !== undefined
-        );
-        expect(call[1].$push.commandUsage.$slice).toBe(-3000);
+        const [op] = await flushedOps();
+        expect(op.updateOne.update.$push.commandUsage.$slice).toBe(-3000);
     });
 
     it('records the hour of the command (0–23)', async () => {
         const interaction = makeInteraction();
         await interactionCreate.execute(interaction, mockClient);
 
-        const call = mockGuildAnalytics.updateOne.mock.calls.find(c =>
-            c[1]?.$push?.commandUsage !== undefined
-        );
-        const hour = call[1].$push.commandUsage.$each[0].hour;
-        expect(hour).toBeGreaterThanOrEqual(0);
-        expect(hour).toBeLessThanOrEqual(23);
+        const [entry] = await flushedEntries();
+        expect(entry.hour).toBeGreaterThanOrEqual(0);
+        expect(entry.hour).toBeLessThanOrEqual(23);
     });
 
     it('logs unknown_command reason when command not found', async () => {
         const unknownInteraction = makeInteraction({ commandName: 'nonexistent' });
         await interactionCreate.execute(unknownInteraction, mockClient);
 
-        const call = mockGuildAnalytics.updateOne.mock.calls.find(c =>
-            c[1]?.$push?.commandUsage !== undefined
-        );
-        expect(call[1].$push.commandUsage.$each[0].reason).toBe('unknown_command');
-        expect(call[1].$push.commandUsage.$each[0].success).toBe(false);
+        const [entry] = await flushedEntries();
+        expect(entry.reason).toBe('unknown_command');
+        expect(entry.success).toBe(false);
+    });
+
+    it('collapses a burst of commands into one write per guild', async () => {
+        // The reason for the buffer. Five commands used to be five capped
+        // pushes, each one rewriting a 3000-element array region.
+        // A different user each time: the command carries a 3s cooldown, and
+        // the cooldown store is real here, so one user would be turned away
+        // four times over and record four policy-shaped metrics instead.
+        for (let i = 0; i < 5; i++) {
+            await interactionCreate.execute(
+                makeInteraction({ user: { id: `44444444444444440${i}` } }), mockClient);
+        }
+
+        const ops = await flushedOps();
+        expect(mockGuildAnalytics.bulkWrite).toHaveBeenCalledTimes(1);
+        expect(ops).toHaveLength(1);
+        expect(ops[0].updateOne.update.$push.commandUsage.$each.length).toBeGreaterThan(1);
     });
 });
 

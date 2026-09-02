@@ -1,6 +1,5 @@
 const { MessageFlags } = require('discord.js');
 const Guild = require('../models/Guild');
-const GuildAnalytics = require('../models/GuildAnalytics');
 const User = require('../models/User');
 const { handlePollVote } = require('../services/pollService');
 const { handleHeistButton } = require('../services/heistService');
@@ -16,6 +15,7 @@ const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const cooldownStore = require('../utils/commandCooldowns');
+const { recordCommandMetric } = require('../utils/commandMetricsBuffer');
 // Giveaway entry/withdrawal.
 //
 // Entrants are toggled directly in the Guild document with $addToSet/$pull
@@ -60,31 +60,21 @@ async function handleGiveawayEntry(interaction) {
     });
 }
 
-async function logCommandMetric(interaction, success, reason = null) {
-    try {
-        const entry = {
-            command: interaction.commandName,
-            channelId: interaction.channelId || null,
-            hour: new Date().getUTCHours(),
-            success,
-            reason
-        };
-        await GuildAnalytics.updateOne(
-            { guildId: interaction.guild.id },
-            {
-                $push: {
-                    commandUsage: {
-                        $each: [entry],
-                        $slice: -3000
-                    }
-                },
-                $setOnInsert: { guildId: interaction.guild.id }
-            },
-            { upsert: true }
-        );
-    } catch (error) {
-        console.error('Command metric error:', error);
-    }
+// Buffered, not written (#895). This used to be an awaited `$push` with
+// `$slice: -3000` per command, which MongoDB serves by rewriting the capped
+// region of the array — a write proportional to the cap rather than to the one
+// entry — and it sat in front of the user's reply. Nothing here is on anyone's
+// critical path, so it is neither awaited nor written per command now: the
+// buffer batches an interval's worth into one push per guild. See
+// utils/commandMetricsBuffer.js for what that costs on a crash.
+function logCommandMetric(interaction, success, reason = null) {
+    recordCommandMetric(interaction.guild.id, {
+        command: interaction.commandName,
+        channelId: interaction.channelId || null,
+        hour: new Date().getUTCHours(),
+        success,
+        reason
+    });
 }
 
 async function trackQuestCommandUse(interaction) {
@@ -311,13 +301,13 @@ module.exports = {
 
         if (!command) {
             console.error(`No command matching ${interaction.commandName} was found.`);
-            await logCommandMetric(interaction, false, 'unknown_command');
+            logCommandMetric(interaction, false, 'unknown_command');
             return;
         }
 
         const missingPerms = missingRequiredPermissions(interaction, command);
         if (missingPerms) {
-            await logCommandMetric(interaction, false, 'missing_permissions');
+            logCommandMetric(interaction, false, 'missing_permissions');
             return interaction.reply({
                 content: `You need the following permission(s) to use \`/${command.data.name}\`: **${missingPerms.join(', ')}**.`,
                 flags: MessageFlags.Ephemeral
@@ -326,7 +316,7 @@ module.exports = {
 
         const policy = getPolicyDecision(interaction, guildSettings);
         if (!policy.allowed) {
-            await logCommandMetric(interaction, false, 'policy_denied');
+            logCommandMetric(interaction, false, 'policy_denied');
             return interaction.reply({ content: policy.reason, flags: MessageFlags.Ephemeral });
         }
 
@@ -359,13 +349,13 @@ module.exports = {
 
         try {
             await command.execute(interaction, client);
-            await logCommandMetric(interaction, true);
+            logCommandMetric(interaction, true);
 
             // Quest: track command usage (fire-and-forget)
             trackQuestCommandUse(interaction).catch(console.error);
         } catch (error) {
             console.error(`Error executing ${interaction.commandName}:`, error);
-            await logCommandMetric(interaction, false, error.name || 'execution_error');
+            logCommandMetric(interaction, false, error.name || 'execution_error');
             const errorMessage = { content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral };
 
             // The apology itself can fail (expired token, already-acked interaction).
