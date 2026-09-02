@@ -67,7 +67,7 @@
                         <% } else if (guild.inviteUrl) { %>
                             <a href="<%= guild.inviteUrl %>" target="_blank" rel="noopener" class="cw-btn cw-btn-ghost cw-dash-lp-action">Invite bot</a>
                         <% } else { %>
-                            <span class="cw-btn cw-btn-ghost cw-dash-lp-action" style="opacity:.45;cursor:not-allowed;">Not configured</span>
+                            <span class="cw-dash-lp-unavailable">Not configured</span>
                         <% } %>
                     </div>
                 <% }); %>
