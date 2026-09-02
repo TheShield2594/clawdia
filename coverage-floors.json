@@ -157,10 +157,10 @@
             "lines": 31
         },
         "src/migrations": {
-            "statements": 49,
-            "branches": 42,
-            "functions": 42,
-            "lines": 51
+            "statements": 54,
+            "branches": 47,
+            "functions": 45,
+            "lines": 56
         },
         "src/models": {
             "statements": 75,
@@ -275,9 +275,21 @@
             "functions": 97,
             "lines": 97
         },
+        "src/utils/debitKey.js": {
+            "statements": 97,
+            "branches": 88,
+            "functions": 97,
+            "lines": 97
+        },
         "src/utils/duelEscrow.js": {
             "statements": 97,
             "branches": 91,
+            "functions": 97,
+            "lines": 97
+        },
+        "src/utils/economyFreeze.js": {
+            "statements": 97,
+            "branches": 97,
             "functions": 97,
             "lines": 97
         },
@@ -369,7 +381,6 @@
         "src/migrations/008_pet_decay_cursor.js",
         "src/migrations/009_drop_stale_grind_indexes.js",
         "src/migrations/010_merge_duplicate_inventory_slots.js",
-        "src/migrations/011_clamp_negative_balances.js",
         "src/migrations/012_active_lock_unique_key.js",
         "src/migrations/013_split_guild_analytics.js",
         "src/migrations/014_scope_item_images_per_guild.js",

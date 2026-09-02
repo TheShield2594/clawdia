@@ -39,6 +39,7 @@ const DEFAULT_USER = require('../models/User');
 const { BUDGETS, budgetState, spendBudget, refundBudget } = require('./giftCaps');
 const { recordOwedPayout } = require('./owedPayout');
 const { transferRefundPayoutKey, isDuplicateKeyError } = require('./payoutKey');
+const { NOT_FROZEN, FROZEN_NOTICE, frozenTargetNotice } = require('./economyFreeze');
 
 /**
  * Fresh Discord accounts can't send or receive coins — blocks throwaway-alt
@@ -63,6 +64,24 @@ function accountAgeRefusal(sender, receiver, { now = Date.now(), noun = 'coins' 
     if (now - receiver.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
         return `${receiver.username}'s Discord account is too new to receive ${noun}.`;
     }
+    return null;
+}
+
+/**
+ * Whether either party's economy is frozen, as the sentence to show the sender.
+ *
+ * The filters inside `commitCoinTransfer` are what actually stop the coins, and
+ * they are what a freeze landing mid-transfer runs into. This is the pre-flight
+ * that turns the same refusal into a sentence naming the reason: both call sites
+ * already read the two documents to word their other refusals, so it costs
+ * nothing to ask, and without it a frozen sender is told their balance changed
+ * and a frozen receiver is told they hit a cap.
+ *
+ * Takes documents rather than ids for that reason — the caller has them.
+ */
+function frozenRefusal(senderDoc, receiverDoc, { mention } = {}) {
+    if (senderDoc?.economyFrozen) return FROZEN_NOTICE;
+    if (receiverDoc?.economyFrozen) return frozenTargetNotice(mention ?? 'That member');
     return null;
 }
 
@@ -101,8 +120,10 @@ function coinBudgets(senderDoc, receiverDoc, limits) {
  *
  * @returns {Promise<object>} one of
  *   `{ status: 'ok', sender, receiver }`             both documents, post-write
- *   `{ status: 'debit_failed' }`                     balance or send cap moved under it
- *   `{ status: 'receive_cap', refunded, owed }`      receiver hit their cap in the race
+ *   `{ status: 'debit_failed' }`                     balance, send cap or a freeze
+ *                                                    moved under it
+ *   `{ status: 'receive_cap', refunded, owed }`      receiver hit their cap, or was
+ *                                                    frozen, in the race
  *   `{ status: 'credit_failed', refunded, owed, error }`
  *
  * `refunded` false with `owed` true means the coins are neither with the sender
@@ -120,7 +141,7 @@ async function commitCoinTransfer({
     // The balance guard and the cap guard in one filter: if either has moved
     // since the pre-flight read, this matches nothing and no coins leave.
     const sender = await Model.findOneAndUpdate(
-        { userId: senderId, guildId, balance: { $gte: amount }, ...sendSpend.filter },
+        { userId: senderId, guildId, ...NOT_FROZEN, balance: { $gte: amount }, ...sendSpend.filter },
         {
             $inc: { balance: -amount, ...sendSpend.inc },
             ...(Object.keys(sendSpend.set).length ? { $set: sendSpend.set } : {}),
@@ -148,7 +169,7 @@ async function commitCoinTransfer({
             // document for this user, which the unique index rejects.
             await Model.updateOne({ userId: receiverId, guildId }, {}, { upsert: true });
             receiver = await Model.findOneAndUpdate(
-                { userId: receiverId, guildId, ...rxSpend.filter },
+                { userId: receiverId, guildId, ...NOT_FROZEN, ...rxSpend.filter },
                 {
                     $inc: { balance: amount, ...rxSpend.inc },
                     ...(Object.keys(rxSpend.set).length ? { $set: rxSpend.set } : {}),
@@ -257,5 +278,5 @@ function transferRefusal(moved, { mention, currency, amount, sendCapLabel, recei
 }
 
 module.exports = {
-    MIN_ACCOUNT_AGE_MS, accountAgeRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
+    MIN_ACCOUNT_AGE_MS, accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
 };

@@ -78,19 +78,44 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-}
       MONGODB_APP_USERNAME: ${MONGODB_APP_USERNAME:-}
       MONGODB_APP_PASSWORD: ${MONGODB_APP_PASSWORD:-}
+    # Extra mongod flags, empty by default so nothing changes for a deployment
+    # that does not set it (#891). What it is for is running mongod as a
+    # single-node replica set, which is what makes MongoDB's multi-document
+    # transactions available:
+    #
+    #   MONGODB_REPLICA_SET_ARGS=--replSet rs0
+    #
+    # With authentication also on, MongoDB requires internal authentication for a
+    # replica set and mongod refuses to start without a key file, so both flags
+    # belong in the same variable — and the file has to be mounted below:
+    #
+    #   MONGODB_REPLICA_SET_ARGS=--replSet rs0 --keyFile /etc/mongo-keyfile
+    #
+    # `mongo-replset-init` does the one-time `rs.initiate()`. See "Running
+    # MongoDB as a single-node replica set" in docs/SETUP_GUIDE.md for the full
+    # procedure, including the one for a deployment that already has data.
+    command: mongod ${MONGODB_REPLICA_SET_ARGS:-}
     volumes:
       - mongodb_data:/data/db
       # - /opt/clawdia/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      # - /opt/clawdia/mongo-keyfile:/etc/mongo-keyfile:ro
     networks:
       - db-network   # internal-only: no external routing, no published ports
     healthcheck:
-      # `ping` is deliberately one of the commands mongod answers without
-      # authentication, so this probe keeps working with auth enabled.
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      # "Will you accept a write", not "are you listening". `hello` is answered
+      # without authentication, exactly as `ping` was, so this still works with
+      # auth enabled — but unlike `ping` it is false for a replica-set member
+      # that has not been initiated yet (#891), which is precisely the state in
+      # which the bot must not be started: its migrations run at boot and would
+      # fail against a node that is not primary. A standalone mongod reports
+      # itself writable as soon as it is up, so nothing changes there.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.hello().isWritablePrimary ? 0 : 1)"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      # Covers the replica-set initiation as well as the boot, since that is
+      # what stands between mongod starting and mongod being writable.
+      start_period: 90s
     # Unbounded, mongod sizes its WiredTiger cache from *host* RAM — half of
     # (host RAM - 1g) — so on a big host it will happily grow past anything the
     # bot leaves it and take the machine down with it. mongod reads the cgroup
@@ -101,6 +126,113 @@ services:
         limits:
           cpus: '1.0'
           memory: 1g
+
+  # Initiates the single-node replica set, once, if there is one (#891).
+  #
+  # Standalone, MongoDB has no multi-document transactions, so every cross-user
+  # and cross-collection money move — rob, market, syndicate payouts, bank
+  # transfer — hand-rolls its own compensation instead: retry, then the
+  # owed-payout ledger (src/utils/owedPayout.js), then an operator running
+  # `npm run payouts:replay`. That machinery stays either way, because it also
+  # covers Discord-side delivery failures, which a transaction cannot. What it
+  # cannot be is the only answer: it is opt-in per code path, and a new money
+  # path that does not reimplement it loses coins silently. A replica set of one
+  # node is the whole of what stands between this deployment and a real
+  # transaction being available to the paths that want one.
+  #
+  # This container does nothing at all unless mongod was started with --replSet,
+  # so it is harmless on a standalone deployment:
+  #
+  #   1. Wait for mongod to answer `hello`, which needs no authentication.
+  #   2. If it reports itself writable, there is nothing to do — that covers a
+  #      standalone and an already-initiated set alike, and is why an existing
+  #      deployment gains no new failure and no new credential requirement.
+  #   3. Otherwise the node is a replica-set member with no config, so read the
+  #      set name mongod was actually started with and initiate it. Reading that
+  #      name is the one step that needs MONGODB_ROOT_USERNAME /
+  #      MONGODB_ROOT_PASSWORD, and only when authentication is on.
+  #
+  # Reading the name off mongod rather than taking it as a second variable is
+  # deliberate: two variables that have to agree is a way for them to disagree,
+  # and the set this initiates would then not be the set mongod is running.
+  #
+  # `restart: "no"`. A failure here leaves mongod un-writable, so its healthcheck
+  # stays red and nothing that depends on it starts — the reason is in this
+  # container's log rather than buried in a restart loop.
+  mongo-replset-init:
+    image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
+    container_name: clawdia-mongo-replset-init
+    restart: "no"
+    depends_on:
+      # Deliberately not service_healthy. mongod's healthcheck now asks "will you
+      # accept a write", which for a replica set is only true *after* this has
+      # run, so waiting for it would deadlock.
+      - mongodb
+    networks:
+      - db-network
+    environment:
+      MONGODB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-}
+      MONGODB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-}
+    entrypoint: >
+      sh -c '
+        # The host:port the members list will carry, which is how every client
+        # reaches this node once it has discovered the set: the service name on
+        # db-network, the same one MONGODB_URI defaults to — not localhost, or
+        # the bot would be told to connect to itself.
+        HOST=mongodb:27017;
+        # A function rather than an AUTH string spliced into each command line:
+        # unquoted, a password containing a space would be split into separate
+        # arguments and mongosh would get a truncated one; quoted, it would be a
+        # single empty argument when auth is off. Passing the credentials as
+        # their own quoted arguments is the only form that is right both ways.
+        authed_mongosh() {
+          if [ -n "$$MONGODB_ROOT_USERNAME" ]; then
+            mongosh --host "$$HOST" --quiet --username "$$MONGODB_ROOT_USERNAME" --password "$$MONGODB_ROOT_PASSWORD" --authenticationDatabase admin "$$@";
+          else
+            mongosh --host "$$HOST" --quiet "$$@";
+          fi;
+        };
+        # Unauthenticated on purpose: `hello` is answered before login, which is
+        # what lets this work on a deployment whose credentials it was not given.
+        writable() {
+          mongosh --host "$$HOST" --quiet --eval "quit(db.hello().isWritablePrimary ? 0 : 1)" >/dev/null 2>&1;
+        };
+        # mongod accepts a TCP connection well before it answers anything, so
+        # this waits on an answer and not on the port being open.
+        i=0;
+        until mongosh --host "$$HOST" --quiet --eval "db.hello()" >/dev/null 2>&1; do
+          i=$$((i + 1));
+          if [ $$i -ge 60 ]; then echo "[replset-init] mongod at $$HOST never answered"; exit 1; fi;
+          sleep 2;
+        done;
+        if writable; then
+          echo "[replset-init] $$HOST already accepts writes; nothing to do";
+          exit 0;
+        fi;
+        NAME=$$(authed_mongosh --eval "(db.adminCommand({ getCmdLineOpts: 1 }).parsed.replication || {}).replSetName || \"\"" 2>/dev/null) || NAME="";
+        if [ -z "$$NAME" ]; then
+          echo "[replset-init] $$HOST does not accept writes and its replica set name could not be read.";
+          echo "[replset-init] With authentication on, this service needs MONGODB_ROOT_USERNAME and MONGODB_ROOT_PASSWORD.";
+          exit 1;
+        fi;
+        echo "[replset-init] Initiating replica set $$NAME with member $$HOST";
+        # AlreadyInitialized is not a failure: a redeploy against a set that is
+        # already configured, by this or by hand, lands here every time.
+        authed_mongosh --eval "
+          try { rs.initiate({ _id: \"$$NAME\", members: [{ _id: 0, host: \"$$HOST\" }] }); }
+          catch (e) { if (e.codeName !== \"AlreadyInitialized\") { throw e; } }
+        " || exit 1;
+        # Initiating is not the same as having elected itself. Everything that
+        # depends on mongod already waits on its healthcheck, which asks the same
+        # question — this is here so the log says which of the two happened.
+        i=0;
+        until writable; do
+          i=$$((i + 1));
+          if [ $$i -ge 60 ]; then echo "[replset-init] $$NAME did not become primary"; exit 1; fi;
+          sleep 1;
+        done;
+        echo "[replset-init] $$NAME is primary";
+      '
 
   bot:
     # Not a bare `:latest` (#637). `latest` moves with every push to main, so it

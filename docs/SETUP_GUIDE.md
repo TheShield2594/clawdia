@@ -1012,6 +1012,100 @@ variables, `--force-recreate`, and mongod is back to no-auth so the users can
 be recreated. That works because auth here is driven by the environment, which
 is also why the variables must not be quietly removed once set.
 
+### Running MongoDB as a single-node replica set
+
+Off by default. Turning it on is what makes MongoDB's **multi-document
+transactions** available; a standalone `mongod` has none, at any version.
+
+That matters because every cross-user and cross-collection money move — `/rob`,
+the market, syndicate payouts, `/bank transfer` — has to reach for something
+instead. What it reaches for is hand-rolled compensation: retry, then the
+owed-payout ledger (`src/utils/owedPayout.js`), then an operator running
+`npm run payouts:replay`. That machinery is good and it is not going anywhere —
+it also covers Discord-side delivery failures, which a transaction cannot — but
+it is opt-in per code path, so its correctness depends on every author of a new
+money path remembering to reimplement it. A replica set is what lets the paths
+that are genuinely two-party use a real transaction instead.
+
+One node is a legitimate replica set. It buys no redundancy — there is nothing
+to fail over to — only the transaction support, the oplog and change streams
+that come with the replication machinery.
+
+**Fresh deployment (empty `mongodb_data` volume):** set one variable before the
+first `docker compose up`:
+
+```bash
+MONGODB_REPLICA_SET_ARGS=--replSet rs0
+```
+
+`MONGODB_URI` needs no change: the driver discovers the set from
+`mongodb://mongodb:27017/ultrabot` and switches to a replica-set topology on its
+own. Adding `?replicaSet=rs0` is optional and makes the expectation explicit.
+
+The `mongo-replset-init` container does the one-time `rs.initiate()` and exits.
+Until it has, `mongod` reports itself unhealthy — its healthcheck asks whether it
+will accept a write, not merely whether it is listening — so the bot waits rather
+than starting against a node that would fail every migration. Check it with:
+
+```bash
+docker logs clawdia-mongo-replset-init
+docker exec -it clawdia-mongodb mongosh --quiet --eval 'rs.status().myState'   # 1 = primary
+```
+
+One ordering detail for a fresh volume: the mongo image runs its first-boot
+initialization (the root user, then `scripts/mongo-init.js`) against a temporary
+`mongod`, and it drops `--replSet` from that temporary server only when
+`MONGODB_ROOT_USERNAME` and `MONGODB_ROOT_PASSWORD` are both set. So set the app
+variables **with** the root ones, as the authentication section above already
+says — `MONGODB_APP_USERNAME` on its own, with no root user, would have the init
+script try to create a user against a replica set that has not been initiated
+yet, and fail.
+
+**With authentication also on:** MongoDB requires *internal* authentication for
+an authenticated replica set, and `mongod` refuses to start without a key file.
+Create one, then name it in the same variable:
+
+```bash
+# On the Docker host, beside docker-compose.yml (or wherever the stack keeps it):
+mkdir -p secrets
+openssl rand -base64 756 > secrets/mongo-keyfile
+chmod 400 secrets/mongo-keyfile
+chown 999:999 secrets/mongo-keyfile          # the mongo image's own uid
+
+MONGODB_REPLICA_SET_ARGS=--replSet rs0 --keyFile /etc/mongo-keyfile
+```
+
+and uncomment the key-file mount on the `mongodb` service. The
+`mongo-replset-init` container also needs `MONGODB_ROOT_USERNAME` and
+`MONGODB_ROOT_PASSWORD` in that case: reading the set name off `mongod` is an
+authenticated command, and it is the one step that cannot be done anonymously.
+If those are missing it says so and exits non-zero rather than leaving the set
+half-configured.
+
+**Existing deployment (volume already has data):** the same variable, and no
+dump, no restore and no wipe — `rs.initiate()` adopts the existing data
+directory:
+
+```bash
+# 1. Set MONGODB_REPLICA_SET_ARGS (plus the key file, if auth is on) in .env or
+#    the stack environment.
+
+# 2. Recreate the stack. mongod comes back as an uninitiated replica-set member,
+#    the init container initiates it, and the bot starts once it is primary.
+docker compose up -d --force-recreate
+```
+
+Expect the bot to wait around a minute on that first recreate: it is gated on
+`mongod` being writable, which now happens after the initiation rather than at
+startup.
+
+Going back is clearing the variable and recreating: `mongod` starts standalone
+against a data directory that has been a replica-set member, and the data is
+untouched. The set's configuration survives in the `local` database, so turning
+the variable back on resumes the same set rather than needing a second
+`rs.initiate()` — and transactions are unavailable again for as long as it is
+off, which is the thing to weigh, not the data.
+
 ### Automated Backups
 
 Both `docker-compose.yml` and `portainer-stack.yml` run a `backup` service that

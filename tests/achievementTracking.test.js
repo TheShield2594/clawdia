@@ -51,7 +51,8 @@ describe('placeWager counts every stake as gambled', () => {
         await placeWager({ userId: 'u', guildId: 'g' }, 100);
 
         const [filter, update] = User.findOneAndUpdate.mock.calls[0];
-        expect(filter).toEqual({ userId: 'u', guildId: 'g', balance: { $gte: 100 } });
+        // The freeze guard shares the filter with the balance check (#870).
+        expect(filter).toEqual({ userId: 'u', guildId: 'g', economyFrozen: { $ne: true }, balance: { $gte: 100 } });
         expect(update).toEqual({ $inc: { balance: -100, lifetimeGambled: 100 } });
     });
 

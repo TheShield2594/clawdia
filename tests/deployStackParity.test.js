@@ -295,6 +295,54 @@ describe('the two files agree where they must', () => {
         expect(compose.services.bot.env_file).toEqual(['.env']);
     });
 
+    // #891. The replica set is what makes MongoDB's multi-document transactions
+    // available at all, and it is three things that only work together: the flag
+    // on mongod, the one-time initiation, and a healthcheck that does not go
+    // green before the initiation has happened. Two of the three in one file and
+    // three in the other would be a deploy that starts the bot against a node
+    // that refuses every write.
+    it('can be made a replica set, the same way, in both', () => {
+        for (const [name, doc] of stacks) {
+            // A single opt-in variable that defaults to nothing: unset, this is
+            // the image's own `mongod` and every existing deployment is
+            // untouched. `--replSet` and, when auth is on, `--keyFile` both go
+            // in it, because MongoDB requires internal authentication for an
+            // authenticated replica set and refuses to start without the file.
+            expect([name, doc.services.mongodb.command])
+                .toEqual([name, 'mongod ${MONGODB_REPLICA_SET_ARGS:-}']);
+        }
+    });
+
+    it('initiates the set with a one-shot container, identically in both', () => {
+        const [a, b] = stacks.map(([, doc]) => doc.services['mongo-replset-init']);
+        expect(a).toBeDefined();
+        // Byte-identical rather than "both have one". The whole of the logic is
+        // an inline shell script, and a fix applied to one copy and not the
+        // other is the failure mode this file exists for.
+        expect(b).toEqual(a);
+
+        // Started with mongod, not gated on it being healthy: mongod is not
+        // healthy until this has run, so a `service_healthy` condition here
+        // would be a deadlock rather than an ordering.
+        expect(a.depends_on).toEqual(['mongodb']);
+        expect(a.restart).toBe('no');
+        expect(a.networks).toEqual(['db-network']);
+    });
+
+    it('holds mongod unhealthy until it will accept a write', () => {
+        for (const [name, doc] of stacks) {
+            const probe = doc.services.mongodb.healthcheck.test.join(' ');
+            // `ping` answers for a replica-set member that has no config yet, so
+            // it would report a node healthy that refuses every read and write —
+            // and the bot runs its migrations at boot. `hello` is answered
+            // without authentication just as `ping` was, so this still works on
+            // an authenticated deployment, and a standalone mongod reports
+            // itself writable as soon as it is up.
+            expect([name, probe]).toEqual([name, expect.stringContaining('isWritablePrimary')]);
+            expect([name, probe]).not.toEqual([name, expect.stringContaining("adminCommand('ping')")]);
+        }
+    });
+
     it('gives the two services the same MONGODB_URI default', () => {
         const defaultOf = text => /\$\{MONGODB_URI:-([^}]+)\}/.exec(String(text))?.[1];
         const botDefault = defaultOf(JSON.stringify(stack.services.bot.environment));

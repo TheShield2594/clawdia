@@ -108,6 +108,14 @@ router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, check
         } else if (action === 'reset') {
             update = { $set: { balance: 0, bank: 0 } };
         } else if (action === 'freeze') {
+            // What this flag actually does now lives in src/utils/economyFreeze.js.
+            // Until #870 it did nothing at all: it was written here, echoed back
+            // below, recorded in the audit log — and read by no command, event
+            // handler or wager path, so the member kept earning, gambling,
+            // gifting and transferring while a moderator believed a sanction was
+            // in force. It is enforced in the filter of every shared debit and at
+            // the economy command gate; unfreezing is the same write inverted, so
+            // nothing has to be undone here.
             update = { $set: { economyFrozen: true } };
         } else {
             update = { $set: { economyFrozen: false } };

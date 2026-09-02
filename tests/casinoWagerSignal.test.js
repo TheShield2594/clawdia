@@ -75,7 +75,10 @@ describe('placeWager — the debit is the signal', () => {
         User.findOneAndUpdate.mockResolvedValue(walletDoc());
         return placeWager(filter, BET).then(() => {
             expect(User.findOneAndUpdate).toHaveBeenCalledWith(
-                { userId: USER_ID, guildId: GUILD_ID, balance: { $gte: BET } },
+                // `economyFrozen` rides in the same filter as the balance
+                // check, and for the same reason: a freeze that lands mid-hand
+                // has to stop the stake atomically, not be re-read (#870).
+                { userId: USER_ID, guildId: GUILD_ID, economyFrozen: { $ne: true }, balance: { $gte: BET } },
                 // The wagering counter moved into this write when it turned out
                 // seven of the eight games never wrote it — see
                 // tests/achievementTracking.test.js for what depends on it.

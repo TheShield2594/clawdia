@@ -3,7 +3,7 @@ const User = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { logTransaction } = require('../../utils/logTransaction');
 const { giftLimits } = require('../../utils/giftCaps');
-const { accountAgeRefusal, coinBudgets, commitCoinTransfer, transferRefusal } = require('../../utils/coinTransfer');
+const { accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal } = require('../../utils/coinTransfer');
 const COLORS = require('../../utils/embedColors');
 
 async function getCurrency(guildId) {
@@ -172,6 +172,11 @@ async function handleTransfer(interaction) {
     if (!senderNow || senderNow.balance < amount) {
         return deny(`You don't have enough coins! Your balance: ${(senderNow?.balance ?? 0).toLocaleString()} coins`);
     }
+
+    // The filters inside commitCoinTransfer refuse a frozen party on their own
+    // (#870); this is only what turns that refusal into a sentence that names it.
+    const frozen = frozenRefusal(senderNow, receiverNow, { mention: `<@${recipient.id}>` });
+    if (frozen) return deny(frozen);
 
     const budgets = coinBudgets(senderNow, receiverNow, limits);
     if (amount > budgets.send.remaining) {

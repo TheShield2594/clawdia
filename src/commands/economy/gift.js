@@ -14,8 +14,9 @@ const {
     refundBudgetPipeline,
 } = require('../../utils/giftCaps');
 const {
-    accountAgeRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
+    accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
 } = require('../../utils/coinTransfer');
+const { NOT_FROZEN } = require('../../utils/economyFreeze');
 const { isSoulbound } = require('../../data/soulboundItems');
 const { resolveEffectType } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
@@ -257,6 +258,12 @@ module.exports = {
                 return deny(`You only have **${currency}${(senderNow?.balance ?? 0).toLocaleString()}** in your wallet.`);
             }
 
+            // The filters inside commitCoinTransfer refuse a frozen party on
+            // their own (#870); this is only what turns that refusal into a
+            // sentence that names it, using documents already in hand.
+            const frozen = frozenRefusal(senderNow, receiverNow, { mention: `<@${target.id}>` });
+            if (frozen) return deny(frozen);
+
             const budgets = coinBudgets(senderNow, receiverNow, limits);
 
             if (amount > budgets.send.remaining) {
@@ -374,6 +381,14 @@ module.exports = {
         const meta    = describeItem(itemId, { shopItems: guildSettings?.shop ?? [], aiItem: aiItems[itemId] });
         const label   = `${meta.emoji} **${meta.name}**`;
 
+        // The sentence naming the reason. The guarantee is `NOT_FROZEN` in the
+        // two writes below: this is a read taken before a confirmation prompt
+        // the player can sit on, so on its own it is a check the freeze can land
+        // behind — the same read-then-act race the coin path avoids by putting
+        // the guard in the filter.
+        const frozenItem = frozenRefusal(sender, receiver, { mention: `<@${target.id}>` });
+        if (frozenItem) return deny(frozenItem);
+
         if (isSoulbound(itemId)) {
             return deny(`${label} is soulbound and cannot be gifted.`);
         }
@@ -438,6 +453,7 @@ module.exports = {
             {
                 userId: interaction.user.id,
                 guildId,
+                ...NOT_FROZEN,
                 inventory: { $elemMatch: { itemId, quantity: { $gte: qty } } },
                 ...sendSpend.filter,
             },
@@ -465,7 +481,12 @@ module.exports = {
         let credited = null;
         try {
             credited = await addInventoryItem(target.id, guildId, itemId, qty, {
-                guard:    rxSpend.filter,
+                // The recipient's freeze rides in the credit's own guard, so a
+                // freeze landing mid-gift sends the item back rather than
+                // through. The rollback below is deliberately left unguarded:
+                // it returns the sender's own item, and a sanction that ate a
+                // refund would destroy it.
+                guard:    { ...rxSpend.filter, ...NOT_FROZEN },
                 extraSet: rxSpend.set,
             });
         } catch (creditErr) {

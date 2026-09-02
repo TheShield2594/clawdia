@@ -72,6 +72,25 @@ const userSchema = new Schema({
         }, { _id: false })],
         default: undefined,
     },
+    // The debit side of the same idea (#969), kept in its own array rather than
+    // sharing `paidPayouts` above. Debits are a far higher-frequency writer, and
+    // sharing would let them push credit keys out: the 200-entry cap would start
+    // deciding retention instead of the 30-day window, weakening the
+    // exactly-once guarantee for credits. It is also bounded far more tightly —
+    // a credit key outlives an operator running a replay, a debit key only has
+    // to outlive the request that wrote it. src/utils/debitKey.js owns the shape.
+    //
+    // `reversed` is what makes the compensation safe: giving a keyed debit back
+    // is a write conditioned on the key being present and un-reversed, so it
+    // cannot mint coins for a debit that never landed and cannot pay twice.
+    spentDebits: {
+        type: [new Schema({
+            key:      { type: String, required: true },
+            at:       { type: Date, required: true },
+            reversed: { type: Boolean },
+        }, { _id: false })],
+        default: undefined,
+    },
     bank: { type: Number, default: 0, min: 0 },
     lastDaily: { type: Date, default: null },
     lastWork: { type: Date, default: null },

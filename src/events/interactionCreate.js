@@ -13,6 +13,9 @@ const {
 } = require('../commands/fun/8ball');
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
+const {
+    commandIsFreezeGated, isEconomyFrozen, NOT_FROZEN, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
+} = require('../utils/economyFreeze');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const cooldownStore = require('../utils/commandCooldowns');
 const { recordCommandMetric } = require('../utils/commandMetricsBuffer');
@@ -88,6 +91,16 @@ async function trackQuestCommandUse(interaction) {
         user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
     }
 
+    // A frozen member earns nothing, and a completed quest pays coins (#870).
+    // This runs after *every* successful command — the read-only ones the gate
+    // exempts and every non-economy command too — so without this a frozen
+    // member finishes "use 5 commands" on `/help` and is paid for it, which is
+    // the whole of what the freeze is supposed to stop.
+    //
+    // Progress is withheld along with the coins, since a quest that ticks while
+    // frozen just pays out the moment the freeze lifts.
+    if (user.economyFrozen) return;
+
     // A quest completing here pays coins, and this runs after every command —
     // so the reward goes out as an `$inc` rather than riding the save as an
     // absolute `$set` that would erase whatever the command itself just paid.
@@ -99,6 +112,17 @@ async function trackQuestCommandUse(interaction) {
         service: 'interactionCreate',
         jobName: 'commandQuestReward',
         guildId: interaction.guild.id,
+        // The check above is a read, and by here it is a few round trips old: an
+        // admin freezing the member in between would still be paid out. The
+        // guard rides in the credit's own filter so that window closes, which is
+        // the same reason every debit carries it rather than checking beside it.
+        //
+        // This credit is unkeyed, so a filter that matches nothing refuses the
+        // coins outright rather than filing them as owed. What it cannot undo is
+        // the `save()` above, so a freeze landing inside that window still
+        // persists the quest progress and still shows the completion notice —
+        // both cosmetic, and neither pays anything.
+        guard: NOT_FROZEN,
     });
 
     await notifyQuestComplete(guildSettings, interaction.member, completed, interaction.channel, user);
@@ -320,6 +344,37 @@ module.exports = {
             return interaction.reply({ content: policy.reason, flags: MessageFlags.Ephemeral });
         }
 
+        // The economy freeze a server admin sets from the dashboard (#870).
+        //
+        // Ahead of the cooldown claim, so a refused command does not spend the
+        // window it never ran in. Behind the policy check, because a command the
+        // guild has blocked outright should say so rather than reporting a
+        // personal sanction.
+        //
+        // Fails closed. A sanction that stops applying because one read failed
+        // is not a sanction, and the cost of the other direction is small: the
+        // read is a keyed lookup on the same database the command is about to
+        // use anyway, so a failure here almost always means the command would
+        // have failed too. What it must not do is tell an innocent member they
+        // are frozen — that sends them to an admin over a transient error — so
+        // the two answers are worded apart.
+        if (commandIsFreezeGated(command)) {
+            // Left unassigned: every path out of the catch returns, so an
+            // initialiser here would be a value nothing can read.
+            let frozen;
+            try {
+                frozen = await isEconomyFrozen({ userId: interaction.user.id, guildId: interaction.guild.id });
+            } catch (error) {
+                console.error(`Economy freeze check failed for ${interaction.user.id}:`, error.message);
+                logCommandMetric(interaction, false, 'economy_freeze_unknown');
+                return interaction.reply({ content: FREEZE_UNKNOWN_NOTICE, flags: MessageFlags.Ephemeral });
+            }
+            if (frozen) {
+                logCommandMetric(interaction, false, 'economy_frozen');
+                return interaction.reply({ content: FROZEN_NOTICE, flags: MessageFlags.Ephemeral });
+            }
+        }
+
         // Short cooldowns are process-local; anything from 15 minutes up is read
         // from and written to the User document, so a deploy no longer hands
         // every long window back (#621). See utils/commandCooldowns.js.
@@ -377,3 +432,9 @@ module.exports = {
 // Exposed for the permission-gate tests, which drive the check directly rather
 // than booting the whole interaction handler and its model imports.
 module.exports.missingRequiredPermissions = missingRequiredPermissions;
+
+// Same reason, for the freeze gate (#870). Quest rewards are paid from here
+// after *every* command, which puts them outside the command gate entirely, so
+// the refusal is worth driving directly rather than inferring it from the fact
+// that the line is present.
+module.exports.trackQuestCommandUse = trackQuestCommandUse;
