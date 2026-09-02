@@ -42,11 +42,21 @@ const markup = [
         .map(entry => fs.readFileSync(path.join(PUBLIC, entry.name), 'utf8')),
 ].join('\n');
 
-/** The literal values of one data attribute across all of that markup. */
+/**
+ * The literal values of one data attribute across all of that markup.
+ *
+ * All three quoting forms HTML accepts, not just the double-quoted one: a
+ * `data-action='save'` the scan could not see would be an action nobody
+ * checked was dispatched, which is the failure this file exists to catch.
+ * Values holding a `$` are skipped — those are template interpolations rather
+ * than literal names, and no view has one today.
+ */
 function used(attribute) {
     const names = new Set();
-    for (const [, value] of markup.matchAll(new RegExp(`${attribute}="([^"$]+)"`, 'g'))) {
-        names.add(value);
+    const pattern = new RegExp(`${attribute}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\`]+))`, 'gi');
+    for (const match of markup.matchAll(pattern)) {
+        const value = match[1] ?? match[2] ?? match[3];
+        if (value && !value.includes('$')) names.add(value);
     }
     return names;
 }

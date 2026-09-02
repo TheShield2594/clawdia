@@ -369,9 +369,26 @@ services:
         # already reports crashes to (src/utils/errorReporter.js), and a Discord
         # webhook gets Discord shape for the same reason it does there — that is
         # the sink the operator of a Discord bot already has.
+        # The same rule src/utils/errorReporter.js applies to the same variable:
+        # https anywhere, http only to loopback, everything else refused rather
+        # than downgraded. The report names a database host and an archive path,
+        # and over cleartext to a third party that is readable on the wire; a
+        # sink that is refused there must not be honoured here.
+        sink_allowed() {
+          case "$$1" in
+            https://*) return 0;;
+            http://localhost|http://localhost/*|http://localhost:*) return 0;;
+            http://127.0.0.1|http://127.0.0.1/*|http://127.0.0.1:*) return 0;;
+            "http://[::1]"|"http://[::1]/"*|"http://[::1]:"*) return 0;;
+            *) return 1;;
+          esac;
+        };
         notify() {
           echo "[backup] $$1";
           if [ -z "$$ERROR_WEBHOOK_URL" ]; then return 0; fi;
+          if ! sink_allowed "$$ERROR_WEBHOOK_URL"; then
+            echo "[backup] Ignoring ERROR_WEBHOOK_URL: expected an https:// URL (or http:// to loopback)"; return 0;
+          fi;
           if ! command -v curl >/dev/null 2>&1; then
             echo "[backup] curl is not present in this image; ERROR_WEBHOOK_URL not posted"; return 0;
           fi;
@@ -398,8 +415,15 @@ services:
           ARCHIVE=/backups/clawdia-$$TIMESTAMP.gz;
           echo "[backup] Starting backup at $$TIMESTAMP";
           if ! mongodump --uri="$$MONGODB_URI" --gzip --archive="$$ARCHIVE"; then
+            # mongodump has no rollback: a dump killed part-way through leaves
+            # whatever it had written under the real name. Left there, that
+            # partial file is what the boot catch-up counts as the day's backup
+            # and what `verify-backup.sh --latest` picks up — a failure that
+            # reads as a success. Quarantined under the same suffix a failed
+            # verification uses, so it is still pruned and still there to look at.
+            if [ -e "$$ARCHIVE" ]; then mv "$$ARCHIVE" "$$ARCHIVE.unverified"; fi;
             echo "dump-failed $$TIMESTAMP" > "$$STATUS";
-            notify "mongodump exited non-zero at $$TIMESTAMP; no archive was written";
+            notify "mongodump exited non-zero at $$TIMESTAMP; any partial archive was quarantined";
             return 1;
           fi;
           # Exit status 0 says mongodump ran, not that what it wrote can be read

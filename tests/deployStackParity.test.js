@@ -146,6 +146,38 @@ describe.each(stacks)('%s', (name, doc) => {
             expect(entrypoint).toMatch(/curl -fsS --max-time 10/);
         });
 
+        it('vets the sink the way the bot vets the same variable', () => {
+            // src/utils/errorReporter.js allows https anywhere and http only to
+            // loopback, and refuses anything else rather than downgrading it.
+            // The report names a database host and an archive path; a sink the
+            // bot refuses must not be honoured here because the poster happens
+            // to be curl in a shell.
+            expect(entrypoint).toContain('sink_allowed');
+            expect(entrypoint).toMatch(/https:\/\/\*\)/);
+            for (const loopback of ['localhost', '127.0.0.1', '::1']) {
+                expect([name, loopback, entrypoint.includes(loopback)]).toEqual([name, loopback, true]);
+            }
+            // The refusal is said out loud; a silently dropped report is the
+            // failure mode this whole section exists to remove.
+            expect(entrypoint).toMatch(/Ignoring ERROR_WEBHOOK_URL/);
+        });
+
+        it('quarantines what a failed dump left behind', () => {
+            // mongodump has no rollback: killed part-way it leaves whatever it
+            // wrote under the real name. Left there, that partial file is what
+            // the boot catch-up counts as the day's backup and what
+            // `verify-backup.sh --latest` picks up — a failure that reads as a
+            // success. It goes under the same suffix a failed verification uses,
+            // so it stays off both globs and inside the prune.
+            const dumpFailure = entrypoint.slice(
+                entrypoint.indexOf('if ! mongodump'),
+                entrypoint.indexOf('--dryRun'));
+            expect(dumpFailure).toContain('mv "$$ARCHIVE" "$$ARCHIVE.unverified"');
+            // Guarded: a dump that failed before creating the file at all must
+            // not turn the failure into a `mv` error on top of it.
+            expect(dumpFailure).toContain('if [ -e "$$ARCHIVE" ]');
+        });
+
         it('catches up on boot instead of skipping the day', () => {
             // A container that was not running at 03:00 used to wait a full day
             // and say nothing; with the healthcheck above, that gap would read

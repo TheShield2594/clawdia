@@ -208,12 +208,14 @@ async function shutdown(signal) {
     const { stopScheduler } = require('./services/scheduler');
     stopScheduler();
     try {
-        // Before the connection closes. Command metrics are buffered in memory
-        // between 30s flushes (#895), so a deploy would otherwise drop up to an
-        // interval of counts on every restart.
+        await client.destroy();
+        // After the client, before the connection closes. Command metrics are
+        // buffered in memory between 30s flushes (#895), so a deploy would
+        // otherwise drop up to an interval of counts on every restart — and
+        // draining them after the gateway is closed means no new command can
+        // arrive behind the write and be reported as lost.
         const { stopCommandMetrics } = require('./utils/commandMetricsBuffer');
         await stopCommandMetrics();
-        await client.destroy();
         await connection.close();
         console.log('[SHUTDOWN] Clean exit.');
     } catch (err) {

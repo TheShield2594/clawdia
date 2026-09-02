@@ -323,6 +323,28 @@ describe('the paired cooldown claim', () => {
     });
 
     it('puts both players back where they were', async () => {
+        // Two distinct earlier duels, not the null both players start with:
+        // against null, an implementation that cleared the field rather than
+        // restoring it would pass, and clearing is the bug — it would hand a
+        // player a fresh duel the cooldown should still be refusing.
+        const challengerBefore = new Date(NOW - 10 * 60_000);
+        const opponentBefore = new Date(NOW - 8 * 60_000);
+        mockUsers.reset();
+        seedPlayer(CHALLENGER_ID, { balance: 1000, lastDuel: challengerBefore });
+        seedPlayer(OPPONENT_ID, { balance: 1000, lastDuel: opponentBefore });
+
+        const claim = await claimDuelCooldown(
+            CHALLENGER_ID, OPPONENT_ID, GUILD_ID, new Date(Date.now() - 5 * 60_000));
+        await revertDuelCooldown(CHALLENGER_ID, OPPONENT_ID, GUILD_ID,
+            claim.prevChallengerLastDuel, claim.prevOpponentLastDuel);
+
+        expect(mockUsers.get(CHALLENGER_ID).lastDuel).toEqual(challengerBefore);
+        expect(mockUsers.get(OPPONENT_ID).lastDuel).toEqual(opponentBefore);
+    });
+
+    it('clears a player who had never duelled, rather than inventing a time', async () => {
+        // The other half: `prev` is null for a first-time duellist, and the
+        // revert has to put null back rather than leave the claim standing.
         const claim = await claimDuelCooldown(
             CHALLENGER_ID, OPPONENT_ID, GUILD_ID, new Date(Date.now() - 5 * 60_000));
         await revertDuelCooldown(CHALLENGER_ID, OPPONENT_ID, GUILD_ID,

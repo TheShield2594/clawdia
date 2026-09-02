@@ -148,6 +148,47 @@ describe('flushing', () => {
         expect(bulkWrite).toHaveBeenCalledTimes(1);
     });
 
+    it('retries only what a partial bulk write did not apply', async () => {
+        // `{ ordered: false }` means the server keeps going after a failed op,
+        // so a rejected bulkWrite can still have applied most of the batch.
+        // Re-sending all of it would push those entries twice and inflate the
+        // counts — the one direction a capped array cannot be corrected back.
+        const partial = Object.assign(new Error('one op failed'), {
+            // Op index 1 is the second guild in the batch, because buildOps
+            // emits one op per guild in batch order.
+            writeErrors: [{ index: 1 }],
+        });
+        bulkWrite.mockRejectedValueOnce(partial);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        recordCommandMetric('g1', entry('applied'));
+        recordCommandMetric('g2', entry('rejected'));
+
+        await flushCommandMetrics();
+
+        // g1's op is not named in writeErrors, so it landed and is dropped.
+        expect(getCommandMetricsStats().pendingEntries).toBe(1);
+
+        await flushCommandMetrics();
+        expect(lastOps().map(op => op.updateOne.filter.guildId)).toEqual(['g2']);
+        expect(entriesFor(lastOps(), 'g2').map(e => e.command)).toEqual(['rejected']);
+        console.error.mockRestore();
+    });
+
+    it('retries the whole batch when the error says nothing about which op failed', async () => {
+        // A dropped connection or a timeout is either "nothing landed" or "it
+        // landed and the reply was lost", and the response does not say which.
+        // A duplicated count is the better of the two failures.
+        bulkWrite.mockRejectedValueOnce(new Error('connection closed'));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        recordCommandMetric('g1', entry());
+        recordCommandMetric('g2', entry());
+
+        await flushCommandMetrics();
+
+        expect(getCommandMetricsStats().pendingEntries).toBe(2);
+        console.error.mockRestore();
+    });
+
     it('re-buffers a failed flush rather than losing it', async () => {
         bulkWrite.mockRejectedValueOnce(new Error('no primary'));
         jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -244,6 +285,38 @@ describe('shutdown', () => {
         expect(await stopCommandMetrics()).toBe(1);
         expect(bulkWrite).toHaveBeenCalledTimes(1);
         expect(getCommandMetricsStats().pendingEntries).toBe(0);
+    });
+
+    it('drains what a command records while the shutdown write is open', async () => {
+        // The flush swaps the buffer out and leaves a fresh one behind. A
+        // handler still finishing lands in that one, and a single flush would
+        // write the backlog and then report what arrived behind it as lost.
+        let release;
+        bulkWrite.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+        recordCommandMetric('g1', entry('before'));
+
+        const stopping = stopCommandMetrics();
+        recordCommandMetric('g1', entry('during'));
+        release({});
+        await stopping;
+
+        expect(bulkWrite).toHaveBeenCalledTimes(2);
+        expect(entriesFor(lastOps(), 'g1').map(e => e.command)).toEqual(['during']);
+        expect(getCommandMetricsStats().pendingEntries).toBe(0);
+    });
+
+    it('stops draining when a pass makes no progress', async () => {
+        // A database refusing writes re-buffers every pass. Without the
+        // progress check the loop would spin, and the shutdown with it.
+        bulkWrite.mockRejectedValue(new Error('down'));
+        const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+        recordCommandMetric('g1', entry());
+
+        await stopCommandMetrics();
+
+        expect(bulkWrite).toHaveBeenCalledTimes(1);
+        expect(error).toHaveBeenCalledWith(expect.stringContaining('lost at shutdown'));
+        error.mockRestore();
     });
 
     it('says so when the final flush fails', async () => {

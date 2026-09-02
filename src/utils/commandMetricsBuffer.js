@@ -47,6 +47,11 @@ const MAX_ENTRIES_PER_GUILD = 1_000;
 // unbounded heap. A metric for a guild beyond this is dropped and counted.
 const MAX_BUFFERED_GUILDS = 5_000;
 
+// How many times the shutdown path will drain and re-check. The client is
+// destroyed before this runs, so one more pass than the handlers still in
+// flight can fill is plenty; the loop also stops early on no progress.
+const SHUTDOWN_DRAIN_PASSES = 3;
+
 // A burst should not wait out the interval. Crossing this flushes immediately
 // instead — unless the last flush failed, in which case the interval is left to
 // do the retrying. Otherwise every command during an outage would start its own
@@ -118,6 +123,13 @@ function recordCommandMetric(guildId, entry) {
     }
 }
 
+// The op at index i is the i-th guild of the batch, and unappliedFrom() reads
+// a failed write's indexes back through that correspondence — so the two have
+// to iterate the batch the same way. Both go through this.
+function guildsOf(batch) {
+    return [...batch.keys()];
+}
+
 function buildOps(batch) {
     return [...batch].map(([guildId, entries]) => ({
         updateOne: {
@@ -161,17 +173,59 @@ function flushCommandMetrics() {
         })
         .catch(error => {
             lastError = error;
-            // Put them back, oldest first, so a transient outage costs nothing
-            // more than a delay. The per-guild cap is re-applied on the way in,
-            // which is what keeps a long outage from growing the heap: the
-            // buffer stops at MAX_ENTRIES_PER_GUILD however many flushes fail.
-            requeue(batch);
+            // Put back what did not land, oldest first, so a transient outage
+            // costs nothing more than a delay. The per-guild cap is re-applied
+            // on the way in, which is what keeps a long outage from growing the
+            // heap: the buffer stops at MAX_ENTRIES_PER_GUILD however many
+            // flushes fail.
+            requeue(unappliedFrom(batch, error));
             console.error('Command metric flush error:', error);
             return 0;
         })
         .finally(() => { inFlight = null; });
 
     return inFlight;
+}
+
+/**
+ * The part of a failed batch that is safe to send again.
+ *
+ * `{ ordered: false }` means the server keeps going after a failed operation,
+ * so a rejected bulk write can still have applied most of it. Re-sending the
+ * whole batch would push those entries a second time and inflate the counts —
+ * the mirror of the loss this buffer already accepts, and the one direction a
+ * ratcheted `$slice` array cannot be corrected back from.
+ *
+ * A bulk write error names the operations that failed by their index in the ops
+ * array, and buildOps() emits one op per guild in batch order, so those indexes
+ * map back to guilds. Anything not named is applied and is dropped here.
+ *
+ * The exception is an error carrying no per-operation detail — a connection
+ * that dropped, a timeout, a rejection before the write was sent. That is
+ * either "nothing landed" or "it landed and the reply was lost", and nothing in
+ * the response distinguishes them, so the whole batch goes back: a duplicate
+ * count is the better failure of the two, and making it impossible needs an
+ * idempotency key on every entry, which is a larger change than telemetry
+ * warrants.
+ *
+ * @param {Map<string, object[]>} batch the batch that was sent.
+ * @param {unknown} error whatever the driver rejected with.
+ * @returns {Map<string, object[]>} the guilds whose entries must be retried.
+ */
+function unappliedFrom(batch, error) {
+    const writeErrors = error?.writeErrors
+        ?? error?.result?.writeErrors
+        ?? error?.result?.result?.writeErrors;
+    if (!Array.isArray(writeErrors) || !writeErrors.length) return batch;
+
+    const guilds = guildsOf(batch);
+    const unapplied = new Map();
+    for (const writeError of writeErrors) {
+        const index = writeError?.index ?? writeError?.err?.index;
+        const guildId = guilds[index];
+        if (guildId !== undefined) unapplied.set(guildId, batch.get(guildId));
+    }
+    return unapplied;
 }
 
 function requeue(batch) {
@@ -201,16 +255,33 @@ function requeue(batch) {
  * Stop the interval and write what is left. Called from the shutdown path so a
  * deploy does not drop the counts since the last flush.
  *
- * @returns {Promise<number>} entries written by the final flush.
+ * Drains rather than flushing once. A flush swaps the buffer out and leaves a
+ * fresh one behind, and a command handler still finishing while that write is
+ * open records into it — so a single flush would write the backlog and then
+ * report whatever arrived behind it as lost. src/index.js destroys the Discord
+ * client before calling this, which bounds how much can still arrive; the loop
+ * bounds it again, and stops early when a pass makes no progress so a database
+ * that is refusing writes ends the shutdown instead of spinning on a batch that
+ * keeps being re-buffered.
+ *
+ * @returns {Promise<number>} entries written across every pass.
  */
 async function stopCommandMetrics() {
     if (timer) {
         clearInterval(timer);
         timer = null;
     }
-    const written = await flushCommandMetrics();
-    // A failed final flush re-buffers, and there is no next interval to pick it
-    // up — say so rather than exiting quietly on lost telemetry.
+
+    let written = 0;
+    for (let pass = 0; pass < SHUTDOWN_DRAIN_PASSES && buffers.size; pass++) {
+        const drained = await flushCommandMetrics();
+        written += drained;
+        // A failed flush re-buffers; another pass would fail the same way.
+        if (!drained) break;
+    }
+
+    // There is no next interval to pick up what is left — say so rather than
+    // exiting quietly on lost telemetry.
     if (buffers.size) {
         console.error(`Command metric flush error: ${pendingEntries} buffered entr(ies) lost at shutdown`);
     }

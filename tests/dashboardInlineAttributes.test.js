@@ -40,6 +40,7 @@
  * have reached zero on the views and the directive still could not have gone.
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const VIEWS = path.join(__dirname, '..', 'src', 'dashboard', 'views');
@@ -93,12 +94,26 @@ const SCRIPT_BASELINE = {
     'guild-settings.js': 102,
 };
 
-// Either quote style. HTML treats style='x' and onclick='x()' exactly like
-// their double-quoted forms, and the CSP does too — a regex that only saw one
-// of them let a view not in BASELINE carry inline handlers and still report
-// clean, which is the case this whole file exists to prevent.
-const STYLE_ATTR = /\sstyle\s*=\s*["']/g;
-const HANDLER_ATTR = /\son[a-z]+\s*=\s*["']/g;
+// Every form HTML actually accepts, because the browser and the CSP accept them
+// all and a scanner that does not is a ban with a way around it:
+//
+//   * either quote style — style='x' and onclick='x()' are the double-quoted
+//     forms exactly. A regex that saw only one let a view not in BASELINE carry
+//     inline handlers and still report clean, which is what this file exists to
+//     prevent;
+//   * any case — attribute names are case-insensitive, so ONCLICK= runs;
+//   * no quotes at all — `onclick=save()` is a legal attribute whose value ends
+//     at the first space.
+//
+// The last one applies to the views only, and that is not an oversight. In a
+// .js file an unquoted-value pattern cannot tell an attribute from an ordinary
+// assignment: `const style = TOAST_KINDS[kind]` and `el.onclick = fn` both read
+// as one, and the second is how a renderer is *supposed* to bind a handler. A
+// script writes markup into a string, where the quotes are always there.
+const STYLE_ATTR = /\sstyle\s*=\s*["']/gi;
+const HANDLER_ATTR = /\son[a-z]+\s*=\s*["']/gi;
+const UNQUOTED_STYLE_ATTR = /\sstyle\s*=\s*[^\s"'=<>`]/gi;
+const UNQUOTED_HANDLER_ATTR = /\son[a-z]+\s*=\s*[^\s"'=<>`]/gi;
 
 function views(dir = VIEWS) {
     const found = [];
@@ -110,9 +125,39 @@ function views(dir = VIEWS) {
     return found.sort();
 }
 
+/**
+ * Comment-only lines and comment blocks, removed before counting.
+ *
+ * Necessary once the scan accepts unquoted values: guild-settings.js explains,
+ * in prose, that a template literal turns a role named `<img onerror=...>` into
+ * markup — and an unquoted-value pattern matches that sentence. A comment is
+ * also the one place a handler attribute genuinely does not run, so dropping
+ * these cannot hide a live one.
+ *
+ * Whole-line only, deliberately. Stripping a trailing `//` from a line of code
+ * would also cut the `//` out of a URL inside a string, and this sweep would
+ * rather report a comment than miss an attribute.
+ */
+function withoutComments(source, file) {
+    let text = source
+        .split('\n')
+        .filter(line => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
+        .join('\n');
+    if (file.endsWith('.ejs')) {
+        // EJS comment tags and HTML comments, which do span lines.
+        text = text.replace(/<%#[\s\S]*?%>/g, '').replace(/<!--[\s\S]*?-->/g, '');
+    }
+    return text;
+}
+
 function counts(file, root = VIEWS) {
-    const src = fs.readFileSync(path.join(root, file), 'utf8');
-    return [(src.match(STYLE_ATTR) || []).length, (src.match(HANDLER_ATTR) || []).length];
+    const src = withoutComments(fs.readFileSync(path.join(root, file), 'utf8'), file);
+    const markup = file.endsWith('.ejs');
+    const hits = pattern => (src.match(pattern) || []).length;
+    return [
+        hits(STYLE_ATTR) + (markup ? hits(UNQUOTED_STYLE_ATTR) : 0),
+        hits(HANDLER_ATTR) + (markup ? hits(UNQUOTED_HANDLER_ATTR) : 0),
+    ];
 }
 
 function scripts() {
@@ -184,6 +229,55 @@ describe('inline styles only ever decrease, and handlers are gone', () => {
             ...scripts().filter(file => counts(file, PUBLIC)[1] > 0).map(file => `public/${file}`),
         ];
         expect(offenders).toEqual([]);
+    });
+
+    describe('the scanners see every form a browser would run', () => {
+        // The ban is only worth what the scan catches. These are the shapes it
+        // used to miss: HTML attribute names are case-insensitive and values do
+        // not have to be quoted, so both of these are live handlers that read as
+        // clean to a `/\son[a-z]+\s*=\s*["']/` sweep.
+        const scan = (text, file) => {
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inline-attr-'));
+            try {
+                fs.writeFileSync(path.join(dir, file), text);
+                return counts(file, dir);
+            } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+            }
+        };
+
+        it.each([
+            ['double-quoted', '<button onclick="save()">x</button>'],
+            ['single-quoted', "<button onclick='save()'>x</button>"],
+            ['unquoted', '<button onclick=save()>x</button>'],
+            ['upper-case', '<button ONCLICK="save()">x</button>'],
+            ['mixed-case, unquoted', '<button OnClick=save()>x</button>'],
+        ])('catches a %s handler in a view', (_form, markup) => {
+            expect(scan(markup, 'probe.ejs')[1]).toBe(1);
+        });
+
+        it.each([
+            ['double-quoted', 'el.innerHTML = \'<button onclick="save()">x</button>\';'],
+            ['single-quoted', 'el.innerHTML = "<button onclick=\'save()\'>x</button>";'],
+            ['upper-case', 'el.innerHTML = \'<button ONCLICK="save()">x</button>\';'],
+        ])('catches a %s handler a script renders', (_form, code) => {
+            expect(scan(code, 'probe.js')[1]).toBe(1);
+        });
+
+        it('does not read an ordinary assignment in a script as an attribute', () => {
+            // Why the unquoted form is scanned in views only: these two lines
+            // are how a script is *supposed* to be written, and an
+            // unquoted-value pattern reports both as inline attributes.
+            const code = 'const style = TOAST_KINDS[kind];\nbutton.onclick = () => save();\n';
+            expect(scan(code, 'probe.js')).toEqual([0, 0]);
+        });
+
+        it('does not count a handler that only appears in prose', () => {
+            // guild-settings.js explains, in a comment, that a role named
+            // `<img onerror=...>` becomes markup. That sentence is not a handler.
+            const code = '// a role called `<img onerror=...>` would run here\nconst x = 1;\n';
+            expect(scan(code, 'probe.js')).toEqual([0, 0]);
+        });
     });
 
     it('is what the CSP comment in server.js points at', () => {

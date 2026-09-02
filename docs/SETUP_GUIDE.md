@@ -1073,8 +1073,13 @@ with `mongorestore --dryRun`, which writes nothing; one that fails is renamed to
 on the normal retention schedule.
 
 **Failures post to `ERROR_WEBHOOK_URL`.** The same sink the bot sends crashes to,
-and the same shapes: a Discord webhook URL gets a Discord message, anything else
-gets flat JSON. Unset — the default — the loop logs and does nothing more.
+the same shapes — a Discord webhook URL gets a Discord message, anything else
+gets flat JSON — and the same rule about which URLs are usable at all:
+`https://` anywhere, `http://` only to loopback (`localhost`, `127.0.0.1`,
+`[::1]`). Anything else is refused rather than downgraded, with a line in the log
+saying so; the report names a database host and an archive path, and over
+cleartext to a third party that is readable on the wire. Unset — the default —
+the loop logs and does nothing more.
 
 Two files in the backup directory carry the state, both readable from the host:
 
@@ -1082,6 +1087,11 @@ Two files in the backup directory carry the state, both readable from the host:
 | --- | --- |
 | `.backup-status` | `ok`, `dump-failed` or `verify-failed`, with the timestamp and archive |
 | `.backup-ok` | empty; its mtime is the last good run, and is what the healthcheck reads |
+
+A dump that fails part-way leaves whatever it had written behind — `mongodump`
+has no rollback — so that file is renamed `.gz.unverified` too. Under its real
+name it would be exactly what the catch-up and `--latest` reach for: a failure
+that reads as a success.
 
 A container that was down at 03:00 — a host reboot, an image pull, a stack
 redeploy — no longer skips the day in silence: on boot, if the newest archive is
