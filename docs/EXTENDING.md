@@ -1102,7 +1102,11 @@ with it, and a hard rule would put a local run and CI into permanent
 disagreement over every one of them. For the same reason `--update` unions
 rather than replaces: re-recording from a run that did include the integration
 suites would otherwise drop all twenty, and the next run without them would fail
-on twenty files nobody touched. Pruning an entry is a hand edit.
+on twenty files nobody touched. Pruning an entry whose file still exists is
+therefore a hand edit. The one case `--update` does clear out by itself is an
+entry naming a file the run never measured — a deleted or renamed one — which
+the check fails on meanwhile, because an entry nobody can act on is noise on a
+list whose whole value is that somebody reads it.
 
 `files` is the last section: a floor per file, for the money primitives under
 `src/utils`. `src/utils` is seventy-odd files, so three points of slack on its
