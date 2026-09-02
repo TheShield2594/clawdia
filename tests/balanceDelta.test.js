@@ -327,7 +327,9 @@ describe('commitBalanceDelta', () => {
             await commitBalanceDelta(Model, FILTER, makeDoc(1_000), -250, KEY);
 
             expect(seen).toHaveLength(1);
-            expect(seen[0].filter).toEqual(FILTER);
+            // The caller's filter, plus the freeze guard `debitUpTo` folds in
+            // for every clamped debit (#870).
+            expect(seen[0].filter).toEqual({ ...FILTER, economyFrozen: { $ne: true } });
             expect(JSON.stringify(seen[0])).not.toContain('quest:42');
         });
     });

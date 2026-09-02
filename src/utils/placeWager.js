@@ -1,6 +1,7 @@
 'use strict';
 
 const User = require('../models/User');
+const { NOT_FROZEN } = require('./economyFreeze');
 
 /**
  * Takes a wager off a player — and, for the wager that opens a hand, says so.
@@ -54,14 +55,17 @@ const User = require('../models/User');
  *                                 a crash lobby takes bets from joiners too
  * @param {object} [opts.source]   the interaction to announce a jackpot through
  * @returns {Promise<object|null>} the updated user document, or null if the
- *                                 coins were gone by the time the write landed
+ *                                 coins were gone by the time the write landed —
+ *                                 or if the dashboard froze the player, which
+ *                                 rides in the same filter for the same reason
+ *                                 the balance check does (#870)
  */
 async function placeWager(filter, amount, { extraInc = {}, onWager = null, user = null, source = null } = {}) {
     const wager = Math.floor(amount);
     if (!(wager > 0)) return null;
 
     const debited = await User.findOneAndUpdate(
-        { ...filter, balance: { $gte: wager } },
+        { ...filter, ...NOT_FROZEN, balance: { $gte: wager } },
         { $inc: { balance: -wager, lifetimeGambled: wager, ...extraInc } },
         { new: true },
     );

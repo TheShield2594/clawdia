@@ -14,7 +14,7 @@ const {
     refundBudgetPipeline,
 } = require('../../utils/giftCaps');
 const {
-    accountAgeRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
+    accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
 } = require('../../utils/coinTransfer');
 const { isSoulbound } = require('../../data/soulboundItems');
 const { resolveEffectType } = require('../../services/effectsService');
@@ -257,6 +257,12 @@ module.exports = {
                 return deny(`You only have **${currency}${(senderNow?.balance ?? 0).toLocaleString()}** in your wallet.`);
             }
 
+            // The filters inside commitCoinTransfer refuse a frozen party on
+            // their own (#870); this is only what turns that refusal into a
+            // sentence that names it, using documents already in hand.
+            const frozen = frozenRefusal(senderNow, receiverNow, { mention: `<@${target.id}>` });
+            if (frozen) return deny(frozen);
+
             const budgets = coinBudgets(senderNow, receiverNow, limits);
 
             if (amount > budgets.send.remaining) {
@@ -373,6 +379,12 @@ module.exports = {
         const aiItems = await loadAiItems([itemId]);
         const meta    = describeItem(itemId, { shopItems: guildSettings?.shop ?? [], aiItem: aiItems[itemId] });
         const label   = `${meta.emoji} **${meta.name}**`;
+
+        // An item gift moves no coins, so no filter downstream carries the
+        // freeze guard — a frozen sender is already refused by the command gate,
+        // and this is what stops one being handed items instead.
+        const frozenItem = frozenRefusal(sender, receiver, { mention: `<@${target.id}>` });
+        if (frozenItem) return deny(frozenItem);
 
         if (isSoulbound(itemId)) {
             return deny(`${label} is soulbound and cannot be gifted.`);

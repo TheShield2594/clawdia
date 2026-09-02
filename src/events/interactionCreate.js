@@ -13,6 +13,7 @@ const {
 } = require('../commands/fun/8ball');
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
+const { commandIsFreezeGated, isEconomyFrozen, FROZEN_NOTICE } = require('../utils/economyFreeze');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const cooldownStore = require('../utils/commandCooldowns');
 const { recordCommandMetric } = require('../utils/commandMetricsBuffer');
@@ -318,6 +319,30 @@ module.exports = {
         if (!policy.allowed) {
             logCommandMetric(interaction, false, 'policy_denied');
             return interaction.reply({ content: policy.reason, flags: MessageFlags.Ephemeral });
+        }
+
+        // The economy freeze a server admin sets from the dashboard (#870).
+        //
+        // Ahead of the cooldown claim, so a refused command does not spend the
+        // window it never ran in. Behind the policy check, because a command the
+        // guild has blocked outright should say so rather than reporting a
+        // personal sanction.
+        //
+        // Fails open. The shared debit filters carry the guard themselves, so a
+        // read that cannot answer costs the clear message and nothing else — and
+        // failing closed would turn a database blip into "the economy is frozen"
+        // for every member of every guild.
+        if (commandIsFreezeGated(command)) {
+            let frozen = false;
+            try {
+                frozen = await isEconomyFrozen({ userId: interaction.user.id, guildId: interaction.guild.id });
+            } catch (error) {
+                console.error(`Economy freeze check failed for ${interaction.user.id}:`, error.message);
+            }
+            if (frozen) {
+                logCommandMetric(interaction, false, 'economy_frozen');
+                return interaction.reply({ content: FROZEN_NOTICE, flags: MessageFlags.Ephemeral });
+            }
         }
 
         // Short cooldowns are process-local; anything from 15 minutes up is read

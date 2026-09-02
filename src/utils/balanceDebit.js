@@ -20,6 +20,8 @@
  * the subtraction reads is the balance being written.
  */
 
+const { NOT_FROZEN } = require('./economyFreeze');
+
 /**
  * Pipeline expression for `balance` after taking up to `amount`, floored at zero.
  */
@@ -41,6 +43,10 @@ function incExpr(path, by) {
  * (use `incExpr` for counters). Returns
  * `{ taken, balance, matched }` — `balance` being the balance after the debit,
  * and `matched` false when the filter matched nothing.
+ *
+ * A member the dashboard has frozen matches nothing and so is fined nothing
+ * (#870); see src/utils/economyFreeze.js for why the guard lives in the filter
+ * rather than in a check beside it.
  */
 async function debitUpTo(Model, filter, amount, extraSet = {}) {
     const wanted = Math.max(0, Math.floor(amount) || 0);
@@ -48,7 +54,7 @@ async function debitUpTo(Model, filter, amount, extraSet = {}) {
     // `new: false` returns the pre-image, which is the only way to learn how
     // much the clamp actually let through.
     const before = await Model.findOneAndUpdate(
-        filter,
+        { ...filter, ...NOT_FROZEN },
         [{ $set: { balance: clampedDebitExpr(wanted), ...extraSet } }],
         { updatePipeline: true, new: false },
     );
@@ -72,12 +78,14 @@ async function debitUpTo(Model, filter, amount, extraSet = {}) {
  * happen.
  *
  * Returns the updated document (balance only), or null when the player can no
- * longer afford it. The caller is expected to take `balance` from the result and
- * clear the path with `unmarkModified('balance')` before saving anything else.
+ * longer afford it — or when the dashboard has frozen them (#870), which is the
+ * same "the coins did not move" answer every caller already handles. The caller
+ * is expected to take `balance` from the result and clear the path with
+ * `unmarkModified('balance')` before saving anything else.
  */
 function chargeExact(Model, filter, cost) {
     return Model.findOneAndUpdate(
-        { ...filter, balance: { $gte: cost } },
+        { ...filter, ...NOT_FROZEN, balance: { $gte: cost } },
         { $inc: { balance: -cost } },
         { new: true, projection: { balance: 1 } },
     );
