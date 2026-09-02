@@ -30,6 +30,9 @@ const Case = require('../../src/models/Case');
 const TempBan = require('../../src/models/TempBan');
 
 const { debitUpTo } = require('../../src/utils/balanceDebit');
+const {
+    debitCoinsOnce, reverseKeyedDebit, KEY_CAP, RETENTION_MS,
+} = require('../../src/utils/debitKey');
 
 const GUILD = '111111111111111111';
 const MEMBER = '222222222222222222';
@@ -181,6 +184,156 @@ describe('debiting a balance', () => {
 
             const after = await User.findOne(filter());
             expect([after.balance, after.messages]).toEqual([75, 5]);
+        });
+    });
+});
+
+// The keyed debit (#969). Every claim it makes is a claim about what the server
+// does with an expression: `$$NOW` against a stored date decides the retention
+// window, `$slice` decides which key is evicted, and the `$elemMatch` filter
+// paired with an `arrayFilters` positional `$set` is the whole of what makes the
+// compensation safe. A stub can be told any answer to those; only a server has
+// one. tests/debitKey.test.js drives the same functions against a fake store,
+// which is where the branch coverage is — this is where the expressions are
+// either right or wrong.
+describe('debitCoinsOnce and reverseKeyedDebit — the keyed debit', () => {
+    beforeEach(() => buildIndexes(User));
+
+    const filter = () => ({ userId: MEMBER, guildId: GUILD });
+    const KEY = 'duel:d1:escrow:222222222222222222';
+    const read = () => User.findOne(filter()).lean();
+
+    test('takes the coins and records the key in the same write', async () => {
+        await User.create({ userId: MEMBER, guildId: GUILD, balance: 500 });
+
+        expect((await debitCoinsOnce(filter(), 200, KEY)).status).toBe('debited');
+
+        const after = await read();
+        expect(after.balance).toBe(300);
+        expect(after.spentDebits.map(e => e.key)).toEqual([KEY]);
+        // `$$NOW` is a server variable, not a string being stored: a pipeline
+        // update is not cast by Mongoose, so if the server did not evaluate it
+        // this field would be the literal '$$NOW'.
+        expect(after.spentDebits[0].at).toBeInstanceOf(Date);
+    });
+
+    test('a second attempt with the same key moves no coins', async () => {
+        await User.create({ userId: MEMBER, guildId: GUILD, balance: 500 });
+
+        await debitCoinsOnce(filter(), 200, KEY);
+        expect((await debitCoinsOnce(filter(), 200, KEY)).status).toBe('duplicate');
+
+        expect((await read()).balance).toBe(300);
+    });
+
+    test('moves its counters in the same write', async () => {
+        await User.create({ userId: MEMBER, guildId: GUILD, balance: 500, lifetimeGambled: 40 });
+
+        await debitCoinsOnce(filter(), 200, KEY, { counters: { lifetimeGambled: 200 } });
+
+        expect(await read()).toMatchObject({ balance: 300, lifetimeGambled: 240 });
+    });
+
+    test('refuses a debit the balance cannot cover, and records nothing', async () => {
+        await User.create({ userId: MEMBER, guildId: GUILD, balance: 50 });
+
+        expect((await debitCoinsOnce(filter(), 200, KEY)).status).toBe('insufficient');
+
+        const after = await read();
+        expect([after.balance, after.spentDebits]).toEqual([50, undefined]);
+    });
+
+    // The retention window is a correctness bound, not housekeeping: past it a
+    // key is gone and the debit it guarded can be taken a second time. What
+    // decides it is `$$NOW` compared against each entry's stored `at`, inside a
+    // `$filter` — server arithmetic on server time.
+    test('drops keys past the retention window and keeps the rest', async () => {
+        await User.create({
+            userId: MEMBER, guildId: GUILD, balance: 500,
+            spentDebits: [
+                { key: 'ancient', at: new Date(Date.now() - RETENTION_MS - 60_000) },
+                { key: 'recent', at: new Date() },
+            ],
+        });
+
+        await debitCoinsOnce(filter(), 200, KEY);
+
+        expect((await read()).spentDebits.map(e => e.key)).toEqual(['recent', KEY]);
+    });
+
+    test('evicts the oldest when the cap is reached, in order', async () => {
+        const at = new Date();
+        await User.create({
+            userId: MEMBER, guildId: GUILD, balance: 500,
+            spentDebits: Array.from({ length: KEY_CAP }, (_, i) => ({ key: `k${i}`, at })),
+        });
+
+        await debitCoinsOnce(filter(), 200, KEY);
+
+        // `$concatArrays` and `$slice`, not `$setUnion`: a set has no defined
+        // order, so the eviction would drop an arbitrary key and the bound
+        // would mean nothing.
+        const keys = (await read()).spentDebits.map(e => e.key);
+        expect(keys).toHaveLength(KEY_CAP);
+        expect([keys[0], keys.at(-1)]).toEqual(['k1', KEY]);
+    });
+
+    describe('reversing one', () => {
+        test('gives back a debit that happened, and marks it', async () => {
+            await User.create({ userId: MEMBER, guildId: GUILD, balance: 500, lifetimeGambled: 0 });
+            await debitCoinsOnce(filter(), 200, KEY, { counters: { lifetimeGambled: 200 } });
+
+            const back = await reverseKeyedDebit(filter(), 200, KEY, { counters: { lifetimeGambled: -200 } });
+
+            expect(back).toMatchObject({ reversed: true, resolved: true });
+            const after = await read();
+            expect(after).toMatchObject({ balance: 500, lifetimeGambled: 0 });
+            expect(after.spentDebits[0].reversed).toBe(true);
+        });
+
+        // The reason a caller who does not know whether the debit landed may
+        // compensate anyway, which is the whole of what #969 asked for.
+        test('mints nothing against a key that was never recorded', async () => {
+            await User.create({ userId: MEMBER, guildId: GUILD, balance: 500 });
+
+            expect(await reverseKeyedDebit(filter(), 200, KEY))
+                .toMatchObject({ reversed: false, resolved: true });
+            expect((await read()).balance).toBe(500);
+        });
+
+        test('cannot pay twice', async () => {
+            await User.create({ userId: MEMBER, guildId: GUILD, balance: 500 });
+            await debitCoinsOnce(filter(), 200, KEY);
+
+            await reverseKeyedDebit(filter(), 200, KEY);
+            expect((await reverseKeyedDebit(filter(), 200, KEY)).reversed).toBe(false);
+
+            expect((await read()).balance).toBe(500);
+        });
+
+        test('reverses only the entry it names, leaving the others alone', async () => {
+            // The `arrayFilters` identifier is what picks the entry out. Without
+            // it a positional `$set` would mark whichever element the filter
+            // happened to bind, which is a different debit's key.
+            await User.create({ userId: MEMBER, guildId: GUILD, balance: 500 });
+            await debitCoinsOnce(filter(), 100, 'key-a');
+            await debitCoinsOnce(filter(), 100, 'key-b');
+
+            await reverseKeyedDebit(filter(), 100, 'key-b');
+
+            const after = await read();
+            expect(after.balance).toBe(400);
+            expect(after.spentDebits.map(e => [e.key, e.reversed ?? false]))
+                .toEqual([['key-a', false], ['key-b', true]]);
+        });
+
+        test('leaves the key in place, so the debit cannot be retaken', async () => {
+            await User.create({ userId: MEMBER, guildId: GUILD, balance: 500 });
+            await debitCoinsOnce(filter(), 200, KEY);
+            await reverseKeyedDebit(filter(), 200, KEY);
+
+            expect((await debitCoinsOnce(filter(), 200, KEY)).status).toBe('reversed');
+            expect((await read()).balance).toBe(500);
         });
     });
 });
