@@ -346,6 +346,13 @@ describe('per-file floors', () => {
         // down: they mutate wallets directly, they had branch coverage at or
         // near zero, and src/commands/economy is a hundred-file directory whose
         // floor cannot notice one of them going back to that.
+        //
+        // economyFreeze.js joined in #870. It is four lines of logic and one
+        // filter clause, which is exactly why it belongs here: the clause is
+        // spread into the filter of every shared debit, so nothing about it
+        // being uncovered would look like a failure — the debits would simply
+        // stop refusing a frozen member and every one of their tests would
+        // still pass.
         expect(Object.keys(floors.files).sort()).toEqual([
             'src/commands/economy/bank.js',
             'src/commands/economy/duel.js',
@@ -355,6 +362,7 @@ describe('per-file floors', () => {
             'src/utils/coinTransfer.js',
             'src/utils/creditOrOwe.js',
             'src/utils/duelEscrow.js',
+            'src/utils/economyFreeze.js',
             'src/utils/owedPayout.js',
             'src/utils/payoutKey.js',
             'src/utils/placeWager.js',
