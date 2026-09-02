@@ -19,15 +19,28 @@
         <div class="game-item-id"><%= item.id %></div>
     </div>
     <div class="game-item-actions">
+        <%# The input is clipped, not hidden (#880). `display: none` took it out
+            of the tab order, and a <label> is not a tab stop of its own — which
+            left no way at all to reach this control without a mouse. `.sr-only`
+            keeps it invisible and focusable, and styles.css puts the focus ring
+            on the label so it lands on the thing that is actually on screen.
+
+            The name is per-item because every card here says "Upload": a screen
+            reader listing the page's controls would otherwise read out a column
+            of sixty-odd identical buttons. The id is in it as well as the
+            label, because three item names ("Repair Kit (Small)", "XP Scroll")
+            are shared by the hunt, fish and mine catalogues and the id is what
+            tells those apart — on the card it is the line under the name. -%>
         <label class="btn btn-sm btn-primary game-item-upload-btn" title="Upload image">
             Upload
             <input
                 type="file"
+                class="sr-only"
+                aria-label="Upload an image for <%= item.label %> (<%= item.id %>)"
                 accept="image/png,image/jpeg,image/gif,image/webp"
-                style="display:none"
                 onchange="uploadActivityImage('<%= item.id %>', this)"
             >
         </label>
-        <button class="btn btn-sm btn-danger" onclick="removeActivityImage('<%= item.id %>')" title="Remove image" aria-label="Remove the image for <%= item.label %>">✕</button>
+        <button class="btn btn-sm btn-danger" onclick="removeActivityImage('<%= item.id %>')" title="Remove image" aria-label="Remove the image for <%= item.label %> (<%= item.id %>)">✕</button>
     </div>
 </div>

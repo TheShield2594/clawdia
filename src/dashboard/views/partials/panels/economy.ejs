@@ -513,9 +513,11 @@
                                         <span id="shop-img-placeholder" style="font-size:2rem">🖼️</span>
                                     </div>
                                     <div style="display:flex;flex-direction:column;gap:.4rem">
-                                        <label class="btn btn-sm btn-primary" style="cursor:pointer;width:fit-content">
+                                        <%# Clipped rather than hidden, so the input is still a tab
+                                            stop — see game-item-card.ejs for why (#880). -%>
+                                        <label class="btn btn-sm btn-primary shop-img-upload-btn" style="width:fit-content">
                                             Upload image
-                                            <input type="file" id="modal-item-image-file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="previewShopItemImage(this)">
+                                            <input type="file" id="modal-item-image-file" class="sr-only" accept="image/png,image/jpeg,image/gif,image/webp" onchange="previewShopItemImage(this)">
                                         </label>
                                         <button class="btn btn-sm btn-danger" type="button" id="shop-img-clear-btn" onclick="clearShopItemImage()" style="display:none;width:fit-content">Remove image</button>
                                     </div>

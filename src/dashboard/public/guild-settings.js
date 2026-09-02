@@ -3991,14 +3991,20 @@ async function loadOverviewStats() {
         if (aiVal) aiVal.textContent = aiTotal.toLocaleString();
         if (aiFoot) aiFoot.textContent = aiTotal === 1 ? 'AI request' : 'AI requests';
 
-        // Ask Clawdia recommendations
+        // Ask Clawdia recommendations.
+        //
+        // The strings arrive off the API, so they go through escHtml on the
+        // way into innerHTML (#918). Every one of them is a fixed sentence
+        // today, but the first that quotes a guild name, a channel topic or a
+        // nickname would make this sink stored XSS, and the escape costs
+        // nothing to have in place before that.
         const recs = a.recommendations || [];
         const msgEl = document.getElementById('clawdia-msg');
         const actionsEl = document.getElementById('clawdia-actions');
         if (msgEl) {
             if (recs.length > 0) {
                 msgEl.innerHTML = recs.slice(0, 3).map(r =>
-                    `<div style="display:flex;gap:.5rem;align-items:flex-start;margin-bottom:.4rem"><span style="color:var(--accent,#f90);flex-shrink:0">💡</span><span>${r}</span></div>`
+                    `<div style="display:flex;gap:.5rem;align-items:flex-start;margin-bottom:.4rem"><span style="color:var(--accent,#f90);flex-shrink:0">💡</span><span>${escHtml(r)}</span></div>`
                 ).join('');
             } else {
                 msgEl.innerHTML = `<b>Everything looks good on ${escHtml(BOOT.guildName)}.</b><br><span style="opacity:.7">No active recommendations right now.</span>`;
@@ -4036,7 +4042,7 @@ async function loadOverviewStats() {
             feed.innerHTML = items.map(it =>
                 `<div style="display:flex;gap:.6rem;align-items:flex-start;padding:.4rem 0;border-bottom:1px solid rgba(255,255,255,.05)">
                     <span style="flex-shrink:0;font-size:1rem">${it.icon}</span>
-                    <span style="font-size:.875rem;color:${it.color || 'inherit'}">${it.text}</span>
+                    <span style="font-size:.875rem;color:${it.color || 'inherit'}">${escHtml(it.text)}</span>
                 </div>`
             ).join('');
         }
@@ -4482,7 +4488,7 @@ async function loadAnalytics() {
             ['Likely causes', (a.likelyCauses || ['None detected']).join(' · ')],
         ];
         for (const [label, val] of rows) {
-            insightsCont.insertAdjacentHTML('beforeend', `<div class="list-item"><strong>${label}</strong><span>${val}</span></div>`);
+            insightsCont.insertAdjacentHTML('beforeend', `<div class="list-item"><strong>${label}</strong><span>${escHtml(val)}</span></div>`);
         }
 
         // Command usage
@@ -4494,7 +4500,8 @@ async function loadAnalytics() {
             }
         }
 
-        // Recommendations as actionable cards
+        // Recommendations as actionable cards. Same API strings as the
+        // overview's Ask Clawdia box, same escape on the way in (#918).
         const recCont = document.getElementById('analytics-recommendations');
         recCont.innerHTML = '';
         const navMap = {
@@ -4511,13 +4518,13 @@ async function loadAnalytics() {
         const activeRecs = a.recommendations || [];
         if (!activeRecs.length) {
             for (const r of defaultRecs) {
-                recCont.insertAdjacentHTML('beforeend', `<div class="analytics-rec-card"><span>💡 ${r.text}</span><a href="#" class="analytics-rec-link" onclick="document.querySelector('.nav-item[data-tab=${r.tab}]')?.click();return false">Configure →</a></div>`);
+                recCont.insertAdjacentHTML('beforeend', `<div class="analytics-rec-card"><span>💡 ${escHtml(r.text)}</span><a href="#" class="analytics-rec-link" onclick="document.querySelector('.nav-item[data-tab=${r.tab}]')?.click();return false">Configure →</a></div>`);
             }
         } else {
             for (const rec of activeRecs) {
                 const navTarget = Object.keys(navMap).find(k => rec.toLowerCase().includes(k));
                 const linkHtml = navTarget ? `<a href="#" class="analytics-rec-link" onclick="document.querySelector('.nav-item[data-tab=${navMap[navTarget]}]')?.click();return false">Configure →</a>` : '';
-                recCont.insertAdjacentHTML('beforeend', `<div class="analytics-rec-card"><span>💡 ${rec}</span>${linkHtml}</div>`);
+                recCont.insertAdjacentHTML('beforeend', `<div class="analytics-rec-card"><span>💡 ${escHtml(rec)}</span>${linkHtml}</div>`);
             }
         }
     } catch {
