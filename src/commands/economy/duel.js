@@ -627,13 +627,20 @@ async function runChallenge(interaction, isRanked) {
                 const why = escrow.reason === 'error'
                     ? 'Something went wrong taking the bets.'
                     : `**${escrow.reason === 'challenger' ? interaction.user.username : target.username}** no longer has enough ${currency}.`;
-                // When the challenger's stake was taken and could not be put
-                // back, saying only that the opponent is short leaves them
-                // looking for coins nobody told them about.
+                // When a stake was taken and could not be put back, saying only
+                // that the opponent is short leaves someone looking for coins
+                // nobody told them about.
+                //
+                // "A stake" rather than the challenger's by name: `returned` now
+                // covers both players, because an opponent stake left deducted
+                // by a reversal that could not be confirmed is exactly as
+                // missing as the challenger's. Naming one of them would be wrong
+                // half the time — the same reason `refundNote` says "at least
+                // one bet".
                 const stakeNote = escrow.returned && !escrow.returned.refunded
                     ? (escrow.returned.owed
-                        ? `\n\n**${interaction.user.username}**'s stake could not be returned automatically. It is recorded and an admin can restore it.`
-                        : `\n\n**${interaction.user.username}**'s stake could not be returned. Please contact a server admin.`)
+                        ? '\n\nAt least one stake could not be returned automatically. It is recorded and an admin can restore it.'
+                        : '\n\nAt least one stake could not be returned. Please contact a server admin.')
                     : '';
                 return interaction.editReply({
                     embeds: [new EmbedBuilder().setColor(COLORS.ERROR).setTitle('⚔️ Duel Cancelled').setDescription(`${why}${stakeNote}`).setTimestamp()],

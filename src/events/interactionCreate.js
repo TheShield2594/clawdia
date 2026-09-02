@@ -13,7 +13,9 @@ const {
 } = require('../commands/fun/8ball');
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
-const { commandIsFreezeGated, isEconomyFrozen, FROZEN_NOTICE } = require('../utils/economyFreeze');
+const {
+    commandIsFreezeGated, isEconomyFrozen, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
+} = require('../utils/economyFreeze');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const cooldownStore = require('../utils/commandCooldowns');
 const { recordCommandMetric } = require('../utils/commandMetricsBuffer');
@@ -88,6 +90,20 @@ async function trackQuestCommandUse(interaction) {
     if (!user) {
         user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
     }
+
+    // A frozen member earns nothing, and a completed quest pays coins (#870).
+    // This runs after *every* successful command — the read-only ones the gate
+    // exempts and every non-economy command too — so without this a frozen
+    // member finishes "use 5 commands" on `/help` and is paid for it, which is
+    // the whole of what the freeze is supposed to stop.
+    //
+    // Refused here rather than by guarding the credit's filter: a credit that
+    // matches nothing is indistinguishable from one that failed, and this path
+    // records a failed credit as an owed payout — so guarding it would queue the
+    // reward for an operator to pay out later instead of refusing it. Progress
+    // is withheld along with the coins, since a quest that ticks while frozen
+    // just pays out the moment the freeze lifts.
+    if (user.economyFrozen) return;
 
     // A quest completing here pays coins, and this runs after every command —
     // so the reward goes out as an `$inc` rather than riding the save as an
@@ -328,16 +344,23 @@ module.exports = {
         // guild has blocked outright should say so rather than reporting a
         // personal sanction.
         //
-        // Fails open. The shared debit filters carry the guard themselves, so a
-        // read that cannot answer costs the clear message and nothing else — and
-        // failing closed would turn a database blip into "the economy is frozen"
-        // for every member of every guild.
+        // Fails closed. A sanction that stops applying because one read failed
+        // is not a sanction, and the cost of the other direction is small: the
+        // read is a keyed lookup on the same database the command is about to
+        // use anyway, so a failure here almost always means the command would
+        // have failed too. What it must not do is tell an innocent member they
+        // are frozen — that sends them to an admin over a transient error — so
+        // the two answers are worded apart.
         if (commandIsFreezeGated(command)) {
-            let frozen = false;
+            // Left unassigned: every path out of the catch returns, so an
+            // initialiser here would be a value nothing can read.
+            let frozen;
             try {
                 frozen = await isEconomyFrozen({ userId: interaction.user.id, guildId: interaction.guild.id });
             } catch (error) {
                 console.error(`Economy freeze check failed for ${interaction.user.id}:`, error.message);
+                logCommandMetric(interaction, false, 'economy_freeze_unknown');
+                return interaction.reply({ content: FREEZE_UNKNOWN_NOTICE, flags: MessageFlags.Ephemeral });
             }
             if (frozen) {
                 logCommandMetric(interaction, false, 'economy_frozen');
@@ -402,3 +425,9 @@ module.exports = {
 // Exposed for the permission-gate tests, which drive the check directly rather
 // than booting the whole interaction handler and its model imports.
 module.exports.missingRequiredPermissions = missingRequiredPermissions;
+
+// Same reason, for the freeze gate (#870). Quest rewards are paid from here
+// after *every* command, which puts them outside the command gate entirely, so
+// the refusal is worth driving directly rather than inferring it from the fact
+// that the line is present.
+module.exports.trackQuestCommandUse = trackQuestCommandUse;

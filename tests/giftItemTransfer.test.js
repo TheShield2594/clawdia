@@ -21,6 +21,13 @@ function mockFindDoc(query) {
 // Handles only the query shapes gift.js uses.
 function mockMatches(doc, query) {
     if (!doc) return false;
+    // The freeze guard the item debit and the recipient credit both carry
+    // (#870). Without it here the mock would wave a frozen party straight
+    // through and the two tests below would pass against unguarded writes,
+    // which is the bug they exist to catch.
+    if (query.economyFrozen?.$ne !== undefined && doc.economyFrozen === query.economyFrozen.$ne) {
+        return false;
+    }
     const elem = query.inventory?.$elemMatch;
     if (elem) {
         const idx = doc.inventory.findIndex(
@@ -91,6 +98,12 @@ function mockApplyUpdate(doc, update, options = {}) {
 // Set from a test to make the recipient's credit fail.
 let mockFailCreditFor = null;
 
+// Set from a test to freeze a party *between* the pre-flight read and the write
+// that acts on it — the race a read-then-act check cannot see. Called with each
+// update just before it is matched, so the filter is evaluated against a
+// document that changed after the command decided to proceed.
+let mockFreezeOnWrite = null;
+
 jest.mock('../src/models/User', () => ({
     findOne: jest.fn((query) => {
         const doc = mockFindDoc(query);
@@ -102,6 +115,7 @@ jest.mock('../src/models/User', () => ({
             doc = { userId: query.userId, guildId: query.guildId, balance: 0, inventory: [], activeEffects: [] };
             mockStore[query.userId] = doc;
         }
+        if (mockFreezeOnWrite) mockFreezeOnWrite(update);
         if (!mockMatches(doc, query)) return null;
         if (query['inventory.itemId'] !== undefined && query['inventory.itemId'].$ne === undefined) {
             doc._matchedIndex = doc.inventory.findIndex(s => s.itemId === query['inventory.itemId']);
@@ -182,6 +196,7 @@ function mockTotalHeld(itemId) {
 
 beforeEach(() => {
     mockFailCreditFor = null;
+    mockFreezeOnWrite = null;
     mockWrites = [];
     mockStore = {
         sender:    { userId: 'sender',    guildId: 'g1', balance: 0, inventory: [{ itemId: 'pet_food', quantity: 3 }], activeEffects: [] },
@@ -239,6 +254,45 @@ test('a rolled-back gift of a whole stack restores the slot', async () => {
 
     expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
     expect(mockTotalHeld('pet_food')).toBe(3);
+});
+
+// A frozen party is refused by the read before any of this, so these do not
+// seed the flag — they land it *after* that read, which is the only thing the
+// guard in the filter is there for. Seeding it up front would pass against
+// completely unguarded writes and prove nothing (#870).
+describe('a freeze that lands after the pre-flight read', () => {
+    /** The debit; the credit is a pipeline update and carries no `$inc`. */
+    const isItemDebit = update => !Array.isArray(update) && !!update.$inc?.['inventory.$.quantity'];
+    /** The recipient credit, which gift.js issues as a pipeline update. */
+    const isItemCredit = update => Array.isArray(update);
+
+    test('takes no item from a sender frozen mid-gift', async () => {
+        mockFreezeOnWrite = (update) => {
+            if (isItemDebit(update)) mockStore.sender.economyFrozen = true;
+        };
+        const { interaction } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
+        expect(mockStore.recipient.inventory).toEqual([]);
+        expect(mockWrites).toEqual([]);
+    });
+
+    test('gives the item back when the recipient is frozen mid-gift', async () => {
+        // The debit has already landed by the time the credit is refused, so
+        // this is the rollback path — and the rollback is deliberately
+        // unguarded, because a sanction that ate the refund would destroy the
+        // sender's item.
+        mockFreezeOnWrite = (update) => {
+            if (isItemCredit(update)) mockStore.recipient.economyFrozen = true;
+        };
+        const { interaction } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        expect(mockStore.recipient.inventory).toEqual([]);
+        expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
+        expect(mockTotalHeld('pet_food')).toBe(3); // conserved
+    });
 });
 
 test('gifting more than you hold moves nothing', async () => {

@@ -63,6 +63,9 @@ const writesTo = (update, array) => JSON.stringify(update ?? '').includes(array)
 // array but is an operator update, so the shape is what separates the two.
 const isDebit  = update => Array.isArray(update) && writesTo(update, 'spentDebits');
 const isCredit = update => Array.isArray(update) && writesTo(update, 'paidPayouts');
+// The reversal names the same array as the debit but is an operator update, so
+// the shape is what separates giving a stake back from taking one.
+const isReversal = update => !Array.isArray(update) && writesTo(update, 'spentDebits');
 
 const GUILD = 'guild-1';
 const CH    = 'user-1';       // challenger — the fake interaction's own user
@@ -124,13 +127,18 @@ describe('taking the escrow', () => {
         seed(CH, 500); seed(OP, 10);
         // The rollback used to be an unguarded `await`, so this rejection
         // escaped `takeEscrow` into a catch that had `escrowTaken` false.
+        //
+        // Both writes the rollback can make have to fail to reach the owed
+        // ledger now: the keyed reversal is tried first, and only once the key
+        // has been read and says that reversal did not land is the
+        // unconditional credit reached. Breaking the credit alone would leave
+        // the reversal to succeed, which is the stake coming back — the right
+        // outcome, but not the one this test is about.
         // The store's own implementation, not the mock wrapping it: calling
         // the mock from inside its own replacement recurses forever.
         const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
         mockUsers.model.findOneAndUpdate.mockImplementation(async (filter, update, options) => {
-            // Only the credit: the opponent is short, so the debits decide
-            // nothing here and breaking them would test a different failure.
-            if (isCredit(update)) throw new Error('mongo is down');
+            if (isCredit(update) || isReversal(update)) throw new Error('mongo is down');
             return store(filter, update, options);
         });
 
@@ -140,6 +148,50 @@ describe('taking the escrow', () => {
         expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
             payload: expect.objectContaining({ kind: 'coins', userId: CH, amount: BET }),
         }));
+    });
+
+    // The one branch that deliberately does nothing. Everywhere else an unknown
+    // outcome is resolved by reading the key; here even that read fails, and
+    // crediting on a guess is the last way left to mint a coin.
+    test('refuses to credit blind when the key cannot be read at all', async () => {
+        seed(CH, 500); seed(OP, 10);
+        const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (f, u, o) => {
+            if (isReversal(u)) throw new Error('mongo is down');
+            return store(f, u, o);
+        });
+        const read = mockUsers.model.findOne.getMockImplementation();
+        mockUsers.model.findOne.mockImplementation((f, p) => {
+            if (f?.userId === CH) throw new Error('mongo is down');
+            return read(f, p);
+        });
+
+        const result = await takeEscrow(CH, OP, GUILD, BET, DUEL);
+
+        // Reported as not returned, which is the truth, rather than as refunded.
+        expect(result).toMatchObject({ reason: 'opponent', returned: { refunded: false, owed: false } });
+        // The stake stays debited and nothing is credited on a guess: the
+        // reversal may have committed and lost its response, and a second
+        // credit under a different key would pay the stake twice.
+        expect(balanceOf(CH)).toBe(400);
+        expect(recordOwedPayout).not.toHaveBeenCalled();
+    });
+
+    // The keyed reversal is what the rollback reaches for first, and it both
+    // credits the stake and marks the key in one write. The owed ledger above
+    // is the fallback behind it, not the path.
+    test('rolls the challenger back through the key, leaving it marked reversed', async () => {
+        seed(CH, 500); seed(OP, 10);
+
+        const result = await takeEscrow(CH, OP, GUILD, BET, DUEL);
+
+        expect(result).toMatchObject({ reason: 'opponent', returned: { refunded: true, owed: false } });
+        expect(balanceOf(CH)).toBe(500);
+        // Left unmarked, a second takeEscrow for this duel would read the key as
+        // `duplicate`, treat the stake as still held, and start a duel on an
+        // escrow it never took.
+        expect(mockUsers.get(CH).spentDebits.map(e => [e.key, e.reversed]))
+            .toEqual([[`duel:${DUEL}:escrow:${CH}`, true]]);
     });
 });
 
@@ -245,6 +297,64 @@ describe('a debit that rejects mid-escrow', () => {
         // a document — so it comes back whatever is true of the opponent's.
         expect(result).toMatchObject({ success: false, reason: 'error', returned: { refunded: true } });
         expect([balanceOf(CH), balanceOf(OP)]).toEqual([500, 500]);
+    });
+
+    /**
+     * The other half of an unknown outcome: the write *commits* and the response
+     * is lost.
+     *
+     * `breakDebitFor` and `blindDebitFor` above throw before the store writes,
+     * so between them they only ever describe a debit that did not land — which
+     * is the easy half. This lets the write through and then loses every
+     * response to it, which is the half that destroys coins if it is read as a
+     * failure. It is the case the key exists for, so it is the case that has to
+     * be driven.
+     */
+    function commitThenLoseResponseFor(userId, { alsoBreakReads = false } = {}) {
+        const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (f, u, o) => {
+            const landed = await store(f, u, o);
+            if (isDebit(u) && f.userId === userId) throw new Error('connection reset');
+            return landed;
+        });
+        if (!alsoBreakReads) return;
+        const read = mockUsers.model.findOne.getMockImplementation();
+        mockUsers.model.findOne.mockImplementation((f, p) => {
+            if (f?.userId === userId) throw new Error('connection reset');
+            return read(f, p);
+        });
+    }
+
+    test('takes the escrow when the opponent debit landed but every response was lost', async () => {
+        seed(CH, 500); seed(OP, 500);
+        commitThenLoseResponseFor(OP);
+
+        const result = await takeEscrow(CH, OP, GUILD, BET, DUEL);
+
+        // The retry reads the key and finds the debit already recorded, so the
+        // stake is known to have been taken and the duel goes ahead. Read as a
+        // failure, this would have refunded a stake that was never returned to
+        // escrow — coins minted — or cancelled a duel both players had paid for.
+        expect(result).toMatchObject({ success: true });
+        expect([balanceOf(CH), balanceOf(OP)]).toEqual([400, 400]);
+        expect(mockUsers.get(OP).spentDebits.map(e => e.key))
+            .toEqual([`duel:${DUEL}:escrow:${OP}`]);
+    });
+
+    test('gives back a challenger stake that landed while unreadable', async () => {
+        seed(CH, 500); seed(OP, 500);
+        // The debit committed, its response was lost, and the read that would
+        // resolve it fails too — so `takeEscrow` compensates blind. It is safe
+        // only because the compensation is itself conditioned on the key.
+        commitThenLoseResponseFor(CH, { alsoBreakReads: true });
+
+        const result = await takeEscrow(CH, OP, GUILD, BET, DUEL);
+
+        expect(result).toMatchObject({ success: false, reason: 'error', returned: { refunded: true } });
+        expect(balanceOf(CH)).toBe(500);
+        expect(mockUsers.get(CH).spentDebits.map(e => e.reversed)).toEqual([true]);
+        // And the opponent was never charged for a duel that did not happen.
+        expect(balanceOf(OP)).toBe(500);
     });
 
     test('mints nothing when the challenger\'s own debit is indeterminate', async () => {

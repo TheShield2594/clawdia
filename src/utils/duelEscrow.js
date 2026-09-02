@@ -11,9 +11,10 @@
  * inside the command, because none of it is about buttons or embeds.
  */
 
+const User = require('../models/User');
 const { creditCoinsOrOwe } = require('./creditOrOwe');
 const { duelPayoutKey } = require('./payoutKey');
-const { debitCoinsOrKnow, reverseKeyedDebit } = require('./debitKey');
+const { debitCoinsOrKnow, reverseKeyedDebit, resolveKeyedDebit } = require('./debitKey');
 
 /**
  * Names one player's stake in one duel, for the debit that takes it.
@@ -42,17 +43,66 @@ function takeStake(userId, guildId, amount, duelId) {
 /**
  * Undoes a stake whose debit may or may not have happened.
  *
- * The conditional compensation from src/utils/debitKey.js, and the reason this
- * module no longer has a case it cannot handle: it credits back only against a
- * recorded debit, so calling it without knowing whether the debit landed is
- * safe. `returnStake` below is still the right tool when the debit is *known* to
- * have landed — it is an unconditional credit with the owed-payout ledger behind
- * it, which this deliberately is not.
+ * The conditional compensation from src/utils/debitKey.js: it credits back only
+ * against a recorded debit, so calling it without knowing whether the debit
+ * landed cannot mint and cannot pay twice.
  */
 function undoStake(userId, guildId, amount, duelId) {
     return reverseKeyedDebit({ userId, guildId }, amount, duelEscrowKey(duelId, userId), {
         counters: { lifetimeGambled: -amount },
     });
+}
+
+/**
+ * Hands a stake back during `takeEscrow`, and leaves the key saying so.
+ *
+ * `returnStake` below credits unconditionally and does not touch the key, which
+ * is wrong for a rollback in two ways. The stake stays recorded as held, so a
+ * second `takeEscrow` for the same duel would read it as `duplicate` and start a
+ * duel on an escrow it never took; and the credit cannot be combined with a
+ * reversal without risking paying twice, because the two carry different keys
+ * and either could be the one that landed.
+ *
+ * So the reversal is tried first — it credits and marks in one write — and the
+ * unconditional credit is reached only once the key has been read and says the
+ * reversal did not land. That ordering is what keeps the owed-payout ledger
+ * available without making it a way to double-pay.
+ *
+ * **Only sound for a debit taken moments ago in this same call**, which is why
+ * it is not what `refundEscrow` uses. Its "no key, so nothing to give back"
+ * branch is true here — `takeEscrow` knows whether it just took the stake — and
+ * false for a duel declined an hour later, whose key may have aged out of the
+ * retention window entirely. There, an unconditional `returnStake` is the only
+ * correct answer.
+ *
+ * @returns {Promise<{credited: boolean, owed: boolean}>} `credited` meaning no
+ *   coins of theirs are missing, which covers a stake given back and a stake
+ *   that never left.
+ */
+async function rollbackStake(userId, guildId, amount, duelId, jobName) {
+    const undo = await undoStake(userId, guildId, amount, duelId);
+    // Reversed, or nothing recorded to reverse. Both mean nothing is missing.
+    if (undo.resolved) return { credited: true, owed: false };
+
+    // The write could not be confirmed. This is the case the key exists for:
+    // ask the document instead of guessing, exactly as `debitCoinsOrKnow` does.
+    let state = null;
+    try {
+        state = await resolveKeyedDebit(User, { userId, guildId }, duelEscrowKey(duelId, userId));
+    } catch (err) {
+        console.error(`[duel] could not read the escrow key for ${userId} in ${guildId}:`, err.message);
+    }
+
+    // Not readable. Crediting blind here would be the one unsafe move left: the
+    // reversal may have committed and lost its response, and a second credit
+    // under a different key would pay the stake twice.
+    if (!state) return { credited: false, owed: false };
+    if (!state.landed || state.reversed) return { credited: true, owed: false };
+
+    // The debit stands and the reversal is known not to have landed, so the
+    // coins really are missing and an unconditional credit cannot double-pay.
+    const back = await returnStake(userId, guildId, amount, duelId, jobName);
+    return { credited: back.credited, owed: back.owed };
 }
 
 /**
@@ -97,14 +147,12 @@ async function takeEscrow(challengerId, opponentId, guildId, amount, duelId) {
     // a recorded debit, so it gives the stake back if it was taken and does
     // nothing at all if it was not.
     if (!challenger.resolved) {
-        const back = await undoStake(challengerId, guildId, amount, duelId);
         console.error(`[duel] challenger escrow for ${challengerId} in ${guildId} was indeterminate:`, challenger.error?.message);
+        const back = await rollbackStake(challengerId, guildId, amount, duelId, 'escrowRollback');
         return {
             success: false,
             reason: 'error',
-            // `refunded` here means "no coins are missing", which covers both a
-            // stake given back and a stake that never left.
-            returned: { refunded: back.resolved, owed: false },
+            returned: { refunded: back.credited, owed: back.owed },
         };
     }
 
@@ -125,21 +173,29 @@ async function takeEscrow(challengerId, opponentId, guildId, amount, duelId) {
     if (opponent.debited) return { success: true, returned: null };
 
     // From here the challenger's stake is known to have left, so it has to come
-    // back whatever happened to the opponent's. The opponent's own stake is
-    // undone first and unconditionally: if their debit landed, this returns it;
-    // if it did not, this does nothing.
+    // back whatever happened to the opponent's. Both are rolled back through the
+    // key: the opponent's debit may or may not have landed, and asking the
+    // document is the only way to tell — a blind credit would mint for a debit
+    // that never happened.
     if (!opponent.resolved) {
         console.error(`[duel] opponent escrow for ${opponentId} in ${guildId} was indeterminate:`, opponent.error?.message);
     }
-    await undoStake(opponentId, guildId, amount, duelId);
+    const opponentBack = await rollbackStake(opponentId, guildId, amount, duelId, 'escrowRollback');
+    const back = await rollbackStake(challengerId, guildId, amount, duelId, 'escrowRollback');
 
-    const back = await returnStake(challengerId, guildId, amount, duelId, 'escrowRollback');
     return {
         success: false,
         // Same rule as above: 'opponent' is a verdict on their wallet, and
         // nothing else may be reported as one.
         reason: SHORT_STATUSES.has(opponent.status) ? 'opponent' : 'error',
-        returned: { refunded: back.credited, owed: back.owed },
+        // Both stakes, not just the challenger's. An opponent stake left
+        // deducted because its reversal could not be confirmed is exactly as
+        // missing as the challenger's, and reporting `refunded: true` over it
+        // is how a player is told their coins came back when they did not.
+        returned: {
+            refunded: back.credited && opponentBack.credited,
+            owed: (!back.credited && back.owed) || (!opponentBack.credited && opponentBack.owed),
+        },
     };
 }
 
@@ -226,5 +282,5 @@ function payWinner(winnerId, guildId, payout, duelId) {
 
 module.exports = {
     takeEscrow, refundEscrow, returnStake, payWinner, refundNote,
-    duelEscrowKey, takeStake, undoStake,
+    duelEscrowKey, takeStake, undoStake, rollbackStake,
 };

@@ -33,7 +33,7 @@ jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async ()
 
 const {
     NOT_FROZEN, unfrozen, isEconomyFrozen, commandIsFreezeGated,
-    FREEZE_EXEMPT_COMMANDS, FROZEN_NOTICE, frozenTargetNotice,
+    FREEZE_EXEMPT_COMMANDS, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE, frozenTargetNotice,
 } = require('../src/utils/economyFreeze');
 const { chargeExact, debitUpTo } = require('../src/utils/balanceDebit');
 const { placeWager } = require('../src/utils/placeWager');
@@ -211,6 +211,22 @@ describe('the command gate', () => {
     // stand between them and every economy command they have never run.
     test('a member with no document is not frozen', async () => {
         expect(await isEconomyFrozen(filter('never-played'))).toBe(false);
+    });
+
+    // The gate fails closed, so this rejection is what refuses the command. It
+    // has to reach the caller rather than being swallowed into a false.
+    test('a read that cannot answer rejects rather than answering false', async () => {
+        User.findOne.mockImplementationOnce(() => { throw new Error('mongo is down'); });
+
+        await expect(isEconomyFrozen(filter(PLAYER))).rejects.toThrow('mongo is down');
+    });
+
+    // Failing closed is only tolerable if the member is not told they are
+    // sanctioned: that sends them to an admin who will find nothing to lift.
+    test('the unknown-state notice does not claim the member is frozen', () => {
+        expect(FREEZE_UNKNOWN_NOTICE).not.toBe(FROZEN_NOTICE);
+        expect(FREEZE_UNKNOWN_NOTICE.toLowerCase()).not.toContain('frozen');
+        expect(FROZEN_NOTICE.toLowerCase()).toContain('frozen');
     });
 });
 

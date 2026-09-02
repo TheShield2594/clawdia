@@ -131,10 +131,20 @@ services:
         # db-network, the same one MONGODB_URI defaults to — not localhost, or
         # the bot would be told to connect to itself.
         HOST=mongodb:27017;
-        AUTH="";
-        if [ -n "$$MONGODB_ROOT_USERNAME" ]; then
-          AUTH="--username $$MONGODB_ROOT_USERNAME --password $$MONGODB_ROOT_PASSWORD --authenticationDatabase admin";
-        fi;
+        # A function rather than an AUTH string spliced into each command line:
+        # unquoted, a password containing a space would be split into separate
+        # arguments and mongosh would get a truncated one; quoted, it would be a
+        # single empty argument when auth is off. Passing the credentials as
+        # their own quoted arguments is the only form that is right both ways.
+        authed_mongosh() {
+          if [ -n "$$MONGODB_ROOT_USERNAME" ]; then
+            mongosh --host "$$HOST" --quiet --username "$$MONGODB_ROOT_USERNAME" --password "$$MONGODB_ROOT_PASSWORD" --authenticationDatabase admin "$$@";
+          else
+            mongosh --host "$$HOST" --quiet "$$@";
+          fi;
+        };
+        # Unauthenticated on purpose: `hello` is answered before login, which is
+        # what lets this work on a deployment whose credentials it was not given.
         writable() {
           mongosh --host "$$HOST" --quiet --eval "quit(db.hello().isWritablePrimary ? 0 : 1)" >/dev/null 2>&1;
         };
@@ -150,7 +160,7 @@ services:
           echo "[replset-init] $$HOST already accepts writes; nothing to do";
           exit 0;
         fi;
-        NAME=$$(mongosh --host "$$HOST" $$AUTH --quiet --eval "(db.adminCommand({ getCmdLineOpts: 1 }).parsed.replication || {}).replSetName || \"\"" 2>/dev/null) || NAME="";
+        NAME=$$(authed_mongosh --eval "(db.adminCommand({ getCmdLineOpts: 1 }).parsed.replication || {}).replSetName || \"\"" 2>/dev/null) || NAME="";
         if [ -z "$$NAME" ]; then
           echo "[replset-init] $$HOST does not accept writes and its replica set name could not be read.";
           echo "[replset-init] With authentication on, this service needs MONGODB_ROOT_USERNAME and MONGODB_ROOT_PASSWORD.";
@@ -159,7 +169,7 @@ services:
         echo "[replset-init] Initiating replica set $$NAME with member $$HOST";
         # AlreadyInitialized is not a failure: a redeploy against a set that is
         # already configured, by this or by hand, lands here every time.
-        mongosh --host "$$HOST" $$AUTH --quiet --eval "
+        authed_mongosh --eval "
           try { rs.initiate({ _id: \"$$NAME\", members: [{ _id: 0, host: \"$$HOST\" }] }); }
           catch (e) { if (e.codeName !== \"AlreadyInitialized\") { throw e; } }
         " || exit 1;

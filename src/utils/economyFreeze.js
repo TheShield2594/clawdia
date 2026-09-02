@@ -57,6 +57,18 @@ const FROZEN_NOTICE =
     'Your economy access is frozen in this server, so this command cannot run. '
     + 'A server admin can lift it from the dashboard.';
 
+/**
+ * What a member is told when the freeze state could not be read at all.
+ *
+ * Worded apart from `FROZEN_NOTICE` deliberately. The gate fails closed, so a
+ * transient read failure refuses the command — but telling that member they are
+ * frozen would send them to an admin over a database blip, and the admin would
+ * find no sanction to lift.
+ */
+const FREEZE_UNKNOWN_NOTICE =
+    'Could not check your economy status just now, so this command was not run. '
+    + 'Please try again in a moment.';
+
 /** What the *other* party is told when they are the frozen one. */
 function frozenTargetNotice(mention) {
     return `${mention}'s economy access is frozen in this server, so they cannot send or receive coins.`;
@@ -114,6 +126,6 @@ async function isEconomyFrozen(filter, Model = null) {
 
 module.exports = {
     NOT_FROZEN, unfrozen, isEconomyFrozen,
-    FROZEN_NOTICE, frozenTargetNotice,
+    FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE, frozenTargetNotice,
     FREEZE_EXEMPT_COMMANDS, commandIsFreezeGated,
 };

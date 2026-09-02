@@ -16,6 +16,7 @@ const {
 const {
     accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
 } = require('../../utils/coinTransfer');
+const { NOT_FROZEN } = require('../../utils/economyFreeze');
 const { isSoulbound } = require('../../data/soulboundItems');
 const { resolveEffectType } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
@@ -380,9 +381,11 @@ module.exports = {
         const meta    = describeItem(itemId, { shopItems: guildSettings?.shop ?? [], aiItem: aiItems[itemId] });
         const label   = `${meta.emoji} **${meta.name}**`;
 
-        // An item gift moves no coins, so no filter downstream carries the
-        // freeze guard — a frozen sender is already refused by the command gate,
-        // and this is what stops one being handed items instead.
+        // The sentence naming the reason. The guarantee is `NOT_FROZEN` in the
+        // two writes below: this is a read taken before a confirmation prompt
+        // the player can sit on, so on its own it is a check the freeze can land
+        // behind — the same read-then-act race the coin path avoids by putting
+        // the guard in the filter.
         const frozenItem = frozenRefusal(sender, receiver, { mention: `<@${target.id}>` });
         if (frozenItem) return deny(frozenItem);
 
@@ -450,6 +453,7 @@ module.exports = {
             {
                 userId: interaction.user.id,
                 guildId,
+                ...NOT_FROZEN,
                 inventory: { $elemMatch: { itemId, quantity: { $gte: qty } } },
                 ...sendSpend.filter,
             },
@@ -477,7 +481,12 @@ module.exports = {
         let credited = null;
         try {
             credited = await addInventoryItem(target.id, guildId, itemId, qty, {
-                guard:    rxSpend.filter,
+                // The recipient's freeze rides in the credit's own guard, so a
+                // freeze landing mid-gift sends the item back rather than
+                // through. The rollback below is deliberately left unguarded:
+                // it returns the sender's own item, and a sanction that ate a
+                // refund would destroy it.
+                guard:    { ...rxSpend.filter, ...NOT_FROZEN },
                 extraSet: rxSpend.set,
             });
         } catch (creditErr) {
