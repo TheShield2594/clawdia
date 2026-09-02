@@ -347,6 +347,11 @@ describe('per-file floors', () => {
         // near zero, and src/commands/economy is a hundred-file directory whose
         // floor cannot notice one of them going back to that.
         //
+        // debitKey.js joined in #969, on the same footing as payoutKey.js beside
+        // it: it is the primitive that decides whether a debit whose outcome was
+        // never learned gets refunded or not, and both wrong answers make or
+        // unmake coins.
+        //
         // economyFreeze.js joined in #870. It is four lines of logic and one
         // filter clause, which is exactly why it belongs here: the clause is
         // spread into the filter of every shared debit, so nothing about it
@@ -361,6 +366,7 @@ describe('per-file floors', () => {
             'src/utils/balanceDelta.js',
             'src/utils/coinTransfer.js',
             'src/utils/creditOrOwe.js',
+            'src/utils/debitKey.js',
             'src/utils/duelEscrow.js',
             'src/utils/economyFreeze.js',
             'src/utils/owedPayout.js',

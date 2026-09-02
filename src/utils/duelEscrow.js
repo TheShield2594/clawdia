@@ -11,9 +11,56 @@
  * inside the command, because none of it is about buttons or embeds.
  */
 
-const User = require('../models/User');
 const { creditCoinsOrOwe } = require('./creditOrOwe');
 const { duelPayoutKey } = require('./payoutKey');
+const { debitCoinsOrKnow, reverseKeyedDebit } = require('./debitKey');
+
+/**
+ * Names one player's stake in one duel, for the debit that takes it.
+ *
+ * Separate from `duelPayoutKey`: that keys the credits a duel can owe, and this
+ * keys the debits it takes. They live on different arrays and answer different
+ * questions, and a shared string would let one silently satisfy the other.
+ */
+function duelEscrowKey(duelId, userId) {
+    return `duel:${duelId}:escrow:${userId}`;
+}
+
+/**
+ * Takes one player's stake, keyed, and reports a state rather than a document.
+ *
+ * `lifetimeGambled` moves in the same write for the reason it always has: a
+ * stake that moved is a stake that was gambled, and there is exactly one place
+ * that knows the coins moved.
+ */
+function takeStake(userId, guildId, amount, duelId) {
+    return debitCoinsOrKnow({ userId, guildId }, amount, duelEscrowKey(duelId, userId), {
+        counters: { lifetimeGambled: amount },
+    });
+}
+
+/**
+ * Undoes a stake whose debit may or may not have happened.
+ *
+ * The conditional compensation from src/utils/debitKey.js, and the reason this
+ * module no longer has a case it cannot handle: it credits back only against a
+ * recorded debit, so calling it without knowing whether the debit landed is
+ * safe. `returnStake` below is still the right tool when the debit is *known* to
+ * have landed — it is an unconditional credit with the owed-payout ledger behind
+ * it, which this deliberately is not.
+ */
+function undoStake(userId, guildId, amount, duelId) {
+    return reverseKeyedDebit({ userId, guildId }, amount, duelEscrowKey(duelId, userId), {
+        counters: { lifetimeGambled: -amount },
+    });
+}
+
+/**
+ * The debit outcomes that mean "this player cannot cover the stake", as opposed
+ * to "something went wrong". A member with no document has no coins, so it
+ * belongs with the other two.
+ */
+const SHORT_STATUSES = new Set(['insufficient', 'frozen', 'missing']);
 
 /**
  * Atomically deducts both players' wagers. Returns `{ success, reason, returned }`.
@@ -24,61 +71,76 @@ const { duelPayoutKey } = require('./payoutKey');
  * casino that puts a player's own coins at risk on an outcome — leaving it out
  * meant those achievements measured "coins staked at /casino" while claiming to
  * measure coins gambled. Every path that hands a stake back for a duel that
- * never happened (both branches here, and `refundEscrow`) takes the counter back
- * with it, so a declined or expired duel counts for nothing.
+ * never happened takes the counter back with it, so a declined or expired duel
+ * counts for nothing.
  *
  * The rollback when the opponent's stake cannot be taken used to be a bare
  * `await User.updateOne(...)`: unchecked, so an update that matched no document
  * looked exactly like one that moved coins, and unguarded, so a rejection
  * travelled out to a caller that had already decided no escrow was taken and
  * refunded nothing. Either way the challenger's stake was simply gone (#873).
- * It goes through the same credit-or-write-it-down path as every other refund
- * here now, and what actually happened comes back with the result.
+ *
+ * What #873 could not close was the debit whose *own* outcome was unknown — a
+ * write that may have committed and lost its response. Refunding it would mint
+ * coins for a debit that never landed; not refunding it would destroy coins for
+ * one that did. Both stakes are keyed now (#969), which turns that into a
+ * question the document can answer: `takeStake` retries and then reads the key,
+ * and `undoStake` compensates against the key rather than against a guess, so it
+ * is a no-op for a debit that never happened. There is no branch below that can
+ * make or unmake a coin.
  */
 async function takeEscrow(challengerId, opponentId, guildId, amount, duelId) {
-    const challenger = await User.findOneAndUpdate(
-        { userId: challengerId, guildId, balance: { $gte: amount } },
-        { $inc: { balance: -amount, lifetimeGambled: amount } },
-        { new: true }
-    );
-    if (!challenger) return { success: false, reason: 'challenger', returned: null };
+    const challenger = await takeStake(challengerId, guildId, amount, duelId);
 
-    // The second debit is wrapped because the first one has already committed —
-    // it returned a document — and a rejection here used to travel out to a
-    // caller whose `escrowTaken` was still false, so nothing refunded the
-    // challenger. A stake known to have left an account is reconciled here
-    // rather than left to a handler that does not know it exists (#873).
-    //
-    // Note what this does *not* cover: a rejection from either debit whose own
-    // outcome is unknown — the write may have committed and lost its response.
-    // Refunding on that would mint coins for a debit that never landed, so it
-    // needs a keyed debit the way credits already have one, which is a larger
-    // change than this. See the PR discussion.
-    let opponent;
-    try {
-        opponent = await User.findOneAndUpdate(
-            { userId: opponentId, guildId, balance: { $gte: amount } },
-            { $inc: { balance: -amount, lifetimeGambled: amount } },
-            { new: true }
-        );
-    } catch (err) {
-        console.error(`[duel] opponent escrow for ${opponentId} in ${guildId} failed:`, err.message);
-        const back = await returnStake(challengerId, guildId, amount, duelId, 'escrowRollback');
+    // The database could not be reached even to ask whether the debit landed.
+    // Compensating blind is safe here and nowhere else: `undoStake` matches only
+    // a recorded debit, so it gives the stake back if it was taken and does
+    // nothing at all if it was not.
+    if (!challenger.resolved) {
+        const back = await undoStake(challengerId, guildId, amount, duelId);
+        console.error(`[duel] challenger escrow for ${challengerId} in ${guildId} was indeterminate:`, challenger.error?.message);
         return {
             success: false,
             reason: 'error',
-            returned: { refunded: back.credited, owed: back.owed },
+            // `refunded` here means "no coins are missing", which covers both a
+            // stake given back and a stake that never left.
+            returned: { refunded: back.resolved, owed: false },
         };
     }
-    if (!opponent) {
-        const back = await returnStake(challengerId, guildId, amount, duelId, 'escrowRollback');
+
+    if (!challenger.debited) {
         return {
             success: false,
-            reason: 'opponent',
-            returned: { refunded: back.credited, owed: back.owed },
+            // Only the three that are actually about the player's wallet are
+            // reported as the player being short. A write that matched nothing
+            // it should have matched, or one that never landed, is a fault —
+            // and saying "you no longer have enough" would send them off to
+            // check a balance that is fine.
+            reason: SHORT_STATUSES.has(challenger.status) ? 'challenger' : 'error',
+            returned: null,
         };
     }
-    return { success: true, returned: null };
+
+    const opponent = await takeStake(opponentId, guildId, amount, duelId);
+    if (opponent.debited) return { success: true, returned: null };
+
+    // From here the challenger's stake is known to have left, so it has to come
+    // back whatever happened to the opponent's. The opponent's own stake is
+    // undone first and unconditionally: if their debit landed, this returns it;
+    // if it did not, this does nothing.
+    if (!opponent.resolved) {
+        console.error(`[duel] opponent escrow for ${opponentId} in ${guildId} was indeterminate:`, opponent.error?.message);
+    }
+    await undoStake(opponentId, guildId, amount, duelId);
+
+    const back = await returnStake(challengerId, guildId, amount, duelId, 'escrowRollback');
+    return {
+        success: false,
+        // Same rule as above: 'opponent' is a verdict on their wallet, and
+        // nothing else may be reported as one.
+        reason: SHORT_STATUSES.has(opponent.status) ? 'opponent' : 'error',
+        returned: { refunded: back.credited, owed: back.owed },
+    };
 }
 
 /**
@@ -162,4 +224,7 @@ function payWinner(winnerId, guildId, payout, duelId) {
     });
 }
 
-module.exports = { takeEscrow, refundEscrow, returnStake, payWinner, refundNote };
+module.exports = {
+    takeEscrow, refundEscrow, returnStake, payWinner, refundNote,
+    duelEscrowKey, takeStake, undoStake,
+};

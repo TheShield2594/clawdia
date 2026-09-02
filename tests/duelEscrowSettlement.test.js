@@ -53,6 +53,17 @@ const restoreStore = () => {
     for (const [name, impl] of storeImpl) mockUsers.model[name].mockImplementation(impl);
 };
 
+// Both the debits and the credits are pipeline updates now that the stakes are
+// keyed (#969), so `Array.isArray(update)` no longer tells them apart. The array
+// each one writes does: a debit records its key in `spentDebits`, a credit in
+// `paidPayouts`. Matching on that rather than on the update's shape is also what
+// keeps these tests pointed at the write they mean when either side changes form.
+const writesTo = (update, array) => JSON.stringify(update ?? '').includes(array);
+// Pipeline form for the debit; the reversal that gives one back names the same
+// array but is an operator update, so the shape is what separates the two.
+const isDebit  = update => Array.isArray(update) && writesTo(update, 'spentDebits');
+const isCredit = update => Array.isArray(update) && writesTo(update, 'paidPayouts');
+
 const GUILD = 'guild-1';
 const CH    = 'user-1';       // challenger — the fake interaction's own user
 const OP    = 'user-2';
@@ -117,9 +128,9 @@ describe('taking the escrow', () => {
         // the mock from inside its own replacement recurses forever.
         const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
         mockUsers.model.findOneAndUpdate.mockImplementation(async (filter, update, options) => {
-            // The credit is the only pipeline update in this flow; the two
-            // debits above it are operator updates and go through untouched.
-            if (Array.isArray(update)) throw new Error('mongo is down');
+            // Only the credit: the opponent is short, so the debits decide
+            // nothing here and breaking them would test a different failure.
+            if (isCredit(update)) throw new Error('mongo is down');
             return store(filter, update, options);
         });
 
@@ -133,17 +144,27 @@ describe('taking the escrow', () => {
 });
 
 describe('a debit that rejects mid-escrow', () => {
+    /**
+     * Makes one player's debit reject, however many times it is attempted.
+     *
+     * By user rather than by call count: `debitCoinsOrKnow` retries, so an
+     * "every second debit" rule would break a different attempt each time and
+     * the test would be describing the retry schedule instead of the failure.
+     */
+    function breakDebitFor(userId) {
+        const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (filter, update, options) => {
+            if (isDebit(update) && filter.userId === userId) throw new Error('mongo is down');
+            return store(filter, update, options);
+        });
+    }
+
     test('gives back the stake the first debit had already taken', async () => {
         // The first debit returned a document, so it committed. The rejection
         // used to travel out to a handler whose `escrowTaken` was still false,
         // which refunded nothing and left that stake gone.
         seed(CH, 500); seed(OP, 500);
-        const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
-        let debits = 0;
-        mockUsers.model.findOneAndUpdate.mockImplementation(async (filter, update, options) => {
-            if (!Array.isArray(update) && ++debits === 2) throw new Error('mongo is down');
-            return store(filter, update, options);
-        });
+        breakDebitFor(OP);
 
         const result = await takeEscrow(CH, OP, GUILD, BET, DUEL);
 
@@ -153,14 +174,89 @@ describe('a debit that rejects mid-escrow', () => {
 
     test('does not reject at the caller', async () => {
         seed(CH, 500); seed(OP, 500);
-        const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
-        let debits = 0;
-        mockUsers.model.findOneAndUpdate.mockImplementation(async (filter, update, options) => {
-            if (!Array.isArray(update) && ++debits === 2) throw new Error('mongo is down');
-            return store(filter, update, options);
-        });
+        breakDebitFor(OP);
 
         await expect(takeEscrow(CH, OP, GUILD, BET, DUEL)).resolves.toBeDefined();
+    });
+
+    // #969. The half #873 left open: a debit whose *own* outcome is unknown.
+    // Every attempt rejected, so nothing came back to read — but the key is on
+    // the document if any of them committed, and it is not if none did. The
+    // rejection stops being a dead end and becomes a question with an answer.
+    test('reads the key to decide whether the opponent was charged', async () => {
+        seed(CH, 500); seed(OP, 500);
+        breakDebitFor(OP);
+
+        await takeEscrow(CH, OP, GUILD, BET, DUEL);
+
+        // No key on the opponent's document, so their debit never landed, so
+        // nothing of theirs was given back and nothing was minted.
+        expect(mockUsers.get(OP).spentDebits ?? []).toEqual([]);
+        expect(balanceOf(OP)).toBe(500);
+    });
+
+    // The other direction of the same ambiguity, and the one that used to have
+    // no safe answer at all: the *challenger's* debit is the first write, so
+    // there is nothing else to reason from. Compensating anyway is safe because
+    // the compensation is conditioned on the key.
+    /**
+     * Takes the debit *and* the read that would resolve it away from one player.
+     *
+     * This is the state the key cannot rescue: every attempt rejected and the
+     * document cannot be reached to ask what happened. It is not the old
+     * ambiguity — the answer is written down and can be asked for later — but
+     * within this call there is nothing to act on, which is what these two
+     * cases are about.
+     */
+    function blindDebitFor(userId) {
+        const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (f, u, o) => {
+            if (isDebit(u) && f.userId === userId) throw new Error('mongo is down');
+            return store(f, u, o);
+        });
+        const read = mockUsers.model.findOne.getMockImplementation();
+        mockUsers.model.findOne.mockImplementation((f, p) => {
+            if (f?.userId === userId) throw new Error('mongo is down');
+            return read(f, p);
+        });
+    }
+
+    test('compensates the challenger blind when even the resolution read fails', async () => {
+        seed(CH, 500); seed(OP, 500);
+        blindDebitFor(CH);
+
+        const result = await takeEscrow(CH, OP, GUILD, BET, DUEL);
+
+        // The compensation is conditioned on the key, so calling it without
+        // knowing whether the debit landed is safe: there is no key, so it does
+        // nothing, and `refunded` says what the player needs to hear — no coins
+        // of theirs are missing.
+        expect(result).toMatchObject({ success: false, reason: 'error', returned: { refunded: true, owed: false } });
+        expect([balanceOf(CH), balanceOf(OP)]).toEqual([500, 500]);
+    });
+
+    test('still returns the challenger when the opponent\'s debit cannot be resolved', async () => {
+        seed(CH, 500); seed(OP, 500);
+        blindDebitFor(OP);
+
+        const result = await takeEscrow(CH, OP, GUILD, BET, DUEL);
+
+        // The challenger's stake is known to have left — its own debit returned
+        // a document — so it comes back whatever is true of the opponent's.
+        expect(result).toMatchObject({ success: false, reason: 'error', returned: { refunded: true } });
+        expect([balanceOf(CH), balanceOf(OP)]).toEqual([500, 500]);
+    });
+
+    test('mints nothing when the challenger\'s own debit is indeterminate', async () => {
+        seed(CH, 500); seed(OP, 500);
+        breakDebitFor(CH);
+
+        const result = await takeEscrow(CH, OP, GUILD, BET, DUEL);
+
+        expect(result).toMatchObject({ success: false, reason: 'error' });
+        // The debit did not land, so the blind reversal was a no-op rather than
+        // a free 100 coins — and the opponent was never charged.
+        expect([balanceOf(CH), balanceOf(OP)]).toEqual([500, 500]);
     });
 });
 
