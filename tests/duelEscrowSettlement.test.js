@@ -126,14 +126,17 @@ describe('taking the escrow', () => {
     test('does not throw the rollback failure at a caller that will not refund', async () => {
         seed(CH, 500); seed(OP, 10);
         // The rollback used to be an unguarded `await`, so this rejection
-        // escaped `takeEscrow` into a catch that had `escrowTaken` false.
+        // escaped `takeEscrow` into a catch that had `escrowTaken` false. What
+        // matters is still that it does not: the caller gets a result, and that
+        // result says the stake did not come back.
         //
-        // Both writes the rollback can make have to fail to reach the owed
-        // ledger now: the keyed reversal is tried first, and only once the key
-        // has been read and says that reversal did not land is the
-        // unconditional credit reached. Breaking the credit alone would leave
-        // the reversal to succeed, which is the stake coming back — the right
-        // outcome, but not the one this test is about.
+        // It is not filed as owed, and that is deliberate rather than a gap. A
+        // ledger replay credits under a payout key, which cannot see the keyed
+        // reversal that may yet commit — filing it is how the stake gets paid
+        // twice. The un-reversed key left on the document is the record here,
+        // and re-reversing it is idempotent. `refundEscrow` still uses the
+        // ledger, and the tests below still cover it, because no reversal
+        // competes with it there.
         // The store's own implementation, not the mock wrapping it: calling
         // the mock from inside its own replacement recurses forever.
         const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
@@ -144,10 +147,66 @@ describe('taking the escrow', () => {
 
         const result = await takeEscrow(CH, OP, GUILD, BET, DUEL);
 
-        expect(result).toMatchObject({ reason: 'opponent', returned: { refunded: false, owed: true } });
-        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
-            payload: expect.objectContaining({ kind: 'coins', userId: CH, amount: BET }),
-        }));
+        expect(result).toMatchObject({ reason: 'opponent', returned: { refunded: false, owed: false } });
+        expect(recordOwedPayout).not.toHaveBeenCalled();
+        // The stake is still debited and the key still stands un-reversed, which
+        // is what makes it recoverable by the same idempotent call.
+        expect(balanceOf(CH)).toBe(400);
+        expect(mockUsers.get(CH).spentDebits.map(e => [e.key, e.reversed ?? false]))
+            .toEqual([[`duel:${DUEL}:escrow:${CH}`, false]]);
+    });
+
+    // The race the second review round found, and the reason the rollback has no
+    // unconditional fallback: a write whose client connection failed can still
+    // commit afterwards, so a read that sees the key un-reversed has established
+    // only what was true when it ran.
+    //
+    // The interleaving is exact — the reversal's write is held back until the
+    // resolution read has returned the stale document, then allowed to land.
+    // With a `returnStake` fallback the player ends on 600: the delayed reversal
+    // credits, and so does the payout-keyed credit, because the two live in
+    // different arrays behind different filters and neither can see the other.
+    test('does not pay the stake twice when a failed reversal commits late', async () => {
+        seed(CH, 500); seed(OP, 10);
+
+        const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        let commitTheReversal = null;
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (f, u, o) => {
+            if (!isReversal(u)) return store(f, u, o);
+            // In flight: the client is told it failed, and the write is parked
+            // rather than discarded.
+            commitTheReversal = () => store(f, u, o);
+            throw new Error('connection reset');
+        });
+
+        const read = mockUsers.model.findOne.getMockImplementation();
+        mockUsers.model.findOne.mockImplementation((f, p) => {
+            const query = read(f, p);
+            if (f?.userId !== CH || !commitTheReversal) return query;
+            // The read must *succeed* and answer with the pre-reversal
+            // document — breaking it instead would exercise a different branch
+            // entirely. The parked write lands immediately afterwards, which is
+            // the delayed server-side commit.
+            return {
+                ...query,
+                lean: async () => {
+                    const stale = await query.lean();
+                    const commit = commitTheReversal;
+                    commitTheReversal = null;
+                    await commit();
+                    return stale;
+                },
+            };
+        });
+
+        await takeEscrow(CH, OP, GUILD, BET, DUEL);
+
+        // Exactly one credit: the reversal's own. The stake is back, once.
+        expect(balanceOf(CH)).toBe(500);
+        expect(mockUsers.get(CH).spentDebits.map(e => e.reversed)).toEqual([true]);
+        // And nothing was filed in the ledger, which would have replayed as a
+        // second credit under a key the reversal cannot see.
+        expect(recordOwedPayout).not.toHaveBeenCalled();
     });
 
     // The one branch that deliberately does nothing. Everywhere else an unknown
