@@ -237,7 +237,8 @@ describe('POST leveling/adjust', () => {
 
         const settle = mockUsers.writes.at(-1);
         expect(settle.op).toBe('findOneAndUpdate');
-        expect(settle.query).toMatchObject({ userId: USER, guildId: GUILD, xp: 700 });
+        // The whole pair, not the XP alone — see the ABA test below.
+        expect(settle.query).toMatchObject({ userId: USER, guildId: GUILD, level: 2, xp: 700 });
         expect(settle.update).toEqual({ $set: { level: 4, xp: 0 } });
     });
 
@@ -275,19 +276,56 @@ describe('POST leveling/adjust', () => {
         expect(mockUsers.get(USER)).toMatchObject({ level: 2, xp: 55 });
     });
 
-    test('a settle that keeps losing the guard gives up rather than spinning', async () => {
+    // CodeRabbit on #977: the guard named only `xp`, so it was an ABA check. A
+    // level set between the adjustment and its settle moves `level` while a
+    // following give can put `xp` back to the very value the settle was computed
+    // from — and the settle then wrote a level derived from the *old* level over
+    // the new one.
+    test('a settle does not overwrite a level set while it was in flight', async () => {
         mockUsers.seed({ userId: USER, guildId: GUILD, xp: 40, level: 2 });
-        // Every attempt is beaten, so the bound is what ends this.
+        // Between the give's write and its settle: set_level 7 (which zeroes XP)
+        // and a further give that lands XP back on 300, the value the in-flight
+        // settle read.
+        const restore = concurrentlyWriteBeforeSettle(() => {
+            Object.assign(mockUsers.get(USER), { level: 7, xp: 300 });
+        }, { times: 1 });
+
+        const res = await adjustLeveling({ userId: USER, action: 'give', amount: 260 });
+        restore();
+
+        // Level 7 survives: the settle computed level 3 from the pair it read,
+        // and that pair is no longer the member's.
+        expect(mockUsers.get(USER).level).toBe(7);
+        expect(res.status).toBe(200);
+    });
+
+    // CodeRabbit on #977: giving up used to answer a plain success carrying
+    // whatever the last re-read held — which can be XP still past its threshold,
+    // i.e. a rank the database does not hold, reported as final.
+    test('a settle that keeps losing the guard says so instead of claiming success', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, xp: 40, level: 2 });
+        // Every attempt is beaten, and each interloper leaves XP unsettled.
         let n = 0;
         const restore = concurrentlyWriteBeforeSettle(() => { mockUsers.get(USER).xp = 1000 + (n += 1); });
 
         const res = await adjustLeveling({ userId: USER, action: 'give', amount: 660 });
         restore();
 
+        // Not a 4xx: the XP moved and is durable, so inviting a retry would
+        // invite a second grant. The response says the level has not caught up.
         expect(res.status).toBe(200);
-        // Three attempts, each losing its guard: no settle write landed.
+        expect(res.body).toMatchObject({ success: true, settled: false });
+        // Every attempt lost its guard, so no settle write landed.
         expect(mockUsers.writes.filter(write => 'xp' in write.query)).toEqual([]);
-        expect(n).toBe(3);
+        expect(n).toBe(5);
+    });
+
+    test('an ordinary settled response does not carry the settled flag', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, xp: 40, level: 2 });
+
+        const res = await adjustLeveling({ userId: USER, action: 'give', amount: 660 });
+
+        expect(res.body).toEqual({ success: true, level: 4, xp: 0 });
     });
 
     test('take runs, and clamps at zero', async () => {
