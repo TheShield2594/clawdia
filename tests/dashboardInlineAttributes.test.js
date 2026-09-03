@@ -54,7 +54,7 @@ const PUBLIC = path.join(__dirname, '..', 'src', 'dashboard', 'public');
 // `script-src-attr` was, and untangling 327 of them is the large change with no
 // visible result that #692 declined to make.
 const BASELINE = {
-    'dashboard.ejs': 4,
+    'dashboard.ejs': 3,
     'guild-settings.ejs': 12,
     'index.ejs': 11,
     'partials/game-item-card.ejs': 1,

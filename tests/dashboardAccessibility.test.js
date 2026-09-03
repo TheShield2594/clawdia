@@ -618,3 +618,63 @@ describe('injected images', () => {
         expect(script).toMatch(/imgEl\.alt\s*=/);
     });
 });
+
+// #944. On a guild the bot is not in and cannot be invited to, the server
+// picker rendered "Not configured" as a <span> carrying .cw-btn dimmed to 45%
+// opacity: a non-interactive element dressed as a button, whose text landed
+// below AA at that opacity. It is plain muted text now.
+describe('the server picker\'s unconfigured guild', () => {
+    const ejs = require('ejs');
+    const VIEWS = path.join(__dirname, '..', 'src', 'dashboard', 'views');
+    const { asset } = require('../src/dashboard/lib/assets');
+
+    const render = guild => {
+        const file = path.join(VIEWS, 'dashboard.ejs');
+        return ejs.render(fs.readFileSync(file, 'utf8'), {
+            user: { id: '1', username: 'tester', avatar: null },
+            guilds: [guild],
+            version: '1.2.3',
+            asset,
+        }, { filename: file });
+    };
+
+    const UNCONFIGURED = { id: '7', name: 'No invite', icon: null, botPresent: false, inviteUrl: null };
+
+    it('does not dress the label as a button', () => {
+        const html = render(UNCONFIGURED);
+
+        expect(html).toContain('Not configured');
+        const tag = /<span[^>]*>Not configured<\/span>/.exec(html)[0];
+        expect([tag, /\bcw-dash-lp-unavailable\b/.test(tag)]).toEqual([tag, true]);
+        expect([tag, /cw-btn/.test(tag)]).toEqual([tag, false]);
+        expect([tag, /opacity/.test(tag)]).toEqual([tag, false]);
+    });
+
+    it('still renders a real link when the guild can be acted on', () => {
+        // The two live branches are what the span is the fallback for; a fix
+        // that flattened them all to text would pass the assertion above.
+        expect(render({ ...UNCONFIGURED, botPresent: true })).toMatch(/<a[^>]+href="\/dashboard\/guild\/7"/);
+        expect(render({ ...UNCONFIGURED, inviteUrl: 'https://example.invalid/invite' })).toContain('Invite bot');
+    });
+
+    it('colours the label at a ratio that passes AA against the card', () => {
+        // The card is #fff and the label is 13px, so it needs 4.5:1. --ink-400,
+        // the other muted token, is 3.7:1 there and would not do.
+        const css = fs.readFileSync(path.join(PUBLIC, 'styles.css'), 'utf8');
+        const rule = /\.cw-dash-lp-unavailable\s*\{([^}]*)\}/.exec(css);
+        expect(rule).not.toBeNull();
+
+        const token = /color:\s*var\((--[\w-]+)\)/.exec(rule[1])[1];
+        const hex = new RegExp(`${token}\\s*:\\s*(#[0-9a-f]{6})`, 'i').exec(css)[1];
+
+        const channel = c => {
+            const s = parseInt(c, 16) / 255;
+            return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        };
+        const luminance = 0.2126 * channel(hex.slice(1, 3))
+            + 0.7152 * channel(hex.slice(3, 5))
+            + 0.0722 * channel(hex.slice(5, 7));
+
+        expect(1.05 / (luminance + 0.05)).toBeGreaterThanOrEqual(4.5);
+    });
+});

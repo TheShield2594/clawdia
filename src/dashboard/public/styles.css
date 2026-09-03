@@ -1428,6 +1428,10 @@ textarea.auto-resize {
 
 .cw-btn.cw-dash-lp-action { flex-shrink: 0; padding: 9px 16px; font-size: 13px; border-radius: 999px; }
 .cw-btn.cw-dash-lp-action:focus-visible { outline: 2px solid var(--ink-950); outline-offset: 3px; }
+/* Not a control — there is nothing to invite a click on a guild the bot cannot
+   be invited to. Plain muted text on the card's white background at
+   --ink-500 (5.7:1), rather than .cw-btn dimmed to 45% (below 4.5:1). */
+.cw-dash-lp-unavailable { flex-shrink: 0; font-size: 13px; color: var(--ink-500); }
 
 /* Empty state */
 .cw-dash-lp-empty {

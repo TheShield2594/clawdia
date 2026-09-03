@@ -111,7 +111,7 @@ the first upgrade of a deployment with data in it.
 ## Manual Installation
 
 ```bash
-npm install
+npm ci          # ci, not install — the lockfile is the build
 npm run deploy  # Optional: publish the slash commands now, without starting
 npm start
 ```
