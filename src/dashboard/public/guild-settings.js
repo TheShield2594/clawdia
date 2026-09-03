@@ -399,13 +399,24 @@ document.querySelectorAll('.panel').forEach(p => {
     if (!p.classList.contains('active')) p.style.display = 'none';
 });
 
+// The selected state of an inner tab, in the three places it has to agree:
+// the class the stylesheet paints from, the `aria-selected` a screen reader
+// reads, and the roving tabindex that keeps one tab stop per strip (#909).
+// The markup ships all three already set, so this only has to keep them in
+// step as the reader moves around.
+function markInnerTab(tab, selected) {
+    tab.classList.toggle('active', selected);
+    tab.setAttribute('aria-selected', String(selected));
+    tab.setAttribute('tabindex', selected ? '0' : '-1');
+}
+
 // AI inner tab navigation
 function switchAiInnerTab(tabId) {
-    document.querySelectorAll('#ai .ai-inner-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('#ai .ai-inner-tab').forEach(t => markInnerTab(t, false));
     document.querySelectorAll('#ai .ai-inner-panel').forEach(p => p.classList.remove('active'));
     const btn = document.querySelector(`.ai-inner-tab[data-ai-tab="${tabId}"]`);
     const panel = document.getElementById(tabId);
-    if (btn) btn.classList.add('active');
+    if (btn) markInnerTab(btn, true);
     if (panel) panel.classList.add('active');
     if (tabId === 'ai-knowledgebase') loadKnowledgeBase();
     if (tabId === 'ai-summaries') loadSummaryJobs();
@@ -415,22 +426,22 @@ function switchAiInnerTab(tabId) {
 
 // RSS inner tab navigation
 function switchRssInnerTab(tabId) {
-    document.querySelectorAll('.rss-inner-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.rss-inner-tab').forEach(t => markInnerTab(t, false));
     document.querySelectorAll('#rss .ai-inner-panel').forEach(p => p.classList.remove('active'));
     const btn = document.querySelector(`.rss-inner-tab[data-rss-tab="${tabId}"]`);
     const panel = document.getElementById(tabId);
-    if (btn) btn.classList.add('active');
+    if (btn) markInnerTab(btn, true);
     if (panel) panel.classList.add('active');
 }
 
 // Game inner tab navigation (Hunt / Fish / Mine)
 function makeGameTabSwitcher(tabClass, panelSelector, dataAttr) {
     return function switchTab(tabId) {
-        document.querySelectorAll('.' + tabClass).forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.' + tabClass).forEach(t => markInnerTab(t, false));
         document.querySelectorAll(panelSelector).forEach(p => p.classList.remove('active'));
         const btn = document.querySelector('.' + tabClass + '[data-' + dataAttr + '="' + tabId + '"]');
         const panel = document.getElementById(tabId);
-        if (btn) btn.classList.add('active');
+        if (btn) markInnerTab(btn, true);
         if (panel) panel.classList.add('active');
     };
 }
@@ -468,6 +479,37 @@ document.addEventListener('click', e => {
     } else if (cls.contains('ai-inner-tab')) {
         switchAiInnerTab(tab.dataset.aiTab);
     }
+});
+
+// Arrow-key navigation within a tab strip (#909). A tablist is one tab stop:
+// Tab reaches the selected tab, and Left/Right move between the tabs in that
+// strip. Delegated for the same reason the click handler above is — the strip
+// may not have been fetched yet. Nested strips (the hunt/fish/mine item
+// categories inside Economy) resolve to the closest tablist, so an arrow press
+// stays inside the strip the reader is actually in.
+const INNER_TAB_KEYS = { ArrowLeft: -1, ArrowRight: 1, Home: 'first', End: 'last' };
+document.addEventListener('keydown', e => {
+    const step = INNER_TAB_KEYS[e.key];
+    if (step === undefined || e.ctrlKey || e.metaKey || e.altKey) return;
+    const tab = e.target.closest && e.target.closest('[role="tab"]');
+    const strip = tab && tab.closest('[role="tablist"]');
+    if (!strip) return;
+
+    const tabs = [...strip.querySelectorAll(':scope > [role="tab"]')];
+    const at = tabs.indexOf(tab);
+    if (at === -1) return;
+
+    let next;
+    if (step === 'first') next = tabs[0];
+    else if (step === 'last') next = tabs[tabs.length - 1];
+    // Wraps at both ends, which is what a tablist is expected to do.
+    else next = tabs[(at + step + tabs.length) % tabs.length];
+
+    e.preventDefault();
+    // Activate as well as focus: these panels are already in the document, so
+    // there is nothing to be gained by making the reader press Enter as well.
+    next.focus();
+    next.dispatchEvent(new Event('click', { bubbles: true }));
 });
 
 // An inner tab can only be selected once its parent panel has arrived, which is

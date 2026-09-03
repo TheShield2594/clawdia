@@ -55,7 +55,7 @@ const PUBLIC = path.join(__dirname, '..', 'src', 'dashboard', 'public');
 // visible result that #692 declined to make.
 const BASELINE = {
     'dashboard.ejs': 3,
-    'guild-settings.ejs': 12,
+    'guild-settings.ejs': 11,
     'index.ejs': 11,
     'partials/game-item-card.ejs': 1,
     'partials/panels/achievements.ejs': 14,
