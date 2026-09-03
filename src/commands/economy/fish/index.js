@@ -2,10 +2,14 @@
 
 // /fish — the command definition and nothing else but dispatch.
 //
-// This was one 3,178-line file holding roughly forty-five top-level functions:
-// the cast roll, every embed, the shop, crafting, quests, repairs and location
-// handling, all beside a service layer that already existed for exactly this
-// logic (#721). Each group now has its own file and this one only routes to it,
+// Before #721 this was one file of about 3,200 lines holding roughly forty-five
+// top-level functions: the cast roll, every embed, the shop, crafting, quests,
+// repairs and location handling, all beside a service layer that already
+// existed for exactly this logic. What it comes to today is in README's "Shape
+// of the codebase" table, which is generated — a second figure written down
+// here is the drift #916 was about.
+//
+// Each group now has its own file and this one only routes to it,
 // which is also why the folder is a command rather than a file — the loader
 // treats <category>/<name>/index.js as one command, so the siblings here never
 // register as commands of their own.
