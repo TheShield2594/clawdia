@@ -241,6 +241,55 @@ describe('POST leveling/adjust', () => {
         expect(settle.update).toEqual({ $set: { level: 4, xp: 0 } });
     });
 
+    /**
+     * Lets a test land a write between the adjustment and the settle that
+     * follows it. `mutate` runs just before the guarded settle write — the one
+     * whose filter names an XP — so the guard is evaluated against a document
+     * that has moved underneath it, which is the race the guard exists for.
+     */
+    function concurrentlyWriteBeforeSettle(mutate, { times = Infinity } = {}) {
+        const real = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        let landed = 0;
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (query, update, options) => {
+            if ('xp' in query && landed < times) {
+                landed += 1;
+                mutate();
+            }
+            return real(query, update, options);
+        });
+        return () => mockUsers.model.findOneAndUpdate.mockImplementation(real);
+    }
+
+    test('a settle that loses the guard reports the pair the other writer left', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, xp: 40, level: 2 });
+        // One interloper, then the retry sees a consistent pair and stops.
+        const restore = concurrentlyWriteBeforeSettle(() => { mockUsers.get(USER).xp = 55; }, { times: 1 });
+
+        const res = await adjustLeveling({ userId: USER, action: 'give', amount: 660 });
+        restore();
+
+        // The level derived from 700 XP is not written over the 55 the other
+        // writer left, and the response describes the document as it stands.
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ success: true, level: 2, xp: 55 });
+        expect(mockUsers.get(USER)).toMatchObject({ level: 2, xp: 55 });
+    });
+
+    test('a settle that keeps losing the guard gives up rather than spinning', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, xp: 40, level: 2 });
+        // Every attempt is beaten, so the bound is what ends this.
+        let n = 0;
+        const restore = concurrentlyWriteBeforeSettle(() => { mockUsers.get(USER).xp = 1000 + (n += 1); });
+
+        const res = await adjustLeveling({ userId: USER, action: 'give', amount: 660 });
+        restore();
+
+        expect(res.status).toBe(200);
+        // Three attempts, each losing its guard: no settle write landed.
+        expect(mockUsers.writes.filter(write => 'xp' in write.query)).toEqual([]);
+        expect(n).toBe(3);
+    });
+
     test('take runs, and clamps at zero', async () => {
         mockUsers.seed({ userId: USER, guildId: GUILD, xp: 30 });
 
