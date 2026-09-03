@@ -69,9 +69,10 @@ async function buildGuildStats(guildId) {
         const channelId = item.channelId || 'unknown';
         let channel = bestTimesByChannel.get(channelId);
         if (!channel) {
-            channel = { hours: {}, bestHour: 0, bestCount: 0 };
+            channel = { hours: {}, bestHour: 0, bestCount: 0, total: 0 };
             bestTimesByChannel.set(channelId, channel);
         }
+        channel.total += 1;
         const count = (channel.hours[item.hour] || 0) + 1;
         channel.hours[item.hour] = count;
         // The sort this replaces ran over `Object.entries(hours)`, whose keys are
@@ -89,7 +90,13 @@ async function buildGuildStats(guildId) {
             msgVolMap[day] = (msgVolMap[day] || 0) + 1;
         }
     }
+    // Sorted by volume before the slice (#923). A Map iterates in insertion
+    // order, which here is the order channels first appear in the usage log —
+    // so slicing straight off the front kept whichever eight were logged first
+    // and presented them as the busiest, with a server's loudest channel able to
+    // be missing entirely. Ties keep insertion order, since Array#sort is stable.
     const bestPostingTimes = [...bestTimesByChannel.entries()]
+        .sort((a, b) => b[1].total - a[1].total)
         .slice(0, 8)
         .map(([channelId, channel]) => ({ channelId, hourUtc: Number(channel.bestHour) || 0 }));
 
