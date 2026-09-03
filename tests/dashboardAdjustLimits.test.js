@@ -192,15 +192,140 @@ describe('POST leveling/adjust', () => {
 
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ success: true, level: 2, xp: 100 });
+        // Level 2 needs 300 to advance, so nothing was folded — and the settle
+        // step wrote nothing rather than rewriting the pair it was handed.
+        expect(mockUsers.writes).toHaveLength(1);
     });
 
-    test('a give onto a maxed-out XP total clamps', async () => {
-        mockUsers.seed({ userId: USER, guildId: GUILD, xp: MAX_ADJUST_TOTAL });
+    // #924: `give` moved XP and left `level` alone, so the member kept their old
+    // rank — the leaderboard sorts by `{ level: -1, xp: -1 }` — until they next
+    // happened to send a message and applyXpGain caught the levels up.
+    test('a give that crosses thresholds levels the member up in the same request', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, xp: 40, level: 2 });
+
+        // 40 + 660 = 700, which buys level 2 → 3 (300) and 3 → 4 (400) exactly.
+        const res = await adjustLeveling({ userId: USER, action: 'give', amount: 660 });
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ success: true, level: 4, xp: 0 });
+        expect(mockUsers.get(USER)).toMatchObject({ level: 4, xp: 0 });
+    });
+
+    test('a give onto a maxed-out XP total clamps, then spends the clamped total', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, xp: MAX_ADJUST_TOTAL, level: 0 });
 
         const res = await adjustLeveling({ userId: USER, action: 'give', amount: MAX_ADJUST_AMOUNT });
 
-        expect(res.body.xp).toBe(MAX_ADJUST_TOTAL);
-        expect(Number.isSafeInteger(mockUsers.get(USER).xp)).toBe(true);
+        // The clamp still bites — the ceiling is what bounds the catch-up — and
+        // the ceiling's worth of XP is then folded into levels rather than left
+        // sitting in `xp` as a total no level reflects. XP is progress within a
+        // level, so what is conserved is the cumulative cost of getting there.
+        const { level, xp } = mockUsers.get(USER);
+        expect(50 * level * (level + 1) + xp).toBe(MAX_ADJUST_TOTAL);
+        expect(res.body).toEqual({ success: true, level, xp });
+        expect(Number.isSafeInteger(xp)).toBe(true);
+        expect(Number.isSafeInteger(level)).toBe(true);
+    });
+
+    // The settle is a second write, so it is guarded on the XP it was computed
+    // from: a concurrent adjustment must lose the guard rather than have a level
+    // derived from a total that is no longer the member's written over it.
+    test('the level settle is guarded on the XP it was derived from', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, xp: 40, level: 2 });
+
+        await adjustLeveling({ userId: USER, action: 'give', amount: 660 });
+
+        const settle = mockUsers.writes.at(-1);
+        expect(settle.op).toBe('findOneAndUpdate');
+        // The whole pair, not the XP alone — see the ABA test below.
+        expect(settle.query).toMatchObject({ userId: USER, guildId: GUILD, level: 2, xp: 700 });
+        expect(settle.update).toEqual({ $set: { level: 4, xp: 0 } });
+    });
+
+    /**
+     * Lets a test land a write between the adjustment and the settle that
+     * follows it. `mutate` runs just before the guarded settle write — the one
+     * whose filter names an XP — so the guard is evaluated against a document
+     * that has moved underneath it, which is the race the guard exists for.
+     */
+    function concurrentlyWriteBeforeSettle(mutate, { times = Infinity } = {}) {
+        const real = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        let landed = 0;
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (query, update, options) => {
+            if ('xp' in query && landed < times) {
+                landed += 1;
+                mutate();
+            }
+            return real(query, update, options);
+        });
+        return () => mockUsers.model.findOneAndUpdate.mockImplementation(real);
+    }
+
+    test('a settle that loses the guard reports the pair the other writer left', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, xp: 40, level: 2 });
+        // One interloper, then the retry sees a consistent pair and stops.
+        const restore = concurrentlyWriteBeforeSettle(() => { mockUsers.get(USER).xp = 55; }, { times: 1 });
+
+        const res = await adjustLeveling({ userId: USER, action: 'give', amount: 660 });
+        restore();
+
+        // The level derived from 700 XP is not written over the 55 the other
+        // writer left, and the response describes the document as it stands.
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ success: true, level: 2, xp: 55 });
+        expect(mockUsers.get(USER)).toMatchObject({ level: 2, xp: 55 });
+    });
+
+    // CodeRabbit on #977: the guard named only `xp`, so it was an ABA check. A
+    // level set between the adjustment and its settle moves `level` while a
+    // following give can put `xp` back to the very value the settle was computed
+    // from — and the settle then wrote a level derived from the *old* level over
+    // the new one.
+    test('a settle does not overwrite a level set while it was in flight', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, xp: 40, level: 2 });
+        // Between the give's write and its settle: set_level 7 (which zeroes XP)
+        // and a further give that lands XP back on 300, the value the in-flight
+        // settle read.
+        const restore = concurrentlyWriteBeforeSettle(() => {
+            Object.assign(mockUsers.get(USER), { level: 7, xp: 300 });
+        }, { times: 1 });
+
+        const res = await adjustLeveling({ userId: USER, action: 'give', amount: 260 });
+        restore();
+
+        // Level 7 survives: the settle computed level 3 from the pair it read,
+        // and that pair is no longer the member's.
+        expect(mockUsers.get(USER).level).toBe(7);
+        expect(res.status).toBe(200);
+    });
+
+    // CodeRabbit on #977: giving up used to answer a plain success carrying
+    // whatever the last re-read held — which can be XP still past its threshold,
+    // i.e. a rank the database does not hold, reported as final.
+    test('a settle that keeps losing the guard says so instead of claiming success', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, xp: 40, level: 2 });
+        // Every attempt is beaten, and each interloper leaves XP unsettled.
+        let n = 0;
+        const restore = concurrentlyWriteBeforeSettle(() => { mockUsers.get(USER).xp = 1000 + (n += 1); });
+
+        const res = await adjustLeveling({ userId: USER, action: 'give', amount: 660 });
+        restore();
+
+        // Not a 4xx: the XP moved and is durable, so inviting a retry would
+        // invite a second grant. The response says the level has not caught up.
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ success: true, settled: false });
+        // Every attempt lost its guard, so no settle write landed.
+        expect(mockUsers.writes.filter(write => 'xp' in write.query)).toEqual([]);
+        expect(n).toBe(5);
+    });
+
+    test('an ordinary settled response does not carry the settled flag', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, xp: 40, level: 2 });
+
+        const res = await adjustLeveling({ userId: USER, action: 'give', amount: 660 });
+
+        expect(res.body).toEqual({ success: true, level: 4, xp: 0 });
     });
 
     test('take runs, and clamps at zero', async () => {
@@ -242,5 +367,18 @@ describe('POST leveling/adjust', () => {
 
         expect(res.status).toBe(200);
         expect(mockUsers.get(USER).level).toBe(0);
+    });
+
+    // #924: setting a level left the old XP in place. XP is progress *within*
+    // the current level, so a level set beneath a large XP balance was undone by
+    // the member's next message, which re-derived the level the XP implied.
+    test('set_level puts the member at the start of that level', async () => {
+        mockUsers.seed({ userId: USER, guildId: GUILD, level: 2, xp: 250 });
+
+        const res = await adjustLeveling({ userId: USER, action: 'set_level', amount: 7 });
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ success: true, level: 7, xp: 0 });
+        expect(mockUsers.get(USER)).toMatchObject({ level: 7, xp: 0 });
     });
 });

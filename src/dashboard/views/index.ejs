@@ -99,7 +99,7 @@
         </div>
 
         <!-- Decorative claw mark -->
-        <svg class="cw-hero-art" viewBox="0 0 460 460" fill="none">
+        <svg class="cw-hero-art" viewBox="0 0 460 460" fill="none" aria-hidden="true">
             <ellipse cx="230" cy="320" rx="135" ry="95" fill="#14110d" opacity="0.06"/>
             <ellipse cx="90" cy="170" rx="42" ry="62" fill="#14110d" opacity="0.06" transform="rotate(-18 90 170)"/>
             <ellipse cx="180" cy="115" rx="42" ry="65" fill="#14110d" opacity="0.06" transform="rotate(-6 180 115)"/>
@@ -232,7 +232,10 @@
                     </div>
                     <div style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--ink-850);font-size:12px;color:var(--ink-200);border:1px solid var(--ink-800);font-family:'JetBrains Mono',monospace;">peak · Sat 21:00</div>
                 </div>
-                <div class="cw-heatmap" id="insights-heatmap"></div>
+                <!-- Illustrative demo data, drawn as 168 coloured cells with no text of
+                     their own. Hidden from assistive tech rather than announced as 168
+                     empty divs: there is nothing in them to read. -->
+                <div class="cw-heatmap" id="insights-heatmap" aria-hidden="true"></div>
                 <div class="cw-show-stats">
                     <div class="cw-show-stat">
                         <div class="v">D7 · 62%</div>

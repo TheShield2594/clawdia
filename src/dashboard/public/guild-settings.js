@@ -2452,7 +2452,13 @@ async function levelAdminAction(action) {
         const data = await resp.json();
         if (!resp.ok) { msgEl.style.color = 'var(--bad)'; msgEl.textContent = data.error || 'Failed.'; return; }
         msgEl.style.color = 'var(--good)';
-        msgEl.textContent = 'Done — level: ' + data.level + ' · XP: ' + Number(data.xp).toLocaleString();
+        // `settled: false` means the XP landed but another writer kept beating
+        // the level fold to the document. Saying "done" with a level the server
+        // has just told us it did not write would be the misreport this whole
+        // path exists to avoid.
+        msgEl.textContent = data.settled === false
+            ? 'XP applied — level is still catching up; reload in a moment.'
+            : 'Done — level: ' + data.level + ' · XP: ' + Number(data.xp).toLocaleString();
         loadLevelLeaderboard(1, true);
     } catch {
         msgEl.style.color = 'var(--bad)'; msgEl.textContent = 'Request failed.';

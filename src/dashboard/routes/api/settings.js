@@ -27,10 +27,21 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'dynamicPricing'
 ]);
 
+// Segments that must never appear anywhere in a dotted path (#920). The
+// allow-list bounds the *first* segment only, so `ai.__proto__.x` cleared it and
+// reached `guildSettings.set()` with the rest of the path intact. Mongoose's
+// strict schemas reject the unknown nested path today, which is why this was a
+// latent hole rather than a live one — but the check has to bound the whole path
+// for anything to be entitled to rely on its name.
+const FORBIDDEN_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
+
 function isAllowedSettingKey(key) {
     if (typeof key !== 'string') return false;
-    const top = key.split('.')[0];
-    return ALLOWED_SETTING_PARENTS.has(top);
+    const segments = key.split('.');
+    // An empty segment is `a..b` or a leading/trailing dot: not a path the UI
+    // ever sends, and not one worth handing to `.set()` to interpret.
+    if (segments.some(segment => segment === '' || FORBIDDEN_SEGMENTS.has(segment))) return false;
+    return ALLOWED_SETTING_PARENTS.has(segments[0]);
 }
 
 // Field-level validation for welcome settings before they reach Mongoose (fix #12).

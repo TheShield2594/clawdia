@@ -87,6 +87,33 @@ describe('isAllowedSettingKey', () => {
         expect(ALLOWED_SETTING_PARENTS.has('welcome')).toBe(true);
     });
 
+    // #920: the check read the first segment and nothing else, then the caller
+    // handed the *whole* dotted key to `guildSettings.set()`. So a pollution
+    // segment behind an allowed parent cleared the allow-list and arrived at the
+    // write intact. Mongoose's strict schema is what refused it in the end,
+    // which made this a hole in a named security control rather than a live bug.
+    it('refuses a pollution segment anywhere in the path, not just at the front', () => {
+        for (const key of [
+            'ai.__proto__.x',
+            'ai.constructor.prototype.polluted',
+            'welcome.message.__proto__',
+            'economy.prototype.x',
+        ]) {
+            expect([key, isAllowedSettingKey(key)]).toEqual([key, false]);
+        }
+    });
+
+    it('refuses a path with an empty segment', () => {
+        for (const key of ['welcome.', '.welcome', 'welcome..message']) {
+            expect([key, isAllowedSettingKey(key)]).toEqual([key, false]);
+        }
+    });
+
+    it('still accepts the deep paths the settings page actually sends', () => {
+        expect(isAllowedSettingKey('ai.mcpServers.0.confirmMode')).toBe(true);
+        expect(isAllowedSettingKey('moderation.autoModEnabled')).toBe(true);
+    });
+
     it('is exported as a copy, so a caller cannot widen the writable surface', () => {
         const mine = settings.ALLOWED_SETTING_PARENTS;
         mine.add('casinoJackpot');

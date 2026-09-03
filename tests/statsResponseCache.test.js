@@ -161,6 +161,43 @@ describe('/stats command-log aggregation', () => {
         expect(body.analytics.failedCommands).toEqual({ execution_error: 1, cooldown: 1 });
     });
 
+    // #923: the eight came off the front of a Map, whose iteration order is the
+    // order channels first appear in the log — so the panel showed whichever
+    // eight were logged first and called them the best, with a server's busiest
+    // channel able to be missing entirely.
+    test('ranks channels by volume rather than by which was logged first', async () => {
+        // Nine channels, seen in ascending order of activity: the quietest is
+        // first in the log, so an unsorted slice would drop the busiest.
+        const usage = [];
+        for (let i = 1; i <= 9; i++) {
+            for (let n = 0; n < i; n++) usage.push({ command: 'ping', success: true, channelId: `c${i}`, hour: i });
+        }
+        stubAnalytics({ guildId: 'g1', memberEvents: [], commandUsage: usage });
+
+        const { body } = await get('/guild/g1/stats');
+
+        expect(body.analytics.bestPostingTimes.map(entry => entry.channelId))
+            .toEqual(['c9', 'c8', 'c7', 'c6', 'c5', 'c4', 'c3', 'c2']);
+    });
+
+    test('breaks a volume tie toward the channel seen first', async () => {
+        stubAnalytics({
+            guildId: 'g1',
+            memberEvents: [],
+            commandUsage: [
+                { command: 'ping', success: true, channelId: 'first',  hour: 4 },
+                { command: 'ping', success: true, channelId: 'second', hour: 5 },
+            ],
+        });
+
+        const { body } = await get('/guild/g1/stats');
+
+        expect(body.analytics.bestPostingTimes).toEqual([
+            { channelId: 'first',  hourUtc: 4 },
+            { channelId: 'second', hourUtc: 5 },
+        ]);
+    });
+
     test('picks each channel\'s busiest hour, breaking ties toward the earlier one', async () => {
         const { body } = await get('/guild/g1/stats');
 
