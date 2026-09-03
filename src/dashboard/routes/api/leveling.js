@@ -5,6 +5,7 @@ const User = require('../../../models/User');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId, readAdjustAmount, MAX_ADJUST_TOTAL } = require('../../lib/apiHelpers');
 const { readPage, pageEnvelope } = require('../../lib/apiPage');
+const { normalizeLevelProgress } = require('../../../services/levelingService');
 
 // One page of members ranked by level then XP, 25 to a page.
 router.get('/guild/:guildId/leveling/leaderboard', checkAuth, checkGuildAccess, async (req, res) => {
@@ -26,6 +27,46 @@ router.get('/guild/:guildId/leveling/leaderboard', checkAuth, checkGuildAccess, 
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
+/**
+ * Fold a member's XP into levels after an adjustment, and persist the result.
+ *
+ * The adjustment itself is a pipeline update so the ceiling clamp is atomic, but
+ * a pipeline cannot express the catch-up: working out how many levels a pile of
+ * XP buys is a quadratic solve, not an arithmetic expression over the document.
+ * So the fold is a second write, guarded on the XP this was computed from — a
+ * concurrent adjustment loses the guard rather than being overwritten with a
+ * level derived from a total that is no longer the member's.
+ *
+ * A no-op when the pair is already consistent, which is the ordinary case: a
+ * give that does not cross a threshold writes nothing here.
+ *
+ * @param {object} filter    the `{ userId, guildId }` the adjustment matched
+ * @param {object} user      the document the adjustment returned
+ * @returns {Promise<object>} the document as it now stands
+ */
+async function settleLevel(filter, user) {
+    let current = user;
+    // Bounded rather than a retry-until-won loop: each lost guard means another
+    // writer has since settled the pair itself, so a caller that runs out of
+    // attempts is reporting a consistent document written by someone else.
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const settled = normalizeLevelProgress(current.level, current.xp);
+        if (settled.level === (current.level || 0) && settled.xp === (current.xp || 0)) return current;
+
+        const written = await User.findOneAndUpdate(
+            { ...filter, xp: current.xp },
+            { $set: settled },
+            { new: true },
+        );
+        if (written) return written;
+
+        const reread = await User.findOne(filter).select('userId level xp');
+        if (!reread) return current;
+        current = reread;
+    }
+    return current;
+}
 
 // Gives, takes, resets or sets one member's XP or level.
 router.post('/guild/:guildId/leveling/adjust', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
@@ -63,14 +104,24 @@ router.post('/guild/:guildId/leveling/adjust', checkAuth, checkGuildAccess, chec
         } else if (action === 'reset') {
             update = { $set: { xp: 0, level: 0 } };
         } else {
-            update = { $set: { level: amt } };
+            // XP is progress within the current level, so the level a moderator
+            // sets means "at the start of level N" and its XP is zero (#924).
+            // Leaving the old XP behind is what let the next message re-derive a
+            // different level and undo the adjustment on the spot.
+            update = { $set: { level: amt, xp: 0 } };
         }
         // No upsert (#584) — see the note on the economy adjust route: a mistyped
         // snowflake is still a well-formed one, and upserting turned it into a
         // phantom member document instead of an error the admin could act on.
         const user = await User.findOneAndUpdate(filter, update, options);
         if (!user) return res.status(404).json({ error: 'That member has no leveling record in this server' });
-        res.json({ success: true, level: user.level, xp: user.xp });
+
+        // `give` and `take` move XP without touching the level it implies, and
+        // the leaderboard sorts by `{ level: -1, xp: -1 }` — so until this runs,
+        // a 50,000 XP grant left the member ranked where they were and only
+        // caught up whenever they next happened to speak (#924).
+        const settled = ['give', 'take'].includes(action) ? await settleLevel(filter, user) : user;
+        res.json({ success: true, level: settled.level, xp: settled.xp });
     } catch (err) {
         console.error('Leveling adjust error:', err);
         res.status(500).json({ error: 'Internal server error' });
