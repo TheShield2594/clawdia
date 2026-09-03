@@ -1,0 +1,190 @@
+name: Scheduled security scan
+
+# #902: both security gates live in ci.yml, which runs on push, pull_request
+# and workflow_dispatch only — so `npm audit` and the Trivy image scan fire
+# when someone commits and at no other time. A new advisory against a
+# dependency, or a CVE in the Alpine base layer, therefore goes unnoticed for
+# as long as the repo is quiet, which for a self-hosted bot between releases is
+# months. Dependabot covers the dependency half when it raises a bump; nothing
+# re-scanned the *published* image that self-hosters are actually running.
+#
+# This runs the same two checks on a cron, at the same thresholds, so the
+# numbers here and in ci.yml mean the same thing. It is a separate workflow
+# rather than a `schedule:` trigger on ci.yml because ci.yml also publishes:
+# a scheduled run of it would rebuild and repoint `:latest` every week for no
+# reason, and the concurrency group that serializes publishing would be
+# contended by a job that has nothing to publish.
+#
+# A failure here mails the repo owner, which is the notification path — there
+# is no PR for it to be a red check on.
+
+on:
+  schedule:
+    # Weekly, Monday morning UTC. The minute is deliberately not :00 — GitHub's
+    # scheduler is heavily contended on the hour and delays runs queued there.
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+# GitHub disables `schedule:` triggers in a repository with no activity for 60
+# days, and this workflow exists precisely for the quiet stretches. If the
+# Actions tab shows it stopped firing, that is why: re-enable it there, or push
+# anything.
+
+concurrency:
+  group: security-scan
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # The dependency half. Deliberately a separate job from the image scan rather
+  # than two steps in one: they fail for unrelated reasons and a reader should
+  # be able to see which half is red without opening the log.
+  dependencies:
+    name: Audit dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: '.nvmrc'
+
+      # No `npm ci` first: `npm audit` resolves the advisory set from
+      # package-lock.json alone, so the install would buy nothing but minutes —
+      # and it would run every dependency's install scripts inside a scheduled
+      # job whose whole subject is untrusted dependency code.
+      #
+      # `high` and the whole tree, dev dependencies included, matching ci.yml.
+      # The two must stay at the same bar or this one starts reporting things
+      # the gate on the pull request will not.
+      #
+      # `npm audit` exits non-zero for two unrelated reasons: it found
+      # advisories at or above the level, or it never managed to ask. The
+      # registry's bulk advisory endpoint 503s often enough that the first run
+      # of this job hit one, and a weekly scan that reports an outage as a
+      # finding mails a false alarm — a gate that cries wolf is one people stop
+      # reading. So the registry's own failures are retried, and if it never
+      # answers the job still fails, but says why. Failing either way is
+      # deliberate: "could not audit" is not "nothing to report", which is the
+      # same distinction the image job below draws.
+      - name: Audit dependencies
+        run: |
+          attempt=1
+          attempts=3
+
+          while true; do
+            output=$(npm audit --audit-level=high 2>&1) && status=0 || status=$?
+            printf '%s\n' "$output"
+
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+
+            # Matched on npm's own words for "I could not reach the registry",
+            # not on the HTTP code: "503" and "Service Unavailable" both turn
+            # up inside advisory titles and version ranges, and reading a real
+            # finding as an outage would retry it and then report the wrong
+            # reason for the failure.
+            if ! printf '%s\n' "$output" | grep -qiE 'audit endpoint returned an error|npm (error|ERR!) network|npm (error|ERR!) code (ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|ENETUNREACH)'; then
+              exit "$status"
+            fi
+
+            if [ "$attempt" -ge "$attempts" ]; then
+              echo "::error::npm audit could not reach the registry in $attempts attempts — the dependency tree has not been audited this run"
+              exit 1
+            fi
+
+            echo "::notice::npm audit could not reach the registry (attempt $attempt of $attempts); retrying"
+            sleep $(( attempt * 15 ))
+            attempt=$(( attempt + 1 ))
+          done
+
+  # The half that has no other coverage at all. ci.yml scans the image it just
+  # built, before pushing it; nothing re-scans the tag once it is published, and
+  # a base-layer CVE disclosed after the build lands in exactly that gap.
+  image:
+    name: Scan the published image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A fork, or this repo before its first release, has no `:latest` to scan.
+      # That is not a vulnerability and must not be reported as one — a job that
+      # is red for a reason nobody can act on is a job people stop reading. It
+      # is still said out loud, because "publishing has been broken for a month"
+      # looks identical from here and is worth someone noticing.
+      #
+      # Only a manifest the registry positively reports as absent counts as
+      # that, though. A failed login, a revoked token, a registry outage or a
+      # DNS failure all make `docker manifest inspect` non-zero too, and
+      # treating those as "nothing published" would skip the scan and report
+      # the job green — a security gate that passes precisely when it could not
+      # run is worse than no gate, because it looks like one. Anything that is
+      # not a missing image fails the job with the registry's own words in the
+      # log.
+      - name: Check the image exists
+        id: image
+        run: |
+          ref="${REGISTRY}/${IMAGE_NAME}:latest"
+
+          if output=$(docker manifest inspect "$ref" 2>&1); then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "ref=$ref" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The registry's vocabulary for "that tag is not here". GHCR answers
+          # `manifest unknown` for a tag that was never pushed and `name
+          # unknown` for a package that does not exist at all.
+          if printf '%s\n' "$output" | grep -qiE 'manifest unknown|name unknown|no such manifest|not found'; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::no $ref to scan — nothing has been published yet, or the publish is failing"
+            exit 0
+          fi
+
+          # Printed rather than folded into the annotation: the message is
+          # often several lines, and a `::error::` swallows everything after
+          # the first.
+          printf '%s\n' "$output"
+          echo "::error::could not tell whether $ref exists — see the registry error above. Not scanning is not the same as nothing to scan."
+          exit 1
+
+      # Same two narrowings as ci.yml, for the same reason: `ignore-unfixed`
+      # drops findings with no fixed version, which are the bulk of an Alpine
+      # report and have no action behind them, and HIGH/CRITICAL matches the
+      # `--audit-level=high` above so both halves are gated at one bar.
+      #
+      # Unlike ci.yml's copy, this one is scanning an image that is already
+      # published and already running somewhere. A finding here is not "do not
+      # ship this" but "what is deployed needs a rebuild", so the fix is a
+      # release, not a revert.
+      - name: Scan the image for known vulnerabilities
+        if: steps.image.outputs.found == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table

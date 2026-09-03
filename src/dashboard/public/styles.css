@@ -586,6 +586,10 @@ body {
 }
 .ai-inner-tab:hover { color: var(--text); background: var(--surface-strong); }
 .ai-inner-tab.active { color: var(--text); border-bottom-color: var(--accent, #f97316); font-weight: 600; }
+/* A tablist is one tab stop and the arrows move within it (#909), so the
+   reader has to be able to see which tab they are on. Keyed off the role
+   rather than `.ai-inner-tab`, to cover the item-category strips too. */
+.ai-inner-tabs [role="tab"]:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; border-radius: 6px; }
 .ai-inner-panel { display: none; }
 .ai-inner-panel.active { display: block; animation: panel-in 0.2s ease; }
 .ai-inner-desc { color: var(--text-dim); font-size: 0.92rem; margin-bottom: 1.5rem; }
@@ -1497,8 +1501,12 @@ textarea.auto-resize {
    is the way back out of a server you opened by mistake. */
 .dash-side.nav-collapsed .dash-side-nav,
 .dash-side.nav-collapsed .dash-side-footer { display: none; }
-.dash-server-switch { background: var(--ink-850); border: 1px solid var(--ink-800); border-radius: 14px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 22px; transition: border-color .15s; }
+.dash-server-switch { background: var(--ink-850); border: 1px solid var(--ink-800); border-radius: 14px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 22px; transition: border-color .15s; text-decoration: none; }
 .dash-server-switch:hover { border-color: var(--ink-600); }
+/* #943, same defect as the back link below: the underline was suppressed by an
+   inline style on the anchor, and the border-colour hover was the only state
+   it had — nothing at all for a keyboard user. */
+.dash-server-switch:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; }
 .dash-server-avatar { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--claw-500), var(--plum-500)); display: flex; align-items: center; justify-content: center; font-family: 'Instrument Serif', serif; color: #fff; font-size: 18px; flex-shrink: 0; }
 .dash-server-name { flex: 1; min-width: 0; }
 .dash-server-name b { font-size: 14px; display: block; color: var(--cream-50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1640,6 +1648,10 @@ textarea.auto-resize {
 }
 .all-servers-link:hover,
 .all-servers-link:focus-visible { color: var(--cream-50); }
+/* #943. The hover colour was the whole of the focus treatment, and #d4cbb9 to
+   #faf6ef is a 1.3:1 change — not a focus indicator, just a slightly brighter
+   link. The ring is the same one the sidebar items use. */
+.all-servers-link:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; }
 
 /* ── Unsaved changes (#662) ───────────────────────────────────────────
    A section with edits that have not reached the server yet. The dot is

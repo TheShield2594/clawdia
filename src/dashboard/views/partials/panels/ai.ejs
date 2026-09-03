@@ -5,16 +5,16 @@
                     </div>
 
                     <!-- Inner AI tabs -->
-                    <div class="ai-inner-tabs">
-                        <button class="ai-inner-tab active" data-ai-tab="ai-chat">🧠 Chat</button>
-                        <button class="ai-inner-tab" data-ai-tab="ai-knowledgebase">📚 Knowledge Base</button>
-                        <button class="ai-inner-tab" data-ai-tab="ai-summaries">📝 Summaries</button>
-                        <button class="ai-inner-tab" data-ai-tab="ai-personas">👤 Personas</button>
-                        <button class="ai-inner-tab" data-ai-tab="ai-mcp">🔌 Connections</button>
+                    <div class="ai-inner-tabs" role="tablist" aria-label="AI sections">
+                        <button class="ai-inner-tab active" type="button" role="tab" id="tab-ai-chat" aria-controls="ai-chat" aria-selected="true" tabindex="0" data-ai-tab="ai-chat">🧠 Chat</button>
+                        <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-knowledgebase" aria-controls="ai-knowledgebase" aria-selected="false" tabindex="-1" data-ai-tab="ai-knowledgebase">📚 Knowledge Base</button>
+                        <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-summaries" aria-controls="ai-summaries" aria-selected="false" tabindex="-1" data-ai-tab="ai-summaries">📝 Summaries</button>
+                        <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-personas" aria-controls="ai-personas" aria-selected="false" tabindex="-1" data-ai-tab="ai-personas">👤 Personas</button>
+                        <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-mcp" aria-controls="ai-mcp" aria-selected="false" tabindex="-1" data-ai-tab="ai-mcp">🔌 Connections</button>
                     </div>
 
                     <!-- Chat -->
-                    <div id="ai-chat" class="ai-inner-panel active">
+                    <div id="ai-chat" class="ai-inner-panel active" role="tabpanel" aria-labelledby="tab-ai-chat">
                         <p class="ai-inner-desc">Connect OpenAI, Gemini, Anthropic Claude, OpenRouter, or a self-hosted Ollama instance for chat in a designated channel.</p>
                         <label class="toggle">
                             <span class="toggle-text"><strong>Enable AI chat</strong><span>Respond to messages in the AI channel</span></span>
@@ -149,7 +149,7 @@
                     </div>
 
                     <!-- Knowledge Base -->
-                    <div id="ai-knowledgebase" class="ai-inner-panel">
+                    <div id="ai-knowledgebase" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-ai-knowledgebase">
                         <p class="ai-inner-desc">Add context entries that the AI references when answering in this server. Changes take effect immediately — no commands needed.</p>
                         <div id="kb-list" style="margin-bottom:1.5rem;">
                             <div id="kb-skeleton">
@@ -182,7 +182,7 @@
                     </div>
 
                     <!-- Summaries -->
-                    <div id="ai-summaries" class="ai-inner-panel">
+                    <div id="ai-summaries" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-ai-summaries">
                         <p class="ai-inner-desc">Schedule automatic AI-generated summaries of channel activity. The bot fetches recent messages and posts a digest to a target channel at the specified UTC time each day.</p>
 
                         <!-- Daily Server Digest -->
@@ -263,7 +263,7 @@
                     </div>
 
                     <!-- Personas -->
-                    <div id="ai-personas" class="ai-inner-panel">
+                    <div id="ai-personas" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-ai-personas">
                         <p class="ai-inner-desc">Assign a custom AI persona to specific channels. When the bot is active in a channel with a persona, it uses that persona's system prompt instead of the server-wide default.</p>
                         <div id="persona-channel-warning" style="display:none;margin-bottom:1rem;padding:.75rem 1rem;background:var(--warn-bg,#fffbe6);border:1px solid var(--warn-border,#ffe58f);border-radius:6px;color:var(--warn-text,#7a5f00);font-size:.9rem;">
                             ⚠️ The bot is currently restricted to a single channel in the <strong>Chat</strong> tab. Personas configured for other channels won't be active until you clear that restriction or select "All channels."
@@ -300,7 +300,7 @@
                     </div>
 
                     <!-- MCP connections -->
-                    <div id="ai-mcp" class="ai-inner-panel">
+                    <div id="ai-mcp" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-ai-mcp">
                         <p class="ai-inner-desc">Connect your bot to external services over <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP</a> — a GitHub repo, a calendar, an internal search. Whichever model you picked in the <strong>Chat</strong> tab is the one that uses them: with Claude, Anthropic opens the connection on their side; with every other provider Clawdia is the MCP client and runs the tool calls itself.</p>
 
                         <div id="mcp-provider-note" class="mcp-note" style="display:none;"></div>

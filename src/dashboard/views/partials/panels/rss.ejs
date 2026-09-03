@@ -5,13 +5,13 @@
                     </div>
 
                     <!-- Inner RSS tabs -->
-                    <div class="ai-inner-tabs">
-                        <button class="ai-inner-tab rss-inner-tab active" data-rss-tab="rss-tab-feeds">📰 RSS Feeds</button>
-                        <button class="ai-inner-tab rss-inner-tab" data-rss-tab="rss-tab-dailynews">🗞️ Daily News</button>
+                    <div class="ai-inner-tabs" role="tablist" aria-label="RSS sections">
+                        <button class="ai-inner-tab rss-inner-tab active" type="button" role="tab" id="tab-rss-tab-feeds" aria-controls="rss-tab-feeds" aria-selected="true" tabindex="0" data-rss-tab="rss-tab-feeds">📰 RSS Feeds</button>
+                        <button class="ai-inner-tab rss-inner-tab" type="button" role="tab" id="tab-rss-tab-dailynews" aria-controls="rss-tab-dailynews" aria-selected="false" tabindex="-1" data-rss-tab="rss-tab-dailynews">🗞️ Daily News</button>
                     </div>
 
                     <!-- RSS Feeds inner panel -->
-                    <div id="rss-tab-feeds" class="ai-inner-panel active">
+                    <div id="rss-tab-feeds" class="ai-inner-panel active" role="tabpanel" aria-labelledby="tab-rss-tab-feeds">
                         <p class="ai-inner-desc">Pipe any RSS feed straight into a Discord channel.</p>
                         <%# guild-settings.js re-renders the contents of #rss-feeds from
                             the API's response after an add or a remove, rather than
@@ -48,7 +48,7 @@
                     </div>
 
                     <!-- Daily News inner panel -->
-                    <div id="rss-tab-dailynews" class="ai-inner-panel">
+                    <div id="rss-tab-dailynews" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-rss-tab-dailynews">
                         <p class="ai-inner-desc">Roll multiple feeds into one tidy daily digest at a time of your choosing.</p>
                         <label class="toggle">
                             <span class="toggle-text"><strong>Enable daily digest</strong><span>Compile feeds into a daily post</span></span>

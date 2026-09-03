@@ -86,7 +86,12 @@ so adding a command or an endpoint turns the suite red until you regenerate:
 npm run docs:commands   # docs/COMMANDS.md, from the loaded command set
 npm run docs:api        # docs/API_REFERENCE.md's endpoint tables, from the routers
 npm run docs:panels     # the panel reference in docs/FEATURES.md
+npm run docs:shape      # README's "Shape of the codebase" table, from the command tree
 ```
+
+`docs:shape` is the one that fires on an ordinary change rather than a new
+command: it counts lines, so adding a few hundred to `src/commands/` is enough
+to want a regenerate.
 
 The dashboard's own JavaScript and CSS are minified before they ship, and that
 one is *not* something you have to keep in step:

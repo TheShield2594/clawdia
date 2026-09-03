@@ -4,20 +4,20 @@
                         <p>Tune currency rewards, manage the store, games, and jobs.</p>
                     </div>
 
-                    <div class="ai-inner-tabs">
-                        <button class="ai-inner-tab eco-inner-tab active" data-eco-tab="eco-tab-settings">⚙️ Settings &amp; Store</button>
-                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-games">🎮 Games</button>
-                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-careers">💼 Careers</button>
-                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-hunt">🏹 Hunting</button>
-                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-fish">🎣 Fishing</button>
-                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-mine">⛏️ Mining</button>
-                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-heist">🎭 Heist</button>
-                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-dynamic-pricing">📈 Dynamic Pricing</button>
-                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-health">📊 Economy Health</button>
+                    <div class="ai-inner-tabs" role="tablist" aria-label="Economy sections">
+                        <button class="ai-inner-tab eco-inner-tab active" type="button" role="tab" id="tab-eco-tab-settings" aria-controls="eco-tab-settings" aria-selected="true" tabindex="0" data-eco-tab="eco-tab-settings">⚙️ Settings &amp; Store</button>
+                        <button class="ai-inner-tab eco-inner-tab" type="button" role="tab" id="tab-eco-tab-games" aria-controls="eco-tab-games" aria-selected="false" tabindex="-1" data-eco-tab="eco-tab-games">🎮 Games</button>
+                        <button class="ai-inner-tab eco-inner-tab" type="button" role="tab" id="tab-eco-tab-careers" aria-controls="eco-tab-careers" aria-selected="false" tabindex="-1" data-eco-tab="eco-tab-careers">💼 Careers</button>
+                        <button class="ai-inner-tab eco-inner-tab" type="button" role="tab" id="tab-eco-tab-hunt" aria-controls="eco-tab-hunt" aria-selected="false" tabindex="-1" data-eco-tab="eco-tab-hunt">🏹 Hunting</button>
+                        <button class="ai-inner-tab eco-inner-tab" type="button" role="tab" id="tab-eco-tab-fish" aria-controls="eco-tab-fish" aria-selected="false" tabindex="-1" data-eco-tab="eco-tab-fish">🎣 Fishing</button>
+                        <button class="ai-inner-tab eco-inner-tab" type="button" role="tab" id="tab-eco-tab-mine" aria-controls="eco-tab-mine" aria-selected="false" tabindex="-1" data-eco-tab="eco-tab-mine">⛏️ Mining</button>
+                        <button class="ai-inner-tab eco-inner-tab" type="button" role="tab" id="tab-eco-tab-heist" aria-controls="eco-tab-heist" aria-selected="false" tabindex="-1" data-eco-tab="eco-tab-heist">🎭 Heist</button>
+                        <button class="ai-inner-tab eco-inner-tab" type="button" role="tab" id="tab-eco-tab-dynamic-pricing" aria-controls="eco-tab-dynamic-pricing" aria-selected="false" tabindex="-1" data-eco-tab="eco-tab-dynamic-pricing">📈 Dynamic Pricing</button>
+                        <button class="ai-inner-tab eco-inner-tab" type="button" role="tab" id="tab-eco-tab-health" aria-controls="eco-tab-health" aria-selected="false" tabindex="-1" data-eco-tab="eco-tab-health">📊 Economy Health</button>
                     </div>
 
                     <!-- Settings & Store -->
-                    <div id="eco-tab-settings" class="ai-inner-panel active">
+                    <div id="eco-tab-settings" class="ai-inner-panel active" role="tabpanel" aria-labelledby="tab-eco-tab-settings">
                         <label class="toggle">
                             <span class="toggle-text"><strong>Enable economy</strong><span>Allow members to earn and spend currency</span></span>
                             <span class="switch"><input type="checkbox" id="economy-enabled" <%= settings.economy.enabled ? 'checked' : '' %>><span class="slider"></span></span>
@@ -90,7 +90,7 @@
                     </div>
 
                     <!-- Games -->
-                    <div id="eco-tab-games" class="ai-inner-panel">
+                    <div id="eco-tab-games" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-eco-tab-games">
                         <p class="ai-inner-desc">Toggle individual economy games on or off for your server.</p>
                         <div class="eco-section-head" style="margin-bottom:.75rem">
                             <label class="toggle" style="margin:0;flex:1">
@@ -171,7 +171,7 @@
                     </div>
 
                     <!-- Careers -->
-                    <div id="eco-tab-careers" class="ai-inner-panel">
+                    <div id="eco-tab-careers" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-eco-tab-careers">
                         <!-- Career Tiers -->
                         <div class="eco-section-head">
                             <span class="toggle-text"><strong>Career Tiers</strong><span>Rename tiers and set how many shifts unlock each one</span></span>
@@ -194,7 +194,7 @@
                     </div>
 
                     <!-- Dynamic Pricing -->
-                    <div id="eco-tab-dynamic-pricing" class="ai-inner-panel">
+                    <div id="eco-tab-dynamic-pricing" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-eco-tab-dynamic-pricing">
                         <div class="panel-head">
                             <h3>📈 Dynamic Pricing</h3>
                             <p>Let shop item prices fluctuate automatically based on member demand. Prices drift up when items are bought and decay when idle.</p>
@@ -238,7 +238,7 @@
                     </div>
 
                     <!-- Economy Health -->
-                    <div id="eco-tab-health" class="ai-inner-panel">
+                    <div id="eco-tab-health" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-eco-tab-health">
                         <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
                             <!-- KPI tiles -->
                             <div class="eco-kpi-tile"><div class="eco-kpi-label">Total coins in circulation</div><div class="eco-kpi-value" id="eco-stat-total-coins">—</div></div>
@@ -288,18 +288,18 @@
                     </div>
 
                     <!-- Hunting item images -->
-                    <div id="eco-tab-hunt" class="ai-inner-panel">
+                    <div id="eco-tab-hunt" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-eco-tab-hunt">
                         <div class="panel-head">
                             <h3>🏹 Hunting Item Images</h3>
                             <p>Manage item images for the hunting mini-game. Images show as thumbnails when members browse and purchase items.</p>
                         </div>
-                        <div class="ai-inner-tabs">
-                            <button class="hunt-inner-tab active" data-hunt-tab="hunt-weapons">🔫 Weapons</button>
-                            <button class="hunt-inner-tab" data-hunt-tab="hunt-upgrades">🔧 Upgrades</button>
-                            <button class="hunt-inner-tab" data-hunt-tab="hunt-ammo">🔶 Ammo</button>
-                            <button class="hunt-inner-tab" data-hunt-tab="hunt-consumables">🧪 Consumables</button>
+                        <div class="ai-inner-tabs" role="tablist" aria-label="Hunting item categories">
+                            <button class="hunt-inner-tab active" type="button" role="tab" id="tab-hunt-weapons" aria-controls="hunt-weapons" aria-selected="true" tabindex="0" data-hunt-tab="hunt-weapons">🔫 Weapons</button>
+                            <button class="hunt-inner-tab" type="button" role="tab" id="tab-hunt-upgrades" aria-controls="hunt-upgrades" aria-selected="false" tabindex="-1" data-hunt-tab="hunt-upgrades">🔧 Upgrades</button>
+                            <button class="hunt-inner-tab" type="button" role="tab" id="tab-hunt-ammo" aria-controls="hunt-ammo" aria-selected="false" tabindex="-1" data-hunt-tab="hunt-ammo">🔶 Ammo</button>
+                            <button class="hunt-inner-tab" type="button" role="tab" id="tab-hunt-consumables" aria-controls="hunt-consumables" aria-selected="false" tabindex="-1" data-hunt-tab="hunt-consumables">🧪 Consumables</button>
                         </div>
-                        <div id="hunt-weapons" class="ai-inner-panel active">
+                        <div id="hunt-weapons" class="ai-inner-panel active" role="tabpanel" aria-labelledby="tab-hunt-weapons">
                             <p class="ai-inner-desc">Weapons used for hunting. Tier 1–12 progression.</p>
                             <div class="game-items-grid">
                                 <% huntItems.weapons.forEach(function(item){ %>
@@ -307,7 +307,7 @@
                                 <% }); %>
                             </div>
                         </div>
-                        <div id="hunt-upgrades" class="ai-inner-panel">
+                        <div id="hunt-upgrades" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-hunt-upgrades">
                             <p class="ai-inner-desc">Permanent module upgrades installed on weapons.</p>
                             <div class="game-items-grid">
                                 <% huntItems.upgrades.forEach(function(item){ %>
@@ -315,7 +315,7 @@
                                 <% }); %>
                             </div>
                         </div>
-                        <div id="hunt-ammo" class="ai-inner-panel">
+                        <div id="hunt-ammo" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-hunt-ammo">
                             <p class="ai-inner-desc">Ammunition packs consumed during hunts.</p>
                             <div class="game-items-grid">
                                 <% huntItems.ammo.forEach(function(item){ %>
@@ -323,7 +323,7 @@
                                 <% }); %>
                             </div>
                         </div>
-                        <div id="hunt-consumables" class="ai-inner-panel">
+                        <div id="hunt-consumables" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-hunt-consumables">
                             <p class="ai-inner-desc">One-time use consumables for hunt boosts.</p>
                             <div class="game-items-grid">
                                 <% huntItems.consumables.forEach(function(item){ %>
@@ -334,18 +334,18 @@
                     </div>
 
                     <!-- Fishing item images -->
-                    <div id="eco-tab-fish" class="ai-inner-panel">
+                    <div id="eco-tab-fish" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-eco-tab-fish">
                         <div class="panel-head">
                             <h3>🎣 Fishing Item Images</h3>
                             <p>Manage item images for the fishing mini-game.</p>
                         </div>
-                        <div class="ai-inner-tabs">
-                            <button class="fish-inner-tab active" data-fish-tab="fish-rods">🎣 Rods</button>
-                            <button class="fish-inner-tab" data-fish-tab="fish-upgrades">🔩 Upgrades</button>
-                            <button class="fish-inner-tab" data-fish-tab="fish-bait">🪱 Bait</button>
-                            <button class="fish-inner-tab" data-fish-tab="fish-consumables">🧪 Consumables</button>
+                        <div class="ai-inner-tabs" role="tablist" aria-label="Fishing item categories">
+                            <button class="fish-inner-tab active" type="button" role="tab" id="tab-fish-rods" aria-controls="fish-rods" aria-selected="true" tabindex="0" data-fish-tab="fish-rods">🎣 Rods</button>
+                            <button class="fish-inner-tab" type="button" role="tab" id="tab-fish-upgrades" aria-controls="fish-upgrades" aria-selected="false" tabindex="-1" data-fish-tab="fish-upgrades">🔩 Upgrades</button>
+                            <button class="fish-inner-tab" type="button" role="tab" id="tab-fish-bait" aria-controls="fish-bait" aria-selected="false" tabindex="-1" data-fish-tab="fish-bait">🪱 Bait</button>
+                            <button class="fish-inner-tab" type="button" role="tab" id="tab-fish-consumables" aria-controls="fish-consumables" aria-selected="false" tabindex="-1" data-fish-tab="fish-consumables">🧪 Consumables</button>
                         </div>
-                        <div id="fish-rods" class="ai-inner-panel active">
+                        <div id="fish-rods" class="ai-inner-panel active" role="tabpanel" aria-labelledby="tab-fish-rods">
                             <p class="ai-inner-desc">Fishing rods used to catch fish. Tier 1–5 progression.</p>
                             <div class="game-items-grid">
                                 <% fishItems.rods.forEach(function(item){ %>
@@ -353,7 +353,7 @@
                                 <% }); %>
                             </div>
                         </div>
-                        <div id="fish-upgrades" class="ai-inner-panel">
+                        <div id="fish-upgrades" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-fish-upgrades">
                             <p class="ai-inner-desc">Permanent module upgrades for rods.</p>
                             <div class="game-items-grid">
                                 <% fishItems.upgrades.forEach(function(item){ %>
@@ -361,7 +361,7 @@
                                 <% }); %>
                             </div>
                         </div>
-                        <div id="fish-bait" class="ai-inner-panel">
+                        <div id="fish-bait" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-fish-bait">
                             <p class="ai-inner-desc">Bait packs used when fishing.</p>
                             <div class="game-items-grid">
                                 <% fishItems.bait.forEach(function(item){ %>
@@ -369,7 +369,7 @@
                                 <% }); %>
                             </div>
                         </div>
-                        <div id="fish-consumables" class="ai-inner-panel">
+                        <div id="fish-consumables" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-fish-consumables">
                             <p class="ai-inner-desc">One-time use consumables for fishing boosts.</p>
                             <div class="game-items-grid">
                                 <% fishItems.consumables.forEach(function(item){ %>
@@ -380,18 +380,18 @@
                     </div>
 
                     <!-- Mining item images -->
-                    <div id="eco-tab-mine" class="ai-inner-panel">
+                    <div id="eco-tab-mine" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-eco-tab-mine">
                         <div class="panel-head">
                             <h3>⛏️ Mining Item Images</h3>
                             <p>Manage item images for the mining mini-game.</p>
                         </div>
-                        <div class="ai-inner-tabs">
-                            <button class="mine-inner-tab active" data-mine-tab="mine-pickaxes">⛏️ Pickaxes</button>
-                            <button class="mine-inner-tab" data-mine-tab="mine-upgrades">🔧 Upgrades</button>
-                            <button class="mine-inner-tab" data-mine-tab="mine-blasts">💥 Blasts</button>
-                            <button class="mine-inner-tab" data-mine-tab="mine-consumables">🧪 Consumables</button>
+                        <div class="ai-inner-tabs" role="tablist" aria-label="Mining item categories">
+                            <button class="mine-inner-tab active" type="button" role="tab" id="tab-mine-pickaxes" aria-controls="mine-pickaxes" aria-selected="true" tabindex="0" data-mine-tab="mine-pickaxes">⛏️ Pickaxes</button>
+                            <button class="mine-inner-tab" type="button" role="tab" id="tab-mine-upgrades" aria-controls="mine-upgrades" aria-selected="false" tabindex="-1" data-mine-tab="mine-upgrades">🔧 Upgrades</button>
+                            <button class="mine-inner-tab" type="button" role="tab" id="tab-mine-blasts" aria-controls="mine-blasts" aria-selected="false" tabindex="-1" data-mine-tab="mine-blasts">💥 Blasts</button>
+                            <button class="mine-inner-tab" type="button" role="tab" id="tab-mine-consumables" aria-controls="mine-consumables" aria-selected="false" tabindex="-1" data-mine-tab="mine-consumables">🧪 Consumables</button>
                         </div>
-                        <div id="mine-pickaxes" class="ai-inner-panel active">
+                        <div id="mine-pickaxes" class="ai-inner-panel active" role="tabpanel" aria-labelledby="tab-mine-pickaxes">
                             <p class="ai-inner-desc">Pickaxes used for mining. Tier 1–5 progression.</p>
                             <div class="game-items-grid">
                                 <% mineItems.pickaxes.forEach(function(item){ %>
@@ -399,7 +399,7 @@
                                 <% }); %>
                             </div>
                         </div>
-                        <div id="mine-upgrades" class="ai-inner-panel">
+                        <div id="mine-upgrades" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-mine-upgrades">
                             <p class="ai-inner-desc">Permanent module upgrades for pickaxes.</p>
                             <div class="game-items-grid">
                                 <% mineItems.upgrades.forEach(function(item){ %>
@@ -407,7 +407,7 @@
                                 <% }); %>
                             </div>
                         </div>
-                        <div id="mine-blasts" class="ai-inner-panel">
+                        <div id="mine-blasts" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-mine-blasts">
                             <p class="ai-inner-desc">Blast charge packs used when mining.</p>
                             <div class="game-items-grid">
                                 <% mineItems.blasts.forEach(function(item){ %>
@@ -415,7 +415,7 @@
                                 <% }); %>
                             </div>
                         </div>
-                        <div id="mine-consumables" class="ai-inner-panel">
+                        <div id="mine-consumables" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-mine-consumables">
                             <p class="ai-inner-desc">One-time use consumables for mining boosts.</p>
                             <div class="game-items-grid">
                                 <% mineItems.consumables.forEach(function(item){ %>
@@ -426,7 +426,7 @@
                     </div>
 
                     <!-- Heist configuration -->
-                    <div id="eco-tab-heist" class="ai-inner-panel">
+                    <div id="eco-tab-heist" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-eco-tab-heist">
                         <div class="panel-head">
                             <h3>🎭 Strategic Heist</h3>
                             <p>A group economy event where players plan and execute a heist together. Each role carries a unique skill check — strategy and team composition matter. Use <code>/heist start</code> to open a lobby.</p>

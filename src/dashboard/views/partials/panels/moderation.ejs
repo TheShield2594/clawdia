@@ -4,17 +4,17 @@
                         <p>Auto-mod, spam protection, link &amp; invite filtering, escalation, and audit logging.</p>
                     </div>
 
-                    <div class="ai-inner-tabs">
-                        <button class="ai-inner-tab mod-inner-tab active" data-mod-tab="mod-tab-automod">🛡️ Auto-Mod</button>
-                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-escalation">⚖️ Escalation</button>
-                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-logging">📋 Logging</button>
-                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-appeals">🔔 Appeals</button>
-                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-sanctions">🔨 Active Sanctions</button>
-                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-cases">📚 Case History</button>
+                    <div class="ai-inner-tabs" role="tablist" aria-label="Moderation sections">
+                        <button class="ai-inner-tab mod-inner-tab active" type="button" role="tab" id="tab-mod-tab-automod" aria-controls="mod-tab-automod" aria-selected="true" tabindex="0" data-mod-tab="mod-tab-automod">🛡️ Auto-Mod</button>
+                        <button class="ai-inner-tab mod-inner-tab" type="button" role="tab" id="tab-mod-tab-escalation" aria-controls="mod-tab-escalation" aria-selected="false" tabindex="-1" data-mod-tab="mod-tab-escalation">⚖️ Escalation</button>
+                        <button class="ai-inner-tab mod-inner-tab" type="button" role="tab" id="tab-mod-tab-logging" aria-controls="mod-tab-logging" aria-selected="false" tabindex="-1" data-mod-tab="mod-tab-logging">📋 Logging</button>
+                        <button class="ai-inner-tab mod-inner-tab" type="button" role="tab" id="tab-mod-tab-appeals" aria-controls="mod-tab-appeals" aria-selected="false" tabindex="-1" data-mod-tab="mod-tab-appeals">🔔 Appeals</button>
+                        <button class="ai-inner-tab mod-inner-tab" type="button" role="tab" id="tab-mod-tab-sanctions" aria-controls="mod-tab-sanctions" aria-selected="false" tabindex="-1" data-mod-tab="mod-tab-sanctions">🔨 Active Sanctions</button>
+                        <button class="ai-inner-tab mod-inner-tab" type="button" role="tab" id="tab-mod-tab-cases" aria-controls="mod-tab-cases" aria-selected="false" tabindex="-1" data-mod-tab="mod-tab-cases">📚 Case History</button>
                     </div>
 
                     <!-- Auto-Mod tab -->
-                    <div id="mod-tab-automod" class="ai-inner-panel active">
+                    <div id="mod-tab-automod" class="ai-inner-panel active" role="tabpanel" aria-labelledby="tab-mod-tab-automod">
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable auto-moderation</strong><span>Automatically delete or warn on rule violations</span></span>
                         <span class="switch"><input type="checkbox" id="mod-automod" <%= settings.moderation.autoModEnabled ? 'checked' : '' %>><span class="slider"></span></span>
@@ -69,7 +69,7 @@
                     </div><!-- end mod-tab-automod -->
 
                     <!-- Escalation tab -->
-                    <div id="mod-tab-escalation" class="ai-inner-panel">
+                    <div id="mod-tab-escalation" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-mod-tab-escalation">
                     <div class="panel-head"><h3>Escalation Thresholds</h3><p>Auto-actions taken as warning count rises. Set 0 to disable an action.</p></div>
                     <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
                         <div><label class="field-label" for="mod-warn-threshold">Warn count</label><input type="number" id="mod-warn-threshold" value="<%= settings.moderation.warnThreshold || 3 %>" min="1" max="50"><small>DM user at this many warnings</small></div>
@@ -101,7 +101,7 @@
                     </div><!-- end mod-tab-escalation -->
 
                     <!-- Logging tab -->
-                    <div id="mod-tab-logging" class="ai-inner-panel">
+                    <div id="mod-tab-logging" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-mod-tab-logging">
                     <div data-save-scope="moderation">
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable moderation</strong><span>Master switch for all moderation features</span></span>
@@ -140,7 +140,7 @@
                     </div><!-- end mod-tab-logging -->
 
                     <!-- Appeals tab -->
-                    <div id="mod-tab-appeals" class="ai-inner-panel">
+                    <div id="mod-tab-appeals" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-mod-tab-appeals">
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable ban/mute appeals</strong><span>Allow users to submit appeals via <code>/appeal</code></span></span>
                         <span class="switch"><input type="checkbox" id="mod-appeals-enabled" <%= settings.moderation.appealsEnabled ? 'checked' : '' %>><span class="slider"></span></span>
@@ -155,7 +155,7 @@
                     </div><!-- end mod-tab-appeals -->
 
                     <!-- Active Sanctions tab -->
-                    <div id="mod-tab-sanctions" class="ai-inner-panel">
+                    <div id="mod-tab-sanctions" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-mod-tab-sanctions">
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
                             <div style="display:flex;gap:.5rem;flex-wrap:wrap">
                                 <button class="btn btn-sm sanctions-filter active" data-filter="all" data-action="sanctions-filter" data-filter="all">All</button>
@@ -183,7 +183,7 @@
                     </div>
 
                     <!-- Case History tab -->
-                    <div id="mod-tab-cases" class="ai-inner-panel">
+                    <div id="mod-tab-cases" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-mod-tab-cases">
                         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
                             <div style="display:flex;gap:.5rem;flex-wrap:wrap">
                                 <select id="cases-filter-type" class="cases-filter-select" aria-label="Filter cases by type" data-change="case-page" data-page="1">

@@ -16,7 +16,7 @@ global.TextDecoder = global.TextDecoder || TextDecoder;
 // live region and told success from failure by border colour alone.
 const fs = require('fs');
 const path = require('path');
-const { PUBLIC, renderPanel, bootPage, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
+const { PUBLIC, renderPage, renderPanel, bootPage, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
 
 describe('sidebar navigation', () => {
     beforeEach(() => {
@@ -244,6 +244,172 @@ describe('inner tab strips', () => {
     );
 });
 
+// #909. The strips marked the open tab with an `.active` class and nothing
+// else: no `role`, no `aria-selected`, no link from a tab to the panel it
+// opens. A screen reader got an undifferentiated row of buttons with no way to
+// tell which panel was showing, arrow keys did nothing, and the economy and
+// item-category buttons carried no `type` — so inside a form they were submit
+// buttons. WCAG 4.1.2.
+describe('inner tab semantics', () => {
+    const PANELS = ['economy', 'moderation', 'ai', 'rss'];
+
+    /** Every strip in a panel, as [tablist, its tabs]. */
+    const strips = panel => {
+        document.body.innerHTML = renderPanel(panel);
+        return [...document.querySelectorAll('.ai-inner-tabs')]
+            .map(strip => [strip, [...strip.querySelectorAll(':scope > [role="tab"]')]]);
+    };
+
+    it.each(PANELS)('makes every strip in the %s panel a named tablist', panel => {
+        const found = strips(panel);
+        expect(found.length).toBeGreaterThan(0);
+
+        for (const [strip, tabs] of found) {
+            expect(strip.getAttribute('role')).toBe('tablist');
+            // Several panels carry more than one strip, so each needs a name of
+            // its own or they are announced as indistinguishable tab sets.
+            expect([panel, Boolean(strip.getAttribute('aria-label'))]).toEqual([panel, true]);
+            // No button in a strip may sit outside the tablist's own tabs.
+            expect(tabs.length).toBe(strip.querySelectorAll('button').length);
+        }
+    });
+
+    it.each(PANELS)('points every tab in the %s panel at the panel it opens', panel => {
+        for (const [, tabs] of strips(panel)) {
+            for (const tab of tabs) {
+                const target = document.getElementById(tab.getAttribute('aria-controls'));
+                expect([tab.id, target !== null]).toEqual([tab.id, true]);
+                expect([tab.id, target.getAttribute('role')]).toEqual([tab.id, 'tabpanel']);
+                // And back again, so the panel is announced by its tab's name.
+                expect([tab.id, target.getAttribute('aria-labelledby')]).toEqual([tab.id, tab.id]);
+            }
+        }
+    });
+
+    it.each(PANELS)('leaves no submit button in the %s panel\'s strips', panel => {
+        for (const [, tabs] of strips(panel)) {
+            for (const tab of tabs) {
+                // A <button> with no type is type="submit"; several of these
+                // strips sit inside a form.
+                expect([tab.id, tab.getAttribute('type')]).toEqual([tab.id, 'button']);
+            }
+        }
+    });
+
+    it.each(PANELS)('ships one selected tab and one tab stop per strip in %s', panel => {
+        for (const [strip, tabs] of strips(panel)) {
+            const name = strip.getAttribute('aria-label');
+            expect([name, tabs.filter(t => t.getAttribute('aria-selected') === 'true').length])
+                .toEqual([name, 1]);
+            // Roving tabindex: Tab reaches the strip once, arrows do the rest.
+            expect([name, tabs.filter(t => t.getAttribute('tabindex') === '0').length])
+                .toEqual([name, 1]);
+            // And the three signals agree with each other on which tab that is.
+            for (const tab of tabs) {
+                const selected = tab.classList.contains('active');
+                expect([tab.id, tab.getAttribute('aria-selected')]).toEqual([tab.id, String(selected)]);
+                expect([tab.id, tab.getAttribute('tabindex')]).toEqual([tab.id, selected ? '0' : '-1']);
+            }
+        }
+    });
+});
+
+// The half of #909 that only the running page can answer: the switchers used
+// to move the `.active` class alone, so any ARIA the markup shipped would have
+// gone stale on the first click.
+describe('inner tab behaviour', () => {
+    beforeEach(async () => {
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        document.body.innerHTML = '';
+        bootPage();
+        clickTab('economy');
+        await settle();
+    });
+
+    afterEach(async () => {
+        await settle();
+        forgetDocumentListeners();
+        jest.restoreAllMocks();
+    });
+
+    const ecoTabs = () => [...document.querySelectorAll('#economy > .ai-inner-tabs > [role="tab"]')];
+    const selected = tabs => tabs.filter(t => t.getAttribute('aria-selected') === 'true').map(t => t.id);
+    const press = (el, key) => el.dispatchEvent(
+        new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+    );
+
+    it('moves aria-selected and the tab stop when a tab is clicked', () => {
+        const tabs = ecoTabs();
+        expect(selected(tabs)).toEqual(['tab-eco-tab-settings']);
+
+        tabs[2].dispatchEvent(new window.Event('click', { bubbles: true }));
+
+        expect(selected(tabs)).toEqual(['tab-eco-tab-careers']);
+        expect(tabs.filter(t => t.getAttribute('tabindex') === '0').map(t => t.id))
+            .toEqual(['tab-eco-tab-careers']);
+        expect(document.getElementById('eco-tab-careers').classList.contains('active')).toBe(true);
+    });
+
+    it('walks the strip with the arrow keys, wrapping at both ends', () => {
+        const tabs = ecoTabs();
+
+        press(tabs[0], 'ArrowRight');
+        expect(selected(tabs)).toEqual([tabs[1].id]);
+        expect(document.activeElement).toBe(tabs[1]);
+
+        press(tabs[1], 'ArrowLeft');
+        expect(selected(tabs)).toEqual([tabs[0].id]);
+
+        // Left from the first lands on the last, and Right from the last comes
+        // back round to the first.
+        press(tabs[0], 'ArrowLeft');
+        expect(selected(tabs)).toEqual([tabs[tabs.length - 1].id]);
+        press(tabs[tabs.length - 1], 'ArrowRight');
+        expect(selected(tabs)).toEqual([tabs[0].id]);
+    });
+
+    it('jumps to the ends with Home and End', () => {
+        const tabs = ecoTabs();
+
+        press(tabs[0], 'End');
+        expect(selected(tabs)).toEqual([tabs[tabs.length - 1].id]);
+
+        press(tabs[tabs.length - 1], 'Home');
+        expect(selected(tabs)).toEqual([tabs[0].id]);
+    });
+
+    it('keeps an arrow press inside the strip the reader is in', async () => {
+        // The item-category strips are nested inside a tab panel of the strip
+        // above, so a handler that reached for the outermost tablist would
+        // throw the reader out of Hunting and into a different Economy tab.
+        const outer = ecoTabs();
+        outer.find(t => t.id === 'tab-eco-tab-hunt').dispatchEvent(new window.Event('click', { bubbles: true }));
+        await settle();
+
+        const inner = [...document.querySelectorAll('#eco-tab-hunt > .ai-inner-tabs > [role="tab"]')];
+        expect(inner.length).toBeGreaterThan(1);
+
+        press(inner[0], 'ArrowRight');
+
+        expect(selected(inner)).toEqual([inner[1].id]);
+        // The outer strip has not moved off Hunting.
+        expect(selected(outer)).toEqual(['tab-eco-tab-hunt']);
+    });
+
+    it('leaves a modified arrow press to the browser', () => {
+        // Ctrl/Alt/Meta + arrow are the platform's own shortcuts; a tablist
+        // that swallowed them would break text navigation on the page.
+        const tabs = ecoTabs();
+        const event = new window.KeyboardEvent('keydown', {
+            key: 'ArrowRight', bubbles: true, cancelable: true, ctrlKey: true,
+        });
+        tabs[0].dispatchEvent(event);
+
+        expect(selected(tabs)).toEqual([tabs[0].id]);
+        expect(event.defaultPrevented).toBe(false);
+    });
+});
+
 // #880. Shop and game item images are uploaded through a <label> wrapping a
 // `display: none` file input. A label is not a tab stop and a hidden input
 // cannot take focus, and there was no other control bound to either action —
@@ -307,6 +473,122 @@ describe('image upload controls', () => {
             expect([cls, match !== null]).toEqual([cls, true]);
             expect([cls, /outline/.test(match[1])]).toEqual([cls, true]);
         }
+    });
+});
+
+// #943. The topbar's back link carried a long inline `style=` plus an
+// onmouseover/onmouseout pair that swapped colours in JavaScript. #887 moved
+// all of that to `.all-servers-link`; what it left behind was a focus state
+// that was only the hover colour, which is a 1.3:1 change on a link a keyboard
+// user reaches on the way out of the page. WCAG 2.4.7.
+describe('links back to the server picker', () => {
+    const css = fs.readFileSync(path.join(PUBLIC, 'styles.css'), 'utf8');
+    // Two of them: the sidebar's server switcher and the topbar's back link.
+    const LINKS = ['dash-server-switch', 'all-servers-link'];
+
+    it('styles both of them from a class alone', () => {
+        const page = renderPage();
+        const links = [...page.matchAll(/<a[^>]+href="\/dashboard"[^>]*>/g)].map(m => m[0]);
+        expect(links.map(a => /class="([\w-]+)"/.exec(a)[1])).toEqual(LINKS);
+
+        for (const link of links) {
+            expect(link).not.toMatch(/style=|onmouseover|onmouseout/);
+        }
+    });
+
+    it.each(LINKS)('draws a focus ring on .%s, not just a colour change', cls => {
+        // Whichever rules target the focus state, between them they have to
+        // draw a ring — the colour change alone is what this is about.
+        const rules = [...css.matchAll(new RegExp(`\\.${cls}:focus-visible\\s*\\{([^}]*)\\}`, 'g'))];
+        expect(rules.length).toBeGreaterThan(0);
+        expect(rules.map(r => r[1]).join(' ')).toMatch(/outline:\s*\d+px\s+solid/);
+    });
+});
+
+// #910. Each module card and checklist step is a <button> whose state was
+// shown by `.dash-module-toggle` — a decorative div with no text, coloured and
+// slid by CSS. Nothing in the button's accessible name said whether Welcome,
+// Economy or Leveling was on, so a screen reader read a row of identical
+// "open settings" buttons. WCAG 1.4.1 and 4.1.2.
+describe('module cards', () => {
+    const { guildSettingsLocals } = require('./helpers/guildSettingsLocals');
+
+    /** Every module card in the Overview panel, rendered from `overrides`. */
+    const cards = overrides => {
+        document.body.innerHTML = renderPanel('overview', overrides);
+        return [...document.querySelectorAll('.dash-module')];
+    };
+
+    const named = card => card.querySelector('h4').textContent.trim();
+
+    it('says in words whether each module is on', () => {
+        const found = cards();
+        expect(found.length).toBeGreaterThan(0);
+
+        for (const card of found) {
+            const pip = card.querySelector('.dash-module-toggle');
+            if (!pip) continue;
+            const state = card.querySelector('.sr-only');
+            expect([named(card), state !== null]).toEqual([named(card), true]);
+            expect([named(card), state.textContent.trim().length > 0])
+                .toEqual([named(card), true]);
+            // And the words have to match the colour, or the card now lies to
+            // one of its two audiences instead of ignoring one of them.
+            const on = card.classList.contains('on');
+            expect([named(card), /enabled|done/.test(state.textContent) && !/not|dis/.test(state.textContent)])
+                .toEqual([named(card), on]);
+        }
+    });
+
+    it('hides the pip from the accessibility tree', () => {
+        // Rendered here rather than leaning on the test above: a `for` over an
+        // empty NodeList passes, so a version of this that inherited the
+        // previous test's DOM would go green the day that test was reordered
+        // or removed, having checked nothing.
+        const pips = cards().flatMap(card => [...card.querySelectorAll('.dash-module-toggle')]);
+        expect(pips.length).toBeGreaterThan(0);
+
+        // The pip carries no text, so left exposed it is an unlabelled node
+        // between the card's description and its state.
+        for (const pip of pips) {
+            expect(pip.getAttribute('aria-hidden')).toBe('true');
+        }
+    });
+
+    it('gives no pip to a card that has no state to report', () => {
+        // Analytics has no enabled setting, so its pip sat permanently in the
+        // off position — a card reporting a state it does not have.
+        const analytics = cards().find(c => c.dataset.tabLink === 'analytics');
+        expect(analytics).toBeDefined();
+        expect(analytics.querySelector('.dash-module-toggle')).toBeNull();
+        expect(analytics.querySelector('.sr-only')).toBeNull();
+    });
+
+    it('keeps the words and the colour on the same setting', () => {
+        const base = guildSettingsLocals();
+        const welcome = list => list.find(c => c.dataset.tabLink === 'welcome');
+
+        const off = welcome(cards({
+            settings: { ...base.settings, welcome: { ...base.settings.welcome, enabled: false } },
+        }));
+        expect(off.classList.contains('on')).toBe(false);
+        expect(off.querySelector('.sr-only').textContent).toContain('disabled');
+
+        const on = welcome(cards({
+            settings: { ...base.settings, welcome: { ...base.settings.welcome, enabled: true } },
+        }));
+        expect(on.classList.contains('on')).toBe(true);
+        expect(on.querySelector('.sr-only').textContent).toContain('enabled');
+    });
+
+    it('keeps the state text out of the layout', () => {
+        // `.sr-only` is the clipped-not-hidden class; `display: none` would drop
+        // the state back out of the accessibility tree it was added to.
+        const css = fs.readFileSync(path.join(PUBLIC, 'styles.css'), 'utf8');
+        const rule = /^\.sr-only[^{]*\{([^}]*)\}/m.exec(css);
+        expect(rule).not.toBeNull();
+        expect(rule[1]).toMatch(/position:\s*absolute/);
+        expect(rule[1]).not.toMatch(/display:\s*none/);
     });
 });
 
