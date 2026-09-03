@@ -645,6 +645,7 @@ describe('the server picker\'s unconfigured guild', () => {
 
         expect(html).toContain('Not configured');
         const tag = /<span[^>]*>Not configured<\/span>/.exec(html)[0];
+        expect([tag, /\bcw-dash-lp-unavailable\b/.test(tag)]).toEqual([tag, true]);
         expect([tag, /cw-btn/.test(tag)]).toEqual([tag, false]);
         expect([tag, /opacity/.test(tag)]).toEqual([tag, false]);
     });

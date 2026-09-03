@@ -24,8 +24,9 @@ To *write* an endpoint rather than call one, see
 ## Authentication
 
 Log in at `/auth/discord`; the OAuth callback sets a session cookie backed by
-MongoDB. Every route below except the two image reads is behind `checkAuth`,
-which answers `401 {"error": "Unauthorized"}` to a request without a session.
+MongoDB. Every route below is behind `checkAuth`, which answers
+`401 {"error": "Unauthorized"}` to a request without a session — the two
+item-image `GET`s included, since #565.
 
 ## Authorization
 
