@@ -18,7 +18,9 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const yaml = require('js-yaml');
 
 const WORKFLOWS = path.join(__dirname, '..', '.github', 'workflows');
@@ -124,6 +126,115 @@ describe('the image half', () => {
 
         expect(step().with.severity).toBe(built.with.severity);
         expect(step().with['ignore-unfixed']).toBe(built.with['ignore-unfixed']);
+    });
+});
+
+// The existence check decides whether the scan runs at all, so the one thing it
+// must never do is answer "nothing to scan" to a question it could not ask. A
+// failed login or a registry outage makes `docker manifest inspect` non-zero
+// exactly like a missing tag does, and the first version of this step treated
+// them alike — which would have reported the job green in precisely the case
+// where the gate did not run.
+//
+// Run for real, against a stub on PATH, because the branch is shell: asserting
+// on the YAML would only restate the script back to itself.
+describe('the existence check', () => {
+    const step = allSteps(scanner.doc).find(s => s.id === 'image');
+
+    /**
+     * Run the step's own script with `docker` stubbed to the given output and
+     * exit status.
+     *
+     * @returns {{status: number, stdout: string, outputs: string}}
+     */
+    const runWith = ({ says, exits }) => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdia-scan-'));
+        try {
+            const bin = path.join(dir, 'bin');
+            fs.mkdirSync(bin);
+            fs.writeFileSync(
+                path.join(bin, 'docker'),
+                `#!/bin/sh
+printf '%s\n' ${JSON.stringify(says)} >&2
+exit ${exits}
+`,
+                { mode: 0o755 },
+            );
+
+            const script = path.join(dir, 'step.sh');
+            fs.writeFileSync(script, step.run);
+            const outputs = path.join(dir, 'outputs');
+            fs.writeFileSync(outputs, '');
+
+            // `bash -e {0}` is the shell GitHub runs a `run:` block with.
+            const result = spawnSync('bash', ['-e', script], {
+                encoding: 'utf8',
+                env: {
+                    ...process.env,
+                    PATH: `${bin}:${process.env.PATH}`,
+                    REGISTRY: 'ghcr.io',
+                    IMAGE_NAME: 'owner/repo',
+                    GITHUB_OUTPUT: outputs,
+                },
+            });
+
+            return {
+                status: result.status,
+                stdout: `${result.stdout}${result.stderr}`,
+                outputs: fs.readFileSync(outputs, 'utf8'),
+            };
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    };
+
+    test('the step is still a shell script this can run', () => {
+        // If it is ever replaced by an action, this whole suite is measuring
+        // nothing and should say so rather than passing.
+        expect(step).toBeDefined();
+        expect(typeof step.run).toBe('string');
+    });
+
+    test('reports the image when the registry has it', () => {
+        const run = runWith({ says: '{"schemaVersion":2}', exits: 0 });
+
+        expect(run.status).toBe(0);
+        expect(run.outputs).toContain('found=true');
+        expect(run.outputs).toContain('ref=ghcr.io/owner/repo:latest');
+    });
+
+    test('skips, without failing, when the registry says the tag is not there', () => {
+        const run = runWith({ says: 'manifest unknown', exits: 1 });
+
+        expect(run.status).toBe(0);
+        expect(run.outputs).toContain('found=false');
+        expect(run.outputs).not.toContain('found=true');
+        expect(run.stdout).toContain('::warning::');
+    });
+
+    test('and for a package that does not exist at all', () => {
+        const run = runWith({ says: 'name unknown: repository name not known', exits: 1 });
+
+        expect(run.status).toBe(0);
+        expect(run.outputs).toContain('found=false');
+    });
+
+    test.each([
+        ['a rejected credential', 'unauthorized: authentication required'],
+        ['a revoked token', 'denied: requested access to the resource is denied'],
+        ['the registry being down', 'Get "https://ghcr.io/v2/": EOF'],
+        ['no route to it at all', 'dial tcp: lookup ghcr.io: no such host'],
+    ])('fails the job on %s', (_case, says) => {
+        const run = runWith({ says, exits: 1 });
+
+        // The point of the whole branch: this must not read as "nothing has
+        // been published", because the scan would then be skipped and the job
+        // would go green having checked nothing.
+        expect(run.status).not.toBe(0);
+        expect(run.outputs).not.toContain('found=true');
+        expect(run.stdout).toContain('::error::');
+        // The registry's own words, so whoever reads the log can act on it.
+        expect(run.stdout).toContain(says);
     });
 });
 

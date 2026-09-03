@@ -94,17 +94,41 @@ jobs:
       # is red for a reason nobody can act on is a job people stop reading. It
       # is still said out loud, because "publishing has been broken for a month"
       # looks identical from here and is worth someone noticing.
+      #
+      # Only a manifest the registry positively reports as absent counts as
+      # that, though. A failed login, a revoked token, a registry outage or a
+      # DNS failure all make `docker manifest inspect` non-zero too, and
+      # treating those as "nothing published" would skip the scan and report
+      # the job green — a security gate that passes precisely when it could not
+      # run is worse than no gate, because it looks like one. Anything that is
+      # not a missing image fails the job with the registry's own words in the
+      # log.
       - name: Check the image exists
         id: image
         run: |
           ref="${REGISTRY}/${IMAGE_NAME}:latest"
-          if docker manifest inspect "$ref" > /dev/null 2>&1; then
+
+          if output=$(docker manifest inspect "$ref" 2>&1); then
             echo "found=true" >> "$GITHUB_OUTPUT"
             echo "ref=$ref" >> "$GITHUB_OUTPUT"
-          else
+            exit 0
+          fi
+
+          # The registry's vocabulary for "that tag is not here". GHCR answers
+          # `manifest unknown` for a tag that was never pushed and `name
+          # unknown` for a package that does not exist at all.
+          if printf '%s\n' "$output" | grep -qiE 'manifest unknown|name unknown|no such manifest|not found'; then
             echo "found=false" >> "$GITHUB_OUTPUT"
             echo "::warning::no $ref to scan — nothing has been published yet, or the publish is failing"
+            exit 0
           fi
+
+          # Printed rather than folded into the annotation: the message is
+          # often several lines, and a `::error::` swallows everything after
+          # the first.
+          printf '%s\n' "$output"
+          echo "::error::could not tell whether $ref exists — see the registry error above. Not scanning is not the same as nothing to scan."
+          exit 1
 
       # Same two narrowings as ci.yml, for the same reason: `ignore-unfixed`
       # drops findings with no fixed version, which are the bulk of an Alpine

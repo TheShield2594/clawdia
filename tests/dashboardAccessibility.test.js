@@ -541,9 +541,16 @@ describe('module cards', () => {
     });
 
     it('hides the pip from the accessibility tree', () => {
-        // It carries no text, so left exposed it is an unlabelled node between
-        // the card's description and its state.
-        for (const pip of document.querySelectorAll('.dash-module-toggle')) {
+        // Rendered here rather than leaning on the test above: a `for` over an
+        // empty NodeList passes, so a version of this that inherited the
+        // previous test's DOM would go green the day that test was reordered
+        // or removed, having checked nothing.
+        const pips = cards().flatMap(card => [...card.querySelectorAll('.dash-module-toggle')]);
+        expect(pips.length).toBeGreaterThan(0);
+
+        // The pip carries no text, so left exposed it is an unlabelled node
+        // between the card's description and its state.
+        for (const pip of pips) {
             expect(pip.getAttribute('aria-hidden')).toBe('true');
         }
     });
