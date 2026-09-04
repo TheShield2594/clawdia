@@ -58,18 +58,20 @@ function fakeDb({ guilds = [], images = [], unique = true } = {}) {
             expect(filter).toEqual({ 'shop.imageData': { $exists: true, $ne: null } });
             return cursor(guilds.filter(hasInlineImage));
         },
-        updateOne: async (filter, update, options = {}) => {
+        updateOne: async (filter, update) => {
             // `up` clears the entries it moved, addressed by _id and an array
             // filter; `down` restores one entry, addressed by the positional $.
             if (update.$unset) {
                 order.push('clear');
                 const guild = guilds.find(g => g._id === filter._id);
-                const wanted = options.arrayFilters?.[0]?.['moved.itemId']?.$in ?? [];
                 let modified = 0;
-                for (const item of guild?.shop ?? []) {
-                    if (!wanted.includes(item.itemId)) continue;
-                    delete item.imageData;
-                    delete item.imageType;
+                for (const path of Object.keys(update.$unset)) {
+                    // `shop.<index>.<field>` — addressed by position, so a
+                    // duplicate id cannot drag its sibling's image out with it.
+                    const [, index, field] = path.split('.');
+                    const item = guild?.shop?.[Number(index)];
+                    if (!item || !(field in item)) continue;
+                    delete item[field];
                     modified = 1;
                 }
                 return { modifiedCount: modified };
@@ -205,6 +207,32 @@ describe('up', () => {
 
         expect(db.images).toHaveLength(1);
         expect(db.images[0].imageData).toEqual(bytes('first'));
+        // And the one that was not moved keeps its inline image: there is no key
+        // to store a second image for one id under, so clearing it would be a
+        // delete with nothing written down.
+        expect(db.guilds[0].shop[0]).toEqual({ itemId: 'padlock' });
+        expect(db.guilds[0].shop[1]).toEqual({ itemId: 'padlock', imageData: bytes('second') });
+    });
+
+    it('takes the entry the routes resolved, even when it is the empty one', () => {
+        // `shop.find(...)` returns the first entry with the id whatever its
+        // image, so an empty first duplicate is a guild that saw no shop image
+        // for it. Moving the second one's artwork would put a picture on screen
+        // that was not there before, which is not a migration's job.
+        const db = fakeDb({
+            guilds: [{
+                guildId: 'g1',
+                shop: [
+                    { itemId: 'padlock', imageData: null },
+                    { itemId: 'padlock', imageData: bytes('hidden') },
+                ],
+            }],
+        });
+
+        return migration.up().then(() => {
+            expect(db.images).toEqual([]);
+            expect(db.guilds[0].shop[1].imageData).toEqual(bytes('hidden'));
+        });
     });
 
     it('skips an item with no id, which was never servable', async () => {

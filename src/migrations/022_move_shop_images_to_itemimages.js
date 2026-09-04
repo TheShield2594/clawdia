@@ -101,18 +101,31 @@ module.exports = {
             // `shop.find(...)`, so a second element carrying the same id was
             // already unreachable. Moving the last would change which artwork a
             // guild sees, on a migration whose job is to move it unchanged.
+            //
+            // Resolved in two steps for the same reason, and in this order: the
+            // first entry carrying an id is the one `find()` returns whether or
+            // not it has an image, so an empty first duplicate means the guild
+            // saw no shop image for that id — and taking a later duplicate's
+            // image would put artwork on screen that was not there before.
             const byId = new Map();
-            for (const item of guild.shop ?? []) {
+            (guild.shop ?? []).forEach((item, index) => {
                 // An item with no id was never servable either: the image route
                 // keys on `itemId`, so no URL could have reached it.
-                if (!item?.itemId || !byteLength(item.imageData)) continue;
-                if (!byId.has(item.itemId)) byId.set(item.itemId, item);
-            }
-            if (!byId.size) continue;
+                if (!item?.itemId || byId.has(item.itemId)) return;
+                byId.set(item.itemId, { item, index });
+            });
+            const movable = [...byId].filter(([, { item }]) => byteLength(item.imageData));
+            if (!movable.length) continue;
             guildsTouched++;
-            movedByGuild.push({ _id: guild._id, itemIds: [...byId.keys()] });
+            // By array index, not by id: two entries sharing an id share the
+            // arrayFilter that an id-based clear would use, so the duplicate
+            // whose image was *not* moved would be cleared along with the one
+            // that was. Indexes are stable here because migrations run at boot,
+            // before the bot logs in and before the dashboard opens its port —
+            // the same thing that makes the whole sweep safe to do unlocked.
+            movedByGuild.push({ _id: guild._id, indexes: movable.map(([, { index }]) => index) });
 
-            for (const [itemId, item] of byId) {
+            for (const [itemId, { item }] of movable) {
                 batch.push({
                     updateOne: {
                         filter: { guildId: guild.guildId, itemId: shopImageId(itemId) },
@@ -139,16 +152,18 @@ module.exports = {
         // them have been. `$[]` over every element of every shop was simpler and
         // wrong twice over: it rewrote every guild document that has a shop at
         // all, including the ones with no image in it, and it destroyed the
-        // image on any entry `up` had skipped — an item with no `itemId` has no
+        // image on any entry `up` had skipped — an entry this cannot move has no
         // row to move its artwork to, so clearing it is a delete with nothing
-        // written down and nothing for `down` to put back.
+        // written down and nothing for `down` to put back. That covers an item
+        // with no `itemId` and the second of two entries sharing one.
         let cleared = 0;
-        for (const { _id, itemIds } of movedByGuild) {
-            const result = await guilds().updateOne(
-                { _id },
-                { $unset: { 'shop.$[moved].imageData': '', 'shop.$[moved].imageType': '' } },
-                { arrayFilters: [{ 'moved.itemId': { $in: itemIds } }] },
-            );
+        for (const { _id, indexes } of movedByGuild) {
+            const unset = {};
+            for (const index of indexes) {
+                unset[`shop.${index}.imageData`] = '';
+                unset[`shop.${index}.imageType`] = '';
+            }
+            const result = await guilds().updateOne({ _id }, { $unset: unset });
             cleared += result.modifiedCount ?? 0;
         }
 

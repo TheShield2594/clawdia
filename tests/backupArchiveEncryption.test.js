@@ -389,6 +389,11 @@ describe("the backup service's entrypoint", () => {
         };
     }
 
+    // Not gated on openssl, unlike its neighbours: the emptiness check sits in
+    // the file-reading block above the `command -v openssl` one, so this refusal
+    // is reached on a machine that has no openssl at all — and it is the case
+    // where a missing gate would let plaintext through, so it is worth having
+    // run everywhere.
     it('refuses an empty passphrase file rather than writing plaintext', () => {
         // The failure this closes: a docker secret that exists and is readable
         // but holds nothing — a mount pointed at the wrong path, a file the
@@ -408,7 +413,7 @@ describe("the backup service's entrypoint", () => {
         expect(run.archives).toEqual([]);
     });
 
-    it('reads a passphrase file that has one, and seals with it', () => {
+    withOpenssl('reads a passphrase file that has one, and seals with it', () => {
         const secret = path.join(dir, 'good.secret');
         fs.writeFileSync(secret, 'a passphrase with spaces\n');
 
