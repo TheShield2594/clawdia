@@ -32,6 +32,14 @@
  * rather than by callers remembering to invalidate, so it cannot drift as write
  * sites are added. The TTL is a backstop for anything that writes around the
  * model (a direct driver call, or another process sharing the database).
+ *
+ * That middleware runs in the process doing the write and nowhere else, which is
+ * what makes the TTL a real bound rather than a formality once a deployment has
+ * more than one process: a save on one shard leaves every other shard's entry
+ * stale for up to `DEFAULT_TTL_MS`. The window, why it is acceptable at this
+ * size, and the two ways to close it are written up alongside the other sharding
+ * invariants in utils/sharding.js (#934) — this note exists so the constraint is
+ * visible from the cache as well as from there.
  */
 
 const DEFAULT_TTL_MS = 30_000;

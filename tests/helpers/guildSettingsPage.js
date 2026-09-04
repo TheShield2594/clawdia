@@ -163,7 +163,13 @@ function bootPage({ panelFetch, media, minified } = {}) {
         return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) };
     });
 
-    const bootstrap = html.match(/<script nonce="[^"]*">([\s\S]*?)<\/script>/)[1];
+    // The page's own per-request data block, found by what it defines rather
+    // than by being first: the shared head partial carries a nonce'd script of
+    // its own now (the CDN image fallback of #946), and it comes earlier in the
+    // document.
+    const bootstrap = [...html.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g)]
+        .map(match => match[1])
+        .find(body => body.includes('window.CLAWDIA_BOOTSTRAP'));
     const addDocumentListener = document.addEventListener.bind(document);
     const addWindowListener = window.addEventListener.bind(window);
     document.addEventListener = (type, fn, opts) => {

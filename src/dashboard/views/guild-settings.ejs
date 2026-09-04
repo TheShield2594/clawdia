@@ -6,7 +6,21 @@
         and injected by loadChartJs() the first time a chart is about to be
         drawn — only the Analytics panel and the Economy panel's Health tab draw
         one, and most sessions open neither. %>
-    <script src="<%= asset('/esc-html.js') %>"></script>
+    <%# `defer` rather than a bare tag (#945). This sat in <head> as a synchronous
+        script, which stops the parser for a whole round trip before anything is
+        painted — and for nothing, because no other script in <head> reads
+        escHtml. Its only consumers are guild-settings.js and the panel renderers
+        it calls, none of which run until after parse.
+
+        The two tags at the end of <body> below carry `defer` too, and that is
+        load-bearing rather than tidiness: deferred scripts run in document order
+        *after* every parser-executed one, so deferring this alone would move it
+        behind the bundle that calls escHtml at load. All three deferred keeps
+        the order they have always run in — escHtml, then the payload builder,
+        then the bundle — while none of them blocks the parse. The inline
+        bootstrap block stays inline and undeferred, so window.CLAWDIA_BOOTSTRAP
+        is still set before any of them looks at it. %>
+    <script defer src="<%= asset('/esc-html.js') %>"></script>
 </head>
 <body style="background:var(--ink-950);margin:0;">
 <%# First tab stop on the page. The sidebar is 25 items long and is rebuilt on
@@ -43,8 +57,16 @@
 
         <!-- Server switcher -->
         <a href="/dashboard" class="dash-server-switch">
+            <%# ?size=64 for a 36px tile, and no lazy: the server switcher is the
+                first thing in the sidebar. The fallback tile is .dash-server-avatar
+                below, which carries its own size and gradient, so the handler in
+                partials/head.ejs swaps the element rather than the src (#946). %>
             <% if (guild.icon) { %>
-                <img src="https://cdn.discordapp.com/icons/<%= guild.id %>/<%= guild.icon %>.png" alt="" style="width:36px;height:36px;border-radius:10px;object-fit:cover;flex-shrink:0;">
+                <img src="https://cdn.discordapp.com/icons/<%= guild.id %>/<%= guild.icon %>.png?size=64" alt=""
+                     width="36" height="36" decoding="async"
+                     style="width:36px;height:36px;border-radius:10px;object-fit:cover;flex-shrink:0;"
+                     data-fallback-class="dash-server-avatar"
+                     data-fallback-text="<%= guild.name.charAt(0).toUpperCase() %>">
             <% } else { %>
                 <div class="dash-server-avatar"><%= guild.name.charAt(0).toUpperCase() %></div>
             <% } %>
@@ -132,8 +154,14 @@
         <!-- User footer -->
         <div class="dash-side-footer" id="dash-side-footer">
             <div class="dash-user">
+                <%# The sidebar footer's own avatar; same treatment as the switcher
+                    above, 34px, .dash-user-avatar as the fallback tile (#946). %>
                 <% if (user.avatar) { %>
-                    <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png" alt="" style="width:34px;height:34px;border-radius:10px;object-fit:cover;flex-shrink:0;">
+                    <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png?size=64" alt=""
+                         width="34" height="34" decoding="async"
+                         style="width:34px;height:34px;border-radius:10px;object-fit:cover;flex-shrink:0;"
+                         data-fallback-class="dash-user-avatar"
+                         data-fallback-text="<%= user.username.charAt(0).toUpperCase() %>">
                 <% } else { %>
                     <div class="dash-user-avatar"><%= user.username.charAt(0).toUpperCase() %></div>
                 <% } %>
@@ -331,7 +359,7 @@
             chartJsUrl:             <%- jsonForScript(asset('/vendor/chart.umd.min.js')) %>,
         };
     </script>
-    <script src="<%= asset('/settings-payload.js') %>"></script>
-    <script src="<%= asset('/guild-settings.js') %>"></script>
+    <script defer src="<%= asset('/settings-payload.js') %>"></script>
+    <script defer src="<%= asset('/guild-settings.js') %>"></script>
 </body>
 </html>

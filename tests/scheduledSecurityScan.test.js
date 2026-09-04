@@ -22,6 +22,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const yaml = require('js-yaml');
+const { describeAuditRetry } = require('./helpers/auditStep');
 
 const WORKFLOWS = path.join(__dirname, '..', '.github', 'workflows');
 
@@ -100,137 +101,12 @@ describe('the dependency half', () => {
 //
 // Run for real against a stub, for the same reason the image check is: the
 // branch is shell, and asserting on the YAML would restate it back to itself.
-describe('the audit retry', () => {
-    const step = allSteps(scanner.doc).find(s => /npm audit/.test(s.run || ''));
-
-    // What npm actually printed on the run that failed.
-    const OUTAGE = [
-        "npm warn audit 503 Service Unavailable - POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk - Service Unavailable",
-        "{ error: 'Service Unavailable' }",
-        'npm error audit endpoint returned an error',
-    ].join('\n');
-
-    // A real finding. It names a denial-of-service advisory and a version
-    // range with 503 in it, both of which a pattern matching on the HTTP code
-    // would read as an outage and retry.
-    const FINDING = [
-        'qs  2.2.5 - 6.503.1',
-        'Severity: high',
-        'qs: Denial of Service via Attacker Controlled isBuffer',
-        '1 high severity vulnerability',
-    ].join('\n');
-
-    /**
-     * Run the step's script with `npm` stubbed to answer differently per
-     * attempt, and `sleep` stubbed away so the backoff costs nothing.
-     *
-     * @param {Array<{says: string, exits: number}>} replies one per attempt;
-     *   the last is repeated once exhausted
-     * @returns {{status: number, stdout: string, calls: number}}
-     */
-    const runWith = replies => {
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdia-audit-'));
-        try {
-            const bin = path.join(dir, 'bin');
-            fs.mkdirSync(bin);
-            const calls = path.join(dir, 'calls');
-            fs.writeFileSync(calls, '');
-
-            // Each reply is a file the stub reads by attempt number.
-            replies.forEach((reply, at) => {
-                fs.writeFileSync(path.join(dir, `say-${at}`), reply.says);
-                fs.writeFileSync(path.join(dir, `exit-${at}`), String(reply.exits));
-            });
-
-            fs.writeFileSync(path.join(bin, 'npm'), [
-                '#!/bin/sh',
-                `echo x >> ${JSON.stringify(calls)}`,
-                `n=$(wc -l < ${JSON.stringify(calls)})`,
-                `last=${replies.length - 1}`,
-                'at=$((n - 1))',
-                '[ "$at" -gt "$last" ] && at="$last"',
-                `cat ${JSON.stringify(dir)}/say-"$at"`,
-                `exit "$(cat ${JSON.stringify(dir)}/exit-"$at")"`,
-            ].join('\n') + '\n', { mode: 0o755 });
-
-            // So the 15s and 30s backoffs do not become the test's runtime.
-            fs.writeFileSync(path.join(bin, 'sleep'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-
-            const script = path.join(dir, 'step.sh');
-            fs.writeFileSync(script, step.run);
-
-            const result = spawnSync('bash', ['-e', script], {
-                encoding: 'utf8',
-                env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-            });
-
-            return {
-                status: result.status,
-                stdout: `${result.stdout}${result.stderr}`,
-                calls: fs.readFileSync(calls, 'utf8').split('\n').filter(Boolean).length,
-            };
-        } finally {
-            fs.rmSync(dir, { recursive: true, force: true });
-        }
-    };
-
-    test('the step is still a shell script this can run', () => {
-        expect(step).toBeDefined();
-        expect(typeof step.run).toBe('string');
-    });
-
-    test('passes, once, on a clean tree', () => {
-        const run = runWith([{ says: 'found 0 vulnerabilities', exits: 0 }]);
-
-        expect(run.status).toBe(0);
-        expect(run.calls).toBe(1);
-    });
-
-    test('fails on a real finding without retrying it', () => {
-        // Retrying a finding would only ask the same question three times and
-        // then report the wrong reason for the failure.
-        const run = runWith([{ says: FINDING, exits: 1 }]);
-
-        expect(run.status).not.toBe(0);
-        expect(run.calls).toBe(1);
-        expect(run.stdout).toContain('1 high severity vulnerability');
-        expect(run.stdout).not.toContain('could not reach the registry');
-    });
-
-    test('rides out an outage that clears', () => {
-        // The failure that prompted this: one 503, then the endpoint answers.
-        const run = runWith([
-            { says: OUTAGE, exits: 1 },
-            { says: 'found 0 vulnerabilities', exits: 0 },
-        ]);
-
-        expect(run.status).toBe(0);
-        expect(run.calls).toBe(2);
-    });
-
-    test('gives up on an outage that does not, and says which it was', () => {
-        const run = runWith([{ says: OUTAGE, exits: 1 }]);
-
-        // Still red — an un-audited tree is not a clean one. What changes is
-        // that the log says the audit did not run, rather than implying a
-        // vulnerability nobody can find.
-        expect(run.status).not.toBe(0);
-        expect(run.calls).toBeGreaterThan(1);
-        expect(run.stdout).toContain('::error::');
-        expect(run.stdout).toContain('has not been audited');
-    });
-
-    test.each([
-        ['a DNS failure', 'npm error code ENOTFOUND\nnpm error network request to https://registry.npmjs.org failed'],
-        ['a dropped connection', 'npm error code ECONNRESET'],
-        ['a timeout', 'npm error code ETIMEDOUT'],
-    ])('treats %s as the registry\'s fault too', (_case, says) => {
-        const run = runWith([{ says, exits: 1 }, { says: 'found 0 vulnerabilities', exits: 0 }]);
-
-        expect(run.status).toBe(0);
-        expect(run.calls).toBe(2);
-    });
-});
+// The cases live in tests/helpers/auditStep.js because ci.yml's gate now runs
+// the same script and has to answer them identically (#980).
+describeAuditRetry(
+    'the weekly audit',
+    () => allSteps(scanner.doc).find(s => /npm audit/.test(s.run || '')),
+);
 
 describe('the image half', () => {
     const step = () => scannerStep(scanner.doc);

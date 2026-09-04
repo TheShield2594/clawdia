@@ -22,5 +22,92 @@
 <meta name="description" content="<%= description %>">
 <%_ } _%>
 <%- include('favicon') %>
+<%#
+    The two faces that render above the fold on every page, asked for before the
+    stylesheet that declares them (#945).
+
+    Without these the font chain is three serial round trips deep — HTML, then
+    fonts.css, then the woff2 — because a @font-face URL is not discoverable
+    until the stylesheet declaring it has arrived and parsed. `font-display:
+    swap` means that costs a flash of fallback text rather than blank space, but
+    it is still two round trips of it. A preload moves the fetch to the first,
+    alongside the stylesheets.
+
+    Only the latin subsets of Inter Tight 400 and 600, and deliberately so: a
+    preload for a face the page does not end up rendering is a wasted download
+    that also warns in the console. 400 is the body text and 600 is every heading
+    and label, on all three pages; every other weight, family and subset stays
+    demand-loaded off its unicode-range exactly as before. Instrument Serif is
+    left out for the same reason — it is display type, below the fold on the
+    dashboard pages, and the landing page's wordmark is one line of it.
+
+    `crossorigin` is not optional even though these are same-origin: fonts are
+    fetched in CORS mode, and a preload whose mode does not match the fetch it is
+    meant to satisfy is downloaded twice rather than once.
+
+    The URLs are written plainly rather than through asset(), which is the one
+    place in this file that is right. A preload only satisfies a later fetch when
+    the two URLs match exactly, and the fetch comes from fonts.css, which names
+    every face by bare filename with no `?v=` — the un-hashed font URLs of #903.
+    Stamping a hash here would preload one URL and then fetch a different one:
+    two downloads and a console warning instead of the round trip this saves.
+    When #903 gives the faces hashed URLs, these two move to asset() with it.
+
+    The two <link rel="stylesheet"> below are left as two. #945 also suggested
+    collapsing them into one file, which the preload scanner has already made
+    close to free — both are requested in the same round trip, neither waits on
+    the other — and doing it would mean either editing the file
+    scripts/fetch-fonts.sh regenerates or making the built image serve a
+    different <head> from a plain checkout. Neither is worth a request that is
+    already parallel.
+-%>
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/inter-tight-400-latin.woff2">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/inter-tight-600-latin.woff2">
 <link rel="stylesheet" href="<%= asset('/fonts/fonts.css') %>">
 <link rel="stylesheet" href="<%= asset('/styles.css') %>">
+<%#
+    The letter-avatar fallback for a Discord CDN image that does not load (#946).
+
+    Every place the dashboard shows a guild icon or a user avatar already renders
+    a letter tile when Discord reports no icon hash. What it could not handle was
+    a hash that *is* reported and no longer resolves — a server that changed its
+    icon since the OAuth session was minted, most often — which arrives as a 404
+    and paints the browser's broken-image glyph in a layout built for a rounded
+    tile. This turns that case into the same letter tile as having no icon at all.
+
+    An `onerror=""` attribute is the obvious way to write this and is not
+    available: the dashboard serves `script-src-attr 'none'` (#887), so an inline
+    handler attribute is refused by the CSP whether it was authored here or
+    injected. A capturing listener is the CSP-clean equivalent — `error` does not
+    bubble, but it does capture — and it is registered here, in <head>, because
+    it has to be installed before the parser reaches the first <img> it is meant
+    to catch. A deferred external file would not run until after every image on
+    the page had already had its chance to fail.
+
+    Only images that opted in are touched. `data-fallback-class` names the tile
+    class the markup would have rendered anyway and doubles as the opt-in flag,
+    so an image with no fallback to swap to is left exactly as it is. It is
+    cleared before the swap so that a second `error` on the same element — a
+    browser that retries, a handler that somehow runs twice — cannot build two
+    tiles out of one image.
+
+    The letter goes in through `textContent` and never `innerHTML`: it is the
+    first character of a guild or user name, which is attacker-controlled in
+    exactly the way the rest of this dashboard's XSS work is about.
+
+    The body below is kept terse deliberately. It is inline in a per-request HTML
+    response, so unlike the files under public/ it is neither cached nor minified
+    — every byte of it is re-sent on every page view, which is why the reasoning
+    lives up here, in an EJS comment the renderer strips.
+-%>
+<script nonce="<%= locals.cspNonce %>">
+document.addEventListener('error', function (event) {
+    var img = event.target;
+    if (!img || img.tagName !== 'IMG' || !img.dataset || !img.dataset.fallbackClass) return;
+    var tile = document.createElement('div');
+    tile.className = img.dataset.fallbackClass;
+    delete img.dataset.fallbackClass;
+    tile.textContent = img.dataset.fallbackText || '';
+    img.replaceWith(tile);
+}, true);
+</script>

@@ -6,7 +6,7 @@ const { processJackpotBet, getJackpotDisplay } = require('../../services/casinoJ
 const { advanceMissions } = require('../../services/seasonMissionService');
 const { tryAcquire, release } = require('../../utils/activeGameLock');
 const { checkAndAwardAtomic, announceAchievements } = require('../../services/achievementService');
-const { economyLockKey, busyMessage } = require('../../utils/economyLock');
+const { economyLockKey, casinoLockKey, busyMessage, GRIND_TTL_MS } = require('../../utils/economyLock');
 
 const games = [
     require('../../games/casino/blackjack'),
@@ -137,16 +137,45 @@ module.exports = {
             return interaction.reply({ content: 'Unknown casino game.', flags: MessageFlags.Ephemeral });
         }
 
-        // One economy action per user — prevents concurrent sessions from racing
-        // each other's debits, effects, and jackpot snapshots. The key is shared
-        // with /fish, /hunt, /mine, /explore and /craft (utils/economyLock.js),
-        // so a hand cannot interleave with a cast over the same user document
-        // either. The TTL is the primitive's ten-minute default rather than the
-        // grind commands' two minutes, because a hand outlives `execute` by as
-        // long as the player takes to play it.
-        const lockKey   = economyLockKey(interaction.guild.id, interaction.user.id);
+        // Two leases, because the two things being prevented have different
+        // lifetimes (#955). The rationale is written up in utils/economyLock.js;
+        // the shapes are:
+        //
+        //   the shared economy key   /fish, /hunt, /mine, /explore and /craft
+        //                            contend for it too, so nothing of this
+        //                            player's interleaves with the opening
+        //                            debit. Released when execute() returns,
+        //                            like every grind command's.
+        //   the casino key           one game per player, held for the whole
+        //                            hand — which outlives execute() by as long
+        //                            as the player takes to play it, hence the
+        //                            primitive's ten-minute default.
+        //
+        // The economy key used to do both jobs, which is what made an abandoned
+        // blackjack hand a ten-minute lockout from every other economy command.
+        // It is safe to stop holding it across the hand because every coin write
+        // a hand makes past this point is already atomic — placeWager's
+        // compare-and-set for the stake, `$inc` for every payout — and no grind
+        // command can write a stale balance over one (tests/balanceSaveGuard).
+        //
+        // Economy first, then casino, which is the order everywhere and the
+        // reason there is no cycle to deadlock on.
+        const economyKey   = economyLockKey(interaction.guild.id, interaction.user.id);
+        const economyToken = await tryAcquire(economyKey, GRIND_TTL_MS, 'casino');
+        if (!economyToken) {
+            return interaction.reply({
+                content: await busyMessage(economyKey),
+                flags: MessageFlags.Ephemeral,
+            });
+        }
+
+        const lockKey   = casinoLockKey(interaction.guild.id, interaction.user.id);
         const lockToken = await tryAcquire(lockKey, undefined, 'casino');
         if (!lockToken) {
+            // Hand it straight back: holding the shared key while refusing the
+            // game would lock the player out of the grind commands for a hand
+            // that never started.
+            await release(economyKey, economyToken);
             return interaction.reply({
                 content: await busyMessage(lockKey),
                 flags: MessageFlags.Ephemeral,
@@ -164,8 +193,8 @@ module.exports = {
         //
         // If a game throws, or forgets to call releaseLock on some exotic
         // early-return path, the lock's own TTL (10 min) frees the slot —
-        // worst case the player is blocked from every economy command for
-        // that long, never permanently.
+        // worst case the player is blocked from *the casino* for that long,
+        // never permanently, and never from the rest of the economy.
         // Fire-and-forget: the games call this from collector callbacks that
         // cannot await, and a release that loses its round trip is covered by
         // the lease's own TTL.
@@ -231,6 +260,12 @@ module.exports = {
         } catch (err) {
             releaseLock();
             throw err;
+        } finally {
+            // The shared key, and only the shared key. Its job — keeping this
+            // invocation from interleaving with another of the player's economy
+            // commands — is finished the moment execute() returns; the hand
+            // itself is guarded by the casino key, which the game releases.
+            await release(economyKey, economyToken);
         }
     },
 };

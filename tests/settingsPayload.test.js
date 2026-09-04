@@ -375,6 +375,6 @@ describe('the bundle', () => {
         const view = fs.readFileSync(
             path.join(__dirname, '..', 'src', 'dashboard', 'views', 'guild-settings.ejs'), 'utf8'
         );
-        expect(view).toContain("<script src=\"<%= asset('/settings-payload.js') %>\"></script>");
+        expect(view).toContain("<script defer src=\"<%= asset('/settings-payload.js') %>\"></script>");
     });
 });

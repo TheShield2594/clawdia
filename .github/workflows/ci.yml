@@ -156,9 +156,54 @@ jobs:
       #
       # `always()` for the same reason as lint: a failing suite must not hide
       # the advisory, and an advisory must not hide which tests failed.
+      #
+      # `npm audit` exits non-zero for two unrelated reasons: it found
+      # advisories at or above the level, or it never managed to ask. Read
+      # alike, an npmjs blip arrives as a security finding — which is how a
+      # green pull request came to be blocked by a 503 from the registry's bulk
+      # advisory endpoint, with nothing in the log to say the tree had simply
+      # not been audited. security-scan.yml was fixed for exactly this on its
+      # weekly job; this is the same guard on the gate that people actually
+      # merge past, where a false alarm is worse because it is the one that
+      # teaches everyone to merge past it.
+      #
+      # The two steps are deliberately the same script. They already have to
+      # stay at the same bar — see the note in security-scan.yml — and
+      # tests/ciSupplyChainGates.test.js and tests/scheduledSecurityScan.test.js
+      # run each of them for real against a stubbed npm, so a copy that drifts
+      # is a copy that fails.
       - name: Audit dependencies
         if: always()
-        run: npm audit --audit-level=high
+        run: |
+          attempt=1
+          attempts=3
+
+          while true; do
+            output=$(npm audit --audit-level=high 2>&1) && status=0 || status=$?
+            printf '%s\n' "$output"
+
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+
+            # Matched on npm's own words for "I could not reach the registry",
+            # not on the HTTP code: "503" and "Service Unavailable" both turn
+            # up inside advisory titles and version ranges, and reading a real
+            # finding as an outage would retry it and then report the wrong
+            # reason for the failure.
+            if ! printf '%s\n' "$output" | grep -qiE 'audit endpoint returned an error|npm (error|ERR!) network|npm (error|ERR!) code (ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|ENETUNREACH)'; then
+              exit "$status"
+            fi
+
+            if [ "$attempt" -ge "$attempts" ]; then
+              echo "::error::npm audit could not reach the registry in $attempts attempts — the dependency tree has not been audited this run"
+              exit 1
+            fi
+
+            echo "::notice::npm audit could not reach the registry (attempt $attempt of $attempts); retrying"
+            sleep $(( attempt * 15 ))
+            attempt=$(( attempt + 1 ))
+          done
 
   # #646: the Dockerfile was built in exactly one place — the publish job below,
   # which runs on `main` after a merge. So a Dockerfile regression was found by

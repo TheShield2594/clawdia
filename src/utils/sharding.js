@@ -46,6 +46,52 @@
 //
 // Both are gated on `isPrimaryShard()` at their bootstrap site.
 
+// ── What is neither, and is bounded instead ──────────────────────────────────
+//
+// A third category: process-local state that is neither guild-affine nor
+// singleton work, but a *cache* — correct on every shard, merely capable of
+// being out of date on the ones that did not do the writing (#934).
+//
+// `utils/guildSettingsCache.js` is the one that matters. It holds a guild's
+// settings for 30 seconds on the hot read paths (messageCreate,
+// interactionCreate), and it is invalidated by Mongoose middleware registered
+// in models/Guild.js — middleware that runs in the process doing the write and
+// nowhere else. So a dashboard save on shard 0 is invisible to shards 1..N
+// until their own entry expires.
+//
+// The window is therefore bounded by the TTL and nothing else: at most 30
+// seconds during which a message handled on another shard is judged against the
+// settings that applied before the save. Nothing here moves coins or grants
+// permission that a stale read could widen — the dashboard's own authorization
+// is re-checked per request in dashboard/lib/permissions.js, not read from this
+// cache — so the cost is a moderation rule or a welcome message lagging half a
+// minute behind the admin who changed it.
+//
+// How reachable it is depends on the deployment, and there are three cases:
+//
+//   unsharded          the window is empty. One process, so the middleware that
+//                      invalidates is always the one holding the cache.
+//   two or more shards the window is real *now*. The dashboard is gated on
+//                      `isPrimaryShard()` (above), so an admin's save always
+//                      lands on shard 0 — and invalidates shard 0's entry and no
+//                      other. Shards 1..N keep serving the pre-save settings
+//                      until their own entry expires. The bot's own commands are
+//                      the case that stays covered: a command writes on whatever
+//                      shard is handling that guild, which is the shard holding
+//                      the entry the middleware then drops.
+//   dashboard split    wider still (#876). A dashboard in its own process shares
+//                      middleware with no shard at all, so even a single-shard
+//                      deployment gets the window, and a save invalidates
+//                      nothing anywhere.
+//
+// Recorded here rather than fixed, because the fix costs more than the staleness
+// does at this size. When it stops being acceptable, the two options are:
+//
+//   - shorten the TTL, which trades staleness for read load one-for-one; or
+//   - add a Mongo-side invalidation bump — a monotonically increasing counter on
+//     the guild document that the cached read compares against — which is one
+//     extra round trip per read and removes the window entirely.
+
 /** Discord's gateway routing rule. The one place it is written down. */
 const GUILD_SHARD_SHIFT = 22n;
 

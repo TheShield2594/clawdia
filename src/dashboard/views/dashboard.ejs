@@ -45,8 +45,21 @@
             <div class="cw-dash-lp-grid">
                 <% guilds.forEach(function(guild) { %>
                     <div class="cw-dash-lp-card">
+                        <%# ?size=128 for a 52px tile: the CDN's default is whatever
+                            the owner uploaded, routinely 1024px or larger, and this
+                            grid fetches one per guild. 128 is the smallest size
+                            Discord serves that still covers a 2x display (52 x 2 =
+                            104). loading="lazy" because the grid is as long as the
+                            member's server list and most of it starts below the
+                            fold; width/height so the row does not reflow as each
+                            icon lands. See partials/head.ejs for the data-fallback-*
+                            handler (#946). %>
                         <% if (guild.icon) { %>
-                            <img src="https://cdn.discordapp.com/icons/<%= guild.id %>/<%= guild.icon %>.png" alt="Icon for <%= guild.name %> server" class="cw-dash-lp-icon">
+                            <img src="https://cdn.discordapp.com/icons/<%= guild.id %>/<%= guild.icon %>.png?size=128"
+                                 alt="Icon for <%= guild.name %> server" class="cw-dash-lp-icon"
+                                 width="52" height="52" loading="lazy" decoding="async"
+                                 data-fallback-class="cw-dash-lp-icon-fallback"
+                                 data-fallback-text="<%= guild.name.charAt(0).toUpperCase() %>">
                         <% } else { %>
                             <div class="cw-dash-lp-icon-fallback">
                                 <%= guild.name.charAt(0).toUpperCase() %>
