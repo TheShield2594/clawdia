@@ -247,6 +247,12 @@ async function awardPool({ guildId, userId, username, seedAmount, extra = 0, not
  * CRITICAL line the failed credit logged.
  */
 async function reconcileJackpotClaims({ limit = MAX_RECONCILE_PER_BOOT } = {}) {
+    // `$ne: null` excludes a document that has no `pendingPayoutKey` at all,
+    // not only one holding null: a missing field *is* null to Mongo's equality,
+    // and this is the negation of it. That is what keeps every guild whose last
+    // jackpot predates the field out of this sweep — they still carry the
+    // lastWinner display fields, and reading one as an outstanding claim would
+    // pay a historical win again on the next boot.
     const outstanding = await Guild
         .find({ 'casinoJackpot.pendingPayoutKey': { $ne: null } }, 'guildId casinoJackpot')
         .limit(limit)

@@ -394,6 +394,30 @@ describe('reconcileJackpotClaims', () => {
         expect(guildDoc().casinoJackpot).toMatchObject({ lastWinnerId: USER, lastWonAmount: 250_050 });
     });
 
+    test('leaves a win from before the marker existed alone', async () => {
+        // The upgrade shape: a guild whose last jackpot predates
+        // `pendingPayoutKey`, so the field is absent rather than null. A
+        // missing field is null to Mongo, so `$ne: null` excludes it — if it
+        // did not, every historical winner in the database would be read as an
+        // outstanding claim on the next boot and paid their old win again.
+        mockGuilds.reset();
+        mockGuilds.seed({
+            guildId: GUILD,
+            casinoJackpot: {
+                ...jackpot(),
+                lastWinnerId:  USER,
+                lastWinnerName: 'Ada',
+                lastWonAmount: 250_050,
+                lastWonAt:     new Date('2026-08-01T00:00:00Z'),
+            },
+        });
+
+        expect(await reconcileJackpotClaims()).toEqual({ reconciled: 0, failed: 0 });
+
+        expect(balance()).toBe(999);
+        expect(logTransaction).not.toHaveBeenCalled();
+    });
+
     test('keeps the claim when the credit fails', async () => {
         outstanding();
         mockUsers.model.findOneAndUpdate.mockImplementation(async () => { throw new Error('mongo down'); });
