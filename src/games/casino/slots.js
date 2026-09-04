@@ -31,8 +31,11 @@ const WIN_ANNOUNCE_MULT = 50;
 // (services/casinoJackpotService) — the same one `/casino jackpot` reports and
 // every casino bet feeds at 0.5%. Slots keeps no pool of its own; a Triple Wild is
 // simply a second, rarer way to claim this one. FREE_SPIN_JACKPOT_MULT is what a
-// Triple Wild pays when it cannot claim the pool: on a free spin (which staked
-// nothing) or if the pool credit failed and was rolled back.
+// Triple Wild pays when there is no pool to claim: on a free spin (which staked
+// nothing), or in a guild with no document and so no accumulated pot. A claim
+// that succeeded and has not been credited yet is *not* one of those — the pot
+// is the player's and is being recovered under its payout key, so paying this
+// on top would pay the same Triple Wild twice (#873).
 
 function reelDisplay(reels, revealed) {
     return reels.map((s, i) => i < revealed ? s.emoji : randomEmoji()).join('  ┃  ');
@@ -106,7 +109,31 @@ function resultEmbed(reels, result, bet, balance, interaction, jackpotPool) {
         .setTimestamp();
 }
 
-function jackpotBroadcastEmbed(interaction, wonAmount, newPool) {
+/**
+ * The channel-wide announcement of a Triple Wild.
+ *
+ * `delivery` is the claim's outcome, and it is what makes the channel hear the
+ * same thing the winner does: this embed used to say the player "walked away
+ * with the entire pool" whatever became of the credit, so a pot that had not
+ * arrived was announced as paid to everyone while the winner's own result embed
+ * said otherwise (#873).
+ *
+ * @param {object} interaction  the spin, for the winner's name and avatar
+ * @param {number} wonAmount    the pot that was claimed
+ * @param {number} newPool      what the pool was reseeded to
+ * @param {object} [delivery]   `{ credited, owed }` from the claim; defaults to
+ *                              a delivered pot, which is what every caller
+ *                              before the claim could fail to land meant
+ */
+function jackpotBroadcastEmbed(interaction, wonAmount, newPool, delivery = {}) {
+    const { credited = true, owed = false } = delivery;
+    const wonLine = credited
+        ? `  💰 Won: **${wonAmount.toLocaleString()}** coins\n`
+        : `  💰 Won: **${wonAmount.toLocaleString()}** coins — not delivered yet\n` +
+          (owed
+              ? `  📝 Recorded for an admin to settle\n`
+              : `  ⚠️ Could not be recorded — tell an admin\n`);
+
     return new EmbedBuilder()
         .setColor('#FF00FF')
         .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
@@ -115,9 +142,9 @@ function jackpotBroadcastEmbed(interaction, wonAmount, newPool) {
             `　　　**J A C K P O T**\n` +
             `🎰 ━━━━━━━━━━━━━━━━━━━━━━━ 🎰\n\n` +
             `${interaction.user} just hit **TRIPLE WILD** 🃏🃏🃏\n` +
-            `and walked away with the entire pool.\n\n` +
+            (credited ? `and walked away with the entire pool.\n\n` : `and claimed the entire pool.\n\n`) +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `  💰 Won: **${wonAmount.toLocaleString()}** coins\n` +
+            wonLine +
             `  🔄 New pool: **${newPool.toLocaleString()}** coins\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
             `> Think you can be next?`
@@ -248,6 +275,8 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         // pool of its own.
         let finalJackpotPool = jackpotPool;
         let jackpotWon = false;
+        let jackpotNote = null;
+        let jackpotDelivery = {};
 
         if (result.outcome === 'jackpot') {
             const claim = await claimJackpot({
@@ -257,17 +286,30 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 note:     'Progressive jackpot win — slots Triple Wild',
             });
             finalJackpotPool = claim.newPool;
-            if (claim.credited) {
-                // The service has already moved the coins and logged the payout, so
-                // the spin's own credit below must skip this amount. It is carried on
-                // result.payout for the embeds' arithmetic only.
+            if (claim.claimed) {
+                // The pot came out of the pool, so it is this player's whether or
+                // not the credit has landed yet — and either way the spin's own
+                // credit below must skip the amount. A claim that has not been
+                // paid is being recovered under its own payout key (the restart
+                // reconciler, `payouts:replay`), and paying the flat mega-win in
+                // its place would pay the same Triple Wild twice: the fallback
+                // used to run on top of a pool the service had put back, over a
+                // credit that may well have committed and only lost its response.
+                //
+                // result.payout carries the pot for the embeds' arithmetic only.
                 jackpotWon = true;
                 result = { ...result, payout: claim.wonAmount };
+                jackpotDelivery = { credited: claim.credited, owed: claim.owed };
+                if (!claim.credited) {
+                    jackpotNote = claim.owed
+                        ? '\n> ⚠️ *The pot could not be paid out just now — it has been recorded and an admin can settle it.*'
+                        : '\n> ⚠️ *The pot could not be paid out just now, and could not be recorded either — please tell an admin.*';
+                }
             } else {
-                // The credit failed and the pool was rolled back. Pay the flat
-                // mega-win through the normal payout path instead — a Triple Wild is
-                // never a dead spin.
-                console.error(`[Slots] jackpot credit failed for ${interaction.user.id} — paying the ${FREE_SPIN_JACKPOT_MULT}x fallback`);
+                // Nothing was claimed — there is no guild document and so no pool
+                // to win. Pay the flat mega-win through the normal payout path
+                // instead; a Triple Wild is never a dead spin.
+                console.error(`[Slots] no jackpot pool to claim for ${interaction.user.id} — paying the ${FREE_SPIN_JACKPOT_MULT}x fallback`);
                 result = { ...result, payout: bet * FREE_SPIN_JACKPOT_MULT };
             }
         }
@@ -319,7 +361,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 : interaction.channel;
             await targetChannel?.send({
                 content: pingHere ? '@here' : undefined,
-                embeds: [jackpotBroadcastEmbed(interaction, result.payout, finalJackpotPool)],
+                embeds: [jackpotBroadcastEmbed(interaction, result.payout, finalJackpotPool, jackpotDelivery)],
             }).catch(err => console.error(`[Slots] jackpot broadcast failed — channel:${targetChannel?.id} interaction:${interaction.id}`, err));
         }
 
@@ -411,6 +453,13 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         if (totalCoinMult > 1.0 && adjustedPayout > bet) {
             const desc = finalEmbed.data.description ?? '';
             finalEmbed.setDescription(desc + `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied to winnings!*`);
+        }
+        // A pot that was claimed but has not reached the balance yet says so
+        // here. The embed reports the win and the new balance from the same
+        // document, and without this it would show the pot as paid.
+        if (jackpotNote) {
+            const desc = finalEmbed.data.description ?? '';
+            finalEmbed.setDescription(desc + jackpotNote);
         }
         await interaction.editReply({
             embeds: [finalEmbed],

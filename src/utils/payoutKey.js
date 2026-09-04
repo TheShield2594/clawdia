@@ -302,6 +302,24 @@ function crewSharePayoutKey(jobId, userId) {
 }
 
 /**
+ * One claim on the progressive casino jackpot pool (#873).
+ *
+ * `claimId` is minted by the claim itself and written into the guild document
+ * alongside the reset pool, so the live credit, the restart reconciler and
+ * `payouts:replay` all rebuild the same string for the same pot. That is the
+ * whole recovery design: the pool is claimed once and can then be credited from
+ * three places at three different times, and the key is what makes all three
+ * add up to one payment.
+ *
+ * Nothing about the win goes into it — not the guild's pool, not the amount, not
+ * the winner. Two players can win identical pots minutes apart, and a key built
+ * from what they won would make the second look like a replay of the first.
+ */
+function jackpotPayoutKey(guildId, claimId) {
+    return `jackpot:${guildId}:${claimId}`;
+}
+
+/**
  * The sender's refund when a coin transfer could not be completed (#868).
  *
  * Keyed by the interaction, which is the one identifier that names *this*
@@ -316,6 +334,7 @@ function transferRefundPayoutKey(interactionId) {
 module.exports = {
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
     marketSalePayoutKey, transferRefundPayoutKey, duelPayoutKey, crewSharePayoutKey,
+    jackpotPayoutKey,
     payoutKeyGuard, payoutKeyAppendExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, isDuplicateKeyError,
     RETENTION_DAYS, RETENTION_MS, KEY_CAP,

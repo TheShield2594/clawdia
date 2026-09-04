@@ -366,10 +366,19 @@ describe('per-file floors', () => {
         // being uncovered would look like a failure — the debits would simply
         // stop refusing a frozen member and every one of their tests would
         // still pass.
+        //
+        // casinoJackpotService.js joined in #873's casino pass. It is not a
+        // primitive but it is the largest single payout the bot makes, and the
+        // only pot in the casino that exists outside anybody's balance: it
+        // claims coins out of a shared pool, credits them in a separate write,
+        // and recovers the gap on the next boot. It sat at 14.6% statements and
+        // 0% branches once before (#784), inside a services directory whose
+        // floor is a hundred files wide and could not have noticed.
         expect(Object.keys(floors.files).sort()).toEqual([
             'src/commands/economy/bank.js',
             'src/commands/economy/duel.js',
             'src/commands/economy/invest.js',
+            'src/services/casinoJackpotService.js',
             'src/utils/balanceDebit.js',
             'src/utils/balanceDelta.js',
             'src/utils/coinTransfer.js',

@@ -1,11 +1,12 @@
 # Feature Audit Log
 
 A record of the subsystems that have been through a line-by-line audit, and what
-was found and fixed in each. **It is not a survey of the whole bot.** Ten
-subsystems have been audited: nine long-stable, low-churn ones, and the first
-pass over the economy — the escrow and payout paths of `/duel`, `/heist` and
-`/syndicate` (#873). The majority of the codebase, and most of the economy, has
-never been audited; see [Not yet reviewed](#not-yet-reviewed) for the full list.
+was found and fixed in each. **It is not a survey of the whole bot.** Eleven
+subsystems have been audited: nine long-stable, low-churn ones, and two passes
+over the economy — the escrow and payout paths of `/duel`, `/heist` and
+`/syndicate`, and the casino's progressive jackpot (#873). The majority of the
+codebase, and most of the economy, has never been audited; see
+[Not yet reviewed](#not-yet-reviewed) for the full list.
 
 A subsystem appearing here means it was audited on the date at the bottom of
 this file and the findings were resolved. A subsystem *not* appearing here means
@@ -445,6 +446,101 @@ with both sides guarded and reversed on failure), `utils/placeWager.js`, and the
 clears the winner fields when a credit fails, which is sound; it does not write
 an owed record, and is left for the casino pass.
 
+*The pool restore was not sound, and the casino pass below says why: it is the
+right recovery only if the credit definitely did not land, which is exactly what
+the unkeyed retry above it could not establish. Left as it was written, because
+what a pass concluded is part of what the next one has to check.*
+
+---
+
+## Economy — The Progressive Jackpot
+
+**Status: Audited — all findings resolved** ✓
+
+The second pass of the economy audit #873 asks for, over `casino payouts,
+jackpot`. It takes the jackpot first for the same reason the first pass took
+escrow: the pool is the one place in the casino where coins exist outside
+anybody's balance, and it is the largest single payout the bot makes — a
+five-figure pot claimed out of a shared pool in one write and credited in
+another, with a boot-time reconciler in between to cover the gap. A failure
+there does not misreport a number; it makes or unmakes one.
+
+The rest of the casino — the eight games' own payout writes, `confirmBet`, the
+crash lobby's `pendingCrashRefund` escrow — is **not** audited by this pass and
+is still listed under [Not yet reviewed](#not-yet-reviewed).
+
+**Files reviewed/fixed:**
+- `src/services/casinoJackpotService.js`
+- `src/events/ready.js`
+- `src/games/casino/slots.js`
+- `src/models/Guild.js`
+- `src/utils/payoutKey.js`
+- `tests/casinoJackpotPayout.test.js` (rewritten)
+- `tests/casinoJackpotSinglePool.test.js`
+- `tests/readyEvent.test.js`
+- `tests/coverageRatchet.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | The pot and the amount of it were two writes. The claim reset the pool and named the winner; `lastWonAmount` followed in a separate, unawaited `updateOne`. A process that stopped in between left the new winner's name over the *previous* winner's amount — and that field is what the restart reconciler pays from, so the next boot credited a number this player never won, out of a pool that had already been reseeded | The claim is one update-pipeline write that reseeds the pool, records the amount it took — computed from the pool as it stood at the start of the same write — and mints the payout key, all atomically. The amount is read back off the document that write returned | `casinoJackpotService.js` |
+| 2 | The credit was an unkeyed `$inc` retried three times. A write that commits and loses its response is indistinguishable from one that never ran, so the second attempt paid the pot again — the same finding as #4 in the escrow pass, in the payout that pot for pot is the biggest in the bot | The credit goes through `creditCoinsOrOwe` under the claim's own payout key, so a retry of a landed credit moves no coins and reports success | `casinoJackpotService.js`, `payoutKey.js` |
+| 3 | A credit that would not land rolled the pool back. That is only the right recovery if the credit definitely did not happen, which #2 says cannot be established; the rollback put a five-figure pot back under a player who may already have been paid it. It also left the coins nowhere an operator could find them: no owed record, no queue entry, one console line | The pool stays reseeded and the debt is written down instead — an owed payout under the claim's key, which `npm run payouts:replay` settles, plus a marker on the guild document for the boot-time reconciler. Restoring *and* recording is what pays twice; recording is the one of the two that cannot | `casinoJackpotService.js` |
+| 4 | Slots paid its 25x Triple Wild consolation on top of a rolled-back claim. The three failures compose: one lost response could credit the pot, restore the pool, and pay the fallback — the player keeps the pot, the guild keeps the pot, and the fallback is minted on top | A claim that succeeded is the player's whether the credit has landed or not, so nothing is paid in its place; the spin says the pot has not arrived and whether it was recorded. The fallback now runs only where nothing was claimed at all — a guild with no document, which has no pool to win | `slots.js`, `casinoJackpotService.js` |
+| 5 | The restart reconciler asked the transaction log whether a win had been paid. `logTransaction` is fire-and-forget and documents that it never throws, so the absence of a row proves nothing: a credit that landed and whose ledger entry did not was paid a second time. The probe also matched on the amount from finding #1, and on nothing that identified *this* win | Nothing is asked. The credit carries the claim's payout key, so a reconciling attempt against a pot already paid moves no coins by construction, and a `pendingPayoutKey` marker — not the ledger — says whether anything is outstanding | `ready.js`, `casinoJackpotService.js`, `Guild.js` |
+| 6 | The reconciler selected on `lastWinnerId` and `lastWonAmount`, which are display state that stays set after a win is paid, and cleared them on success — so every restart went looking for a payout in every guild that had ever dropped a jackpot, and wiped the last-winner line `/casino jackpot` shows | The sweep selects on the outstanding-claim marker and clears only that. The display fields are left alone | `casinoJackpotService.js` |
+| 7 | The sweep's own lease could strand a payout for good. It stamped a `claimToken` on the guild before crediting and selected only on `null` or its own token, so a process that stopped after stamping left a claim no later run could ever select — every run mints a different token. The mechanism meant to protect the payout was the one that lost it | There is no lease. N shards crediting the same pot is safe by construction — the credit carries the claim's payout key and only one attempt can move coins — so the sweep reads the outstanding claims and settles them. Reading the set up front is also what bounds the loop | `casinoJackpotService.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 7 | A jackpot whose credit failed was announced to nobody. The announcement is the only thing that ever tells a player the random per-bet trigger fired for them, and it ran only on a successful credit — so an unpaid winner was never told they had won | Announced either way, worded from what happened: the pot, and whether it has been delivered or recorded. The same treatment as finding #8 in the escrow pass | `casinoJackpotService.js` |
+| 8 | The winner's display name went into a pipeline update raw, where a value beginning with `$` is a field path rather than text | `$literal` on the strings the claim writes | `casinoJackpotService.js` |
+| 9 | The reconciler's loop could not terminate if a settled guild's marker failed to clear: the same document is re-selected, credited as a duplicate, and re-selected again | The sweep works from the set of outstanding claims it read at the start, so a document that stays selectable is not selected twice. A credit that fails leaves the marker in place and stops the sweep, and the next boot retries it | `casinoJackpotService.js` |
+| 10 | Startup owned the reconciliation loop — the claim lease, the ledger probe, the field clearing — over a data shape only the service knows | The sweep is `reconcileJackpotClaims()` in the service, next to the claim it recovers. `ready.js` calls it and logs what it settled | `ready.js`, `casinoJackpotService.js` |
+| 11 | Slots' public jackpot broadcast said the player "walked away with the entire pool" whatever became of the credit, so a pot that had not arrived was announced as paid to the whole channel while the winner's own result said otherwise | `jackpotBroadcastEmbed` is worded from the claim's outcome, like the service's own announcement | `slots.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 12 | A credit that succeeded on a retry filed no ledger entry, because the helper hands back no document when the key says an earlier attempt landed | The balance is read back and the entry filed. Rare path, and the ledger is where an operator goes looking for the biggest payout the casino makes | `casinoJackpotService.js` |
+| 13 | The tests mocked the claim and the credit as bare `findOneAndUpdate` stubs, which cannot evaluate a payout-key guard and so cannot tell a safe retry from a double payment | 34 tests against stores that apply the claim pipeline and evaluate the key for real, including the lost-response case the key exists for. `casinoJackpotService.js` measures 98/84/90/100 and joins the per-file coverage floors | `tests/`, `coverage-floors.json` |
+
+**Reviewed and found sound** — recorded so the next pass does not re-derive it:
+
+- `processJackpotBet`'s contribution is *minted*, not taken. The player's bet has
+  already gone to the game; the 0.5% that grows the pool is house money, as is
+  the seed the pool resets to. That is the design — a progressive pot funded by
+  the house at a rate the guild sets — and not a leak, but it is invisible at the
+  call site and reads like one. Recorded rather than changed: changing it would
+  change what players are paid.
+- The claim races itself harmlessly. Two winners at the same instant settle
+  cleanly — the first takes the accumulated pool, the second the fresh seed —
+  and a contribution that lands between the two goes into one pot or the other,
+  never both.
+- `getJackpotDisplay` answers with the default seed for a guild with no document.
+  That is a display for a pool that does not exist, but every path that *pays*
+  the pool guards for the missing document first, so nothing is credited from it.
+- The marker holds one claim at a time, so a guild that drops a second jackpot
+  while the first is still unpaid overwrites it, and the boot-time sweep loses
+  sight of the first. The owed payout `creditCoinsOrOwe` files is what carries
+  that one; what is genuinely lost is a claim whose process died in the window
+  between the claim and that record, in a guild that then drops another jackpot
+  before the next boot. A per-claim outbox would close it, and is not worth a
+  growing array on the guild document for that.
+- Upgrade note: a claim left unpaid by a process that died *before* this shipped
+  carries no marker and is not reconciled. Nothing can pick those out — the old
+  code left the winner fields set on successful wins too, which is the ambiguity
+  the ledger probe was failing to resolve. They are recoverable by hand from
+  those fields and the CRITICAL line the failed credit logged.
+
 ---
 
 ## Not yet reviewed
@@ -462,7 +558,9 @@ wide, and it is widest exactly where the risk is.
 - `pet` (`petService.js`, `pet.js`)
 - `use` / items / effects (`use.js`, `effectsService.js`, `inventory.js`, `shop.js`)
 - exploration (`exploreService.js`, `explore.js`, `map.js`)
-- casino (`src/games/casino/*`, `casino.js`, `casinoJackpotService.js`)
+- casino (`src/games/casino/*`, `casino.js`) — the eight games' own wager and
+  payout writes, `confirmBet`, and the crash lobby's `pendingCrashRefund`
+  escrow. Only the progressive jackpot has been audited
 - core currency (`balance.js`, `bank.js`, `daily.js`, `work.js`, `jobs.js`, `crime.js`, `rob.js`, `invest.js`, `market.js`, `gift.js`)
 - group and PvP systems (`war.js`, `rivalryService.js`, `tournamentService.js`, and everything in `heistService.js`, `syndicateService.js` and `duel.js` other than the escrow and payout paths audited above)
 - progression (`prestige.js`, `season.js`, `synergyService.js`, `dailychallenge.js`)
@@ -483,5 +581,6 @@ wide, and it is widest exactly where the risk is.
 ---
 
 *The nine non-economy subsystems above were last reviewed on 2026-05-28; the
-economy escrow and payout paths on 2026-09-01. "Not yet reviewed" carries no
-review date, because nothing in it has been reviewed.*
+economy escrow and payout paths on 2026-09-01; the progressive jackpot on
+2026-09-04. "Not yet reviewed" carries no review date, because nothing in it has
+been reviewed.*

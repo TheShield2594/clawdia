@@ -27,12 +27,24 @@ const { applyPipelineUpdate, evaluate } = require('./pipelineUpdate');
 
 const isPlainObject = v => v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date);
 
-/** Mongo compares dates by value; `===` on two Date objects never matches. */
+/**
+ * Mongo compares dates by value; `===` on two Date objects never matches.
+ *
+ * A *missing* field equals `null`, which is the rule that decides what happens
+ * to a document written before a field existed: `{ f: null }` matches it,
+ * `{ f: { $ne: null } }` excludes it, and `{ f: { $in: [null, x] } }` matches
+ * it. All three are the real server's behaviour, and a mock reading
+ * `undefined !== null` answers the opposite for exactly the documents an
+ * upgrade leaves behind — the ones a migration-shaped test is about. It cost a
+ * jackpot sweep a regression test it could not otherwise express: whether a
+ * guild whose last win predates `pendingPayoutKey` is read as an unpaid claim.
+ */
 function equals(a, b) {
     if (a instanceof Date || b instanceof Date) {
         if (a == null || b == null) return (a ?? null) === (b ?? null);
         return new Date(a).getTime() === new Date(b).getTime();
     }
+    if (a == null || b == null) return (a ?? null) === (b ?? null);
     return a === b;
 }
 

@@ -18,6 +18,31 @@ whose schema predates a migration that has already run.
 
 Migrations through `022_move_shop_images_to_itemimages`.
 
+The economy audit's second pass takes the casino's progressive jackpot — the
+one pot in the casino that exists outside anybody's balance, and the largest
+single payout the bot makes (#873). The pot was claimed in one write and its
+*amount* recorded in a second, unawaited one, so a process that stopped in
+between left the pool reset and the new winner's name sitting over the
+**previous** winner's amount, which is the number the restart reconciler then
+paid them. The credit itself was an unkeyed `$inc` retried three times: a write
+that commits and loses its response is indistinguishable from one that never
+ran, so a retry paid the pot twice. When it would not land at all the pool was
+rolled back — a recovery that is only correct if the credit definitely did not
+happen, which that retry can never establish — and slots then paid its 25x
+Triple Wild consolation on top, so a lost response could pay the pot, restore
+the pool *and* pay the fallback. And the restart reconciler decided whether a
+win had already been paid by looking for it in the transaction log, which is
+written fire-and-forget and documents that it never throws: its absence proved
+nothing, and finding it wiped the `/casino jackpot` last-winner display. Now the
+claim is one update-pipeline write that reseeds the pool, records what it took
+and mints the payout key for it; the credit goes through the same keyed,
+verified `creditCoinsOrOwe` the duel and crew payouts use, so the live attempt,
+the boot-time reconciler and `npm run payouts:replay` can all try the same pot
+and pay it exactly once between them; and a pot that has not arrived says so, in
+the spin's own embed and in the jackpot announcement, instead of being reported
+as paid. 34 tests, and `casinoJackpotService.js` joins the per-file coverage
+floors.
+
 Shop item images move out of the guild document (#888). They were `Buffer`s on
 `guild.shop[].imageData` — up to 512 KB each, in an array with no bound, inside
 the one document every cached settings read pulls. A guild with an illustrated

@@ -15,15 +15,13 @@
 jest.mock('../src/utils/commandDeployer', () => ({ deployCommandsIfChanged: jest.fn() }));
 jest.mock('../src/services/scheduler', () => ({ startScheduler: jest.fn() }));
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
-jest.mock('../src/models/Guild', () => ({ findOneAndUpdate: jest.fn(), updateOne: jest.fn() }));
-jest.mock('../src/models/Transaction', () => ({ findOne: jest.fn() }));
+jest.mock('../src/services/casinoJackpotService', () => ({ reconcileJackpotClaims: jest.fn() }));
 jest.mock('../src/models/User', () => ({ find: jest.fn(), findOneAndUpdate: jest.fn() }));
 
 const { deployCommandsIfChanged } = require('../src/utils/commandDeployer');
 const { startScheduler } = require('../src/services/scheduler');
 const { logTransaction } = require('../src/utils/logTransaction');
-const Guild = require('../src/models/Guild');
-const Transaction = require('../src/models/Transaction');
+const { reconcileJackpotClaims } = require('../src/services/casinoJackpotService');
 const User = require('../src/models/User');
 
 const ready = require('../src/events/ready');
@@ -38,20 +36,6 @@ function makeClient() {
     };
 }
 
-/** Resolves the jackpot sweep's find-and-claim loop once, then ends it. */
-function jackpotOnce(doc) {
-    Guild.findOneAndUpdate.mockResolvedValueOnce(doc).mockResolvedValue(null);
-}
-
-function jackpotDoc(overrides = {}) {
-    return {
-        _id: 'doc-1',
-        guildId: GUILD_ID,
-        casinoJackpot: { lastWinnerId: 'user-1', lastWonAmount: 5000, lastWonAt: new Date('2026-01-01T00:00:00Z') },
-        ...overrides,
-    };
-}
-
 let logs;
 let errors;
 
@@ -61,9 +45,7 @@ beforeEach(() => {
     errors = jest.spyOn(console, 'error').mockImplementation(() => {});
 
     deployCommandsIfChanged.mockResolvedValue({ deployed: true, count: 98, reason: 'command set changed' });
-    Guild.findOneAndUpdate.mockResolvedValue(null);
-    Guild.updateOne.mockResolvedValue({});
-    Transaction.findOne.mockReturnValue({ lean: async () => null });
+    reconcileJackpotClaims.mockResolvedValue({ reconciled: 0, failed: 0 });
     User.find.mockReturnValue({ lean: async () => [] });
     User.findOneAndUpdate.mockResolvedValue(null);
 });
@@ -118,69 +100,38 @@ describe('startup steps', () => {
 });
 
 describe('jackpot reconciliation', () => {
-    it('credits a win the crash left unpaid, then clears the recovery fields', async () => {
-        jackpotOnce(jackpotDoc());
-        User.findOneAndUpdate.mockResolvedValue({ userId: 'user-1', balance: 12000 });
+    // The sweep itself lives in casinoJackpotService, where the claim marker and
+    // the payout key it credits under are (#873). What startup owes it is a call
+    // on every boot — the failure it exists for is a process that stopped
+    // between claiming a pot and paying it, so there is no live caller left to
+    // retry — and not letting it take the rest of startup down with it.
+
+    it('settles anything the last process left unpaid, and says what it settled', async () => {
+        reconcileJackpotClaims.mockResolvedValue({ reconciled: 2, failed: 0 });
 
         await ready.execute(makeClient());
 
-        expect(User.findOneAndUpdate).toHaveBeenCalledWith(
-            { userId: 'user-1', guildId: GUILD_ID },
-            { $inc: { balance: 5000 } },
-            { new: true }
-        );
-        expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({
-            userId: 'user-1', guildId: GUILD_ID, type: 'casino_jackpot', amount: 5000, balance: 12000,
-        }));
-        expect(Guild.updateOne).toHaveBeenCalledWith(
-            { _id: 'doc-1' },
-            { $set: { 'casinoJackpot.lastWinnerId': null, 'casinoJackpot.lastWonAmount': null, 'casinoJackpot.claimToken': null } }
-        );
+        expect(reconcileJackpotClaims).toHaveBeenCalled();
+        expect(logs).toHaveBeenCalledWith(expect.stringContaining('Reconciled 2 unpaid jackpot win(s)'));
     });
 
-    it('does not pay twice when the transaction log already shows the credit', async () => {
-        jackpotOnce(jackpotDoc());
-        Transaction.findOne.mockReturnValue({ lean: async () => ({ _id: 'txn-1' }) });
-
+    it('stays quiet when there was nothing outstanding', async () => {
         await ready.execute(makeClient());
 
-        expect(User.findOneAndUpdate).not.toHaveBeenCalled();
-        // Still cleared: the money is out, so leaving the fields set would make
-        // every future restart look at the same already-paid win.
-        expect(Guild.updateOne).toHaveBeenCalledWith(
-            { _id: 'doc-1' },
-            expect.objectContaining({ $set: expect.objectContaining({ 'casinoJackpot.lastWinnerId': null }) })
-        );
+        expect(logs).not.toHaveBeenCalledWith(expect.stringContaining('jackpot'));
+        expect(errors).not.toHaveBeenCalled();
     });
 
-    it('releases the claim without clearing the win when the credit fails', async () => {
-        jackpotOnce(jackpotDoc());
-        // No matching user document, so nobody was credited.
-        User.findOneAndUpdate.mockResolvedValue(null);
+    it('reports the claims left for the next restart', async () => {
+        reconcileJackpotClaims.mockResolvedValue({ reconciled: 0, failed: 1 });
 
         await ready.execute(makeClient());
 
-        // Only the lock is dropped; the winner and amount stay for the next
-        // restart to retry.
-        expect(Guild.updateOne).toHaveBeenCalledWith(
-            { _id: 'doc-1' },
-            { $set: { 'casinoJackpot.claimToken': null } }
-        );
-    });
-
-    it('stops after a failing guild rather than spinning on it', async () => {
-        // Every call would hand back the same unpayable guild if the loop kept
-        // going, which is a startup that never finishes.
-        Guild.findOneAndUpdate.mockResolvedValue(jackpotDoc());
-        User.findOneAndUpdate.mockResolvedValue(null);
-
-        await ready.execute(makeClient());
-
-        expect(Guild.findOneAndUpdate).toHaveBeenCalledTimes(1);
+        expect(errors).toHaveBeenCalledWith(expect.stringContaining('could not be settled'));
     });
 
     it('logs a sweep that blew up and carries on to the crash refunds', async () => {
-        Guild.findOneAndUpdate.mockRejectedValue(new Error('mongo is down'));
+        reconcileJackpotClaims.mockRejectedValue(new Error('mongo is down'));
 
         await ready.execute(makeClient());
 
