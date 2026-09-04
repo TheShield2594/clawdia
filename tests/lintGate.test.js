@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const yaml = require('js-yaml');
 
 // #714: 63k lines across 278 files with no linter and no formatter config, and
 // a CI that ran only the tests. The config is only half of the fix — a linter
@@ -24,7 +25,12 @@ describe('lint gate', () => {
         // the one after it — the image build and scan sit between them (#646).
         const testJob = ci.slice(ci.indexOf('\n  test:'), ci.indexOf('\n  image:'));
         expect(testJob).toMatch(/run: npm run lint/);
-        expect(ci).toMatch(/needs: \[test, image\]/);
+        // Read off the parsed workflow rather than matched as text. This was
+        // `/needs: \[test, image\]/` until the arm64 scan job joined that list
+        // (#941) and broke a test with no opinion about arm64. The claim is
+        // that publishing waits for this job, and nothing about what else it
+        // waits for.
+        expect(yaml.load(ci).jobs.publish.needs).toContain('test');
     });
 
     // Without `if: always()` a failing test hides the lint result and vice
