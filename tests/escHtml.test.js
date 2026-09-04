@@ -37,7 +37,7 @@ describe('escHtml', () => {
 describe('guild-settings.ejs', () => {
     it('defines escHtml once, in the shared script', () => {
         expect(PAGE).not.toMatch(/function\s+escHtml/);
-        expect(VIEW).toContain("<script src=\"<%= asset('/esc-html.js') %>\"></script>");
+        expect(VIEW).toContain("<script defer src=\"<%= asset('/esc-html.js') %>\"></script>");
     });
 
     it('never concatenates escaped values into an inline event handler', () => {

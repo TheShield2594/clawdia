@@ -68,7 +68,11 @@ function bootPage(overrides) {
         return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' };
     });
 
-    const bootstrap = html.match(/<script nonce="[^"]*">([\s\S]*?)<\/script>/)[1];
+    // Found by what it defines, not by being first: the shared head partial
+    // carries a nonce'd script of its own now (the CDN image fallback of #946).
+    const bootstrap = [...html.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g)]
+        .map(match => match[1])
+        .find(body => body.includes('window.CLAWDIA_BOOTSTRAP'));
     document.addEventListener = (type, fn, opts) => {
         documentListeners.push([type, fn, opts]);
         addDocumentListener(type, fn, opts);

@@ -23,6 +23,12 @@
  *      locks the user out of the command for the full TTL — 120s for the grind
  *      commands, 10 minutes for casino — with nothing to tell them why.
  *
+ * `/casino` holds two leases with different lifetimes (#955): the shared
+ * `economy:` key for the length of `execute`, and a `casino:` key of its own for
+ * the whole hand. Which lease is held when is most of what the casino tests
+ * below are about, because the split is exactly what stops an abandoned
+ * blackjack hand locking a player out of `/fish` for ten minutes.
+ *
  * The lock is Mongo-backed, so the fake model stands in for the collection; it
  * models the unique-index-rejects-the-insert behaviour that "already held"
  * actually is. The real `activeGameLock` and the real wrappers run.
@@ -252,7 +258,7 @@ describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub,
     test('a read-only subcommand takes no lease at all', async () => {
         // These write nothing, so they have no read-modify-write to protect —
         // and one shared key means a lock here would refuse to show a player
-        // their own profile because they have a casino hand open.
+        // their own profile because another of their commands is mid-flight.
         await command.execute(readInteraction(read));
 
         // Free, and takeable exactly once — so it was never taken, rather than
@@ -263,7 +269,9 @@ describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub,
     });
 
     test('a read-only subcommand runs while a lease is held', async () => {
-        // The property as the player meets it: mid-hand, they can still look.
+        // The property as the player meets it: mid-action, they can still look.
+        // The activity on the lease only words the message it is not going to
+        // print — what is under test is that the read never asks for the key.
         const held = await tryAcquire(key, 60_000, 'casino');
         expect(held).toBeTruthy();
 
@@ -311,10 +319,17 @@ describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub,
 // the `releaseLock` it is handed. `execute` returning is therefore *not* the
 // end of the critical section — except on the throw path, which the command
 // still has to cover itself.
+//
+// Which lock, though, is now the question. `releaseLock` frees the `casino:`
+// key, the one that says this player has a game open; the shared `economy:` key
+// is released in a `finally` exactly like a grind command's, because its job is
+// finished when `execute` returns (#955).
 
 describe('/casino — the lock around a game that outlives execute()', () => {
     const casino = require('../src/commands/economy/casino');
     const BUSY = /casino game in progress/;
+    /** The lease a hand holds for as long as it is being played. */
+    const GAME_KEY = 'casino:g1:u1';
 
     const interactionFor = overrides => makeInteraction({ sub: 'slots', ...overrides });
 
@@ -348,10 +363,14 @@ describe('/casino — the lock around a game that outlives execute()', () => {
 
         await expect(casino.execute(interactionFor())).rejects.toThrow('dealer exploded');
 
-        await releaseLanded(KEY);
-        const token = await tryAcquire(KEY);
-        expect(token).toBeTruthy();
-        await release(KEY, token);
+        // Both of them: the shared key in the command's `finally`, the game key
+        // through `releaseLock` on the catch path.
+        for (const key of [KEY, GAME_KEY]) {
+            await releaseLanded(key);
+            const token = await tryAcquire(key);
+            expect([key, Boolean(token)]).toEqual([key, true]);
+            await release(key, token);
+        }
     });
 
     test('a game that calls releaseLock frees the slot for the next hand', async () => {
@@ -361,10 +380,10 @@ describe('/casino — the lock around a game that outlives execute()', () => {
 
         await casino.execute(interactionFor());
 
-        await releaseLanded(KEY);
-        const token = await tryAcquire(KEY);
+        await releaseLanded(GAME_KEY);
+        const token = await tryAcquire(GAME_KEY);
         expect(token).toBeTruthy();
-        await release(KEY, token);
+        await release(GAME_KEY, token);
     });
 
     test('releaseLock is idempotent — a game may call it on several exit paths', async () => {
@@ -378,17 +397,17 @@ describe('/casino — the lock around a game that outlives execute()', () => {
 
         // A second release must not have freed a lock someone else took in the
         // meantime; the key is simply free, and takeable exactly once.
-        await releaseLanded(KEY);
-        const token = await tryAcquire(KEY);
+        await releaseLanded(GAME_KEY);
+        const token = await tryAcquire(GAME_KEY);
         expect(token).toBeTruthy();
-        await expect(tryAcquire(KEY)).resolves.toBeNull();
-        await release(KEY, token);
+        await expect(tryAcquire(GAME_KEY)).resolves.toBeNull();
+        await release(GAME_KEY, token);
     });
 
-    test('a game that returns without releasing leaves the lease to its TTL', async () => {
+    test('a game that returns without releasing leaves the game lease to its TTL', async () => {
         // Documented behaviour rather than a bug: execute() returning means the
-        // hand is still being played in collectors, so the lock has to outlive
-        // it. This test exists so that the day the wrapper grows a `finally`,
+        // hand is still being played in collectors, so the game key has to
+        // outlive it. This test exists so that the day that stops being true,
         // it is a deliberate change and not a silent one.
         slots.execute.mockResolvedValueOnce(undefined);
 
@@ -397,7 +416,7 @@ describe('/casino — the lock around a game that outlives execute()', () => {
         // The hand ran and simply did not release — that is the case under
         // test, not a game that never started and so never took the lock.
         expect(slots.execute).toHaveBeenCalledTimes(1);
-        await expect(tryAcquire(KEY)).resolves.toBeNull();
+        await expect(tryAcquire(GAME_KEY)).resolves.toBeNull();
 
         const next = interactionFor();
         await casino.execute(next);
@@ -405,6 +424,37 @@ describe('/casino — the lock around a game that outlives execute()', () => {
         // Turned away by the still-held lease rather than allowed to start a
         // second hand: the game ran once in total, for the first call.
         expect(slots.execute).toHaveBeenCalledTimes(1);
+    });
+
+    test('the shared economy lease is handed back when execute returns', async () => {
+        // The other half of the same case, and the whole of #955: the hand is
+        // still open on the game key, and the key every *other* economy command
+        // contends for is already free.
+        slots.execute.mockResolvedValueOnce(undefined);
+
+        await casino.execute(interactionFor());
+
+        await releaseLanded(KEY);
+        const token = await tryAcquire(KEY);
+        expect(token).toBeTruthy();
+        await release(KEY, token);
+    });
+
+    test('a second game refused mid-hand does not strand the shared lease', async () => {
+        // The refusal path takes the economy key before it discovers the game
+        // key is held. Keeping it would lock the player out of the grind
+        // commands for a hand that never started.
+        slots.execute.mockResolvedValueOnce(undefined);
+        await casino.execute(interactionFor());
+
+        const refused = interactionFor();
+        await casino.execute(refused);
+        expect(replyContent(refused)).toMatch(BUSY);
+
+        await releaseLanded(KEY);
+        const token = await tryAcquire(KEY);
+        expect(token).toBeTruthy();
+        await release(KEY, token);
     });
 });
 
@@ -421,11 +471,19 @@ describe('/casino — the lock around a game that outlives execute()', () => {
 // away is not the one holding the lease, so "you already have a fishing action
 // in progress" has to come from what is actually running, not from whichever
 // command you happened to type.
+//
+// The third is where the shared key stops. It covers each command's own
+// invocation, not a casino hand's whole life in its collectors (#955), so what
+// contends is `/fish cast` against `/casino slots` *starting* — not against a
+// blackjack hand the player opened ten minutes ago and walked away from. Both
+// halves are asserted below, because the one that is easy to lose by accident is
+// the second.
 
 describe('one economy lock across every money-moving command', () => {
-    const fish   = require('../src/commands/economy/fish');
-    const casino = require('../src/commands/economy/casino');
-    const KEY    = 'economy:g1:u1';
+    const fish     = require('../src/commands/economy/fish');
+    const casino   = require('../src/commands/economy/casino');
+    const KEY      = 'economy:g1:u1';
+    const GAME_KEY = 'casino:g1:u1';
 
     test('a cast in progress turns away a casino game, and says so', async () => {
         const parked = gate();
@@ -445,19 +503,46 @@ describe('one economy lock across every money-moving command', () => {
         await casting;
     });
 
-    test('a hand in progress turns away a cast, and says so', async () => {
+    test('a game still being dealt turns away a cast, and says so', async () => {
+        // `execute` parked: the hand is still inside the command invocation, so
+        // the shared lease is genuinely held and /fish must wait on it.
+        const parked = gate();
         Guild.findOne.mockResolvedValue({});
-        // A game that returns without releasing is a hand still being played in
-        // collectors — the lease is held for real, not leaked.
-        slots.execute.mockResolvedValueOnce(undefined);
-        await casino.execute(makeInteraction({ sub: 'slots' }));
+        slots.execute.mockReturnValueOnce(parked.promise);
+
+        const dealing = casino.execute(makeInteraction({ sub: 'slots' }));
+        await until(() => slots.execute.mock.calls.length === 1, '/casino to reach the game');
 
         const blocked = makeInteraction({ sub: 'cast' });
         await fish.execute(blocked);
 
         expect(replyContent(blocked)).toMatch(/casino game in progress/);
-        // Turned away before the body: /fish never got as far as its first read.
+        // Turned away before the body: /fish never got as far as its own read.
         expect(Guild.findOne).toHaveBeenCalledTimes(1);
+
+        parked.resolve(undefined);
+        await dealing;
+    });
+
+    test('an open hand no longer turns away a cast', async () => {
+        // #955, as the player meets it. A game that returns without releasing is
+        // a hand still being played in collectors — a real lease, on the casino
+        // key, for up to ten minutes. What it must not be is a ten-minute
+        // lockout from every other economy command.
+        Guild.findOne.mockResolvedValue({});
+        slots.execute.mockResolvedValueOnce(undefined);
+        await casino.execute(makeInteraction({ sub: 'slots' }));
+
+        // Still open, so a second game is still refused.
+        await expect(tryAcquire(GAME_KEY)).resolves.toBeNull();
+
+        Guild.findOne.mockResolvedValue(ECONOMY_OFF);
+        const casting = makeInteraction({ sub: 'cast' });
+        await fish.execute(casting);
+
+        expect(replyContent(casting)).not.toMatch(/in progress/);
+        // Reached its own body rather than being answered by the wrapper.
+        expect(Guild.findOne.mock.calls.length).toBeGreaterThan(1);
     });
 
     test('the lease is still per user — one player mid-hand does not stop another fishing', async () => {
