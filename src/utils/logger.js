@@ -32,7 +32,7 @@ const DEFAULT_LEVEL = 'info';
 // Fields that must never reach a log backend, wherever in the object they turn
 // up. The bot handles a gateway token, an OAuth client secret, a session secret
 // and up to five provider keys; one `logger.error({ err }, ...)` on a failed
-// axios call is otherwise enough to print an Authorization header into a stream
+// HTTP call is otherwise enough to print an Authorization header into a stream
 // with 250 MB of retention.
 const REDACT_PATHS = [
     'token', '*.token', '*.*.token',
@@ -219,9 +219,9 @@ function splitArgs(args) {
 // all caught alongside the bare names.
 const SECRET_KEY = /token|secret|password|passwd|api[-_]?key|apikey|authorization|cookie|credential/i;
 
-// Deep enough for the shapes that actually turn up (an axios error's
-// `config.headers`, a Mongo command document); past that the value is
-// truncated by `formatWithOptions` anyway.
+// Deep enough for the shapes that actually turn up (a request's `init.headers`,
+// a Mongo command document); past that the value is truncated by
+// `formatWithOptions` anyway.
 const SCRUB_DEPTH = 4;
 
 /**

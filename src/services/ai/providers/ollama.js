@@ -1,5 +1,5 @@
-const axios = require('axios');
-const { guardedAgents, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { guardedDispatcher, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { request, fetchHeaders, bodyStream } = require('../../../utils/httpFetch');
 const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // The endpoint the *operator* runs, from the environment or the shipped default.
@@ -25,7 +25,7 @@ function operatorEndpoints() {
  * Where this request may go, and how it is allowed to get there (#559).
  *
  * `ai` is a whitelisted settings parent, so any guild admin can write
- * `ai.ollamaBaseUrl`, and it used to reach `axios.post` unexamined — with the
+ * `ai.ollamaBaseUrl`, and it used to reach the HTTP client unexamined — with the
  * response echoed back into a Discord channel. From inside the container that
  * reaches the metadata service, the Mongo host on the compose network, and
  * anything else the bot can see: a read primitive against the operator's own
@@ -35,19 +35,23 @@ function operatorEndpoints() {
  * the operator's machine, usually localhost, and the whole point of the
  * provider. Any *other* base URL is somebody's configuration, so it must be a
  * plain http(s) URL, it must not be a literal private address, and it is
- * dialled through agents that refuse to open a socket to private or reserved
- * space. Those checks sit where the connection is made, so they also cover a
- * hostname that resolves privately only sometimes, and every hop of any
- * redirect axios follows.
+ * dialled through a dispatcher that refuses to open a socket to private or
+ * reserved space. Those checks sit where the connection is made, so they also
+ * cover a hostname that resolves privately only sometimes, and every hop of any
+ * redirect `fetch` follows.
+ *
+ * `dispatcher` is undefined for the operator's own endpoint, which is what
+ * hands the request to the global one — an operator running Ollama on
+ * localhost is the ordinary case, and the guard would refuse it.
  */
 function resolveEndpoint(baseUrl) {
     const configured = normalize(baseUrl) || OPERATOR_DEFAULT;
     const url = `${configured}/api/chat`;
 
-    if (operatorEndpoints().has(configured)) return { url, agents: {} };
+    if (operatorEndpoints().has(configured)) return { url, dispatcher: undefined };
 
     assertPublicHttpUrl(configured, 'ai.ollamaBaseUrl');
-    return { url, agents: guardedAgents() };
+    return { url, dispatcher: guardedDispatcher() };
 }
 
 /**
@@ -175,11 +179,21 @@ function requestBody({ model, messages, temperature, maxTokens, stream, tools })
  * `yield*`, and an out-parameter reads better here than nesting one generator
  * inside another to get at its return value.
  */
-async function* streamRound({ url, agents, body, out }) {
-    const response = await axios.post(url, body, { responseType: 'stream', timeout: 120000, ...agents });
+async function* streamRound({ url, dispatcher, body, out }) {
+    // The 120s bounds the wait for headers, as it did under axios: a model
+    // generating a long answer holds the body open for as long as it takes,
+    // and a clock on the whole response would cut off the slow ones.
+    const response = await fetchHeaders(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        timeout: 120000,
+        dispatcher,
+    });
+    if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}`);
 
     let buf = '';
-    for await (const chunk of response.data) {
+    for await (const chunk of bodyStream(response)) {
         buf += chunk.toString('utf8');
         let idx;
         while ((idx = buf.indexOf('\n')) >= 0) {
@@ -221,7 +235,7 @@ async function* separated(pieces) {
 async function* stream({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
-    const { url, agents } = resolveEndpoint(baseUrl);
+    const { url, dispatcher } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt, images, model });
 
     const totals = { inputTokens: 0, outputTokens: 0 };
@@ -241,8 +255,8 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, images, 
         });
 
         const out = { content: '', calls: [], usage: null };
-        if (wroteText) yield* separated(streamRound({ url, agents, body, out }));
-        else yield* streamRound({ url, agents, body, out });
+        if (wroteText) yield* separated(streamRound({ url, dispatcher, body, out }));
+        else yield* streamRound({ url, dispatcher, body, out });
         if (out.content) wroteText = true;
 
         if (out.usage) {
@@ -260,7 +274,7 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, images, 
 async function complete({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
-    const { url, agents } = resolveEndpoint(baseUrl);
+    const { url, dispatcher } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt, images, model });
 
     const totals = { inputTokens: 0, outputTokens: 0 };
@@ -269,19 +283,29 @@ async function complete({ baseUrl, model, systemPrompt, history, prompt, images,
 
     for (let round = 0; ; round++) {
         const offerTools = Boolean(toolkit) && round < rounds;
-        const response = await axios.post(url, requestBody({
-            model, messages, temperature, maxTokens,
-            stream: false,
-            tools: offerTools ? toolParams(toolkit) : null
-        }), { timeout: 120000, ...agents });
+        // Not streamed, so unlike `streamRound` the clock covers the whole
+        // response: the body here is one JSON object the model has finished.
+        const response = await request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody({
+                model, messages, temperature, maxTokens,
+                stream: false,
+                tools: offerTools ? toolParams(toolkit) : null
+            })),
+            timeout: 120000,
+            dispatcher,
+        });
+        if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}`);
+        const payload = await response.json();
 
-        const usage = usageOf(response.data);
+        const usage = usageOf(payload);
         if (usage) {
             sawUsage = true;
             addUsage(totals, usage);
         }
 
-        const message = response.data?.message;
+        const message = payload?.message;
         const content = message?.content || '';
         if (content) parts.push(content);
         const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];

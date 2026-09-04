@@ -15,13 +15,12 @@
  * rotate.
  */
 
-jest.mock('axios');
 jest.mock('../src/utils/outboundGuard', () => ({
-    guardedAgents: () => ({}),
+    guardedDispatcher: () => undefined,
     assertPublicHttpUrl: url => new URL(url),
 }));
 
-const axios = require('axios');
+const { jsonResponse } = require('./helpers/fetchResponse');
 const {
     resourceMetadataUrl, isOAuthChallenge, discover, registerClient,
     createPkce, createState, authorizationUrl, exchangeCode, refreshTokens,
@@ -39,9 +38,20 @@ const AS_METADATA = {
     scopes_supported: ['read', 'write'],
 };
 
-const ok = data => ({ status: 200, data, headers: {} });
+// A builder rather than a value: a `Response` body reads once, and the
+// discovery flow makes several calls in a row.
+const ok = data => () => jsonResponse(data);
+const refused = (status, data) => () => jsonResponse(data, { status });
 
-beforeEach(() => jest.resetAllMocks());
+let fetchMock;
+beforeEach(() => {
+    jest.resetAllMocks();
+    // Every unstubbed call answers 404. Discovery walks a list of well-known
+    // paths and stops at the first that answers, so "nothing here" is the right
+    // default — and a real request escaping to the network is not.
+    fetchMock = jest.spyOn(globalThis, 'fetch').mockImplementation(refused(404, {}));
+});
+afterEach(() => fetchMock.mockRestore());
 
 describe('reading the challenge', () => {
     test('finds the resource metadata URL a quoted challenge names', () => {
@@ -116,19 +126,19 @@ describe('checking a URL the far side named', () => {
 
 describe('discovery', () => {
     test('follows the challenge to the resource, then to its authorization server', async () => {
-        axios.get
-            .mockResolvedValueOnce(ok({
+        fetchMock
+            .mockImplementationOnce(ok({
                 resource: 'https://mcp.example.com/mcp',
                 authorization_servers: ['https://auth.example.com'],
                 scopes_supported: ['mcp:read'],
             }))
-            .mockResolvedValueOnce(ok(AS_METADATA));
+            .mockImplementationOnce(ok(AS_METADATA));
 
         const result = await discover(MCP_URL, {
             resourceMetadata: 'https://mcp.example.com/.well-known/oauth-protected-resource',
         });
 
-        expect(axios.get.mock.calls[0][0]).toBe('https://mcp.example.com/.well-known/oauth-protected-resource');
+        expect(fetchMock.mock.calls[0][0]).toBe('https://mcp.example.com/.well-known/oauth-protected-resource');
         expect(result).toMatchObject({
             issuer: 'https://auth.example.com',
             authorizationEndpoint: 'https://auth.example.com/authorize',
@@ -145,10 +155,10 @@ describe('discovery', () => {
     // authorization server is the spec's fallback and what most single-tenant
     // servers actually are.
     test('treats a server with no resource metadata as its own issuer', async () => {
-        axios.get
-            .mockResolvedValueOnce({ status: 404, data: {}, headers: {} })
-            .mockResolvedValueOnce({ status: 404, data: {}, headers: {} })
-            .mockResolvedValueOnce(ok({
+        fetchMock
+            .mockImplementationOnce(refused(404, {}))
+            .mockImplementationOnce(refused(404, {}))
+            .mockImplementationOnce(ok({
                 issuer: 'https://mcp.example.com',
                 authorization_endpoint: 'https://mcp.example.com/authorize',
                 token_endpoint: 'https://mcp.example.com/token',
@@ -169,15 +179,15 @@ describe('discovery', () => {
             authorization_endpoint: 'https://mcp.example.com/authorize',
             token_endpoint: 'https://mcp.example.com/token',
         };
-        axios.get
-            .mockResolvedValueOnce({ status: 404, data: {}, headers: {} })  // resource, 8414 form
-            .mockResolvedValueOnce({ status: 404, data: {}, headers: {} })  // resource, appended form
-            .mockResolvedValueOnce({ status: 404, data: {}, headers: {} })  // AS, 8414 form
-            .mockResolvedValueOnce(ok(selfIssued));                         // AS, openid form
+        fetchMock
+            .mockImplementationOnce(refused(404, {}))  // resource, 8414 form
+            .mockImplementationOnce(refused(404, {}))  // resource, appended form
+            .mockImplementationOnce(refused(404, {}))  // AS, 8414 form
+            .mockImplementationOnce(ok(selfIssued));                         // AS, openid form
 
         await discover(MCP_URL);
 
-        expect(axios.get.mock.calls.at(-1)[0]).toContain('/.well-known/openid-configuration');
+        expect(fetchMock.mock.calls.at(-1)[0]).toContain('/.well-known/openid-configuration');
     });
 
     /**
@@ -188,9 +198,9 @@ describe('discovery', () => {
      * while sending the client secret wherever it said.
      */
     test('refuses a document that claims an issuer it was not published at', async () => {
-        axios.get
-            .mockResolvedValueOnce(ok({ authorization_servers: ['https://auth.example.com'] }))
-            .mockResolvedValueOnce(ok({
+        fetchMock
+            .mockImplementationOnce(ok({ authorization_servers: ['https://auth.example.com'] }))
+            .mockImplementationOnce(ok({
                 issuer: 'https://evil.example.com',
                 authorization_endpoint: 'https://evil.example.com/authorize',
                 token_endpoint: 'https://evil.example.com/token',
@@ -205,9 +215,9 @@ describe('discovery', () => {
     // this either, and the same leniency is already extended to a resource with
     // no metadata at all.
     test('accepts a document that omits the issuer entirely', async () => {
-        axios.get
-            .mockResolvedValueOnce(ok({ authorization_servers: ['https://auth.example.com'] }))
-            .mockResolvedValueOnce(ok({
+        fetchMock
+            .mockImplementationOnce(ok({ authorization_servers: ['https://auth.example.com'] }))
+            .mockImplementationOnce(ok({
                 authorization_endpoint: 'https://auth.example.com/authorize',
                 token_endpoint: 'https://auth.example.com/token',
             }));
@@ -220,9 +230,9 @@ describe('discovery', () => {
     // The issuer is checked against what the *document* claims, not the URL it
     // was fetched from, since a redirect could have moved that.
     test('refuses a document whose token endpoint is on another origin', async () => {
-        axios.get
-            .mockResolvedValueOnce(ok({ authorization_servers: ['https://auth.example.com'] }))
-            .mockResolvedValueOnce(ok({ ...AS_METADATA, token_endpoint: 'https://evil.example.com/token' }));
+        fetchMock
+            .mockImplementationOnce(ok({ authorization_servers: ['https://auth.example.com'] }))
+            .mockImplementationOnce(ok({ ...AS_METADATA, token_endpoint: 'https://evil.example.com/token' }));
 
         await expect(discover(MCP_URL, { resourceMetadata: 'https://mcp.example.com/meta' }))
             .rejects.toThrow('refusing to use it');
@@ -231,13 +241,13 @@ describe('discovery', () => {
 
 describe('client registration', () => {
     test('registers for the authorization-code and refresh grants', async () => {
-        axios.post.mockResolvedValue(ok({ client_id: 'cid', client_secret: 'shh' }));
+        fetchMock.mockImplementation(ok({ client_id: 'cid', client_secret: 'shh' }));
 
         const client = await registerClient(AS_METADATA.registration_endpoint, {
             redirectUri: REDIRECT, clientName: 'Clawdia (linear)', scope: 'read write',
         });
 
-        const [, body] = axios.post.mock.calls[0];
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body).toMatchObject({
             client_name: 'Clawdia (linear)',
             redirect_uris: [REDIRECT],
@@ -248,7 +258,7 @@ describe('client registration', () => {
     });
 
     test('works for a server that issues no secret', async () => {
-        axios.post.mockResolvedValue(ok({ client_id: 'cid' }));
+        fetchMock.mockImplementation(ok({ client_id: 'cid' }));
 
         const client = await registerClient(AS_METADATA.registration_endpoint, { redirectUri: REDIRECT });
 
@@ -257,18 +267,16 @@ describe('client registration', () => {
     });
 
     test('reports what the server said when it refuses', async () => {
-        axios.post.mockResolvedValue({
-            status: 400,
-            data: { error: 'invalid_redirect_uri', error_description: 'redirect_uri is not allowed' },
-            headers: {},
-        });
+        fetchMock.mockImplementation(refused(400, {
+            error: 'invalid_redirect_uri', error_description: 'redirect_uri is not allowed',
+        }));
 
         await expect(registerClient(AS_METADATA.registration_endpoint, { redirectUri: REDIRECT }))
             .rejects.toThrow('redirect_uri is not allowed');
     });
 
     test('a 200 with no client_id is still a failure', async () => {
-        axios.post.mockResolvedValue(ok({ ok: true }));
+        fetchMock.mockImplementation(ok({ ok: true }));
         await expect(registerClient(AS_METADATA.registration_endpoint, { redirectUri: REDIRECT }))
             .rejects.toThrow('no client_id');
     });
@@ -336,7 +344,7 @@ describe('exchanging the code', () => {
     const discovery = { tokenEndpoint: AS_METADATA.token_endpoint, resource: MCP_URL };
 
     test('sends the verifier, the redirect URI and the audience', async () => {
-        axios.post.mockResolvedValue(ok({
+        fetchMock.mockImplementation(ok({
             access_token: 'at', refresh_token: 'rt', expires_in: 3600, scope: 'read', token_type: 'Bearer',
         }));
 
@@ -344,7 +352,7 @@ describe('exchanging the code', () => {
             code: 'abc', redirectUri: REDIRECT, verifier: 'ver', clientId: 'cid', clientSecret: 'shh',
         });
 
-        const sent = Object.fromEntries(new URLSearchParams(axios.post.mock.calls[0][1]));
+        const sent = Object.fromEntries(new URLSearchParams(fetchMock.mock.calls[0][1].body));
         expect(sent).toEqual({
             grant_type: 'authorization_code',
             code: 'abc',
@@ -359,7 +367,7 @@ describe('exchanging the code', () => {
     });
 
     test('leaves the expiry unset when the server gave no lifetime', async () => {
-        axios.post.mockResolvedValue(ok({ access_token: 'at' }));
+        fetchMock.mockImplementation(ok({ access_token: 'at' }));
 
         const tokens = await exchangeCode(discovery, {
             code: 'abc', redirectUri: REDIRECT, verifier: 'ver', clientId: 'cid',
@@ -371,11 +379,9 @@ describe('exchanging the code', () => {
     });
 
     test('reports the authorization server\'s own error', async () => {
-        axios.post.mockResolvedValue({
-            status: 400,
-            data: { error: 'invalid_grant', error_description: 'code already used' },
-            headers: {},
-        });
+        fetchMock.mockImplementation(refused(400, {
+            error: 'invalid_grant', error_description: 'code already used',
+        }));
 
         await expect(exchangeCode(discovery, {
             code: 'abc', redirectUri: REDIRECT, verifier: 'ver', clientId: 'cid',
@@ -383,7 +389,7 @@ describe('exchanging the code', () => {
     });
 
     test('a 200 with no access token is a failure, not an empty grant', async () => {
-        axios.post.mockResolvedValue(ok({ token_type: 'Bearer' }));
+        fetchMock.mockImplementation(ok({ token_type: 'Bearer' }));
 
         await expect(exchangeCode(discovery, {
             code: 'abc', redirectUri: REDIRECT, verifier: 'ver', clientId: 'cid',
@@ -393,13 +399,13 @@ describe('exchanging the code', () => {
 
 describe('refreshing', () => {
     test('sends the refresh grant with the audience', async () => {
-        axios.post.mockResolvedValue(ok({ access_token: 'at2', refresh_token: 'rt2', expires_in: 3600 }));
+        fetchMock.mockImplementation(ok({ access_token: 'at2', refresh_token: 'rt2', expires_in: 3600 }));
 
         const tokens = await refreshTokens(AS_METADATA.token_endpoint, {
             refreshToken: 'rt1', clientId: 'cid', clientSecret: 'shh', resource: MCP_URL,
         });
 
-        const sent = Object.fromEntries(new URLSearchParams(axios.post.mock.calls[0][1]));
+        const sent = Object.fromEntries(new URLSearchParams(fetchMock.mock.calls[0][1].body));
         expect(sent).toMatchObject({ grant_type: 'refresh_token', refresh_token: 'rt1', resource: MCP_URL });
         expect(tokens.refreshToken).toBe('rt2');
     });
@@ -407,7 +413,7 @@ describe('refreshing', () => {
     // A non-rotating server omits it. Reporting null is what lets the store
     // keep the one it already has instead of storing null over a working token.
     test('reports no refresh token when the server did not rotate one', async () => {
-        axios.post.mockResolvedValue(ok({ access_token: 'at2', expires_in: 3600 }));
+        fetchMock.mockImplementation(ok({ access_token: 'at2', expires_in: 3600 }));
 
         const tokens = await refreshTokens(AS_METADATA.token_endpoint, { refreshToken: 'rt1', clientId: 'cid' });
 
@@ -415,14 +421,14 @@ describe('refreshing', () => {
     });
 
     test('a refusal carries its status, so a revoked grant can be told from a hiccup', async () => {
-        axios.post.mockResolvedValue({ status: 400, data: { error: 'invalid_grant' }, headers: {} });
+        fetchMock.mockImplementation(refused(400, { error: 'invalid_grant' }));
 
         await expect(refreshTokens(AS_METADATA.token_endpoint, { refreshToken: 'rt1', clientId: 'cid' }))
             .rejects.toMatchObject({ status: 400, code: 'invalid_grant' });
     });
 
-    test('a network failure is an OAuthError rather than an axios one', async () => {
-        axios.post.mockRejectedValue(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
+    test('a network failure is an OAuthError rather than a raw one', async () => {
+        fetchMock.mockRejectedValue(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
 
         await expect(refreshTokens(AS_METADATA.token_endpoint, { refreshToken: 'rt1', clientId: 'cid' }))
             .rejects.toBeInstanceOf(OAuthError);

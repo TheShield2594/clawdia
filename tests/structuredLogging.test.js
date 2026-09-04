@@ -199,7 +199,7 @@ describe('redaction through the console bridge', () => {
     });
 
     test('catches a credential nested below the top level', () => {
-        // An axios error's `config.headers.Authorization` is three deep, which
+        // A failed request's `init.headers.Authorization` is three deep, which
         // is why this is a walk rather than a fixed path list.
         const scrubbed = scrubSecrets({ a: { b: { c: { sessionSecret: 'shh' } } } });
         expect(JSON.stringify(scrubbed)).not.toContain('shh');

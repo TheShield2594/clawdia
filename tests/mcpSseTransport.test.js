@@ -16,13 +16,16 @@
 // socket reaches the request that asked for it, and that the endpoint the
 // *server* names cannot send this bot's credential somewhere else.
 
-jest.mock('axios');
-
-const { PassThrough, Readable } = require('stream');
-const axios = require('axios');
+const { PassThrough } = require('stream');
 const { McpHttpClient, McpError } = require('../src/services/ai/mcp/client');
 const { PassThrough: _PT } = require('stream');
 const { resolveEndpoint, pumpEvents, MAX_EVENT_BYTES } = require('../src/services/ai/mcp/sse');
+const { installHttpMock } = require('./helpers/httpMock');
+const { response, jsonResponse, textResponse, acceptedResponse } = require('./helpers/fetchResponse');
+
+// The GET is the standing stream and the POSTs are the messages, so the two
+// stay separate mocks even though `fetch` is one function.
+let http;
 
 const URL_ = 'https://mcp.example.com/sse';
 const MESSAGES = 'https://mcp.example.com/messages?sessionId=abc';
@@ -45,13 +48,13 @@ function openChannel({ endpoint = '/messages?sessionId=abc', contentType = 'text
         end: () => stream.end(),
     };
 
-    axios.get.mockImplementation(async () => {
+    http.get.mockImplementation(async () => {
         if (endpoint !== null) {
             // Named on the next tick, the way a real server does: after the
             // response headers, not with them.
             setImmediate(() => stream.write(`event: endpoint\ndata: ${endpoint}\n\n`));
         }
-        return { status: 200, headers: { 'content-type': contentType }, data: stream };
+        return response(stream, { headers: { 'content-type': contentType } });
     });
 
     return channel;
@@ -62,14 +65,14 @@ function openChannel({ endpoint = '/messages?sessionId=abc', contentType = 'text
  * test described — which is what a server on this transport actually does.
  */
 function replyOnChannel(channel, handlers) {
-    axios.post.mockImplementation(async (url, payload) => {
+    http.post.mockImplementation(async (url, payload) => {
         expect(url).toBe(MESSAGES);
         if (payload.id !== undefined && payload.method in handlers) {
             const handler = handlers[payload.method];
             const body = typeof handler === 'function' ? handler(payload) : handler;
             if (body !== null) setImmediate(() => channel.send({ jsonrpc: '2.0', id: payload.id, ...body }));
         }
-        return { status: 202, headers: {}, data: Readable.from([]) };
+        return acceptedResponse();
     });
 }
 
@@ -78,16 +81,9 @@ const HANDSHAKE = {
     'notifications/initialized': null,
 };
 
-function textResponse(body, status) {
-    return { status, headers: { 'content-type': 'text/plain' }, data: Readable.from([body]) };
-}
-
-function jsonResponse(body) {
-    return { status: 200, headers: { 'content-type': 'application/json' }, data: Readable.from([JSON.stringify(body)]) };
-}
-
 beforeEach(() => {
     jest.clearAllMocks();
+    http = installHttpMock();
     // The fallback announces itself, and the both-transports-failed path warns.
     jest.spyOn(console, 'log').mockImplementation(() => {});
     jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -98,13 +94,13 @@ describe('choosing a transport', () => {
     test.each([404, 405])('falls back to HTTP+SSE when the handshake POST answers %i', async status => {
         const channel = openChannel();
         let refused = false;
-        axios.post.mockImplementation(async (url, payload) => {
+        http.post.mockImplementation(async (url, payload) => {
             if (!refused) { refused = true; return textResponse('not here', status); }
             expect(url).toBe(MESSAGES);
             if (payload.method === 'initialize') {
                 setImmediate(() => channel.send({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT }));
             }
-            return { status: 202, headers: {}, data: Readable.from([]) };
+            return acceptedResponse();
         });
 
         const client = new McpHttpClient({ url: URL_ });
@@ -113,20 +109,20 @@ describe('choosing a transport', () => {
         expect(client.transport).toBe('sse');
         expect(client.serverInfo).toEqual(INIT_RESULT.serverInfo);
         // The GET is the configured URL; the POSTs go to the endpoint it named.
-        expect(axios.get).toHaveBeenCalledWith(URL_, expect.anything());
+        expect(http.get).toHaveBeenCalledWith(URL_, undefined, expect.anything());
         client.close();
     });
 
     test('offers the older revision when it has fallen back', async () => {
         const channel = openChannel();
         let refused = false;
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (!refused) { refused = true; return textResponse('nope', 405); }
             if (payload.method === 'initialize') {
                 expect(payload.params.protocolVersion).toBe('2024-11-05');
                 setImmediate(() => channel.send({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT }));
             }
-            return { status: 202, headers: {}, data: Readable.from([]) };
+            return acceptedResponse();
         });
 
         const client = new McpHttpClient({ url: URL_ });
@@ -137,18 +133,18 @@ describe('choosing a transport', () => {
     });
 
     test.each([401, 403, 429, 500])('does not fall back on HTTP %i, which is not a wrong transport', async status => {
-        axios.post.mockResolvedValue(textResponse('denied', status));
+        http.post.mockResolvedValue(textResponse('denied', status));
         // No retry-after, so the 429 is an answer rather than a wait.
         const client = new McpHttpClient({ url: URL_ });
 
         await expect(client.initialize()).rejects.toThrow(McpError);
-        expect(axios.get).not.toHaveBeenCalled();
+        expect(http.get).not.toHaveBeenCalled();
         expect(client.transport).toBe('auto');
     });
 
     test('reports the POST failure, not the stream failure, when neither works', async () => {
-        axios.post.mockResolvedValue(textResponse('nothing here', 404));
-        axios.get.mockResolvedValue(textResponse('nothing here either', 404));
+        http.post.mockResolvedValue(textResponse('nothing here', 404));
+        http.get.mockResolvedValue(textResponse('nothing here either', 404));
 
         const client = new McpHttpClient({ url: URL_ });
         // A pasted typo fails both ways, and what is wrong with it is that
@@ -162,7 +158,7 @@ describe('choosing a transport', () => {
     test('does not leave a stream open when the fallback handshake fails', async () => {
         const channel = openChannel();
         let refused = false;
-        axios.post.mockImplementation(async () => {
+        http.post.mockImplementation(async () => {
             if (!refused) { refused = true; return textResponse('not here', 405); }
             // The endpoint is named, so the stream is up — and then initialize
             // fails behind it. The client is about to go back to Streamable
@@ -179,9 +175,9 @@ describe('choosing a transport', () => {
     });
 
     test('stays on Streamable HTTP when the POST works', async () => {
-        axios.post.mockImplementation(async (_url, payload) => (
+        http.post.mockImplementation(async (_url, payload) => (
             payload.id === undefined
-                ? { status: 202, headers: {}, data: Readable.from([]) }
+                ? acceptedResponse()
                 : jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT })
         ));
 
@@ -189,7 +185,7 @@ describe('choosing a transport', () => {
         await client.initialize();
 
         expect(client.transport).toBe('auto');
-        expect(axios.get).not.toHaveBeenCalled();
+        expect(http.get).not.toHaveBeenCalled();
     });
 });
 
@@ -213,13 +209,13 @@ describe('talking over the standing stream', () => {
         });
 
         await Promise.all([client.listTools(), client.listTools(), client.listTools()]);
-        expect(axios.get).toHaveBeenCalledTimes(1);
+        expect(http.get).toHaveBeenCalledTimes(1);
     });
 
     test('routes a response to the request that asked for it, whatever order they arrive in', async () => {
         // Answered out of order and after a pause, which is the case a single
         // shared socket makes possible and a per-request stream cannot.
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'tools/call') {
                 const delay = payload.params.name === 'slow' ? 20 : 1;
                 setTimeout(() => channel.send({
@@ -227,7 +223,7 @@ describe('talking over the standing stream', () => {
                     result: { content: [{ type: 'text', text: payload.params.name }] },
                 }), delay);
             }
-            return { status: 202, headers: {}, data: Readable.from([]) };
+            return acceptedResponse();
         });
 
         const [slow, quick] = await Promise.all([
@@ -242,7 +238,7 @@ describe('talking over the standing stream', () => {
         const slowProgress = [];
         const quickProgress = [];
 
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'tools/call') {
                 const token = payload.params._meta.progressToken;
                 setImmediate(() => {
@@ -254,7 +250,7 @@ describe('talking over the standing stream', () => {
                     channel.send({ jsonrpc: '2.0', id: payload.id, result: { content: [] } });
                 });
             }
-            return { status: 202, headers: {}, data: Readable.from([]) };
+            return acceptedResponse();
         });
 
         await Promise.all([
@@ -271,7 +267,7 @@ describe('talking over the standing stream', () => {
     test('answers a server request on a POST of its own, and survives the wait', async () => {
         const asked = [];
         let callId = null;
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'tools/call') {
                 callId = payload.id;
                 setImmediate(() => channel.send({
@@ -284,7 +280,7 @@ describe('talking over the standing stream', () => {
                 // what a real server does — the question is blocking the call.
                 setImmediate(() => channel.send({ jsonrpc: '2.0', id: callId, result: { content: [] } }));
             }
-            return { status: 202, headers: {}, data: Readable.from([]) };
+            return acceptedResponse();
         });
 
         // The handler takes three times the call's own deadline, which is what a
@@ -318,10 +314,10 @@ describe('talking over the standing stream', () => {
         // than one turn are open is refused instead.
         const answers = [];
         const calls = [];
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'tools/call') calls.push(payload.id);
             if (payload.id === 4242) answers.push(payload);
-            return { status: 202, headers: {}, data: Readable.from([]) };
+            return acceptedResponse();
         });
 
         const askedIn = [];
@@ -349,10 +345,10 @@ describe('talking over the standing stream', () => {
         const turn = Symbol('one-turn');
         const answers = [];
         const calls = [];
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'tools/call') calls.push(payload.id);
             if (payload.id === 4243) answers.push(payload);
-            return { status: 202, headers: {}, data: Readable.from([]) };
+            return acceptedResponse();
         });
 
         const onElicit = async () => ({ action: 'accept', content: { ok: true } });
@@ -370,16 +366,16 @@ describe('talking over the standing stream', () => {
     });
 
     test('does not hang when a failed POST stalls its error body', async () => {
-        // responseType 'stream' means the axios timeout bounds the wait for
+        // A streamed body means the request timeout bounds the wait for
         // headers only. A server that answers 500 and then stops writing used
         // to hang the read forever — before postOverSse installs its own
         // deadline on the reply — so the waiter sat in `pending` and the
         // caller's promise never settled either way.
         const stalled = new PassThrough();   // headers, then silence
-        axios.post.mockImplementation(async (_url, payload) => (
+        http.post.mockImplementation(async (_url, payload) => (
             payload.method === 'tools/list'
-                ? { status: 500, headers: {}, data: stalled }
-                : { status: 202, headers: {}, data: Readable.from([]) }
+                ? response(stalled, { status: 500 })
+                : acceptedResponse()
         ));
 
         jest.useFakeTimers();
@@ -395,7 +391,7 @@ describe('talking over the standing stream', () => {
 
     test('refuses a method it does not serve rather than leaving the server waiting', async () => {
         const answers = [];
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'tools/call') {
                 setImmediate(() => {
                     channel.send({ jsonrpc: '2.0', id: 7, method: 'roots/list', params: {} });
@@ -403,7 +399,7 @@ describe('talking over the standing stream', () => {
                 });
             }
             if (payload.id === 7) answers.push(payload);
-            return { status: 202, headers: {}, data: Readable.from([]) };
+            return acceptedResponse();
         });
 
         await client.callTool('search', {});
@@ -413,7 +409,7 @@ describe('talking over the standing stream', () => {
     });
 
     test('fails everything in flight when the stream dies, and forgets the session', async () => {
-        axios.post.mockResolvedValue({ status: 202, headers: {}, data: Readable.from([]) });
+        http.post.mockResolvedValue(acceptedResponse());
 
         const call = client.callTool('search', {});
         await new Promise(resolve => setImmediate(resolve));
@@ -428,16 +424,16 @@ describe('talking over the standing stream', () => {
 
     test('waits out a 429 the server put a bounded clock on, then re-sends', async () => {
         const posts = [];
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             posts.push(payload);
             // Only the first attempt at the list is refused.
             if (payload.method === 'tools/list' && posts.filter(p => p.method === 'tools/list').length === 1) {
-                return { status: 429, headers: { 'retry-after': '0' }, data: Readable.from([]) };
+                return response(null, { status: 429, headers: { 'retry-after': '0' } });
             }
             if (payload.method === 'tools/list') {
                 setImmediate(() => channel.send({ jsonrpc: '2.0', id: payload.id, result: { tools: [{ name: 'search' }] } }));
             }
-            return { status: 202, headers: {}, data: Readable.from([]) };
+            return acceptedResponse();
         });
 
         await expect(client.listTools()).resolves.toEqual([{ name: 'search' }]);
@@ -449,10 +445,10 @@ describe('talking over the standing stream', () => {
     });
 
     test('reports a 429 the turn cannot afford rather than sitting on it', async () => {
-        axios.post.mockImplementation(async (_url, payload) => (
+        http.post.mockImplementation(async (_url, payload) => (
             payload.method === 'tools/list'
-                ? { status: 429, headers: { 'retry-after': '600' }, data: Readable.from([]) }
-                : { status: 202, headers: {}, data: Readable.from([]) }
+                ? response(null, { status: 429, headers: { 'retry-after': '600' } })
+                : acceptedResponse()
         ));
 
         await expect(client.listTools()).rejects.toThrow(/rate-limiting/);
@@ -483,12 +479,12 @@ describe('an expiring OAuth token on the older transport', () => {
 
         const channel = openChannel();
         const seen = [];
-        axios.post.mockImplementation(async (_url, payload, config) => {
-            seen.push(config.headers.Authorization);
+        http.post.mockImplementation(async (_url, payload, init) => {
+            seen.push(init.headers.Authorization);
             // The handshake goes through on the stale token; it expires between
             // then and the list, which is the case that matters.
-            if (payload.method === 'tools/list' && config.headers.Authorization === 'Bearer stale') {
-                return { status: 401, headers: {}, data: Readable.from(['expired']) };
+            if (payload.method === 'tools/list' && init.headers.Authorization === 'Bearer stale') {
+                return textResponse('expired', 401);
             }
             if (payload.id !== undefined) {
                 setImmediate(() => channel.send({
@@ -496,7 +492,7 @@ describe('an expiring OAuth token on the older transport', () => {
                     result: payload.method === 'initialize' ? INIT_RESULT : { tools: [] },
                 }));
             }
-            return { status: 202, headers: {}, data: Readable.from([]) };
+            return acceptedResponse();
         });
 
         const client = new McpHttpClient({ url: URL_, transport: 'sse', getAccessToken });

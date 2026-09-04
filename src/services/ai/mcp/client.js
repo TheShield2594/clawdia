@@ -1,7 +1,7 @@
 'use strict';
 
-const axios = require('axios');
-const { guardedAgents, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { guardedDispatcher, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { request, fetchHeaders, bodyStream } = require('../../../utils/httpFetch');
 const { isOAuthChallenge } = require('./oauth');
 const { SseChannel } = require('./sse');
 const { version: CLAWDIA_VERSION } = require('../../../../package.json');
@@ -307,8 +307,8 @@ function progressReader(token, onProgress) {
 /**
  * `read`, bounded by what is left of the call's deadline.
  *
- * axios's `timeout` only covers the wait for response *headers*. With
- * `responseType: 'stream'` a server could return `200 text/event-stream` and
+ * The request timeout only covers the wait for response *headers* — see
+ * `fetchHeaders`. A server could otherwise return `200 text/event-stream` and
  * then never answer the request id, which left the event-stream reader
  * iterating forever — a Discord reply that never finishes, holding one of the
  * per-server slots in connections.js the whole time (#816). The timer destroys
@@ -550,7 +550,7 @@ class McpHttpClient {
         await this.authorize();
 
         // One deadline for the whole exchange, headers and body alike. The
-        // axios timeout below only bounds the wait for headers; every body
+        // request timeout below only bounds the wait for headers; every body
         // read after it gets whatever is left of the same budget.
         // An object rather than a number, because an elicitation moves it: the
         // time a person spends answering the server's question is not time the
@@ -558,27 +558,28 @@ class McpHttpClient {
         const deadline = { at: Date.now() + timeout, reschedule: null };
         let response;
         try {
-            response = await axios.post(this.url, payload, {
+            // Non-2xx is read as a body rather than thrown — which `fetch` does
+            // by default — so the server's own explanation reaches the admin.
+            response = await fetchHeaders(this.url, {
+                method: 'POST',
                 headers: this.headers(),
-                responseType: 'stream',
+                body: JSON.stringify(payload),
                 timeout,
-                maxRedirects: 3,
-                // Non-2xx is read as a body rather than thrown, so the server's
-                // own explanation reaches the admin.
-                validateStatus: () => true,
-                ...guardedAgents()
+                dispatcher: guardedDispatcher()
             });
         } catch (err) {
             throw new McpError(err.message || 'request failed', { code: err.code || null });
         }
 
+        const stream = bodyStream(response);
+
         if (response.status === 429 && retryable) {
             // Only when the server said how long, and only when it is a wait a
             // Discord reply can sit through. A 429 with no Retry-After, or one
             // asking for a minute, is an answer rather than a hiccup.
-            const wait = retryAfterMs(response.headers['retry-after']);
+            const wait = retryAfterMs(response.headers.get('retry-after'));
             if (wait !== null) {
-                response.data?.destroy?.();
+                stream.destroy();
                 await new Promise(resolve => setTimeout(resolve, wait));
                 return this.postOverHttp(payload, { id, timeout, retryable: false, authRetried, onNotification, onServerRequest });
             }
@@ -587,8 +588,8 @@ class McpHttpClient {
         if (response.status >= 400) {
             // Read before anything decides what to do with it: the body is the
             // server's own explanation and the stream can only be consumed once.
-            const body = await readWithDeadline(collectText(response.data), response.data, deadline);
-            const challenge = response.headers['www-authenticate'] ?? null;
+            const body = await readWithDeadline(collectText(stream), stream, deadline);
+            const challenge = response.headers.get('www-authenticate');
 
             // A 401 on an OAuth connection is the ordinary end of an access
             // token's life — one that expired early, a scope that changed, a
@@ -604,25 +605,25 @@ class McpHttpClient {
             throw httpError(response.status, body, challenge);
         }
 
-        const sessionId = response.headers['mcp-session-id'];
+        const sessionId = response.headers.get('mcp-session-id');
         if (sessionId) this.sessionId = sessionId;
 
         // 202 is the answer to a notification: accepted, nothing to read.
         if (id === null || response.status === 202) {
-            response.data?.destroy?.();
+            stream.destroy();
             return null;
         }
 
-        const contentType = String(response.headers['content-type'] || '');
+        const contentType = String(response.headers.get('content-type') || '');
         const read = contentType.includes('text/event-stream')
             ? readEventStream(
-                response.data,
+                stream,
                 id,
                 this.notificationSink(onNotification),
                 request => this.answerServerRequest(request, onServerRequest, deadline)
             )
-            : collectText(response.data).then(text => parseJsonBody(text, id));
-        return readWithDeadline(read, response.data, deadline);
+            : collectText(stream).then(text => parseJsonBody(text, id));
+        return readWithDeadline(read, stream, deadline);
     }
 
     /**
@@ -847,24 +848,25 @@ class McpHttpClient {
 
         let response;
         try {
-            response = await axios.post(endpoint, payload, {
+            response = await fetchHeaders(endpoint, {
+                method: 'POST',
                 headers: this.headers(),
-                // The body is empty by design, but a server is free to send one
-                // and axios would otherwise buffer it into memory unread.
-                responseType: 'stream',
+                body: JSON.stringify(payload),
                 timeout,
-                maxRedirects: 3,
-                validateStatus: () => true,
-                ...guardedAgents()
+                dispatcher: guardedDispatcher()
             });
         } catch (err) {
             throw new McpError(err.message || 'request failed', { code: err.code || null });
         }
 
+        // The body is empty by design, but a server is free to send one; it is
+        // destroyed rather than read on every path out of here.
+        const stream = bodyStream(response);
+
         if (response.status === 429 && retryable) {
-            const wait = retryAfterMs(response.headers['retry-after']);
+            const wait = retryAfterMs(response.headers.get('retry-after'));
             if (wait !== null) {
-                response.data?.destroy?.();
+                stream.destroy();
                 await new Promise(resolve => setTimeout(resolve, wait));
                 return this.deliver(endpoint, payload, { timeout, deadline, retryable: false, authRetried });
             }
@@ -874,15 +876,15 @@ class McpHttpClient {
             // Read before anything decides what to do with it: the body is the
             // server's own explanation and the stream can only be consumed once.
             //
-            // Under the exchange's deadline, because `responseType: 'stream'`
-            // means the axios timeout above bounded the wait for *headers*
-            // only. A server that answers 500 and then stalls the body would
+            // Under the exchange's deadline, because the timeout above bounded
+            // the wait for *headers* only — the body is read from a stream.
+            // A server that answers 500 and then stalls the body would
             // otherwise hang here forever — and this runs before `postOverSse`
             // installs its own deadline on the reply, so the waiter would sit
             // in `pending` and the caller's promise would never settle either
             // way. `postOverHttp` bounds the identical read.
-            const body = await readWithDeadline(collectText(response.data), response.data, deadline);
-            const challenge = response.headers['www-authenticate'] ?? null;
+            const body = await readWithDeadline(collectText(stream), stream, deadline);
+            const challenge = response.headers.get('www-authenticate');
 
             if (response.status === 401 && this.getAccessToken && !authRetried
                 && await this.authorize({ force: true })) {
@@ -892,7 +894,7 @@ class McpHttpClient {
             throw httpError(response.status, body, challenge);
         }
 
-        response.data?.destroy?.();
+        stream.destroy();
         return null;
     }
 
@@ -1279,12 +1281,15 @@ class McpHttpClient {
             return;
         }
         try {
-            await axios.delete(this.url, {
+            const response = await request(this.url, {
+                method: 'DELETE',
                 headers: this.headers(),
                 timeout: CONNECT_TIMEOUT_MS,
-                validateStatus: () => true,
-                ...guardedAgents()
+                dispatcher: guardedDispatcher()
             });
+            // Whatever the server says here is discarded, but an unread body
+            // holds its connection open until the pool times it out.
+            await response.body?.cancel();
         } catch {
             // Terminating a session is a courtesy; the server times it out anyway.
         }

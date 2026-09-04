@@ -32,10 +32,11 @@ jest.mock('@google/genai', () => ({
     }))
 }));
 
-const mockAxiosPost = jest.fn(async () => ({
-    data: { message: { content: 'ok' }, prompt_eval_count: 1, eval_count: 1 }
+const { jsonResponse, payloadOf } = require('./helpers/fetchResponse');
+const mockFetch = jest.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({
+    message: { content: 'ok' }, prompt_eval_count: 1, eval_count: 1
 }));
-jest.mock('axios', () => ({ post: (...args) => mockAxiosPost(...args), get: jest.fn() }));
+afterAll(() => mockFetch.mockRestore());
 
 const openai = require('../src/services/ai/providers/openai');
 const anthropic = require('../src/services/ai/providers/anthropic');
@@ -159,7 +160,7 @@ describe('Ollama', () => {
     test('sends base64 alongside the content, which is how Ollama takes it', async () => {
         await ollama.complete({ ...baseReq, model: 'llava' });
 
-        const user = mockAxiosPost.mock.calls[0][1].messages.at(-1);
+        const user = payloadOf(mockFetch.mock.calls[0]).messages.at(-1);
         expect(user.content).toBe("what's wrong with this?");
         expect(user.images).toEqual(['QUJD']);
     });
@@ -167,6 +168,6 @@ describe('Ollama', () => {
     test('a model with no vision tower is never handed one', async () => {
         await ollama.complete({ ...baseReq, model: 'llama3.2' });
 
-        expect(mockAxiosPost.mock.calls[0][1].messages.at(-1)).not.toHaveProperty('images');
+        expect(payloadOf(mockFetch.mock.calls[0]).messages.at(-1)).not.toHaveProperty('images');
     });
 });

@@ -6,39 +6,19 @@
 // notification, and the fact that a server may answer a POST with an SSE stream
 // rather than a JSON body.
 
-jest.mock('axios');
-
 const { Readable } = require('stream');
-const axios = require('axios');
 const { McpHttpClient, McpError, CALL_TIMEOUT_MS } = require('../src/services/ai/mcp/client');
+const { installHttpMock } = require('./helpers/httpMock');
+const {
+    response, jsonResponse, sseResponse, textResponse, acceptedResponse,
+} = require('./helpers/fetchResponse');
 
 const URL = 'https://mcp.example.com/mcp';
 
-function jsonResponse(body, { status = 200, headers = {} } = {}) {
-    return {
-        status,
-        headers: { 'content-type': 'application/json', ...headers },
-        data: Readable.from([JSON.stringify(body)])
-    };
-}
-
-function sseResponse(events, { status = 200, headers = {} } = {}) {
-    const text = events.map(event => `event: message\ndata: ${JSON.stringify(event)}\n\n`).join('');
-    return {
-        status,
-        headers: { 'content-type': 'text/event-stream', ...headers },
-        data: Readable.from([text])
-    };
-}
-
-function textResponse(body, status) {
-    return { status, headers: { 'content-type': 'text/plain' }, data: Readable.from([body]) };
-}
-
-// 202 with no body: what a server returns for a notification.
-function acceptedResponse() {
-    return { status: 202, headers: {}, data: Readable.from([]) };
-}
+// `fetch` is one function; the transport's POSTs and its session DELETE are two
+// different servers as far as a test is concerned, so they stay two mocks.
+let http;
+beforeEach(() => { http = installHttpMock(); });
 
 const INIT_RESULT = {
     protocolVersion: '2025-06-18',
@@ -49,7 +29,7 @@ const INIT_RESULT = {
 // Answers each POST by method, so a test only has to describe the calls it
 // cares about and the handshake stays out of the way.
 function respondBy(handlers) {
-    axios.post.mockImplementation(async (_url, payload) => {
+    http.post.mockImplementation(async (_url, payload) => {
         if (!(payload.method in handlers)) throw new Error(`unexpected method ${payload.method}`);
         const handler = handlers[payload.method];
         // A null handler is a notification: 202, no body.
@@ -65,7 +45,7 @@ const HANDSHAKE = {
 };
 
 function postsTo(method) {
-    return axios.post.mock.calls.filter(call => call[1].method === method);
+    return http.post.mock.calls.filter(call => call[1].method === method);
 }
 
 beforeEach(() => {
@@ -74,7 +54,7 @@ beforeEach(() => {
 
 describe('handshake', () => {
     test('initializes, adopts the session id, then confirms with a notification', async () => {
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'initialize') {
                 return jsonResponse(
                     { jsonrpc: '2.0', id: payload.id, result: INIT_RESULT },
@@ -170,7 +150,7 @@ describe('an OAuth connection', () => {
 
     test('refreshes once and retries when the server rejects the token', async () => {
         let seen = 0;
-        axios.post.mockImplementation(async (_url, payload, options) => {
+        http.post.mockImplementation(async (_url, payload, options) => {
             if (payload.method === 'initialize' && seen++ === 0) {
                 return textResponse('', 401);
             }
@@ -190,24 +170,19 @@ describe('an OAuth connection', () => {
     // A second identical request buys nothing, and a second 401 after a fresh
     // token is the server saying no rather than a clock problem.
     test('does not retry twice, or with a token that did not change', async () => {
-        axios.post.mockResolvedValue(textResponse('', 401));
+        http.post.mockResolvedValue(textResponse('', 401));
         const { client } = oauthClient(['at1', 'at1', 'at1']);
 
         await expect(client.initialize()).rejects.toThrow(/401/);
-        expect(axios.post).toHaveBeenCalledTimes(1);
+        expect(http.post).toHaveBeenCalledTimes(1);
     });
 
     // A 401 with a Bearer challenge is a server asking for a login, not a bad
     // token, and the dashboard offers Connect on the difference.
     test('carries the challenge on the error, so discovery knows where to start', async () => {
-        axios.post.mockResolvedValue({
-            status: 401,
-            headers: {
-                'content-type': 'text/plain',
-                'www-authenticate': 'Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"'
-            },
-            data: Readable.from([''])
-        });
+        http.post.mockResolvedValue(textResponse('', 401, {
+            'www-authenticate': 'Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"',
+        }));
 
         const error = await new McpHttpClient({ url: URL }).initialize().catch(err => err);
 
@@ -217,7 +192,7 @@ describe('an OAuth connection', () => {
     });
 
     test('a 401 with no challenge is still just a rejected token', async () => {
-        axios.post.mockResolvedValue(textResponse('nope', 401));
+        http.post.mockResolvedValue(textResponse('nope', 401));
 
         const error = await new McpHttpClient({ url: URL, authorizationToken: 'x' }).initialize().catch(err => err);
 
@@ -228,10 +203,10 @@ describe('an OAuth connection', () => {
     // A static-token connection has no store to ask, and must not gain a retry
     // it never had.
     test('leaves a static-token connection exactly as it was', async () => {
-        axios.post.mockResolvedValue(textResponse('nope', 401));
+        http.post.mockResolvedValue(textResponse('nope', 401));
 
         await expect(new McpHttpClient({ url: URL, authorizationToken: 'x' }).initialize()).rejects.toThrow();
-        expect(axios.post).toHaveBeenCalledTimes(1);
+        expect(http.post).toHaveBeenCalledTimes(1);
     });
 
     // A store that cannot produce a token is not an error: the request goes out
@@ -275,18 +250,20 @@ describe('SSRF guard', () => {
         expect(() => new McpHttpClient({ url: 'file:///etc/passwd' })).toThrow();
     });
 
-    test('dials through the guarded agents, which check the address at connect time', async () => {
+    test('dials through the guarded dispatcher, which checks the address at connect time', async () => {
+        const { guardedDispatcher } = require('../src/utils/outboundGuard');
         respondBy(HANDSHAKE);
         await new McpHttpClient({ url: URL }).initialize();
-        const options = postsTo('initialize')[0][2];
-        expect(options.httpsAgent).toBeDefined();
-        expect(options.httpAgent).toBeDefined();
+
+        // One dispatcher covers both schemes and every redirect hop, which is
+        // the pair of agents axios was given and then some.
+        expect(postsTo('initialize')[0][2].dispatcher).toBe(guardedDispatcher());
     });
 });
 
 describe('server-sent event responses', () => {
     test('reads the answer out of an SSE stream', async () => {
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') {
                 return sseResponse([{ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT }]);
@@ -309,7 +286,7 @@ describe('server-sent event responses', () => {
      * off the wire and dropped.
      */
     test('forwards every notification to the connection-level listener', async () => {
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             return sseResponse([
@@ -328,7 +305,7 @@ describe('server-sent event responses', () => {
     // Nobody asked for progress here, which used to mean no listener was passed
     // at all and every notification on the stream went unread.
     test('and does so on a request that asked for no progress', async () => {
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             return sseResponse([
@@ -349,7 +326,7 @@ describe('server-sent event responses', () => {
     // one — a progress reader that throws is a bug in the caller, not a reason
     // to miss the server saying its tool list moved.
     test('a per-request listener that throws does not cost the connection one', async () => {
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             return sseResponse([
@@ -369,7 +346,7 @@ describe('server-sent event responses', () => {
     });
 
     test('forwards progress notifications to a caller that asked for them', async () => {
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             return sseResponse([
@@ -408,7 +385,7 @@ describe('server-sent event responses', () => {
     });
 
     test('ignores progress for somebody else\'s request', async () => {
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             return sseResponse([
@@ -426,7 +403,7 @@ describe('server-sent event responses', () => {
     });
 
     test('a listener that throws does not cost the tool result', async () => {
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             return sseResponse([
@@ -462,7 +439,7 @@ describe('server-sent event responses', () => {
     });
 
     test('reports a stream that ends without answering', async () => {
-        axios.post.mockImplementation(async (_url, payload) =>
+        http.post.mockImplementation(async (_url, payload) =>
             payload.method === 'notifications/initialized' ? acceptedResponse() : sseResponse([]));
 
         await expect(new McpHttpClient({ url: URL }).initialize())
@@ -470,13 +447,13 @@ describe('server-sent event responses', () => {
     });
 
     test('a stream that never answers is cut off at the deadline (#816)', async () => {
-        // 200 with event-stream headers, then silence: axios's own timeout only
+        // 200 with event-stream headers, then silence: the request timeout only
         // covers the headers, so this is the shape that used to hang forever.
         const hanging = new Readable({ read() {} });
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
-            return { status: 200, headers: { 'content-type': 'text/event-stream' }, data: hanging };
+            return response(hanging, { headers: { 'content-type': 'text/event-stream' } });
         });
 
         const client = new McpHttpClient({ url: URL });
@@ -488,8 +465,8 @@ describe('server-sent event responses', () => {
 
     test('an error body that never arrives is cut off at the deadline too', async () => {
         const hanging = new Readable({ read() {} });
-        axios.post.mockImplementation(async () => ({
-            status: 500, headers: { 'content-type': 'text/plain' }, data: hanging
+        http.post.mockImplementation(async () => response(hanging, {
+            status: 500, headers: { 'content-type': 'text/plain' },
         }));
 
         const client = new McpHttpClient({ url: URL });
@@ -675,47 +652,44 @@ describe('failures', () => {
         [404, /no MCP endpoint/],
         [500, /HTTP 500/]
     ])('explains an HTTP %s', async (status, expected) => {
-        axios.post.mockResolvedValue(textResponse('upstream said no', status));
+        http.post.mockResolvedValue(textResponse('upstream said no', status));
         await expect(new McpHttpClient({ url: URL }).initialize()).rejects.toThrow(expected);
     });
 
     test('marks a 404 as an expired session so the caller can reconnect', async () => {
-        axios.post.mockResolvedValue(textResponse('unknown session', 404));
+        http.post.mockResolvedValue(textResponse('unknown session', 404));
         await expect(new McpHttpClient({ url: URL }).initialize())
             .rejects.toMatchObject({ sessionExpired: true });
     });
 
-    test('reports a transport failure as an McpError, not a raw axios throw', async () => {
-        axios.post.mockRejectedValue(Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' }));
+    test('reports a transport failure as an McpError, not a raw fetch throw', async () => {
+        http.post.mockRejectedValue(Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' }));
         const error = await new McpHttpClient({ url: URL }).initialize().catch(e => e);
         expect(error).toBeInstanceOf(McpError);
         expect(error.code).toBe('ENOTFOUND');
     });
 
     test('rejects a response body that is not JSON at all', async () => {
-        axios.post.mockResolvedValue({
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-            data: Readable.from(['<html>login</html>'])
-        });
+        http.post.mockResolvedValue(
+            response('<html>login</html>', { headers: { 'content-type': 'application/json' } }));
         await expect(new McpHttpClient({ url: URL }).initialize()).rejects.toThrow(/non-JSON/);
     });
 });
 
 describe('close', () => {
     test('deletes the session it was given', async () => {
-        axios.post.mockImplementation(async (_url, payload) => (
+        http.post.mockImplementation(async (_url, payload) => (
             payload.method === 'initialize'
                 ? jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT }, { headers: { 'mcp-session-id': 'sess-9' } })
                 : acceptedResponse()
         ));
-        axios.delete.mockResolvedValue({ status: 204, headers: {} });
+        http.del.mockResolvedValue(response(null, { status: 204 }));
 
         const client = new McpHttpClient({ url: URL });
         await client.initialize();
         await client.close();
 
-        expect(axios.delete).toHaveBeenCalledWith(URL, expect.objectContaining({
+        expect(http.del).toHaveBeenCalledWith(URL, undefined, expect.objectContaining({
             headers: expect.objectContaining({ 'Mcp-Session-Id': 'sess-9' })
         }));
         expect(client.sessionId).toBeNull();
@@ -726,16 +700,16 @@ describe('close', () => {
         const client = new McpHttpClient({ url: URL });
         await client.initialize();
         await client.close();
-        expect(axios.delete).not.toHaveBeenCalled();
+        expect(http.del).not.toHaveBeenCalled();
     });
 
     test('swallows a failed teardown — the server times the session out anyway', async () => {
-        axios.post.mockImplementation(async (_url, payload) => (
+        http.post.mockImplementation(async (_url, payload) => (
             payload.method === 'initialize'
                 ? jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT }, { headers: { 'mcp-session-id': 'sess-9' } })
                 : acceptedResponse()
         ));
-        axios.delete.mockRejectedValue(new Error('connection reset'));
+        http.del.mockRejectedValue(new Error('connection reset'));
 
         const client = new McpHttpClient({ url: URL });
         await client.initialize();
@@ -750,19 +724,21 @@ describe('a server that is rate-limiting us', () => {
     // before it dials again, which is the part a mock catches and a live server
     // would only show as a leak.
     function rateLimited(retryAfter) {
-        const data = Readable.from(['slow down']);
-        jest.spyOn(data, 'destroy');
-        return {
+        const body = new Readable({ read() { this.push('slow down'); this.push(null); } });
+        const res = response(body, {
             status: 429,
             headers: { 'content-type': 'text/plain', ...(retryAfter ? { 'retry-after': retryAfter } : {}) },
-            data
-        };
+        });
+        // The source stream, so a test can assert the client let go of the body
+        // rather than the `Readable.fromWeb` wrapper it actually destroys.
+        res.source = body;
+        return res;
     }
 
     describe('waiting it out', () => {
         test('retries once when the wait is short enough', async () => {
             const refused = rateLimited('0');
-            axios.post
+            http.post
                 .mockResolvedValueOnce(refused)
                 .mockResolvedValueOnce(jsonResponse({ jsonrpc: '2.0', id: 1, result: INIT_RESULT }))
                 .mockResolvedValueOnce(acceptedResponse())
@@ -772,36 +748,38 @@ describe('a server that is rate-limiting us', () => {
             await expect(client.listTools()).resolves.toEqual([{ name: 'search' }]);
             // The refused response's body is a stream the client has to let go
             // of before it dials again; a live server would only show that as a
-            // socket nobody closed.
-            expect(refused.data.destroy).toHaveBeenCalled();
+            // socket nobody closed. Destroying the `Readable.fromWeb` wrapper
+            // cancels the web stream, which destroys this — so the source is
+            // what says the release actually reached the socket.
+            expect(refused.source.destroyed).toBe(true);
         });
 
         test('gives up rather than looping when the retry is refused too', async () => {
             // Once, not until it works: a server that means it will keep
             // meaning it, and the reply is waiting.
-            axios.post
+            http.post
                 .mockResolvedValueOnce(rateLimited('0'))
                 .mockResolvedValueOnce(rateLimited('0'));
 
             const client = new McpHttpClient({ url: URL });
             await expect(client.listTools()).rejects.toThrow(/rate-limiting/);
-            expect(axios.post).toHaveBeenCalledTimes(2);
+            expect(http.post).toHaveBeenCalledTimes(2);
         });
 
         test('reports a 429 that never said how long', async () => {
-            axios.post.mockResolvedValueOnce(rateLimited(null));
+            http.post.mockResolvedValueOnce(rateLimited(null));
 
             const client = new McpHttpClient({ url: URL });
             await expect(client.listTools()).rejects.toThrow(/rate-limiting this connection/);
-            expect(axios.post).toHaveBeenCalledTimes(1);
+            expect(http.post).toHaveBeenCalledTimes(1);
         });
 
         test('reports a 429 asking for longer than a reply can wait', async () => {
-            axios.post.mockResolvedValueOnce(rateLimited('600'));
+            http.post.mockResolvedValueOnce(rateLimited('600'));
 
             const client = new McpHttpClient({ url: URL });
             await expect(client.listTools()).rejects.toThrow(/HTTP 429/);
-            expect(axios.post).toHaveBeenCalledTimes(1);
+            expect(http.post).toHaveBeenCalledTimes(1);
         });
     });
 
@@ -856,7 +834,7 @@ describe('a request from the server', () => {
 
     function serverThatAsks(params = { message: 'which one?', requestedSchema: { type: 'object', properties: {} } }) {
         const answers = [];
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             // A JSON-RPC message with no method is the client answering us.
@@ -931,7 +909,7 @@ describe('a request from the server', () => {
     /** Answers `method` from the server mid-tool-call, and collects the reply. */
     function serverThatAsksFor(method) {
         const answers = [];
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             if (!payload.method) { answers.push(payload); return acceptedResponse(); }
@@ -1005,7 +983,7 @@ describe('a request from the server', () => {
 describe('a server request whose id collides with ours', () => {
     test('is not mistaken for the answer to our call', async () => {
         const answers = [];
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             if (!payload.method) { answers.push(payload); return acceptedResponse(); }
@@ -1032,7 +1010,7 @@ describe('a server request whose id collides with ours', () => {
     // Same reasoning for a batched JSON body, which may carry the server's own
     // requests alongside the answer.
     test('and not in a batched JSON body either', async () => {
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             return jsonResponse([
@@ -1058,13 +1036,13 @@ describe('the deadline while somebody is answering', () => {
 
     test('is pushed out by the handler, so the call outlives its original budget', async () => {
         const held = heldStream();
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             if (!payload.method) return acceptedResponse();
             callId = payload.id;
             setImmediate(() => held.push({ jsonrpc: '2.0', id: 'srv-1', method: 'elicitation/create', params: {} }));
-            return { status: 200, headers: { 'content-type': 'text/event-stream' }, data: held.stream };
+            return response(held.stream, { headers: { 'content-type': 'text/event-stream' } });
         });
 
         let callId;
@@ -1092,12 +1070,12 @@ describe('the deadline while somebody is answering', () => {
     // holding a Discord reply open indefinitely.
     test('and still expires when nobody answers at all', async () => {
         const held = heldStream();
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
             if (!payload.method) return acceptedResponse();
             setImmediate(() => held.push({ jsonrpc: '2.0', id: 'srv-1', method: 'elicitation/create', params: {} }));
-            return { status: 200, headers: { 'content-type': 'text/event-stream' }, data: held.stream };
+            return response(held.stream, { headers: { 'content-type': 'text/event-stream' } });
         });
 
         const client = new McpHttpClient({ url: URL, elicitation: true });
@@ -1114,7 +1092,7 @@ describe('the deadline while somebody is answering', () => {
 describe('what the client tells a server it can do', () => {
     async function capabilitiesOf(options) {
         let sent;
-        axios.post.mockImplementation(async (_url, payload) => {
+        http.post.mockImplementation(async (_url, payload) => {
             if (payload.method === 'initialize') sent = payload.params.capabilities;
             if (payload.method === 'notifications/initialized') return acceptedResponse();
             return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: payload.method === 'initialize' ? INIT_RESULT : { tools: [] } });

@@ -11,9 +11,12 @@
 
 jest.mock('../src/models/User', () => ({ findOne: jest.fn(() => ({ lean: async () => null })) }));
 
-const mockAxiosGet = jest.fn(async () => ({ data: Buffer.from('IMGBYTES') }));
-jest.mock('axios', () => ({ get: (...args) => mockAxiosGet(...args) }));
-jest.mock('../src/utils/outboundGuard', () => ({ guardedAgents: () => ({}), assertPublicHttpUrl: () => {} }));
+jest.mock('../src/utils/outboundGuard', () => ({ guardedDispatcher: () => undefined, assertPublicHttpUrl: () => {} }));
+
+const { response } = require('./helpers/fetchResponse');
+const mockFetch = jest.spyOn(globalThis, 'fetch')
+    .mockImplementation(async () => response(Buffer.from('IMGBYTES')));
+afterAll(() => mockFetch.mockRestore());
 
 const mockRetrieveKnowledge = jest.fn(async () => ({ entries: [], matched: [], background: [], isBackground: true }));
 jest.mock('../src/services/ai/knowledge', () => {
@@ -132,7 +135,7 @@ describe('a model that cannot see', () => {
     test('is not sent the image, and is not sent for it either', async () => {
         await handleAIChat(chatMessage('what is this?', [IMAGE]), settings);
 
-        expect(mockAxiosGet).not.toHaveBeenCalled();
+        expect(mockFetch).not.toHaveBeenCalled();
         expect(callArgs().images).toHaveLength(0);
     });
 

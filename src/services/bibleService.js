@@ -1,5 +1,5 @@
-const axios = require('axios');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { request } = require('../utils/httpFetch');
 
 // All recognised book names and abbreviations, sorted longest-first so the
 // regex alternation matches greedily (e.g. "1 Samuel" before "Samuel").
@@ -97,7 +97,12 @@ async function lookupVerse(reference, translation = 'kjv') {
     try {
         const encoded = encodeURIComponent(reference);
         const url = `https://bible-api.com/${encoded}?translation=${translation}`;
-        const { data } = await axios.get(url, { timeout: 8000 });
+        // Both lookups here answer a null on any failure, so a non-2xx is
+        // thrown into the same catch that a transport failure lands in —
+        // `fetch`, unlike axios, would otherwise hand back the error page.
+        const response = await request(url, { timeout: 8000 });
+        if (!response.ok) return null;
+        const data = await response.json();
         if (data.error) return null;
         return data;
     } catch {
@@ -107,10 +112,12 @@ async function lookupVerse(reference, translation = 'kjv') {
 
 async function getDailyVerse() {
     try {
-        const { data } = await axios.get(
+        const response = await request(
             'https://beta.ourmanna.com/api/v1/get/?format=json&order=daily',
             { timeout: 8000 }
         );
+        if (!response.ok) return null;
+        const data = await response.json();
         const details = data?.verse?.details;
         if (details?.text && details?.reference) {
             return {

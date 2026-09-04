@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const axios = require('axios');
+const { request } = require('../../utils/httpFetch');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
 const COLORS = require('../../utils/embedColors');
 
@@ -77,10 +77,15 @@ module.exports = {
             await interaction.deferReply();
 
             const params = new URLSearchParams({ template_id: templateId, username, password, text0: topText, text1: bottomText });
-            const { data } = await axios.post('https://api.imgflip.com/caption_image', params.toString(), {
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            const response = await request('https://api.imgflip.com/caption_image', {
+                method: 'POST',
+                body: params,
                 timeout: 10_000,
             });
+            // `fetch` does not throw on a 4xx or 5xx the way axios did, and the
+            // catch below is what turns a failure into the user's error reply.
+            if (!response.ok) throw new Error(`Imgflip returned HTTP ${response.status}`);
+            const data = await response.json();
 
             if (!data.success) {
                 console.error('meme: Imgflip API returned failure', { templateId, error_message: data.error_message });

@@ -6,7 +6,7 @@ const {
     StringSelectMenuOptionBuilder,
     MessageFlags,
 } = require('discord.js');
-const axios = require('axios');
+const { request } = require('../../utils/httpFetch');
 const User  = require('../../models/User');
 const { advanceMissions } = require('../../services/seasonMissionService');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
@@ -53,9 +53,14 @@ function decodeHtml(str) {
 }
 
 async function fetchQuestion(difficulty) {
-    const params = { amount: 1, type: 'multiple' };
-    if (difficulty !== 'any') params.difficulty = difficulty;
-    const { data } = await axios.get(OPENTDB_URL, { params, timeout: 4000 });
+    const params = new URLSearchParams({ amount: '1', type: 'multiple' });
+    if (difficulty !== 'any') params.set('difficulty', difficulty);
+    // Every failure here lands in the same place — the caller falls back to the
+    // offline bank — so a refusal is thrown rather than inspected. `fetch` only
+    // rejects for a transport failure, so the status is the caller's to check.
+    const response = await request(`${OPENTDB_URL}?${params}`, { timeout: 4000 });
+    if (!response.ok) throw new Error(`OpenTDB returned HTTP ${response.status}`);
+    const data = await response.json();
     if (data.response_code !== 0 || !data.results?.length)
         throw new Error(`OpenTDB response_code: ${data.response_code}`);
     return { raw: data.results[0], offline: false };

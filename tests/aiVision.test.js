@@ -8,12 +8,16 @@
 // of the fix: which attachments are eligible and what they cost, which models
 // may be shown one, and the wire shape each provider puts them in.
 
-const mockAxiosGet = jest.fn();
-jest.mock('axios', () => ({ get: (...args) => mockAxiosGet(...args) }));
 jest.mock('../src/utils/outboundGuard', () => ({
-    guardedAgents: () => ({ httpAgent: 'guarded' }),
+    guardedDispatcher: () => GUARDED_DISPATCHER,
     assertPublicHttpUrl: jest.fn()
 }));
+
+// A stand-in rather than a real undici Agent: what these tests need to know is
+// that the fetch was handed the guarded dispatcher and not the global one.
+const GUARDED_DISPATCHER = { guarded: true };
+
+const { response } = require('./helpers/fetchResponse');
 
 const vision = require('../src/services/ai/vision');
 const { collectImages, loadImages, visionNotice, MAX_IMAGES, MAX_IMAGE_BYTES } = vision;
@@ -41,10 +45,13 @@ function messageWith(...attachments) {
     return { attachments: new Map(attachments.map((a, i) => [String(i), a])) };
 }
 
+let mockFetch;
 beforeEach(() => {
     jest.clearAllMocks();
-    mockAxiosGet.mockResolvedValue({ data: Buffer.from('PNGBYTES') });
+    mockFetch = jest.spyOn(globalThis, 'fetch');
+    mockFetch.mockImplementation(async () => response(Buffer.from('PNGBYTES')));
 });
+afterEach(() => mockFetch.mockRestore());
 
 describe('which attachments are eligible', () => {
     test('an image is collected with its type and URL', () => {
@@ -118,8 +125,8 @@ describe('loading the bytes', () => {
 
         const loaded = await loadImages(found, { supported: true });
 
-        expect(mockAxiosGet).toHaveBeenCalledTimes(1);
-        expect(mockAxiosGet.mock.calls[0][1]).toMatchObject({ httpAgent: 'guarded', responseType: 'arraybuffer' });
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        expect(mockFetch.mock.calls[0][1].dispatcher).toBe(GUARDED_DISPATCHER);
         expect(loaded.images[0].base64).toBe(Buffer.from('PNGBYTES').toString('base64'));
         expect(loaded.unsupported).toBe(0);
     });
@@ -129,13 +136,13 @@ describe('loading the bytes', () => {
 
         const loaded = await loadImages(found, { supported: false });
 
-        expect(mockAxiosGet).not.toHaveBeenCalled();
+        expect(mockFetch).not.toHaveBeenCalled();
         expect(loaded.images).toHaveLength(0);
         expect(loaded.unsupported).toBe(1);
     });
 
     test('a body larger than Discord declared is dropped after the fetch', async () => {
-        mockAxiosGet.mockResolvedValue({ data: Buffer.alloc(MAX_IMAGE_BYTES + 1) });
+        mockFetch.mockImplementation(async () => response(Buffer.alloc(MAX_IMAGE_BYTES + 1)));
 
         const loaded = await loadImages(collectImages(messageWith(attachment())), { supported: true });
 
@@ -150,15 +157,15 @@ describe('loading the bytes', () => {
         const found = collectImages(messageWith(attachment({ url: 'http://169.254.169.254/latest' })));
         const loaded = await loadImages(found, { supported: true });
 
-        expect(mockAxiosGet).not.toHaveBeenCalled();
+        expect(mockFetch).not.toHaveBeenCalled();
         expect(loaded.images).toHaveLength(0);
         expect(loaded.skipped).toBe(1);
     });
 
     test('a failed fetch costs its image and nothing else', async () => {
-        mockAxiosGet
+        mockFetch
             .mockRejectedValueOnce(new Error('gone'))
-            .mockResolvedValueOnce({ data: Buffer.from('OK') });
+            .mockImplementationOnce(async () => response(Buffer.from('OK')));
 
         const found = collectImages(messageWith(attachment(), attachment({ name: 'two.png' })));
         const loaded = await loadImages(found, { supported: true });
