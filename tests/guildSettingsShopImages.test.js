@@ -3,7 +3,13 @@
 // #605: the guild settings page used to read every shop item's inline image
 // Buffer off the wire and deep-copy it through toObject(), only to strip both
 // fields before rendering. The images are served by their own route and were
-// never on the page — so they are projected out of the read instead.
+// never on the page — so they were projected out of the read instead.
+//
+// #888 removed the fields themselves: shop artwork lives in the ItemImage
+// collection now, so there is nothing on this document to project out and no
+// projection for a future read to forget. What is left to hold is the property
+// the projection existed for — no image bytes reach the rendered page — plus
+// the seeding behaviour that grew up around it.
 
 const express = require('express');
 const path = require('path');
@@ -74,56 +80,60 @@ beforeEach(() => {
 });
 
 describe('guild settings page and shop image Buffers', () => {
-    it('projects the image fields out of the read', async () => {
-        const res = await fetch(`${baseUrl}/dashboard/guild/g1`);
-        expect(res.status).toBe(200);
+    it('carries no image fields on the shop schema to read at all', () => {
+        // The projection this suite was written for is gone because the fields
+        // are: a document written through the schema cannot hold a Buffer on a
+        // shop item any more, whatever a caller sets.
+        const doc = new ActualGuild({ guildId: 'g1', name: 'Test Guild' });
+        doc.shop = [{
+            itemId: 'lantern', name: 'Lantern', price: 10,
+            imageData: Buffer.from('SECRETIMAGEBYTES'),
+            imageType: 'image/png',
+        }];
 
-        const projection = Guild.findOne.mock.calls[0][1];
-        expect(projection).toContain('-shop.imageData');
-        expect(projection).toContain('-shop.imageType');
-    });
-
-    it('projects them out of a panel fragment read too', async () => {
-        const res = await fetch(`${baseUrl}/dashboard/guild/g1/panel/economy`);
-        expect(res.status).toBe(200);
-
-        expect(Guild.findOne.mock.calls[0][1]).toContain('-shop.imageData');
+        expect(doc.shop[0].imageData).toBeUndefined();
+        expect(doc.shop[0].imageType).toBeUndefined();
+        expect(doc.shop[0].name).toBe('Lantern');
     });
 
     it('keeps image bytes out of the rendered page even if a read returns them', async () => {
-        // Belt and braces: the projection is the fix, but a document that
-        // carries the fields anyway (a freshly created one is unprojected) must
-        // still not put a Buffer into the HTML.
-        Guild.findOne.mockResolvedValue(guildDoc({
-            shop: [{
-                itemId: 'lantern', name: 'Lantern', price: 10,
-                imageData: Buffer.from('SECRETIMAGEBYTES'),
-                imageType: 'image/png',
-            }],
-        }));
+        // Belt and braces, and it still earns its place after #888: a document
+        // read straight off a database that predates migration 022 carries the
+        // fields whatever the schema says, and none of them may reach the HTML.
+        const doc = guildDoc();
+        doc.shop = [{ itemId: 'lantern', name: 'Lantern', price: 10 }];
+        // Past the schema, the way an unmigrated document arrives.
+        doc.shop[0].$__parent = undefined;
+        const asObject = doc.toObject.bind(doc);
+        doc.toObject = () => {
+            const plain = asObject();
+            plain.shop[0].imageData = Buffer.from('SECRETIMAGEBYTES');
+            plain.shop[0].imageType = 'image/png';
+            return plain;
+        };
+        Guild.findOne.mockResolvedValue(doc);
 
         const html = await (await fetch(`${baseUrl}/dashboard/guild/g1`)).text();
 
         expect(html).toContain('Lantern');
-        expect(html).not.toContain('imageData');
         expect(html).not.toContain('SECRETIMAGEBYTES');
         expect(html).not.toContain(Buffer.from('SECRETIMAGEBYTES').toString('base64'));
     });
 
-    it('seeds default shop items against a fully selected document, never the projection', async () => {
-        // Saving a partially selected shop array is how a guild's images get
-        // replaced with nothing, so the rare backfill re-reads without the
-        // projection and writes that document instead.
-        const projected = guildDoc({ seeded: false });
-        const full = guildDoc({ seeded: false });
-        Guild.findOne.mockResolvedValueOnce(projected).mockResolvedValueOnce(full);
+    it('seeds default shop items off one fully selected read, not two', async () => {
+        // The backfill used to re-read the document without the projection
+        // before writing, because saving a partially selected shop array was how
+        // a guild's images got replaced with nothing. There is no projection to
+        // work around any more, so there is no second read either.
+        const doc = guildDoc({ seeded: false });
+        Guild.findOne.mockResolvedValue(doc);
 
         const res = await fetch(`${baseUrl}/dashboard/guild/g1`);
         expect(res.status).toBe(200);
 
-        expect(projected.save).not.toHaveBeenCalled();
-        expect(full.save).toHaveBeenCalledTimes(1);
-        expect(Guild.findOne.mock.calls[1][1]).toBeUndefined();
+        expect(doc.save).toHaveBeenCalledTimes(1);
+        expect(Guild.findOne).toHaveBeenCalledTimes(1);
+        expect(Guild.findOne.mock.calls[0][1]).toBeUndefined();
     });
 
     it('does not re-read or write for a guild whose shop is already complete', async () => {

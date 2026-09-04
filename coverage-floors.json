@@ -7,10 +7,10 @@
             "lines": 10
         },
         "src/bot": {
-            "statements": 87,
-            "branches": 84,
-            "functions": 85,
-            "lines": 90
+            "statements": 92,
+            "branches": 85,
+            "functions": 92,
+            "lines": 94
         },
         "src/commands/admin": {
             "statements": 21,
@@ -63,7 +63,7 @@
         "src/commands/economy/hunt/shop": {
             "statements": 27,
             "branches": 7,
-            "functions": 15,
+            "functions": 17,
             "lines": 28
         },
         "src/commands/economy/mine": {
@@ -75,7 +75,7 @@
         "src/commands/economy/mine/shop": {
             "statements": 27,
             "branches": 6,
-            "functions": 9,
+            "functions": 11,
             "lines": 28
         },
         "src/commands/fun": {
@@ -104,19 +104,19 @@
         },
         "src/config": {
             "statements": 94,
-            "branches": 91,
+            "branches": 92,
             "functions": 97,
             "lines": 95
         },
         "src/dashboard": {
-            "statements": 78,
-            "branches": 40,
-            "functions": 60,
-            "lines": 80
+            "statements": 81,
+            "branches": 45,
+            "functions": 72,
+            "lines": 83
         },
         "src/dashboard/lib": {
             "statements": 87,
-            "branches": 78,
+            "branches": 81,
             "functions": 89,
             "lines": 89
         },
@@ -127,28 +127,28 @@
             "lines": 0
         },
         "src/dashboard/routes": {
-            "statements": 79,
-            "branches": 53,
-            "functions": 71,
-            "lines": 81
+            "statements": 81,
+            "branches": 63,
+            "functions": 75,
+            "lines": 83
         },
         "src/dashboard/routes/api": {
-            "statements": 66,
-            "branches": 64,
-            "functions": 60,
-            "lines": 67
+            "statements": 69,
+            "branches": 66,
+            "functions": 65,
+            "lines": 70
         },
         "src/data": {
-            "statements": 61,
-            "branches": 26,
-            "functions": 34,
-            "lines": 61
+            "statements": 77,
+            "branches": 57,
+            "functions": 64,
+            "lines": 78
         },
         "src/events": {
-            "statements": 63,
-            "branches": 50,
-            "functions": 43,
-            "lines": 67
+            "statements": 67,
+            "branches": 53,
+            "functions": 47,
+            "lines": 71
         },
         "src/games/casino": {
             "statements": 31,
@@ -157,16 +157,16 @@
             "lines": 31
         },
         "src/migrations": {
-            "statements": 54,
-            "branches": 47,
-            "functions": 45,
-            "lines": 56
+            "statements": 55,
+            "branches": 48,
+            "functions": 46,
+            "lines": 57
         },
         "src/models": {
-            "statements": 75,
-            "branches": 4,
+            "statements": 79,
+            "branches": 10,
             "functions": 67,
-            "lines": 79
+            "lines": 83
         },
         "src/services": {
             "statements": 65,
@@ -205,10 +205,10 @@
             "lines": 94
         },
         "src/services/scheduler": {
-            "statements": 13,
-            "branches": 0,
-            "functions": 0,
-            "lines": 15
+            "statements": 64,
+            "branches": 84,
+            "functions": 33,
+            "lines": 65
         },
         "src/utils": {
             "statements": 73,
@@ -252,20 +252,20 @@
             "lines": 93
         },
         "src/utils/balanceDebit.js": {
-            "statements": 70,
-            "branches": 47,
-            "functions": 59,
-            "lines": 75
+            "statements": 97,
+            "branches": 77,
+            "functions": 97,
+            "lines": 97
         },
         "src/utils/balanceDelta.js": {
             "statements": 97,
-            "branches": 72,
+            "branches": 73,
             "functions": 97,
             "lines": 97
         },
         "src/utils/coinTransfer.js": {
-            "statements": 94,
-            "branches": 78,
+            "statements": 95,
+            "branches": 81,
             "functions": 97,
             "lines": 94
         },
@@ -401,5 +401,30 @@
         "src/utils/wealthMilestone.js",
         "src/views/heistView.js",
         "src/views/pollView.js"
-    ]
+    ],
+    "unguarded": {
+        "src/commands/admin": [
+            "branches"
+        ],
+        "src/commands/economy/event": [
+            "branches"
+        ],
+        "src/commands/economy/fish": [
+            "branches"
+        ],
+        "src/commands/economy/fish/shop": [
+            "branches",
+            "functions"
+        ],
+        "src/commands/economy/mine": [
+            "branches"
+        ],
+        "src/commands/utility": [
+            "branches"
+        ],
+        "src/dashboard/public": [
+            "statements",
+            "lines"
+        ]
+    }
 }

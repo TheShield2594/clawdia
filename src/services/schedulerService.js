@@ -1001,26 +1001,26 @@ function weeklyRunNote(winner) {
 
 // ─── Dynamic shop pricing recalculation (issue #354) ────────────────────────
 //
-// Shop items carry their icon inline, as an `imageData` Buffer on the subdocument
-// (see the `shop` array in models/Guild.js). That makes the whole-document
-// read-mutate-`save()` shape this job used to have proportional to the size of a
-// guild's uploaded artwork rather than to the handful of numbers it changes:
-// every fifteen minutes it pulled every icon of every dynamic-pricing guild into
-// the process, and `markModified('shop')` then wrote all of them back untouched.
+// The shop is read under a projection naming only the pricing fields, and the
+// new prices go back as a `bulkWrite` of per-item `$set`s, rather than the
+// whole-document read-mutate-`save()` this job used to do.
 //
-// So the shop is read under a projection that names only the pricing fields, and
-// the new prices go back as a `bulkWrite` of per-item `$set`s. The Buffers are
-// never read and never rewritten.
+// The reason was that shop items carried their icon inline, as an `imageData`
+// Buffer on the subdocument, so the job's cost was proportional to a guild's
+// uploaded artwork rather than to the handful of numbers it changes — every
+// fifteen minutes it pulled every icon of every dynamic-pricing guild into the
+// process and `markModified('shop')` wrote them all back untouched. #888 moved
+// those Buffers into the ItemImage collection, so that particular cost is gone;
+// the shape stays, because a targeted `$set` of the fields a job changes is
+// still the right thing for a job that runs every fifteen minutes against every
+// guild.
 /**
  * Move every dynamic-pricing guild's shop prices one step toward what demand
  * says they should be, decay the demand scores, and append to the price history.
  *
  * Reads the shop under a projection naming only the pricing fields and writes
- * the new prices as a `bulkWrite` of per-item `$set`s. That is not a
- * micro-optimisation: shop items carry their icon inline as an `imageData`
- * Buffer, so the whole-document read-mutate-`save()` this replaced pulled every
- * icon of every guild into the process every fifteen minutes and wrote them all
- * back untouched.
+ * the new prices as a `bulkWrite` of per-item `$set`s — see the note above for
+ * why that shape rather than a read-mutate-`save()`.
  *
  * @param {import('discord.js').Client} client
  * @returns {Promise<void>}

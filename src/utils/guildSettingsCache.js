@@ -7,7 +7,7 @@
  * `Guild.findOne({ guildId })`, which loads and hydrates the entire guild
  * document. On a busy server that is one full document read per message, and
  * it is the single biggest scaling limit in the bot. The read here excludes
- * the shop's inline `imageData` Buffers (see HEAVY_FIELDS_PROJECTION), and
+ * a giveaway's entrant list (see HEAVY_FIELDS_PROJECTION), and
  * telemetry lives in its own GuildAnalytics collection, so the heavyweight
  * parts of the old document never enter the heap on this path.
  *
@@ -60,14 +60,18 @@ let ttlMs = DEFAULT_TTL_MS;
 let hits = 0;
 let misses = 0;
 
-// Heavy payloads nothing on the cached read paths (messageCreate,
-// interactionCreate) ever looks at. Excluded so a guild with a fully
-// illustrated shop (up to 35 items × 512 KB image Buffers) or a giveaway with
-// thousands of entrants does not pin megabytes in this cache. Every giveaway
-// reader/writer (the entry button, /giveaway, giveawayService) goes through
-// the model directly, never through here. Exclusion projection on a hydrated
-// read still applies schema defaults to every other field.
-const HEAVY_FIELDS_PROJECTION = '-shop.imageData -giveaways.entrantIds';
+// The one heavy payload left on this document that nothing on the cached read
+// paths (messageCreate, interactionCreate) looks at. Excluded so a giveaway
+// with thousands of entrants does not pin megabytes in this cache; every
+// giveaway reader/writer (the entry button, /giveaway, giveawayService) goes
+// through the model directly, never through here. Exclusion projection on a
+// hydrated read still applies schema defaults to every other field.
+//
+// `-shop.imageData` used to be here too, and is gone because the field is
+// (#888): shop artwork lives in the ItemImage collection now, so a guild with a
+// fully illustrated shop costs this cache nothing and no reader has a
+// projection to forget.
+const HEAVY_FIELDS_PROJECTION = '-giveaways.entrantIds';
 
 // Required lazily: models/Guild.js registers invalidation hooks that reach back
 // into this module, and a top-level require in both directions would leave one

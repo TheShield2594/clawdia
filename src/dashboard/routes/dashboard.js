@@ -10,11 +10,6 @@ const { ACTIVITY_ITEMS } = require('../../data/activityItems');
 const { REGION_LIST } = require('../../data/exploreData');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 
-// A shop item's image is served by /api/item-image/shop/:guildId/:itemId, never
-// inlined into the settings page, so the guild-settings read excludes both
-// fields. Up to 35 items x 512 KB of Buffer per guild that would otherwise be
-// pulled off the wire and deep-copied by toObject() only to be dropped again.
-const SHOP_IMAGES_EXCLUDED = '-shop.imageData -shop.imageType';
 
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
@@ -98,8 +93,12 @@ async function buildGuildSettingsLocals(req) {
         return { status: 403, message: 'You do not have permission to manage this guild.' };
     }
 
-    let guildSettings = await Guild.findOne({ guildId }, SHOP_IMAGES_EXCLUDED);
-    let shopIsProjected = true;
+    // Read unprojected. It used to exclude `shop.imageData`/`shop.imageType` —
+    // up to 35 × 512 KB of Buffer per guild, pulled off the wire and deep-copied
+    // by toObject() only to be dropped again (#605) — and #888 moved those
+    // fields out of this document altogether, so there is nothing left to
+    // exclude and no projection for a later read to forget.
+    let guildSettings = await Guild.findOne({ guildId });
     const guild = await req.bot.getGuild(guildId);
 
     if (!guild) {
@@ -111,25 +110,15 @@ async function buildGuildSettingsLocals(req) {
             guildId: guild.id,
             name: guild.name
         });
-        shopIsProjected = false;
     }
 
     // Seeding is a rare backfill: a guild the bot joined before a shop category
-    // existed. Running it against the projection keeps the new items on the page
-    // being rendered, but the *write* goes through a fully selected document.
-    // ensureDefaultShopItems only ever appends, so a save here would in practice
-    // emit `$push`; re-reading rather than trusting that is cheap on a path that
-    // runs once per guild, and the alternative failure — a whole guild's shop
-    // images replaced with nothing — is not one worth a judgement call.
+    // existed. It used to re-read the document without the projection before
+    // writing, because saving a partially selected shop array is how a guild's
+    // images got replaced with nothing. With no projection above, the document
+    // in hand is the fully selected one and the second read is gone with it.
     if (ensureDefaultShopItems(guildSettings)) {
-        if (!shopIsProjected) {
-            await guildSettings.save();
-        } else {
-            const fullSettings = await Guild.findOne({ guildId });
-            if (fullSettings && ensureDefaultShopItems(fullSettings)) {
-                await fullSettings.save();
-            }
-        }
+        await guildSettings.save();
     }
 
     const allChannels = await req.bot.listChannels(guildId) || [];
@@ -150,12 +139,7 @@ async function buildGuildSettingsLocals(req) {
         xpReward: a.xpReward, coinReward: a.coinReward
     }));
 
-    // imageData/imageType are already projected out above for an existing guild;
-    // the map still runs because a freshly created document is unprojected.
     const safeSettings = guildSettings.toObject();
-    if (Array.isArray(safeSettings.shop)) {
-        safeSettings.shop = safeSettings.shop.map(({ imageData, imageType, ...rest }) => rest);
-    }
     // MCP authorization tokens are write-only: the panel shows that a token
     // exists, never its value, so it must not be in the rendered page at all.
     if (Array.isArray(safeSettings.ai?.mcpServers)) {
@@ -164,15 +148,21 @@ async function buildGuildSettingsLocals(req) {
         );
     }
 
-    // Pre-load the set of activity item images that actually exist so the
-    // template can skip rendering <img> tags that would otherwise 404. Scoped to
-    // this guild plus the shared pre-#561 rows, which is exactly what the image
-    // route will serve back for these ids.
+    // Pre-load the set of item images that actually exist so the template can
+    // skip rendering <img> tags that would otherwise 404. Scoped to this guild
+    // plus the shared pre-#561 rows, which is exactly what the image route will
+    // serve back for these ids.
+    //
+    // Since #888 the same collection also holds the shop's images, under
+    // `shop:<itemId>` keys; those are not what this set is for — the shop panel
+    // renders its own <img> per item and hides it on a 404 — so they simply sit
+    // in it unused, which is cheaper than a second query to exclude them.
     const uploadedImageDocs = await ItemImage.find(
         { guildId: { $in: [guildId, null] } },
         { itemId: 1 },
     ).lean();
     const uploadedImageIds = new Set(uploadedImageDocs.map(d => d.itemId));
+
 
     // The item list itself comes from data/activityItems.js, which is also what
     // the upload route validates against — one catalog, so the panel cannot

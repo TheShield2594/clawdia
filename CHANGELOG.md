@@ -14,6 +14,81 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.6.0] - 2026-09-04
+
+Migrations through `022_move_shop_images_to_itemimages`.
+
+Shop item images move out of the guild document (#888). They were `Buffer`s on
+`guild.shop[].imageData` — up to 512 KB each, in an array with no bound, inside
+the one document every cached settings read pulls. A guild with an illustrated
+shop was on a path to MongoDB's 16 MB ceiling, at which point the document stops
+saving at all; the upload route read the whole thing, set a Buffer on one
+element of the shop array and `guild.save()`d it back, so an upload and a
+concurrent settings write each committed a document read before the other
+landed; and every reader owed a `-shop.imageData` projection it could forget, at
+megabytes a read. They are rows in the `ItemImage` collection now, beside the
+activity artwork that was already there, keyed `{ guildId, 'shop:<itemId>' }` —
+namespaced because shop item ids are whatever an admin typed, and one called
+`hunt:wooden_rifle` would otherwise land on that guild's activity icon. An
+upload is a targeted upsert on one small document, the settings endpoint no
+longer has to carry Buffers across a shop rewrite item by item, the cache's
+`HEAVY_FIELDS_PROJECTION` special case is gone, and the settings page reads its
+document unprojected in one read rather than two. `022` moves what is stored and
+clears the inline fields only once every image is written; it is reversible.
+
+Stored credentials and the archives that hold them (#886). Without
+`SECRET_ENCRYPTION_KEY` the per-guild AI provider keys and the MCP OAuth refresh
+tokens are plaintext in the database — and the nightly `backup` service keeps
+thirty days of unencrypted `mongodump` archives beside it, so "readable with
+database access" quietly meant "readable by anyone who can list `./backups`",
+for a rolling month. Encryption stays opt-in, because failing the boot would
+take down every deployment that has not set the variable, but the choice stops
+being silent: a `NODE_ENV=production` boot without it warns and names what is
+exposed, and `.env.example` asks for the value beside `SESSION_SECRET` rather
+than describing it as optional. The other half is new:
+`BACKUP_ENCRYPTION_PASSPHRASE` seals each archive with AES-256-CBC (PBKDF2,
+200k iterations) as `clawdia-<timestamp>.gz.enc`. `mongodump` writes into the
+container's own `/tmp` and only the sealed file reaches the mounted directory,
+the archive that is *kept* is the one verified — decrypted and then parsed with
+`mongorestore --dryRun`, so an archive that will not open is found the night it
+is taken — and a passphrase set without `openssl` in the image aborts the
+container rather than quietly writing plaintext. `scripts/backup.sh`,
+`restore.sh` and `verify-backup.sh` read either form through one sourced helper.
+
+Backups have somewhere to go that is not this host (#900). Archives and the
+database they protect shared a machine, so a failed disk, a wiped VPS or a
+mistaken `docker volume prune` took the database and every backup of it in one
+event. `scripts/offsite-sync.sh` copies the archive directory to any rclone
+remote from a host crontab, reporting failures to `ERROR_WEBHOOK_URL` like the
+backup container does. It copies rather than mirrors — `rclone sync` would
+propagate the deletion that is exactly the event it exists for — and it does not
+upload plaintext archives, since handing a readable copy of the database to a
+third party is a wider exposure than the one it closes: those are skipped with a
+count, and a run with nothing sealed to send is refused outright.
+
+`chargeExact` and `refundCharge` have tests (#884). The all-or-nothing purchase
+primitive behind every `/hunt`, `/fish` and `/mine` shop purchase, and its
+compensating refund, had no executed line in lcov — an isolated hole beside
+sibling primitives at 100%, with the three shop command trees at 0-3% branch
+coverage themselves, so a regression had no net at any layer. Fourteen tests
+drive the three paths that matter against the shared in-memory model: the filter
+missing because the coins moved, the exact debit, and the charge-lands-then-save
+-fails refund that is the whole reason the second function exists.
+`src/utils/balanceDebit.js` goes from 70/47/59/75 to 97/77/97/97.
+
+Coverage floors of zero are recorded rather than silent (#907). A floor of 0 is
+satisfied by every possible state, including the subsystem it names losing all
+of its coverage — deleting every branch test under `economy/fish` passed — and
+the directories carrying one were exactly the ones with the least coverage,
+which is where the net is worth most. `coverage-floors.json` now names them in
+an `unguarded` list that may shrink and must not grow, so a subsystem sliding to
+zero fails the run instead of acquiring a floor that cannot fail. A directory
+with nothing to measure needs no entry; the denominator is what tells the two
+zeroes apart. The floors themselves are re-recorded against the current suite —
+`src/services/scheduler` from 13/0/0/15 to 64/84/33/65, `src/models` branches
+from 4 to 10, `src/data` from 61/26/34/61 to 77/57/64/78 — and the global
+thresholds from 50/40/53/51 to 51/41/53/52.
+
 ## [4.5.2] - 2026-09-01
 
 Migrations through `021_market_listing_ttl_grace`.

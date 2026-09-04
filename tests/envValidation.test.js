@@ -18,6 +18,7 @@ const {
     collectEnvProblems,
     checkDashboardUrl,
     checkSessionSecret,
+    checkSecretEncryption,
     resolveDashboardUrl,
     REQUIRED_ENV,
     SESSION_SECRET_MIN_LENGTH,
@@ -32,6 +33,9 @@ function goodEnv(overrides = {}) {
         // Credentialed: a production URI without credentials is a warning (#648).
         MONGODB_URI: 'mongodb://clawdia:pass@mongodb:27017/ultrabot?authSource=ultrabot',
         SESSION_SECRET: 'x'.repeat(SESSION_SECRET_MIN_LENGTH),
+        // Set: a production deploy that stores other people's provider keys in
+        // the clear is a warning (#886).
+        SECRET_ENCRYPTION_KEY: 'Zm9vYmFyYmF6cXV1eGZvb2JhcmJhenF1dXhmb28=',
         DASHBOARD_URL: 'https://bot.example.com',
         NODE_ENV: 'production',
         ...overrides,
@@ -109,6 +113,54 @@ describe('SESSION_SECRET strength', () => {
     test('the rule reaches collectEnvProblems too', () => {
         expect(errorsFor(goodEnv({ SESSION_SECRET: 'too-short' })).join('\n'))
             .toMatch(/SESSION_SECRET must be at least/);
+    });
+});
+
+// #886. Without SECRET_ENCRYPTION_KEY the per-guild AI provider keys and the
+// MCP OAuth refresh tokens are plaintext in the database, and the nightly backup
+// keeps a month of unencrypted dumps of it — so the credentials someone else's
+// server entered are readable by anyone who can list ./backups.
+describe('SECRET_ENCRYPTION_KEY', () => {
+    test('an unset key warns in production, naming what is exposed', () => {
+        const [warning] = checkSecretEncryption({ NODE_ENV: 'production' });
+        expect(warning).toMatch(/SECRET_ENCRYPTION_KEY is not set/);
+        expect(warning).toMatch(/backup/);
+        // And says how to fix it, both halves: the variable and the sweep that
+        // seals what is already stored.
+        expect(warning).toMatch(/openssl rand -base64 32/);
+        expect(warning).toMatch(/secrets:encrypt/);
+    });
+
+    test('it is a warning and not a refusal', () => {
+        // Encryption shipped opt-in, so failing the boot would take down every
+        // deployment that has not set it — the same call the MONGODB_URI
+        // credentials check makes.
+        const { errors, warnings } = collectEnvProblems(goodEnv({ SECRET_ENCRYPTION_KEY: '' }));
+        expect(errors).toEqual([]);
+        expect(warnings.join('\n')).toMatch(/SECRET_ENCRYPTION_KEY/);
+    });
+
+    test('a key that is only whitespace counts as unset', () => {
+        // config/secretBox.js trims before deriving, so " " configures nothing;
+        // reading it as configured here would silence the one warning about it.
+        expect(checkSecretEncryption({ NODE_ENV: 'production', SECRET_ENCRYPTION_KEY: '   ' }))
+            .toHaveLength(1);
+    });
+
+    test('a short passphrase is called out on its own terms', () => {
+        const [warning] = checkSecretEncryption({ NODE_ENV: 'production', SECRET_ENCRYPTION_KEY: 'hunter2' });
+        // It still works — scrypt stretches anything — so the message must not
+        // read as "this is not encrypting", which would send an operator looking
+        // for a fault that is not there.
+        expect(warning).toMatch(/still works/);
+        expect(warning).toMatch(/7 characters/);
+    });
+
+    test('development says nothing at all', () => {
+        // A dev database holds test guilds; the warning would be noise on every
+        // `npm run dev`.
+        expect(checkSecretEncryption({ NODE_ENV: 'development' })).toEqual([]);
+        expect(checkSecretEncryption({})).toEqual([]);
     });
 });
 

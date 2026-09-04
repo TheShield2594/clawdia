@@ -431,6 +431,14 @@ services:
       # Where the entrypoint sends a failed dump or an archive that will not
       # parse back (#899). Unset — the default — it logs and nothing else.
       - ERROR_WEBHOOK_URL=${ERROR_WEBHOOK_URL:-}
+      # Seals each archive with AES-256-CBC (#886). `mongodump --gzip` is
+      # compression, so unset every archive in the volume is a readable copy of
+      # the whole database and a month of them is kept. This container is the
+      # only thing that writes them, so it is the only thing that can seal them.
+      - BACKUP_ENCRYPTION_PASSPHRASE=${BACKUP_ENCRYPTION_PASSPHRASE:-}
+      # Delivered as a file instead, the same way MONGODB_URI can be. Uncomment
+      # with the matching `secrets:` entry below.
+      # - BACKUP_ENCRYPTION_PASSPHRASE_FILE=/run/secrets/backup_encryption_passphrase
       # Mirrors the bot's MONGODB_URI_FILE. This is a stock mongo image with no
       # loader of its own, so the entrypoint below reads the file itself — and
       # prefers it over MONGODB_URI, so unlike the bot's mapping the
@@ -438,6 +446,7 @@ services:
       # - MONGODB_URI_FILE=/run/secrets/mongodb_uri
     # secrets:
     #   - mongodb_uri
+    #   - backup_encryption_passphrase
     volumes:
       - backups:/backups
     networks:
@@ -462,6 +471,32 @@ services:
           echo "[backup] Neither MONGODB_URI nor MONGODB_URI_FILE is set"; exit 1;
         fi;
         RETAIN=$${BACKUP_RETENTION_DAYS:-30};
+        # The passphrase the archives are sealed with (#886). `mongodump --gzip`
+        # is compression: unset, every archive here is a readable copy of the
+        # whole database and a month of them is kept, which is the exposure
+        # SECRET_ENCRYPTION_KEY only covers the credentials of.
+        #
+        # Read from a file first, the same way MONGODB_URI is, so it can be
+        # delivered as a docker secret rather than as a container variable.
+        if [ -n "$$BACKUP_ENCRYPTION_PASSPHRASE_FILE" ]; then
+          if [ ! -r "$$BACKUP_ENCRYPTION_PASSPHRASE_FILE" ]; then
+            echo "[backup] BACKUP_ENCRYPTION_PASSPHRASE_FILE=$$BACKUP_ENCRYPTION_PASSPHRASE_FILE is not readable"; exit 1;
+          fi;
+          BACKUP_ENCRYPTION_PASSPHRASE=$$(tr -d "\r\n" < "$$BACKUP_ENCRYPTION_PASSPHRASE_FILE");
+          export BACKUP_ENCRYPTION_PASSPHRASE;
+          echo "[backup] Read BACKUP_ENCRYPTION_PASSPHRASE from $$BACKUP_ENCRYPTION_PASSPHRASE_FILE";
+        fi;
+        if [ -n "$$BACKUP_ENCRYPTION_PASSPHRASE" ]; then
+          # Refused rather than downgraded. An operator who asked for encrypted
+          # archives and silently got readable ones is worse off than one who
+          # never asked, because they stop thinking about the directory.
+          if ! command -v openssl >/dev/null 2>&1; then
+            echo "[backup] BACKUP_ENCRYPTION_PASSPHRASE is set but openssl is not in this image; refusing to write archives in the clear"; exit 1;
+          fi;
+          echo "[backup] Archives are encrypted (AES-256-CBC, PBKDF2)";
+        else
+          echo "[backup] BACKUP_ENCRYPTION_PASSPHRASE is not set; archives are written unencrypted";
+        fi;
         # Two files the loop keeps in the backup volume, both of them for
         # something outside the container to read (#899). STATUS is for a human
         # asking "what happened last night"; OK_MARKER carries no content at all
@@ -515,20 +550,38 @@ services:
           # rename are still aged out instead of accumulating forever. The bot
           # lands pre-migration-*.gz in the same volume; those are pruned
           # on the same schedule.
-          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" \) -mtime +$$RETAIN -delete;
+          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" -o -name "clawdia-*.gz.unverified" -o -name "clawdia-*.gz.enc.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" \) -mtime +$$RETAIN -delete;
         };
         run_backup() {
           TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
           ARCHIVE=/backups/clawdia-$$TIMESTAMP.gz;
+          # WORK is what mongodump and mongorestore see; ARCHIVE is what is
+          # kept. With no passphrase they are the same path and every branch
+          # below reduces to what this loop has always done. With one, ARCHIVE
+          # gains the .enc suffix and WORK moves to the container own /tmp: the
+          # plaintext of the database must not be written into the mounted
+          # archive directory even for the seconds between the dump and the seal,
+          # because that directory being readable is the whole premise.
+          WORK=$$ARCHIVE;
+          if [ -n "$$BACKUP_ENCRYPTION_PASSPHRASE" ]; then
+            ARCHIVE=$$ARCHIVE.enc;
+            WORK=/tmp/clawdia-$$TIMESTAMP.gz;
+          fi;
           echo "[backup] Starting backup at $$TIMESTAMP";
-          if ! mongodump --uri="$$MONGODB_URI" --gzip --archive="$$ARCHIVE"; then
+          if ! mongodump --uri="$$MONGODB_URI" --gzip --archive="$$WORK"; then
             # mongodump has no rollback: a dump killed part-way through leaves
             # whatever it had written under the real name. Left there, that
             # partial file is what the boot catch-up counts as the day's backup
             # and what `verify-backup.sh --latest` picks up — a failure that
             # reads as a success. Quarantined under the same suffix a failed
             # verification uses, so it is still pruned and still there to look at.
-            if [ -e "$$ARCHIVE" ]; then mv "$$ARCHIVE" "$$ARCHIVE.unverified"; fi;
+            # Encrypting, the partial dump is plaintext in /tmp and is removed:
+            # there is nothing there worth keeping that would be safe to keep.
+            if [ "$$WORK" = "$$ARCHIVE" ]; then
+              if [ -e "$$ARCHIVE" ]; then mv "$$ARCHIVE" "$$ARCHIVE.unverified"; fi;
+            else
+              rm -f "$$WORK";
+            fi;
             echo "dump-failed $$TIMESTAMP" > "$$STATUS";
             notify "mongodump exited non-zero at $$TIMESTAMP; any partial archive was quarantined";
             return 1;
@@ -541,7 +594,30 @@ services:
           # restore rehearsal: for that, scripts/verify-backup.sh restores into a
           # scratch database and compares document counts, which needs
           # privileges this container deliberately does not have.
-          if ! mongorestore --uri="$$MONGODB_URI" --gzip --archive="$$ARCHIVE" --dryRun --quiet; then
+          # Sealed before it is verified, and verified by opening it again. The
+          # archive that is kept is the encrypted one, and an archive that will
+          # not decrypt is as lost as one that will not parse — so the thing
+          # checked has to be the thing kept.
+          #
+          # `-pass env:` and not the passphrase on the command line: argv is
+          # readable from the host with no access to this container at all.
+          if [ "$$WORK" != "$$ARCHIVE" ]; then
+            if ! openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BACKUP_ENCRYPTION_PASSPHRASE -in "$$WORK" -out "$$ARCHIVE"; then
+              rm -f "$$WORK" "$$ARCHIVE";
+              echo "encrypt-failed $$TIMESTAMP" > "$$STATUS";
+              notify "archive $$TIMESTAMP could not be encrypted; nothing was kept for it";
+              return 1;
+            fi;
+            rm -f "$$WORK";
+            if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_PASSPHRASE -in "$$ARCHIVE" -out "$$WORK"; then
+              mv "$$ARCHIVE" "$$ARCHIVE.unverified";
+              rm -f "$$WORK";
+              echo "verify-failed $$TIMESTAMP $$ARCHIVE.unverified" > "$$STATUS";
+              notify "archive $$TIMESTAMP did not decrypt back; kept as $$ARCHIVE.unverified and not counted as a backup";
+              return 1;
+            fi;
+          fi;
+          if ! mongorestore --uri="$$MONGODB_URI" --gzip --archive="$$WORK" --dryRun --quiet; then
             # Renamed rather than kept or deleted. Kept under its own name, an
             # unreadable archive is what --latest picks up and what the boot
             # catch-up counts as this day's backup; deleted, an operator has
@@ -549,10 +625,12 @@ services:
             # not the archive (mongorestore has to reach the server for --dryRun
             # too). The suffix keeps it off both globs and inside the prune.
             mv "$$ARCHIVE" "$$ARCHIVE.unverified";
+            rm -f "$$WORK";
             echo "verify-failed $$TIMESTAMP $$ARCHIVE.unverified" > "$$STATUS";
             notify "archive $$TIMESTAMP did not parse back; kept as $$ARCHIVE.unverified and not counted as a backup";
             return 1;
           fi;
+          if [ "$$WORK" != "$$ARCHIVE" ]; then rm -f "$$WORK"; fi;
           echo "ok $$TIMESTAMP $$ARCHIVE" > "$$STATUS";
           touch "$$OK_MARKER";
           echo "[backup] Done: $$ARCHIVE";
@@ -562,7 +640,7 @@ services:
         # With the healthcheck now asserting a fresh archive, that gap would
         # read as a fault, so close it instead of reporting it: catch up on
         # boot whenever the newest archive is over a day old.
-        if [ -z "$$(find /backups -name "clawdia-*.gz" -mmin -1440 2>/dev/null)" ]; then
+        if [ -z "$$(find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" \) -mmin -1440 2>/dev/null)" ]; then
           echo "[backup] No archive from the last 24h; backing up now instead of waiting for 03:00";
           run_backup || true;
           prune;
@@ -647,6 +725,8 @@ services:
 #   session_secret:
 #     external: true
 #   mongodb_uri:
+#     external: true
+#   backup_encryption_passphrase:
 #     external: true
 #   secret_encryption_key:
 #     external: true

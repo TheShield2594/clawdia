@@ -137,10 +137,20 @@ describe.each(stacks)('%s', (name, doc) => {
 
         it('reports a failure somewhere a human is', () => {
             expect(entrypoint).toContain('ERROR_WEBHOOK_URL');
-            // Both failure paths, not just the dump: an archive that will not
-            // parse back is the one that stays invisible until the restore.
-            const notifies = entrypoint.match(/notify "/g) || [];
-            expect([name, notifies.length]).toEqual([name, 2]);
+            // Every failure path, not just the dump: an archive that will not
+            // parse back is the one that stays invisible until the restore, and
+            // #886 added two more ways for a run to end without an archive.
+            // Asserted as "every giving-up point reports" rather than as a count,
+            // because a count is satisfied by two reports on one path and says
+            // nothing about a third path that was added silently.
+            const body = entrypoint.slice(entrypoint.indexOf('run_backup() {'), entrypoint.indexOf('touch "$$OK_MARKER"'));
+            const gaveUp = body.split('return 1;');
+            // Four ways to end without an archive — the dump, the seal, the
+            // decrypt-back and the parse-back — so five segments around them.
+            expect([name, gaveUp.length]).toEqual([name, 5]);
+            for (const segment of gaveUp.slice(0, -1)) {
+                expect([name, /notify "[^"]+";\s*$/.test(segment.trim())]).toEqual([name, true]);
+            }
             // Never fatal and never slow — the next run matters more than the
             // post landing, and this runs in a container with no supervisor.
             expect(entrypoint).toMatch(/curl -fsS --max-time 10/);
@@ -185,6 +195,63 @@ describe.each(stacks)('%s', (name, doc) => {
             const beforeLoop = entrypoint.slice(0, entrypoint.indexOf('while true'));
             expect(beforeLoop).toMatch(/-mmin\s+-1440\b/);
             expect(beforeLoop).toContain('run_backup');
+        });
+    });
+
+    // #886. `mongodump --gzip` is compression, not encryption: every archive in
+    // the backup directory was a readable copy of the whole database, and thirty
+    // days of them were kept beside the database itself.
+    describe('archives can be encrypted (#886)', () => {
+        const entrypoint = String(doc.services.backup.entrypoint)
+            .split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
+
+        it('takes the passphrase from a variable or a file, like the URI', () => {
+            expect(entrypoint).toContain('BACKUP_ENCRYPTION_PASSPHRASE_FILE');
+            expect(entrypoint).toMatch(/BACKUP_ENCRYPTION_PASSPHRASE=\$+\(tr -d/);
+        });
+
+        it('refuses to start rather than writing plaintext it was asked to seal', () => {
+            // Downgrading silently is worse than never offering the feature: an
+            // operator who believes the archives are encrypted stops thinking
+            // about who can read the directory.
+            const guard = entrypoint.slice(entrypoint.indexOf('command -v openssl'));
+            expect(guard).toMatch(/exit 1/);
+        });
+
+        it('keeps the plaintext dump out of the archive directory entirely', () => {
+            // Not even for the seconds between the dump and the seal: that
+            // directory being readable is the whole premise of the feature.
+            const run = entrypoint.slice(entrypoint.indexOf('run_backup() {'));
+            expect(run).toMatch(/WORK=\/tmp\/clawdia-/);
+            expect(run).toMatch(/mongodump [^;]*--archive="\$+WORK"/);
+        });
+
+        it('verifies the archive it kept, not the one it threw away', () => {
+            // The sealed file is what a restore will be handed, so an archive
+            // that will not decrypt is as lost as one that will not parse.
+            const run = entrypoint.slice(entrypoint.indexOf('run_backup() {'));
+            const sealed = run.indexOf('openssl enc -aes-256-cbc');
+            const opened = run.indexOf('openssl enc -d');
+            const parsed = run.indexOf('--dryRun');
+            expect([name, sealed]).not.toEqual([name, -1]);
+            expect([name, sealed < opened && opened < parsed]).toEqual([name, true]);
+            // argv is readable from the host with no access to the container.
+            expect(run).not.toMatch(/-pass pass:/);
+            expect(run).toContain('-pass env:BACKUP_ENCRYPTION_PASSPHRASE');
+        });
+
+        it('ages the sealed archives out on the same retention window', () => {
+            // `-name "clawdia-*.gz"` does not match `clawdia-*.gz.enc`, so an
+            // encrypted install would have kept every archive it ever wrote.
+            const prune = entrypoint.slice(entrypoint.indexOf('prune() {'), entrypoint.indexOf('run_backup() {'));
+            for (const glob of ['clawdia-*.gz.enc', 'clawdia-*.gz.enc.unverified']) {
+                expect([name, glob, prune.includes(glob)]).toEqual([name, glob, true]);
+            }
+            // And the boot catch-up counts them as the day's backup, or an
+            // encrypted install would re-dump on every restart.
+            const beforeLoop = entrypoint.slice(0, entrypoint.indexOf('while true'));
+            const catchUp = beforeLoop.slice(beforeLoop.lastIndexOf('if [ -z'));
+            expect([name, catchUp.includes('clawdia-*.gz.enc')]).toEqual([name, true]);
         });
     });
 
@@ -285,8 +352,15 @@ describe('the two files agree where they must', () => {
             // its failures go to (#899), and nothing else. The rule is "no
             // variable this container has no use for" — not a count — so a
             // fourth name here needs a reason of the same kind, not a bump.
+            // BACKUP_ENCRYPTION_PASSPHRASE is the fourth, and it earns its place
+            // by the same rule rather than by relaxing it: this container is the
+            // only thing that writes the archives, so it is the only thing that
+            // can seal them (#886). It is a variable this container uses.
             expect([name, names(backup.environment).sort()])
-                .toEqual([name, ['BACKUP_RETENTION_DAYS', 'ERROR_WEBHOOK_URL', 'MONGODB_URI']]);
+                .toEqual([name, [
+                    'BACKUP_ENCRYPTION_PASSPHRASE', 'BACKUP_RETENTION_DAYS',
+                    'ERROR_WEBHOOK_URL', 'MONGODB_URI',
+                ]]);
         }
 
         // The bot is the service that legitimately wants the whole file, and

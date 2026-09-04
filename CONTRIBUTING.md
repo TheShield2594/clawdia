@@ -165,6 +165,18 @@ that one is only ever edited by hand.
 collapsing. That set is maintained by hand too — `--update` refreshes every
 number in it but never adds a file, and never lowers a floor.
 
+`unguarded` is a fifth, and it exists because a floor of 0 is satisfied by
+every possible state — including the subsystem it names losing all of its
+coverage. A directory whose branch coverage measures 0.9% gets a floor of 0
+from the slack rule above, and deleting every branch test under it would pass.
+So a zero floor has to be recorded by name, on the same terms as the lists
+above: a directory that slides to zero fails the run until somebody either
+raises it with tests or writes it down. A directory with nothing to measure — a
+folder of constant tables has no branch to cover — needs no entry; the
+denominator is what tells the two zeroes apart. The entries there today are the
+subsystems carrying the least coverage in the repo, which is where the net
+would be worth most, so they are the ones to take off the list first.
+
 ## Things that will surprise you
 
 **Migrations run themselves, on every boot.** `src/index.js` runs everything in

@@ -20,6 +20,13 @@ const ci = read('.github/workflows/ci.yml');
 //
 // Both halves are load-bearing and both are one line to undo, which is what
 // this file is here to notice.
+// Several fixtures below floor a directory at 0 to mean "not what this test is
+// about". Since #907 that is itself a failure — a floor of 0 is satisfied by
+// every possible state — unless the directory is recorded as unguarded, so
+// those fixtures say so rather than tripping a rule they are not testing.
+const NO_FLOOR = { statements: 0, branches: 0, functions: 0, lines: 0 };
+const unguardedAll = dir => ({ [dir]: ['statements', 'branches', 'functions', 'lines'] });
+
 describe('coverage ratchet', () => {
     test('coverage is measured over all of src, not just the tested part', () => {
         expect(config.collectCoverageFrom).toContain('src/**/*.js');
@@ -201,7 +208,7 @@ describe('the files with no executed line', () => {
     test('a newly unexecuted file fails', () => {
         const files = new Map([['src/fresh.js', file(0, 12)]]);
         const { failures } = check(files, {
-            directories: { src: { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            directories: { src: NO_FLOOR }, unguarded: unguardedAll('src'),
             neverExecuted: [],
         });
         expect(failures.join('\n')).toMatch(/src\/fresh.js has no executed line/);
@@ -211,7 +218,7 @@ describe('the files with no executed line', () => {
     test('a listed file that is covered now fails, so the list cannot rot', () => {
         const files = new Map([['src/covered.js', file(12, 12)]]);
         const { failures } = check(files, {
-            directories: { src: { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            directories: { src: NO_FLOOR }, unguarded: unguardedAll('src'),
             neverExecuted: ['src/covered.js'],
         });
         expect(failures.join('\n')).toMatch(/src\/covered.js is covered now/);
@@ -236,9 +243,10 @@ describe('the files that are loaded but never run', () => {
         lines: { covered: stmt, total: 100, pct: stmt },
     });
 
-    const dirs = { src: { statements: 0, branches: 0, functions: 0, lines: 0 } };
+    const dirs = { src: NO_FLOOR };
     const floorsFor = overrides => ({
-        directories: dirs, neverExecuted: [], loadedButNeverRun: [], ...overrides,
+        directories: dirs, unguarded: unguardedAll('src'),
+        neverExecuted: [], loadedButNeverRun: [], ...overrides,
     });
 
     test('the recorded list names real files', () => {
@@ -405,7 +413,7 @@ describe('per-file floors', () => {
     test('a file at or above its floor passes', () => {
         const files = new Map([['src/utils/money.js', file(90)]]);
         const { failures } = check(files, {
-            directories: { 'src/utils': { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            directories: { 'src/utils': NO_FLOOR }, unguarded: unguardedAll('src/utils'),
             neverExecuted: [], loadedButNeverRun: [],
             files: { 'src/utils/money.js': { statements: 90, branches: 90, functions: 90, lines: 90 } },
         });
@@ -415,7 +423,7 @@ describe('per-file floors', () => {
     test('a floor for a file that no longer exists fails', () => {
         const files = new Map([['src/utils/money.js', file(90)]]);
         const { failures } = check(files, {
-            directories: { 'src/utils': { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            directories: { 'src/utils': NO_FLOOR }, unguarded: unguardedAll('src/utils'),
             neverExecuted: [], loadedButNeverRun: [],
             files: { 'src/utils/gone.js': { statements: 90, branches: 90, functions: 90, lines: 90 } },
         });
@@ -426,7 +434,7 @@ describe('per-file floors', () => {
         const spy = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
         const files = new Map([['src/utils/money.js', file(99)], ['src/utils/other.js', file(99)]]);
         const next = update(files, {
-            directories: { 'src/utils': { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            directories: { 'src/utils': NO_FLOOR }, unguarded: unguardedAll('src/utils'),
             neverExecuted: [], loadedButNeverRun: [],
             files: { 'src/utils/money.js': { statements: 10, branches: 10, functions: 10, lines: 10 } },
         });
@@ -441,7 +449,7 @@ describe('per-file floors', () => {
         const spy = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
         const files = new Map([['src/utils/money.js', file(5)]]);
         const next = update(files, {
-            directories: { 'src/utils': { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            directories: { 'src/utils': NO_FLOOR }, unguarded: unguardedAll('src/utils'),
             neverExecuted: [], loadedButNeverRun: [],
             files: { 'src/utils/money.js': { statements: 90, branches: 90, functions: 90, lines: 90 } },
         });
@@ -456,6 +464,138 @@ describe('per-file floors', () => {
 // those suites reach is zero-coverage in the first run and covered in the
 // second, and neither reading is wrong — which is what sent CI red the first
 // time this landed, on src/models/MigrationRecord.js.
+// #907. A floor of 0 is satisfied by any state at all, including a subsystem's
+// branch coverage dropping to nothing — deleting every branch test under
+// `economy/fish` passed. And the directories carrying one were exactly the ones
+// with the least coverage, so the net was absent precisely where it was worth
+// most. They are named instead, on the same terms as the zero-coverage list:
+// the set may shrink and must not grow.
+describe('floors of zero, which guard nothing', () => {
+    const floors = JSON.parse(read('coverage-floors.json'));
+    const { check, update, unguardedFloors, denominators, METRICS } = require('../scripts/check-coverage.js');
+
+    const file = (covered, total) => Object.fromEntries(
+        METRICS.map(m => [m, { covered, total, pct: total ? (covered * 100) / total : 100 }]),
+    );
+
+    const floorsFor = (directories, overrides = {}) => ({
+        directories, neverExecuted: [], loadedButNeverRun: [], ...overrides,
+    });
+
+    test('the recorded entries name directories that exist and really are unfloored', () => {
+        for (const [dir, metrics] of Object.entries(floors.unguarded ?? {})) {
+            expect([dir, fs.existsSync(path.join(root, dir))]).toEqual([dir, true]);
+            expect(metrics.length).toBeGreaterThan(0);
+            for (const metric of metrics) {
+                expect([dir, metric, METRICS]).toContainEqual(metric);
+                // An entry beside a real floor would be permission to drop back
+                // to zero, which is the state it was recorded to make visible.
+                expect([dir, metric, floors.directories[dir][metric]]).toEqual([dir, metric, 0]);
+            }
+        }
+    });
+
+    test('an unrecorded zero fails, saying which metric guards nothing', () => {
+        const files = new Map([['src/thing/a.js', file(0, 100)]]);
+        const { failures } = check(files, floorsFor({ 'src/thing': { statements: 5, branches: 0, functions: 5, lines: 5 } }));
+
+        expect(failures.join('\n')).toMatch(/src\/thing has a floor of 0 for branches, which guards nothing/);
+    });
+
+    test('a recorded one passes', () => {
+        // Covered everywhere except branches, which is the shape the recorded
+        // directories are actually in.
+        const files = new Map([['src/thing/a.js', {
+            statements: { covered: 60, total: 100, pct: 60 },
+            branches: { covered: 0, total: 100, pct: 0 },
+            functions: { covered: 60, total: 100, pct: 60 },
+            lines: { covered: 60, total: 100, pct: 60 },
+        }]]);
+        const { failures } = check(files, floorsFor(
+            { 'src/thing': { statements: 5, branches: 0, functions: 5, lines: 5 } },
+            { unguarded: { 'src/thing': ['branches'] } },
+        ));
+
+        expect(failures).toEqual([]);
+    });
+
+    test('a directory with nothing to measure needs no entry', () => {
+        // A folder of constant tables has no branch to cover, and 0 is the only
+        // honest floor for it. A percentage cannot tell that from a subsystem of
+        // command handlers at zero; the denominator can.
+        const files = new Map([['src/tables/a.js', file(0, 0)]]);
+        const { failures } = check(files, floorsFor({ 'src/tables': { statements: 0, branches: 0, functions: 0, lines: 0 } }));
+
+        expect(failures).toEqual([]);
+    });
+
+    test('an entry that has a real floor now fails, so the list cannot rot', () => {
+        const files = new Map([['src/thing/a.js', file(60, 100)]]);
+        const { failures } = check(files, floorsFor(
+            { 'src/thing': { statements: 50, branches: 50, functions: 50, lines: 50 } },
+            { unguarded: { 'src/thing': ['branches'] } },
+        ));
+
+        expect(failures.join('\n')).toMatch(/src\/thing is recorded as unguarded for branches but has a real floor now/);
+    });
+
+    test('an entry naming a directory that is gone fails', () => {
+        const files = new Map([['src/thing/a.js', file(60, 100)]]);
+        const { failures } = check(files, floorsFor(
+            { 'src/thing': { statements: 50, branches: 50, functions: 50, lines: 50 } },
+            { unguarded: { 'src/gone': ['branches'] } },
+        ));
+
+        expect(failures.join('\n')).toMatch(/src\/gone is recorded as unguarded but was not measured/);
+    });
+
+    test('an update records a new zero rather than letting it in silently', () => {
+        const spy = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
+        // 2% branches: the three points of slack put the recorded floor at 0.
+        const files = new Map([['src/thing/a.js', {
+            statements: { covered: 60, total: 100, pct: 60 },
+            branches: { covered: 2, total: 100, pct: 2 },
+            functions: { covered: 60, total: 100, pct: 60 },
+            lines: { covered: 60, total: 100, pct: 60 },
+        }]]);
+
+        const next = update(files, floorsFor({ 'src/thing': { statements: 0, branches: 0, functions: 0, lines: 0 } }));
+
+        expect(next.directories['src/thing'].branches).toBe(0);
+        expect(next.unguarded).toEqual({ 'src/thing': ['branches'] });
+        spy.mockRestore();
+    });
+
+    test('and drops one whose floor has risen off zero', () => {
+        const spy = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
+        const files = new Map([['src/thing/a.js', file(60, 100)]]);
+
+        const next = update(files, floorsFor(
+            { 'src/thing': { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            { unguarded: { 'src/thing': ['branches'] } },
+        ));
+
+        expect(next.directories['src/thing'].branches).toBe(57);
+        expect(next.unguarded).toEqual({});
+        spy.mockRestore();
+    });
+
+    test('the denominator is what separates the two zeroes', () => {
+        const files = new Map([
+            ['src/handlers/a.js', file(0, 400)],
+            ['src/tables/b.js', file(0, 0)],
+        ]);
+        const totals = denominators(files, ['src/handlers', 'src/tables']);
+
+        expect(totals['src/handlers'].branches).toBe(400);
+        expect(totals['src/tables'].branches).toBe(0);
+
+        const zeroFloors = { statements: 0, branches: 0, functions: 0, lines: 0 };
+        expect(unguardedFloors({ 'src/handlers': zeroFloors, 'src/tables': zeroFloors }, totals))
+            .toEqual({ 'src/handlers': METRICS });
+    });
+});
+
 describe('files only the integration suites reach', () => {
     const floors = JSON.parse(read('coverage-floors.json'));
     const { check, METRICS } = require('../scripts/check-coverage.js');
@@ -464,7 +604,8 @@ describe('files only the integration suites reach', () => {
         METRICS.map(m => [m, { covered, total }]),
     );
 
-    const dirs = { src: { statements: 0, branches: 0, functions: 0, lines: 0 } };
+    const dirs = { src: NO_FLOOR };
+    const unguarded = unguardedAll('src');
 
     test('the recorded entries are real files, and are not on the other list', () => {
         for (const name of floors.coveredOnlyByIntegration) {
@@ -476,7 +617,7 @@ describe('files only the integration suites reach', () => {
     test('one reading zero passes — that is the run without integration', () => {
         const files = new Map([['src/only.js', file(0, 10)]]);
         const { failures } = check(files, {
-            directories: dirs, neverExecuted: [], coveredOnlyByIntegration: ['src/only.js'],
+            directories: dirs, unguarded, neverExecuted: [], coveredOnlyByIntegration: ['src/only.js'],
         });
         expect(failures).toEqual([]);
     });
@@ -484,7 +625,7 @@ describe('files only the integration suites reach', () => {
     test('the same one reading covered passes too — that is CI', () => {
         const files = new Map([['src/only.js', file(10, 10)]]);
         const { failures } = check(files, {
-            directories: dirs, neverExecuted: [], coveredOnlyByIntegration: ['src/only.js'],
+            directories: dirs, unguarded, neverExecuted: [], coveredOnlyByIntegration: ['src/only.js'],
         });
         expect(failures).toEqual([]);
     });
@@ -493,7 +634,7 @@ describe('files only the integration suites reach', () => {
     test('an entry that was not measured at all fails', () => {
         const files = new Map([['src/other.js', file(10, 10)]]);
         const { failures } = check(files, {
-            directories: dirs, neverExecuted: [], coveredOnlyByIntegration: ['src/gone.js'],
+            directories: dirs, unguarded, neverExecuted: [], coveredOnlyByIntegration: ['src/gone.js'],
         });
         expect(failures.join('\n')).toMatch(/src\/gone.js is listed as integration-covered/);
     });
@@ -511,7 +652,7 @@ describe('files only the integration suites reach', () => {
 
     test('the list is optional — a floors file without one still checks', () => {
         const files = new Map([['src/a.js', file(0, 10)]]);
-        const { failures } = check(files, { directories: dirs, neverExecuted: ['src/a.js'] });
+        const { failures } = check(files, { directories: dirs, unguarded, neverExecuted: ['src/a.js'] });
         expect(failures).toEqual([]);
     });
 });
@@ -532,7 +673,7 @@ describe('re-recording the floors', () => {
 
         const files = new Map([['src/only.js', file(0, 10)], ['src/b.js', file(5, 10)]]);
         const next = update(files, {
-            directories: { src: { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            directories: { src: NO_FLOOR }, unguarded: unguardedAll('src'),
             neverExecuted: [],
             coveredOnlyByIntegration: ['src/only.js'],
         });

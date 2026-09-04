@@ -10,8 +10,12 @@
 # Nothing is written to the live database, and the scratch database is dropped
 # on the way out, including when a step fails.
 #
-# Usage: ./scripts/verify-backup.sh <path-to-archive.gz>
+# Usage: ./scripts/verify-backup.sh <path-to-archive.gz|.gz.enc>
 #        ./scripts/verify-backup.sh --latest [backup-dir]
+#
+# A `.gz.enc` archive is one the backup service sealed (#886); it is decrypted
+# into a private temp directory first, which needs BACKUP_ENCRYPTION_PASSPHRASE
+# (read from .env like MONGODB_URI).
 #
 # Meant to be scheduled, not only run by hand (#899). The backup container
 # checks every archive it writes is parseable, but a full restore rehearsal
@@ -24,6 +28,9 @@
 #
 # Requires: mongorestore and mongosh on PATH, or the clawdia-mongodb container.
 set -euo pipefail
+
+# shellcheck source=scripts/lib/archive.sh
+. "$(dirname "$0")/lib/archive.sh"
 
 # A scheduled run that fails into a log file nobody reads is the failure mode
 # this script exists to close, so route it to the same place src/index.js sends
@@ -73,12 +80,14 @@ notify_failure() {
 }
 
 # Installed before anything can fail. Replaced further down by the trap that
-# also drops the scratch database, once there is one to drop.
-trap 'status=$?; [ "${status}" -eq 0 ] || notify_failure "verification of ${ARCHIVE:-<no archive>} exited ${status}"; exit "${status}"' EXIT
+# also drops the scratch database, once there is one to drop. Both clean
+# WORKDIR: between the two of them is where a decrypted copy of the database
+# exists, and a failure in that window must not leave it behind.
+trap 'status=$?; [ -n "${WORKDIR:-}" ] && rm -rf "${WORKDIR}"; [ "${status}" -eq 0 ] || notify_failure "verification of ${ARCHIVE:-<no archive>} exited ${status}"; exit "${status}"' EXIT
 
 ARCHIVE="${1:-}"
 if [ -z "${ARCHIVE}" ]; then
-    echo "Usage: $0 <path-to-archive.gz> | --latest [backup-dir]" >&2
+    echo "Usage: $0 <path-to-archive.gz|.gz.enc> | --latest [backup-dir]" >&2
     exit 1
 fi
 
@@ -86,9 +95,11 @@ if [ "${ARCHIVE}" = "--latest" ]; then
     BACKUP_DIR="${2:-./backups}"
     # -t sorts newest first; the names are timestamped, but mtime is what
     # actually reflects when the dump finished.
-    ARCHIVE=$(ls -t "${BACKUP_DIR}"/clawdia-*.gz 2>/dev/null | head -1 || true)
+    # Both names: sealed archives carry .gz.enc, and an install that turned
+    # encryption on has a directory holding one of each for the first month.
+    ARCHIVE=$(ls -t "${BACKUP_DIR}"/clawdia-*.gz "${BACKUP_DIR}"/clawdia-*.gz.enc 2>/dev/null | head -1 || true)
     if [ -z "${ARCHIVE}" ]; then
-        echo "[verify] No clawdia-*.gz archives in ${BACKUP_DIR}" >&2
+        echo "[verify] No clawdia-*.gz or clawdia-*.gz.enc archives in ${BACKUP_DIR}" >&2
         exit 1
     fi
     echo "[verify] Latest archive: ${ARCHIVE}"
@@ -141,6 +152,12 @@ echo "[verify] URI:      ${MONGO_URI_MASKED}"
 echo "[verify] Source:   ${SOURCE_DB}"
 echo "[verify] Scratch:  ${SCRATCH_DB} (dropped on exit)"
 
+# A sealed archive is opened into a private directory first; a plain one is read
+# where it lies. WORKDIR is removed by the cleanup trap installed below, which is
+# also what keeps the decrypted copy from outliving a failed run.
+WORKDIR=$(mktemp -d)
+READABLE=$(open_archive "${ARCHIVE}" "${WORKDIR}")
+
 # Everything below runs either directly or inside the mongo container, so pick
 # once and route every command through the same pair of helpers.
 if command -v mongorestore &>/dev/null && command -v mongosh &>/dev/null; then
@@ -155,7 +172,7 @@ else
         echo "[verify] ERROR: could not create a temp directory in clawdia-mongodb" >&2
         exit 1
     fi
-    docker cp "${ARCHIVE}" "clawdia-mongodb:${REMOTE_DIR}/verify.gz"
+    docker cp "${READABLE}" "clawdia-mongodb:${REMOTE_DIR}/verify.gz"
 fi
 
 mongo_eval() {
@@ -170,6 +187,7 @@ mongo_eval() {
 # a half-populated copy of production data lying beside the real one.
 cleanup() {
     local status=$?
+    rm -rf "${WORKDIR:-}"
     mongo_eval "$(db_uri "${SCRATCH_DB}")" 'db.dropDatabase()' >/dev/null 2>&1 || true
     if [ "${IN_DOCKER:-0}" -eq 1 ] && [ -n "${REMOTE_DIR:-}" ]; then
         docker exec clawdia-mongodb rm -rf "${REMOTE_DIR}" >/dev/null 2>&1 || true
@@ -188,7 +206,7 @@ if [ "${IN_DOCKER}" -eq 1 ]; then
         --archive="${REMOTE_DIR}/verify.gz" \
         --nsFrom="${SOURCE_DB}.*" --nsTo="${SCRATCH_DB}.*" --drop
 else
-    mongorestore --uri="$(db_uri "${SOURCE_DB}")" --gzip --archive="${ARCHIVE}" \
+    mongorestore --uri="$(db_uri "${SOURCE_DB}")" --gzip --archive="${READABLE}" \
         --nsFrom="${SOURCE_DB}.*" --nsTo="${SCRATCH_DB}.*" --drop
 fi
 
