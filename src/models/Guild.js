@@ -271,6 +271,15 @@ const guildSchema = new Schema({
         lastWonAmount:        { type: Number,  default: null },
         lastWonAt:            { type: Date,    default: null },
         claimToken:           { type: String,  default: null },
+        // The payout key of a claim that has not been settled yet, and the only
+        // thing that says a pot was taken out of the pool and never reached its
+        // winner (#873). Set by the claim, cleared once the credit lands, and
+        // the key every retry of that credit is guarded by — so the live
+        // attempt, the restart reconciler and `payouts:replay` can all try the
+        // same pot and pay it once between them. `null` means nothing is
+        // outstanding; the three lastWinner* fields above are display state and
+        // stay set after a win is paid.
+        pendingPayoutKey:     { type: String,  default: null },
     },
 
     rssFeeds: [{

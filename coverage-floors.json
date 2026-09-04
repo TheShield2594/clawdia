@@ -251,6 +251,12 @@
             "functions": 86,
             "lines": 93
         },
+        "src/services/casinoJackpotService.js": {
+            "statements": 95,
+            "branches": 81,
+            "functions": 87,
+            "lines": 97
+        },
         "src/utils/balanceDebit.js": {
             "statements": 97,
             "branches": 77,

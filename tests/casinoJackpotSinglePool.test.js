@@ -17,8 +17,11 @@
  *   1. Both commands read the same field, so both print the same number.
  *   2. A Triple Wild claims that pool — once. The service credits the winner, so
  *      the spin's own payout must not pay it a second time.
- *   3. A claim whose credit fails still pays the player something, out of the
- *      normal payout path, rather than announcing a pot nobody received.
+ *   3. A claim whose credit has not landed yet pays nothing in its place and
+ *      says so. The pot is out of the pool and recorded against the player under
+ *      its payout key (#873); a consolation payout on top of a pot that is still
+ *      going to arrive is the second payment, not a fallback. The fallback is
+ *      for the one case where nothing was claimed at all.
  *   4. Whatever the retired pool had accumulated is folded in, not deleted — and
  *      the 5,000 of house seed money is not minted into every guild.
  */
@@ -75,10 +78,16 @@ function poolShownBySlots(interaction) {
     return null;
 }
 
-/** Every coin credited to the player's balance across the whole spin. */
+/** Every coin the spin itself credited, through its own `$inc` payout write. */
 const totalCredited = () => User.findOneAndUpdate.mock.calls
     .filter(([, update]) => update?.$inc?.balance !== undefined)
     .reduce((sum, [, update]) => sum + update.$inc.balance, 0);
+
+/**
+ * The keyed credits the jackpot service issued — pipeline updates, because the
+ * payout key has to go in the same write as the coins (src/utils/payoutKey.js).
+ */
+const keyedCredits = () => User.findOneAndUpdate.mock.calls.filter(([, update]) => Array.isArray(update));
 
 let randomSpy;
 let errorSpy;
@@ -134,19 +143,25 @@ describe('a Triple Wild claims the shared pool', () => {
 
     beforeEach(() => {
         randomSpy = jest.spyOn(Math, 'random').mockReturnValue(ALL_WILD);
-        // findOneAndUpdate on the guild is the atomic claim; { new: false } means
-        // it answers with the pool as it stood at the moment of the win.
-        Guild.findOneAndUpdate.mockResolvedValue({ guildId: GUILD_ID, casinoJackpot: { pool: CLAIMED } });
+        // findOneAndUpdate on the guild is the atomic claim: it reseeds the pool
+        // and records what it took in the same write, and answers with the
+        // document that update produced.
+        Guild.findOneAndUpdate.mockResolvedValue({
+            guildId: GUILD_ID,
+            casinoJackpot: { pool: SEED, lastWonAmount: CLAIMED, pendingPayoutKey: `jackpot:${GUILD_ID}:claim-1` },
+        });
     });
 
     test('the winner is paid the pool exactly once', async () => {
         const spin = makeInteraction({ bet: BET });
         await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
 
-        // casinoJackpotService credits the win itself. Slots crediting its own
-        // result.payout on top — which is what it does for every other outcome —
-        // would hand the player the whole pot twice.
-        expect(totalCredited()).toBe(CLAIMED);
+        // casinoJackpotService credits the win itself, under the claim's payout
+        // key. Slots crediting its own result.payout on top — which is what it
+        // does for every other outcome — would hand the player the whole pot
+        // twice, so the spin's own write has to be for nothing.
+        expect(keyedCredits()).toHaveLength(1);
+        expect(totalCredited()).toBe(0);
         expect(User.findOneAndUpdate).toHaveBeenCalledWith(
             expect.objectContaining({ userId: USER_ID, guildId: GUILD_ID }),
             { $inc: { balance: 0 } },
@@ -158,34 +173,35 @@ describe('a Triple Wild claims the shared pool', () => {
         const spin = makeInteraction({ bet: BET });
         await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
 
-        expect(Guild.findOneAndUpdate).toHaveBeenCalledWith(
-            { guildId: GUILD_ID },
-            expect.objectContaining({ $set: expect.objectContaining({ 'casinoJackpot.pool': SEED }) }),
-            expect.objectContaining({ new: false }),
-        );
+        const [filter, update, options] = Guild.findOneAndUpdate.mock.calls[0];
+        expect(filter).toEqual({ guildId: GUILD_ID });
+        expect(update.flatMap(stage => Object.keys(stage.$set))).toContain('casinoJackpot.pool');
+        expect(options).toMatchObject({ updatePipeline: true, new: true });
         expect(poolShownBySlots(spin)).toContain(SEED.toLocaleString());
     }, 20_000);
 
-    test('a claim that cannot be credited pays the flat fallback instead', async () => {
-        // Three failed credit attempts is what makes awardPool roll the pool back.
+    test('a claim that cannot be credited pays nothing in its place, and says so', async () => {
+        // Every credit attempt matches nothing, so the pot is claimed and owed.
         User.findOneAndUpdate.mockImplementation((_filter, update) =>
             Promise.resolve(update?.$setOnInsert ? walletDoc() : null));
 
         const spin = makeInteraction({ bet: BET });
         await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
 
-        // The pool went back, so nothing was won from it...
-        expect(Guild.updateOne).toHaveBeenCalledWith(
-            { guildId: GUILD_ID },
-            expect.objectContaining({ $inc: { 'casinoJackpot.pool': CLAIMED - SEED } }),
-        );
-        // ...and the player is paid the 25x through the ordinary payout path
-        // rather than shown a jackpot that never landed.
-        expect(User.findOneAndUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ userId: USER_ID }),
-            { $inc: { balance: BET * 25 } },
+        // The pot is out of the pool and recorded against the player under its
+        // key. Paying the 25x fallback on top of that pays the same Triple Wild
+        // twice — and it used to, over a rolled-back pool and a credit that may
+        // well have committed and only lost its response.
+        expect(totalCredited()).toBe(0);
+        expect(Guild.updateOne).not.toHaveBeenCalledWith(
             expect.anything(),
+            expect.objectContaining({ $inc: expect.objectContaining({ 'casinoJackpot.pool': expect.anything() }) }),
         );
+        // And the player is told, rather than shown a pot that is in their
+        // balance according to the embed and not according to the database.
+        const description = spin.replies.at(-1).embeds[0].data.description;
+        expect(description).toContain('could not be paid out just now');
+        expect(description).toContain('recorded');
     }, 20_000);
 
     test('a guild with no document has no pool to win', async () => {
@@ -201,18 +217,20 @@ describe('a Triple Wild claims the shared pool', () => {
         expect(totalCredited()).toBe(BET * 25);
     }, 20_000);
 
-    test('a rolled-back claim clears the winner fields the restart reconciler pays from', async () => {
+    test('an unpaid claim keeps the marker the restart reconciler settles it from', async () => {
         User.findOneAndUpdate.mockImplementation((_filter, update) =>
             Promise.resolve(update?.$setOnInsert ? walletDoc() : null));
 
         await slots.execute(makeInteraction({ bet: BET }), { releaseLock: jest.fn(), onWager: jest.fn() });
 
-        // events/ready.js pays out any guild still carrying a lastWinnerId and a
-        // lastWonAmount. The coins are back in the pool, so leaving those set
-        // would pay this win again on the next restart, out of a pot other
-        // players are still feeding.
-        const [, restore] = Guild.updateOne.mock.calls.find(([, u]) => u?.$inc?.['casinoJackpot.pool']);
-        expect(restore.$set).toMatchObject({ 'casinoJackpot.lastWinnerId': null, 'casinoJackpot.lastWonAmount': null });
+        // `pendingPayoutKey` is the only thing that says a pot left the pool and
+        // never reached its winner. Clearing it here — which the rollback this
+        // replaced did — is what left the coins with nowhere to be recovered
+        // from, and the credit is guarded by that same key, so the reconciler
+        // and `payouts:replay` cannot double it between them.
+        const cleared = Guild.updateOne.mock.calls
+            .some(([, u]) => u?.$set?.['casinoJackpot.pendingPayoutKey'] === null);
+        expect(cleared).toBe(false);
     }, 20_000);
 });
 

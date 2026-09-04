@@ -248,6 +248,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         // pool of its own.
         let finalJackpotPool = jackpotPool;
         let jackpotWon = false;
+        let jackpotNote = null;
 
         if (result.outcome === 'jackpot') {
             const claim = await claimJackpot({
@@ -257,17 +258,29 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 note:     'Progressive jackpot win — slots Triple Wild',
             });
             finalJackpotPool = claim.newPool;
-            if (claim.credited) {
-                // The service has already moved the coins and logged the payout, so
-                // the spin's own credit below must skip this amount. It is carried on
-                // result.payout for the embeds' arithmetic only.
+            if (claim.claimed) {
+                // The pot came out of the pool, so it is this player's whether or
+                // not the credit has landed yet — and either way the spin's own
+                // credit below must skip the amount. A claim that has not been
+                // paid is being recovered under its own payout key (the restart
+                // reconciler, `payouts:replay`), and paying the flat mega-win in
+                // its place would pay the same Triple Wild twice: the fallback
+                // used to run on top of a pool the service had put back, over a
+                // credit that may well have committed and only lost its response.
+                //
+                // result.payout carries the pot for the embeds' arithmetic only.
                 jackpotWon = true;
                 result = { ...result, payout: claim.wonAmount };
+                if (!claim.credited) {
+                    jackpotNote = claim.owed
+                        ? '\n> ⚠️ *The pot could not be paid out just now — it has been recorded and an admin can settle it.*'
+                        : '\n> ⚠️ *The pot could not be paid out just now, and could not be recorded either — please tell an admin.*';
+                }
             } else {
-                // The credit failed and the pool was rolled back. Pay the flat
-                // mega-win through the normal payout path instead — a Triple Wild is
-                // never a dead spin.
-                console.error(`[Slots] jackpot credit failed for ${interaction.user.id} — paying the ${FREE_SPIN_JACKPOT_MULT}x fallback`);
+                // Nothing was claimed — there is no guild document and so no pool
+                // to win. Pay the flat mega-win through the normal payout path
+                // instead; a Triple Wild is never a dead spin.
+                console.error(`[Slots] no jackpot pool to claim for ${interaction.user.id} — paying the ${FREE_SPIN_JACKPOT_MULT}x fallback`);
                 result = { ...result, payout: bet * FREE_SPIN_JACKPOT_MULT };
             }
         }
@@ -411,6 +424,13 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         if (totalCoinMult > 1.0 && adjustedPayout > bet) {
             const desc = finalEmbed.data.description ?? '';
             finalEmbed.setDescription(desc + `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied to winnings!*`);
+        }
+        // A pot that was claimed but has not reached the balance yet says so
+        // here. The embed reports the win and the new balance from the same
+        // document, and without this it would show the pot as paid.
+        if (jackpotNote) {
+            const desc = finalEmbed.data.description ?? '';
+            finalEmbed.setDescription(desc + jackpotNote);
         }
         await interaction.editReply({
             embeds: [finalEmbed],
