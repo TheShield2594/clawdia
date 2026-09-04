@@ -72,6 +72,8 @@ notify_failure() {
         || echo "[offsite] posting to ERROR_WEBHOOK_URL failed" >&2
 }
 
+# shellcheck disable=SC2154  # `status` is assigned by the trap's own first
+# command; shellcheck reads a trap string without knowing when it runs.
 trap 'status=$?; [ "${status}" -eq 0 ] || notify_failure "sync to ${BACKUP_REMOTE:-<no remote>} exited ${status}"; exit "${status}"' EXIT
 
 if [ -z "${BACKUP_REMOTE:-}" ]; then

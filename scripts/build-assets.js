@@ -77,6 +77,16 @@ function minify(source, file) {
         // The dashboard's browser support is whatever runs Discord; nothing
         // here needs downlevelling, and a transform that rewrites syntax is a
         // transform that can change behaviour. Minify only.
+        //
+        // This line is also where that floor is written down, and
+        // docs/EXTENDING.md ("What the browser scripts may assume") is what
+        // points at it (#948). Note what it is not: esbuild lowers newer syntax
+        // to reach a target rather than rejecting it — it refuses only what it
+        // cannot express at all, which here is top-level `await` — and never
+        // polyfills a library addition, so `.at()` and `Object.hasOwn` pass
+        // straight through to fail in the browser instead. Nor do the twins
+        // decide it: they are what the image serves, while `npm start` serves
+        // these sources as authored. The floor holds by being written to.
         target: 'es2020',
         sourcefile: file,
     });

@@ -29,14 +29,20 @@ const allDocs = [...rootDocs, ...docsDir.map(f => `docs/${f}`)];
 
 describe('the reference material lives in docs/', () => {
     it('keeps the root to the files a repo root is for', () => {
-        // README, the changelog, the two contributor-facing files, and the
-        // production checklist. Everything else is reference and belongs in
-        // docs/, where the four moved files now are.
+        // README, the changelog, and the two contributor-facing files.
+        // Everything else is reference and belongs in docs/, where the four
+        // moved files — and now the audit log — live.
+        //
+        // PRODUCTIONREADY.md was the fifth entry here until #915. It is a
+        // scrupulous audit log that says in its own header not to read it as a
+        // release gate, under a filename that asserted exactly that from the
+        // repo root, where it was one of the first things a visitor saw. It is
+        // docs/AUDIT_LOG.md now, which is what the file has always called
+        // itself.
         expect(rootDocs).toEqual([
             'CHANGELOG.md',
             'CLAUDE.md',
             'CONTRIBUTING.md',
-            'PRODUCTIONREADY.md',
             'README.md',
         ]);
     });

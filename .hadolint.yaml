@@ -1,0 +1,30 @@
+# hadolint, for the Dockerfile (#940).
+#
+# One rule is turned off, and it is turned off rather than worked around
+# because the Dockerfile disagrees with it on purpose.
+ignored:
+  # DL3018: "Pin versions in apk add".
+  #
+  # The runtime stage opens with `apk upgrade` and a build argument whose whole
+  # job is to make that upgrade re-resolve daily (#961) — the point being to
+  # take an Alpine fix the day it lands rather than waiting for a node:24-alpine
+  # rebuild to carry it. Pinning the six shared libraries beside it would freeze
+  # exactly what that is there to keep moving, and the reproducibility DL3018
+  # protects is already held from above: every FROM carries an @sha256 digest
+  # (#644), and tests/imagePinning.test.js fails if one loses it.
+  #
+  # The trade is written out in the Dockerfile's own comments, and it is the
+  # image scan in CI — Trivy, HIGH and CRITICAL, before anything is pushed —
+  # that says when an unpinned package has become a problem.
+  - DL3018
+
+# Warnings and errors fail the build; info and style are reported and do not.
+# Same bar as `npm audit --audit-level=high` and the image scan's
+# HIGH,CRITICAL: a gate that is normally red is a gate everyone learns to
+# merge past. DL3066 on `USER node` is the one that lands under it today.
+#
+# This governs a local `hadolint` run and nothing else. hadolint-action passes
+# its own `failure-threshold` input through the environment, which wins over
+# this file, so ci.yml sets that input to the same word — the two have to be
+# changed together, and this comment is the only thing saying so.
+failure-threshold: warning

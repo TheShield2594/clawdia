@@ -73,6 +73,37 @@ applies Jest's global thresholds, and `npm run coverage:check` applies the
 per-directory floors. CI runs both — see [Coverage](#coverage) below.
 `npm run lint:fix` applies what ESLint can fix on its own.
 
+The ops files are linted too, and they used not to be (#940) — the shell in
+`scripts/` and in the two stack files was the only substantial code in the
+repository nothing checked, which is a poor place for it given that most of it
+is the backup path. Four gates, all of them seconds:
+
+```bash
+hadolint Dockerfile                       # v2.15.1, the version CI's action pins
+shellcheck -x --severity=warning scripts/*.sh scripts/lib/*.sh
+npm run lint:stacks                       # the shell inside the stack files
+docker compose -f docker-compose.yml config --quiet
+```
+
+hadolint picks up `.hadolint.yaml` from the working directory on its own, so
+run it from the repo root and it will agree with CI — but only on the same
+version. It gained rules between 2.14 and 2.15, and CI is what decides: the
+action pins its own hadolint, and a bump can arrive as a red build on a
+Dockerfile nobody edited. That is the linter working; read the rule, and either
+fix the line or record the disagreement the way `.hadolint.yaml` and the
+`DL3025` note above the `HEALTHCHECK` already do.
+
+`npm run lint:stacks` is the odd one and the one worth knowing about. Both stack
+files run their backup on an eleven-kilobyte shell script written inline as
+`entrypoint: > sh -c '…'`, and **compose splits that string into arguments
+before the container starts**: one single quote inside the script — an
+apostrophe in a comment is enough — ends it, and the rest becomes positional
+arguments that never run. That had already happened to both files, and the
+symptom was a backup container that started, failed to parse its own script and
+exited, saying nothing anywhere anyone looks. So: no apostrophes in those
+entrypoints, reword instead, and `tests/stackEntrypointShell.test.js` holds it
+on every `npm test` whether or not shellcheck is installed.
+
 ### Formatting
 
 Formatting is `npm run format -- <paths>`, and it takes explicit paths on
