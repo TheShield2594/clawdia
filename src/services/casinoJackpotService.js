@@ -374,6 +374,27 @@ async function claimJackpot({ guildId, userId, username, note = 'Progressive jac
     return awardPool({ guildId, userId, username, seedAmount, note });
 }
 
+/**
+ * Posts the drop to the guild, in the configured jackpot channel or the one the
+ * bet was placed in.
+ *
+ * Announced whether or not the credit landed, and worded from `credited` and
+ * `owed`. The pot is won at the claim rather than at the credit, and for the
+ * random per-bet trigger this embed is the *only* thing that ever tells a player
+ * it fired for them — going quiet on a failed credit leaves them never knowing,
+ * on top of not being paid.
+ *
+ * @param {object}  opts
+ * @param {object}  opts.guildDoc     the claimed guild, for its announce channel
+ * @param {object}  opts.interaction  the interaction to announce through, and
+ *                                    whose `user` is the winner — a crash
+ *                                    joiner's own button interaction, not the
+ *                                    invoker's command
+ * @param {number}  opts.wonAmount    the pot that was claimed
+ * @param {number}  opts.newPool      what the pool was reseeded to
+ * @param {boolean} [opts.credited]   whether the coins reached the balance
+ * @param {boolean} [opts.owed]       whether an unpaid pot was written down
+ */
 async function announceJackpot({ guildDoc, interaction, wonAmount, newPool, credited = true, owed = false }) {
     const { EmbedBuilder } = require('discord.js');
     const channelId = guildDoc?.casinoJackpot?.announceChannelId ?? guildDoc?.economy?.announcementChannelId ?? null;

@@ -109,10 +109,22 @@ function resultEmbed(reels, result, bet, balance, interaction, jackpotPool) {
         .setTimestamp();
 }
 
-// `delivery` is the claim's outcome, and the channel hears the same thing the
-// winner does: this embed used to say the player "walked away with the entire
-// pool" whatever became of the credit, so a pot that had not arrived was
-// announced as paid to everyone while the winner's own result said otherwise.
+/**
+ * The channel-wide announcement of a Triple Wild.
+ *
+ * `delivery` is the claim's outcome, and it is what makes the channel hear the
+ * same thing the winner does: this embed used to say the player "walked away
+ * with the entire pool" whatever became of the credit, so a pot that had not
+ * arrived was announced as paid to everyone while the winner's own result embed
+ * said otherwise (#873).
+ *
+ * @param {object} interaction  the spin, for the winner's name and avatar
+ * @param {number} wonAmount    the pot that was claimed
+ * @param {number} newPool      what the pool was reseeded to
+ * @param {object} [delivery]   `{ credited, owed }` from the claim; defaults to
+ *                              a delivered pot, which is what every caller
+ *                              before the claim could fail to land meant
+ */
 function jackpotBroadcastEmbed(interaction, wonAmount, newPool, delivery = {}) {
     const { credited = true, owed = false } = delivery;
     const wonLine = credited
