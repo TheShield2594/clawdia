@@ -276,8 +276,8 @@ jobs:
   # `test` rather than after it: the two answer different questions, and a red
   # suite should not hide a broken image any more than the reverse.
   #
-  # What `publish: needs: [test, image]` buys is worth stating precisely, because
-  # `needs:` orders the two jobs and nothing more — it does not hand this image
+  # What `publish: needs: […, image, …]` buys is worth stating precisely, because
+  # `needs:` orders the jobs and nothing more — it does not hand this image
   # over, and that job builds again before it pushes. So the guarantee is that
   # the same commit, Dockerfile, lockfile and digest-pinned base produced an
   # image that booted and scanned clean; it is not byte identity, because
@@ -286,15 +286,18 @@ jobs:
   # publish build is a cache hit rather than a second compile, and a cache hit is
   # the same layers. The residue is a cache miss inside a single run.
   #
-  # All of that is about amd64, and since #941 the publish job builds arm64 as
-  # well, which nothing here boots or scans. Deliberately: buildx cannot
-  # `--load` a multi-platform result — there is no single image for `docker run`
-  # to name — so holding arm64 to this standard means a second, emulated build
-  # of a tree that compiles `canvas` from source, on every pull request. What
-  # arm64 does get is that compile: the toolchain, the headers and the native
-  # binding are exactly what an architecture change breaks, and a failure there
-  # fails the publish. docs/SETUP_GUIDE.md says what the difference means for
-  # somebody running the published image on a Pi.
+  # All of that is about amd64. Since #941 the publish job also builds arm64,
+  # and the `arm64` job below is what holds that half to the same vulnerability
+  # gate before the manifest list goes out. It is a job of its own rather than
+  # more steps here for two reasons: buildx cannot `--load` a multi-platform
+  # result, so the scan needs a single-platform build to name, and that build is
+  # emulated — minutes of it, on a tree that compiles `canvas` from source —
+  # which is not a cost worth paying on a pull request that publishes nothing.
+  #
+  # So the two differ, and docs/SETUP_GUIDE.md says how: amd64 is booted and
+  # scanned on every event, arm64 is compiled and scanned on the events that
+  # publish. Booting arm64 as well would mean running an emulated Node through
+  # its whole require graph, and is not done.
   #
   # Closing it properly means pushing a staging tag from here and promoting it by
   # digest, which needs `packages: write` in a job that also runs on pull
@@ -304,8 +307,8 @@ jobs:
     name: Build, boot and scan Docker image
     runs-on: ubuntu-latest
     # On a cold cache this compiles canvas from source, which is minutes rather
-    # than seconds; a warm one is a small fraction of that. Matches the publish
-    # job's budget, since it is the same build.
+    # than seconds; a warm one is a small fraction of that. Native throughout —
+    # the emulated build that needs a bigger budget is the `arm64` job below.
     timeout-minutes: 30
     outputs:
       # Read by `publish` so both builds carry the same value — see the step
@@ -348,8 +351,13 @@ jobs:
           # otherwise leaves its result in the builder cache and nowhere else.
           load: true
           tags: ${{ env.SMOKE_IMAGE }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Scoped per platform. Both this job and `arm64` below export a cache
+          # on every push, and a buildx export replaces the whole manifest for
+          # the scope it writes — unscoped, the second to finish would evict the
+          # first and `publish` would rebuild whichever it lost. The names are
+          # what `publish` reads back.
+          cache-from: type=gha,scope=amd64
+          cache-to: type=gha,mode=max,scope=amd64
 
       # Everything that is true of the image rather than of the source tree: the
       # native canvas binding actually links, the fonts the card generators
@@ -415,7 +423,84 @@ jobs:
           exit-code: '1'
           format: table
 
-  # Publishing lives here, behind `needs: [test, image]`, rather than in its own
+  # The arm64 half of what `publish` pushes, built and scanned before it goes
+  # out. Added because the multi-platform publish of #941 put an image into the
+  # manifest list that the Trivy gate had never looked at — the gate's whole
+  # premise, stated on the scan step above, is that a finding stops the image
+  # existing rather than being raised against one already deployed, and that
+  # premise did not survive the second platform.
+  #
+  # Only where it can matter. Nothing publishes on a pull request, and this is
+  # an emulated build of the stage that compiles `canvas` from source, so the
+  # condition below is what keeps that cost off every PR. `needs: image` is for
+  # the apk refresh key: the same value has to reach all three builds, or they
+  # are three different images and this scans one nobody ships.
+  #
+  # What this buys is what the amd64 pair buys, with the same residue: the same
+  # commit, Dockerfile, lockfile and digest-pinned base produced an arm64 image
+  # that scanned clean, and the cache is what makes the build `publish` pushes
+  # the same layers rather than merely the same inputs.
+  arm64:
+    name: Build and scan the arm64 image
+    needs: image
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # Emulated, and cold on the first build after a Dockerfile or lockfile
+    # change: tens of minutes rather than the handful the native build takes.
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same pin, and for a weaker version of the same reason as in `publish`:
+      # this job holds no registry credential, but a mutable image run
+      # `--privileged` against the checkout is not something to leave floating
+      # anywhere. Both steps move together.
+      - name: Set up QEMU for the arm64 build
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+        with:
+          image: docker.io/tonistiigi/binfmt:qemu-v9.2.2@sha256:1b804311fe87047a4c96d38b4b3ef6f62fca8cd125265917a9e3dc3c996c39e6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build the arm64 image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/arm64
+          build-args: |
+            APK_REFRESH=${{ needs.image.outputs.apk-refresh }}
+          # Never pushed from here: this job has no credentials and the manifest
+          # list is `publish`'s to assemble. `load` is what gives the scan below
+          # something to name.
+          push: false
+          load: true
+          tags: ${{ env.SMOKE_IMAGE }}-arm64
+          cache-from: type=gha,scope=arm64
+          cache-to: type=gha,mode=max,scope=arm64
+
+      # Same narrowings as the amd64 scan above, and deliberately the same: the
+      # two platforms are gated at one bar or the bar means nothing.
+      #
+      # Trivy reads the image's layers rather than running it, so an arm64
+      # filesystem is as scannable on this runner as a native one. The findings
+      # are usually the same as amd64's — both stages install the same Alpine
+      # packages from the same repository — and "usually" is the reason this
+      # exists.
+      - name: Scan the arm64 image for known vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.SMOKE_IMAGE }}-arm64
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+
+  # Publishing lives here, behind `needs: [test, image, arm64]`, rather than in its own
   # workflow. It used to be a separate file triggered on `push: main`, which
   # ran alongside the tests instead of after them: a commit that broke the
   # suite still got built and pushed as `:latest`, and `:latest` is the tag
@@ -426,18 +511,17 @@ jobs:
   # simply depends on the one before it in the same run.
   publish:
     name: Build and publish Docker image
-    needs: [test, image]
+    needs: [test, image, arm64]
     # Pull requests build the image in the `image` job above but publish
     # nothing: they have no push credentials worth using and no tag that
     # anything deploys. Pushes to main and to v* tags do.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     # Three times the `image` job's budget, for the arm64 half added in #941.
-    # That half is emulated and this tree compiles `canvas` from source, so a
-    # cold cache here is tens of minutes rather than the handful an amd64 build
-    # takes. A warm one is a small fraction of that — emulated layers cache like
-    # any others — so this is the ceiling for the first build after a Dockerfile
-    # or lockfile change, not the cost of an ordinary merge.
+    # In the ordinary case this job builds nothing: `image` and `arm64` have
+    # each just built and checked their platform, and this assembles the
+    # manifest list out of their caches. The budget is for the case where one of
+    # those restores misses and buildx compiles `canvas` under emulation again.
     timeout-minutes: 90
     permissions:
       contents: read
@@ -531,12 +615,28 @@ jobs:
           # for @napi-rs/canvas, which ships prebuilt musl binaries for both
           # architectures and would turn this compile into a download twice
           # over.
+          #
+          # Neither platform reaches the registry unscanned: `image` boots and
+          # scans amd64, `arm64` scans arm64, and both gate this job through
+          # `needs:`.
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Both platform scopes, and no export of its own. `image` and `arm64`
+          # are the producers — each has just built and checked the platform it
+          # writes — so this build is meant to be two cache hits and an assembly
+          # of the manifest list. Exporting from here would write a third
+          # manifest over one of theirs for no gain.
+          #
+          # A miss is slow rather than wrong: buildx rebuilds the platform it
+          # could not restore, which for arm64 is the emulated compile the
+          # timeout above is sized for. It is also what makes "the image that
+          # scanned clean" and "the image that was pushed" the same layers
+          # rather than merely the same inputs.
+          cache-from: |
+            type=gha,scope=amd64
+            type=gha,scope=arm64
           # Attestations, attached to the image in the registry (#652).
           # `sbom` is an SPDX inventory of what the image contains, which is
           # what turns "does any published build ship the vulnerable version?"
