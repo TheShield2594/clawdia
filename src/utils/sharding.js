@@ -67,12 +67,22 @@
 // cache — so the cost is a moderation rule or a welcome message lagging half a
 // minute behind the admin who changed it.
 //
-// It is also not reachable today: the dashboard is gated on `isPrimaryShard()`
-// (above), so shard 0 is the only process that takes a settings write from a
-// human, and the only writers on other shards are the bot's own commands, whose
-// middleware invalidates the entry they just wrote in the process that wrote it.
-// The gap opens when the dashboard is split into its own process (#876) — a
-// *fourth* writer, in a process that shares no middleware with any shard.
+// How reachable it is depends on the deployment, and there are three cases:
+//
+//   unsharded          the window is empty. One process, so the middleware that
+//                      invalidates is always the one holding the cache.
+//   two or more shards the window is real *now*. The dashboard is gated on
+//                      `isPrimaryShard()` (above), so an admin's save always
+//                      lands on shard 0 — and invalidates shard 0's entry and no
+//                      other. Shards 1..N keep serving the pre-save settings
+//                      until their own entry expires. The bot's own commands are
+//                      the case that stays covered: a command writes on whatever
+//                      shard is handling that guild, which is the shard holding
+//                      the entry the middleware then drops.
+//   dashboard split    wider still (#876). A dashboard in its own process shares
+//                      middleware with no shard at all, so even a single-shard
+//                      deployment gets the window, and a save invalidates
+//                      nothing anywhere.
 //
 // Recorded here rather than fixed, because the fix costs more than the staleness
 // does at this size. When it stops being acceptable, the two options are:

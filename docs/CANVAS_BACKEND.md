@@ -33,19 +33,35 @@ is also why `canvas` is the dependency most likely to break on a Node major
 bump, since a new ABI means a new compile against whatever Cairo the base image
 happens to ship.
 
-None of this is a runtime problem. Rendering is main-thread work capped at two
-concurrent renders by `src/utils/cardRenderQueue.js`, and the PNG encode is
-already off the event loop via the callback form of `toBuffer` (see
-`src/utils/canvasEncode.js` and #592). The cost is build fragility and image
-build time, and it is paid at upgrade time rather than in production.
+None of this is a runtime problem. Drawing is main-thread work on every path,
+and the PNG encode is already off the event loop via the callback form of
+`toBuffer` (see `src/utils/canvasEncode.js` and #592).
+
+The concurrency cap is narrower than its name suggests and worth stating
+precisely, since it is easy to read as covering everything: `renderQueued` in
+`src/utils/cardRenderQueue.js` has exactly one caller,
+`src/events/guildMemberAdd.js`, so the two-renders-at-a-time limit covers
+welcome cards and nothing else. The other `cardGenerator` surfaces are bounded
+by their commands' cooldowns; `/caption`, `/wanted` and `/wasted` go through
+`src/utils/imageRateLimit.js`, which caps how often a *person* may ask rather
+than how many renders run at once.
+
+The cost is therefore build fragility and image build time, and it is paid at
+upgrade time rather than in production.
 
 ## The alternative: @napi-rs/canvas
 
 [`@napi-rs/canvas`](https://www.npmjs.com/package/@napi-rs/canvas) is a Skia
 binding shipped as prebuilt N-API binaries — including `linux-x64-musl` and
-`linux-arm64-musl`, which is the pair Alpine needs. Adopting it would delete
-the compiler and both apk lists above outright, and being N-API it would also
-make moving card rendering onto worker threads possible later.
+`linux-arm64-musl`, which is the pair Alpine needs. Adopting it would delete the
+compiler and both apk lists above outright.
+
+That is the whole of the case. #933 also suggests that being N-API would open
+the door to moving card rendering onto worker threads, and that half does not
+survive being checked: both backends were loaded inside a `worker_threads`
+worker, had a font registered, and drew and encoded a PNG, and both worked. If
+worker-thread rendering is worth doing it is worth doing today, on the
+dependency already installed — it is not a reason to change backends.
 
 Everything below was measured against `@napi-rs/canvas@1.0.8` and
 `canvas@3.2.3` on Node 22, driving this repo's own `src/utils/cardGenerator.js`
@@ -146,13 +162,28 @@ a reason not to make this swap blind:
 
 Worth doing, not urgent, and as a change of its own.
 
-The compatibility question — the one #933 asks to settle first — is settled:
-the API gap is two call sites, the metrics are identical, the output is
-equivalent and the encode stays off the event loop. What remains is verification
-that can only happen in the image, so the swap should be its own pull request
-whose CI runs `scripts/image-smoke.js` against a built image and whose reviewer
-looks at a rendered card with an emoji in it. Bundling it with anything else
-makes it un-revertable, which is the wrong property for the dependency that
+The compatibility question — the one #933 asks to settle first — is answered for
+the path it names, and the scope of that answer matters. What was *rendered and
+diffed* is `src/utils/cardGenerator.js`: six surfaces, on both backends, pixel
+for pixel. What was *enumerated* is wider — the full 2D context surface across
+every module that draws, `shopBanner`, `eightBallImage`, `/caption`, `/wanted`
+and `/wasted` included — and every call in it is supported. So: the API gap is
+two call sites, the text metrics are identical, the encode stays off the event
+loop, and the one path anyone has looked at pixel by pixel comes out equivalent.
+
+That is not the same as "no visual difference anywhere". The five modules that
+were enumerated but not rendered use the same primitives cardGenerator does, so
+there is no specific reason to expect otherwise — but nobody has looked, and the
+Skia-versus-Cairo deltas in the table above are real, if small.
+
+What remains is verification that can only happen in the image, and the three
+open items above are gates on the swap rather than caveats on it — colour emoji
+in particular, and a *successful* remote `loadImage`, which is the one runtime
+behaviour the two backends implement with entirely different HTTP clients. So
+the swap should be its own pull request: CI running `scripts/image-smoke.js`
+against a built image, a reviewer looking at a rendered card with an emoji in
+it, and an avatar actually fetched from Discord's CDN. Bundling it with anything
+else makes it un-revertable, which is the wrong property for the dependency that
 draws every image the bot sends.
 
 The change itself, when someone takes it:
