@@ -1,7 +1,7 @@
 'use strict';
 
-const axios = require('axios');
-const { guardedAgents, assertPublicHttpUrl } = require('../../utils/outboundGuard');
+const { guardedDispatcher, assertPublicHttpUrl } = require('../../utils/outboundGuard');
+const { request, readCapped } = require('../../utils/httpFetch');
 
 /**
  * Image attachments, on their way from a Discord message to a model (#839).
@@ -28,7 +28,7 @@ const { guardedAgents, assertPublicHttpUrl } = require('../../utils/outboundGuar
  *
  * The URLs come from Discord's own CDN, and are still checked as though they
  * did not: a plain http(s) URL, not a literal private address, dialled through
- * the agents that refuse to open a socket into private or reserved space. An
+ * the dispatcher that refuses to open a socket into private or reserved space. An
  * attachment URL is not user-typed today, but this module hands whatever it is
  * given to an HTTP client, and it should not be one refactor away from fetching
  * the metadata service on somebody's say-so.
@@ -135,20 +135,22 @@ async function fetchImages(images) {
     for (const image of images) {
         try {
             // Throws for a scheme that is not http(s), or a literal address in
-            // private or reserved space; the agents below cover the hostname
-            // that only resolves there sometimes, and every redirect hop.
+            // private or reserved space; the dispatcher below covers the
+            // hostname that only resolves there sometimes, and every redirect
+            // hop.
             assertPublicHttpUrl(image.url, 'attachment URL');
-            const response = await axios.get(image.url, {
-                responseType: 'arraybuffer',
+            const response = await request(image.url, {
                 timeout: FETCH_TIMEOUT_MS,
-                maxContentLength: MAX_IMAGE_BYTES,
-                maxBodyLength: MAX_IMAGE_BYTES,
-                ...guardedAgents()
+                dispatcher: guardedDispatcher()
             });
-            const buffer = Buffer.from(response.data);
-            // Discord's declared size is somebody else's number, and
-            // maxContentLength only covers a response that declared a length.
-            if (!buffer.length || buffer.length > MAX_IMAGE_BYTES || bytes + buffer.length > MAX_TOTAL_BYTES) {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            // `readCapped` stops reading at the ceiling rather than buffering
+            // whatever arrives and measuring it afterwards, so an attachment
+            // that is larger than it claimed costs the read and not the memory.
+            const buffer = await readCapped(response, MAX_IMAGE_BYTES);
+            // Discord's declared size is somebody else's number, and the total
+            // across the message is checked here rather than per image.
+            if (!buffer.length || bytes + buffer.length > MAX_TOTAL_BYTES) {
                 skipped++;
                 continue;
             }

@@ -9,6 +9,7 @@
 // cards-per-minute budget sends the plain embed instead of a card.
 
 const { encodeCanvas } = require('../src/utils/canvasEncode');
+const { deferred } = require('./helpers/deferred');
 const {
     renderQueued,
     _resetCardRenderQueue,
@@ -18,12 +19,6 @@ const {
 } = require('../src/utils/cardRenderQueue');
 
 /** A promise plus the handles to settle it from the test body. */
-function deferred() {
-    let resolve, reject;
-    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
-    return { promise, resolve, reject };
-}
-
 beforeEach(() => _resetCardRenderQueue());
 
 describe('encodeCanvas', () => {

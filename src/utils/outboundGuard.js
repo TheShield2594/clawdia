@@ -9,23 +9,21 @@
  * request loop and has to re-run the check on each redirect hop, and it stays
  * where it is.
  *
- * This module is the same guarantee for the requests the bot makes through a
- * client library — axios, an SDK — where the connection is not ours to build.
- * Rather than resolving up front and hoping the library connects to the same
- * address (it will not: it resolves again, and DNS can answer differently the
- * second time), the checks are moved to where the socket is opened: into the
- * resolver for hostnames, and into the agent's `createConnection` for literal
- * addresses, which never reach a resolver at all. The address that is validated
- * is by construction the address that is dialled, so there is no window between
- * the two for a rebind to land in — on the first request or on a redirect.
+ * This module is the same guarantee for the requests the bot makes through
+ * `fetch` or an SDK, where the connection is not ours to build. Rather than
+ * resolving up front and hoping the client connects to the same address (it
+ * will not: it resolves again, and DNS can answer differently the second time),
+ * the checks are moved to where the socket is opened: into the resolver for
+ * hostnames, and into the connector for literal addresses, which never reach a
+ * resolver at all. The address that is validated is by construction the address
+ * that is dialled, so there is no window between the two for a rebind to land
+ * in — on the first request or on a redirect.
  *
  * `isPrivateIp` is imported from safeFeedFetch rather than copied: the list of
  * ranges that must never be reached is one rule, and two copies of it drift.
  */
 
 const dns = require('dns');
-const http = require('http');
-const https = require('https');
 const net = require('net');
 const { isPrivateIp } = require('./safeFeedFetch');
 
@@ -92,45 +90,50 @@ function guardedLookup(hostname, options, callback) {
 }
 
 // Two checks per connection, because they cover different inputs: `lookup`
-// handles hostnames, and the override handles the literal addresses `lookup`
-// never sees. `createConnection` is where a connection is actually opened, so a
+// handles hostnames, and the wrapper handles the literal addresses `lookup`
+// never sees. The connector is where a connection is actually opened, so a
 // redirect to a private address is checked exactly like the first request was —
-// which is what makes this hold for a library whose redirect handling we do not
-// write.
-function guardConnection(agentClass) {
-    return class GuardedAgent extends agentClass {
-        createConnection(options, callback) {
-            const error = literalAddressError(options.host ?? options.hostname);
-            if (!error) return super.createConnection(options, callback);
-            // Reporting through the callback rather than throwing keeps the
-            // failure on the request, where a caller can catch it, instead of
-            // unwinding through the agent's internals.
-            process.nextTick(() => callback(error));
-            return undefined;
-        }
+// which is what makes this hold for redirect handling we do not write.
+//
+// undici's own connector is wrapped rather than replaced: TLS, ALPN, session
+// reuse and socket timeouts are its business, and the only thing added here is
+// a refusal in front of it.
+function guardedConnect() {
+    const { buildConnector } = require('undici');
+    const connect = buildConnector({ lookup: guardedLookup });
+    return (options, callback) => {
+        const error = literalAddressError(options.hostname ?? options.host);
+        if (!error) return connect(options, callback);
+        // Reporting through the callback rather than throwing keeps the failure
+        // on the request, where a caller can catch it, instead of unwinding
+        // through the dispatcher's internals.
+        process.nextTick(() => callback(error, null));
+        return undefined;
     };
 }
 
-const GuardedHttpAgent = guardConnection(http.Agent);
-const GuardedHttpsAgent = guardConnection(https.Agent);
-
-// One pair for the process. Agents are pooled by design and these carry no
-// per-request state; keepAlive is left off (the default), so no socket outlives
-// the request that validated its address.
-let agents = null;
+// One dispatcher for the process. undici pools by design and this carries no
+// per-request state; `pipelining: 0` keeps one request per connection, so no
+// socket is reused by a request other than the one that validated its address.
+let dispatcher = null;
 
 /**
- * `{ httpAgent, httpsAgent }` for handing to axios (or any library that takes
- * Node agents).
+ * The undici `Agent` to hand `fetch` as its `dispatcher`.
+ *
+ * `fetch` has no equivalent of axios's `httpAgent`/`httpsAgent` pair: the
+ * dispatcher is one object covering both schemes, and it is also what every
+ * redirect hop is dialled through — which is the property this whole module
+ * exists for.
  */
-function guardedAgents() {
-    if (!agents) {
-        agents = {
-            httpAgent: new GuardedHttpAgent({ lookup: guardedLookup }),
-            httpsAgent: new GuardedHttpsAgent({ lookup: guardedLookup }),
-        };
-    }
-    return agents;
+function guardedDispatcher() {
+    // Required here rather than at the top of the file. `assertPublicHttpUrl`
+    // is called from the dashboard's settings validation, which several suites
+    // exercise under jsdom — and undici's module body touches `ReadableStream`,
+    // which jsdom does not define. Nothing that only validates a URL should
+    // have to load an HTTP stack to do it.
+    const { Agent } = require('undici');
+    if (!dispatcher) dispatcher = new Agent({ connect: guardedConnect(), pipelining: 0 });
+    return dispatcher;
 }
 
 /**
@@ -142,7 +145,7 @@ function guardedAgents() {
  * past a naive parser — and a literal address in private or reserved space.
  *
  * Where a *hostname* points is not settled here, because it is not knowable
- * when a setting is saved; that is what the agents above are for.
+ * when a setting is saved; that is what the dispatcher above is for.
  *
  * @returns {URL} the parsed URL, so callers can use the normalised form.
  */
@@ -178,4 +181,4 @@ function assertPublicHttpUrl(raw, label = 'URL') {
     return url;
 }
 
-module.exports = { guardedLookup, guardedAgents, assertPublicHttpUrl, literalAddressError };
+module.exports = { guardedLookup, guardedDispatcher, assertPublicHttpUrl, literalAddressError };

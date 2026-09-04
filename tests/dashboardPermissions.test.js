@@ -69,22 +69,34 @@ describe('BoundedRateLimiter', () => {
         expect(rl.size).toBeLessThanOrEqual(50);
     });
 
-    it('forgets requests that have aged out of the window', () => {
-        const rl = new BoundedRateLimiter(100);
-        expect(rl.check('u1', 1, 1)).toBe(true);
-        // A 1ms window means the recorded request is already outside it.
-        return new Promise(resolve => setTimeout(() => {
-            expect(rl.check('u1', 1, 1)).toBe(true);
-            resolve();
-        }, 5));
-    });
+    // Both of these are about a window closing, and both used to get there by
+    // sleeping 5ms and trusting the runner to have taken at least 1 (#949).
+    // The limiter reads `Date.now()`, which jest's timers move with the clock
+    // they fake — so the window can be stepped over rather than waited out.
+    describe('once the window has passed', () => {
+        beforeEach(() => jest.useFakeTimers());
+        afterEach(() => jest.useRealTimers());
 
-    it('cleanup drops keys whose requests have all expired', async () => {
-        const rl = new BoundedRateLimiter(100);
-        rl.check('u1', 60_000, 5);
-        expect(rl.size).toBe(1);
-        await new Promise(r => setTimeout(r, 5));
-        rl.cleanup(1);
-        expect(rl.size).toBe(0);
+        it('forgets requests that have aged out of the window', () => {
+            const rl = new BoundedRateLimiter(100);
+            expect(rl.check('u1', 1, 1)).toBe(true);
+
+            // A 1ms window, stepped well past: the recorded request is outside
+            // it, so the next one is allowed rather than counted against it.
+            jest.advanceTimersByTime(5);
+
+            expect(rl.check('u1', 1, 1)).toBe(true);
+        });
+
+        it('cleanup drops keys whose requests have all expired', () => {
+            const rl = new BoundedRateLimiter(100);
+            rl.check('u1', 60_000, 5);
+            expect(rl.size).toBe(1);
+
+            jest.advanceTimersByTime(5);
+            rl.cleanup(1);
+
+            expect(rl.size).toBe(0);
+        });
     });
 });

@@ -31,16 +31,16 @@
  * Every URL here comes from a server the guild admin chose, including the ones
  * discovered rather than typed: an authorization-server metadata document is
  * that server telling the bot where to send a browser and a token request. So
- * each one goes through the same `assertPublicHttpUrl` and guarded agents as
+ * each one goes through the same `assertPublicHttpUrl` and guarded dispatcher as
  * the MCP endpoint itself, and each discovered URL is additionally required to
  * be https and to live on the issuer the metadata claims — a discovery document
  * that points its token endpoint at somewhere else entirely is not a service
  * this bot is going to post a client secret to.
  */
 
-const axios = require('axios');
 const crypto = require('crypto');
-const { guardedAgents, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { guardedDispatcher, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { request, readCappedText } = require('../../../utils/httpFetch');
 const { version: CLAWDIA_VERSION } = require('../../../../package.json');
 
 const DISCOVERY_TIMEOUT_MS = 10000;
@@ -125,18 +125,41 @@ function checkedUrl(value, label, sameOriginAs = null) {
         : normalized;
 }
 
+/**
+ * One read of a response body: the text, and the same text parsed if it is a
+ * JSON object.
+ *
+ * Both are wanted at every call site below. axios handed back one value that
+ * was a parsed object or a string depending on what arrived, and the branches
+ * that read it had to test which they had got; this says it once. A body that
+ * is not JSON, or is JSON but not an object, has `json: null` — an OAuth
+ * response that is a bare string or a number is a server misbehaving, and the
+ * callers' "did not return a JSON object" is the right answer for both.
+ */
+async function readBody(response) {
+    const text = await readCappedText(response, MAX_METADATA_BYTES);
+    try {
+        const parsed = JSON.parse(text);
+        return { text, json: parsed && typeof parsed === 'object' ? parsed : null };
+    } catch {
+        return { text, json: null };
+    }
+}
+
 /** GET a JSON document from a URL the far side named. */
 async function fetchJson(url, label) {
     let response;
+    let body;
     try {
-        response = await axios.get(url, {
+        response = await request(url, {
             timeout: DISCOVERY_TIMEOUT_MS,
-            maxRedirects: 3,
-            maxContentLength: MAX_METADATA_BYTES,
             headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },
-            validateStatus: () => true,
-            ...guardedAgents(),
+            dispatcher: guardedDispatcher(),
         });
+        // Read inside the same try as the request: a stalled or oversized body
+        // is the same failure to an admin as a connection that never opened,
+        // and `fetch` only rejects for the second.
+        body = await readBody(response);
     } catch (err) {
         throw new OAuthError(`could not fetch ${label}: ${err.message}`, { code: err.code || null });
     }
@@ -144,10 +167,10 @@ async function fetchJson(url, label) {
     if (response.status >= 400) {
         throw new OAuthError(`could not fetch ${label}: HTTP ${response.status}`, { status: response.status });
     }
-    if (!response.data || typeof response.data !== 'object') {
+    if (!body.json) {
         throw new OAuthError(`${label} did not return a JSON object`);
     }
-    return response.data;
+    return body.json;
 }
 
 /**
@@ -286,43 +309,50 @@ async function registerClient(registrationEndpoint, { redirectUri, clientName = 
     };
 
     let response;
+    let read;
     try {
-        response = await axios.post(registrationEndpoint, body, {
+        response = await request(registrationEndpoint, {
+            method: 'POST',
+            body: JSON.stringify(body),
             timeout: TOKEN_TIMEOUT_MS,
-            maxRedirects: 0,
-            maxContentLength: MAX_METADATA_BYTES,
+            // A redirect is not followed with a client secret in hand: the
+            // registration request goes to the endpoint the discovery document
+            // named or it does not go at all. `manual` hands the 3xx back as an
+            // ordinary response, which the status check below refuses.
+            redirect: 'manual',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': USER_AGENT },
-            validateStatus: () => true,
-            ...guardedAgents(),
+            dispatcher: guardedDispatcher(),
         });
+        read = await readBody(response);
     } catch (err) {
         throw new OAuthError(`client registration failed: ${err.message}`, { code: err.code || null });
     }
 
-    if (response.status >= 400) {
-        // `typeof null === 'object'`, so the null check is load-bearing: a
-        // refusal with an empty body would otherwise throw a TypeError here and
-        // lose the status the admin needs. Same shape as `postToken` below.
-        const detail = response.data && typeof response.data === 'object'
-            ? (response.data.error_description || response.data.error || '')
-            : String(response.data || '').slice(0, 200);
+    // 3xx included: `redirect: 'manual'` hands the redirect back rather than
+    // following it, and a registration endpoint that answers one has not
+    // registered anything. Under axios's `maxRedirects: 0` this fell through to
+    // "returned no client_id", which said the same thing less clearly.
+    if (response.status >= 300) {
+        const detail = read.json
+            ? (read.json.error_description || read.json.error || '')
+            : read.text.slice(0, 200);
         throw new OAuthError(
             `client registration was refused (HTTP ${response.status}${detail ? `: ${detail}` : ''})`,
             { status: response.status },
         );
     }
 
-    const clientId = response.data?.client_id;
+    const clientId = read.json?.client_id;
     if (typeof clientId !== 'string' || !clientId) {
         throw new OAuthError('client registration returned no client_id');
     }
 
     return {
         clientId,
-        clientSecret: typeof response.data.client_secret === 'string' ? response.data.client_secret : null,
-        tokenEndpointAuthMethod: typeof response.data.token_endpoint_auth_method === 'string'
-            ? response.data.token_endpoint_auth_method
-            : (response.data.client_secret ? 'client_secret_post' : 'none'),
+        clientSecret: typeof read.json.client_secret === 'string' ? read.json.client_secret : null,
+        tokenEndpointAuthMethod: typeof read.json.token_endpoint_auth_method === 'string'
+            ? read.json.token_endpoint_auth_method
+            : (read.json.client_secret ? 'client_secret_post' : 'none'),
     };
 }
 
@@ -375,25 +405,32 @@ async function postToken(tokenEndpoint, params, { clientId, clientSecret }) {
     if (clientSecret) body.set('client_secret', clientSecret);
 
     let response;
+    let read;
     try {
-        response = await axios.post(tokenEndpoint, body.toString(), {
+        response = await request(tokenEndpoint, {
+            method: 'POST',
+            body,
             timeout: TOKEN_TIMEOUT_MS,
-            maxRedirects: 0,
-            maxContentLength: MAX_METADATA_BYTES,
+            // As in `registerClient`: this request carries the client secret and
+            // the PKCE verifier, so it goes to the endpoint the discovery
+            // document named or nowhere.
+            redirect: 'manual',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 Accept: 'application/json',
                 'User-Agent': USER_AGENT,
             },
-            validateStatus: () => true,
-            ...guardedAgents(),
+            dispatcher: guardedDispatcher(),
         });
+        read = await readBody(response);
     } catch (err) {
         throw new OAuthError(`token request failed: ${err.message}`, { code: err.code || null });
     }
 
-    const data = response.data && typeof response.data === 'object' ? response.data : {};
-    if (response.status >= 400) {
+    const data = read.json || {};
+    // 3xx as well as 4xx and 5xx: a redirect is not followed here, and a token
+    // endpoint that answers one has not issued a token.
+    if (response.status >= 300) {
         const detail = data.error_description || data.error || `HTTP ${response.status}`;
         throw new OAuthError(`the authorization server refused the token request: ${detail}`, {
             status: response.status,

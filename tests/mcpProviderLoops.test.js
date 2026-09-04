@@ -21,8 +21,6 @@ jest.mock('openai', () => class {
     }
 });
 
-jest.mock('axios');
-
 const mockSendMessage = jest.fn();
 const mockSendMessageStream = jest.fn();
 const mockGetHistory = jest.fn(() => [{ role: 'user', parts: [{ text: 'earlier' }] }]);
@@ -37,13 +35,18 @@ jest.mock('@google/genai', () => ({
     }
 }));
 
-const { Readable } = require('stream');
-const axios = require('axios');
 const openai = require('../src/services/ai/providers/openai');
 const openrouter = require('../src/services/ai/providers/openrouter');
 const ollama = require('../src/services/ai/providers/ollama');
 const gemini = require('../src/services/ai/providers/gemini');
 const { MAX_TOOL_ROUNDS } = require('../src/services/ai/mcp/toolkit');
+const { installHttpMock } = require('./helpers/httpMock');
+const { gates } = require('./helpers/deferred');
+const { response, jsonResponse } = require('./helpers/fetchResponse');
+
+// Ollama is the one provider here reached over plain HTTP rather than through a
+// vendor SDK, so it is the one whose wire calls are asserted directly.
+let http;
 
 const REQ = {
     apiKey: 'k',
@@ -82,6 +85,9 @@ beforeEach(() => {
     // reset, not clear: these tests queue one-shot responses, and a queue left
     // over from a case that consumed fewer than it queued would answer the next.
     jest.resetAllMocks();
+    // After the reset, not before: `resetAllMocks` strips the implementation
+    // off the `fetch` spy along with everything else.
+    http = installHttpMock();
     mockToolkitFor.mockResolvedValue(TOOLKIT);
     mockCall.mockResolvedValue('clawdia, 3 open PRs');
     mockGetHistory.mockReturnValue([{ role: 'user', parts: [{ text: 'earlier' }] }]);
@@ -172,20 +178,23 @@ describe('openai', () => {
             ]))
             .mockResolvedValueOnce(ANSWER_STREAM());
 
-        let inFlight = 0;
-        let peak = 0;
+        // Both calls are held until the test has seen both start, so "they ran
+        // at the same time" is established rather than timed; then the *second*
+        // is released first, so a result order that still matches the call
+        // order is ordering and not luck (#949).
+        const calls = gates(['a', 'b']);
         mockCall.mockImplementation(async (_name, args) => {
-            peak = Math.max(peak, ++inFlight);
-            // The first call is the slow one, so a result order that still
-            // matches the call order is ordering and not luck.
-            await new Promise(resolve => setTimeout(resolve, args.q === 'a' ? 10 : 1));
-            inFlight--;
+            calls.started[args.q].resolve();
+            await calls.finish[args.q].promise;
             return `result for ${args.q}`;
         });
 
-        await collect(openai.stream(REQ));
+        const streamed = collect(openai.stream(REQ));
+        await calls.allStarted();
+        calls.finish.b.resolve();
+        calls.finish.a.resolve();
+        await streamed;
 
-        expect(peak).toBe(2);
         expect(mockCreate.mock.calls[1][0].messages.slice(-2)).toEqual([
             { role: 'tool', tool_call_id: 'call_1', content: 'result for a' },
             { role: 'tool', tool_call_id: 'call_2', content: 'result for b' }
@@ -267,7 +276,7 @@ describe('openrouter', () => {
 // ── Ollama ──────────────────────────────────────────────────────────────────
 
 function ndjson(lines) {
-    return { data: Readable.from(lines.map(line => `${JSON.stringify(line)}\n`)) };
+    return response(lines.map(line => `${JSON.stringify(line)}\n`));
 }
 
 // Functions, not constants: a stream can only be read once.
@@ -283,17 +292,17 @@ const OLLAMA_ANSWER = () => ndjson([
 
 describe('ollama', () => {
     test('offers the tools and feeds the result back as a tool message', async () => {
-        axios.post
+        http.post
             .mockResolvedValueOnce(OLLAMA_TOOL_CALL())
             .mockResolvedValueOnce(OLLAMA_ANSWER());
 
         const pieces = await collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434' }));
 
-        expect(axios.post.mock.calls[0][1].tools).toHaveLength(1);
+        expect(http.post.mock.calls[0][1].tools).toHaveLength(1);
         expect(mockCall).toHaveBeenCalledWith('github__search_repositories', { q: 'clawdia' });
         expect(pieces.join('')).toBe('Three open PRs.');
 
-        const second = axios.post.mock.calls[1][1].messages;
+        const second = http.post.mock.calls[1][1].messages;
         expect(second.at(-1)).toEqual({
             role: 'tool',
             tool_name: 'github__search_repositories',
@@ -304,7 +313,7 @@ describe('ollama', () => {
     test('runs a round\'s calls at the same time, keeping the results in order', async () => {
         // Older Ollama builds ignore tool_name and match a result to its call
         // by position, so the order the results are appended in is load-bearing.
-        axios.post
+        http.post
             .mockResolvedValueOnce(ndjson([
                 { message: { tool_calls: [
                     { function: { name: 'github__search_repositories', arguments: { q: 'a' } } },
@@ -314,26 +323,29 @@ describe('ollama', () => {
             ]))
             .mockResolvedValueOnce(OLLAMA_ANSWER());
 
-        let inFlight = 0;
-        let peak = 0;
+        // Held until both have started, then released back to front — see the
+        // OpenAI case above for why that is the shape (#949).
+        const calls = gates(['a', 'b']);
         mockCall.mockImplementation(async (_name, args) => {
-            peak = Math.max(peak, ++inFlight);
-            await new Promise(resolve => setTimeout(resolve, args.q === 'a' ? 10 : 1));
-            inFlight--;
+            calls.started[args.q].resolve();
+            await calls.finish[args.q].promise;
             return `result for ${args.q}`;
         });
 
-        await collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434' }));
+        const streamed = collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434' }));
+        await calls.allStarted();
+        calls.finish.b.resolve();
+        calls.finish.a.resolve();
+        await streamed;
 
-        expect(peak).toBe(2);
-        expect(axios.post.mock.calls[1][1].messages.slice(-2)).toEqual([
+        expect(http.post.mock.calls[1][1].messages.slice(-2)).toEqual([
             { role: 'tool', tool_name: 'github__search_repositories', content: 'result for a' },
             { role: 'tool', tool_name: 'github__search_repositories', content: 'result for b' }
         ]);
     });
 
     test('accepts arguments sent as JSON text as well as an object', async () => {
-        axios.post
+        http.post
             .mockResolvedValueOnce(ndjson([
                 { message: { tool_calls: [{ function: { name: 'github__search_repositories', arguments: '{"q":"clawdia"}' } }] } },
                 { done: true }
@@ -345,7 +357,7 @@ describe('ollama', () => {
     });
 
     test('sums the token counts across rounds', async () => {
-        axios.post
+        http.post
             .mockResolvedValueOnce(OLLAMA_TOOL_CALL())
             .mockResolvedValueOnce(OLLAMA_ANSWER());
 
@@ -356,16 +368,16 @@ describe('ollama', () => {
 
     test('sends no tools field when there is nothing to offer', async () => {
         mockToolkitFor.mockResolvedValue(null);
-        axios.post.mockResolvedValueOnce(OLLAMA_ANSWER());
+        http.post.mockResolvedValueOnce(OLLAMA_ANSWER());
 
         await collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434' }));
-        expect(axios.post.mock.calls[0][1]).not.toHaveProperty('tools');
+        expect(http.post.mock.calls[0][1]).not.toHaveProperty('tools');
     });
 
     test('runs the same loop without streaming', async () => {
-        axios.post
-            .mockResolvedValueOnce({ data: { message: { content: '', tool_calls: [{ function: { name: 'github__search_repositories', arguments: { q: 'clawdia' } } }] }, prompt_eval_count: 100, eval_count: 20 } })
-            .mockResolvedValueOnce({ data: { message: { content: 'Three open PRs.' }, prompt_eval_count: 300, eval_count: 10 } });
+        http.post
+            .mockResolvedValueOnce(jsonResponse({ message: { content: '', tool_calls: [{ function: { name: 'github__search_repositories', arguments: { q: 'clawdia' } } }] }, prompt_eval_count: 100, eval_count: 20 }))
+            .mockResolvedValueOnce(jsonResponse({ message: { content: 'Three open PRs.' }, prompt_eval_count: 300, eval_count: 10 }));
 
         const result = await ollama.complete({ ...REQ, baseUrl: 'http://localhost:11434' });
         expect(result).toEqual({ text: 'Three open PRs.', usage: { inputTokens: 400, outputTokens: 30 } });
@@ -424,18 +436,21 @@ describe('gemini', () => {
             })
             .mockResolvedValueOnce({ text: 'Three open PRs.' });
 
-        let inFlight = 0;
-        let peak = 0;
+        // Held until both have started, then released back to front — see the
+        // OpenAI case above for why that is the shape (#949).
+        const calls = gates(['a', 'b']);
         mockCall.mockImplementation(async (_name, args) => {
-            peak = Math.max(peak, ++inFlight);
-            await new Promise(resolve => setTimeout(resolve, args.q === 'a' ? 10 : 1));
-            inFlight--;
+            calls.started[args.q].resolve();
+            await calls.finish[args.q].promise;
             return `result for ${args.q}`;
         });
 
-        await gemini.complete(REQ);
+        const completed = gemini.complete(REQ);
+        await calls.allStarted();
+        calls.finish.b.resolve();
+        calls.finish.a.resolve();
+        await completed;
 
-        expect(peak).toBe(2);
         expect(mockSendMessage.mock.calls[1][0].message.map(part => part.functionResponse.response.result))
             .toEqual(['result for a', 'result for b']);
     });
@@ -554,7 +569,7 @@ describe('a tool loaded mid-turn', () => {
     });
 
     test('ollama declares it on the round after the load', async () => {
-        axios.post
+        http.post
             .mockResolvedValueOnce(ndjson([
                 { message: { role: 'assistant', content: '', tool_calls: [{ function: { name: 'load_tools', arguments: { names: ['github__create_issue'] } } }] } },
                 { done: true }
@@ -563,8 +578,8 @@ describe('a tool loaded mid-turn', () => {
 
         await collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434' }));
 
-        expect(axios.post.mock.calls[0][1].tools).toHaveLength(1);
-        expect(axios.post.mock.calls[1][1].tools).toHaveLength(2);
+        expect(http.post.mock.calls[0][1].tools).toHaveLength(1);
+        expect(http.post.mock.calls[1][1].tools).toHaveLength(2);
     });
 
     // Anthropic's half of this lives in tests/mcpAnthropicRoute.test.js,
@@ -690,7 +705,7 @@ describe('a preamble and the answer after it', () => {
     });
 
     test('ollama keeps them apart while streaming', async () => {
-        axios.post
+        http.post
             .mockResolvedValueOnce(ndjson([
                 { message: { content: 'Let me look.' } },
                 { message: { tool_calls: [{ function: { name: 'github__search_repositories', arguments: { q: 'x' } } }] } },
@@ -703,7 +718,7 @@ describe('a preamble and the answer after it', () => {
     });
 
     test('ollama adds nothing when the round before said nothing', async () => {
-        axios.post
+        http.post
             .mockResolvedValueOnce(OLLAMA_TOOL_CALL())
             .mockResolvedValueOnce(OLLAMA_ANSWER());
 

@@ -23,15 +23,23 @@ jest.mock('discord.js', () => ({
     PermissionFlagsBits: { SendMessages: 1n << 11n },
 }));
 
-jest.mock('axios');
 jest.mock('node-cron', () => ({
     schedule: jest.fn(() => ({ stop: jest.fn() })),
 }));
 jest.mock('../src/models/Guild');
 
-const axios = require('axios');
 const cron = require('node-cron');
+const { jsonResponse, textResponse } = require('./helpers/fetchResponse');
 const Guild = require('../src/models/Guild');
+
+// Both lookups are plain `fetch` calls to fixed public endpoints, so there is
+// nothing to intercept below the client — the global is the seam. A fresh
+// `Response` per call, because a body can only be read once and several tests
+// here trigger two lookups.
+let fetchMock;
+beforeEach(() => { fetchMock = jest.spyOn(globalThis, 'fetch'); });
+afterEach(() => fetchMock.mockRestore());
+
 const {
     lookupVerse,
     getDailyVerse,
@@ -111,28 +119,35 @@ describe('lookupVerse', () => {
     afterEach(() => jest.clearAllMocks());
 
     test('returns verse data on success', async () => {
-        axios.get.mockResolvedValue({ data: { text: 'For God so loved…', reference: 'John 3:16', translation_name: 'KJV' } });
+        fetchMock.mockImplementation(async () => jsonResponse({ text: 'For God so loved…', reference: 'John 3:16', translation_name: 'KJV' }));
         const result = await lookupVerse('John 3:16');
         expect(result.text).toBe('For God so loved…');
         expect(result.reference).toBe('John 3:16');
     });
 
     test('returns null when API returns an error field', async () => {
-        axios.get.mockResolvedValue({ data: { error: 'not found' } });
+        fetchMock.mockImplementation(async () => jsonResponse({ error: 'not found' }));
         const result = await lookupVerse('Fake 1:1');
         expect(result).toBeNull();
     });
 
     test('returns null on network failure', async () => {
-        axios.get.mockRejectedValue(new Error('Network error'));
+        fetchMock.mockRejectedValue(new Error('Network error'));
         const result = await lookupVerse('John 3:16');
         expect(result).toBeNull();
     });
 
+    // axios threw for a 4xx and this was caught; `fetch` hands the error page
+    // back as an ordinary response, so the status is checked explicitly (#932).
+    test('returns null on an HTTP error rather than reading the error page', async () => {
+        fetchMock.mockImplementation(async () => textResponse('Not Found', 404));
+        expect(await lookupVerse('Fake 1:1')).toBeNull();
+    });
+
     test('passes translation to API URL', async () => {
-        axios.get.mockResolvedValue({ data: { text: 'text', reference: 'John 3:16', translation_name: 'ASV' } });
+        fetchMock.mockImplementation(async () => jsonResponse({ text: 'text', reference: 'John 3:16', translation_name: 'ASV' }));
         await lookupVerse('John 3:16', 'asv');
-        expect(axios.get.mock.calls[0][0]).toContain('translation=asv');
+        expect(fetchMock.mock.calls[0][0]).toContain('translation=asv');
     });
 });
 
@@ -144,21 +159,24 @@ describe('getDailyVerse', () => {
     afterEach(() => jest.clearAllMocks());
 
     test('returns verse on success', async () => {
-        axios.get.mockResolvedValue({
-            data: { verse: { details: { text: 'The Lord is my shepherd', reference: 'Psalms 23:1', version: 'KJV' } } }
-        });
+        fetchMock.mockImplementation(async () => jsonResponse({ verse: { details: { text: 'The Lord is my shepherd', reference: 'Psalms 23:1', version: 'KJV' } } }));
         const result = await getDailyVerse();
         expect(result.text).toBe('The Lord is my shepherd');
         expect(result.reference).toBe('Psalms 23:1');
     });
 
     test('returns null when response is malformed', async () => {
-        axios.get.mockResolvedValue({ data: {} });
+        fetchMock.mockImplementation(async () => jsonResponse({}));
         expect(await getDailyVerse()).toBeNull();
     });
 
     test('returns null on network failure', async () => {
-        axios.get.mockRejectedValue(new Error('timeout'));
+        fetchMock.mockRejectedValue(new Error('timeout'));
+        expect(await getDailyVerse()).toBeNull();
+    });
+
+    test('returns null on an HTTP error', async () => {
+        fetchMock.mockImplementation(async () => textResponse('Bad Gateway', 502));
         expect(await getDailyVerse()).toBeNull();
     });
 });
@@ -225,9 +243,7 @@ describe('postDailyVerse — permission guard', () => {
     afterEach(() => jest.clearAllMocks());
 
     test('sends embed when bot has permission', async () => {
-        axios.get.mockResolvedValue({
-            data: { verse: { details: { text: 'The Lord is my shepherd', reference: 'Psalms 23:1', version: 'KJV' } } }
-        });
+        fetchMock.mockImplementation(async () => jsonResponse({ verse: { details: { text: 'The Lord is my shepherd', reference: 'Psalms 23:1', version: 'KJV' } } }));
         Guild.find.mockResolvedValue([
             { guildId: 'g1', bibleVerse: { enabled: true, channelId: '111', time: '08:00', timezone: 'UTC', translation: 'kjv' } },
         ]);
@@ -245,9 +261,7 @@ describe('postDailyVerse — permission guard', () => {
     });
 
     test('skips send when bot lacks SendMessages permission', async () => {
-        axios.get.mockResolvedValue({
-            data: { verse: { details: { text: 'verse text', reference: 'John 1:1', version: 'KJV' } } }
-        });
+        fetchMock.mockImplementation(async () => jsonResponse({ verse: { details: { text: 'verse text', reference: 'John 1:1', version: 'KJV' } } }));
         Guild.find.mockResolvedValue([
             { guildId: 'g1', bibleVerse: { enabled: true, channelId: '111', time: '08:00', timezone: 'UTC', translation: 'kjv' } },
         ]);

@@ -137,7 +137,17 @@ const run = (message) => messageCreate.execute(message, { user: { id: 'bot1' } }
 
 const { maybeTriggerChatEvent } = require('../src/services/chatEventService');
 
-const tick = ms => new Promise(r => setTimeout(r, ms));
+const { gates } = require('./helpers/deferred');
+
+/**
+ * One turn of the event loop — what a query costs the flow that issued it.
+ *
+ * `setImmediate` rather than a 5ms sleep (#949): the property these tests need
+ * from a round trip is that the flow yields, so a concurrent one can reach its
+ * own read. A duration on top of that is a number the assertions never look at,
+ * and one more thing for a loaded runner to reorder.
+ */
+const roundTrip = () => new Promise(setImmediate);
 
 beforeEach(() => {
     jest.clearAllMocks();
@@ -162,7 +172,7 @@ describe('two messages from the same user', () => {
             // follows. Logging after it would show 'read' happening after a
             // concurrent flow's save and hide the interleaving entirely.
             order.push('read');
-            await tick(5);
+            await roundTrip();
             const doc = makeUserDoc();
             const save = doc.save;
             doc.save = jest.fn(async () => { order.push('save'); return save(); });
@@ -191,7 +201,7 @@ describe('two messages from the same user', () => {
             // the await would let a concurrent flow's write land first and be
             // picked up, and no amount of racing would ever lose anything.
             const snapshot = { ...stored };
-            await tick(5);
+            await roundTrip();
             const doc = makeUserDoc(snapshot);
             const save = doc.save;
             doc.save = jest.fn(async () => {
@@ -231,12 +241,20 @@ describe('two messages from the same user', () => {
 
     test('messages from different users are not queued behind each other', async () => {
         const order = [];
+        // Each write is held open until the *other* one has started, so the
+        // overlap is established rather than inferred from a 10ms write
+        // outlasting whatever the other flow was doing (#949). A lock keyed any
+        // coarser than per-user never gets both writes in flight, and this
+        // waits for something that will not happen rather than reporting a
+        // plausible-looking order.
+        const writes = gates(['author1', 'author2']);
         User.findOne.mockImplementation(async filter => {
             const doc = makeUserDoc({ userId: filter.userId });
             const save = doc.save;
             doc.save = jest.fn(async () => {
                 order.push(`enter:${filter.userId}`);
-                await tick(10);
+                writes.started[filter.userId].resolve();
+                await writes.finish[filter.userId].promise;
                 order.push(`leave:${filter.userId}`);
                 return save();
             });
@@ -247,11 +265,14 @@ describe('two messages from the same user', () => {
         second.author = { ...second.author, id: 'author2' };
         second.member = { ...second.member, id: 'author2' };
 
-        await Promise.all([run(makeMessage('one')), run(second)]);
+        const both = Promise.all([run(makeMessage('one')), run(second)]);
+        await writes.allStarted();
+        writes.finish.author1.resolve();
+        writes.finish.author2.resolve();
+        await both;
 
-        // The lock is keyed per user, so these two overlap: both writes are in
-        // flight before either finishes. Keying it any coarser — per guild, or
-        // globally — would serialise every message the bot sees.
+        // Both writes were in flight before either finished. Keying the lock
+        // per guild, or globally, would serialise every message the bot sees.
         expect(order).toEqual([
             'enter:author1', 'enter:author2', 'leave:author1', 'leave:author2',
         ]);

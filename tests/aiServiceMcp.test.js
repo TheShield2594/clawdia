@@ -154,14 +154,18 @@ describe('getCompletion — anthropic', () => {
 
     test('leaves the other providers alone', async () => {
         configureServers([{ name: 'one', url: 'https://one.example.com/sse' }]);
-        const axios = require('axios');
-        jest.spyOn(axios, 'post').mockResolvedValue({ data: { message: { content: 'local' } } });
+        const { jsonResponse, payloadOf } = require('./helpers/fetchResponse');
+        const fetchMock = jest.spyOn(globalThis, 'fetch')
+            .mockImplementation(async () => jsonResponse({ message: { content: 'local' } }));
 
-        await expect(getCompletion({ ...BASE, provider: 'ollama', baseUrl: 'http://localhost:11434' }))
-            .resolves.toBe('local');
+        try {
+            await expect(getCompletion({ ...BASE, provider: 'ollama', baseUrl: 'http://localhost:11434' }))
+                .resolves.toBe('local');
 
-        const [, body] = axios.post.mock.calls[0];
-        expect(body).not.toHaveProperty('mcp_servers');
+            expect(payloadOf(fetchMock.mock.calls[0])).not.toHaveProperty('mcp_servers');
+        } finally {
+            fetchMock.mockRestore();
+        }
         expect(create).not.toHaveBeenCalled();
         expect(betaCreate).not.toHaveBeenCalled();
     });

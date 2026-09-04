@@ -38,7 +38,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
     "@google/genai": "^2.18.0",
-    "axios": "^1.19.0",
     "canvas": "^3.2.3",
     "compression": "^1.8.1",
     "connect-mongo": "^6.0.0",
@@ -54,7 +53,8 @@
     "passport": "^0.7.0",
     "passport-oauth2": "^1.8.0",
     "pino": "^9.14.0",
-    "rss-parser": "^3.13.0"
+    "rss-parser": "^3.13.0",
+    "undici": "^6.28.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

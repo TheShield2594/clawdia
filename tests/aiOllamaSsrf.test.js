@@ -1,7 +1,7 @@
 'use strict';
 
 // #559: `ai.ollamaBaseUrl` is a dashboard setting any guild admin can write, and
-// it reached `axios.post` unexamined — the one user-supplied fetch in the bot
+// it reached the HTTP client unexamined — the one user-supplied fetch in the bot
 // that went around safeFeedFetch's guard, with the response echoed back into a
 // Discord channel. From inside the container that is a read primitive against
 // the operator's own network.
@@ -12,9 +12,9 @@
 // nothing about DNS an hour later).
 
 const http = require('http');
-const axios = require('axios');
 
-const { guardedLookup, assertPublicHttpUrl } = require('../src/utils/outboundGuard');
+const { guardedLookup, guardedDispatcher, assertPublicHttpUrl } = require('../src/utils/outboundGuard');
+const { jsonResponse, payloadOf } = require('./helpers/fetchResponse');
 const ollama = require('../src/services/ai/providers/ollama');
 const { validateAiUpdate } = require('../src/dashboard/routes/api/settings');
 
@@ -130,27 +130,26 @@ describe('ollama endpoint policy', () => {
     test("the operator's own endpoint is dialled directly", () => {
         delete process.env.OLLAMA_BASE_URL;
         for (const baseUrl of ['http://localhost:11434', 'http://127.0.0.1:11434/', '']) {
-            const { url, agents } = ollama.resolveEndpoint(baseUrl);
+            const { url, dispatcher } = ollama.resolveEndpoint(baseUrl);
             expect(url).toMatch(/\/api\/chat$/);
-            expect(agents).toEqual({});
+            // Undefined rather than a dispatcher of its own: that is what hands
+            // the request to the global one, which is the point.
+            expect(dispatcher).toBeUndefined();
         }
     });
 
     test('OLLAMA_BASE_URL names an operator endpoint, however private it is', () => {
         process.env.OLLAMA_BASE_URL = 'http://ollama.internal:11434';
-        expect(ollama.resolveEndpoint('http://ollama.internal:11434').agents).toEqual({});
+        expect(ollama.resolveEndpoint('http://ollama.internal:11434').dispatcher).toBeUndefined();
     });
 
     // The attack from the issue: a guild admin points the setting at a host on
     // the compose network. The name is resolved through the guarded resolver,
     // which is where "mongodb" turns out to be private.
-    test('any other endpoint is forced through the guarded resolver', () => {
+    test('any other endpoint is forced through the guarded dispatcher', () => {
         delete process.env.OLLAMA_BASE_URL;
         for (const baseUrl of ['http://mongodb:27017', 'http://localhost:27017', 'https://ollama.example.com']) {
-            const { agents } = ollama.resolveEndpoint(baseUrl);
-            expect(agents.httpAgent).toBeDefined();
-            expect(agents.httpsAgent).toBeDefined();
-            expect(agents.httpAgent.options.lookup).toBe(guardedLookup);
+            expect(ollama.resolveEndpoint(baseUrl).dispatcher).toBe(guardedDispatcher());
         }
     });
 
@@ -169,38 +168,37 @@ describe('ollama endpoint policy', () => {
 });
 
 describe('the provider actually uses the policy', () => {
-    let post;
+    let mockFetch;
     beforeEach(() => {
-        post = jest.spyOn(axios, 'post').mockResolvedValue({ data: { message: { content: 'hi' } } });
+        mockFetch = jest.spyOn(globalThis, 'fetch')
+            .mockImplementation(async () => jsonResponse({ message: { content: 'hi' } }));
     });
-    afterEach(() => post.mockRestore());
+    afterEach(() => mockFetch.mockRestore());
 
     const args = { model: 'llama3.2', systemPrompt: 's', history: [], prompt: 'p', temperature: 0.7, maxTokens: 64 };
 
-    test('complete() sends the guarded agents for a guild-supplied endpoint', async () => {
+    test('complete() sends the guarded dispatcher for a guild-supplied endpoint', async () => {
         await ollama.complete({ ...args, baseUrl: 'http://mongodb:27017' });
 
-        const [url, , config] = post.mock.calls[0];
+        const [url, init] = mockFetch.mock.calls[0];
         expect(url).toBe('http://mongodb:27017/api/chat');
-        expect(config.httpAgent).toBeDefined();
-        expect(config.httpsAgent).toBeDefined();
+        expect(init.dispatcher).toBe(guardedDispatcher());
+        expect(payloadOf(mockFetch.mock.calls[0]).model).toBe('llama3.2');
     });
 
-    test("complete() leaves the operator's endpoint unproxied", async () => {
+    test("complete() leaves the operator's endpoint on the global dispatcher", async () => {
         await ollama.complete({ ...args, baseUrl: 'http://localhost:11434' });
 
-        const [, , config] = post.mock.calls[0];
-        expect(config.httpAgent).toBeUndefined();
-        expect(config.httpsAgent).toBeUndefined();
+        expect(mockFetch.mock.calls[0][1].dispatcher).toBeUndefined();
     });
 
     test('stream() applies the same policy', async () => {
-        post.mockResolvedValue({ data: (async function* () { yield Buffer.from('{"done":true}\n'); })() });
+        mockFetch.mockImplementation(async () => jsonResponse({ done: true }));
 
         // eslint-disable-next-line no-unused-vars
         for await (const _chunk of ollama.stream({ ...args, baseUrl: 'http://attacker.example.com' })) { /* drain */ }
 
-        expect(post.mock.calls[0][2].httpAgent).toBeDefined();
+        expect(mockFetch.mock.calls[0][1].dispatcher).toBe(guardedDispatcher());
     });
 });
 
@@ -217,12 +215,35 @@ describe('end to end: a private endpoint is not connected to', () => {
     });
     afterAll(done => { server.close(() => done()); });
 
-    test('complete() against loopback is refused before the socket opens', async () => {
-        await expect(ollama.complete({
-            baseUrl: `http://127.0.0.1:${port}`,
-            model: 'llama3.2', systemPrompt: 's', history: [], prompt: 'p', temperature: 0.7, maxTokens: 64,
-        })).rejects.toThrow(/private or reserved address/);
+    const args = { model: 'llama3.2', systemPrompt: 's', history: [], prompt: 'p', temperature: 0.7, maxTokens: 64 };
 
+    test('complete() against a literal loopback address is refused before the socket opens', async () => {
+        await expect(ollama.complete({ ...args, baseUrl: `http://127.0.0.1:${port}` }))
+            .rejects.toThrow(/private or reserved address/);
+
+        expect(hits).toBe(0);
+    });
+
+    // The other half, and the one only the dispatcher can catch: a *name* is
+    // not a literal, so `assertPublicHttpUrl` lets it through and the refusal
+    // has to come from the resolver the connection is made with. `localhost` on
+    // any port but the operator's is a guild-supplied endpoint like any other.
+    test('complete() against a name that resolves to loopback is refused at the socket', async () => {
+        await expect(ollama.complete({ ...args, baseUrl: `http://localhost:${port}` }))
+            .rejects.toThrow(/private or reserved address/);
+
+        expect(hits).toBe(0);
+    });
+
+    // Streaming goes through the same dispatcher, and it is the path that
+    // carries the model's answer back into a Discord channel.
+    test('stream() against that name is refused too', async () => {
+        const drain = async () => {
+            // eslint-disable-next-line no-unused-vars
+            for await (const _chunk of ollama.stream({ ...args, baseUrl: `http://localhost:${port}` })) { /* drain */ }
+        };
+
+        await expect(drain()).rejects.toThrow(/private or reserved address/);
         expect(hits).toBe(0);
     });
 });

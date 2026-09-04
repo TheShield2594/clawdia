@@ -39,7 +39,7 @@ const { MAX_TOOL_ROUNDS, TURN_BUDGET_MS } = require('../ai/mcp/toolkit');
  * per-request timeout any provider here sets, plus the tool loop's own budget.
  */
 
-// Ollama's axios timeout, which is the longest per-request ceiling in
+// Ollama's request timeout, which is the longest per-request ceiling in
 // providers/ — the OpenAI and Anthropic SDKs are left on their own defaults and
 // the toolkit's budget below is what actually bounds those turns.
 const PROVIDER_REQUEST_TIMEOUT_MS = 120 * 1000;

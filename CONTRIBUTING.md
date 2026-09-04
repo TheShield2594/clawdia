@@ -73,11 +73,40 @@ applies Jest's global thresholds, and `npm run coverage:check` applies the
 per-directory floors. CI runs both — see [Coverage](#coverage) below.
 `npm run lint:fix` applies what ESLint can fix on its own.
 
+### Formatting
+
 Formatting is `npm run format -- <paths>`, and it takes explicit paths on
-purpose: Prettier's settings match the style the tree is already written in,
-but it has never been run over the whole tree, because that would rewrite
-~45,000 lines and every `git blame` along with them. Run it on the files your
-change already touches, nothing else.
+purpose. Run it on the files your change already touches, read what it did, and
+keep the parts that are improvements.
+
+The tree is deliberately not Prettier-clean, and that is a decision rather than
+a backlog item (#956). A tree-wide run rewrites 849 files — roughly 49,000 lines
+added and 27,000 removed — and the reason it is that large is that Prettier's
+output is *not* the style this tree is written in. It removes the column
+alignment used throughout:
+
+```js
+const THUMB         = 'https://…/1f393.png';    // here
+const TIMER_SECONDS = 30;
+const OPENTDB_URL   = 'https://opentdb.com/api.php';
+
+const THUMB = 'https://…/1f393.png';            // Prettier
+const TIMER_SECONDS = 30;
+const OPENTDB_URL = 'https://opentdb.com/api.php';
+```
+
+and it breaks compact method chains onto one call per line, turning a
+thirteen-entry replace chain from five readable lines into thirteen. Neither is
+something a Prettier option restores; alignment in particular is not a thing it
+preserves at any setting.
+
+`git blame` used to be the stated objection, and it is no longer the real one:
+`.git-blame-ignore-revs` is honoured by both `git blame --ignore-revs-file` and
+GitHub, so a single formatting commit could be made invisible to blame. The
+objection that stands is that the reformat costs readability the tree currently
+has and buys consistency it already has by hand.
+
+So: format the files you touch, and do not run Prettier over the tree.
 
 Some documentation is generated and a test compares it against a fresh render,
 so adding a command or an endpoint turns the suite red until you regenerate:
@@ -127,6 +156,25 @@ Discord's API.
 Mongoose connection or an un-`unref`'d timer hangs at the end of the run instead
 of being silently shot, because the hang is the bug. If your new test hangs the
 run, something it opened is still open.
+
+Nothing sleeps to get its ordering right. A test that makes one operation take
+10ms and another 1ms and then asserts on which finished first is a statement
+about the scheduler, and on a loaded CI runner it is the first thing to break —
+with a failure that looks like a bug in whatever it was testing. Two tools
+instead:
+
+- `tests/helpers/deferred.js` for ordering. `deferred()` is one promise the test
+  settles by hand; `gates(names)` is a `started`/`finish` pair per name, so a
+  test can wait until every operation is genuinely in flight before releasing
+  any of them. Concurrency that is required then *hangs* when it is missing,
+  rather than passing on a timing coincidence.
+- `jest.useFakeTimers()` for anything about a clock — a deadline, a TTL, a
+  retry window — with `jest.advanceTimersByTimeAsync()` to step over it. Where a
+  test also depends on real stream or socket delivery, fake only the clock:
+  `jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] })`.
+
+`await new Promise(setImmediate)` is fine, and is not a sleep: it yields one
+turn of the event loop, which is what an awaited round trip actually costs.
 
 ### Coverage
 

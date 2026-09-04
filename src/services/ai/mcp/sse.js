@@ -1,7 +1,7 @@
 'use strict';
 
-const axios = require('axios');
-const { guardedAgents, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { guardedDispatcher, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { fetchHeaders, bodyStream } = require('../../../utils/httpFetch');
 
 /**
  * The MCP transport that came before Streamable HTTP (#838).
@@ -191,30 +191,31 @@ class SseChannel {
     async open() {
         let response;
         try {
-            response = await axios.get(this.url, {
+            // Headers only, which is the whole point: the body is the session
+            // and must not be on a clock.
+            response = await fetchHeaders(this.url, {
                 headers: { ...this.headers(), Accept: 'text/event-stream' },
-                responseType: 'stream',
-                // Headers only, which is the whole point: the body is the
-                // session and must not be on a clock.
                 timeout: ENDPOINT_TIMEOUT_MS,
-                maxRedirects: 3,
-                validateStatus: () => true,
-                ...guardedAgents(),
+                dispatcher: guardedDispatcher(),
             });
         } catch (err) {
             throw new Error(err.message || 'could not open the event stream', { cause: err });
         }
 
+        // A non-2xx is read as a status rather than thrown, which `fetch` gives
+        // for free; the body is cancelled either way so the socket is released
+        // rather than left holding a page nobody reads.
+        const stream = bodyStream(response);
         if (response.status >= 400) {
-            response.data?.destroy?.();
+            stream.destroy();
             throw new Error(`HTTP ${response.status} opening the event stream`);
         }
-        if (!String(response.headers['content-type'] || '').includes('text/event-stream')) {
-            response.data?.destroy?.();
+        if (!String(response.headers.get('content-type') || '').includes('text/event-stream')) {
+            stream.destroy();
             throw new Error('the server did not answer the event stream with text/event-stream');
         }
 
-        this.stream = response.data;
+        this.stream = stream;
 
         return new Promise((resolve, reject) => {
             let settled = false;

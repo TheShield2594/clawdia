@@ -33,6 +33,7 @@ jest.mock('../src/services/ai/mcp/client', () => {
 });
 
 const { McpError } = require('../src/services/ai/mcp/client');
+const { deferred, gates } = require('./helpers/deferred');
 const {
     prepareMcpToolkit,
     toolkitFor,
@@ -399,36 +400,50 @@ describe('parallel discovery', () => {
     test('dials every server at once rather than one after another', async () => {
         // Serially this was a handshake per server before the model saw a
         // token, and one slow server held up every other server's tools.
-        let inFlight = 0;
-        let peak = 0;
+        //
+        // Every handshake is held until all three have started, so nothing here
+        // completes before the others begin (#949). Serial discovery cannot
+        // reach that point at all — it waits on the first, which is waiting on
+        // the third to start — so the test times out rather than passing on a
+        // peak counter that a fast enough sequence could also reach.
+        const dials = gates(['a', 'b', 'c']);
+        const names = ['a', 'b', 'c'];
+        let next = 0;
         mockListTools.mockImplementation(async () => {
-            peak = Math.max(peak, ++inFlight);
-            await new Promise(resolve => setTimeout(resolve, 5));
-            inFlight--;
+            const name = names[next++];
+            dials.started[name].resolve();
+            await dials.finish[name].promise;
             return [{ name: 'ask' }];
         });
 
-        await prepareMcpToolkit([
-            { ...GITHUB, name: 'a', url: 'https://a.example.com/mcp' },
-            { ...GITHUB, name: 'b', url: 'https://b.example.com/mcp' },
-            { ...GITHUB, name: 'c', url: 'https://c.example.com/mcp' }
-        ]);
+        const discovery = prepareMcpToolkit(names.map(name => ({
+            ...GITHUB, name, url: `https://${name}.example.com/mcp`,
+        })));
 
-        expect(peak).toBe(3);
+        await dials.allStarted();
+        for (const name of names) dials.finish[name].resolve();
+        await discovery;
     });
 
     test('names tools in the configured order however the servers answer', async () => {
         // Otherwise a server that happens to be slow this minute renames
         // another server's tools between one message and the next, and the
         // model is handed a function list that moved under it.
+        // "Slow" is a promise the test settles second, not one that sleeps
+        // 10ms and hopes that is longer than the other took (#949).
+        const slow = deferred();
         mockListTools
-            .mockReturnValueOnce(new Promise(resolve => setTimeout(() => resolve([{ name: 'ask' }]), 10)))
+            .mockReturnValueOnce(slow.promise)
             .mockResolvedValueOnce([{ name: 'ask' }]);
 
-        const toolkit = await prepareMcpToolkit([
+        const discovery = prepareMcpToolkit([
             { ...GITHUB, name: 'slow', url: 'https://slow.example.com/mcp' },
             { ...GITHUB, name: 'fast', url: 'https://fast.example.com/mcp' }
         ]);
+        // A turn of the event loop for the second server to answer first.
+        await new Promise(setImmediate);
+        slow.resolve([{ name: 'ask' }]);
+        const toolkit = await discovery;
 
         expect(toolkit.definitions.map(d => d.name)).toEqual(['slow__ask', 'fast__ask']);
         expect(toolkit.servers).toEqual(['slow', 'fast']);
