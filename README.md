@@ -212,10 +212,9 @@ route or a model in the first place.
 
 [#916]: https://github.com/TheShield2594/clawdia/issues/916
 
-`npm run format` takes explicit paths on purpose. Prettier's settings match the
-style the tree is already written in, but it has never been applied wholesale —
-doing that rewrites ~45,000 lines and every `git blame` with them — so run it on
-the files a change already touches.
+`npm run format` takes explicit paths on purpose, and the tree is deliberately
+not Prettier-clean — see [Formatting](CONTRIBUTING.md#formatting) for why. Run
+it on the files a change already touches, and read the diff before keeping it.
 
 ## Configuration
 
