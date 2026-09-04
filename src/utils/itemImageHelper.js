@@ -11,34 +11,38 @@ const { AttachmentBuilder } = require('discord.js');
  * should pass it: activity images (hunt/fish/mine) are per guild since #561,
  * and a lookup without one can only find the shared pre-#561 image.
  *
- * Three places are checked, most specific first: the guild's own shop item,
+ * Three places are checked, most specific first: the guild's own shop image,
  * then that guild's activity image, then the shared image left over from when
- * the collection was global.
+ * the collection was global. All three are rows in `itemimages` since #888 —
+ * the first used to be a scan of the guild settings document's shop array,
+ * which meant loading every other item's Buffer to find one of them.
  */
 async function getItemImageAttachment(itemId, guildId = null, { label } = {}) {
     const ItemImage = require('../models/ItemImage');
-    let imageData = null;
-    let imageType = 'image/png';
+    const { shopImageId } = require('../models/itemImageKeys');
 
-    const take = source => {
-        if (!source?.imageData?.length) return false;
-        imageData = source.imageData;
-        imageType = source.imageType || 'image/png';
-        return true;
-    };
+    // All three candidates are rows in one collection, so they are one query
+    // rather than up to three round trips resolved in precedence order. The
+    // shared pre-#561 row is only ever an activity id; a `shop:` key is always
+    // this guild's own.
+    const candidates = guildId
+        ? await ItemImage.find({
+            guildId: { $in: [guildId, null] },
+            itemId: { $in: [shopImageId(itemId), itemId] },
+        })
+        : await ItemImage.find({ guildId: null, itemId });
 
-    if (guildId) {
-        const Guild = require('../models/Guild');
-        const guild = await Guild.findOne({ guildId }, { shop: 1 });
-        const shopItem = guild?.shop?.find(i => i.itemId === itemId);
-        take(shopItem);
+    // Most specific first: this guild's shop image, then its activity image,
+    // then the shared one.
+    const rank = doc => (doc.itemId !== itemId ? 0 : doc.guildId != null ? 1 : 2);
+    const best = [...candidates]
+        .filter(doc => doc?.imageData?.length)
+        .sort((a, b) => rank(a) - rank(b))[0];
 
-        if (!imageData) take(await ItemImage.findOne({ guildId, itemId }));
-    }
+    if (!best) return null;
 
-    if (!imageData) take(await ItemImage.findOne({ guildId: null, itemId }));
-
-    if (!imageData) return null;
+    const imageData = best.imageData;
+    const imageType = best.imageType || 'image/png';
 
     const ext = (imageType.split('/')[1] || 'png').replace('jpeg', 'jpg');
     // itemId may contain characters (e.g. the `system:slug` colon used by

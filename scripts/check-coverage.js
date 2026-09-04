@@ -51,7 +51,18 @@
  *      `--update` prunes nothing on its own: dropping one is a hand edit, which
  *      is the reviewable diff that says a file grew tests.
  *
- *   4. Per-file floors, for the few files where a directory floor is too coarse
+ *   4. A record of the floors that are zero, which is a floor that guards
+ *      nothing (#907). A directory whose branch coverage measures 0.9% gets a
+ *      floor of 0 from the rule above, and 0 is satisfied by every possible
+ *      state — including that subsystem's branch coverage going to nothing at
+ *      all. Deleting every branch test under `economy/fish` passed. So a zero
+ *      floor is recorded by name in `unguarded`, on the same terms as list 2:
+ *      it may shrink and it must not grow. A subsystem that slides to zero
+ *      fails the run instead of quietly acquiring a floor that means nothing,
+ *      and the ones that are already there are a short list somebody can read
+ *      rather than five zeroes among a hundred and fifty numbers.
+ *
+ *   5. Per-file floors, for the few files where a directory floor is too coarse
  *      to say anything. `src/utils` is seventy-odd files, so three points of
  *      directory slack is room enough for one of them to lose its coverage
  *      outright; the money primitives under it are few enough to list by hand
@@ -162,6 +173,39 @@ function inertFiles(files) {
         .sort();
 }
 
+/**
+ * How much there is to measure in each directory, per metric.
+ *
+ * A percentage cannot tell "0% of 400 branches" from "0% of nothing": a
+ * directory of constant tables has no branch to cover and a floor of 0 on it is
+ * the only honest number, while the same 0 on a directory of command handlers is
+ * the hole #907 is about. The denominator is what separates them.
+ */
+function denominators(files, directories) {
+    return Object.fromEntries(directories.map(dir => [
+        dir,
+        Object.fromEntries(METRICS.map(metric => [
+            metric,
+            [...files.entries()]
+                .filter(([file]) => dirOf(file) === dir)
+                .reduce((sum, [, entry]) => sum + entry[metric].total, 0),
+        ])),
+    ]));
+}
+
+/**
+ * The directory/metric pairs whose floor would be zero — a floor that guards
+ * nothing — over the directories that have something to measure.
+ */
+function unguardedFloors(directories, totals) {
+    const out = {};
+    for (const [dir, required] of Object.entries(directories)) {
+        const metrics = METRICS.filter(m => required[m] === 0 && (totals[dir]?.[m] ?? 0) > 0);
+        if (metrics.length) out[dir] = metrics;
+    }
+    return out;
+}
+
 function measure(files, directories) {
     return Object.fromEntries(directories.map(dir => [
         dir,
@@ -211,9 +255,15 @@ function update(files, floors) {
         ...inertFiles(files).filter(file => !integrationOnly.has(file)),
     ]);
 
+    // Recomputed rather than carried over, the way `neverExecuted` is: a floor
+    // that rose above zero must lose its entry, or the entry is standing
+    // permission for it to fall back.
+    const unguarded = unguardedFloors(directories, denominators(files, directoriesIn(files)));
+
     const next = {
         ...floors,
         directories,
+        unguarded,
         files: perFile,
         neverExecuted: zeroCoverageFiles(files).filter(file => !integrationOnly.has(file)),
         loadedButNeverRun: [...inert].sort(),
@@ -247,6 +297,43 @@ function check(files, floors) {
                     `${dir} ${metric} ${actual.toFixed(2)}% is below its floor of ${required[metric]}%`
                 );
             }
+        }
+    }
+
+    // A floor of 0 is satisfied by any state at all, so the directories carrying
+    // one are exactly the ones with no safety net — and they were the ones with
+    // the least coverage, which is where a net is worth most (#907). They are
+    // named in `unguarded` instead: the list may shrink and must not grow, so a
+    // subsystem sliding to zero fails here rather than quietly being floored at
+    // a number that cannot fail.
+    const totals = denominators(files, directoriesIn(files));
+    const shouldBeUnguarded = unguardedFloors(floors.directories, totals);
+    const recordedUnguarded = floors.unguarded ?? {};
+
+    for (const [dir, metrics] of Object.entries(shouldBeUnguarded)) {
+        if (!measured[dir]) continue;
+        const recorded = recordedUnguarded[dir] ?? [];
+        const unrecorded = metrics.filter(m => !recorded.includes(m));
+        if (unrecorded.length) {
+            failures.push(
+                `${dir} has a floor of 0 for ${unrecorded.join(', ')}, which guards nothing — ` +
+                'add tests to raise it, or record it under `unguarded` in coverage-floors.json'
+            );
+        }
+    }
+    for (const [dir, metrics] of Object.entries(recordedUnguarded)) {
+        if (!measured[dir]) {
+            failures.push(`${dir} is recorded as unguarded but was not measured — drop it`);
+            continue;
+        }
+        // An entry whose floor is no longer zero is permission to let it fall
+        // back to zero, which is the state it was recorded to make visible.
+        const stale = metrics.filter(m => !(shouldBeUnguarded[dir] ?? []).includes(m));
+        if (stale.length) {
+            failures.push(
+                `${dir} is recorded as unguarded for ${stale.join(', ')} but has a real floor now — ` +
+                'drop those from `unguarded` in coverage-floors.json'
+            );
         }
     }
 
@@ -376,5 +463,6 @@ if (require.main === module) main();
 
 module.exports = {
     aggregate, check, update, zeroCoverageFiles, inertFiles, measure, directoriesIn, dirOf,
+    denominators, unguardedFloors,
     METRICS, SLACK, FLOORS_PATH,
 };

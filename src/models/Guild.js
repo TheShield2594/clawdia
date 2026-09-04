@@ -537,8 +537,14 @@ const guildSchema = new Schema({
         price: { type: Number, required: true },
         roleId: { type: String, default: null },
         stock:     { type: Number, default: -1 },
-        imageData: { type: Buffer, default: null },
-        imageType: { type: String, default: 'image/png' },
+        // The item's artwork is NOT here (#888). It used to be: `imageData` was
+        // a Buffer of up to 512 KB on this subdocument, in an array with no
+        // bound, inside the document every cached settings read pulls. That put
+        // a guild's illustrated shop on a path to the 16 MB BSON ceiling, made
+        // the upload route rewrite the whole document, and left every reader
+        // owing a projection it could forget. Images live in the `ItemImage`
+        // collection now, keyed `{ guildId, 'shop:<itemId>' }` beside the
+        // activity images — see models/itemImageKeys.js and migration 022.
         createdAt: { type: Date, default: null },
         // ── Dynamic pricing (issue #354) ──
         // basePrice is the canonical anchor; currentPrice is what buyers actually pay.

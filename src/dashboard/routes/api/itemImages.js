@@ -4,6 +4,7 @@ const multer = require('multer');
 const ItemImage = require('../../../models/ItemImage');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isActivityItemId } = require('../../../data/activityItems');
+const { shopImageId } = require('../../../models/itemImageKeys');
 
 // M4: Validate image files by magic bytes rather than trusting the client-supplied
 // MIME type. Prevents disguised file uploads (e.g. PHP named as image/jpeg).
@@ -54,31 +55,63 @@ function uploadImage(req, res, next) {
 // and an item id could read that guild's uploaded artwork.
 router.get('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
     try {
-        const guild = await require('../../../models/Guild').findOne({ guildId: req.params.guildId }, { shop: 1 });
-        const item = guild?.shop?.find(i => i.itemId === req.params.itemId);
-        if (!item?.imageData?.length) return res.status(404).end();
-        res.set('Content-Type', item.imageType || 'image/png');
+        // One keyed lookup on `{ guildId, itemId }` against a document holding
+        // one image, rather than a read of the whole guild settings document to
+        // find one element of its shop array (#888).
+        const img = await ItemImage.findOne({
+            guildId: req.params.guildId,
+            itemId: shopImageId(req.params.itemId),
+        });
+        if (!img?.imageData?.length) return res.status(404).end();
+        res.set('Content-Type', img.imageType || 'image/png');
         // `private`: the response is scoped to a session now, so it may sit in
         // the requesting browser's cache but not in a shared one.
         res.set('Cache-Control', 'private, max-age=86400');
-        res.send(item.imageData);
+        res.send(img.imageData);
     } catch { res.status(500).end(); }
 });
 
+/**
+ * Whether this guild's shop carries an item with this id.
+ *
+ * Still checked, and for the same reason the activity routes check their id
+ * against the catalog: without it the collection accepts any id at all, at
+ * 512 KB and 60 writes a minute. A guild's shop is its own catalog, so it is
+ * what bounds this half.
+ *
+ * Read under a projection naming the one field, which is the shape the whole
+ * issue is about — the previous version pulled the entire settings document,
+ * every shop image Buffer included, to answer this question.
+ */
+async function shopHasItem(guildId, itemId) {
+    const guild = await require('../../../models/Guild')
+        .findOne({ guildId, 'shop.itemId': itemId }, { _id: 1 })
+        .lean();
+    return Boolean(guild);
+}
+
 // Stores the image shown for a guild shop item, replacing any existing one.
+//
+// A targeted upsert on one small document (#888). It used to load the whole
+// guild settings document, set a Buffer on one element of its shop array and
+// `guild.save()` the lot back — which raced every concurrent settings write,
+// since the document it wrote was the one it had read before that write landed.
 router.post('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, uploadImage, async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image file provided' });
     // M4: Verify file contents match a known image signature.
     const detectedType = detectImageType(req.file.buffer);
     if (!detectedType) return res.status(400).json({ error: 'Invalid image file: unrecognized format' });
+    const { guildId, itemId } = req.params;
     try {
-        const guild = await require('../../../models/Guild').findOne({ guildId: req.params.guildId });
-        if (!guild) return res.status(404).json({ error: 'Guild not found' });
-        const item = guild.shop.find(i => i.itemId === req.params.itemId);
-        if (!item) return res.status(404).json({ error: 'Shop item not found' });
-        item.imageData = req.file.buffer;
-        item.imageType = detectedType; // use detected type, not client-supplied MIME
-        await guild.save();
+        if (!await shopHasItem(guildId, itemId)) {
+            return res.status(404).json({ error: 'Shop item not found' });
+        }
+        await ItemImage.findOneAndUpdate(
+            { guildId, itemId: shopImageId(itemId) },
+            // The detected type, not the client-supplied MIME.
+            { imageData: req.file.buffer, imageType: detectedType, updatedAt: new Date() },
+            { upsert: true }
+        );
         res.json({ success: true });
     } catch (err) {
         console.error('Shop item image upload error:', err);
@@ -87,14 +120,17 @@ router.post('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, ch
 });
 
 // Removes a guild shop item's image.
+//
+// A delete of the image document, not a `null` written into the guild's. An
+// item whose image was never uploaded and one whose image was removed are the
+// same state, and both answer 404 from the GET above.
 router.delete('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId, itemId } = req.params;
     try {
-        const guild = await require('../../../models/Guild').findOne({ guildId: req.params.guildId });
-        if (!guild) return res.status(404).json({ error: 'Guild not found' });
-        const item = guild.shop.find(i => i.itemId === req.params.itemId);
-        if (!item) return res.status(404).json({ error: 'Shop item not found' });
-        item.imageData = null;
-        await guild.save();
+        if (!await shopHasItem(guildId, itemId)) {
+            return res.status(404).json({ error: 'Shop item not found' });
+        }
+        await ItemImage.deleteOne({ guildId, itemId: shopImageId(itemId) });
         res.json({ success: true });
     } catch (err) {
         console.error('Shop item image delete error:', err);

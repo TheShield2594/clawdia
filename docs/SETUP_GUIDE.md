@@ -648,11 +648,23 @@ nothing. The bot-wide `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`
 / `OPENROUTER_API_KEY` variables are unaffected either way — they are read from
 the environment and never stored in the database.
 
-Leaving `SECRET_ENCRYPTION_KEY` unset is a supportable choice, and on a
-single-machine install where you control the backup directory it may well be
-the right one. It is just worth making deliberately: the migration logs how many
-keys it is leaving in the clear so the decision shows up on the first boot after
-upgrading.
+The same key covers the MCP OAuth tokens (`Connecting GitHub from the dashboard`
+above). Those are longer-lived than a provider key in one respect that matters:
+a refresh token mints new access tokens on demand, so a month-old backup of one
+is a month-old key to somebody's GitHub.
+
+Leaving `SECRET_ENCRYPTION_KEY` unset keeps working and is not refused at
+startup — encryption shipped opt-in and failing the boot would take down every
+deployment that has not set it. It is no longer silent, though: a
+`NODE_ENV=production` boot without it prints a warning naming what is exposed,
+`.env.example` asks for it beside `SESSION_SECRET`, and migration 018 logs how
+many keys it is leaving in the clear. If you are running on one machine you
+control and you have read the above, it is a defensible choice — just a
+deliberate one.
+
+Encrypting the credentials is the half of this that costs nothing. The other
+half is the archives themselves, which hold everything else the database
+contains — see below.
 
 ## Portainer Deployment
 
@@ -1191,6 +1203,118 @@ A container that was down at 03:00 — a host reboot, an image pull, a stack
 redeploy — no longer skips the day in silence: on boot, if the newest archive is
 over 24 hours old, it dumps immediately rather than waiting.
 
+### Encrypting the Archives
+
+`mongodump --gzip` is compression, not encryption. Every archive in the backup
+directory is a readable copy of the whole database, and thirty days of them sit
+beside the volume the database itself lives in — so "you need database access to
+read this" quietly means "you need read access to `./backups`", which is a much
+lower bar.
+
+Set a passphrase and each archive is sealed with AES-256-CBC (PBKDF2, 200,000
+iterations) and named `clawdia-<timestamp>.gz.enc`:
+
+```bash
+openssl rand -base64 32
+```
+
+```env
+BACKUP_ENCRYPTION_PASSPHRASE=the_generated_value
+```
+
+Recreate the stack and the next run writes a sealed archive. Nothing else
+changes: the retention window prunes `.gz.enc` on the same schedule, the boot
+catch-up counts one as the day's backup, and the healthcheck reads the same
+marker. Existing plain `.gz` archives are left alone and age out normally.
+
+Three things are worth knowing:
+
+- **The dump never touches the archive directory in the clear.** `mongodump`
+  writes into the container's own `/tmp` and only the sealed file is moved into
+  `./backups` — not even for the seconds in between, because that directory
+  being readable is the whole premise.
+- **The archive that is kept is the one that is verified.** Each night's archive
+  is decrypted and then parsed with `mongorestore --dryRun`, so an archive that
+  will not open is found the night it is taken rather than on the day you need
+  it. One that fails either step is quarantined as `.gz.enc.unverified` and does
+  not count as that day's backup.
+- **Keep the passphrase somewhere other than `./backups`.** A passphrase stored
+  beside the archives it protects protects nothing. It is also not recoverable:
+  without it those archives cannot be read, so keep it for at least as long as
+  the oldest archive you would ever restore.
+
+If the passphrase is set and `openssl` is missing from the image, the backup
+container exits at boot rather than writing plaintext — an operator who believes
+the archives are encrypted and gets readable ones is worse off than one who
+never asked.
+
+`scripts/backup.sh`, `scripts/restore.sh` and `scripts/verify-backup.sh` all
+read `BACKUP_ENCRYPTION_PASSPHRASE` from `.env` and handle either form, so the
+commands below are the same whichever way the archives are written.
+
+This is the archive half of the exposure; `SECRET_ENCRYPTION_KEY` ("Encrypting
+stored provider keys" above) is the credential half, and it is the one to set
+first — it is the difference between a leaked archive costing you your own data
+and costing your users their provider bills.
+
+### Off-site Backups
+
+The archives and the database they protect share a host. That covers a bad
+migration, an accidental delete or a botched deploy; it covers nothing about
+losing the machine. A failed disk, a wiped VPS or a mistaken
+`docker volume prune` takes the database *and* every backup of it in one event.
+
+`scripts/offsite-sync.sh` copies the archive directory to any
+[rclone](https://rclone.org/) remote — S3, B2, Backblaze, a box in another
+building, anything rclone speaks:
+
+```bash
+rclone config                                   # once, on the host
+```
+
+```env
+BACKUP_REMOTE=s3:my-bucket/clawdia
+```
+
+```cron
+17 * * * *  cd /opt/clawdia && ./scripts/offsite-sync.sh >> /var/log/clawdia-offsite.log 2>&1
+```
+
+Hourly is plenty — the archives are written once a day — and a failure posts to
+`ERROR_WEBHOOK_URL` like the backup container's own, so a sync that has been
+failing for a month is not something you find out about during the restore.
+
+It is a host script rather than a service in the stack for the same reason
+`verify-backup.sh` is: what it needs — a remote, its credentials, a network path
+off the host — is yours to configure, and a stack service that cannot work until
+you have would just be a container in a crash loop.
+
+Two deliberate choices in it:
+
+- **It copies, it does not mirror.** `rclone sync` would propagate deletions,
+  which sounds right until the thing that empties `./backups` is exactly the
+  event this exists for — and the next run empties the off-site copy too.
+  Expiry belongs to the remote's own lifecycle policy, where deleting is
+  something somebody configured on purpose.
+- **It does not upload unencrypted archives.** Sending a readable copy of the
+  database to a third party is a wider exposure than the one off-site
+  replication closes, not a narrower one. Plaintext archives are skipped with a
+  line saying how many — the bot's own `pre-migration-*.gz` dump has no
+  passphrase to seal it with, so one turns up after every irreversible migration
+  and stays for the retention window, and refusing the whole run over it would
+  take the off-site copy away for a month. A run that would send *nothing* is
+  refused instead, which is what an install with no
+  `BACKUP_ENCRYPTION_PASSPHRASE` gets. Set
+  `BACKUP_REMOTE_ALLOW_PLAINTEXT=true` only when the remote encrypts for you —
+  an rclone `crypt` remote, or a bucket with SSE-KMS.
+
+On a Portainer stack the archives are in a named volume rather than a checkout,
+so point the script at a directory the volume is mounted into, or run the same
+`rclone copy` from a container that mounts it.
+
+Whatever you use, the rule is the same one that applies to the passphrase: the
+off-site copy has to be somewhere that losing this host does not also lose.
+
 ### Backup on Demand
 
 ```bash
@@ -1199,7 +1323,10 @@ over 24 hours old, it dumps immediately rather than waiting.
 
 It uses `mongodump` if it is on `PATH` and otherwise runs it inside the
 `clawdia-mongodb` container, so it works whether or not the host has the mongo
-tools installed.
+tools installed. With `BACKUP_ENCRYPTION_PASSPHRASE` set it seals the archive
+the same way the nightly service does and writes `clawdia-<timestamp>.gz.enc`,
+so a dump taken by hand does not become the one readable copy in a directory of
+encrypted ones.
 
 ### Verify a Backup Restores
 
@@ -1239,7 +1366,12 @@ file to discover. Run it after any change to the backup service too.
 ```bash
 ./scripts/restore.sh ./backups/clawdia-<timestamp>.gz          # merge
 ./scripts/restore.sh ./backups/clawdia-<timestamp>.gz --drop   # clean restore
+./scripts/restore.sh ./backups/clawdia-<timestamp>.gz.enc      # sealed archive
 ```
+
+A `.gz.enc` archive is decrypted into a private temp directory first — never
+beside the archive — and that copy is removed when the script exits, however it
+exits. It needs `BACKUP_ENCRYPTION_PASSPHRASE`, which it reads from `.env`.
 
 Both forms prompt for confirmation first. Verify the archive with
 `scripts/verify-backup.sh` before running this against a live database.
@@ -1293,10 +1425,17 @@ only when the set changes.
 
 - Never share your `.env` file or API keys
 - Use strong session secrets (32+ characters)
-- Set `SECRET_ENCRYPTION_KEY` if server admins enter their own AI provider keys
-  in the dashboard, so the nightly database dumps in `./backups` hold ciphertext
-  rather than live credentials. See
+- Set `SECRET_ENCRYPTION_KEY`. Without it the AI provider keys server admins
+  enter in the dashboard, and the MCP OAuth refresh tokens, are plaintext in the
+  database and in every nightly dump in `./backups` — a rolling month of live
+  credentials that bill someone else's account. A production boot without it
+  warns. See
   [Encrypting stored provider keys](#encrypting-stored-provider-keys)
+- Set `BACKUP_ENCRYPTION_PASSPHRASE` so the archives themselves are ciphertext,
+  not just the credentials inside them. See
+  [Encrypting the Archives](#encrypting-the-archives)
+- Keep a copy of the archives off the host, so losing the machine does not lose
+  the backups with it. See [Off-site Backups](#off-site-backups)
 - Limit bot permissions to only what's needed
 - Regularly update dependencies
 - In Docker, deliver secrets as files rather than environment variables. Anyone

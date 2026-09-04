@@ -39,16 +39,18 @@ describe('getGuildSettings', () => {
         expect(third).toBe(first);
     });
 
-    it('excludes the heavy payloads nothing on the cached paths reads', async () => {
-        // Shop image Buffers (up to 35 × 512 KB per guild) and giveaway
-        // entrant lists would otherwise be pinned for every cached guild.
+    it('excludes the heavy payload nothing on the cached paths reads', async () => {
+        // A giveaway's entrant list runs to thousands of ids and would otherwise
+        // be pinned for every cached guild. Shop image Buffers used to be the
+        // other one; #888 moved them out of this document, so there is no
+        // projection left to forget for them.
         Guild.findOne.mockResolvedValue(makeDoc('g1'));
 
         await getGuildSettings('g1');
 
         const projection = Guild.findOne.mock.calls[0][1];
-        expect(projection).toContain('-shop.imageData');
         expect(projection).toContain('-giveaways.entrantIds');
+        expect(projection).not.toContain('shop.imageData');
     });
 
     it('returns a plain object with no save(), so a caller cannot persist a shared view', async () => {

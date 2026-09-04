@@ -1,36 +1,36 @@
 'use strict';
 
 jest.mock('../src/models/ItemImage', () => ({
-    findOne: jest.fn(),
-}));
-
-jest.mock('../src/models/Guild', () => ({
-    findOne: jest.fn(),
+    find: jest.fn(),
 }));
 
 const ItemImage = require('../src/models/ItemImage');
-const Guild = require('../src/models/Guild');
 const { getItemImageAttachment } = require('../src/utils/itemImageHelper');
+
+/** The rows the one query answers with. */
+const rows = (...docs) => ItemImage.find.mockResolvedValue(docs);
+
+const png = bytes => ({ imageData: Buffer.from(bytes), imageType: 'image/png' });
 
 describe('getItemImageAttachment', () => {
     beforeEach(() => {
-        ItemImage.findOne.mockReset();
-        Guild.findOne.mockReset();
+        ItemImage.find.mockReset();
+        rows();
     });
 
     test('sanitizes colon-containing itemIds (hunt/fish/mine activity items) so the attachment filename stays valid', async () => {
-        ItemImage.findOne.mockResolvedValue({ imageData: Buffer.from('fake-png-bytes'), imageType: 'image/png' });
+        rows({ guildId: null, itemId: 'hunt:wooden_rifle', ...png('fake-png-bytes') });
 
         const result = await getItemImageAttachment('hunt:wooden_rifle');
 
         expect(result).not.toBeNull();
         expect(result.url).toBe('attachment://item-hunt_wooden_rifle.png');
         expect(result.attachment.name).toBe('item-hunt_wooden_rifle.png');
-        expect(ItemImage.findOne).toHaveBeenCalledWith({ guildId: null, itemId: 'hunt:wooden_rifle' });
+        expect(ItemImage.find).toHaveBeenCalledWith({ guildId: null, itemId: 'hunt:wooden_rifle' });
     });
 
     test('leaves plain itemIds untouched', async () => {
-        ItemImage.findOne.mockResolvedValue({ imageData: Buffer.from('fake-png-bytes'), imageType: 'image/jpeg' });
+        rows({ guildId: null, itemId: 'plain_item', imageData: Buffer.from('x'), imageType: 'image/jpeg' });
 
         const result = await getItemImageAttachment('plain_item');
 
@@ -38,49 +38,70 @@ describe('getItemImageAttachment', () => {
     });
 
     test('returns null when no image is stored anywhere', async () => {
-        ItemImage.findOne.mockResolvedValue(null);
-
         const result = await getItemImageAttachment('hunt:nonexistent');
 
         expect(result).toBeNull();
     });
 
-    test('checks guild shop image first using the unmodified itemId, falling back to ItemImage', async () => {
-        Guild.findOne.mockResolvedValue({
-            shop: [{ itemId: 'fish:bamboo_rod', imageData: Buffer.from('guild-bytes'), imageType: 'image/png' }],
+    // #888. The shop image is a row in the same collection now, under a
+    // `shop:` key, so all three candidates are one query rather than a read of
+    // the whole guild settings document followed by up to two more.
+    test('asks for every candidate at once, not one round trip at a time', async () => {
+        await getItemImageAttachment('fish:bamboo_rod', 'g1');
+
+        expect(ItemImage.find).toHaveBeenCalledTimes(1);
+        expect(ItemImage.find).toHaveBeenCalledWith({
+            guildId: { $in: ['g1', null] },
+            itemId: { $in: ['shop:fish:bamboo_rod', 'fish:bamboo_rod'] },
         });
+    });
+
+    test('prefers the guild shop image over both activity images', async () => {
+        // An admin who uploaded artwork for their own shop item gets that,
+        // whatever the activity catalog carries for the same id.
+        rows(
+            { guildId: null, itemId: 'fish:bamboo_rod', ...png('shared') },
+            { guildId: 'g1', itemId: 'fish:bamboo_rod', ...png('guild-activity') },
+            { guildId: 'g1', itemId: 'shop:fish:bamboo_rod', imageData: Buffer.from('shop'), imageType: 'image/gif' },
+        );
 
         const result = await getItemImageAttachment('fish:bamboo_rod', 'g1');
 
-        expect(result.url).toBe('attachment://item-fish_bamboo_rod.png');
-        expect(ItemImage.findOne).not.toHaveBeenCalled();
+        expect(result.attachment.name).toBe('item-fish_bamboo_rod.gif');
     });
 
     // #561: activity images belong to a guild now. The guild's own row is what
     // it must render — the shared pre-#561 row is a fallback, not a peer.
-    test('prefers the guild\'s own activity image over the shared one', async () => {
-        Guild.findOne.mockResolvedValue({ shop: [] });
-        ItemImage.findOne.mockImplementation(async ({ guildId }) => ({
-            imageData: Buffer.from(guildId === 'g1' ? 'guild-bytes' : 'shared-bytes'),
-            imageType: guildId === 'g1' ? 'image/png' : 'image/gif',
-        }));
+    test("prefers the guild's own activity image over the shared one", async () => {
+        rows(
+            { guildId: null, itemId: 'mine:stone_pickaxe', imageData: Buffer.from('shared'), imageType: 'image/gif' },
+            { guildId: 'g1', itemId: 'mine:stone_pickaxe', ...png('guild') },
+        );
 
         const result = await getItemImageAttachment('mine:stone_pickaxe', 'g1');
 
-        expect(ItemImage.findOne).toHaveBeenCalledWith({ guildId: 'g1', itemId: 'mine:stone_pickaxe' });
         expect(result.attachment.name).toBe('item-mine_stone_pickaxe.png');
     });
 
     test('falls back to the shared image when this guild has none of its own', async () => {
-        Guild.findOne.mockResolvedValue({ shop: [] });
-        ItemImage.findOne.mockImplementation(async ({ guildId }) =>
-            guildId === null ? { imageData: Buffer.from('shared-bytes'), imageType: 'image/gif' } : null);
+        rows({ guildId: null, itemId: 'mine:stone_pickaxe', imageData: Buffer.from('shared'), imageType: 'image/gif' });
 
         const result = await getItemImageAttachment('mine:stone_pickaxe', 'g1');
 
-        expect(ItemImage.findOne).toHaveBeenNthCalledWith(1, { guildId: 'g1', itemId: 'mine:stone_pickaxe' });
-        expect(ItemImage.findOne).toHaveBeenNthCalledWith(2, { guildId: null, itemId: 'mine:stone_pickaxe' });
         expect(result.attachment.name).toBe('item-mine_stone_pickaxe.gif');
+    });
+
+    test('skips a row whose image is empty rather than rendering nothing', async () => {
+        // A zero-length Buffer is not artwork, and taking it because it ranked
+        // highest would hide the image that is actually there.
+        rows(
+            { guildId: 'g1', itemId: 'shop:sword', imageData: Buffer.alloc(0), imageType: 'image/png' },
+            { guildId: null, itemId: 'sword', imageData: Buffer.from('shared'), imageType: 'image/gif' },
+        );
+
+        const result = await getItemImageAttachment('sword', 'g1');
+
+        expect(result.attachment.name).toBe('item-sword.gif');
     });
 
     // #672's alt text. A shop item's name is whatever an admin typed into the
@@ -88,7 +109,7 @@ describe('getItemImageAttachment', () => {
     // characters — so the whole message fails over the caption on the thumbnail.
     describe('alt text', () => {
         beforeEach(() => {
-            ItemImage.findOne.mockResolvedValue({ imageData: Buffer.from('fake-png-bytes'), imageType: 'image/png' });
+            ItemImage.find.mockImplementation(async () => [{ guildId: null, itemId: 'x', ...png('fake-png-bytes') }]);
         });
 
         test('names the item when the caller passes one', async () => {

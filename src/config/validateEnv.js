@@ -46,6 +46,11 @@ const DASHBOARD_REQUIRED_ENV = REQUIRED_ENV.filter(name => name !== 'DISCORD_TOK
 // one openssl invocation in .env.example: `openssl rand -hex 32`.
 const SESSION_SECRET_MIN_LENGTH = 32;
 
+// What a generated `openssl rand -base64 32` is (44 characters); the floor is
+// set well under it so a passphrase an operator chose by hand is not rejected
+// for not looking machine-made.
+const SECRET_ENCRYPTION_KEY_MIN_LENGTH = 24;
+
 /** What DASHBOARD_URL falls back to when it is not set — local development. */
 function defaultDashboardUrl(env) {
     return `http://localhost:${env.DASHBOARD_PORT || 3000}`;
@@ -165,6 +170,8 @@ function collectEnvProblems(env = process.env, { required = REQUIRED_ENV } = {})
         );
     }
 
+    warnings.push(...checkSecretEncryption(env));
+
     if (env.DASHBOARD_PORT !== undefined && env.DASHBOARD_PORT !== '') {
         const port = Number(env.DASHBOARD_PORT);
         if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -179,6 +186,55 @@ function collectEnvProblems(env = process.env, { required = REQUIRED_ENV } = {})
     errors.push(...checkGatewaySplit(env));
 
     return { errors, warnings };
+}
+
+/**
+ * Whether the credentials this bot stores for other people are stored in the
+ * clear (#886).
+ *
+ * `SECRET_ENCRYPTION_KEY` opens two things that live in MongoDB: the AI
+ * provider keys guild admins enter in the dashboard, which bill their account,
+ * and the MCP OAuth refresh tokens, which are long-lived and re-mint access on
+ * demand. Unset, both are plaintext in the database — and the nightly `backup`
+ * service keeps a month of mongodump archives beside it, so "readable with
+ * database access" quietly means "readable by anyone who can list ./backups".
+ *
+ * Warnings rather than errors, the same call the MONGODB_URI credentials check
+ * above makes and for the same reason: encryption shipped opt-in
+ * (config/secretBox.js), and failing the boot would take down every deployment
+ * that has not set the variable yet. What this changes is that the choice stops
+ * being a silent one on the deployments where it costs something — a
+ * production install hears about it on every boot, and .env.example now asks
+ * for the value beside SESSION_SECRET rather than describing it as optional.
+ *
+ * Only in production. A development database holds test guilds and the warning
+ * would be noise on every `npm run dev`.
+ */
+function checkSecretEncryption(env) {
+    if (env.NODE_ENV !== 'production') return [];
+
+    const key = (env.SECRET_ENCRYPTION_KEY || '').trim();
+    if (!key) {
+        return [
+            'SECRET_ENCRYPTION_KEY is not set, so per-guild AI provider keys and MCP OAuth ' +
+            'refresh tokens are stored in the clear — in the database and in every nightly ' +
+            'backup archive. Generate one with `openssl rand -base64 32`, then run ' +
+            '`npm run secrets:encrypt` to seal what is already stored. See "Encrypting stored ' +
+            'provider keys" in docs/SETUP_GUIDE.md.',
+        ];
+    }
+
+    // Any passphrase works — scrypt stretches it — but a short one is a short
+    // one, and this is the credential that opens every other stored credential.
+    if (key.length < SECRET_ENCRYPTION_KEY_MIN_LENGTH) {
+        return [
+            `SECRET_ENCRYPTION_KEY is only ${key.length} characters. It is stretched with scrypt, ` +
+            'so it still works, but it is the key to every stored provider credential — ' +
+            'generate one with `openssl rand -base64 32`.',
+        ];
+    }
+
+    return [];
 }
 
 /**
@@ -270,6 +326,7 @@ module.exports = {
     collectEnvProblems,
     checkDashboardUrl,
     checkSessionSecret,
+    checkSecretEncryption,
     checkGatewaySplit,
     DASHBOARD_REQUIRED_ENV,
     resolveDashboardUrl,

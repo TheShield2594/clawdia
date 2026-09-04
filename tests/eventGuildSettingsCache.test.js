@@ -114,10 +114,10 @@ describe('read-only event handlers read through guildSettingsCache', () => {
         expect(Guild.findOne).toHaveBeenCalledTimes(1);
     });
 
-    it.each(HANDLERS)('%s asks for the projection that leaves image Buffers behind', async (_name, fire) => {
+    it.each(HANDLERS)('%s asks for the projection that leaves the heavy payload behind', async (_name, fire) => {
         await fire();
 
-        expect(Guild.findOne.mock.calls[0][1]).toContain('-shop.imageData');
+        expect(Guild.findOne.mock.calls[0][1]).toContain('-giveaways.entrantIds');
     });
 });
 

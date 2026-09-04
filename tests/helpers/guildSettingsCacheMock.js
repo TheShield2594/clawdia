@@ -29,7 +29,7 @@
 
 // The projection the real cache reads with. Passed through so a suite can
 // assert the heavy fields are still excluded on this path.
-const HEAVY_FIELDS_PROJECTION = '-shop.imageData -giveaways.entrantIds';
+const HEAVY_FIELDS_PROJECTION = '-giveaways.entrantIds';
 
 /** Resolves the query-like shapes the model mocks in this repo return. */
 async function unwrap(result) {

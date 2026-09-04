@@ -437,24 +437,17 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
             return res.status(404).json({ error: 'Guild not found' });
         }
 
-        // Shop item images live inline at guild.shop[].imageData. The dashboard
-        // never round-trips those Buffers, so a naive replace of the shop array
-        // would wipe every saved image. Preserve imageData/imageType from the
-        // existing items, matched by itemId.
-        if (Array.isArray(updates.shop)) {
-            const existingImages = new Map();
-            for (const item of guildSettings.shop || []) {
-                if (item && item.itemId && item.imageData) {
-                    existingImages.set(item.itemId, { imageData: item.imageData, imageType: item.imageType });
-                }
-            }
-            updates.shop = updates.shop.map(item => {
-                if (!item || !item.itemId) return item;
-                const preserved = existingImages.get(item.itemId);
-                if (!preserved) return item;
-                return { ...item, imageData: preserved.imageData, imageType: preserved.imageType };
-            });
-        }
+        // No image salvage here any more (#888). Shop images used to live inline
+        // at guild.shop[].imageData, so replacing the shop array wholesale — the
+        // one thing this endpoint does with it — wiped every saved image unless
+        // the Buffers were carried across by hand, item by item, on every
+        // settings save. They live in the ItemImage collection now, keyed by
+        // guild and item, so a rewritten shop array cannot touch them.
+        //
+        // What it can still do is orphan one: an item deleted from the shop
+        // leaves its image behind. That is deliberate — an admin who removes an
+        // item and re-adds it under the same id keeps the artwork, and the row
+        // is small, keyed and invisible to every read that does not ask for it.
 
         // H1: Strip any MongoDB operator keys ($ne, $regex, etc.) before writing.
         Object.keys(updates).forEach(key => {
@@ -479,8 +472,7 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
                 .catch(err => console.error(`[DASHBOARD] Bible reschedule for ${guildId} failed:`, err.message));
         }
 
-        // Deliberately does not echo the saved document. It carries every shop
-        // item's imageData Buffer (base64-inflated in JSON) plus up to 3000
+        // Deliberately does not echo the saved document: up to 3000
         // analytics.commandUsage entries, and the client only ever reads this
         // body on a non-2xx response.
         res.json({ success: true });

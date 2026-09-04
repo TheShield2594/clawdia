@@ -6,8 +6,8 @@ const {
 } = require('discord.js');
 
 const ItemImage = require('../models/ItemImage');
-const Guild = require('../models/Guild');
 const { renderCategoryBanner, getTheme } = require('./shopBanner');
+const { shopImageId, shopItemIdOf } = require('../models/itemImageKeys');
 
 const COLOR_HEX = {
     hunt:          '#27ae60',
@@ -31,34 +31,24 @@ async function loadImagesByItemIds(itemIds, guildId = null) {
     const ids = [...new Set(itemIds.filter(Boolean))];
     if (!ids.length) return out;
 
-    // Guild shop items store their image on the shop sub-document itself.
-    // Check there first so dashboard-uploaded icons appear in /shop view.
-    if (guildId) {
-        const guild = await Guild.findOne({ guildId }, { shop: 1 }).lean();
-        if (guild?.shop) {
-            for (const item of guild.shop) {
-                if (!ids.includes(item.itemId)) continue;
-                const buf = toBuffer(item.imageData);
-                if (buf) out[item.itemId] = buf;
-            }
-        }
-    }
-
-    const missing = ids.filter(id => !out[id]);
-    if (missing.length) {
-        // Activity images are per guild since #561, with the pre-#561 shared
-        // rows (guildId: null) still readable as a fallback. Both are fetched in
-        // one query and the shared ones applied first, so a guild's own image
-        // overwrites the shared one rather than racing it.
-        const docs = await ItemImage.find({
-            itemId: { $in: missing },
-            guildId: { $in: [guildId || null, null] },
-        });
-        const sharedFirst = [...docs].sort((a, b) => (a.guildId == null ? 0 : 1) - (b.guildId == null ? 0 : 1));
-        for (const d of sharedFirst) {
-            const buf = toBuffer(d.imageData);
-            if (buf) out[d.itemId] = buf;
-        }
+    // One query for all three kinds of row, which is what #888 bought: a guild
+    // shop item's image used to live on the guild settings document, so this
+    // read the whole of it — every other item's Buffer included — before it
+    // could look at the ItemImage collection at all.
+    //
+    // Activity images are per guild since #561, with the pre-#561 shared rows
+    // (guildId: null) still readable as a fallback. The sort is what resolves
+    // the precedence: shared first, then the guild's own activity image over
+    // it, then the guild's shop image over that, each overwriting the last
+    // rather than racing it.
+    const docs = await ItemImage.find({
+        itemId: { $in: [...ids, ...ids.map(shopImageId)] },
+        guildId: { $in: [guildId || null, null] },
+    });
+    const rank = d => (shopItemIdOf(d.itemId) ? 2 : d.guildId == null ? 0 : 1);
+    for (const d of [...docs].sort((a, b) => rank(a) - rank(b))) {
+        const buf = toBuffer(d.imageData);
+        if (buf) out[shopItemIdOf(d.itemId) ?? d.itemId] = buf;
     }
     return out;
 }

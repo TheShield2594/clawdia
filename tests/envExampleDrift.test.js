@@ -38,6 +38,11 @@ const CONSUMED_OUTSIDE_SRC = new Set([
     'MONGODB_APP_PASSWORD',
     'MONGODB_REPLICA_SET_ARGS',
     'DISCORD_TOKEN_FILE',
+    // Read by the backup service's entrypoint and by the host scripts that
+    // write and open archives (#886, #900); the bot process never sees them.
+    'BACKUP_ENCRYPTION_PASSPHRASE',
+    'BACKUP_REMOTE',
+    'BACKUP_REMOTE_ALLOW_PLAINTEXT',
 ]);
 
 // Where those are allowed to turn up.
@@ -46,6 +51,9 @@ const OUTSIDE_CONSUMERS = [
     'portainer-stack.yml',
     'scripts/mongo-init.js',
     'src/config/fileSecrets.js',
+    'scripts/backup.sh',
+    'scripts/offsite-sync.sh',
+    'scripts/lib/archive.sh',
 ];
 
 function walk(dir) {

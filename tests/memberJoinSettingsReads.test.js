@@ -111,10 +111,10 @@ describe('guildMemberAdd settings reads', () => {
         expect(Guild.findOne).toHaveBeenCalledTimes(1);
     });
 
-    it('leaves the shop image Buffers in the database', async () => {
+    it('leaves the giveaway entrant lists in the database', async () => {
         await guildMemberAdd.execute(makeMember(), {});
 
-        expect(Guild.findOne.mock.calls[0][1]).toContain('-shop.imageData');
+        expect(Guild.findOne.mock.calls[0][1]).toContain('-giveaways.entrantIds');
     });
 
     it('still enforces the join gate off the settings it was handed', async () => {
