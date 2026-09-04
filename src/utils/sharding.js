@@ -46,6 +46,42 @@
 //
 // Both are gated on `isPrimaryShard()` at their bootstrap site.
 
+// ── What is neither, and is bounded instead ──────────────────────────────────
+//
+// A third category: process-local state that is neither guild-affine nor
+// singleton work, but a *cache* — correct on every shard, merely capable of
+// being out of date on the ones that did not do the writing (#934).
+//
+// `utils/guildSettingsCache.js` is the one that matters. It holds a guild's
+// settings for 30 seconds on the hot read paths (messageCreate,
+// interactionCreate), and it is invalidated by Mongoose middleware registered
+// in models/Guild.js — middleware that runs in the process doing the write and
+// nowhere else. So a dashboard save on shard 0 is invisible to shards 1..N
+// until their own entry expires.
+//
+// The window is therefore bounded by the TTL and nothing else: at most 30
+// seconds during which a message handled on another shard is judged against the
+// settings that applied before the save. Nothing here moves coins or grants
+// permission that a stale read could widen — the dashboard's own authorization
+// is re-checked per request in dashboard/lib/permissions.js, not read from this
+// cache — so the cost is a moderation rule or a welcome message lagging half a
+// minute behind the admin who changed it.
+//
+// It is also not reachable today: the dashboard is gated on `isPrimaryShard()`
+// (above), so shard 0 is the only process that takes a settings write from a
+// human, and the only writers on other shards are the bot's own commands, whose
+// middleware invalidates the entry they just wrote in the process that wrote it.
+// The gap opens when the dashboard is split into its own process (#876) — a
+// *fourth* writer, in a process that shares no middleware with any shard.
+//
+// Recorded here rather than fixed, because the fix costs more than the staleness
+// does at this size. When it stops being acceptable, the two options are:
+//
+//   - shorten the TTL, which trades staleness for read load one-for-one; or
+//   - add a Mongo-side invalidation bump — a monotonically increasing counter on
+//     the guild document that the cached read compares against — which is one
+//     extra round trip per read and removes the window entirely.
+
 /** Discord's gateway routing rule. The one place it is written down. */
 const GUILD_SHARD_SHIFT = 22n;
 
