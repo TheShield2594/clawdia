@@ -26,6 +26,7 @@
 const fs   = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
+const { describeAuditRetry } = require('./helpers/auditStep');
 
 const ROOT = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
@@ -66,6 +67,19 @@ describe('#645 — the dependency tree is audited', () => {
         expect(step.if).toBe('always()');
     });
 });
+
+// The gate blocked a pull request whose suite, lint and coverage were all green,
+// because the registry's bulk advisory endpoint 503'd. `npm audit` exits
+// non-zero both when it found advisories and when it never managed to ask, and
+// this step read the two alike — so an npmjs blip arrived as a security
+// finding, on the one gate everybody has to merge past. security-scan.yml was
+// fixed for the same conflation on its weekly job (#962); this is the same
+// script, and these are the same cases, because two gates reporting at
+// different bars is worse than one gate.
+describeAuditRetry(
+    'the pull-request audit gate',
+    () => stepsOf('test').find(s => /npm audit/.test(s.run || '')),
+);
 
 describe('#645 — the image is scanned', () => {
     const scan = buildJob && stepsOf(buildJob).find(s => /trivy|grype|snyk/i.test(s.uses || ''));
