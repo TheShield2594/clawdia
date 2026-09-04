@@ -47,32 +47,47 @@ const { saveWithBalanceDelta } = require('../src/utils/balanceDelta');
 const { ensureQuests, onCommandUse } = require('../src/services/questService');
 const { trackQuestCommandUse } = require('../src/events/interactionCreate');
 
+const { useFixedClock } = require('./helpers/fixedClock');
+
 const QUESTS_PER_DAY = 3;
 const QUESTS_PER_WEEK = 2;
+
+// Pinned, and pinned before the boundaries below are derived. `ensureQuests`
+// mints them from the wall clock at module load, while `questAssignmentNeeded`
+// recomputes `getDailyExpiry()` on every call — so a run that crosses UTC
+// midnight between the two buckets the fixture into yesterday and every
+// "nothing to do" case flips. The helper's default instant is 23:30 UTC, half
+// an hour from that boundary, so these now exercise the case rather than
+// merely dodging it.
+//
+// It installs the clock in `beforeEach`, which a module-load constant would
+// run ahead of — hence a function, called from the fixtures under the pinned
+// clock. The derivation itself is unchanged.
+useFixedClock();
 
 // Real expiry boundaries, minted by `ensureQuests` rather than written down
 // here: the pre-check buckets a quest by exact expiry match, so an invented
 // date lands in neither bucket and the set reads as empty — which would make
 // the "nothing to do" cases pass for the wrong reason. `ensureQuests` mutates
 // synchronously despite being declared async.
-const EXPIRIES = (() => {
+function expiries() {
     const seed = { level: 1, quests: [] };
     jest.requireActual('../src/services/questService')
         .ensureQuests(seed, { quests: { enabled: true, questsPerDay: QUESTS_PER_DAY, questsPerWeek: QUESTS_PER_WEEK } });
     const distinct = [...new Set(seed.quests.map(q => q.expiresAt.getTime()))].sort((a, b) => a - b);
     return { daily: new Date(distinct[0]), weekly: new Date(distinct[distinct.length - 1]) };
-})();
+}
 
 const entry = (questId, expiresAt, extra = {}) =>
     ({ questId, progress: 0, completedAt: null, expiresAt, ...extra });
 
 // A full, live set with nothing a command can advance.
 const settledQuests = () => [
-    entry('daily_messages_5',  EXPIRIES.daily),
-    entry('daily_messages_10', EXPIRIES.daily),
-    entry('daily_messages_25', EXPIRIES.daily),
-    entry('weekly_messages_50',  EXPIRIES.weekly),
-    entry('weekly_messages_150', EXPIRIES.weekly),
+    entry('daily_messages_5',  expiries().daily),
+    entry('daily_messages_10', expiries().daily),
+    entry('daily_messages_25', expiries().daily),
+    entry('weekly_messages_50',  expiries().weekly),
+    entry('weekly_messages_150', expiries().weekly),
 ];
 
 function stubFindOne(doc) {
@@ -120,7 +135,7 @@ describe('a command with no command quest to move', () => {
     test('a finished command quest is not a reason to hydrate', async () => {
         stubFindOne({
             userId: 'player-1', guildId: 'guild-1',
-            quests: [...settledQuests(), entry('daily_commands_5', EXPIRIES.daily, { completedAt: new Date() })],
+            quests: [...settledQuests(), entry('daily_commands_5', expiries().daily, { completedAt: new Date() })],
         });
 
         await trackQuestCommandUse(interaction);
@@ -133,7 +148,7 @@ describe('a command that can move something', () => {
     test('a live command quest hydrates and saves as before', async () => {
         stubFindOne({
             userId: 'player-1', guildId: 'guild-1', balance: 100,
-            quests: [...settledQuests(), entry('daily_commands_5', EXPIRIES.daily)],
+            quests: [...settledQuests(), entry('daily_commands_5', expiries().daily)],
         });
 
         await trackQuestCommandUse(interaction);
@@ -146,7 +161,7 @@ describe('a command that can move something', () => {
     test('a live AI quest hydrates too, since its mechanic is not knowable from here', async () => {
         stubFindOne({
             userId: 'player-1', guildId: 'guild-1', balance: 100,
-            quests: [...settledQuests(), entry('ai_legendary_7', EXPIRIES.weekly)],
+            quests: [...settledQuests(), entry('ai_legendary_7', expiries().weekly)],
         });
 
         await trackQuestCommandUse(interaction);

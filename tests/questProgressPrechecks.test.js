@@ -22,6 +22,15 @@ const {
     onMessage, onReaction, onCommandUse,
 } = require('../src/services/questService');
 
+const { useFixedClock } = require('./helpers/fixedClock');
+
+// Same reason as the two pre-check suites: `fullSet()` mints its expiry
+// boundaries from the wall clock and `questAssignmentNeeded` recomputes them a
+// moment later, so a UTC midnight landing between the two would flip the
+// answer. The window here is one test wide rather than a whole module load,
+// but it is the same race, and the helper exists for it (#632).
+useFixedClock();
+
 const SETTINGS = { quests: { enabled: true, questsPerDay: 3, questsPerWeek: 2 } };
 
 const HOUR = 3600_000;
