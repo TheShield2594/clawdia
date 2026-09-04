@@ -3,6 +3,14 @@
 # source and needs a full toolchain plus cairo/pango headers. None of that
 # belongs in the runtime image, so the compile happens here and only the
 # resulting node_modules is carried forward.
+#
+# It is the only dependency in the tree that needs a compiler, and it does not
+# have to be: @napi-rs/canvas ships prebuilt musl binaries that would delete
+# this apk list and the runtime stage's six shared libraries outright.
+# docs/CANVAS_BACKEND.md records what that swap was measured to cost — the API
+# gap is two call sites, the text metrics and rendered output match — and the
+# three things that can only be verified from inside a built image, which is why
+# it has not been taken here (#933).
 # The tag major must stay in step with .nvmrc and package.json `engines`: CI
 # installs and tests on the .nvmrc version, so a Dockerfile on a different major
 # ships a runtime nothing ever tested. tests/nodeVersionAlignment.test.js fails

@@ -25,6 +25,7 @@ moderation attached, that is what she is built for.
 | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Every dashboard HTTP endpoint, generated from the routers |
 | [docs/EXTENDING.md](docs/EXTENDING.md) | Adding a command, a route, a model or a dashboard panel |
 | [docs/RELEASING.md](docs/RELEASING.md) | Cutting a release |
+| [docs/CANVAS_BACKEND.md](docs/CANVAS_BACKEND.md) | What the image's native build toolchain is for, and the measured case for replacing it |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Getting set up, the coverage ratchets, and what surprises people |
 
 Each topic is written in exactly one of them. AI provider setup, Daily News and
