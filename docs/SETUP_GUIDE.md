@@ -668,6 +668,30 @@ contains — see below.
 
 ## Portainer Deployment
 
+### Which architectures the image is built for
+
+`ghcr.io/theshield2594/clawdia` is published for **linux/amd64 and
+linux/arm64**, under one tag as a manifest list — `docker pull` on either
+resolves without you choosing. arm64 covers a Raspberry Pi 4 or 5 on a 64-bit
+OS, an Oracle Ampere instance, and Docker on an Apple Silicon Mac.
+
+Two things are worth knowing before you deploy to one:
+
+- **arm64 is built, not booted.** CI builds the image on every push and then
+  boots and vulnerability-scans it, but only the amd64 one: a multi-platform
+  build produces a manifest list, and there is no single image for `docker run`
+  to name. So the arm64 image is proven to *compile* — including the native
+  `canvas` binding, which is the part an architecture change actually breaks —
+  and is not proven to *start*. If it does not, that is a bug worth filing
+  rather than something known.
+- **32-bit ARM is not built.** A Pi running the 32-bit Raspberry Pi OS needs the
+  64-bit one; `uname -m` says `aarch64` when you are on it and `armv7l` when you
+  are not. `docker pull` on armv7l fails with "no matching manifest", which is
+  the intended failure — it is clearer than an image that starts and then
+  crashes.
+
+Everything else in this guide is the same on either architecture.
+
 ### Migrating an existing UltraBot stack
 
 Skip this section on a fresh install. If you already run the stack under the old

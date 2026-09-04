@@ -279,6 +279,15 @@ jobs:
   # publish build is a cache hit rather than a second compile, and a cache hit is
   # the same layers. The residue is a cache miss inside a single run.
   #
+  # All of that is about amd64, and since #941 the publish job builds arm64 as
+  # well, which nothing here boots or scans. Deliberately: buildx cannot
+  # `--load` a multi-platform result — there is no single image for `docker run`
+  # to name — so holding arm64 to this standard means a second, emulated build
+  # of a tree that compiles `canvas` from source, on every pull request. What
+  # arm64 does get is that compile: the toolchain, the headers and the native
+  # binding are exactly what an architecture change breaks, and a failure there
+  # fails the publish. docs/SETUP_GUIDE.md says what the difference means for
+  # somebody running the published image on a Pi.
   #
   # Closing it properly means pushing a staging tag from here and promoting it by
   # digest, which needs `packages: write` in a job that also runs on pull
@@ -416,7 +425,13 @@ jobs:
     # anything deploys. Pushes to main and to v* tags do.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Three times the `image` job's budget, for the arm64 half added in #941.
+    # That half is emulated and this tree compiles `canvas` from source, so a
+    # cold cache here is tens of minutes rather than the handful an amd64 build
+    # takes. A warm one is a small fraction of that — emulated layers cache like
+    # any others — so this is the ceiling for the first build after a Dockerfile
+    # or lockfile change, not the cost of an ordinary merge.
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
@@ -463,6 +478,12 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # Registers the binfmt handlers that let the arm64 half of the build below
+      # run its RUN steps on this amd64 runner (#941). Only the publish job
+      # needs it: the `image` job builds one native platform and loads it.
+      - name: Set up QEMU for the arm64 build
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
@@ -479,6 +500,21 @@ jobs:
           # midnight UTC is exactly the case worth not leaving to chance.
           build-args: |
             APK_REFRESH=${{ needs.image.outputs.apk-refresh }}
+          # #941: the image was amd64 only, which rules out a Raspberry Pi, an
+          # Oracle Ampere instance and an Apple Silicon machine — three of the
+          # commonest places somebody self-hosts a Discord bot, and an odd set
+          # to exclude from a project whose whole pitch is that you host it
+          # yourself. Both platforms go out under one tag as a manifest list, so
+          # `docker pull` on either resolves without anybody choosing.
+          #
+          # It is not free: arm64 is emulated on an amd64 runner and this tree
+          # compiles `canvas` from source, which is what the raised timeout
+          # above is for. The dependency is worth naming here, because it is the
+          # whole of the cost — docs/CANVAS_BACKEND.md records the measured case
+          # for @napi-rs/canvas, which ships prebuilt musl binaries for both
+          # architectures and would turn this compile into a download twice
+          # over.
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
