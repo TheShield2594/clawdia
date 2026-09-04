@@ -342,9 +342,6 @@ describe('reconcileJackpotClaims', () => {
                 lastWonAmount:    250_050,
                 lastWonAt:        new Date('2026-09-01T00:00:00Z'),
                 pendingPayoutKey: `jackpot:${GUILD}:claim-1`,
-                // The schema's default, and what the sweep's `$in: [null, …]`
-                // lease check reads: an unheld claim is free for any shard.
-                claimToken:       null,
                 ...over,
             },
         });
@@ -397,26 +394,41 @@ describe('reconcileJackpotClaims', () => {
         expect(guildDoc().casinoJackpot).toMatchObject({ lastWinnerId: USER, lastWonAmount: 250_050 });
     });
 
-    test('keeps the claim and hands back the lease when the credit fails', async () => {
+    test('keeps the claim when the credit fails', async () => {
         outstanding();
         mockUsers.model.findOneAndUpdate.mockImplementation(async () => { throw new Error('mongo down'); });
 
         expect(await reconcileJackpotClaims()).toEqual({ reconciled: 0, failed: 1 });
 
-        // Still owed, and nothing holding it: the next boot picks it up again.
+        // Still owed, and still selectable: the next boot picks it up again.
         expect(marker()).toBe(`jackpot:${GUILD}:claim-1`);
-        expect(guildDoc().casinoJackpot.claimToken).toBeNull();
     });
 
-    test('a lease that will not release is logged rather than thrown at startup', async () => {
-        outstanding();
-        mockUsers.model.findOneAndUpdate.mockImplementation(async () => { throw new Error('mongo down'); });
-        mockGuilds.model.updateOne.mockRejectedValue(new Error('mongo down'));
+    test('settles a claim a dead process left its lease on', async () => {
+        // The sweep used to stamp a `claimToken` on a guild before crediting it
+        // and select only on `null` or its own token. A process that stopped
+        // after stamping left a claim every later run filtered out — the payout
+        // stranded for good, by the mechanism meant to protect it. There is no
+        // lease now: the payout key is what makes two shards crediting the same
+        // pot safe, and it does not outlive anything.
+        outstanding({ claimToken: 'dead-process-99' });
 
-        // The sweep runs from events/ready.js, where a rejection would skip the
-        // crash-refund sweep behind it.
-        await expect(reconcileJackpotClaims()).resolves.toEqual({ reconciled: 0, failed: 1 });
-        expect(errorLog.mock.calls.flat().join(' ')).toContain('releasing the reconcile lease failed');
+        expect(await reconcileJackpotClaims()).toEqual({ reconciled: 1, failed: 0 });
+
+        expect(balance()).toBe(999 + 250_050);
+        expect(marker()).toBeNull();
+    });
+
+    test('two shards sweeping the same claim pay it once between them', async () => {
+        outstanding();
+
+        const [first, second] = await Promise.all([reconcileJackpotClaims(), reconcileJackpotClaims()]);
+
+        // Whichever credit lands first pays; the other finds its own key on the
+        // document and moves nothing, which is why the lease was never what
+        // made this safe.
+        expect(balance()).toBe(999 + 250_050);
+        expect(first.reconciled + second.reconciled).toBe(1);
     });
 
     test('clears a claim that names no payout', async () => {
@@ -429,21 +441,15 @@ describe('reconcileJackpotClaims', () => {
         expect(marker()).toBeNull();
     });
 
-    test('stops rather than spinning on a marker that will not clear', async () => {
+    test('a marker that will not clear is visited once, not forever', async () => {
         outstanding();
-        // The credit lands but the clear does not, so the same guild is selected
-        // again — the one shape of this loop that does not terminate.
+        // The credit lands but the clear does not. The sweep works from the set
+        // it read at the start, so a document that stays selectable is not
+        // re-selected — the one shape of a re-querying loop that never ends.
         mockGuilds.model.updateOne.mockResolvedValue({ matchedCount: 0 });
 
         await expect(reconcileJackpotClaims()).resolves.toEqual({ reconciled: 1, failed: 0 });
-    });
-
-    test('a guild claimed by another shard’s lease is left to it', async () => {
-        outstanding({ claimToken: 'other-shard-99' });
-
-        expect(await reconcileJackpotClaims()).toEqual({ reconciled: 0, failed: 0 });
-
-        expect(balance()).toBe(999);
+        expect(balance()).toBe(999 + 250_050);
     });
 });
 

@@ -217,6 +217,30 @@ describe('a Triple Wild claims the shared pool', () => {
         expect(totalCredited()).toBe(BET * 25);
     }, 20_000);
 
+    test('the channel hears the same thing the winner does', async () => {
+        User.findOneAndUpdate.mockImplementation((_filter, update) =>
+            Promise.resolve(update?.$setOnInsert ? walletDoc() : null));
+
+        const spin = makeInteraction({ bet: BET });
+        await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
+
+        // The broadcast announces the drop to everyone. Saying the player
+        // "walked away with the entire pool" over a pot that has not arrived
+        // contradicts the winner's own result embed for the same spin.
+        const broadcast = spin.channel.sent.at(-1).embeds[0].data.description;
+        expect(broadcast).toContain('not delivered yet');
+        expect(broadcast).not.toContain('walked away');
+    }, 20_000);
+
+    test('a delivered pot is still announced as one', async () => {
+        const spin = makeInteraction({ bet: BET });
+        await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
+
+        const broadcast = spin.channel.sent.at(-1).embeds[0].data.description;
+        expect(broadcast).toContain('walked away with the entire pool');
+        expect(broadcast).not.toContain('not delivered yet');
+    }, 20_000);
+
     test('an unpaid claim keeps the marker the restart reconciler settles it from', async () => {
         User.findOneAndUpdate.mockImplementation((_filter, update) =>
             Promise.resolve(update?.$setOnInsert ? walletDoc() : null));

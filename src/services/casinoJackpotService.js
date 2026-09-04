@@ -44,6 +44,12 @@ const DEFAULT_SEED       = 10_000;  // mirrors Guild.casinoJackpot.seedAmount's 
 
 const SERVICE = 'casinoJackpot';
 
+// How many outstanding claims one boot settles. A bound rather than a target:
+// the normal number is zero, and a hundred of them means an outage during which
+// every guild's credit failed — worth working through a batch at a time instead
+// of holding startup open on a database that has just come back.
+const MAX_RECONCILE_PER_BOOT = 100;
+
 /**
  * Clears the outstanding marker for a settled claim.
  *
@@ -52,8 +58,9 @@ const SERVICE = 'casinoJackpot';
  * to is the only one it may say is finished — clearing the other would strand a
  * pot that is still owed somewhere no recovery path looks.
  *
- * The lease `reconcileJackpotClaims` takes goes with it, so a settled claim
- * leaves nothing behind for the next boot to step over.
+ * `claimToken` goes with it. Nothing writes that field any more — the sweep
+ * below used to take it as a lease — and clearing it here retires the values
+ * left on documents by the version that did.
  */
 async function clearClaim(guildId, payoutKey) {
     await Guild.updateOne(
@@ -218,8 +225,19 @@ async function awardPool({ guildId, userId, username, seedAmount, extra = 0, not
  * coins by construction, and the marker — not the ledger — says whether
  * anything is outstanding.
  *
- * `claimToken` is a lease, not a guard: N shards each run this on boot and would
- * otherwise walk the same guilds. Correctness does not rest on it.
+ * There is no lease. One used to be taken — a `claimToken` written onto the
+ * guild before the credit — and it could strand a payout permanently: a process
+ * that stopped after stamping its token left a claim no later run would ever
+ * select, because every run mints a different one and the filter only matched
+ * `null` or its own. A lease that can outlive the process holding it is a worse
+ * failure than the work it saves, and there is no work to save here: N shards
+ * all crediting the same pot is safe by construction, since the credit carries
+ * the claim's payout key and only one of them can move coins. So the sweep reads
+ * the outstanding claims and settles them, and two shards racing settle one pot
+ * between them.
+ *
+ * Reading the set up front rather than re-querying is also what bounds the loop:
+ * a claim whose marker will not clear is visited once and not selected again.
  *
  * Note for the upgrade: a claim left unpaid by a process that died *before* this
  * shipped carries no marker, and is not reconciled here. Nothing can pick those
@@ -228,27 +246,17 @@ async function awardPool({ guildId, userId, username, seedAmount, extra = 0, not
  * failing to resolve. They are recoverable by hand from those fields and the
  * CRITICAL line the failed credit logged.
  */
-async function reconcileJackpotClaims({ claimToken = `${process.pid}-${Date.now()}` } = {}) {
+async function reconcileJackpotClaims({ limit = MAX_RECONCILE_PER_BOOT } = {}) {
+    const outstanding = await Guild
+        .find({ 'casinoJackpot.pendingPayoutKey': { $ne: null } }, 'guildId casinoJackpot')
+        .limit(limit)
+        .lean();
+
     let reconciled = 0;
     let failed     = 0;
-    // A guild seen twice means its marker did not clear — a failed clear, or a
-    // clear whose response was lost. Re-selecting it forever is the one way this
-    // loop does not terminate, so seeing it once is the bound.
-    const seen = new Set();
 
-    let candidate;
-    while ((candidate = await Guild.findOneAndUpdate(
-        {
-            'casinoJackpot.pendingPayoutKey': { $ne: null },
-            'casinoJackpot.claimToken':       { $in: [null, claimToken] },
-        },
-        { $set: { 'casinoJackpot.claimToken': claimToken } },
-        { new: true },
-    )) !== null) {
+    for (const candidate of outstanding) {
         const guildId = candidate.guildId;
-        if (seen.has(guildId)) break;
-        seen.add(guildId);
-
         const { lastWinnerId, lastWonAmount, pendingPayoutKey } = candidate.casinoJackpot ?? {};
 
         // A marker with no winner or nothing to pay names no payout. Clearing it
@@ -273,14 +281,11 @@ async function reconcileJackpotClaims({ claimToken = `${process.pid}-${Date.now(
         );
 
         if (!credited) {
-            // The lease goes back so the next boot can try again; the marker
-            // stays, because the pot is still owed. Stopping rather than working
-            // through the rest: the reason a credit fails here is almost always
-            // that the database is unreachable, and the guild after this one
-            // will fail the same way.
+            // The marker stays, because the pot is still owed, and the next boot
+            // picks it up. Stopping rather than working through the rest: the
+            // reason a credit fails here is almost always that the database is
+            // unreachable, and the guild after this one will fail the same way.
             failed++;
-            await Guild.updateOne({ guildId }, { $set: { 'casinoJackpot.claimToken': null } })
-                .catch(err => console.error(`[${SERVICE}] releasing the reconcile lease failed:`, err.message));
             break;
         }
 

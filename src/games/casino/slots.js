@@ -31,8 +31,11 @@ const WIN_ANNOUNCE_MULT = 50;
 // (services/casinoJackpotService) — the same one `/casino jackpot` reports and
 // every casino bet feeds at 0.5%. Slots keeps no pool of its own; a Triple Wild is
 // simply a second, rarer way to claim this one. FREE_SPIN_JACKPOT_MULT is what a
-// Triple Wild pays when it cannot claim the pool: on a free spin (which staked
-// nothing) or if the pool credit failed and was rolled back.
+// Triple Wild pays when there is no pool to claim: on a free spin (which staked
+// nothing), or in a guild with no document and so no accumulated pot. A claim
+// that succeeded and has not been credited yet is *not* one of those — the pot
+// is the player's and is being recovered under its payout key, so paying this
+// on top would pay the same Triple Wild twice (#873).
 
 function reelDisplay(reels, revealed) {
     return reels.map((s, i) => i < revealed ? s.emoji : randomEmoji()).join('  ┃  ');
@@ -106,7 +109,19 @@ function resultEmbed(reels, result, bet, balance, interaction, jackpotPool) {
         .setTimestamp();
 }
 
-function jackpotBroadcastEmbed(interaction, wonAmount, newPool) {
+// `delivery` is the claim's outcome, and the channel hears the same thing the
+// winner does: this embed used to say the player "walked away with the entire
+// pool" whatever became of the credit, so a pot that had not arrived was
+// announced as paid to everyone while the winner's own result said otherwise.
+function jackpotBroadcastEmbed(interaction, wonAmount, newPool, delivery = {}) {
+    const { credited = true, owed = false } = delivery;
+    const wonLine = credited
+        ? `  💰 Won: **${wonAmount.toLocaleString()}** coins\n`
+        : `  💰 Won: **${wonAmount.toLocaleString()}** coins — not delivered yet\n` +
+          (owed
+              ? `  📝 Recorded for an admin to settle\n`
+              : `  ⚠️ Could not be recorded — tell an admin\n`);
+
     return new EmbedBuilder()
         .setColor('#FF00FF')
         .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
@@ -115,9 +130,9 @@ function jackpotBroadcastEmbed(interaction, wonAmount, newPool) {
             `　　　**J A C K P O T**\n` +
             `🎰 ━━━━━━━━━━━━━━━━━━━━━━━ 🎰\n\n` +
             `${interaction.user} just hit **TRIPLE WILD** 🃏🃏🃏\n` +
-            `and walked away with the entire pool.\n\n` +
+            (credited ? `and walked away with the entire pool.\n\n` : `and claimed the entire pool.\n\n`) +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `  💰 Won: **${wonAmount.toLocaleString()}** coins\n` +
+            wonLine +
             `  🔄 New pool: **${newPool.toLocaleString()}** coins\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
             `> Think you can be next?`
@@ -249,6 +264,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         let finalJackpotPool = jackpotPool;
         let jackpotWon = false;
         let jackpotNote = null;
+        let jackpotDelivery = {};
 
         if (result.outcome === 'jackpot') {
             const claim = await claimJackpot({
@@ -271,6 +287,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 // result.payout carries the pot for the embeds' arithmetic only.
                 jackpotWon = true;
                 result = { ...result, payout: claim.wonAmount };
+                jackpotDelivery = { credited: claim.credited, owed: claim.owed };
                 if (!claim.credited) {
                     jackpotNote = claim.owed
                         ? '\n> ⚠️ *The pot could not be paid out just now — it has been recorded and an admin can settle it.*'
@@ -332,7 +349,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 : interaction.channel;
             await targetChannel?.send({
                 content: pingHere ? '@here' : undefined,
-                embeds: [jackpotBroadcastEmbed(interaction, result.payout, finalJackpotPool)],
+                embeds: [jackpotBroadcastEmbed(interaction, result.payout, finalJackpotPool, jackpotDelivery)],
             }).catch(err => console.error(`[Slots] jackpot broadcast failed — channel:${targetChannel?.id} interaction:${interaction.id}`, err));
         }
 
