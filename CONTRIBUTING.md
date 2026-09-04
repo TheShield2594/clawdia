@@ -128,6 +128,25 @@ Mongoose connection or an un-`unref`'d timer hangs at the end of the run instead
 of being silently shot, because the hang is the bug. If your new test hangs the
 run, something it opened is still open.
 
+Nothing sleeps to get its ordering right. A test that makes one operation take
+10ms and another 1ms and then asserts on which finished first is a statement
+about the scheduler, and on a loaded CI runner it is the first thing to break —
+with a failure that looks like a bug in whatever it was testing. Two tools
+instead:
+
+- `tests/helpers/deferred.js` for ordering. `deferred()` is one promise the test
+  settles by hand; `gates(names)` is a `started`/`finish` pair per name, so a
+  test can wait until every operation is genuinely in flight before releasing
+  any of them. Concurrency that is required then *hangs* when it is missing,
+  rather than passing on a timing coincidence.
+- `jest.useFakeTimers()` for anything about a clock — a deadline, a TTL, a
+  retry window — with `jest.advanceTimersByTimeAsync()` to step over it. Where a
+  test also depends on real stream or socket delivery, fake only the clock:
+  `jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] })`.
+
+`await new Promise(setImmediate)` is fine, and is not a sleep: it yields one
+turn of the event loop, which is what an awaited round trip actually costs.
+
 ### Coverage
 
 Two ratchets, both applied by CI, both failable locally:

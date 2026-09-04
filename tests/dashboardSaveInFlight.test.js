@@ -21,13 +21,7 @@ global.TextDecoder = global.TextDecoder || TextDecoder;
  * mid-flight, which is the only moment any of it is true.
  */
 const { bootPage, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
-
-/** A promise plus the handle to settle it from the test body. */
-function deferred() {
-    let resolve;
-    const promise = new Promise(r => { resolve = r; });
-    return { promise, resolve };
-}
+const { deferred } = require('./helpers/deferred');
 
 function saveButtons(section) {
     return Array.from(document.querySelectorAll(`[data-action="save"][data-section="${section}"]`));

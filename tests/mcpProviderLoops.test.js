@@ -41,6 +41,7 @@ const ollama = require('../src/services/ai/providers/ollama');
 const gemini = require('../src/services/ai/providers/gemini');
 const { MAX_TOOL_ROUNDS } = require('../src/services/ai/mcp/toolkit');
 const { installHttpMock } = require('./helpers/httpMock');
+const { gates } = require('./helpers/deferred');
 const { response, jsonResponse } = require('./helpers/fetchResponse');
 
 // Ollama is the one provider here reached over plain HTTP rather than through a
@@ -177,20 +178,23 @@ describe('openai', () => {
             ]))
             .mockResolvedValueOnce(ANSWER_STREAM());
 
-        let inFlight = 0;
-        let peak = 0;
+        // Both calls are held until the test has seen both start, so "they ran
+        // at the same time" is established rather than timed; then the *second*
+        // is released first, so a result order that still matches the call
+        // order is ordering and not luck (#949).
+        const calls = gates(['a', 'b']);
         mockCall.mockImplementation(async (_name, args) => {
-            peak = Math.max(peak, ++inFlight);
-            // The first call is the slow one, so a result order that still
-            // matches the call order is ordering and not luck.
-            await new Promise(resolve => setTimeout(resolve, args.q === 'a' ? 10 : 1));
-            inFlight--;
+            calls.started[args.q].resolve();
+            await calls.finish[args.q].promise;
             return `result for ${args.q}`;
         });
 
-        await collect(openai.stream(REQ));
+        const streamed = collect(openai.stream(REQ));
+        await calls.allStarted();
+        calls.finish.b.resolve();
+        calls.finish.a.resolve();
+        await streamed;
 
-        expect(peak).toBe(2);
         expect(mockCreate.mock.calls[1][0].messages.slice(-2)).toEqual([
             { role: 'tool', tool_call_id: 'call_1', content: 'result for a' },
             { role: 'tool', tool_call_id: 'call_2', content: 'result for b' }
@@ -319,18 +323,21 @@ describe('ollama', () => {
             ]))
             .mockResolvedValueOnce(OLLAMA_ANSWER());
 
-        let inFlight = 0;
-        let peak = 0;
+        // Held until both have started, then released back to front — see the
+        // OpenAI case above for why that is the shape (#949).
+        const calls = gates(['a', 'b']);
         mockCall.mockImplementation(async (_name, args) => {
-            peak = Math.max(peak, ++inFlight);
-            await new Promise(resolve => setTimeout(resolve, args.q === 'a' ? 10 : 1));
-            inFlight--;
+            calls.started[args.q].resolve();
+            await calls.finish[args.q].promise;
             return `result for ${args.q}`;
         });
 
-        await collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434' }));
+        const streamed = collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434' }));
+        await calls.allStarted();
+        calls.finish.b.resolve();
+        calls.finish.a.resolve();
+        await streamed;
 
-        expect(peak).toBe(2);
         expect(http.post.mock.calls[1][1].messages.slice(-2)).toEqual([
             { role: 'tool', tool_name: 'github__search_repositories', content: 'result for a' },
             { role: 'tool', tool_name: 'github__search_repositories', content: 'result for b' }
@@ -429,18 +436,21 @@ describe('gemini', () => {
             })
             .mockResolvedValueOnce({ text: 'Three open PRs.' });
 
-        let inFlight = 0;
-        let peak = 0;
+        // Held until both have started, then released back to front — see the
+        // OpenAI case above for why that is the shape (#949).
+        const calls = gates(['a', 'b']);
         mockCall.mockImplementation(async (_name, args) => {
-            peak = Math.max(peak, ++inFlight);
-            await new Promise(resolve => setTimeout(resolve, args.q === 'a' ? 10 : 1));
-            inFlight--;
+            calls.started[args.q].resolve();
+            await calls.finish[args.q].promise;
             return `result for ${args.q}`;
         });
 
-        await gemini.complete(REQ);
+        const completed = gemini.complete(REQ);
+        await calls.allStarted();
+        calls.finish.b.resolve();
+        calls.finish.a.resolve();
+        await completed;
 
-        expect(peak).toBe(2);
         expect(mockSendMessage.mock.calls[1][0].message.map(part => part.functionResponse.response.result))
             .toEqual(['result for a', 'result for b']);
     });

@@ -25,6 +25,7 @@ jest.mock('../src/services/ai/mcp/client', () => {
 });
 
 const { McpError } = require('../src/services/ai/mcp/client');
+const { deferred } = require('./helpers/deferred');
 const {
     entryFor,
     clientFor,
@@ -45,12 +46,6 @@ const SERVER = {
 };
 
 // A promise somebody else settles, which is what a tool call in flight is.
-function deferred() {
-    let settle;
-    const promise = new Promise((resolve, reject) => { settle = { resolve, reject }; });
-    return { promise, ...settle };
-}
-
 beforeEach(() => {
     // Reset before clearing, not after: `resetMcpCache` closes whatever clients
     // the last test left pooled, and closing them after the clear leaves a

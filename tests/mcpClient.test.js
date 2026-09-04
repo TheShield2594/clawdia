@@ -1024,6 +1024,15 @@ describe('a server request whose id collides with ours', () => {
 });
 
 describe('the deadline while somebody is answering', () => {
+    // Both cases here are about a clock, so the clock is driven rather than
+    // waited on (#949). The originals slept 250ms of real time to get past a
+    // 60ms deadline, which on a loaded runner is a coin toss about which of the
+    // two the scheduler serves first. `advanceTimersByTimeAsync` flushes the
+    // stream reads between timers, so the elicitation still arrives the way it
+    // does with a real clock.
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
     /** A stream held open by the test, so the deadline is what decides. */
     function heldStream() {
         const stream = new Readable({ read() {} });
@@ -1058,7 +1067,7 @@ describe('the deadline while somebody is answering', () => {
 
         // Comfortably past the 60ms the call started with. Without the
         // extension the stream is destroyed here and the call rejects.
-        await new Promise(resolve => setTimeout(resolve, 250));
+        await jest.advanceTimersByTimeAsync(250);
         answered({ action: 'accept', content: {} });
         held.push({ jsonrpc: '2.0', id: callId, result: { content: [{ type: 'text', text: 'deployed' }] } });
 
@@ -1079,13 +1088,17 @@ describe('the deadline while somebody is answering', () => {
         });
 
         const client = new McpHttpClient({ url: URL, elicitation: true });
-        await expect(client.callTool('deploy', {}, {
+        const call = client.callTool('deploy', {}, {
             timeout: 60,
             onElicit: (_params, { extendDeadline }) => {
                 extendDeadline(150);
-                return new Promise(() => {});
+                return new Promise(() => {});   // nobody ever answers
             }
-        })).rejects.toThrow(/before the deadline/);
+        });
+        const settled = expect(call).rejects.toThrow(/before the deadline/);
+
+        await jest.advanceTimersByTimeAsync(300);
+        await settled;
     });
 });
 

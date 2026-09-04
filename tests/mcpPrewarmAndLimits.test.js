@@ -35,16 +35,11 @@ const {
     MAX_PARALLEL_PER_SERVER
 } = require('../src/services/ai/mcp/toolkit');
 const { toolCallBudget, TOOL_CALLS_PER_MESSAGE, SCHEDULED_TOOL_CALLS_PER_HOUR } = require('../src/services/ai/rateLimit');
+const { deferred } = require('./helpers/deferred');
 
 const GITHUB = { name: 'github', url: 'https://api.githubcopilot.com/mcp/', enabled: true };
 const WIKI = { name: 'wiki', url: 'https://wiki.example.com/mcp', enabled: true };
 const textResult = text => ({ content: [{ type: 'text', text }], structuredContent: null, isError: false });
-
-function deferred() {
-    let settle;
-    const promise = new Promise((resolve, reject) => { settle = { resolve, reject }; });
-    return { promise, ...settle };
-}
 
 beforeEach(() => {
     jest.clearAllMocks();

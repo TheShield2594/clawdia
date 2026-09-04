@@ -21,6 +21,7 @@ const { McpHttpClient, McpError } = require('../src/services/ai/mcp/client');
 const { PassThrough: _PT } = require('stream');
 const { resolveEndpoint, pumpEvents, MAX_EVENT_BYTES } = require('../src/services/ai/mcp/sse');
 const { installHttpMock } = require('./helpers/httpMock');
+const { deferred } = require('./helpers/deferred');
 const { response, jsonResponse, textResponse, acceptedResponse } = require('./helpers/fetchResponse');
 
 // The GET is the standing stream and the POSTs are the messages, so the two
@@ -265,6 +266,10 @@ describe('talking over the standing stream', () => {
     });
 
     test('answers a server request on a POST of its own, and survives the wait', async () => {
+        // Only the clock the deadline is on. `setImmediate` and the microtask
+        // queue stay real: the standing stream's frames are delivered through
+        // them, and faking those stops the transport moving at all.
+        jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
         const asked = [];
         let callId = null;
         http.post.mockImplementation(async (_url, payload) => {
@@ -291,14 +296,33 @@ describe('talking over the standing stream', () => {
         // either nothing or an unrelated call of ours that happens to share the
         // number, since each side numbers its requests independently; either way
         // the tool call dies underneath the prompt still open in the channel.
-        const result = await client.callTool('search', {}, {
+        // Two handles and a driven clock, rather than a 300ms sleep racing a
+        // 100ms deadline for the scheduler's attention (#949). `asking` says
+        // the extension has actually been applied, so the advance past the
+        // original deadline is meaningful; `answering` holds the handler open
+        // across it, which is what a person reading a question in a channel
+        // does.
+        const asking = deferred();
+        const answering = deferred();
+        const call = client.callTool('search', {}, {
             timeout: 100,
             onElicit: async (params, { extendDeadline }) => {
                 extendDeadline(5000);
-                await new Promise(resolve => setTimeout(resolve, 300));
+                asking.resolve();
+                await answering.promise;
                 return { action: 'accept', content: { repo: params.message } };
             },
         });
+
+        let result;
+        try {
+            await asking.promise;
+            await jest.advanceTimersByTimeAsync(300);
+            answering.resolve();
+            result = await call;
+        } finally {
+            jest.useRealTimers();
+        }
 
         expect(result).toEqual({ content: [], structuredContent: null, isError: false });
         expect(asked).toHaveLength(1);
