@@ -162,6 +162,13 @@ jobs:
           dockerfile: Dockerfile
           # The rule this turns off, and why, are recorded in the file itself.
           config: .hadolint.yaml
+          # Repeated from that file because it has to be. The action passes this
+          # input through the environment and the environment beats the config,
+          # so leaving it at the action's `info` default would silently discard
+          # the threshold .hadolint.yaml states — which is how the first run of
+          # this step failed, on an info-level finding the file had already
+          # decided not to gate on.
+          failure-threshold: warning
 
       # ubuntu-latest ships shellcheck, so this needs no install and no action.
       # `-x` follows `. lib/archive.sh`, which restore.sh and verify-backup.sh

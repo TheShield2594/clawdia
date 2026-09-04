@@ -201,6 +201,15 @@ EXPOSE 3000
 # and nothing else, and /health on that port is the only HTTP it answers. The
 # dashboard container runs the same image with neither variable set, so it falls
 # through to DASHBOARD_PORT exactly as before.
+#
+# DL3025 wants JSON notation for this CMD and it stays shell form (#940). The
+# command is one `node -e` whose argument is a JavaScript program full of
+# quotes; in a JSON array every one of them is escaped by hand, and the line
+# below is already the least readable in this file. Exec form would also drop
+# the `/bin/sh -c` the check currently goes through, which changes how a
+# deployed container reports its health — worth doing deliberately, if ever,
+# and not as a side effect of turning a linter on.
+# hadolint ignore=DL3025
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=90s \
     CMD node -e "require('http').get('http://127.0.0.1:' + (process.env.BOT_GATEWAY_PORT || process.env.DASHBOARD_PORT || 3000) + '/health', r => { let b=''; r.on('data', d => b += d); r.on('end', () => { try { process.exit(JSON.parse(b).status === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"
 
