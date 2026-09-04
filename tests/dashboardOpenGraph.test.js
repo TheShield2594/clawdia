@@ -67,8 +67,22 @@ describe('the landing page unfurls', () => {
         expect(attr(html, /<meta name="twitter:card" content="([^"]*)">/)).toBe('summary_large_image');
     });
 
-    it('gives the card alt text', () => {
-        expect(attr(html, /<meta property="og:image:alt" content="([^"]*)">/)).toContain('Clawdia');
+    it('gives the card alt text, on both tags', () => {
+        const alt = attr(html, /<meta property="og:image:alt" content="([^"]*)">/);
+        expect(alt).toContain('Clawdia');
+        expect(attr(html, /<meta name="twitter:image:alt" content="([^"]*)">/)).toBe(alt);
+    });
+
+    // #947. Twitter falls back to og:image when there is no twitter:image, and
+    // the other half-dozen unfurlers that read "Twitter cards" each do their
+    // own thing about it. Naming the image on both tags costs a line.
+    it('names the same image on twitter:image as on og:image', () => {
+        expect(attr(html, /<meta name="twitter:image" content="([^"]*)">/))
+            .toBe(attr(html, /<meta property="og:image" content="([^"]*)">/));
+    });
+
+    it('tints the address bar to the cream the page actually paints', () => {
+        expect(attr(html, /<meta name="theme-color" content="([^"]*)">/)).toBe('#faf6ef');
     });
 
     it('points og:image at an absolute, content-hashed URL', () => {
@@ -88,10 +102,12 @@ describe('the landing page unfurls', () => {
         const withoutBase = landing({ baseUrl: null });
         expect(withoutBase).not.toContain('og:url');
         expect(withoutBase).not.toContain('og:image');
+        expect(withoutBase).not.toContain('twitter:image');
         expect(withoutBase).not.toContain('rel="canonical"');
         // The tags that need no host still go out.
         expect(withoutBase).toContain('<meta property="og:title"');
         expect(withoutBase).toContain('<meta name="twitter:card"');
+        expect(withoutBase).toContain('<meta name="theme-color"');
     });
 });
 

@@ -1,0 +1,11 @@
+# Everything on this host except the landing page needs a session cookie.
+# /dashboard and /auth answer a crawler with a redirect into Discord's OAuth,
+# and /api answers 401 — so the rules below save the crawl rather than protect
+# anything. They are not an access control: the middleware in
+# src/dashboard/lib/middleware.js is (#947).
+User-agent: *
+Disallow: /dashboard
+Disallow: /api
+Disallow: /auth
+
+# Deliberately no Sitemap: line. There is one public page.
