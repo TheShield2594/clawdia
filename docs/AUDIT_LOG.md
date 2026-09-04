@@ -13,6 +13,14 @@ nothing — neither that it is broken nor that it is sound. Do not read the
 absence of a section as a clean bill of health, and do not treat this file as a
 release gate.
 
+The file records what was audited on the day it was audited, so the paths below
+are the paths as they stood then and are deliberately left that way. One has
+moved since and is cited often enough to be worth naming: the settings
+validators and the `/stats` fixes were audited in `src/dashboard/routes/api.js`,
+which is now a mounter and nothing else — that code lives in
+`src/dashboard/routes/api/`, the validators in `settings.js` and the guild
+statistics in `stats.js`.
+
 ---
 
 ## Welcome Function
