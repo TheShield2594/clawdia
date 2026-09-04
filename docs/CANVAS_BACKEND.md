@@ -56,12 +56,28 @@ binding shipped as prebuilt N-API binaries — including `linux-x64-musl` and
 `linux-arm64-musl`, which is the pair Alpine needs. Adopting it would delete the
 compiler and both apk lists above outright.
 
-That is the whole of the case. #933 also suggests that being N-API would open
-the door to moving card rendering onto worker threads, and that half does not
-survive being checked: both backends were loaded inside a `worker_threads`
-worker, had a font registered, and drew and encoded a PNG, and both worked. If
-worker-thread rendering is worth doing it is worth doing today, on the
-dependency already installed — it is not a reason to change backends.
+That is the whole of the case, and the rest of #933's framing should not be
+carried forward with it. The issue also suggests that being N-API would open the
+door to moving card rendering onto worker threads. Two things are wrong with
+that as a reason to switch.
+
+The first is that it does not distinguish the backends: both were loaded inside
+a `worker_threads` worker, had a font registered, and drew and encoded a PNG,
+and both worked. Whatever worker rendering is worth, it is worth the same on the
+dependency already installed.
+
+The second is that neither result means the thing it looks like it means.
+Node-API buys ABI stability across Node majors; it is not a thread-safety
+guarantee, and a `napi_env` is bound to the thread that created it. Upstream is
+reported to advise against using `@napi-rs/canvas` from a worker directly — the
+library already offloads its encode to libuv's pool, which is the same reason
+`canvasEncode` exists here — with segfaults reported against that use. One
+successful render says the module loads and draws in a worker. It says nothing
+about what happens under concurrent load, which is the only condition anyone
+would move rendering to a worker for.
+
+So worker-thread rendering is its own investigation, on either backend, and not
+part of this decision.
 
 Everything below was measured against `@napi-rs/canvas@1.0.8` and
 `canvas@3.2.3` on Node 22, driving this repo's own `src/utils/cardGenerator.js`
