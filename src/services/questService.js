@@ -146,7 +146,16 @@ async function ensureQuests(user, guildSettings) {
     if (!guildSettings?.quests?.enabled) return { assignedNewDaily: false };
 
     const now = new Date();
-    user.quests = (user.quests || []).filter(q => q.expiresAt > now);
+    // Assigning a plain array back over the document array rebuilds it — every
+    // entry re-cast into a subdocument — and this runs on every message, for a
+    // list that actually changes twice a day (#893). Mongoose compares the two
+    // and correctly declines to mark the path modified, so no write was at
+    // stake; the cast itself is what is skipped when nothing expired, along
+    // with the churn of handing the callers below a different array object each
+    // time.
+    const existing = user.quests;
+    const unexpired = (existing || []).filter(q => q.expiresAt > now);
+    if (!Array.isArray(existing) || unexpired.length !== existing.length) user.quests = unexpired;
 
     const dailyCount  = guildSettings.quests.questsPerDay  ?? 3;
     const weeklyCount = guildSettings.quests.questsPerWeek ?? 2;
@@ -190,6 +199,85 @@ async function ensureQuests(user, guildSettings) {
     }
 
     return { assignedNewDaily };
+}
+
+// The quest ids each per-event hook ticks, and the AI-quest mechanic it also
+// advances. Named here rather than inline in the hooks because the hot paths
+// ask a second question of the same lists — "could this event move anything for
+// this user at all?" — before they pay for a full document hydrate and save
+// (#893, #898, #929). Two copies of these ids would drift, and the failure mode
+// of drift is a quest that silently stops progressing.
+const QUEST_EVENTS = {
+    message: {
+        ids: ['daily_messages_5', 'daily_messages_10', 'daily_messages_25', 'daily_messages_50',
+              'weekly_messages_50', 'weekly_messages_150', 'weekly_messages_300'],
+        aiMechanic: 'social',
+    },
+    reaction: {
+        ids: ['daily_reactions_3', 'daily_reactions_5', 'daily_reactions_10', 'daily_reactions_20'],
+        aiMechanic: null,
+    },
+    command: {
+        ids: ['daily_commands_2', 'daily_commands_5', 'daily_commands_10',
+              'weekly_commands_10', 'weekly_commands_25'],
+        aiMechanic: 'explore',
+    },
+    streak: {
+        ids: ['weekly_streak_3', 'weekly_streak_5'],
+        aiMechanic: null,
+    },
+};
+
+// A quest entry this event could still advance: assigned, unfinished, unexpired.
+function isLive(entry, now) {
+    return !entry.completedAt && new Date(entry.expiresAt).getTime() > now;
+}
+
+/**
+ * Whether `on<Event>` could move anything for a user holding `quests`.
+ *
+ * Answers from the quest list alone, so a caller can ask it of a projected
+ * `{ quests: 1 }` read and skip hydrating the whole user document when the
+ * answer is no — which it is for most users most of the time, since the
+ * per-event quests are a handful of ids that are finished early in the day.
+ *
+ * AI legendary quests are matched on the `ai_` prefix rather than on their
+ * mechanic: the mechanic lives in a separate collection, and reading it would
+ * cost the round trip this check exists to avoid. So an active AI quest of any
+ * mechanic answers yes — conservative in the direction that cannot lose
+ * progress, and rare enough not to matter.
+ */
+function questEventCanProgress(quests, event) {
+    const spec = QUEST_EVENTS[event];
+    if (!spec) return true;
+    const now = Date.now();
+    return (quests || []).some(q =>
+        isLive(q, now) && (spec.ids.includes(q.questId) || (spec.aiMechanic && q.questId.startsWith('ai_'))),
+    );
+}
+
+/**
+ * Whether `ensureQuests` would add or remove anything — a fresh daily set, a
+ * topped-up weekly set, or an expired entry to prune.
+ *
+ * Same contract as `questEventCanProgress`: quest list in, boolean out, safe to
+ * ask of a lean projection. Callers pair the two so that a user whose quests
+ * have rolled over still gets the full path even though no event quest is live.
+ */
+function questAssignmentNeeded(quests, guildSettings) {
+    if (!guildSettings?.quests?.enabled) return false;
+
+    const now = Date.now();
+    const entries = quests || [];
+    const unexpired = entries.filter(q => new Date(q.expiresAt).getTime() > now);
+    if (unexpired.length !== entries.length) return true;
+
+    const dailyExpiryMs  = getDailyExpiry().getTime();
+    const weeklyExpiryMs = getWeeklyExpiry().getTime();
+    const countAt = ms => unexpired.filter(q => new Date(q.expiresAt).getTime() === ms).length;
+
+    return countAt(dailyExpiryMs)  < (guildSettings.quests.questsPerDay  ?? 3)
+        || countAt(weeklyExpiryMs) < (guildSettings.quests.questsPerWeek ?? 2);
 }
 
 function getDefById(questId) {
@@ -300,13 +388,12 @@ async function awardSeasonXp(user, xp, guildSettings) {
 async function onMessage(user, guildSettings) {
     if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
     const completed = [], nearComplete = [];
-    for (const questId of ['daily_messages_5', 'daily_messages_10', 'daily_messages_25', 'daily_messages_50',
-                           'weekly_messages_50', 'weekly_messages_150', 'weekly_messages_300']) {
+    for (const questId of QUEST_EVENTS.message.ids) {
         const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
     }
-    const ai = await incrementAiQuestsForMechanic(user, 'social', 1, guildSettings);
+    const ai = await incrementAiQuestsForMechanic(user, QUEST_EVENTS.message.aiMechanic, 1, guildSettings);
     completed.push(...ai.completed); nearComplete.push(...ai.nearComplete);
     return { completed, nearComplete };
 }
@@ -314,7 +401,7 @@ async function onMessage(user, guildSettings) {
 async function onReaction(user, guildSettings) {
     if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
     const completed = [], nearComplete = [];
-    for (const questId of ['daily_reactions_3', 'daily_reactions_5', 'daily_reactions_10', 'daily_reactions_20']) {
+    for (const questId of QUEST_EVENTS.reaction.ids) {
         const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
@@ -345,13 +432,12 @@ async function incrementAiQuestsForMechanic(user, mechanic, amount, guildSetting
 async function onCommandUse(user, guildSettings) {
     if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
     const completed = [], nearComplete = [];
-    for (const questId of ['daily_commands_2', 'daily_commands_5', 'daily_commands_10',
-                           'weekly_commands_10', 'weekly_commands_25']) {
+    for (const questId of QUEST_EVENTS.command.ids) {
         const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
     }
-    const ai = await incrementAiQuestsForMechanic(user, 'explore', 1, guildSettings);
+    const ai = await incrementAiQuestsForMechanic(user, QUEST_EVENTS.command.aiMechanic, 1, guildSettings);
     completed.push(...ai.completed); nearComplete.push(...ai.nearComplete);
     return { completed, nearComplete };
 }
@@ -443,7 +529,7 @@ async function onStreakUpdate(user, guildSettings) {
     const streak       = user.streak?.current || 0;
     const completed    = [];
     const nearComplete = [];
-    for (const questId of ['weekly_streak_3', 'weekly_streak_5']) {
+    for (const questId of QUEST_EVENTS.streak.ids) {
         const def = getDefById(questId);
         if (!def) continue;
         const entry = user.quests?.find(q => q.questId === questId && !q.completedAt && q.expiresAt > new Date());
@@ -584,7 +670,8 @@ function startQuestService() {
 }
 
 module.exports = {
-    ensureQuests, getQuestDefs, getDailyPool, getWeeklyPool,
+    ensureQuests, questEventCanProgress, questAssignmentNeeded,
+    getQuestDefs, getDailyPool, getWeeklyPool,
     getCategoryEmojis, getDifficultyColors,
     onMessage, onReaction, onCommandUse, onEconomyEarn, onHunt, onFish, onMine, onExplore, onPetCare, onStreakUpdate,
     awardSeasonXp, awardQuest, incrementAiQuestsForMechanic,

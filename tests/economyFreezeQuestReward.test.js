@@ -32,12 +32,20 @@ jest.mock('../src/models/User', () => mockUser);
 jest.mock('../src/utils/guildSettingsCache', () => ({
     getGuildSettings: jest.fn(async () => ({ quests: { enabled: true } })),
 }));
-jest.mock('../src/services/questService', () => ({
-    ensureQuests: jest.fn(async () => {}),
-    onCommandUse: jest.fn(async () => ({ completed: [], nearComplete: [] })),
-    notifyQuestComplete: jest.fn(async () => {}),
-    notifyQuestNearComplete: jest.fn(async () => {}),
-}));
+// The predicates are the real ones: what they answer decides whether the
+// document is hydrated at all, and a stub that always says "yes" would hide the
+// skip these tests now have to work around.
+jest.mock('../src/services/questService', () => {
+    const actual = jest.requireActual('../src/services/questService');
+    return {
+        ensureQuests: jest.fn(async () => {}),
+        onCommandUse: jest.fn(async () => ({ completed: [], nearComplete: [] })),
+        questEventCanProgress: actual.questEventCanProgress,
+        questAssignmentNeeded: actual.questAssignmentNeeded,
+        notifyQuestComplete: jest.fn(async () => {}),
+        notifyQuestNearComplete: jest.fn(async () => {}),
+    };
+});
 jest.mock('../src/utils/balanceDelta', () => ({
     saveWithBalanceDelta: jest.fn(async () => ({ credited: true, balance: 0 })),
     detachBalanceDelta: jest.fn(),
@@ -56,10 +64,22 @@ const interaction = {
     channel: {},
 };
 
+// `findOne` is called twice with different shapes now: once projected, whose
+// result is read through `.lean()`, and once unprojected and awaited directly.
+// One stand-in serves both — a promise for the document that also answers
+// `lean()` with it.
+function stubFindOne(doc) {
+    mockUser.findOne.mockImplementation(() => {
+        const query = Promise.resolve(doc);
+        query.lean = async () => doc;
+        return query;
+    });
+}
+
 beforeEach(() => jest.clearAllMocks());
 
 test('a frozen member accrues no quest progress and is paid nothing', async () => {
-    mockUser.findOne.mockResolvedValue({ userId: 'player-1', guildId: 'guild-1', balance: 100, economyFrozen: true });
+    stubFindOne({ userId: 'player-1', guildId: 'guild-1', balance: 100, economyFrozen: true });
 
     await trackQuestCommandUse(interaction);
 
@@ -69,10 +89,14 @@ test('a frozen member accrues no quest progress and is paid nothing', async () =
     expect(onCommandUse).not.toHaveBeenCalled();
     // And nothing is written, so there is no credit to be recorded as owed.
     expect(saveWithBalanceDelta).not.toHaveBeenCalled();
+    // The freeze is read off the projection, so the refusal costs one small
+    // read rather than a full document hydrate (#898).
+    expect(mockUser.findOne).toHaveBeenCalledTimes(1);
+    expect(mockUser.findOne.mock.calls[0][1]).toEqual({ quests: 1, economyFrozen: 1 });
 });
 
 test('an unfrozen member is tracked and paid as before', async () => {
-    mockUser.findOne.mockResolvedValue({ userId: 'player-1', guildId: 'guild-1', balance: 100 });
+    stubFindOne({ userId: 'player-1', guildId: 'guild-1', balance: 100 });
 
     await trackQuestCommandUse(interaction);
 
@@ -84,7 +108,7 @@ test('an unfrozen member is tracked and paid as before', async () => {
 // freeze committed in between has to be refused by the write itself, which is
 // the same rule every debit follows.
 test('the reward write carries the freeze guard, not just the check', async () => {
-    mockUser.findOne.mockResolvedValue({ userId: 'player-1', guildId: 'guild-1', balance: 100 });
+    stubFindOne({ userId: 'player-1', guildId: 'guild-1', balance: 100 });
 
     await trackQuestCommandUse(interaction);
 
@@ -95,7 +119,7 @@ test('the reward write carries the freeze guard, not just the check', async () =
 test('a member with no document yet is tracked, not refused', async () => {
     // The row is created empty, so `economyFrozen` is absent rather than false
     // — the same case the `$ne: true` guard exists for everywhere else.
-    mockUser.findOne.mockResolvedValue(null);
+    stubFindOne(null);
     mockUser.create.mockResolvedValue({ userId: 'player-1', guildId: 'guild-1', balance: 0 });
 
     await trackQuestCommandUse(interaction);

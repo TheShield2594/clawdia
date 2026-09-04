@@ -62,6 +62,24 @@ function getCustomBadWordRegexes(guildId, customBadWords) {
     return regexes;
 }
 
+// The bot's own mention token, as a regex.
+//
+// This was rebuilt with `new RegExp` on every mention-triggered message (#930).
+// The id is fixed for the life of the process, but it is only knowable once the
+// client has logged in — hence built on first use rather than at module load,
+// and keyed on the id so a client that logs in as someone else (a test, a token
+// swap) does not keep the stale pattern.
+let mentionPattern = null;
+function getMentionPattern(botId) {
+    if (mentionPattern?.botId !== botId) {
+        mentionPattern = { botId, regex: new RegExp(`<@!?${botId}>`, 'g') };
+    }
+    // Shared and `g`-flagged, so `lastIndex` is state between calls. `replace`
+    // resets it for us; nothing here may switch to `test`/`exec` without
+    // clearing it first.
+    return mentionPattern.regex;
+}
+
 // Leet-speak normalization map
 const LEET_MAP = {
     '4': 'a', '@': 'a', '3': 'e', '€': 'e', '1': 'i', '!': 'i',
@@ -115,6 +133,9 @@ module.exports = {
     name: 'messageCreate',
     // Exported for unit testing only
     _getCustomBadWordRegexes: getCustomBadWordRegexes,
+    // Likewise: the mention pattern is built once per bot id (#930), and the
+    // only way to see that from outside is to ask for it twice.
+    _getMentionPattern: getMentionPattern,
     // The spam window's backing store. Exposed so a test can assert the sweep
     // actually reclaims it (#600) — a leak is invisible from the outside,
     // because a tracker that never forgets behaves identically until it is the
@@ -167,7 +188,7 @@ module.exports = {
                         // the reset command and the raw `<@id>` token went into the
                         // model prompt on every mention-triggered message (#820).
                         const strippedContent = message.content
-                            .replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '')
+                            .replace(getMentionPattern(client.user.id), '')
                             .trim();
                         const reminderHandled = await handleNLReminder(message, strippedContent);
                         if (!reminderHandled) {
@@ -300,6 +321,10 @@ async function flushPendingUser(user) {
     }
 }
 
+// The one path this handler increments on every single message, and so the one
+// it is worth keeping out of the document save.
+const DAILY_COUNTER_PATH = 'dailyMessages';
+
 async function handleStreakAndQuests(message, guildSettings, existingUser = null, announcements = []) {
     // Reported back to the caller so it knows whether the XP handleLeveling
     // applied has been persisted. Set only once the write has actually landed —
@@ -365,7 +390,8 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
             user.dailyMessages = 0;
             user.lastDailyReset = now;
         }
-        user.dailyMessages = (user.dailyMessages || 0) + 1;
+        const dailyMessagesAtLoad = user.dailyMessages || 0;
+        user.dailyMessages = dailyMessagesAtLoad + 1;
 
         // Quest progress
         const { assignedNewDaily } = await ensureQuests(user, guildSettings);
@@ -376,11 +402,45 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
 
         const newlyEarned = await checkAndAward(user, guildSettings).catch(() => []);
 
-        await saveWithBalanceDelta(User, user, balanceAtLoad, {
-            service: 'messageCreate',
-            jobName: 'streakAndQuestRewards',
-            guildId: message.guild.id,
-        });
+        // The steady-state message changes nothing but the daily counter: same
+        // UTC day, so the streak stands; quests finished for the day or turned
+        // off, so no progress moved; XP on cooldown, so no levelling either.
+        // Writing the whole document back for that `+1` is what made this path
+        // cost a read *and* a write per message per active chatter (#893), so
+        // when the counter is all that is pending it goes out as the `$inc` it
+        // always was, and `save()` is skipped entirely.
+        //
+        // The decision reads `modifiedPaths()` rather than re-deriving "could
+        // anything have changed?" by hand: it is the very list `save()` would
+        // write, so a handler added to this chain later cannot quietly fall
+        // through the gap and stop being persisted. Anything beyond the counter
+        // — a streak rollover, quest progress, a milestone's coins, a fresh
+        // achievement — puts it back on the full save below.
+        //
+        // A document that cannot report its modified paths falls to the full
+        // save: the sentinel matches no path, so the counter-only branch is not
+        // taken. Skipping a write on a guess is how XP goes missing.
+        const pending = user.modifiedPaths?.() ?? ['*'];
+        if (pending.length && pending.every(path => path === DAILY_COUNTER_PATH)) {
+            const delta = (user.dailyMessages || 0) - dailyMessagesAtLoad;
+            await User.updateOne(
+                { userId: user.userId, guildId: user.guildId },
+                { $inc: { [DAILY_COUNTER_PATH]: delta } },
+            );
+            // The in-memory value already counts this message and the `$inc`
+            // has just made the stored one agree, so the path is settled.
+            // Clearing the flag is what stops the caller's backstop flush from
+            // saving the whole document to write a field that is already right.
+            user.unmarkModified?.(DAILY_COUNTER_PATH);
+        } else if (pending.length) {
+            await saveWithBalanceDelta(User, user, balanceAtLoad, {
+                service: 'messageCreate',
+                jobName: 'streakAndQuestRewards',
+                guildId: message.guild.id,
+            });
+        }
+        // Nothing modified at all is also "persisted": there is nothing left
+        // for the caller's flush to write.
         persisted = true;
 
         // Check wealth milestones after any coins may have been awarded (streak rewards, etc.)

@@ -124,6 +124,36 @@ describe('the event handler', () => {
 
         expect(promptGiven()).toBe('!reset');
     });
+
+    // #930. The token was compiled with `new RegExp` on every mention-triggered
+    // message, for an id that is fixed for the life of the process.
+    describe('the token pattern', () => {
+        test('is compiled once and reused', async () => {
+            await run(mentionMessage(`<@${BOT_ID}> one`));
+            await run(mentionMessage(`<@${BOT_ID}> two`));
+
+            expect(messageCreate._getMentionPattern(BOT_ID))
+                .toBe(messageCreate._getMentionPattern(BOT_ID));
+        });
+
+        test('is rebuilt if the bot logs in as someone else', async () => {
+            const first = messageCreate._getMentionPattern(BOT_ID);
+
+            expect(messageCreate._getMentionPattern('999000111222333444')).not.toBe(first);
+            // And the original id is not still being served the other pattern.
+            expect(messageCreate._getMentionPattern(BOT_ID)).not.toBe(first);
+        });
+
+        test('still strips every token in a message, not just the first', async () => {
+            // The cached pattern is `g`-flagged and therefore carries
+            // `lastIndex` between calls. `replace` resets it; a second
+            // consecutive strip would drop tokens if anything ever did not.
+            await run(mentionMessage(`<@${BOT_ID}> hey <@${BOT_ID}> you`));
+
+            expect(promptGiven()).toBe('hey  you');
+            expect(promptGiven()).not.toContain(BOT_ID);
+        });
+    });
 });
 
 describe('the chat transport', () => {
