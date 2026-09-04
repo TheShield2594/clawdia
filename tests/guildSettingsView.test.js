@@ -34,7 +34,7 @@ describe('guild-settings view', () => {
     // build:assets` has been run. What is being asserted either way is that the
     // URL carries the hash.
     it('loads that file through a content-hashed URL', () => {
-        expect(html).toMatch(/<script src="\/guild-settings(\.min)?\.js\?v=[0-9a-f]{10}"><\/script>/);
+        expect(html).toMatch(/<script defer src="\/guild-settings(\.min)?\.js\?v=[0-9a-f]{10}"><\/script>/);
         expect(html).toMatch(/href="\/styles(\.min)?\.css\?v=[0-9a-f]{10}"/);
         expect(html).toMatch(/src="\/esc-html(\.min)?\.js\?v=[0-9a-f]{10}"/);
     });

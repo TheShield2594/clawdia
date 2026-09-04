@@ -68,8 +68,19 @@
             </div>
         <%_ } else { _%>
             <div class="cw-nav-cta">
+                <%# ?size=64 rather than the CDN's full-size default for a 34px
+                    tile (#946). No loading="lazy": this one is in the nav bar, so
+                    it is always in the first viewport and lazy would only delay
+                    it. width/height reserve the box so the nav does not shift when
+                    it arrives; the data-fallback-* pair is the letter tile below,
+                    swapped in by the handler in partials/head.ejs when a stale
+                    avatar hash 404s. _%>
                 <%_ if (user.avatar) { _%>
-                    <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png" alt="<%= user.username %>'s avatar" class="cw-dash-avatar">
+                    <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png?size=64"
+                         alt="<%= user.username %>'s avatar" class="cw-dash-avatar"
+                         width="34" height="34" decoding="async"
+                         data-fallback-class="cw-dash-avatar-fallback"
+                         data-fallback-text="<%= user.username.charAt(0).toUpperCase() %>">
                 <%_ } else { _%>
                     <div class="cw-dash-avatar-fallback"><%= user.username.charAt(0).toUpperCase() %></div>
                 <%_ } _%>

@@ -66,7 +66,9 @@ describe('every top-level view gets its head from one partial', () => {
     });
 
     it('leaves the one script only guild-settings wants where it was', () => {
-        expect(pages['guild-settings.ejs']()).toContain(`<script src="${asset('/esc-html.js')}"></script>`);
+        // Still in that view and nowhere else, and now deferred: it was a
+        // synchronous <script> in <head> that nothing in <head> read (#945).
+        expect(pages['guild-settings.ejs']()).toContain(`<script defer src="${asset('/esc-html.js')}"></script>`);
         expect(pages['index.ejs']()).not.toContain('esc-html.js');
     });
 
@@ -117,8 +119,26 @@ describe('the landing page and the server picker share one nav', () => {
         const html = render('dashboard.ejs', {
             user: { ...USER, avatar: 'abc' }, guilds: [], version: '1.2.3', asset,
         });
-        expect(html).toContain('https://cdn.discordapp.com/avatars/1/abc.png');
-        expect(html).not.toContain('cw-dash-avatar-fallback');
+        expect(html).toContain('https://cdn.discordapp.com/avatars/1/abc.png?size=64');
+        // The letter tile is not *rendered*. It is still named, in the
+        // data-fallback-class the head partial's error handler swaps in when a
+        // stale avatar hash 404s (#946), so the class name alone no longer says
+        // which branch ran — the element does.
+        expect(html).not.toContain('<div class="cw-dash-avatar-fallback">');
+    });
+
+    it('asks the CDN for an avatar the size it is displayed at', () => {
+        // The whole of #946 in one assertion: the default is whatever the user
+        // uploaded, which is routinely 1024px for a 34px tile.
+        const html = render('dashboard.ejs', {
+            user: { ...USER, avatar: 'abc' }, guilds: [], version: '1.2.3', asset,
+        });
+        const img = html.match(/<img[^>]+cdn\.discordapp\.com[^>]*>/)[0];
+        expect(img).toMatch(/\?size=\d+/);
+        expect(img).toMatch(/width="34"/);
+        expect(img).toMatch(/height="34"/);
+        expect(img).toMatch(/data-fallback-class="cw-dash-avatar-fallback"/);
+        expect(img).toMatch(/data-fallback-text="T"/);
     });
 
     it('links the brand home from the dashboard and not from the home page', () => {
