@@ -141,6 +141,57 @@ jobs:
         if: always()
         run: npm run lint
 
+      # #940: CI lints and tests the JavaScript thoroughly and checked nothing
+      # about the files that deploy it. The four steps below are the ops half,
+      # and they are steps in this job rather than a job of their own for the
+      # reason the lint step above already is: one of them needs `npm ci` for
+      # js-yaml, and a second job would pay for that install again to save a few
+      # seconds. `always()` throughout, so a red suite never hides them and they
+      # never hide each other.
+      #
+      # This was not a hypothetical gap. The first run of the third step found
+      # that both stack files' backup entrypoints had been truncated two thirds
+      # of the way through by an apostrophe in a comment — compose splits a
+      # string entrypoint into arguments, and a single quote inside the script
+      # ends it — so the backup container had been starting, failing to parse
+      # its own script, and exiting. See scripts/lint-stack-shell.js.
+      - name: Lint the Dockerfile
+        if: always()
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile
+          # The rule this turns off, and why, are recorded in the file itself.
+          config: .hadolint.yaml
+
+      # ubuntu-latest ships shellcheck, so this needs no install and no action.
+      # `-x` follows `. lib/archive.sh`, which restore.sh and verify-backup.sh
+      # both source — without it the shared functions are unchecked and every
+      # variable they set reads as unassigned in the scripts that use them.
+      - name: Lint the shell scripts
+        if: always()
+        run: |
+          shellcheck --version
+          shellcheck -x --severity=warning scripts/*.sh scripts/lib/*.sh
+
+      - name: Lint the shell inside the stack files
+        if: always()
+        run: npm run lint:stacks
+
+      # Neither stack file is parsed by anything else in CI, so a typo in one
+      # was found by the deploy that failed on it. `--quiet` because the point
+      # is the exit code: interpolation resolves, the schema is honoured, every
+      # anchor and merge key lands. .env.example stands in for the .env an
+      # operator writes — services declare `env_file: .env`, and a compose
+      # version that treats a missing one as fatal would otherwise fail here for
+      # a reason that has nothing to do with the file being checked.
+      - name: Validate both stack files
+        if: always()
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f portainer-stack.yml config --quiet
+          rm -f .env
+
       # #645: CI gated on the tests and nothing else, so a dependency with a
       # published advisory reached the image with nothing in the way. Dependabot
       # raises the bump, but a bump nobody merges is not a control; this is what
@@ -227,6 +278,7 @@ jobs:
   # The `type=gha` cache this job writes is what closes that in practice: the
   # publish build is a cache hit rather than a second compile, and a cache hit is
   # the same layers. The residue is a cache miss inside a single run.
+  #
   #
   # Closing it properly means pushing a staging tag from here and promoting it by
   # digest, which needs `packages: write` in a job that also runs on pull

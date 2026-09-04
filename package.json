@@ -22,6 +22,7 @@
     "og-image": "node scripts/make-og-image.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "lint:stacks": "node scripts/lint-stack-shell.js",
     "format": "prettier --write",
     "test": "jest",
     "test:coverage": "jest --coverage",

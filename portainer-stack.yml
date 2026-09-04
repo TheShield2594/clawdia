@@ -173,6 +173,14 @@ services:
     environment:
       MONGODB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-}
       MONGODB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-}
+    # No apostrophes below — not in a comment either (#940). Compose splits a
+    # string entrypoint into arguments before the container starts, so the first
+    # single quote inside this script closes the one that opened it and
+    # everything after becomes positional arguments that never run. That is not
+    # a warning in the abstract: "the day's backup", in a comment two thirds of
+    # the way down the backup entrypoint, had been truncating it mid-`if` in
+    # both stack files. Reword; there is no escape for one in this form.
+    # tests/stackEntrypointShell.test.js fails on the next one.
     entrypoint: >
       sh -c '
         # The host:port the members list will carry, which is how every client
@@ -454,6 +462,14 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+    # No apostrophes below — not in a comment either (#940). Compose splits a
+    # string entrypoint into arguments before the container starts, so the first
+    # single quote inside this script closes the one that opened it and
+    # everything after becomes positional arguments that never run. That is not
+    # a warning in the abstract: "the day's backup", in a comment two thirds of
+    # the way down the backup entrypoint, had been truncating it mid-`if` in
+    # both stack files. Reword; there is no escape for one in this form.
+    # tests/stackEntrypointShell.test.js fails on the next one.
     entrypoint: >
       sh -c '
         if [ -n "$$MONGODB_URI_FILE" ]; then
@@ -574,10 +590,11 @@ services:
           if ! mongodump --uri="$$MONGODB_URI" --gzip --archive="$$WORK"; then
             # mongodump has no rollback: a dump killed part-way through leaves
             # whatever it had written under the real name. Left there, that
-            # partial file is what the boot catch-up counts as the day's backup
-            # and what `verify-backup.sh --latest` picks up — a failure that
-            # reads as a success. Quarantined under the same suffix a failed
-            # verification uses, so it is still pruned and still there to look at.
+            # partial file is what the boot catch-up counts as the backup for
+            # that day and what `verify-backup.sh --latest` picks up — a failure
+            # that reads as a success. Quarantined under the same suffix a
+            # failed verification uses, so it is still pruned and still there to
+            # look at.
             # Encrypting, the partial dump is plaintext in /tmp and is removed:
             # there is nothing there worth keeping that would be safe to keep.
             if [ "$$WORK" = "$$ARCHIVE" ]; then
@@ -623,10 +640,11 @@ services:
           if ! mongorestore --uri="$$MONGODB_URI" --gzip --archive="$$WORK" --dryRun --quiet; then
             # Renamed rather than kept or deleted. Kept under its own name, an
             # unreadable archive is what --latest picks up and what the boot
-            # catch-up counts as this day's backup; deleted, an operator has
-            # nothing to look at, and the check can fail for reasons that are
-            # not the archive (mongorestore has to reach the server for --dryRun
-            # too). The suffix keeps it off both globs and inside the prune.
+            # catch-up counts as the backup for that day; deleted, an operator
+            # has nothing to look at, and the check can fail for reasons that
+            # are not the archive (mongorestore has to reach the server for
+            # --dryRun too). The suffix keeps it off both globs and inside the
+            # prune.
             mv "$$ARCHIVE" "$$ARCHIVE.unverified";
             rm -f "$$WORK";
             echo "verify-failed $$TIMESTAMP $$ARCHIVE.unverified" > "$$STATUS";
