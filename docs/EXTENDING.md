@@ -750,6 +750,48 @@ Two related conventions worth knowing while writing a panel:
   animation mid-flight leaves the element somewhere wrong — the background
   blobs are the example, since finishing early would strand them off-position.
 
+### What the browser scripts may assume
+
+**ES2020, and nothing newer.** Optional chaining, `??`, `Promise.allSettled`,
+`String.matchAll` and `BigInt` are all in; top-level `await`, `??=`, `.at()`,
+`Object.hasOwn` and class fields are not.
+
+The floor is written down in one place — `target: 'es2020'` in
+`scripts/build-assets.js` — and it is a statement of intent, not a gate. Nothing
+checks it for you, and two things about how these files are served are why that
+matters:
+
+- esbuild *lowers* most newer syntax to hit the target rather than refusing it,
+  so a `??=` or a class field minifies clean and only top-level `await` is
+  actually rejected. It never polyfills library additions at all: `.at()` and
+  `Object.hasOwn` pass straight through and fail in the browser, not the build.
+- The `.min` twins are only what the Docker image serves. A checkout run with
+  `npm start` has none, so `lib/assets.js` serves these files exactly as
+  authored — undownlevelled, whatever esbuild would have done to them.
+
+So the floor holds by being written to, and the review question for a browser
+script is "is this ES2020?", asked here rather than by a tool.
+
+That is also what settles the question #948 was filed about — whether a legacy
+guard in one of these files is worth its lines. Two different answers:
+
+- **Older than the floor: the guard cannot run.** The file is parsed whole
+  before a line of it executes, so a browser missing `window.matchMedia` — one
+  from a decade before `?.` — throws a SyntaxError and never reaches the check
+  written for it. `media()` in `public/guild-settings.js` keeps that check
+  regardless, because its live subject is jsdom rather than any browser, and
+  the comment there says so. Write that down when you keep one.
+- **Inside the floor: the guard runs, and dropping it is a support decision.**
+  The same file carried an `addListener` branch for the Safari versions whose
+  MediaQueryList was an `EventTarget` in name only; those parse ES2020 without
+  complaint, so the branch was live code. It went because that band is years
+  below what a dashboard administered from the same browser as Discord has to
+  reach — a floor, argued here, rather than a dead line.
+
+Feature-detecting something *newer* than the floor is a different thing again
+and is fine. Raising the floor means moving that one `target`; lowering it means
+adding a build step, not scattering fallbacks.
+
 ### Adding API Endpoints
 
 API routes live one feature per file in `src/dashboard/routes/api/`, and

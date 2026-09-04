@@ -16,10 +16,18 @@ function boot(key) {
 }
 
 // ── Media queries ────────────────────────────────────────────────────
-// jsdom has no matchMedia, and neither did a handful of browsers this page
-// still loads in. A query nobody can answer reads as "no preference expressed"
-// — the desktop layout, and motion left as authored — which is what the page
-// did before any of this existed.
+// jsdom has no matchMedia, and a page that called it there would throw before
+// it rendered anything. A query nobody can answer reads as "no preference
+// expressed" — the desktop layout, and motion left as authored — which is what
+// the page did before any of this existed.
+//
+// jsdom is the whole of the reason, and the comment here used to credit old
+// browsers as well. It cannot have been helping any: this file is parsed as a
+// whole before a line of it runs and it is ES2020 throughout, so a browser with
+// no matchMedia — one from a decade before `?.` — fails on the syntax and never
+// reaches the check written for it (#948). The floor is ES2020 and the DOM of
+// the browsers that also run Discord; docs/EXTENDING.md, "What the browser
+// scripts may assume", is where that is written down.
 function media(query) {
     return typeof window.matchMedia === 'function' ? window.matchMedia(query) : null;
 }
@@ -279,13 +287,14 @@ if (navToggle && dashSide && narrowViewport) {
     navToggle.addEventListener('click', () => {
         setNavOpen(dashSide.classList.contains('nav-collapsed'));
     });
-    // addEventListener where it exists, addListener for the Safari versions
-    // where MediaQueryList is still an EventTarget in name only.
-    if (typeof narrowViewport.addEventListener === 'function') {
-        narrowViewport.addEventListener('change', syncNavToggle);
-    } else if (typeof narrowViewport.addListener === 'function') {
-        narrowViewport.addListener(syncNavToggle);
-    }
+    // A plain addEventListener, with no `addListener` fallback beside it any
+    // more. That fallback was for the Safari versions whose MediaQueryList was
+    // an EventTarget in name only, and unlike the matchMedia guard above it was
+    // genuinely reachable — those browsers parse this file's ES2020 without
+    // complaint. It is dropped on the support floor rather than on the syntax:
+    // that band is years below anything that also runs Discord, and a fallback
+    // nobody here can test is one that rots in place (#948).
+    narrowViewport.addEventListener('change', syncNavToggle);
     syncNavToggle();
 }
 
