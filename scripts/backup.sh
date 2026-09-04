@@ -29,12 +29,28 @@ fi
 
 mkdir -p "${BACKUP_DIR}"
 
+# Where mongodump writes. Unencrypted that is the archive itself, as it always
+# was. Encrypted, it is a private directory (mktemp -d is 0700) outside
+# BACKUP_DIR and only the sealed file is moved in — the plaintext of the whole
+# database must not appear in the directory whose readability is the reason the
+# archive is sealed at all, and a dump or an openssl invocation that fails part
+# way must not leave it there either. The nightly service stages the same way.
+WORK="${ARCHIVE}"
+if [ -n "${BACKUP_ENCRYPTION_PASSPHRASE:-}" ]; then
+    STAGING=$(mktemp -d)
+    WORK="${STAGING}/clawdia-${TIMESTAMP}.gz"
+    ARCHIVE="${ARCHIVE}.enc"
+    # However this ends — a failed dump, a failed seal, a Ctrl-C between them.
+    # The Docker branch below replaces this trap and carries the same cleanup.
+    trap 'rm -rf "${STAGING}"' EXIT
+fi
+
 MONGO_URI_MASKED=$(echo "${MONGO_URI}" | sed 's|://[^@]*@|://***@|')
 echo "[backup] Starting backup → ${ARCHIVE}"
 echo "[backup] URI: ${MONGO_URI_MASKED}"
 
 if command -v mongodump &>/dev/null; then
-    mongodump --uri="${MONGO_URI}" --gzip --archive="${ARCHIVE}"
+    mongodump --uri="${MONGO_URI}" --gzip --archive="${WORK}"
 else
     # Fall back to running mongodump inside the Docker container.
     # Replace 'localhost' with '127.0.0.1' so the URI points to the container's
@@ -53,20 +69,26 @@ else
         echo "[backup] ERROR: could not create a temp directory in clawdia-mongodb" >&2
         exit 1
     fi
-    trap 'docker exec clawdia-mongodb rm -rf "${REMOTE_DIR}" >/dev/null 2>&1 || true' EXIT
+    trap 'docker exec clawdia-mongodb rm -rf "${REMOTE_DIR}" >/dev/null 2>&1 || true; rm -rf "${STAGING:-}"' EXIT
     docker exec clawdia-mongodb \
         mongodump --uri="${CONTAINER_URI}" --gzip --archive="${REMOTE_DIR}/backup.gz"
-    docker cp "clawdia-mongodb:${REMOTE_DIR}/backup.gz" "${ARCHIVE}"
+    docker cp "clawdia-mongodb:${REMOTE_DIR}/backup.gz" "${WORK}"
 fi
 
-# Sealed in place: the plaintext is replaced, not kept beside the ciphertext.
+# Sealed out of the staging directory and into BACKUP_DIR, so the only thing
+# that ever lands there is the finished ciphertext.
 if [ -n "${BACKUP_ENCRYPTION_PASSPHRASE:-}" ]; then
     # `-pass env:` and not the passphrase on the command line, which every other
     # user of the host can read out of `ps`.
-    openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
-        -pass env:BACKUP_ENCRYPTION_PASSPHRASE -in "${ARCHIVE}" -out "${ARCHIVE}.enc"
-    rm -f "${ARCHIVE}"
-    ARCHIVE="${ARCHIVE}.enc"
+    if ! openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+        -pass env:BACKUP_ENCRYPTION_PASSPHRASE -in "${WORK}" -out "${ARCHIVE}"; then
+        # A half-written .enc is not an archive, and leaving it under a name the
+        # prune and `verify-backup.sh --latest` both reach for is a failure that
+        # reads as a success.
+        rm -f "${ARCHIVE}"
+        echo "[backup] ERROR: encrypting the archive failed; nothing was kept." >&2
+        exit 1
+    fi
 fi
 
 SIZE=$(du -sh "${ARCHIVE}" | cut -f1)

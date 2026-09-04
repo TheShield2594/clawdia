@@ -42,6 +42,9 @@ const bytes = text => Buffer.from(text);
 function fakeDb({ guilds = [], images = [], unique = true } = {}) {
     const order = [];
 
+    // The clear is addressed by _id, which a real cursor always carries.
+    guilds.forEach((guild, i) => { guild._id = guild._id ?? `guild-${i}`; });
+
     const hasInlineImage = g => (g.shop ?? []).some(i => i?.imageData != null);
 
     const cursor = docs => ({
@@ -55,22 +58,24 @@ function fakeDb({ guilds = [], images = [], unique = true } = {}) {
             expect(filter).toEqual({ 'shop.imageData': { $exists: true, $ne: null } });
             return cursor(guilds.filter(hasInlineImage));
         },
-        updateMany: async (filter, update) => {
-            order.push('clear');
-            expect(filter).toEqual({ 'shop.0': { $exists: true } });
-            expect(Object.keys(update)).toEqual(['$unset']);
-            let modified = 0;
-            for (const guild of guilds) {
-                if (!guild.shop?.length) continue;
-                modified++;
-                for (const item of guild.shop) {
-                    delete item.imageData;
-                    delete item.imageType;
-                }
-            }
-            return { modifiedCount: modified };
-        },
         updateOne: async (filter, update) => {
+            // `up` clears the entries it moved, addressed by _id and an array
+            // filter; `down` restores one entry, addressed by the positional $.
+            if (update.$unset) {
+                order.push('clear');
+                const guild = guilds.find(g => g._id === filter._id);
+                let modified = 0;
+                for (const path of Object.keys(update.$unset)) {
+                    // `shop.<index>.<field>` — addressed by position, so a
+                    // duplicate id cannot drag its sibling's image out with it.
+                    const [, index, field] = path.split('.');
+                    const item = guild?.shop?.[Number(index)];
+                    if (!item || !(field in item)) continue;
+                    delete item[field];
+                    modified = 1;
+                }
+                return { modifiedCount: modified };
+            }
             const guild = guilds.find(g => g.guildId === filter.guildId);
             const item = guild?.shop?.find(i => i.itemId === filter['shop.itemId']);
             if (!item) return { matchedCount: 0 };
@@ -183,8 +188,11 @@ describe('up', () => {
     it('writes one row per item id when a shop holds the same id twice', async () => {
         // Nothing stops a shop array holding two items with one `itemId`, and
         // two upserts to one key in an unordered bulkWrite race into a
-        // duplicate-key error. The later element wins, which is the one the
-        // image route could never reach anyway.
+        // duplicate-key error. The first wins, because that is the one the
+        // routes served — both resolved an id with `shop.find(...)`, so the
+        // second was already unreachable. Moving the second would change which
+        // artwork the guild sees, on a migration whose job is to move it
+        // unchanged.
         const db = fakeDb({
             guilds: [{
                 guildId: 'g1',
@@ -198,7 +206,33 @@ describe('up', () => {
         await migration.up();
 
         expect(db.images).toHaveLength(1);
-        expect(db.images[0].imageData).toEqual(bytes('second'));
+        expect(db.images[0].imageData).toEqual(bytes('first'));
+        // And the one that was not moved keeps its inline image: there is no key
+        // to store a second image for one id under, so clearing it would be a
+        // delete with nothing written down.
+        expect(db.guilds[0].shop[0]).toEqual({ itemId: 'padlock' });
+        expect(db.guilds[0].shop[1]).toEqual({ itemId: 'padlock', imageData: bytes('second') });
+    });
+
+    it('takes the entry the routes resolved, even when it is the empty one', () => {
+        // `shop.find(...)` returns the first entry with the id whatever its
+        // image, so an empty first duplicate is a guild that saw no shop image
+        // for it. Moving the second one's artwork would put a picture on screen
+        // that was not there before, which is not a migration's job.
+        const db = fakeDb({
+            guilds: [{
+                guildId: 'g1',
+                shop: [
+                    { itemId: 'padlock', imageData: null },
+                    { itemId: 'padlock', imageData: bytes('hidden') },
+                ],
+            }],
+        });
+
+        return migration.up().then(() => {
+            expect(db.images).toEqual([]);
+            expect(db.guilds[0].shop[1].imageData).toEqual(bytes('hidden'));
+        });
     });
 
     it('skips an item with no id, which was never servable', async () => {
@@ -211,6 +245,44 @@ describe('up', () => {
         await migration.up();
 
         expect(db.images).toEqual([]);
+    });
+
+    it('leaves the inline image of an entry it could not move', async () => {
+        // Clearing it would be a delete with nothing written down: there is no
+        // key to store an image for an item with no id under, so there would be
+        // nothing for `down` to put back and no copy of it anywhere.
+        const db = fakeDb({
+            guilds: [{
+                guildId: 'g1',
+                shop: [
+                    { itemId: 'padlock', imageData: bytes('moved'), imageType: 'image/png' },
+                    { itemId: null, imageData: bytes('unmovable'), imageType: 'image/gif' },
+                ],
+            }],
+        });
+
+        await migration.up();
+
+        expect(db.guilds[0].shop[0]).toEqual({ itemId: 'padlock' });
+        expect(db.guilds[0].shop[1]).toEqual({
+            itemId: null, imageData: bytes('unmovable'), imageType: 'image/gif',
+        });
+    });
+
+    it('rewrites only the guilds it moved something out of', async () => {
+        // `$[]` over every shop in the collection rewrote every guild document
+        // that has one, including the ones with no image to move.
+        const db = fakeDb({
+            guilds: [
+                { guildId: 'g1', shop: [{ itemId: 'padlock', imageData: bytes('art') }] },
+                { guildId: 'g2', shop: [{ itemId: 'shield', price: 10 }] },
+            ],
+        });
+
+        await migration.up();
+
+        expect(db.guilds[1].shop[0]).toEqual({ itemId: 'shield', price: 10 });
+        expect(db.order.filter(op => op === 'clear')).toHaveLength(1);
     });
 
     it('refuses to run without the unique index the keys depend on', async () => {

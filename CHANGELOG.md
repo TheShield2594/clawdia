@@ -33,8 +33,12 @@ namespaced because shop item ids are whatever an admin typed, and one called
 upload is a targeted upsert on one small document, the settings endpoint no
 longer has to carry Buffers across a shop rewrite item by item, the cache's
 `HEAVY_FIELDS_PROJECTION` special case is gone, and the settings page reads its
-document unprojected in one read rather than two. `022` moves what is stored and
-clears the inline fields only once every image is written; it is reversible.
+document unprojected in one read rather than two. Deleting a shop item still
+deletes its artwork — the image was part of the item when it was inline, and a
+row nothing can reach is a row nothing would ever reclaim — but an id that
+survives a shop rewrite, or is re-added in the same request, keeps it. `022`
+moves what is stored and clears the inline fields only once every image is
+written, and only on the entries it moved; it is reversible.
 
 Stored credentials and the archives that hold them (#886). Without
 `SECRET_ENCRYPTION_KEY` the per-guild AI provider keys and the MCP OAuth refresh

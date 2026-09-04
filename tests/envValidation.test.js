@@ -124,7 +124,11 @@ describe('SECRET_ENCRYPTION_KEY', () => {
     test('an unset key warns in production, naming what is exposed', () => {
         const [warning] = checkSecretEncryption({ NODE_ENV: 'production' });
         expect(warning).toMatch(/SECRET_ENCRYPTION_KEY is not set/);
-        expect(warning).toMatch(/backup/);
+        expect(warning).toMatch(/in the clear in the database/);
+        // The archive half is qualified rather than stated flatly, so it is
+        // right for an operator who has sealed the archives and for one who
+        // has not.
+        expect(warning).toMatch(/BACKUP_ENCRYPTION_PASSPHRASE has not sealed/);
         // And says how to fix it, both halves: the variable and the sweep that
         // seals what is already stored.
         expect(warning).toMatch(/openssl rand -base64 32/);
@@ -145,6 +149,20 @@ describe('SECRET_ENCRYPTION_KEY', () => {
         // reading it as configured here would silence the one warning about it.
         expect(checkSecretEncryption({ NODE_ENV: 'production', SECRET_ENCRYPTION_KEY: '   ' }))
             .toHaveLength(1);
+    });
+
+    test('the answer does not depend on the backup container\'s secret', () => {
+        // It could be read to say whether the archives are sealed, and must not
+        // be: it is the backup container's passphrase, this process has no
+        // other use for one, and the bot's `env_file: .env` would then be
+        // holding a credential it does not need (#901). The message is worded
+        // to be right either way instead.
+        const sealed = checkSecretEncryption({
+            NODE_ENV: 'production',
+            BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase',
+        });
+
+        expect(sealed).toEqual(checkSecretEncryption({ NODE_ENV: 'production' }));
     });
 
     test('a short passphrase is called out on its own terms', () => {

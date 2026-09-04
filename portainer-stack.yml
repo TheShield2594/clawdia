@@ -483,6 +483,9 @@ services:
             echo "[backup] BACKUP_ENCRYPTION_PASSPHRASE_FILE=$$BACKUP_ENCRYPTION_PASSPHRASE_FILE is not readable"; exit 1;
           fi;
           BACKUP_ENCRYPTION_PASSPHRASE=$$(tr -d "\r\n" < "$$BACKUP_ENCRYPTION_PASSPHRASE_FILE");
+          if [ -z "$$BACKUP_ENCRYPTION_PASSPHRASE" ]; then
+            echo "[backup] BACKUP_ENCRYPTION_PASSPHRASE_FILE=$$BACKUP_ENCRYPTION_PASSPHRASE_FILE is empty"; exit 1;
+          fi;
           export BACKUP_ENCRYPTION_PASSPHRASE;
           echo "[backup] Read BACKUP_ENCRYPTION_PASSPHRASE from $$BACKUP_ENCRYPTION_PASSPHRASE_FILE";
         fi;

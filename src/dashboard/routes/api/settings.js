@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const Guild = require('../../../models/Guild');
+const ItemImage = require('../../../models/ItemImage');
+const { shopImageId } = require('../../../models/itemImageKeys');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { validateBaseUrl: validateOllamaBaseUrl } = require('../../../services/ai/providers/ollama');
@@ -444,10 +446,14 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
         // settings save. They live in the ItemImage collection now, keyed by
         // guild and item, so a rewritten shop array cannot touch them.
         //
-        // What it can still do is orphan one: an item deleted from the shop
-        // leaves its image behind. That is deliberate — an admin who removes an
-        // item and re-adds it under the same id keeps the artwork, and the row
-        // is small, keyed and invisible to every read that does not ask for it.
+        // What it can do is strand one, and that is what the ids below are for:
+        // an item removed from the shop used to take its image with it, because
+        // the image was part of the item. Now the row outlives the item unless
+        // something deletes it, and nothing else would — leaving a 512 KB
+        // document per removed item that no read can reach and no prune covers.
+        const shopIdsBefore = Array.isArray(updates.shop)
+            ? (guildSettings.shop || []).map(item => item?.itemId).filter(Boolean)
+            : [];
 
         // H1: Strip any MongoDB operator keys ($ne, $regex, etc.) before writing.
         Object.keys(updates).forEach(key => {
@@ -455,6 +461,23 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
         });
 
         await guildSettings.save();
+
+        // After the save, so a rejected write cannot delete the images of a
+        // shop that still has the items. Scoped to this guild's own rows and to
+        // the ids that actually went: an item re-added under the same id in the
+        // same request keeps its artwork, which is what an admin reordering or
+        // renaming their shop expects.
+        const removedShopIds = shopIdsBefore.filter(
+            id => !(guildSettings.shop || []).some(item => item?.itemId === id));
+        if (removedShopIds.length) {
+            await ItemImage.deleteMany({
+                guildId,
+                itemId: { $in: removedShopIds.map(shopImageId) },
+            // Never fatal: the settings the caller asked for are saved, and a
+            // failed cleanup is a row to collect later rather than a reason to
+            // report the save as failed.
+            }).catch(err => console.error('[SETTINGS] shop image cleanup failed:', err.message));
+        }
 
         // L1: Record what changed and who changed it.
         await logAuditEvent(req, guildId, 'settings_update', { keys: Object.keys(updates) });

@@ -215,10 +215,22 @@ function checkSecretEncryption(env) {
 
     const key = (env.SECRET_ENCRYPTION_KEY || '').trim();
     if (!key) {
+        // The archive half is qualified rather than branched on. It can be
+        // closed separately — BACKUP_ENCRYPTION_PASSPHRASE seals the nightly
+        // dumps whatever this variable is doing — so saying it flatly would
+        // send an operator who has done that looking for an exposure they have
+        // already covered. Reading the passphrase to find out would be worse:
+        // it is the backup container's secret, this process has no other use
+        // for one, and #901 is the argument against handing a container a
+        // credential it does not need. A second BACKUP_ENCRYPTION_ENABLED flag
+        // would answer it without the secret and is not worth having either —
+        // two variables that have to agree is a way for them to disagree, and
+        // the disagreement here would be a security warning that is wrong.
         return [
             'SECRET_ENCRYPTION_KEY is not set, so per-guild AI provider keys and MCP OAuth ' +
-            'refresh tokens are stored in the clear — in the database and in every nightly ' +
-            'backup archive. Generate one with `openssl rand -base64 32`, then run ' +
+            'refresh tokens are stored in the clear in the database — and in every nightly ' +
+            'backup archive BACKUP_ENCRYPTION_PASSPHRASE has not sealed. ' +
+            'Generate one with `openssl rand -base64 32`, then run ' +
             '`npm run secrets:encrypt` to seal what is already stored. See "Encrypting stored ' +
             'provider keys" in docs/SETUP_GUIDE.md.',
         ];
