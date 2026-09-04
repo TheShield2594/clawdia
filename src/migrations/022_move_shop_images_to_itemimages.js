@@ -20,7 +20,10 @@ const { shopImageId, isShopImageId, SHOP_IMAGE_PREFIX } = require('../models/ite
  *
  * Reversible: `down()` copies the Buffers back onto the shop subdocuments and
  * removes the rows it wrote. It is still the migration to have a backup before,
- * because the data being moved is the only copy of it.
+ * because the data being moved is the only copy of it — which is also why the
+ * cleanup below touches only the entries that were moved. An entry this cannot
+ * move (no `itemId`, so no key to store it under) keeps its inline image rather
+ * than losing it to a tidy-up.
  *
  * The driver is used directly rather than the model, as in migration 018 and
  * for the same reason twice over: the Guild schema no longer declares
@@ -71,6 +74,11 @@ module.exports = {
 
         let moved = 0;
         let guildsTouched = 0;
+        // What to clear afterwards, per guild. Collected rather than cleared as
+        // it goes, so nothing is unset until every image is written: the other
+        // order loses whatever had not been copied when it failed, and there is
+        // no second copy of it.
+        const movedByGuild = [];
 
         const cursor = guilds().find(WITH_INLINE_IMAGES, {
             projection: { guildId: 1, 'shop.itemId': 1, 'shop.imageData': 1, 'shop.imageType': 1 },
@@ -86,18 +94,23 @@ module.exports = {
             // One write per item id, not per array element. Nothing stops a
             // shop array holding two items with the same `itemId`, and two
             // upserts to one key inside a single unordered bulkWrite race each
-            // other into a duplicate-key error. The later element wins, which is
-            // also which one the image route served: it took the first match on
-            // the id, and a second element with the same id was unreachable.
+            // other into a duplicate-key error.
+            //
+            // The *first* wins, because that is the one the routes served: both
+            // the image route and utils/itemImageHelper.js resolved an id with
+            // `shop.find(...)`, so a second element carrying the same id was
+            // already unreachable. Moving the last would change which artwork a
+            // guild sees, on a migration whose job is to move it unchanged.
             const byId = new Map();
             for (const item of guild.shop ?? []) {
-                // An item with no id was never servable: the image route keys on
-                // `itemId`, so no URL could have reached it.
+                // An item with no id was never servable either: the image route
+                // keys on `itemId`, so no URL could have reached it.
                 if (!item?.itemId || !byteLength(item.imageData)) continue;
-                byId.set(item.itemId, item);
+                if (!byId.has(item.itemId)) byId.set(item.itemId, item);
             }
             if (!byId.size) continue;
             guildsTouched++;
+            movedByGuild.push({ _id: guild._id, itemIds: [...byId.keys()] });
 
             for (const [itemId, item] of byId) {
                 batch.push({
@@ -122,17 +135,26 @@ module.exports = {
         }
         await flush();
 
-        // Only after every image is written. Unsetting first and failing part
-        // way through would lose the ones not yet copied, and there is no other
-        // copy of them.
-        const cleared = await guilds().updateMany(
-            { 'shop.0': { $exists: true } },
-            { $unset: { 'shop.$[].imageData': '', 'shop.$[].imageType': '' } },
-        );
+        // Only the entries that were actually moved, and only now that all of
+        // them have been. `$[]` over every element of every shop was simpler and
+        // wrong twice over: it rewrote every guild document that has a shop at
+        // all, including the ones with no image in it, and it destroyed the
+        // image on any entry `up` had skipped — an item with no `itemId` has no
+        // row to move its artwork to, so clearing it is a delete with nothing
+        // written down and nothing for `down` to put back.
+        let cleared = 0;
+        for (const { _id, itemIds } of movedByGuild) {
+            const result = await guilds().updateOne(
+                { _id },
+                { $unset: { 'shop.$[moved].imageData': '', 'shop.$[moved].imageType': '' } },
+                { arrayFilters: [{ 'moved.itemId': { $in: itemIds } }] },
+            );
+            cleared += result.modifiedCount ?? 0;
+        }
 
         console.log(
             `[MIGRATIONS] 022: moved ${moved} shop image(s) from ${guildsTouched} guild(s) into ` +
-            `itemimages; cleared the inline fields on ${cleared.modifiedCount} guild document(s).`,
+            `itemimages; cleared the inline fields on ${cleared} guild document(s).`,
         );
     },
 

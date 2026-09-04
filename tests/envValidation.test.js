@@ -124,7 +124,7 @@ describe('SECRET_ENCRYPTION_KEY', () => {
     test('an unset key warns in production, naming what is exposed', () => {
         const [warning] = checkSecretEncryption({ NODE_ENV: 'production' });
         expect(warning).toMatch(/SECRET_ENCRYPTION_KEY is not set/);
-        expect(warning).toMatch(/backup/);
+        expect(warning).toMatch(/in the database and in every nightly backup archive/);
         // And says how to fix it, both halves: the variable and the sweep that
         // seals what is already stored.
         expect(warning).toMatch(/openssl rand -base64 32/);
@@ -145,6 +145,21 @@ describe('SECRET_ENCRYPTION_KEY', () => {
         // reading it as configured here would silence the one warning about it.
         expect(checkSecretEncryption({ NODE_ENV: 'production', SECRET_ENCRYPTION_KEY: '   ' }))
             .toHaveLength(1);
+    });
+
+    test('it stops claiming the backups when those are sealed too', () => {
+        // BACKUP_ENCRYPTION_PASSPHRASE closes the archive half on its own, and
+        // telling an operator who set it that their credentials are readable in
+        // every backup sends them looking for an exposure they have covered.
+        // The database half is what this variable is for, so it stays.
+        const [warning] = checkSecretEncryption({
+            NODE_ENV: 'production',
+            BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase',
+        });
+
+        expect(warning).toMatch(/SECRET_ENCRYPTION_KEY is not set/);
+        expect(warning).toMatch(/in the database\./);
+        expect(warning).not.toMatch(/backup archive/);
     });
 
     test('a short passphrase is called out on its own terms', () => {

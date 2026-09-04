@@ -26,6 +26,7 @@ const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const yaml = require('js-yaml');
 
 const ROOT = path.join(__dirname, '..');
 const ARCHIVE_LIB = path.join(ROOT, 'scripts', 'lib', 'archive.sh');
@@ -160,6 +161,76 @@ describe('the archive readers both go through it', () => {
     });
 });
 
+// scripts/backup.sh is the same dump taken by hand, and it has to hold the same
+// invariant the nightly service does: the plaintext of the database never
+// appears in the archive directory, not even between the dump and the seal, and
+// not after a failure.
+describe('a backup taken by hand', () => {
+    function backup(env = {}) {
+        const out = path.join(dir, 'out');
+        const bin = path.join(dir, 'bin');
+        fs.mkdirSync(out, { recursive: true });
+        fs.mkdirSync(bin, { recursive: true });
+        fs.writeFileSync(path.join(bin, 'mongodump'), [
+            '#!/bin/sh',
+            'for a in "$@"; do case "$a" in --archive=*) OUT="${a#--archive=}";; esac; done',
+            'printf THE-DATABASE > "$OUT"',
+        ].join('\n'));
+        fs.chmodSync(path.join(bin, 'mongodump'), 0o755);
+
+        const run = spawnSync('bash', [path.join(ROOT, 'scripts', 'backup.sh'), out], {
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                PATH: `${bin}:${process.env.PATH}`,
+                MONGODB_URI: 'mongodb://db/clawdia',
+                BACKUP_ENCRYPTION_PASSPHRASE: '',
+                ...env,
+            },
+        });
+        return { ...run, written: fs.readdirSync(out).sort() };
+    }
+
+    it('writes a plain archive when no passphrase is configured', () => {
+        const run = backup();
+
+        expect(run.status).toBe(0);
+        expect(run.written).toEqual([expect.stringMatching(/^clawdia-.*\.gz$/)]);
+    });
+
+    withOpenssl('seals the archive, and puts only the sealed file in the directory', () => {
+        const run = backup({ BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase with spaces' });
+
+        expect(run.status).toBe(0);
+        expect(run.written).toEqual([expect.stringMatching(/^clawdia-.*\.gz\.enc$/)]);
+
+        // And it is the database, sealed — not a file that merely has the name.
+        const sealed = path.join(dir, 'out', run.written[0]);
+        const opened = spawnSync('bash', ['-c',
+            `. "${ARCHIVE_LIB}"; open_archive "${sealed}" "${dir}/work"`], {
+            encoding: 'utf8',
+            env: { ...process.env, BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase with spaces' },
+        });
+        expect(fs.readFileSync(opened.stdout, 'utf8')).toBe('THE-DATABASE');
+    });
+
+    it('keeps nothing when the seal fails', () => {
+        // The plaintext dump is staged outside the archive directory, so a
+        // failure between the dump and the seal cannot strand a readable copy
+        // of the database in the directory being backed up to.
+        const bin = path.join(dir, 'bin');
+        fs.mkdirSync(bin, { recursive: true });
+        fs.writeFileSync(path.join(bin, 'openssl'), '#!/bin/sh\nexit 7\n');
+        fs.chmodSync(path.join(bin, 'openssl'), 0o755);
+
+        const run = backup({ BACKUP_ENCRYPTION_PASSPHRASE: 'passphrase' });
+
+        expect(run.status).not.toBe(0);
+        expect(run.stderr).toMatch(/encrypting the archive failed/);
+        expect(run.written).toEqual([]);
+    });
+});
+
 describe('off-site replication (#900)', () => {
     /** Runs offsite-sync.sh against `dir`, with a stub rclone on PATH. */
     function sync(env = {}) {
@@ -252,5 +323,137 @@ describe('off-site replication (#900)', () => {
         // A quarantined archive failed its own parse check; off-site storage
         // holding a known-bad archive beside good ones is a trap at 3am.
         expect(command).not.toContain('unverified');
+    });
+});
+
+// The backup service's own loop, run. tests/deployStackParity.test.js holds its
+// shape and holds the two stack files to the same one; this drives it, because
+// the properties that matter are about what ends up on disk after a failure —
+// which no amount of reading the YAML can answer.
+describe("the backup service's entrypoint", () => {
+    /** The inline `sh -c` script, with its paths pointed at a scratch tree. */
+    function loopScript(archives, work) {
+        const service = yaml.load(fs.readFileSync(path.join(ROOT, 'docker-compose.yml'), 'utf8'))
+            .services.backup.entrypoint;
+        return String(service)
+            .replace(/^\s*sh -c '/, '')
+            .replace(/'\s*$/, '')
+            // Compose escapes `$` for its own interpolation; the shell sees one.
+            .replace(/\$\$/g, '$')
+            // The staging path first: it is a /tmp path and would otherwise be
+            // caught by the /backups rewrite below.
+            .replace(/\/tmp\/clawdia-/g, `${work}/clawdia-`)
+            .replace(/\/backups/g, archives)
+            // Everything up to the scheduling loop: the boot catch-up runs one
+            // backup, which is the whole of what is under test here.
+            .replace(/while true[\s\S]*$/, '');
+    }
+
+    /** Stand-ins that record what they were handed rather than reaching a database. */
+    function stubMongoTools(bin) {
+        fs.mkdirSync(bin, { recursive: true });
+        fs.writeFileSync(path.join(bin, 'mongodump'), [
+            '#!/bin/sh',
+            'for a in "$@"; do case "$a" in --archive=*) OUT="${a#--archive=}";; esac; done',
+            // A dump killed part way leaves what it had written behind.
+            '[ -n "$FAIL_DUMP" ] && { printf partial > "$OUT"; exit 3; }',
+            'printf THE-DATABASE > "$OUT"',
+        ].join('\n'));
+        fs.writeFileSync(path.join(bin, 'mongorestore'), [
+            '#!/bin/sh',
+            'for a in "$@"; do case "$a" in --archive=*) IN="${a#--archive=}";; esac; done',
+            '[ -n "$FAIL_VERIFY" ] && exit 4',
+            'grep -q THE-DATABASE "$IN" 2>/dev/null || exit 5',
+        ].join('\n'));
+        for (const tool of ['mongodump', 'mongorestore']) fs.chmodSync(path.join(bin, tool), 0o755);
+    }
+
+    function runLoop(env = {}) {
+        const archives = path.join(dir, 'backups');
+        const work = path.join(dir, 'staging');
+        const bin = path.join(dir, 'bin');
+        fs.mkdirSync(archives, { recursive: true });
+        fs.mkdirSync(work, { recursive: true });
+        stubMongoTools(bin);
+
+        const run = spawnSync('sh', ['-c', loopScript(archives, work)], {
+            encoding: 'utf8',
+            env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MONGODB_URI: 'mongodb://db/clawdia', ...env },
+        });
+        // The two dotfiles the loop keeps for the healthcheck and for a human
+        // are state, not archives, and are asserted by name where they matter.
+        return {
+            ...run,
+            archives: fs.readdirSync(archives).filter(f => !f.startsWith('.')).sort(),
+            staging: fs.readdirSync(work),
+        };
+    }
+
+    it('refuses an empty passphrase file rather than writing plaintext', () => {
+        // The failure this closes: a docker secret that exists and is readable
+        // but holds nothing — a mount pointed at the wrong path, a file the
+        // operator has not filled in yet. The `-n` test on the variable is
+        // satisfied by a file and unsatisfied by its contents, so without this
+        // the run falls through to the unencrypted branch and reports itself
+        // done, which is the "asked for encryption, silently got plaintext"
+        // outcome the openssl check a few lines below already refuses.
+        const secret = path.join(dir, 'empty.secret');
+        fs.writeFileSync(secret, '');
+
+        const run = runLoop({ BACKUP_ENCRYPTION_PASSPHRASE_FILE: secret });
+
+        expect(run.status).toBe(1);
+        expect(run.stdout).toMatch(/is empty/);
+        // Refused before anything was dumped, not after.
+        expect(run.archives).toEqual([]);
+    });
+
+    it('reads a passphrase file that has one, and seals with it', () => {
+        const secret = path.join(dir, 'good.secret');
+        fs.writeFileSync(secret, 'a passphrase with spaces\n');
+
+        const run = runLoop({ BACKUP_ENCRYPTION_PASSPHRASE_FILE: secret });
+
+        expect(run.status).toBe(0);
+        expect(run.archives.filter(f => f.endsWith('.gz.enc'))).toHaveLength(1);
+        // And the staging copy does not outlive the run.
+        expect(run.staging).toEqual([]);
+    });
+
+    withOpenssl('never leaves the plaintext dump in the archive directory', () => {
+        // Not even for the seconds between the dump and the seal: that
+        // directory being readable is the premise of the whole feature.
+        const run = runLoop({ BACKUP_ENCRYPTION_PASSPHRASE: 'passphrase' });
+
+        expect(run.status).toBe(0);
+        expect(run.archives).toEqual([expect.stringMatching(/^clawdia-.*\.gz\.enc$/)]);
+        expect(run.archives.some(f => f.endsWith('.gz'))).toBe(false);
+    });
+
+    withOpenssl('removes the partial plaintext when the dump fails', () => {
+        const run = runLoop({ BACKUP_ENCRYPTION_PASSPHRASE: 'passphrase', FAIL_DUMP: '1' });
+
+        expect(run.archives).toEqual([]);
+        expect(run.staging).toEqual([]);
+        expect(fs.readFileSync(path.join(dir, 'backups', '.backup-status'), 'utf8')).toMatch(/^dump-failed/);
+    });
+
+    withOpenssl('quarantines a sealed archive that will not read back, and keeps no plaintext', () => {
+        const run = runLoop({ BACKUP_ENCRYPTION_PASSPHRASE: 'passphrase', FAIL_VERIFY: '1' });
+
+        expect(run.archives).toEqual([expect.stringMatching(/\.gz\.enc\.unverified$/)]);
+        expect(run.staging).toEqual([]);
+        // A quarantined archive is not the day's backup.
+        expect(fs.existsSync(path.join(dir, 'backups', '.backup-ok'))).toBe(false);
+    });
+
+    it('leaves the unencrypted path exactly as it was', () => {
+        // Every deployment that has not set a passphrase runs this branch, and
+        // it has to be what it was before the feature existed.
+        const run = runLoop();
+
+        expect(run.status).toBe(0);
+        expect(run.archives).toEqual([expect.stringMatching(/^clawdia-.*\.gz$/)]);
+        expect(fs.existsSync(path.join(dir, 'backups', '.backup-ok'))).toBe(true);
     });
 });

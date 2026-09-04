@@ -215,10 +215,20 @@ function checkSecretEncryption(env) {
 
     const key = (env.SECRET_ENCRYPTION_KEY || '').trim();
     if (!key) {
+        // The archive half is conditional because it can be closed separately:
+        // with BACKUP_ENCRYPTION_PASSPHRASE set the nightly dumps are ciphertext
+        // whatever this variable is doing, and telling that operator their
+        // credentials are readable in every backup would send them looking for
+        // an exposure they have already covered. The database half is not
+        // conditional — that is what this variable, and only this variable, is
+        // for.
+        const alsoInBackups = (env.BACKUP_ENCRYPTION_PASSPHRASE || '').trim()
+            ? 'in the database.'
+            : 'in the database and in every nightly backup archive.';
         return [
             'SECRET_ENCRYPTION_KEY is not set, so per-guild AI provider keys and MCP OAuth ' +
-            'refresh tokens are stored in the clear — in the database and in every nightly ' +
-            'backup archive. Generate one with `openssl rand -base64 32`, then run ' +
+            `refresh tokens are stored in the clear — ${alsoInBackups} ` +
+            'Generate one with `openssl rand -base64 32`, then run ' +
             '`npm run secrets:encrypt` to seal what is already stored. See "Encrypting stored ' +
             'provider keys" in docs/SETUP_GUIDE.md.',
         ];
