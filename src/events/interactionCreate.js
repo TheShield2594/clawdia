@@ -11,7 +11,10 @@ const {
     handleEightBallButton,
     handleEightBallModal,
 } = require('../commands/fun/8ball');
-const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
+const {
+    ensureQuests, onCommandUse, questEventCanProgress, questAssignmentNeeded,
+    notifyQuestComplete, notifyQuestNearComplete,
+} = require('../services/questService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const {
     commandIsFreezeGated, isEconomyFrozen, NOT_FROZEN, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
@@ -86,9 +89,31 @@ async function trackQuestCommandUse(interaction) {
     const guildSettings = await getGuildSettings(interaction.guild.id);
     if (!guildSettings?.quests?.enabled) return;
 
-    let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+    const filter = { userId: interaction.user.id, guildId: interaction.guild.id };
+
+    // Cheap read first (#898). This runs after *every* successful command, on
+    // top of whatever the command handler itself already loaded and saved for
+    // the same user — so it was a second full document hydrate and a second
+    // full save each time, for a counter that usually has nothing to move.
+    // Most members hold no live command quest at any given moment: the five ids
+    // are a handful of dailies and weeklies, finished early and then dormant
+    // until they roll over.
+    //
+    // The projection is the quest list and the freeze flag, which is everything
+    // the two questions below need. When they both answer no, the command costs
+    // this one small read and nothing else. When either answers yes, the full
+    // document is fetched as before — one extra tiny read on the rare path, in
+    // exchange for dropping a hydrate and a save from the common one.
+    const snapshot = await User.findOne(filter, { quests: 1, economyFrozen: 1 }).lean();
+    if (snapshot) {
+        if (snapshot.economyFrozen) return;
+        if (!questEventCanProgress(snapshot.quests, 'command')
+            && !questAssignmentNeeded(snapshot.quests, guildSettings)) return;
+    }
+
+    let user = await User.findOne(filter);
     if (!user) {
-        user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
+        user = await User.create(filter);
     }
 
     // A frozen member earns nothing, and a completed quest pays coins (#870).

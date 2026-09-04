@@ -2,7 +2,10 @@ const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
 const User = require('../models/User');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
-const { ensureQuests, onReaction, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
+const {
+    ensureQuests, onReaction, questEventCanProgress, questAssignmentNeeded,
+    notifyQuestComplete, notifyQuestNearComplete,
+} = require('../services/questService');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const COLORS = require('../utils/embedColors');
 const { MEMORY_CAP, MAX_MEMORY_LENGTH } = require('../utils/memoryLimits');
@@ -28,18 +31,59 @@ module.exports = {
         const guildSettings = await getGuildSettings(guild.id);
         if (!guildSettings) return;
 
-        await handleReactionRole(reaction, user, guild, guildSettings);
-        await handleStarboard(reaction, user, guild, guildSettings);
-        await handleReactionQuests(reaction, user, guild, guildSettings);
+        // Reaction roles and the starboard share no document with each other or
+        // with anything below — one adds a role, the other claims a message in
+        // the guild document — so they run together rather than one behind the
+        // other (#929). Settled, not raced: a handler that throws must not take
+        // the other three down with it, which is what the old sequential awaits
+        // did.
+        const independent = await Promise.allSettled([
+            handleReactionRole(reaction, user, guild, guildSettings),
+            handleStarboard(reaction, user, guild, guildSettings),
+        ]);
+        for (const outcome of independent) {
+            if (outcome.status === 'rejected') console.error('Error in messageReactionAdd:', outcome.reason);
+        }
+
+        // These two stay in sequence, and must. Both load the reacting member's
+        // `User` document and both `save()` it, so running them concurrently
+        // would have each write back the copy it read — the pinned memory or
+        // the quest progress, whichever landed second, silently erasing the
+        // other.
+        try {
+            await handleReactionQuests(reaction, user, guild, guildSettings);
+        } catch (err) {
+            console.error('Error in messageReactionAdd:', err);
+        }
         await handleMemoryPin(reaction, user, guild, client);
     }
 };
 
 async function handleReactionQuests(reaction, discordUser, guild, guildSettings) {
     if (!guildSettings?.quests?.enabled) return;
+
+    const filter = { userId: discordUser.id, guildId: guild.id };
+
+    // Cheap read first (#929). Every reaction used to pay an upsert, a full
+    // user hydrate, a save and a member fetch, for four quest ids that a given
+    // member has usually either finished for the day or never been assigned.
+    // Reaction bursts are what makes that expensive: a message that catches on,
+    // or a starboard-active channel, lands dozens of these in seconds and each
+    // one paid in full.
+    //
+    // A projected quest list answers whether anything could move. When nothing
+    // can, the reaction costs this one small read — and, notably, no upsert, so
+    // a passer-by who reacts once no longer has a document created for them
+    // here. The upsert still runs on the path that has work to do, which is the
+    // path that needs the document to exist.
+    const snapshot = await User.findOne(filter, { quests: 1 }).lean();
+    if (snapshot
+        && !questEventCanProgress(snapshot.quests, 'reaction')
+        && !questAssignmentNeeded(snapshot.quests, guildSettings)) return;
+
     const userDoc = await User.findOneAndUpdate(
-        { userId: discordUser.id, guildId: guild.id },
-        { $setOnInsert: { userId: discordUser.id, guildId: guild.id } },
+        filter,
+        { $setOnInsert: filter },
         { upsert: true, new: true }
     );
     if (!userDoc) return;
@@ -56,6 +100,11 @@ async function handleReactionQuests(reaction, discordUser, guild, guildSettings)
         jobName: 'reactionQuestReward',
         guildId: guild.id,
     });
+    // The member fetch exists only to address the notification, so it is not
+    // worth a REST call — or a cache miss's round trip — on the overwhelming
+    // majority of reactions, which complete nothing and near-complete nothing.
+    if (!completed.length && !nearComplete.length) return;
+
     const member = await guild.members.fetch(discordUser.id).catch(() => null);
     if (member) {
         await notifyQuestComplete(guildSettings, member, completed, reaction.message.channel);
