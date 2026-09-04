@@ -17,9 +17,9 @@ The file records what was audited on the day it was audited, so the paths below
 are the paths as they stood then and are deliberately left that way. One has
 moved since and is cited often enough to be worth naming: the settings
 validators and the `/stats` fixes were audited in `src/dashboard/routes/api.js`,
-which is now a mounter and nothing else — that code lives in
-`src/dashboard/routes/api/`, the validators in `settings.js` and the guild
-statistics in `stats.js`.
+which mounts the sub-routers and re-exports two of their functions and holds no
+handler of its own — that code lives in `src/dashboard/routes/api/`, the
+validators in `settings.js` and the guild statistics in `stats.js`.
 
 ---
 

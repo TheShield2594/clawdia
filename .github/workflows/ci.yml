@@ -488,8 +488,18 @@ jobs:
       # Registers the binfmt handlers that let the arm64 half of the build below
       # run its RUN steps on this amd64 runner (#941). Only the publish job
       # needs it: the `image` job builds one native platform and loads it.
+      #
+      # `image` is pinned for the same reason every `uses:` in this job is. The
+      # action's default is `tonistiigi/binfmt:latest`, a mutable tag it then
+      # runs `--privileged` — in the one job holding `packages: write`, after
+      # the GHCR login above. A repointed tag there is arbitrary privileged code
+      # beside a registry credential, which is precisely the exposure the SHA
+      # pinning below was written against. Tag kept beside the digest, as in the
+      # Dockerfile: the digest is what resolves, the tag is the readable half.
       - name: Set up QEMU for the arm64 build
         uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+        with:
+          image: docker.io/tonistiigi/binfmt:qemu-v9.2.2@sha256:1b804311fe87047a4c96d38b4b3ef6f62fca8cd125265917a9e3dc3c996c39e6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
