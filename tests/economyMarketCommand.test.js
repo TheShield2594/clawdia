@@ -32,10 +32,14 @@ jest.mock('../src/utils/inventoryGrant', () => ({
     inventoryAddExpr: jest.fn(() => ({})),
 }));
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
+// An ambiguous listing claim is filed as a plain FailedJob rather than an owed
+// payout, so it reaches an operator without `payouts:replay` acting on it.
+jest.mock('../src/models/FailedJob', () => ({ create: jest.fn(async () => ({})) }));
 
 const market = require('../src/commands/economy/market');
 const { grantInventoryItem } = require('../src/utils/inventoryGrant');
 const { recordOwedPayout } = require('../src/utils/owedPayout');
+const FailedJob = require('../src/models/FailedJob');
 const { logTransaction } = require('../src/utils/logTransaction');
 
 const GUILD_ID = 'guild-1';
@@ -81,6 +85,7 @@ beforeEach(() => {
     mockListings.reset();
     mockTransactions.reset();
     jest.clearAllMocks();
+    FailedJob.create.mockResolvedValue({});
     // `/market browse` renders a seller-reputation column from a Transaction
     // aggregation. Nothing here is about reputation, and the fake collections
     // do not run pipelines, so it answers empty.
@@ -699,6 +704,50 @@ describe('buying a listing', () => {
         // returning stock as well would be a second copy of the same item.
         expect(mockUsers.get(SELLER_ID).inventory).toEqual([]);
         expect(await mockListings.model.countDocuments({})).toBe(1);
+        // Written down, not merely logged: the outcome of the claim is unknowable
+        // and a console line is not a record anyone can act on later.
+        expect(FailedJob.create).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'market',
+            // No `.owed` suffix: replaying this unattended would grant the stock
+            // even in the world where a concurrent buyer legitimately took it.
+            jobName: 'buyClaimAmbiguous',
+            payload: expect.objectContaining({
+                listingId: 'listing-1', sellerId: SELLER_ID, buyerId: BUYER_ID,
+                itemId: 'lucky_charm', quantity: 2, stillListed: true,
+            }),
+        }));
+        console.error.mockRestore();
+    });
+
+    it('records the stranded stock when the listing is gone after a rejected claim', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        // The delete commits and only its response is lost — so the row really
+        // is gone by the time the catch re-reads, and the item is in nobody's
+        // bag. Simulated by doing the delete and then throwing, rather than by
+        // stubbing the re-read, which `handleBuy` also uses to load the listing.
+        const realDelete = mockListings.model.findOneAndDelete.getMockImplementation();
+        mockListings.model.findOneAndDelete.mockImplementationOnce(async (...args) => {
+            await realDelete(...args);
+            throw new Error('claim failed');
+        });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(mockUsers.get(BUYER_ID).balance).toBe(1000);
+        // Still not granted — a concurrent buyer may hold it — but the record
+        // names the question an operator has to answer.
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([]);
+        expect(FailedJob.create).toHaveBeenCalledWith(expect.objectContaining({
+            jobName: 'buyClaimAmbiguous',
+            payload: expect.objectContaining({
+                stillListed: false,
+                adjudicate: expect.stringContaining('listing:listing-1:sale'),
+            }),
+        }));
         console.error.mockRestore();
     });
 
@@ -810,6 +859,31 @@ describe('buying a listing', () => {
         console.error.mockRestore();
     });
 
+    it('says so in the log when even the ambiguous-claim record cannot be written', async () => {
+        // The last line of defence: the buyer's coins are back either way, but
+        // the seller's item is only findable through this record. If the queue
+        // write fails too, the log has to say that rather than imply a record
+        // exists.
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        const realDelete = mockListings.model.findOneAndDelete.getMockImplementation();
+        mockListings.model.findOneAndDelete.mockImplementationOnce(async (...args) => {
+            await realDelete(...args);
+            throw new Error('claim failed');
+        });
+        FailedJob.create.mockRejectedValue(new Error('queue is down'));
+        const errors = [];
+        jest.spyOn(console, 'error').mockImplementation((...args) => errors.push(args.join(' ')));
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(mockUsers.get(BUYER_ID).balance).toBe(1000);
+        expect(errors.some(line => line.includes('NOT RECORDED'))).toBe(true);
+        console.error.mockRestore();
+    });
+
     it('refuses a listing that is gone', async () => {
         seedGuild();
         seedUser(BUYER_ID, { balance: 1000 });
@@ -918,10 +992,11 @@ describe('paying the seller', () => {
         expect(mockUsers.get(SELLER_ID).balance).toBe(190);
     });
 
-    // `balance` is required on the Transaction schema, so a read-back that fails
-    // cannot simply be left out — the ledger row would not be written at all,
-    // and the sale is exactly when somebody goes looking for it.
-    it('still files the ledger row when the balance read-back fails', async () => {
+    // #873. `balance` is required on the Transaction schema, and the figure used
+    // to fall back to `0` when it could not be read — a number nobody observed,
+    // filed in the ledger as though somebody had. A missing row is a gap an
+    // operator can see; a fabricated balance is one they cannot.
+    it('files no ledger row rather than a fabricated balance when the read fails', async () => {
         seedGuild();
         seedUser(BUYER_ID, { balance: 1000 });
         // Already paid, so the guarded credit returns no document and the
@@ -941,9 +1016,9 @@ describe('paying the seller', () => {
         const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
 
         expect(repliedText(interaction)).toContain('Purchase Complete');
-        expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({
-            type: 'market_sell', amount: 190, balance: 0,
-        }));
+        expect(logTransaction).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'market_sell' }));
+        // The buyer's own row is unaffected — their balance was read from the debit.
+        expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ type: 'market_buy' }));
         console.error.mockRestore();
     });
 

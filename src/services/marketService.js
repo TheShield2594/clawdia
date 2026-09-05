@@ -15,6 +15,7 @@
  * @module services/marketService
  */
 
+const FailedJob = require('../models/FailedJob');
 const { recordOwedPayout, owedSummary } = require('../utils/owedPayout');
 const { creditCoinsOrOwe, grantItemsOrOwe } = require('../utils/creditOrOwe');
 const {
@@ -344,13 +345,20 @@ async function unwindPurchase({
  * will not land is written down as owed, which is what the expiry sweep does
  * with a return it cannot make.
  *
- * `balance` is read back rather than assumed. 'duplicate' is a success whose
- * response was lost on an earlier attempt — the coins are there — but it comes
- * back with no document, and a failure has none either; `balance` is required on
- * the Transaction schema, so guessing is not an option and neither is leaving it
- * out, because the row simply would not be written.
+ * `balance` is read back rather than assumed, and is `null` only when it could
+ * not be read at all. 'duplicate' is a success whose response was lost on an
+ * earlier attempt — the coins are there — but it comes back with no document,
+ * and a failure has none either, so the figure comes from a second read.
  *
- * @returns {Promise<{paid: boolean, owed: boolean, balance: number, payoutKey: string}>}
+ * That read can fail too, and the previous version answered `0` for it: a number
+ * nobody observed, written into the `market_sell` ledger row as though it had
+ * been. That is the same untruth as a refund that did not happen, in the one
+ * place an operator goes looking when the coins are in question. A read that
+ * *succeeds* and finds no seller document is a different thing — it is an
+ * answer, and zero is the true one — so that case still files its row, which is
+ * what #869 added it for.
+ *
+ * @returns {Promise<{paid: boolean, owed: boolean, balance: ?number, payoutKey: string}>}
  */
 async function payListingSeller({ sellerId, guildId, listing, amount, Model = require('../models/User') }) {
     const who = { userId: sellerId, guildId };
@@ -368,9 +376,16 @@ async function payListingSeller({ sellerId, guildId, listing, amount, Model = re
     }
 
     const paid = status === 'paid' || status === 'duplicate';
-    const balance = doc?.balance
-        ?? (await Model.findOne(who, { balance: 1 }).lean().catch(() => null))?.balance
-        ?? 0;
+    // Three outcomes, not two. The write's own projection answers first; failing
+    // that, a read answers; and only a read that *threw* leaves the figure
+    // genuinely unknown. A read that succeeds and finds no seller document is an
+    // answer — they hold nothing — and the ledger row it produces is true.
+    let balance = doc?.balance ?? null;
+    if (balance === null) {
+        balance = await Model.findOne(who, { balance: 1 }).lean()
+            .then(fresh => fresh?.balance ?? 0)
+            .catch(() => null);
+    }
 
     if (paid) return { paid, owed: false, balance, payoutKey };
 
@@ -396,6 +411,64 @@ async function payListingSeller({ sellerId, guildId, listing, amount, Model = re
     return { paid, owed, balance, payoutKey };
 }
 
+/**
+ * Write down a listing claim whose outcome nobody can establish.
+ *
+ * `findOneAndDelete` is the write that claims a listing for a purchase, and a
+ * rejection from it says nothing about whether it committed. Re-reading the
+ * listing narrows it to two worlds and cannot separate them: the row is gone
+ * either because this delete landed and the item is now in nobody's bag, or
+ * because a concurrent buyer's delete landed and the item is rightfully theirs.
+ *
+ * So nothing is granted. Returning the stock would mint an item in the second
+ * world, and this file's own rule — losing a return is recoverable from a
+ * record, silently doubling one is not — decides that. What the previous version
+ * got wrong is what "recoverable from a record" means: it wrote a console line,
+ * which is not a record. An operator had to already be reading logs at the right
+ * minute to ever learn the item existed.
+ *
+ * This is a plain `FailedJob` and deliberately **not** `recordOwedPayout`. That
+ * helper suffixes the job name with `.owed`, which is what puts a payload in
+ * front of `npm run payouts:replay` — and replaying this one would grant the
+ * stock unconditionally, which is exactly the second world's duplicate. It needs
+ * a human to decide, so it is filed where a human looks and nowhere a script
+ * will act on it unattended.
+ *
+ * Never throws: it runs while a purchase is being unwound and must not abandon
+ * the refund that follows it.
+ *
+ * @returns {Promise<boolean>} whether the record was written
+ */
+async function recordAmbiguousClaim({ listing, buyerId, guildId, stillListed, error }) {
+    return FailedJob.create({
+        service:  'market',
+        jobName:  'buyClaimAmbiguous',
+        guildId,
+        payload: {
+            listingId:    String(listing._id),
+            sellerId:     listing.sellerId,
+            buyerId,
+            itemId:       listing.itemId,
+            quantity:     listing.quantity,
+            stillListed,
+            // Spelled out because whoever reads this is deciding between two
+            // worlds and needs to know which question to ask.
+            adjudicate: stillListed
+                ? 'The listing survived, so the delete did not land: the buyer was refunded and nothing else is owed.'
+                : `The listing is gone. If no completed purchase exists for it — check for a market_sell row or the `
+                  + `${marketSalePayoutKey(listing._id)} key on the seller — then ${listing.quantity}x ${listing.itemId} `
+                  + `is owed back to ${listing.sellerId}. If one does exist, the item went to that buyer and nothing is owed.`,
+        },
+        errorMessage: error?.message ?? 'listing claim rejected with an unknown outcome',
+        errorStack:   error?.stack ?? null,
+        lastAttemptAt: new Date(),
+    }).then(() => true).catch(err => {
+        console.error('[market buy] could not record the ambiguous listing claim:', err?.message);
+        return false;
+    });
+}
+
 module.exports = {
     returnExpiredMarketListings, creditPurchasedItem, unwindPurchase, payListingSeller,
+    recordAmbiguousClaim,
 };

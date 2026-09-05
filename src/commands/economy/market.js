@@ -12,7 +12,7 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { listingCancelPayoutKey, listingCreateRefundPayoutKey } = require('../../utils/payoutKey');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
 const {
-    creditPurchasedItem, unwindPurchase, payListingSeller,
+    creditPurchasedItem, unwindPurchase, payListingSeller, recordAmbiguousClaim,
 } = require('../../services/marketService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
@@ -618,18 +618,24 @@ async function handleBuy(interaction, currency) {
             removed = await MarketListing.findOneAndDelete({ _id: listing._id, guildId: interaction.guild.id });
         } catch (claimErr) {
             console.error('[market buy] claiming the listing failed after the buyer was debited:', claimErr);
-            // The buyer is refunded; the stock is not. A rejection leaves it
-            // unknowable whether this delete landed or another buyer's did, and
-            // returning stock for a listing somebody else bought mints an item —
-            // `marketService`'s rule, that losing a return is recoverable from a
-            // log and silently doubling one is not.
+            // The buyer is refunded; the stock is not, because a rejection
+            // leaves it unknowable whether this delete landed or a concurrent
+            // buyer's did, and returning stock for a listing somebody else
+            // bought mints an item. But "not granted" must not mean "not written
+            // down" (#873): the record goes in first, where an operator can find
+            // it, rather than into a log line nobody was reading at the time.
+            const stillListed = Boolean(await MarketListing
+                .findOne({ _id: listing._id, guildId: interaction.guild.id }, '_id').lean().catch(() => null));
+            const recorded = await recordAmbiguousClaim({
+                listing, buyerId: interaction.user.id, guildId: interaction.guild.id,
+                stillListed, error: claimErr,
+            });
             const { refund } = await unwind('buyRefundClaim', false);
-            const stillListed = await MarketListing
-                .findOne({ _id: listing._id, guildId: interaction.guild.id }, '_id').lean().catch(() => null);
             if (!stillListed) {
                 console.error(
-                    `[market buy] CRITICAL: listing ${listing._id} is gone after a claim that rejected — ` +
-                    `${listing.quantity}x ${listing.itemId} may be stranded and needs returning by hand`,
+                    `[market buy] listing ${listing._id} is gone after a claim that rejected — ` +
+                    `${listing.quantity}x ${listing.itemId} may be owed back to ${listing.sellerId}; ` +
+                    `${recorded ? 'recorded for an operator to adjudicate' : 'NOT RECORDED'}`,
                 );
             }
             return editReply({ content: `Something went wrong claiming the listing. ${refundNote(refund)}`, embeds: [], components: [] });
@@ -679,16 +685,30 @@ async function handleBuy(interaction, currency) {
             listing, amount: sellerReceives,
         });
 
-        // Logged either way: the sale happened, and a row that only appears when
-        // the credit lands leaves the coins unaccounted for exactly when someone
-        // goes looking for them. The note says which it was, so an operator
-        // reading a `market_sell` whose balance did not move has the reason in
-        // front of them rather than a discrepancy to work out.
-        logTransaction({
-            userId: listing.sellerId, guildId: interaction.guild.id, type: 'market_sell',
-            amount: sellerReceives, balance: sellerBalance,
-            note: sellerPaid ? listing.itemId : `${listing.itemId} — payout owed (${saleKey})`,
-        });
+        // Logged whether or not the credit landed: the sale happened, and a row
+        // that only appears when the credit lands leaves the coins unaccounted
+        // for exactly when someone goes looking for them. The note says which it
+        // was, so an operator reading a `market_sell` whose balance did not move
+        // has the reason in front of them rather than a discrepancy to work out.
+        //
+        // The one thing that stops the row being written is not knowing the
+        // balance to put on it (#873). `balance` is required on the Transaction
+        // schema, and the figure used to fall back to `0` — a number nobody
+        // read, filed in the ledger as though somebody had. A missing row is a
+        // gap an operator can see; a fabricated balance is one they cannot.
+        if (sellerBalance === null) {
+            console.error(
+                `[market buy] listing ${listing._id} sold and the seller's balance could not be read — ` +
+                `no market_sell row filed for ${sellerReceives} to ${listing.sellerId} ` +
+                `(payout ${sellerPaid ? 'landed' : `owed under ${saleKey}`})`,
+            );
+        } else {
+            logTransaction({
+                userId: listing.sellerId, guildId: interaction.guild.id, type: 'market_sell',
+                amount: sellerReceives, balance: sellerBalance,
+                note: sellerPaid ? listing.itemId : `${listing.itemId} — payout owed (${saleKey})`,
+            });
+        }
         logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'market_buy', amount: -totalCost, balance: buyer.balance, note: listing.itemId });
 
         // The buyer's side of the trade is complete whatever happened above, so

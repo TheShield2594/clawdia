@@ -53,6 +53,17 @@ the purchase with the coins gone and nothing written down. It is caught now and
 the buyer refunded; the stock deliberately is not returned on that path, because
 a rejection leaves it unknowable whether this delete landed or another buyer's
 did, and returning stock for a listing somebody else bought would mint an item.
+What *is* written down is the ambiguity itself — a queue entry naming the listing,
+both parties and the question an operator has to answer — rather than the console
+line the first attempt left it at. It is filed as a plain failed job rather than
+an owed payout on purpose: `payouts:replay` would grant the stock unconditionally,
+which is the duplicate this path exists to avoid.
+
+And the seller's ledger row no longer invents a balance. When the credit's own
+projection and the follow-up read both come back empty the figure used to fall
+back to zero, which then went into the `market_sell` row as though it had been
+observed. A read that succeeds and finds no seller is still an answer and still
+files its row; only a read that fails omits it, and says in the log why.
 
 All six now go through `grantItemsOrOwe` or `creditCoinsOrOwe` — the second is
 the helper the duel and crew payouts already shared, the first is new and is the
