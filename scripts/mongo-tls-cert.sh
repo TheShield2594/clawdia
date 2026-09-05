@@ -11,6 +11,7 @@
 # Usage:
 #   ./scripts/mongo-tls-cert.sh [dir] [extra-hostname ...]   issue CA + server cert
 #   ./scripts/mongo-tls-cert.sh --check [dir]                how long is left
+#   ./scripts/mongo-tls-cert.sh --new-ca [dir] [host ...]    roll the CA over
 #
 # `dir` defaults to ./secrets/mongo-tls, which is what the commented mounts in
 # docker-compose.yml expect. On a Portainer host it is wherever you pointed
@@ -18,8 +19,9 @@
 #
 # What it writes:
 #   ca.crt      the CA every client validates mongod against (world-readable)
-#   ca.key      the CA private key — the only thing here that can mint a new
-#               server certificate, and the only thing worth moving off the host
+#   ca.key      the CA private key — the only thing here that can mint a
+#               certificate this deployment would trust. It is mounted into no
+#               container, and it is the one file worth moving off the host
 #   server.pem  certificate + private key concatenated, which is the one file
 #               mongod's --tlsCertificateKeyFile wants
 #
@@ -29,7 +31,8 @@
 # mongosh, plus any extra names given on the command line.
 #
 # Lifetimes are deliberately long: ten years for the CA, five for the server
-# certificate. A private CA on an internal-only network gains nothing from short
+# certificate — or whatever is left of the CA, if that is less, since a leaf
+# outlives its issuer only on paper. A private CA on an internal-only network gains nothing from short
 # rotation — there is no revocation path here to make it meaningful — and every
 # month shaved off is a month closer to the outage above. Renewing is this
 # script again with the same directory and a restart; see "Encrypting MongoDB
@@ -177,11 +180,35 @@ issue() {
     # Reuse an existing CA when there is one: reissuing the server certificate
     # under a new CA would mean re-distributing ca.crt to all four containers,
     # which is the step an operator renewing in a hurry would skip.
-    if [ -r "${dir}/ca.key" ] && [ -r "${dir}/ca.crt" ]; then
-        echo "[mongo-tls] Reusing the existing CA in ${dir}"
+    local issue_days ca_left
+    issue_days="${SERVER_DAYS}"
+    if [ "${NEW_CA}" != yes ] && [ -r "${dir}/ca.key" ] && [ -r "${dir}/ca.crt" ]; then
+        ca_left=$(days_left "${dir}/ca.crt") || return 1
+        # A leaf certificate is only good for as long as the chain above it. Its
+        # own notAfter says nothing once the issuer has expired — every client
+        # rejects it on the CA date, whatever the server certificate claims. So
+        # a CA that cannot cover the requested lifetime does not silently issue
+        # a certificate that lies about when it stops working.
+        if [ "${ca_left}" -lt "${WARN_DAYS}" ]; then
+            echo "[mongo-tls] The CA in ${dir} has ${ca_left} days left, which is not enough to issue against." >&2
+            echo "[mongo-tls] Roll it over deliberately — this replaces the trust material every client holds:" >&2
+            echo "[mongo-tls]   ${0} --new-ca ${dir}" >&2
+            echo "[mongo-tls] then recreate every container with a mongo-tls mount. See docs/SETUP_GUIDE.md." >&2
+            return 1
+        fi
+        echo "[mongo-tls] Reusing the existing CA in ${dir} (${ca_left} days left)"
+        if [ "${ca_left}" -lt "${issue_days}" ]; then
+            echo "[mongo-tls] Capping the server certificate at ${ca_left} days to match it, rather than the usual ${SERVER_DAYS}."
+            issue_days="${ca_left}"
+        fi
         cp "${dir}/ca.key" "${WORK}/ca.key"
         cp "${dir}/ca.crt" "${WORK}/ca.crt"
     else
+        if [ -r "${dir}/ca.crt" ]; then
+            echo "[mongo-tls] Replacing the CA in ${dir}. Every client holding the old ca.crt stops"
+            echo "[mongo-tls] trusting mongod the moment it restarts, so redistribute the new one and"
+            echo "[mongo-tls] recreate all four containers together."
+        fi
         echo "[mongo-tls] Creating a CA valid for ${CA_DAYS} days"
         openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
             -days "${CA_DAYS}" \
@@ -191,7 +218,7 @@ issue() {
             -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
     fi
 
-    echo "[mongo-tls] Issuing a server certificate valid for ${SERVER_DAYS} days (${alt_names})"
+    echo "[mongo-tls] Issuing a server certificate valid for ${issue_days} days (${alt_names})"
     openssl req -newkey rsa:4096 -sha256 -nodes \
         -keyout "${WORK}/server.key" -out "${WORK}/server.csr" \
         -subj "/CN=mongodb/O=Clawdia" 2>/dev/null
@@ -208,7 +235,7 @@ EXT
 
     openssl x509 -req -in "${WORK}/server.csr" -sha256 \
         -CA "${WORK}/ca.crt" -CAkey "${WORK}/ca.key" -CAcreateserial \
-        -days "${SERVER_DAYS}" -extfile "${WORK}/ext" \
+        -days "${issue_days}" -extfile "${WORK}/ext" \
         -out "${WORK}/server.crt" 2>/dev/null
 
     # mongod wants one file, key first is conventional and either order parses.
@@ -232,10 +259,18 @@ EXT
 
     echo
     echo "[mongo-tls] Written to ${dir}:"
-    check "${dir}" || true
+    # Not `|| true`. This is the only thing that reads back what was just
+    # written, and a pair that cannot be parsed or is already inside the warning
+    # window is not a successful issue — reporting it as one would leave the
+    # operator moving on to mount it.
+    if ! check "${dir}"; then
+        echo "[mongo-tls] The certificate that was just written did not pass its own check." >&2
+        return 1
+    fi
     echo
-    echo "[mongo-tls] Next: uncomment the mongo-tls mounts on mongodb, mongo-replset-init,"
-    echo "[mongo-tls] bot and backup, then set — in this order, all in one edit —"
+    echo "[mongo-tls] Next: uncomment the mongo-tls mounts — ca.crt on mongodb,"
+    echo "[mongo-tls] mongo-replset-init, bot and backup, and server.pem on mongodb."
+    echo "[mongo-tls] ca.key is mounted nowhere. Then set — in this order, all in one edit —"
     echo "[mongo-tls]   MONGODB_CLIENT_TLS_ARGS=--tls --tlsCAFile /etc/mongo-tls/ca.crt"
     echo "[mongo-tls]   MONGODB_URI=...?tls=true&tlsCAFile=/etc/mongo-tls/ca.crt"
     echo "[mongo-tls]   MONGODB_TLS_ARGS=--tlsMode requireTLS --tlsCertificateKeyFile /etc/mongo-tls/server.pem --tlsCAFile /etc/mongo-tls/ca.crt --tlsAllowConnectionsWithoutCertificates"
@@ -243,11 +278,18 @@ EXT
 }
 
 MODE=issue
+NEW_CA=no
 if [ "${1:-}" = "--check" ]; then
     MODE=check
     shift
+elif [ "${1:-}" = "--new-ca" ]; then
+    # Deliberate, and never implicit: a new CA invalidates the ca.crt every
+    # client holds, so it is a flag rather than something a renewal decides on
+    # the operator behalf.
+    NEW_CA=yes
+    shift
 elif [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-    sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n "2,$(( $(grep -n '^set -euo pipefail' "$0" | cut -d: -f1) - 1 ))p" "$0" | sed 's/^# \{0,1\}//'
     exit 0
 fi
 

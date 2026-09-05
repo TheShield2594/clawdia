@@ -427,7 +427,8 @@ describe('the two files agree where they must', () => {
     // database. That is what this asserts, because it is the only place it can
     // be asserted — the alternative is finding out on the redeploy.
     describe('TLS on db-network is all of it or none of it (#975)', () => {
-        const CERT_MOUNT = /mongo-tls:\/etc\/mongo-tls:ro/g;
+        const CA_MOUNT = /mongo-tls\/ca\.crt:\/etc\/mongo-tls\/ca\.crt:ro/g;
+        const SERVER_MOUNT = /mongo-tls\/server\.pem:\/etc\/mongo-tls\/server\.pem:ro/g;
 
         it('lets mongod be given TLS flags, the same way, in both', () => {
             for (const [name, doc] of stacks) {
@@ -483,14 +484,33 @@ describe('the two files agree where they must', () => {
             }
         });
 
-        it('offers the certificate to every container that needs it', () => {
+        it('offers each container the one file it needs, and no more', () => {
             for (const [name] of stacks) {
                 // Commented out, like the key-file mount beside it, so this
-                // reads the file rather than the parsed YAML. Four: mongod
-                // serves the certificate, and mongo-replset-init, bot and backup
-                // each validate against the CA in it.
+                // reads the file rather than the parsed YAML.
                 const text = fs.readFileSync(path.join(ROOT, name), 'utf8');
-                expect([name, (text.match(CERT_MOUNT) || []).length]).toEqual([name, 4]);
+                const mounts = text.split('\n').filter(line => /:\/etc\/mongo-tls/.test(line));
+
+                // Four: mongod validates its own replication connection against
+                // the CA, and mongo-replset-init, bot and backup each validate
+                // mongod against it.
+                expect([name, (text.match(CA_MOUNT) || []).length]).toEqual([name, 4]);
+                // One: only mongod serves the certificate.
+                expect([name, (text.match(SERVER_MOUNT) || []).length]).toEqual([name, 1]);
+
+                // The point of naming files rather than the directory that holds
+                // them. `scripts/mongo-tls-cert.sh` writes ca.key into that
+                // directory, and it is the one thing that can mint a certificate
+                // this deployment would trust — a directory mount hands it, and
+                // mongod's private key, to the bot, which is the container with
+                // a route to the internet. Neither belongs in any container.
+                for (const mount of mounts) {
+                    expect([name, mount]).not.toEqual([name, expect.stringContaining('ca.key')]);
+                    // A bare `…/mongo-tls:/etc/mongo-tls` mount is the whole
+                    // directory again under another spelling.
+                    expect([name, /:\/etc\/mongo-tls:/.test(mount)]).toEqual([name, false]);
+                }
+                expect([name, mounts.length]).toEqual([name, 5]);
             }
         });
 

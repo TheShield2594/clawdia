@@ -54,6 +54,28 @@ const stripComments = src => src
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
 
+/**
+ * The argument text of every `.parseString(...)` call in one source file.
+ *
+ * Paren-matched rather than regexed to the next `)`, because the argument that
+ * matters most — `parseString(await safeFetchFeed(url))` — contains one.
+ */
+function parseStringArguments(src) {
+    const args = [];
+    const CALL = /\.parseString\(/g;
+    for (let match = CALL.exec(src); match; match = CALL.exec(src)) {
+        let depth = 1;
+        let i = match.index + match[0].length;
+        const start = i;
+        for (; i < src.length && depth > 0; i += 1) {
+            if (src[i] === '(') depth += 1;
+            else if (src[i] === ')') depth -= 1;
+        }
+        args.push(src.slice(start, i - 1).trim());
+    }
+    return args;
+}
+
 const sources = walk(path.join(ROOT, 'src'))
     .map(file => [path.relative(ROOT, file), stripComments(fs.readFileSync(file, 'utf8'))]);
 
@@ -80,6 +102,15 @@ describe('rss-parser stays watched (#954)', () => {
         const ignored = (npm.ignore || []).map(rule => rule['dependency-name']);
         expect(ignored).not.toContain('rss-parser');
         expect(ignored).not.toContain('*');
+        // `allow` is the same hole from the other side, and the quieter one: it
+        // is a whitelist, so adding an entry for any *other* package silently
+        // drops everything not named — this one included — rather than
+        // mentioning it. Absent is the state today and the state that keeps the
+        // schedule reaching everything.
+        const allowed = (npm.allow || []).map(rule => rule['dependency-name']);
+        if (npm.allow) {
+            expect(allowed).toContain('rss-parser');
+        }
     });
 
     it('is required in exactly the two places that parse a feed', () => {
@@ -105,15 +136,34 @@ describe('rss-parser stays watched (#954)', () => {
     it('is only ever handed a string something else already bounded', () => {
         for (const file of importers) {
             const src = stripComments(fs.readFileSync(path.join(ROOT, file), 'utf8'));
-            expect([file, /safeFeedFetch/.test(src)]).toEqual([file, true]);
+            // The module and the function it exports are spelled differently —
+            // `safeFeedFetch.js` exports `safeFetchFeed` — and only the second
+            // proves the guard is actually called rather than merely imported.
+            expect([file, /require\(['"][^'"]*safeFeedFetch['"]\)/.test(src)]).toEqual([file, true]);
+            expect([file, /\bsafeFetchFeed\s*\(/.test(src)]).toEqual([file, true]);
+
             // `parseString` is the whole of the surface, and so the whole of
             // what a replacement would have to provide. Anything else here
             // means the exit plan wants re-costing before it is needed rather
             // than after.
-            const calls = src.match(/\b(?:parser|feedParser)\.\w+\(/g) || [];
+            const calls = [...src.matchAll(/\b(?:parser|feedParser)\.(\w+)\(/g)];
             expect([file, calls.length]).not.toEqual([file, 0]);
-            for (const call of calls) {
-                expect([file, call]).toEqual([file, expect.stringContaining('.parseString(')]);
+            for (const [, method] of calls) {
+                expect([file, method]).toEqual([file, 'parseString']);
+            }
+
+            // And what it is handed has to come from the guard, not merely be
+            // parsed in a file that happens to import it. Both shapes are in
+            // use: the service inlines the call, the route awaits it into a
+            // local first — so an argument is either the call itself or an
+            // identifier this file assigns from it. `parseString(rawBody)`
+            // after a bare fetch is the regression, and it is one line.
+            for (const argument of parseStringArguments(src)) {
+                if (/\bsafeFetchFeed\s*\(/.test(argument)) continue;
+                expect([file, argument]).toEqual([file, expect.stringMatching(/^[A-Za-z_$][\w$]*$/)]);
+                const assignment = new RegExp(
+                    `\\b(?:const|let|var)\\s+${argument}\\s*=\\s*await\\s+safeFetchFeed\\s*\\(`);
+                expect([file, argument, assignment.test(src)]).toEqual([file, argument, true]);
             }
         }
     });

@@ -191,10 +191,15 @@ a database it could not have reached. `scripts/mongo-tls-cert.sh` issues the CA
 and the server certificate, and `--check` prints the days remaining and reports
 to `ERROR_WEBHOOK_URL` under sixty — because a `mongod` that stops accepting
 connections at midnight on a forgotten expiry is a worse outage than the
-cleartext it was turned on to prevent. `tests/deployStackParity.test.js` holds
-both stack files in step so neither can gain a client the other has not, and
-`docs/SETUP_GUIDE.md` has the procedure, the ordering and the case for leaving it
-off.
+cleartext it was turned on to prevent, and it refuses to issue against a CA that
+cannot outlast the certificate, since a leaf outlives its issuer only on paper.
+The mounts name files rather than the directory holding them: `ca.crt` goes to
+all four containers, `server.pem` to `mongod` alone, and `ca.key` — the one thing
+that can mint a certificate this deployment would trust — into none of them.
+`tests/deployStackParity.test.js` holds both stack files in step so neither can
+gain a client the other has not, and fails on a directory mount or a mounted
+`ca.key`; `docs/SETUP_GUIDE.md` has the procedure, the ordering, the CA rollover
+and the case for leaving it off.
 
 The watch on `rss-parser` is written down where it can lapse loudly (#954).
 Nothing is wrong with the package today and nothing here changes how a feed is

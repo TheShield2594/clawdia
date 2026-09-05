@@ -1198,18 +1198,31 @@ the database tools reject a configuration specified both ways.
 ./scripts/mongo-tls-cert.sh /opt/clawdia/mongo-tls    # Portainer host path
 ```
 
-That writes `ca.crt` (what clients validate against), `ca.key` (the only thing
-that can mint a replacement — the one file worth moving off the host) and
-`server.pem` (certificate and key concatenated, which is the single file
-`mongod` wants). The certificate is issued for `mongodb`, the service name every
-client dials, plus `localhost` and `127.0.0.1` for a `docker exec` `mongosh`;
-pass any additional hostnames as further arguments. It chowns `server.pem` to
-uid 999, which is what `mongod` runs as inside the image — if you did not run it
-as root it says so, and `mongod` will not start until you do that step.
+That writes three files:
 
-**2. Mount it.** Uncomment the four `mongo-tls` mounts — on `mongodb`,
-`mongo-replset-init`, `bot` and `backup`. All four, or step 4 locks out whichever
-one you skipped.
+| File | What reads it |
+| --- | --- |
+| `ca.crt` | every client, to validate `mongod` — and `mongod` itself, for its own replication connection |
+| `server.pem` | `mongod` only. Certificate and private key concatenated, which is the single file `--tlsCertificateKeyFile` wants |
+| `ca.key` | nothing, until you renew. It is the only thing that can mint a certificate this deployment would trust, and it goes into no container at all — this is the one file worth moving off the host once the pair is issued |
+
+The certificate is issued for `mongodb`, the service name every client dials,
+plus `localhost` and `127.0.0.1` for a `docker exec` `mongosh`; pass any
+additional hostnames as further arguments. It chowns `server.pem` to uid 999,
+which is what `mongod` runs as inside the image — if you did not run it as root
+it says so, and `mongod` will not start until you do that step.
+
+**2. Mount it, file by file.** Uncomment the five `mongo-tls` mounts: `ca.crt`
+on all four services, and `server.pem` on `mongodb` as well. Four containers
+mount the CA, or step 4 locks out whichever one you skipped.
+
+They name files rather than the directory that holds them, and that is
+deliberate. A `mongo-tls:/etc/mongo-tls:ro` mount is one line shorter and hands
+`ca.key` — and `mongod`'s private key — to the `bot` container, which is the one
+with a route to the internet. Neither has any reader there. If you add a
+container that talks to `mongod`, give it `ca.crt` and nothing else;
+`tests/deployStackParity.test.js` fails on a directory mount or a mounted
+`ca.key` in either stack file.
 
 **3. Point the clients at it, before `mongod`.** In `.env` or the stack
 environment:
@@ -1282,16 +1295,49 @@ that one:
 0 6 * * *  cd /opt/clawdia && ./scripts/mongo-tls-cert.sh --check >> /var/log/clawdia-tls.log 2>&1
 ```
 
-Renewing is the same script against the same directory. It reuses the existing
-CA rather than minting a new one — a new CA would mean re-distributing `ca.crt`
-to all four containers, which is exactly the step someone renewing in a hurry
-skips — so only `server.pem` changes, and `mongod` keeps serving the old
-certificate until it is restarted:
+**Renewing the server certificate** is the same script against the same
+directory. It reuses the existing CA rather than minting a new one — a new CA
+would mean re-distributing `ca.crt` to all four containers, which is exactly the
+step someone renewing in a hurry skips — so only `server.pem` changes, nothing
+else has to be touched, and `mongod` keeps serving the old certificate until it
+is restarted:
 
 ```bash
 ./scripts/mongo-tls-cert.sh
 docker compose up -d --force-recreate mongodb
 ```
+
+If the CA has less time left than the five years a server certificate normally
+gets, the new certificate is capped at whatever the CA has and the script says
+so. That is not a limitation being worked around: a certificate is only good for
+as long as the CA above it, and every client rejects the chain on the CA's date
+whatever the leaf's own dates claim. A certificate issued for longer would be
+lying about when it stops working.
+
+**Rolling the CA over** is the other half, and it is a different job: it replaces
+the trust material every client holds, so it cannot be done one container at a
+time. The script refuses to issue against a CA with less than
+`MONGO_TLS_WARN_DAYS` left and points here. With a ten-year CA this should
+happen roughly never, which is exactly why it is worth having written down:
+
+```bash
+# 1. Mint a new CA and a server certificate under it. This overwrites ca.crt,
+#    ca.key and server.pem in place; keep a copy of the old ca.crt if you want
+#    a way back before step 3.
+./scripts/mongo-tls-cert.sh --new-ca
+
+# 2. On a Portainer host, copy the new ca.crt and server.pem to wherever the
+#    mounts point (the mounted paths do not change, so the stack file does not).
+
+# 3. Recreate every container with a mongo-tls mount, together. A client still
+#    holding the old ca.crt refuses the new certificate, so a rolling restart
+#    is an outage taken one container at a time instead of once.
+docker compose up -d --force-recreate mongodb mongo-replset-init bot backup
+```
+
+There is no revocation here, so the old CA stops mattering the moment nothing
+holds it any more. Delete the copy you kept once the stack is up and
+`./scripts/mongo-tls-cert.sh --check` is green.
 
 ### Automated Backups
 
