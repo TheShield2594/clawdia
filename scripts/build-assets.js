@@ -35,7 +35,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const esbuild = require('esbuild');
 
 const PUBLIC = path.join(__dirname, '..', 'src', 'dashboard', 'public');
 
@@ -46,6 +45,21 @@ const PUBLIC = path.join(__dirname, '..', 'src', 'dashboard', 'public');
 const SOURCES = [
     'esc-html.js',
     'settings-payload.js',
+    // The guild settings page, in the order views/guild-settings.ejs loads it
+    // (#935): the shared machinery, one script per panel, then the shell.
+    'dashboard-core.js',
+    'chart-support.js',
+    'panel-messages.js',
+    'panel-overview.js',
+    'panel-analytics.js',
+    'panel-moderation.js',
+    'panel-economy.js',
+    'panel-leveling.js',
+    'panel-achievements.js',
+    'panel-roles.js',
+    'panel-rss.js',
+    'panel-ai.js',
+    'panel-mcp.js',
     'guild-settings.js',
     'styles.css',
 ];
@@ -71,6 +85,13 @@ function minifiedName(file) {
  * top-level names alone and renames only what is genuinely local.
  */
 function minify(source, file) {
+    // Required here rather than at the top of the file: esbuild refuses to load
+    // inside jsdom (it checks that `new TextEncoder().encode('')` is a
+    // `Uint8Array`, and jsdom's global is from another realm), and the jsdom
+    // suites import this module for its SOURCES list without ever minifying —
+    // they run the build in a child process instead. See
+    // tests/helpers/guildSettingsPage.
+    const esbuild = require('esbuild');
     const { code } = esbuild.transformSync(source, {
         loader: path.extname(file) === '.css' ? 'css' : 'js',
         minify: true,

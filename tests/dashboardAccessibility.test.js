@@ -881,7 +881,7 @@ describe('the Getting Started collapse', () => {
 // rather than the rendered page because three of the six are drawn from data
 // only a live moderation or economy panel has.
 describe('injected images', () => {
-    const script = fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8');
+    const script = require('./helpers/dashboardScripts').pageScriptSource();
 
     it('every <img> the script writes carries an alt', () => {
         const withoutAlt = [...script.matchAll(/<img\b[^>]*>/g)]

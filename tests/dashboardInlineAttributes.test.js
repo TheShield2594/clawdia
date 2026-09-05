@@ -87,11 +87,25 @@ const BASELINE = {
 // vendor/ is not ours and is not swept; everything else here is.
 //
 // file (relative to public/) -> inline style attributes
+//
+// One entry per panel script since #935 split guild-settings.js up, which is
+// what the 102 it used to carry was hiding: the budget is per panel now, so a
+// panel that grows one cannot be paid for out of another's slack.
 const SCRIPT_BASELINE = {
     // Layout a rendered row sets on itself — a card's own display and spacing,
-    // an avatar's 16px box. Lower it the way the view numbers are lowered: move
-    // the rule into a class in styles.css.
-    'guild-settings.js': 102,
+    // an avatar's 16px box. Lower these the way the view numbers are lowered:
+    // move the rule into a class in styles.css.
+    'guild-settings.js': 3,
+    'panel-achievements.js': 15,
+    'panel-ai.js': 23,
+    'panel-analytics.js': 4,
+    'panel-economy.js': 7,
+    'panel-leveling.js': 4,
+    'panel-mcp.js': 8,
+    'panel-moderation.js': 20,
+    'panel-overview.js': 8,
+    'panel-roles.js': 1,
+    'panel-rss.js': 9,
 };
 
 // Every form HTML actually accepts, because the browser and the CSP accept them

@@ -224,7 +224,20 @@
         }
     },
     "neverExecuted": [
+        "src/dashboard/public/chart-support.js",
+        "src/dashboard/public/dashboard-core.js",
         "src/dashboard/public/guild-settings.js",
+        "src/dashboard/public/panel-achievements.js",
+        "src/dashboard/public/panel-ai.js",
+        "src/dashboard/public/panel-analytics.js",
+        "src/dashboard/public/panel-economy.js",
+        "src/dashboard/public/panel-leveling.js",
+        "src/dashboard/public/panel-mcp.js",
+        "src/dashboard/public/panel-messages.js",
+        "src/dashboard/public/panel-moderation.js",
+        "src/dashboard/public/panel-overview.js",
+        "src/dashboard/public/panel-roles.js",
+        "src/dashboard/public/panel-rss.js",
         "src/deploy-commands.js",
         "src/index.js",
         "src/shard.js"

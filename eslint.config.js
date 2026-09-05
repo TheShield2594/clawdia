@@ -118,6 +118,55 @@ const SYNC_CANVAS_ENCODE = [
     },
 ];
 
+// ── The guild settings page's cross-script surface (#935) ───────────────
+// See the config block that uses these, near the bottom of this file.
+
+// esc-html.js, settings-payload.js, and the vendored Chart.js that
+// loadChartJs() injects the first time a chart is drawn (#685).
+const PAGE_EXTERNAL_GLOBALS = { escHtml: 'readonly', buildSettingsPayload: 'readonly', Chart: 'readonly' };
+
+// dashboard-core.js: the per-request payload, the network, panel loading, the
+// feedback channel, the dialogs, shared field helpers — and the registries a
+// panel wires itself into rather than being reached into.
+const PAGE_CORE_GLOBALS = {
+    BOOT: 'readonly', boot: 'readonly',
+    media: 'readonly', scrollBehavior: 'readonly',
+    apiFetch: 'readonly',
+    onPanel: 'readonly', loadPanel: 'readonly', panelStub: 'readonly',
+    onShown: 'readonly', announceShown: 'readonly',
+    toast: 'readonly',
+    openModal: 'readonly', closeModal: 'readonly', showConfirm: 'readonly',
+    escapeHtml: 'readonly', setTableVisible: 'readonly', validateTimezoneInput: 'readonly',
+    registerPanelActions: 'readonly',
+    registerPayloadSources: 'readonly', payloadSources: 'readonly',
+    registerSaveGuard: 'readonly', SAVE_GUARDS: 'readonly',
+    registerSaveFollowUp: 'readonly', SAVE_FOLLOW_UPS: 'readonly',
+    registerScopeSignature: 'readonly', SIGNATURE_EXTRAS: 'readonly',
+};
+
+// chart-support.js, shared by the two panels that draw charts.
+const PAGE_CHART_GLOBALS = { loadChartJs: 'readonly', describeChart: 'readonly', chartsUnavailable: 'readonly' };
+
+// guild-settings.js, the shell. Reached only from a handler that runs on an
+// event, long after every script on the page has loaded.
+const PAGE_SHELL_GLOBALS = { saveSettings: 'readonly', registerSaveScopes: 'readonly', labelRepeatedRows: 'readonly' };
+
+const page = (files, ...groups) => ({
+    files,
+    languageOptions: { globals: Object.assign({}, PAGE_EXTERNAL_GLOBALS, ...groups) },
+});
+
+function dashboardPageScripts() {
+    return [
+        // loadPanel() re-baselines a panel it has just fetched, which is the
+        // shell's job; nothing else here reaches upward.
+        page(['src/dashboard/public/dashboard-core.js'], PAGE_SHELL_GLOBALS),
+        page(['src/dashboard/public/chart-support.js'], PAGE_CORE_GLOBALS),
+        page(['src/dashboard/public/panel-*.js'], PAGE_CORE_GLOBALS, PAGE_CHART_GLOBALS, PAGE_SHELL_GLOBALS),
+        page(['src/dashboard/public/guild-settings.js'], PAGE_CORE_GLOBALS, PAGE_CHART_GLOBALS),
+    ];
+}
+
 module.exports = [
     {
         // public/vendor holds third-party bundles copied in verbatim by the
@@ -209,17 +258,25 @@ module.exports = [
         },
     },
 
-    // guild-settings.js consumes three globals it does not declare: escHtml from
-    // esc-html.js and buildSettingsPayload from settings-payload.js, each loaded
-    // as its own <script>, and Chart from public/vendor/, which loadChartJs()
-    // injects the first time a chart is drawn (#685). Scoped to this file so
-    // those two are still checked against their own declarations.
-    {
-        files: ['src/dashboard/public/guild-settings.js'],
-        languageOptions: {
-            globals: { escHtml: 'readonly', buildSettingsPayload: 'readonly', Chart: 'readonly' },
-        },
-    },
+    // ── The guild settings page's shared surface (#935) ─────────────────
+    //
+    // The page was one guild-settings.js and is a dozen scripts now: the shared
+    // machinery, the chart helpers, one script per settings panel, then the
+    // shell. views/guild-settings.ejs holds the load order and
+    // public/dashboard-core.js explains it.
+    //
+    // They are classic scripts sharing one global scope, so a name that crosses
+    // a file boundary reads as undefined to every file but the one that
+    // declares it — and `no-undef` is worth keeping, so the surface is written
+    // down here. Each group is granted to the files that may *use* it and never
+    // to the file that declares it, which is what stops the list quietly
+    // becoming "anything, anywhere".
+    //
+    // These lists are the contract. A panel needing an entry added is a panel
+    // reaching into another panel, which is the coupling the split removed; the
+    // way to share something is to put it in dashboard-core.js, or to register
+    // it there.
+    ...dashboardPageScripts(),
 
     // ── Tests ───────────────────────────────────────────────────────────
     {

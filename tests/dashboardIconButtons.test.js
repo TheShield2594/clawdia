@@ -34,7 +34,6 @@ const { renderPanel, bootPage, clickTab, settle, forgetDocumentListeners } = req
 
 const VIEWS = path.join(__dirname, '..', 'src', 'dashboard', 'views');
 const PANELS = path.join(VIEWS, 'partials', 'panels');
-const SCRIPT = path.join(__dirname, '..', 'src', 'dashboard', 'public', 'guild-settings.js');
 
 const panelNames = fs.readdirSync(PANELS).filter(f => f.endsWith('.ejs')).map(f => f.replace(/\.ejs$/, ''));
 
@@ -146,7 +145,7 @@ describe.each(cases)('%s', (name, file, locals) => {
 // rows and list entries the user adds after load are built by the script, and
 // every one of them was a `×` with a `title="Remove"` at most.
 describe('markup the script renders at runtime', () => {
-    const script = fs.readFileSync(SCRIPT, 'utf8');
+    const script = require('./helpers/dashboardScripts').pageScriptSource();
 
     /** Every `<button …>…</button>` written as markup inside the script. */
     function markupButtons() {

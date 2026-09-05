@@ -686,17 +686,62 @@ file not in that table must have none at all.
 ```
 
 ```javascript
-// public/guild-settings.js — add the name to CLICK_ACTIONS beside the others.
-// It is a table rather than a lookup into `window`, so an injected data-action
-// can only ever name something already on the list.
-const CLICK_ACTIONS = {
-    // …
-    'save-thing': () => saveThing(),
-    // An argument rides in its own data-* attribute and arrives as the second
-    // parameter, which is the element's dataset:
-    'thing-edit': (el, d) => openThingModal(Number(d.idx)),
-};
+// public/panel-things.js — the script that owns this panel registers its own
+// handlers. They are a table rather than a lookup into `window`, so an injected
+// data-action can only ever name something that was registered.
+registerPanelActions({
+    click: {
+        'save-thing': () => saveThing(),
+        // An argument rides in its own data-* attribute and arrives as the
+        // second parameter, which is the element's dataset. The third is the
+        // event, for the handlers that need to preventDefault().
+        'thing-edit': (el, d) => openThingModal(Number(d.idx)),
+    },
+});
 ```
+
+### The guild settings page's scripts
+
+That page was one 5,206-line `public/guild-settings.js` until #935. It is a set
+of scripts now, loaded in this order — `views/guild-settings.ejs` decides it,
+and `scripts/build-assets.js` and the suites' boot both read the same list:
+
+| file | what belongs in it |
+| --- | --- |
+| `esc-html.js` | the shared HTML escaper |
+| `settings-payload.js` | which fields each section POSTs |
+| `dashboard-core.js` | what every panel needs: the bootstrap payload, `apiFetch`, panel loading, toasts, dialogs, and the registries below |
+| `chart-support.js` | loading Chart.js and describing a chart in text |
+| `panel-*.js` | one per settings panel — its state, its rendering, its requests, its handlers |
+| `guild-settings.js` | the shell: sidebar, tabs and history, saving, unsaved-changes tracking |
+
+The order is the contract. **`dashboard-core.js` and the shell may not name
+anything a panel declares.** What a panel contributes it registers instead:
+
+- `registerPanelActions({ click, input, change })` — delegated handlers for its
+  own markup.
+- `registerPayloadSources({ thing: () => things })` — its slice of the object
+  `settings-payload.js` reads. A getter, so the value is read at save time.
+- `registerSaveGuard(section, fn)` / `registerSaveFollowUp(section, fn)` — a
+  check before the POST, and work that only counts once the POST lands. Either
+  returning a string stops or un-cleans the save and shows it.
+- `registerScopeSignature(selector, fn)` — state a section is dirty on that
+  lives nowhere in the DOM.
+- `onPanel(id, fn)` when the markup arrives, `onShown(id, fn)` when the reader
+  actually opens the panel or inner tab — the second is for panels that fetch.
+
+These are classic scripts sharing one global scope, so **a name that crosses a
+file boundary has to be a top-level `var` or a function declaration.** A `const`
+or a `let` is a binding in the shared global lexical scope: a browser resolves
+it across scripts and the suites' per-file `eval()` boot does not, so it works
+in one and not the other. Panel-local state is `const`/`let`; anything another
+file reads is not. `tests/dashboardScriptBoundaries.test.js` holds that, and
+`eslint.config.js` lists the whole shared surface — an addition to that list is
+a sign the thing belongs in `dashboard-core.js` instead.
+
+A new panel is a new `panel-*.js` plus a line in the view, a line in
+`scripts/build-assets.js`, and an entry in `SCRIPT_BASELINE` in
+`tests/dashboardInlineAttributes.test.js` if it renders any inline style.
 
 `data-input` and `data-change` have their own tables (`INPUT_ACTIONS`,
 `CHANGE_ACTIONS`) for fields rather than buttons.
@@ -778,7 +823,7 @@ guard in one of these files is worth its lines. Two different answers:
 - **Older than the floor: the guard cannot run.** The file is parsed whole
   before a line of it executes, so a browser missing `window.matchMedia` — one
   from a decade before `?.` — throws a SyntaxError and never reaches the check
-  written for it. `media()` in `public/guild-settings.js` keeps that check
+  written for it. `media()` in `public/dashboard-core.js` keeps that check
   regardless, because its live subject is jsdom rather than any browser, and
   the comment there says so. Write that down when you keep one.
 - **Inside the floor: the guard runs, and dropping it is a support decision.**

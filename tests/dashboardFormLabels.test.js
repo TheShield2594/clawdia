@@ -130,10 +130,7 @@ describe('markup the script renders at runtime', () => {
     // The escalation ladder is built from a template literal rather than a
     // panel, so the panel sweep above cannot see it. Its five captions per row
     // were orphans for the same reason.
-    const script = fs.readFileSync(
-        path.join(__dirname, '..', 'src', 'dashboard', 'public', 'guild-settings.js'),
-        'utf8',
-    );
+    const script = require('./helpers/dashboardScripts').pageScriptSource();
 
     it('emits no field-label without a for=', () => {
         const tags = script.match(/<label class="field-label"[^>]*>/g) || [];

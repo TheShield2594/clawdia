@@ -41,6 +41,7 @@ const path = require('path');
 const ejs = require('ejs');
 const { asset } = require('../src/dashboard/lib/assets');
 const { guildSettingsLocals } = require('./helpers/guildSettingsLocals');
+const { PAGE_SCRIPTS } = require('./helpers/dashboardScripts');
 
 const VIEWS = path.join(__dirname, '..', 'src', 'dashboard', 'views');
 const PUBLIC = path.join(__dirname, '..', 'src', 'dashboard', 'public');
@@ -258,7 +259,7 @@ describe('the head asks for its render-critical bytes up front', () => {
         // parser-executed one, so a single undeferred tag among them would run
         // *before* esc-html.js rather than after it.
         const external = view.match(/<script[^>]*\ssrc=[^>]*>/g) || [];
-        expect(external.length).toBe(3);
+        expect(external.length).toBe(PAGE_SCRIPTS.length);
         for (const tag of external) expect([tag, tag.includes('defer')]).toEqual([tag, true]);
     });
 });

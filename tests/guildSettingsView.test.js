@@ -2,9 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const ejs = require('ejs');
 const { guildSettingsLocals } = require('./helpers/guildSettingsLocals');
+const { PUBLIC, PAGE_SCRIPTS, pageScriptSource } = require('./helpers/dashboardScripts');
 
 const VIEW = path.join(__dirname, '..', 'src', 'dashboard', 'views', 'guild-settings.ejs');
-const SCRIPT = path.join(__dirname, '..', 'src', 'dashboard', 'public', 'guild-settings.js');
 
 function render(overrides) {
     return ejs.render(fs.readFileSync(VIEW, 'utf8'), guildSettingsLocals(overrides), { filename: VIEW });
@@ -22,10 +22,21 @@ describe('guild-settings view', () => {
         expect(html).not.toContain('<%');
     });
 
-    it('keeps the page behaviour in a cacheable file rather than inline', () => {
+    it('keeps the page behaviour in cacheable files rather than inline', () => {
         const inlineBytes = inlineScripts(html).reduce((n, s) => n + s.length, 0);
+        const scriptBytes = PAGE_SCRIPTS.reduce((n, f) => n + fs.statSync(path.join(PUBLIC, f)).size, 0);
         expect(inlineBytes).toBeLessThan(60_000);
-        expect(fs.statSync(SCRIPT).size).toBeGreaterThan(100_000);
+        expect(scriptBytes).toBeGreaterThan(100_000);
+    });
+
+    // The page's scripts are three lists that have to agree: the view's tags,
+    // the build's SOURCES and the suites' boot order (#935). Execution order is
+    // document order because every tag is deferred, so this is what stops the
+    // view loading a panel before the machinery it registers into.
+    it('loads exactly the page scripts the build knows about, in that order', () => {
+        const loaded = [...html.matchAll(/<script defer src="\/([a-z-]+)(?:\.min)?\.js\?v=/g)]
+            .map(m => `${m[1]}.js`);
+        expect(loaded).toEqual(PAGE_SCRIPTS);
     });
 
     // `.min` is optional throughout: asset() serves the minified twin when the
@@ -46,7 +57,7 @@ describe('guild-settings view', () => {
 
     it('hands the script every value it reads off the bootstrap', () => {
         const boot = inlineScripts(html).find(s => s.includes('window.CLAWDIA_BOOTSTRAP'));
-        const script = fs.readFileSync(SCRIPT, 'utf8');
+        const script = pageScriptSource();
         const keys = new Set([...script.matchAll(/boot\('(\w+)'\)/g)].map(m => m[1]));
         keys.add('guildId');
         keys.add('guildName');

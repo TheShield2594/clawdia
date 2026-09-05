@@ -13,6 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const ejs = require('ejs');
 const { guildSettingsLocals } = require('./helpers/guildSettingsLocals');
+const { PAGE_SCRIPTS } = require('./helpers/dashboardScripts');
 
 const VIEWS = path.join(__dirname, '..', 'src', 'dashboard', 'views');
 const PUBLIC = path.join(__dirname, '..', 'src', 'dashboard', 'public');
@@ -80,8 +81,11 @@ function bootPage(overrides) {
     try {
         window.eval(fs.readFileSync(path.join(PUBLIC, 'esc-html.js'), 'utf8'));
         window.eval(bootstrap);
-        window.eval(fs.readFileSync(path.join(PUBLIC, 'settings-payload.js'), 'utf8'));
-        window.eval(fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8'));
+        // Every script the page loads, in the order the view loads them (#935).
+        for (const file of PAGE_SCRIPTS) {
+            if (file === 'esc-html.js') continue;
+            window.eval(fs.readFileSync(path.join(PUBLIC, file), 'utf8'));
+        }
     } finally {
         document.addEventListener = addDocumentListener;
     }

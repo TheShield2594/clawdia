@@ -25,6 +25,7 @@ global.TextDecoder = global.TextDecoder || TextDecoder;
 const fs = require('fs');
 const path = require('path');
 const { bootPage, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
+const { pageScriptSource } = require('./helpers/dashboardScripts');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'src', 'dashboard', 'public');
@@ -32,7 +33,7 @@ const VENDOR = path.join(PUBLIC, 'vendor', 'chart.umd.min.js');
 
 const read = p => fs.readFileSync(p, 'utf8');
 const view = read(path.join(ROOT, 'src', 'dashboard', 'views', 'guild-settings.ejs'));
-const dashboardJs = read(path.join(PUBLIC, 'guild-settings.js'));
+const dashboardJs = pageScriptSource();
 const server = read(path.join(ROOT, 'src', 'dashboard', 'server.js'));
 const pkg = JSON.parse(read(path.join(ROOT, 'package.json')));
 

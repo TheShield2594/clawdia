@@ -154,6 +154,29 @@ describe('lazily loaded settings panels', () => {
         }
     });
 
+    // #935. A panel that fetches its own data used to be named in the shell's
+    // tab router — `if (tab === 'analytics') loadAnalytics()`, six of them —
+    // which is the shell knowing what is inside each panel. The router
+    // announces what it just showed now and each panel listens for its own ids,
+    // so this is what says the announcement still reaches them.
+    it('tells a panel when it is shown, panel and inner tab alike', async () => {
+        bootPage();
+
+        clickTab('analytics');
+        await settle();
+        const analytics = window.fetch.mock.calls.map(([url]) => String(url));
+        expect(analytics.some(url => /\/analytics/.test(url))).toBe(true);
+
+        clickTab('ai');
+        await settle();
+        window.fetch.mockClear();
+        document.querySelector('.ai-inner-tab[data-ai-tab="ai-mcp"]')
+            .dispatchEvent(new window.Event('click', { bubbles: true }));
+        await settle();
+        const mcp = window.fetch.mock.calls.map(([url]) => String(url));
+        expect(mcp.some(url => /mcp-servers/.test(url))).toBe(true);
+    });
+
     it('never lets a slow panel steal the view from a later click', async () => {
         const gates = {};
         bootPage({
