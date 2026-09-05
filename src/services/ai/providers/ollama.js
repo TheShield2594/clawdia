@@ -1,5 +1,5 @@
 const { guardedDispatcher, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
-const { request, fetchHeaders, bodyStream } = require('../../../utils/httpFetch');
+const { request, fetchHeaders, discardBody, bodyStream } = require('../../../utils/httpFetch');
 const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // The endpoint the *operator* runs, from the environment or the shipped default.
@@ -190,7 +190,10 @@ async function* streamRound({ url, dispatcher, body, out }) {
         timeout: 120000,
         dispatcher,
     });
-    if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}`);
+    if (!response.ok) {
+        await discardBody(response);
+        throw new Error(`Ollama returned HTTP ${response.status}`);
+    }
 
     let buf = '';
     for await (const chunk of bodyStream(response)) {
@@ -296,7 +299,10 @@ async function complete({ baseUrl, model, systemPrompt, history, prompt, images,
             timeout: 120000,
             dispatcher,
         });
-        if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}`);
+        if (!response.ok) {
+            await discardBody(response);
+            throw new Error(`Ollama returned HTTP ${response.status}`);
+        }
         const payload = await response.json();
 
         const usage = usageOf(payload);

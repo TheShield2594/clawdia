@@ -429,22 +429,47 @@ describe('parallel discovery', () => {
         // Otherwise a server that happens to be slow this minute renames
         // another server's tools between one message and the next, and the
         // model is handed a function list that moved under it.
-        // "Slow" is a promise the test settles second, not one that sleeps
-        // 10ms and hopes that is longer than the other took (#949).
-        const slow = deferred();
-        mockListTools
-            .mockReturnValueOnce(slow.promise)
-            .mockResolvedValueOnce([{ name: 'ask' }]);
+        //
+        // Both dials are gated rather than raced, and both have to be in flight
+        // before either is allowed to answer (#985). A single turn of the event
+        // loop was not enough to say anything: serial discovery would await the
+        // slow server, find it settled by the time the turn ended, and go on to
+        // the fast one — same order, same pass. Waiting on `allStarted` is the
+        // step serial discovery cannot reach, because the second call does not
+        // happen until the first one has returned.
+        const names = ['slow', 'fast'];
+        const dials = gates(names);
+        // The other half of each dial: `started` says the call went out,
+        // `answered` says it came back. Nothing here polls or sleeps.
+        const answeredGate = Object.fromEntries(names.map(name => [name, deferred()]));
+        const answered = [];
+        let next = 0;
+        mockListTools.mockImplementation(async () => {
+            const name = names[next++];
+            dials.started[name].resolve();
+            await dials.finish[name].promise;
+            answered.push(name);
+            answeredGate[name].resolve();
+            return [{ name: 'ask' }];
+        });
 
-        const discovery = prepareMcpToolkit([
-            { ...GITHUB, name: 'slow', url: 'https://slow.example.com/mcp' },
-            { ...GITHUB, name: 'fast', url: 'https://fast.example.com/mcp' }
-        ]);
-        // A turn of the event loop for the second server to answer first.
-        await new Promise(setImmediate);
-        slow.resolve([{ name: 'ask' }]);
+        const discovery = prepareMcpToolkit(names.map(name => ({
+            ...GITHUB, name, url: `https://${name}.example.com/mcp`,
+        })));
+
+        await dials.allStarted();
+
+        // The one configured second answers first, and is seen to have answered
+        // while the first is still outstanding — which is the ordering the
+        // assertion below is about.
+        dials.finish.fast.resolve();
+        await answeredGate.fast.promise;
+        expect(answered).toEqual(['fast']);
+
+        dials.finish.slow.resolve();
         const toolkit = await discovery;
 
+        expect(answered).toEqual(['fast', 'slow']);
         expect(toolkit.definitions.map(d => d.name)).toEqual(['slow__ask', 'fast__ask']);
         expect(toolkit.servers).toEqual(['slow', 'fast']);
     });

@@ -1,7 +1,7 @@
 'use strict';
 
 const { guardedDispatcher, assertPublicHttpUrl } = require('../../utils/outboundGuard');
-const { request, readCapped } = require('../../utils/httpFetch');
+const { request, discardBody, readCapped } = require('../../utils/httpFetch');
 
 /**
  * Image attachments, on their way from a Discord message to a model (#839).
@@ -143,7 +143,10 @@ async function fetchImages(images) {
                 timeout: FETCH_TIMEOUT_MS,
                 dispatcher: guardedDispatcher()
             });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            if (!response.ok) {
+                await discardBody(response);
+                throw new Error(`HTTP ${response.status}`);
+            }
             // `readCapped` stops reading at the ceiling rather than buffering
             // whatever arrives and measuring it afterwards, so an attachment
             // that is larger than it claimed costs the read and not the memory.

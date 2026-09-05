@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const { request } = require('../../utils/httpFetch');
+const { request, discardBody } = require('../../utils/httpFetch');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
 const COLORS = require('../../utils/embedColors');
 
@@ -84,7 +84,10 @@ module.exports = {
             });
             // `fetch` does not throw on a 4xx or 5xx the way axios did, and the
             // catch below is what turns a failure into the user's error reply.
-            if (!response.ok) throw new Error(`Imgflip returned HTTP ${response.status}`);
+            if (!response.ok) {
+                await discardBody(response);
+                throw new Error(`Imgflip returned HTTP ${response.status}`);
+            }
             const data = await response.json();
 
             if (!data.success) {

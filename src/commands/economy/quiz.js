@@ -6,7 +6,7 @@ const {
     StringSelectMenuOptionBuilder,
     MessageFlags,
 } = require('discord.js');
-const { request } = require('../../utils/httpFetch');
+const { request, discardBody } = require('../../utils/httpFetch');
 const User  = require('../../models/User');
 const { advanceMissions } = require('../../services/seasonMissionService');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
@@ -59,7 +59,10 @@ async function fetchQuestion(difficulty) {
     // offline bank — so a refusal is thrown rather than inspected. `fetch` only
     // rejects for a transport failure, so the status is the caller's to check.
     const response = await request(`${OPENTDB_URL}?${params}`, { timeout: 4000 });
-    if (!response.ok) throw new Error(`OpenTDB returned HTTP ${response.status}`);
+    if (!response.ok) {
+        await discardBody(response);
+        throw new Error(`OpenTDB returned HTTP ${response.status}`);
+    }
     const data = await response.json();
     if (data.response_code !== 0 || !data.results?.length)
         throw new Error(`OpenTDB response_code: ${data.response_code}`);

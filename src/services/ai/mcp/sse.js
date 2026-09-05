@@ -1,6 +1,6 @@
 'use strict';
 
-const { guardedDispatcher, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { guardedDispatcher, assertHttpsUrl } = require('../../../utils/outboundGuard');
 const { fetchHeaders, bodyStream } = require('../../../utils/httpFetch');
 
 /**
@@ -151,9 +151,9 @@ function resolveEndpoint(raw, base, label) {
     }
 
     // The origin is the configured one, so this can only fail for a URL that was
-    // never dialable — but it is the same guard every other address goes
-    // through, and it is cheap.
-    return assertPublicHttpUrl(endpoint.toString(), `${label} message endpoint`).toString();
+    // never dialable, or never encrypted — but it is the same guard every other
+    // address goes through, and it is cheap.
+    return assertHttpsUrl(endpoint.toString(), `${label} message endpoint`).toString();
 }
 
 /**
@@ -189,6 +189,10 @@ class SseChannel {
 
     /** @returns {Promise<string>} the message endpoint the server named */
     async open() {
+        // The standing GET carries the connection's credential like every other
+        // request does, and it carries it for the life of the session.
+        assertHttpsUrl(this.url, `${this.label} URL`);
+
         let response;
         try {
             // Headers only, which is the whole point: the body is the session

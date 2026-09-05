@@ -107,6 +107,29 @@ async function fetchHeaders(url, init) {
 }
 
 /**
+ * Let go of a body that is never going to be read.
+ *
+ * A non-2xx is a response like any other here, and every caller that checks
+ * `response.ok` throws or returns without touching the body — which under
+ * undici leaves the socket held until the agent times it out, because the
+ * connection cannot be reused while a body is outstanding. Cancelling releases
+ * it immediately.
+ *
+ * Nothing is thrown out of this. It is called on the failure path, one line
+ * before the error the caller actually wants to raise, and a body that is
+ * already gone — a 204's `null`, one consumed, one whose stream errored — must
+ * not replace that error with a complaint about the cleanup.
+ *
+ * @param {Response} response
+ * @returns {Promise<void>}
+ */
+async function discardBody(response) {
+    try {
+        await response?.body?.cancel?.();
+    } catch {}
+}
+
+/**
  * A response body as a Node `Readable`.
  *
  * `Readable.fromWeb` rather than iterating the web stream directly, because
@@ -151,4 +174,4 @@ async function readCappedText(response, limit) {
     return (await readCapped(response, limit)).toString('utf8');
 }
 
-module.exports = { request, fetchHeaders, bodyStream, readCapped, readCappedText };
+module.exports = { request, fetchHeaders, discardBody, bodyStream, readCapped, readCappedText };

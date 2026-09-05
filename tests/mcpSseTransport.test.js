@@ -642,3 +642,43 @@ describe('the endpoint a server names', () => {
         await expect(client.initialize()).rejects.toThrow(/text\/event-stream/);
     });
 });
+
+describe('a connection that is not encrypted', () => {
+    // On this transport the credential goes out twice over: once on the
+    // standing GET, which holds it for the life of the session, and again on
+    // every POST to the endpoint the server named. Both are checked, and
+    // neither infers its answer from the other (#985).
+    const INSECURE = 'http://mcp.example.com/sse';
+
+    test('never opens the standing stream', async () => {
+        const client = new McpHttpClient({
+            url: INSECURE, transport: 'sse', authorizationToken: 'secret',
+        });
+
+        await expect(client.initialize()).rejects.toThrow(/must use https:\/\//);
+
+        expect(http.get).not.toHaveBeenCalled();
+    });
+
+    test('refuses the message endpoint at the POST, not only at the stream', async () => {
+        // `deliver` is reached with an endpoint that is same-origin with the
+        // configured URL, so this can only fire for a connection that was
+        // http:// all along — checked at the request because that is the line
+        // the credential leaves on, rather than inferred from the check above.
+        const client = new McpHttpClient({ url: URL_, transport: 'sse' });
+
+        const error = await client
+            .deliver('http://mcp.example.com/messages', { jsonrpc: '2.0', id: 1 }, { timeout: 100 })
+            .catch(err => err);
+
+        expect(error).toBeInstanceOf(McpError);
+        expect(error.code).toBe('EINSECURETRANSPORT');
+        expect(http.post).not.toHaveBeenCalled();
+    });
+
+    test('will not follow a server that names an http endpoint on an https connection', () => {
+        // Same-origin already refuses this one, since the scheme is part of an
+        // origin. The guard is spelled https here so the rule has one home.
+        expect(() => resolveEndpoint('http://mcp.example.com/messages', URL_, 'test')).toThrow();
+    });
+});

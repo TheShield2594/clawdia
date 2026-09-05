@@ -1,6 +1,6 @@
 'use strict';
 
-const { guardedDispatcher, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { guardedDispatcher, assertPublicHttpUrl, assertHttpsUrl } = require('../../../utils/outboundGuard');
 const { request, fetchHeaders, bodyStream } = require('../../../utils/httpFetch');
 const { isOAuthChallenge } = require('./oauth');
 const { SseChannel } = require('./sse');
@@ -488,6 +488,27 @@ class McpHttpClient {
     }
 
     /**
+     * Refuse to put this connection's credential on the wire in the clear.
+     *
+     * Every request this client makes carries `headers()` — a bearer token, the
+     * session id, and with it the guild's tool arguments — so http:// is not a
+     * weaker connection, it is a published one. The constructor could refuse the
+     * URL outright, and an admin saving one is told there; it is checked again
+     * here because this is the line the credential leaves on, and a check at the
+     * door only holds for as long as nothing writes to `this.url` afterwards.
+     *
+     * `McpError` rather than the guard's plain one so it reaches an admin
+     * spelled like every other reason a connection failed.
+     */
+    assertTransportEncrypted(url, label) {
+        try {
+            assertHttpsUrl(url, label);
+        } catch (err) {
+            throw new McpError(err.message, { code: 'EINSECURETRANSPORT' });
+        }
+    }
+
+    /**
      * Puts the current OAuth access token on `this.token`, refreshing it if the
      * store says it is due — or, with `force`, whether or not it says so.
      *
@@ -547,6 +568,9 @@ class McpHttpClient {
     }
 
     async postOverHttp(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true, authRetried = false, onNotification = null, onServerRequest = null } = {}) {
+        // Before `authorize`, not after: a URL this connection will refuse to
+        // send to is not worth minting an access token for.
+        this.assertTransportEncrypted(this.url, `${this.label} URL`);
         await this.authorize();
 
         // One deadline for the whole exchange, headers and body alike. The
@@ -844,6 +868,11 @@ class McpHttpClient {
      * both the server refusing the message rather than acting on it.
      */
     async deliver(endpoint, payload, { timeout, deadline, retryable = true, authRetried = false }) {
+        // The endpoint is same-origin with `this.url` by the time it gets here,
+        // so this can only fail for a connection that was http:// all along —
+        // checked at the request rather than inferred from that, because the
+        // credential goes out on this line and nowhere else.
+        this.assertTransportEncrypted(endpoint, `${this.label} message endpoint`);
         await this.authorize();
 
         let response;
@@ -1281,6 +1310,7 @@ class McpHttpClient {
             return;
         }
         try {
+            this.assertTransportEncrypted(this.url, `${this.label} URL`);
             const response = await request(this.url, {
                 method: 'DELETE',
                 headers: this.headers(),

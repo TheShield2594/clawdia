@@ -1,5 +1,5 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { request } = require('../utils/httpFetch');
+const { request, discardBody } = require('../utils/httpFetch');
 
 // All recognised book names and abbreviations, sorted longest-first so the
 // regex alternation matches greedily (e.g. "1 Samuel" before "Samuel").
@@ -101,7 +101,10 @@ async function lookupVerse(reference, translation = 'kjv') {
         // thrown into the same catch that a transport failure lands in —
         // `fetch`, unlike axios, would otherwise hand back the error page.
         const response = await request(url, { timeout: 8000 });
-        if (!response.ok) return null;
+        if (!response.ok) {
+            await discardBody(response);
+            return null;
+        }
         const data = await response.json();
         if (data.error) return null;
         return data;
@@ -116,7 +119,10 @@ async function getDailyVerse() {
             'https://beta.ourmanna.com/api/v1/get/?format=json&order=daily',
             { timeout: 8000 }
         );
-        if (!response.ok) return null;
+        if (!response.ok) {
+            await discardBody(response);
+            return null;
+        }
         const data = await response.json();
         const details = data?.verse?.details;
         if (details?.text && details?.reference) {

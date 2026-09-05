@@ -144,6 +144,17 @@ describe('lookupVerse', () => {
         expect(await lookupVerse('Fake 1:1')).toBeNull();
     });
 
+    // Not reading the error page is only half of it: an unread body holds its
+    // socket open until undici's pool times it out, and this endpoint is
+    // reached from a cron job that runs in every guild (#985).
+    test('lets go of the error page rather than leaving its socket held', async () => {
+        const errorPage = textResponse('Not Found', 404);
+        fetchMock.mockImplementation(async () => errorPage);
+
+        expect(await lookupVerse('Fake 1:1')).toBeNull();
+        expect(errorPage.bodyUsed).toBe(true);
+    });
+
     test('passes translation to API URL', async () => {
         fetchMock.mockImplementation(async () => jsonResponse({ text: 'text', reference: 'John 3:16', translation_name: 'ASV' }));
         await lookupVerse('John 3:16', 'asv');
@@ -157,6 +168,14 @@ describe('lookupVerse', () => {
 
 describe('getDailyVerse', () => {
     afterEach(() => jest.clearAllMocks());
+
+    test('lets go of the error page rather than leaving its socket held', async () => {
+        const errorPage = textResponse('Service Unavailable', 503);
+        fetchMock.mockImplementation(async () => errorPage);
+
+        expect(await getDailyVerse()).toBeNull();
+        expect(errorPage.bodyUsed).toBe(true);
+    });
 
     test('returns verse on success', async () => {
         fetchMock.mockImplementation(async () => jsonResponse({ verse: { details: { text: 'The Lord is my shepherd', reference: 'Psalms 23:1', version: 'KJV' } } }));
