@@ -47,13 +47,24 @@ credit that then failed refunded the buyer and stopped, so the item was in
 nobody's inventory at all, the seller was never told, and no record of it existed
 anywhere but a log line.
 
-All five now go through `grantItemsOrOwe` or `creditCoinsOrOwe` — the second is
+A sixth, found on review of the first five: the `findOneAndDelete` that claims
+the listing had no `catch` either, so a rejection after the buyer's debit escaped
+the purchase with the coins gone and nothing written down. It is caught now and
+the buyer refunded; the stock deliberately is not returned on that path, because
+a rejection leaves it unknowable whether this delete landed or another buyer's
+did, and returning stock for a listing somebody else bought would mint an item.
+
+All six now go through `grantItemsOrOwe` or `creditCoinsOrOwe` — the second is
 the helper the duel and crew payouts already shared, the first is new and is the
 same thing for items. Each is keyed to the trade it unwinds, so a retry of a
 write that landed moves nothing; each reports whether the value is back,
 recorded as owed, or neither; and each reply is worded from that answer rather
-than from the absence of an exception. `market.js`, `gift.js` and
-`marketService.js` join the per-file coverage floors. The full findings are in
+than from the absence of an exception. The buyer's own credit is keyed too, which
+closes the duplication window on that side: a purchase whose credit commits and
+loses its response is read back off the key rather than assumed missing, so the
+seller's stock is never returned while the buyer is holding it. `/market buy`'s
+money mechanics move to `services/marketService.js` beside the expiry sweep, and
+`market.js`, `gift.js` and `marketService.js` join the per-file coverage floors. The full findings are in
 [docs/AUDIT_LOG.md](docs/AUDIT_LOG.md), including the bound this pass leaves open
 and the parts of both commands it found sound.
 

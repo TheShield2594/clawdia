@@ -1,5 +1,6 @@
 /**
- * The player market's expiry sweep (#931).
+ * The player market's money mechanics: the expiry sweep (#931), and the writes
+ * a purchase makes once the listing has been claimed (#873).
  *
  * `/market` lists, buys and cancels; this returns what nobody bought. It is
  * registered as a job in `services/scheduler/index.js`, which owns the cron
@@ -15,7 +16,11 @@
  */
 
 const { recordOwedPayout, owedSummary } = require('../utils/owedPayout');
-const { grantItemOnce, listingPayoutKey } = require('../utils/payoutKey');
+const { creditCoinsOrOwe, grantItemsOrOwe } = require('../utils/creditOrOwe');
+const {
+    grantItemOnce, classifyUnmatchedPayout, listingPayoutKey,
+    listingPurchasePayoutKey, listingUnwindPayoutKey, marketRefundPayoutKey,
+} = require('../utils/payoutKey');
 
 /**
  * Return expired market listings to their sellers before the MongoDB TTL index
@@ -191,4 +196,91 @@ async function returnExpiredMarketListings() {
     }
 }
 
-module.exports = { returnExpiredMarketListings };
+/**
+ * Hand the buyer the item they paid for, and say whether they actually have it.
+ *
+ * By the time this runs the listing is deleted, so this credit is the only copy
+ * of the item that exists — which is what makes the *question* matter as much as
+ * the write. A write that commits and loses its response is indistinguishable
+ * from one that never ran, and unwinding on that reading hands the seller their
+ * stock back while the buyer is holding it. That mints an item, and it is the
+ * bound the pass that added the unwind left open.
+ *
+ * The key closes it. It is on the buyer's own document if the credit landed, so
+ * a rejection is a question `classifyUnmatchedPayout` can answer rather than an
+ * assumption the caller has to make. A classification that itself fails answers
+ * "not delivered", which is the safe way round: a refund the buyer did not need
+ * is recoverable, an item granted twice is not.
+ *
+ * @returns {Promise<{delivered: boolean, error: ?Error}>}
+ */
+async function creditPurchasedItem({ buyerId, guildId, listing, Model = require('../models/User') }) {
+    const who = { userId: buyerId, guildId };
+    const key = listingPurchasePayoutKey(listing._id);
+    try {
+        const { status } = await grantItemOnce(who, listing.itemId, listing.quantity, key, { Model });
+        if (status === 'paid' || status === 'duplicate') return { delivered: true, error: null };
+        return { delivered: false, error: new Error(`buyer credit matched nothing (${status})`) };
+    } catch (err) {
+        const delivered = await classifyUnmatchedPayout(Model, who, key)
+            .then(status => status === 'duplicate')
+            .catch(() => false);
+        return { delivered, error: delivered ? null : err };
+    }
+}
+
+/**
+ * Put a purchase back where it came from: the buyer's coins, and — when the
+ * listing was already claimed — the seller's stock.
+ *
+ * Both halves used to be missing something. The refunds were bare `updateOne`
+ * `$inc`s whose result nothing read, so a buyer whose document had gone was told
+ * their coins were back over a balance that was still short; one swallowed its
+ * rejection and the other did not catch at all. And the stock had nowhere to go
+ * at all: the listing row is the only place a listed item exists, so refunding
+ * the buyer alone left it in nobody's inventory — destroyed, silently, with the
+ * seller never told.
+ *
+ * `refundKey` names the purchase rather than the listing, because the same buyer
+ * trying the same listing again a second later is a different purchase and
+ * refunds separately; the stock is keyed to the listing, which is deleted and so
+ * cannot be reused. The stock is returned to the seller's bag rather than by
+ * recreating the listing — their five slots may have filled while the purchase
+ * was in flight.
+ *
+ * `returnStock` is false for the path where the listing was never claimed: the
+ * item is still in a live listing, and returning it as well would duplicate it.
+ *
+ * @returns {Promise<{refund: object, returned: ?object}>}
+ */
+async function unwindPurchase({
+    buyerId, sellerId, guildId, listing, totalCost, refundKey, jobName, returnStock = true,
+}) {
+    const refund = await creditCoinsOrOwe({ userId: buyerId, guildId }, totalCost, {
+        payoutKey: marketRefundPayoutKey(refundKey),
+        service: 'market',
+        jobName,
+    });
+
+    if (!returnStock) return { refund, returned: null };
+
+    const returned = await grantItemsOrOwe(
+        { userId: sellerId, guildId }, listing.itemId, listing.quantity,
+        {
+            payoutKey: listingUnwindPayoutKey(listing._id),
+            service: 'market',
+            jobName: 'buyUnwindStock',
+            extra: { listingId: String(listing._id) },
+        },
+    );
+    if (!returned.granted) {
+        console.error(
+            `[market buy] listing ${listing._id} was claimed but the sale failed and returning ` +
+            `${listing.quantity}x ${listing.itemId} to ${sellerId} failed too — ` +
+            `${returned.owed ? 'items owed, recorded for replay' : 'items owed and NOT recorded'}`,
+        );
+    }
+    return { refund, returned };
+}
+
+module.exports = { returnExpiredMarketListings, creditPurchasedItem, unwindPurchase };

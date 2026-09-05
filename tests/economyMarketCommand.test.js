@@ -15,7 +15,7 @@ const { fakeCollection } = require('./helpers/fakeCollection');
 const { makeInteraction, repliedText } = require('./helpers/fakeInteraction');
 const { expectNonNegativeBalance } = require('./helpers/balanceInvariant');
 
-const mockUsers = fakeCollection('User', { balance: 0, bank: 0, inventory: [], activeEffects: [], pets: [] });
+const mockUsers = fakeCollection('User', { balance: 0, bank: 0, inventory: [], activeEffects: [], pets: [], paidPayouts: [] });
 const mockGuilds = fakeCollection('Guild');
 const mockListings = fakeCollection('MarketListing', {}, { unique: [] });
 const mockTransactions = fakeCollection('Transaction', {}, { unique: [] });
@@ -86,9 +86,23 @@ beforeEach(() => {
     // do not run pipelines, so it answers empty.
     mockTransactions.model.aggregate = jest.fn(async () => []);
     // The default: the credit lands. Individual tests make it fail.
-    grantInventoryItem.mockImplementation(async (userId, guildId, itemId, quantity) => {
+    //
+    // The payout-key guard is evaluated for real rather than waved through
+    // (#873). Every unwind in this file is keyed, and a mock that ignored the
+    // key would report a retry as safe when the key is the only reason it is —
+    // and would answer 'unknown' where the real store answers 'duplicate', which
+    // is the exact distinction `creditPurchasedItem` turns on.
+    grantInventoryItem.mockImplementation(async (userId, guildId, itemId, quantity, options = {}) => {
         const doc = mockUsers.get(userId);
         if (!doc) return false;
+        const key = options.guard?.['paidPayouts.key']?.$ne;
+        if (key) {
+            doc.paidPayouts = doc.paidPayouts ?? [];
+            // The guard is `$ne`, so a document already carrying the key matches
+            // nothing and the write does not happen.
+            if (doc.paidPayouts.some(entry => entry.key === key)) return null;
+            doc.paidPayouts.push({ key });
+        }
         const slot = doc.inventory.find(s => s.itemId === itemId);
         if (slot) slot.quantity += quantity;
         else doc.inventory.push({ itemId, quantity });
@@ -308,6 +322,24 @@ describe('listing an item', () => {
                 payoutKey: 'market:interaction-1:relist',
             },
         }));
+        console.error.mockRestore();
+    });
+
+    it('does not promise a record that was not written either', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 5 }] });
+        mockListings.model.create.mockRejectedValueOnce(new Error('write failed'));
+        grantInventoryItem.mockResolvedValue(false);
+        recordOwedPayout.mockResolvedValueOnce(false);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({
+            subcommand: 'list',
+            options: { item: 'lucky_charm', quantity: 2, price: 100 },
+        });
+
+        expect(repliedText(interaction)).toContain('could not be recorded');
+        expect(repliedText(interaction)).not.toContain('recorded as owed');
         console.error.mockRestore();
     });
 
@@ -642,6 +674,95 @@ describe('buying a listing', () => {
                 listingId: 'listing-1',
             }),
         }));
+        console.error.mockRestore();
+    });
+
+    // #873. The claim is the one write in the flow whose *rejection* says
+    // nothing about its outcome, and it had no `catch` at all — so it escaped a
+    // purchase that had already taken the buyer's money, with nothing written
+    // down anywhere.
+    it('refunds the buyer when claiming the listing rejects after the debit', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        mockListings.model.findOneAndDelete.mockRejectedValueOnce(new Error('claim failed'));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('claiming the listing');
+        expect(repliedText(interaction)).toContain('coins have been refunded');
+        expect(mockUsers.get(BUYER_ID).balance).toBe(1000);
+        expect(mockUsers.get(BUYER_ID).inventory).toEqual([]);
+        // The listing survived the rejected delete, so the item is still in it —
+        // returning stock as well would be a second copy of the same item.
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([]);
+        expect(await mockListings.model.countDocuments({})).toBe(1);
+        console.error.mockRestore();
+    });
+
+    // #873, the bound the previous pass left open. A write that commits and
+    // loses its response is indistinguishable from one that never ran, so
+    // unwinding on that reading hands the seller their stock back while the
+    // buyer is holding it — an item minted, not merely misreported. The key on
+    // the buyer's credit is what turns that assumption into a question.
+    it('does not give the seller the stock back when the buyer already has it', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        // The credit commits and *then* the response is lost.
+        const landed = grantInventoryItem.getMockImplementation();
+        grantInventoryItem.mockImplementationOnce(async (...args) => {
+            await landed(...args);
+            throw new Error('connection reset after the write committed');
+        });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        // The purchase is a success: the key says the item arrived.
+        expect(repliedText(interaction)).toContain('Purchase Complete');
+        expect(mockUsers.get(BUYER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 2 }]);
+        expect(mockUsers.get(BUYER_ID).balance).toBe(800);
+        // Neither the coins nor the item come back — the trade completed.
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([]);
+        expect(mockUsers.get(SELLER_ID).balance).toBe(190);
+        expect(recordOwedPayout).not.toHaveBeenCalled();
+        console.error.mockRestore();
+    });
+
+    // The other side of the same decision. When the classification *itself*
+    // fails there is no answer to be had, and the two wrong guesses are not
+    // symmetric: assuming delivered destroys the item, assuming not delivered
+    // costs at worst a refund the buyer did not need. It answers "not
+    // delivered" deliberately.
+    it('unwinds when it cannot find out whether the buyer was credited', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        grantInventoryItem.mockImplementationOnce(async () => { throw new Error('connection reset'); });
+        // A Query-shaped stub, not a bare rejected promise: `findOne` is chained
+        // `.lean()` here, and a rejection created before anything can attach a
+        // handler is an unhandled rejection rather than the failure under test.
+        const realFindOne = mockUsers.model.findOne;
+        const failedRead = () => Promise.reject(new Error('read failed'));
+        mockUsers.model.findOne = jest.fn((query, projection, ...rest) => (projection?.paidPayouts
+            ? { lean: failedRead, select() { return this; }, sort() { return this; },
+                then: (res, rej) => failedRead().then(res, rej),
+                catch: rej => failedRead().catch(rej) }
+            : realFindOne(query, projection, ...rest)));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('coins have been refunded');
+        expect(mockUsers.get(BUYER_ID).balance).toBe(1000);
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 2 }]);
         console.error.mockRestore();
     });
 

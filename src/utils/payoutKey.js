@@ -274,6 +274,26 @@ function marketSalePayoutKey(listingId) {
 }
 
 /**
+ * The item a market buyer paid for (#873).
+ *
+ * The buyer's credit is the one write in a purchase whose outcome the unwind
+ * has to *know* rather than assume: the listing is already deleted, so a credit
+ * that committed and lost its response looks exactly like one that never ran,
+ * and unwinding on that reading hands the item to the seller as well. Keyed, it
+ * is a question that can be asked — `classifyUnmatchedPayout` reads the key off
+ * the buyer's own document — so the unwind runs only when the item genuinely did
+ * not arrive.
+ *
+ * Keyed by the listing rather than the interaction, and apart from the sale and
+ * the unwind for the same reason those are apart from each other: one listing,
+ * three credits that can each happen at most once, and a guard that is a string
+ * comparison with nothing on it to say which of them wrote it.
+ */
+function listingPurchasePayoutKey(listingId) {
+    return `listing:${listingId}:buyer`;
+}
+
+/**
  * The stock coming back out of a listing the seller cancelled (#873).
  *
  * Keyed apart from `listingPayoutKey` for the reason `marketSalePayoutKey` is:
@@ -393,7 +413,8 @@ function transferRefundPayoutKey(interactionId) {
 
 module.exports = {
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
-    marketSalePayoutKey, listingCancelPayoutKey, listingUnwindPayoutKey,
+    marketSalePayoutKey, listingPurchasePayoutKey, listingCancelPayoutKey,
+    listingUnwindPayoutKey,
     listingCreateRefundPayoutKey,
     marketRefundPayoutKey, transferRefundPayoutKey, giftItemRollbackPayoutKey,
     duelPayoutKey, crewSharePayoutKey,

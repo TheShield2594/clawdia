@@ -676,9 +676,13 @@ describe('a connection that is not encrypted', () => {
         expect(http.post).not.toHaveBeenCalled();
     });
 
-    test('will not follow a server that names an http endpoint on an https connection', () => {
-        // Same-origin already refuses this one, since the scheme is part of an
-        // origin. The guard is spelled https here so the rule has one home.
-        expect(() => resolveEndpoint('http://mcp.example.com/messages', URL_, 'test')).toThrow();
+    test('refuses an endpoint that is same-origin but not encrypted', () => {
+        // Same-origin cannot be what refuses this one: the scheme is part of an
+        // origin, so an http endpoint on an *https* base is already covered by
+        // the case above and would prove nothing about the https guard. Both
+        // halves are http here, so same-origin passes and `assertHttpsUrl` is
+        // the only thing left to throw.
+        expect(() => resolveEndpoint('http://mcp.example.com/messages', 'http://mcp.example.com/sse', 'test'))
+            .toThrow(/must use https:\/\//);
     });
 });
