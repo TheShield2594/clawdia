@@ -16,12 +16,21 @@
  */
 const fs = require('fs');
 const path = require('path');
+const espree = require('espree');
 
 const ROOT = path.join(__dirname, '..');
 const VIEWS = path.join(ROOT, 'src', 'dashboard', 'views');
 const PUBLIC = path.join(ROOT, 'src', 'dashboard', 'public');
 
-const script = fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8');
+// Every one of the page's own scripts, not just guild-settings.js: the panels
+// are separate files now (#935) and each registers the actions for its own
+// markup, so a scan of one file would pass by finding nothing.
+const scriptFiles = fs.readdirSync(PUBLIC, { withFileTypes: true })
+    .filter(entry => entry.isFile() && entry.name.endsWith('.js') && !entry.name.endsWith('.min.js'))
+    .map(entry => entry.name)
+    .sort();
+const sources = scriptFiles.map(name => fs.readFileSync(path.join(PUBLIC, name), 'utf8'));
+const script = sources.join('\n');
 
 function viewFiles(dir = VIEWS) {
     const found = [];
@@ -37,9 +46,7 @@ function viewFiles(dir = VIEWS) {
 // and a name that only one side knows is broken wherever it appears.
 const markup = [
     ...viewFiles().map(file => fs.readFileSync(file, 'utf8')),
-    ...fs.readdirSync(PUBLIC, { withFileTypes: true })
-        .filter(entry => entry.isFile() && entry.name.endsWith('.js'))
-        .map(entry => fs.readFileSync(path.join(PUBLIC, entry.name), 'utf8')),
+    ...sources,
 ].join('\n');
 
 /**
@@ -61,19 +68,48 @@ function used(attribute) {
     return names;
 }
 
-/** The keys of one object literal in guild-settings.js. */
-function tableKeys(name) {
-    const start = script.indexOf(`const ${name} = {`);
-    if (start === -1) throw new Error(`${name} is not in guild-settings.js`);
-    const body = script.slice(start, script.indexOf('\n};', start));
-    return new Set([...body.matchAll(/^\s+'([a-z0-9-]+)':/gm)].map(m => m[1]));
+/**
+ * Every action name registered for one event, across all of the page's scripts.
+ *
+ * Read from the syntax rather than by matching text: a handler table is an
+ * argument to registerPanelActions() now, and it may be written in any of a
+ * dozen files. Walking the calls is what makes the scan whole-page rather than
+ * whole-file, which is the property this suite needs to keep after #935.
+ */
+function tableKeys(event) {
+    const names = new Set();
+
+    const collect = node => {
+        if (!node || typeof node.type !== 'string') return;
+        if (node.type === 'CallExpression'
+            && node.callee.type === 'Identifier'
+            && node.callee.name === 'registerPanelActions'
+            && node.arguments[0]?.type === 'ObjectExpression') {
+            for (const group of node.arguments[0].properties) {
+                if (group.type !== 'Property') continue;
+                const groupName = group.key.name ?? group.key.value;
+                if (groupName !== event || group.value.type !== 'ObjectExpression') continue;
+                for (const action of group.value.properties) {
+                    if (action.type !== 'Property') continue;
+                    names.add(action.key.value ?? action.key.name);
+                }
+            }
+        }
+        for (const key of Object.keys(node)) {
+            const child = node[key];
+            if (Array.isArray(child)) child.forEach(collect);
+            else if (child && typeof child.type === 'string') collect(child);
+        }
+    };
+
+    for (const source of sources) {
+        collect(espree.parse(source, { ecmaVersion: 2024, sourceType: 'script' }));
+    }
+    return names;
 }
 
-// The click dispatcher is a table plus a chain of `d.action === '…'` for the
-// cases that need more than a name.
 const handledClicks = new Set([
-    ...tableKeys('CLICK_ACTIONS'),
-    ...[...script.matchAll(/d\.action === '([a-z0-9-]+)'/g)].map(m => m[1]),
+    ...tableKeys('click'),
     // A couple are matched by their own listener rather than by the click
     // dispatcher — the member picker listens on mousedown, because the dropdown
     // is closed by the input's blur before a click would land.
@@ -87,12 +123,12 @@ describe('every action the markup names is dispatched', () => {
     });
 
     it('for input', () => {
-        const handled = tableKeys('INPUT_ACTIONS');
+        const handled = tableKeys('input');
         expect([...used('data-input')].filter(name => !handled.has(name))).toEqual([]);
     });
 
     it('for change', () => {
-        const handled = tableKeys('CHANGE_ACTIONS');
+        const handled = tableKeys('change');
         expect([...used('data-change')].filter(name => !handled.has(name))).toEqual([]);
     });
 });
@@ -108,8 +144,8 @@ describe('every action the dispatcher handles is reachable', () => {
     it('has markup for each input and change case', () => {
         const inputs = used('data-input');
         const changes = used('data-change');
-        expect([...tableKeys('INPUT_ACTIONS')].filter(name => !inputs.has(name))).toEqual([]);
-        expect([...tableKeys('CHANGE_ACTIONS')].filter(name => !changes.has(name))).toEqual([]);
+        expect([...tableKeys('input')].filter(name => !inputs.has(name))).toEqual([]);
+        expect([...tableKeys('change')].filter(name => !changes.has(name))).toEqual([]);
     });
 });
 
@@ -120,8 +156,8 @@ describe('the sweep is looking at something', () => {
     it('found actions on both sides', () => {
         expect(used('data-action').size).toBeGreaterThan(50);
         expect(handledClicks.size).toBeGreaterThan(50);
-        expect(tableKeys('INPUT_ACTIONS').size).toBeGreaterThan(0);
-        expect(tableKeys('CHANGE_ACTIONS').size).toBeGreaterThan(0);
+        expect(tableKeys('input').size).toBeGreaterThan(0);
+        expect(tableKeys('change').size).toBeGreaterThan(0);
     });
 });
 

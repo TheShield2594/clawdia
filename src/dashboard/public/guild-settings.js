@@ -4,7 +4,13 @@
 // browser fetches it once and reuses it across every guild and every reload.
 // Everything that varies per request arrives in the small inline bootstrap
 // block that guild-settings.ejs renders just before this script.
-const BOOT = window.CLAWDIA_BOOTSTRAP;
+// `var`, not `const`, because the panel scripts that load after this one read
+// it: a classic script's top-level `var` is a property of the window and is
+// reachable from every other script on the page, and a `const` is a binding in
+// the shared global lexical scope that the suites' per-file `eval()` boot does
+// not reproduce. Anything crossing a file boundary here is a `var` or a
+// function declaration for that reason — see the module note at the top.
+var BOOT = window.CLAWDIA_BOOTSTRAP;
 
 // Each server value used to be inlined as its own object literal, so two
 // variables initialised from the same value were independent and safe to mutate
@@ -201,6 +207,91 @@ function loadPanel(id) {
 
     panelRequests.set(id, request);
     return request;
+}
+
+// ── Delegated handlers for rendered lists ────────────────────────────
+// Attacker-influenced values (member nicknames, achievement names, MCP
+// server names) ride in data-* attributes and come back out through
+// dataset. They must never be concatenated into an inline handler:
+// an on*="" attribute is HTML-decoded before it is parsed as JS, so a
+// `&#39;` from escHtml turns back into a quote and closes the string it
+// was meant to sit inside.
+//
+// One table per event — click, input, change — keyed on the element's own
+// data-action / data-input / data-change and holding a handler called with
+// `(element, dataset, event)`. A table rather than another forty `else if`
+// lines because the point of #887 is that there are forty of them. And a
+// table, not a lookup into `window`: an injected `data-action` can only name
+// something that was registered, which is the difference between a data
+// attribute and the `onclick=""` it replaced.
+//
+// Registered rather than written out as one literal (#935). The panels are
+// separate scripts now, and each contributes the actions for its own markup as
+// it loads — so this file names no function that belongs to a panel, and a
+// panel that goes away takes its actions with it instead of leaving a dangling
+// entry behind.
+var CLICK_ACTIONS = {};
+var INPUT_ACTIONS = {};
+var CHANGE_ACTIONS = {};
+
+/**
+ * Contribute delegated handlers: `{ click, input, change }`, each an object of
+ * data-attribute value → `(element, dataset, event) => void`. Handlers are
+ * written as thunks rather than bare references so a table can sit beside the
+ * markup it serves regardless of where each function is declared.
+ */
+function registerPanelActions(tables) {
+    Object.assign(CLICK_ACTIONS,  tables.click  || {});
+    Object.assign(INPUT_ACTIONS,  tables.input  || {});
+    Object.assign(CHANGE_ACTIONS, tables.change || {});
+}
+
+function runTableAction(table, attribute, e) {
+    const el = e.target.closest && e.target.closest('[' + attribute + ']');
+    if (!el) return;
+    const fn = table[el.getAttribute(attribute)];
+    if (fn) fn(el, el.dataset, e);
+}
+
+document.addEventListener('click',  e => runTableAction(CLICK_ACTIONS,  'data-action', e));
+document.addEventListener('input',  e => runTableAction(INPUT_ACTIONS,  'data-input',  e));
+document.addEventListener('change', e => runTableAction(CHANGE_ACTIONS, 'data-change', e));
+
+// ── What a save is made of, and what happens around it ────────────────
+//
+// Three registries, filled by the panel scripts that load after this one
+// (#935). A panel's state — its shop array, its escalation ladder, whether the
+// MCP controls have been hydrated yet — lives in that panel's own file, and
+// this file has no business naming any of it. So each panel says what it
+// contributes instead:
+//
+//   registerPayloadSources({ storeItems: () => storeItems })
+//       one entry of the `sources` object settings-payload.js reads. A getter,
+//       not a value: `jobsList` and friends are reassigned as the panel is
+//       edited, and a value captured at load time would post the state the
+//       page arrived with.
+//
+//   registerSaveGuard('ai', () => 'System prompt is too long')
+//       a last check before the POST. Returning a string stops the save and
+//       shows it; returning nothing lets it through.
+//
+//   registerSaveFollowUp('economy', async () => 'image upload failed')
+//       work that only counts as done once the settings have landed — the
+//       pending shop-item images. A returned string means the section is not
+//       cleanly saved after all.
+var PAYLOAD_SOURCES = {};
+var SAVE_GUARDS = {};
+var SAVE_FOLLOW_UPS = {};
+
+function registerPayloadSources(sources) { Object.assign(PAYLOAD_SOURCES, sources); }
+function registerSaveGuard(section, fn) { SAVE_GUARDS[section] = fn; }
+function registerSaveFollowUp(section, fn) { SAVE_FOLLOW_UPS[section] = fn; }
+
+/** The `sources` object for this save, each entry read at save time. */
+function payloadSources() {
+    const sources = {};
+    for (const key of Object.keys(PAYLOAD_SOURCES)) sources[key] = PAYLOAD_SOURCES[key]();
+    return sources;
 }
 
 const DAILY_NEWS_INITIAL_PROFILES = boot('dailyNewsProfiles');
@@ -862,6 +953,8 @@ function serializeEscalationLadder() {
     return cleaned.sort((a, b) => a.threshold - b.threshold);
 }
 
+registerPayloadSources({ serializeEscalationLadder: () => serializeEscalationLadder });
+
 function dailyNewsChannelOptions(selected = '') {
     return ['<option value="">Select a channel</option>']
         .concat(DAILY_NEWS_CHANNELS.map(c => `<option value="${c.id}" ${selected === c.id ? 'selected' : ''}>#${c.name}</option>`))
@@ -990,31 +1083,15 @@ async function validateProfileFeeds(index) {
 async function saveSettings(section) {
     const guildId = BOOT.guildId;
 
-    // EJS renders the saved systemPrompt verbatim, so pre-existing values can
-    // exceed the textarea's maxlength (e.g. set via the API). Validate here so
-    // we never POST an oversized prompt.
-    if (section === 'ai' && document.getElementById('ai-prompt').value.length > 4000) {
-        const length = document.getElementById('ai-prompt').value.length;
-        updatePromptCount('ai-prompt');
-        toast('System prompt is ' + length + ' chars — maximum is 4000.', 'error');
+    const blocked = SAVE_GUARDS[section] ? await SAVE_GUARDS[section]() : null;
+    if (blocked) {
+        toast(blocked, 'error');
         return;
     }
 
     // Which fields a section sends lives in settings-payload.js, where it can be
     // tested against the server's key whitelist (#788).
-    const data = buildSettingsPayload(section, {
-        serializeEscalationLadder,
-        storeItems,
-        jobsList,
-        jobTiersList,
-        disabledAchievements: _disabledAchievements,
-        customAchievements: _customAchievements,
-        cpRules: _cpRules,
-        cpCooldowns: _cpCooldowns,
-        mcpSettings: () => (_mcpHydrated
-            ? { confirm: mcpEl('mcp-confirm').value, route: mcpEl('mcp-route').value }
-            : null),
-    });
+    const data = buildSettingsPayload(section, payloadSources());
 
     try {
         const response = await apiFetch(`/api/v1/guild/${guildId}/settings`, {
@@ -1028,34 +1105,17 @@ async function saveSettings(section) {
             return false;
         }
 
-        // After saving economy settings, upload/delete pending shop item images
-        if (section === 'economy') {
-            const uploads = Object.entries(_shopItemPendingImages).map(([itemId, info]) => {
-                const fd = new FormData();
-                fd.append('image', info.file);
-                return apiFetch(`/api/v1/item-image/shop/${guildId}/${itemId}`, { method: 'POST', body: fd })
-                    .then(r => r.ok ? null : r.json().then(e => e.error || 'Upload failed'))
-                    .catch(() => 'Upload error');
-            });
-            const deletes = [..._shopItemClearedImages].map(itemId =>
-                apiFetch(`/api/v1/item-image/shop/${guildId}/${itemId}`, { method: 'DELETE' })
-                    .then(r => r.ok ? null : 'Delete failed')
-                    .catch(() => 'Delete error')
-            );
-            const results = await Promise.all([...uploads, ...deletes]);
-            const errors = results.filter(Boolean);
-            if (errors.length) {
-                toast('Settings saved, but image update failed: ' + errors[0], 'error');
-                // The settings landed but the images did not, and the pending
-                // image is still unsaved work — so this is not a clean save.
-                return false;
-            }
-            Object.keys(_shopItemPendingImages).forEach(k => delete _shopItemPendingImages[k]);
-            _shopItemClearedImages.clear();
-            toast('Settings saved', 'success');
-        } else {
-            toast('Settings saved', 'success');
+        // Work the section is not finished without — economy's pending shop
+        // item images are the only one. A message back means the settings
+        // landed and this did not, which is not a clean save: the unsaved mark
+        // stays up because the pending image is still unsaved work.
+        const followUp = SAVE_FOLLOW_UPS[section] ? await SAVE_FOLLOW_UPS[section]() : null;
+        if (followUp) {
+            toast('Settings saved, but ' + followUp, 'error');
+            return false;
         }
+
+        toast('Settings saved', 'success');
         return true;
     } catch (error) {
         console.error(error);
@@ -1364,6 +1424,8 @@ var _cpCooldowns = boot('commandPolicyCooldowns');
 var _cpRuleIdx = -1;
 var _cpCdIdx   = -1;
 
+registerPayloadSources({ cpRules: () => _cpRules, cpCooldowns: () => _cpCooldowns });
+
 // ── Shared modal machinery ───────────────────────────────────────────
 // One dialog on this page was built properly and the other eight were not:
 // they were shown with a bare `style.display = 'flex'`, which leaves the
@@ -1656,6 +1718,36 @@ var editingJobIdx = -1;
 var _shopItemPendingImages = {}; // itemId -> { file, dataUrl }
 var _shopItemClearedImages = new Set(); // itemIds whose images were explicitly removed
 var _guildId = BOOT.guildId;
+
+registerPayloadSources({
+    storeItems:   () => storeItems,
+    jobsList:     () => jobsList,
+    jobTiersList: () => jobTiersList,
+});
+
+// Shop item images are uploaded after the settings POST rather than with it:
+// they are multipart and the settings are JSON. Reported back as a message so
+// the save that carried them is not marked clean.
+registerSaveFollowUp('economy', async () => {
+    const uploads = Object.entries(_shopItemPendingImages).map(([itemId, info]) => {
+        const fd = new FormData();
+        fd.append('image', info.file);
+        return apiFetch(`/api/v1/item-image/shop/${_guildId}/${itemId}`, { method: 'POST', body: fd })
+            .then(r => r.ok ? null : r.json().then(e => e.error || 'Upload failed'))
+            .catch(() => 'Upload error');
+    });
+    const deletes = [..._shopItemClearedImages].map(itemId =>
+        apiFetch(`/api/v1/item-image/shop/${_guildId}/${itemId}`, { method: 'DELETE' })
+            .then(r => r.ok ? null : 'Delete failed')
+            .catch(() => 'Delete error')
+    );
+    const errors = (await Promise.all([...uploads, ...deletes])).filter(Boolean);
+    if (errors.length) return 'image update failed: ' + errors[0];
+
+    Object.keys(_shopItemPendingImages).forEach(k => delete _shopItemPendingImages[k]);
+    _shopItemClearedImages.clear();
+    return null;
+});
 
 function renderStoreItems() {
     const grid = document.getElementById('store-items-grid');
@@ -1969,150 +2061,157 @@ document.addEventListener('click', function(e) {
     if (e.target.id === 'ach-modal') closeAchModal();
 });
 
-// ── Delegated handlers for rendered lists ────────────────────────────
-// Attacker-influenced values (member nicknames, achievement names, MCP
-// server names) ride in data-* attributes and come back out through
-// dataset. They must never be concatenated into an inline handler:
-// an on*="" attribute is HTML-decoded before it is parsed as JS, so a
-// `&#39;` from escHtml turns back into a quote and closes the string it
-// was meant to sit inside.
-// Actions that are a bare call with no argument, or with one the action name
-// itself supplies. Written as thunks rather than bare references so this can
-// sit next to the dispatcher regardless of where each function is declared, and
-// as a table rather than another forty `else if` lines because the point of
-// #887 is that there are forty of them.
-//
-// It is a table, not a lookup into `window`: an injected `data-action` can only
-// name something on this list, which is the difference between a data attribute
-// and the `onclick=""` it replaced.
-const CLICK_ACTIONS = {
-    'add-auto-role':              () => addAutoRole(),
-    'add-cp-exc-role':            () => addCpExcRole(),
-    'add-daily-news-profile':     () => addDailyNewsProfile(),
-    'add-escalation-step':        () => addEscalationStep(),
-    'add-level-no-xp-channel':    () => addLevelNoXpChannel(),
-    'add-level-no-xp-role':       () => addLevelNoXpRole(),
-    'add-level-role-reward':      () => addLevelRoleReward(),
-    'add-persona':                () => addPersona(),
-    'add-rr-mapping':             () => addRrMapping(),
-    'add-rss-feed':               () => addRssFeed(),
-    'add-season-tier-row':        () => addSeasonTierRow(),
-    'add-summary-job':            () => addSummaryJob(),
-    'clear-shop-item-image':      () => clearShopItemImage(),
-    'close-ach-grant-modal':      () => closeAchGrantModal(),
-    'close-ach-modal':            () => closeAchModal(),
-    'close-case-note-modal':      () => closeCaseNoteModal(),
-    'close-cp-cooldown-modal':    () => closeCpCooldownModal(),
-    'close-cp-rule-modal':        () => closeCpRuleModal(),
-    'close-item-modal':           () => closeItemModal(),
-    'close-job-modal':            () => closeJobModal(),
-    'close-prompt-editor':        () => closePromptEditor(false),
-    'confirm-cancel':             () => _confirmResolve(false),
-    'confirm-ok':                 () => _confirmResolve(true),
-    'dismiss-getting-started':    () => dismissGettingStarted(),
-    'level-leaderboard':          () => loadLevelLeaderboard(1, true),
-    'load-active-sanctions':      () => loadActiveSanctions(),
-    'load-analytics':             () => loadAnalytics(),
-    'load-eco-health':            () => loadEcoHealth(),
-    'publish-rr-panel':           () => publishRrPanel(),
-    'reset-escalation-ladder':    () => resetEscalationLadder(),
-    'reset-mcp-form':             () => resetMcpForm(),
-    'retry-load-summary-jobs':    () => retryLoadSummaryJobs(),
-    'save-ach-modal':             () => saveAchModal(),
-    'save-cp-cooldown-modal':     () => saveCpCooldownModal(),
-    'save-cp-rule-modal':         () => saveCpRuleModal(),
-    'save-daily-digest':          () => saveDailyDigest(),
-    'save-item-modal':            () => saveItemModal(),
-    'save-job-modal':             () => saveJobModal(),
-    'save-mcp-server':            () => saveMcpServer(),
-    'save-prompt-editor':         () => closePromptEditor(true),
-    'send-welcome-card-preview':  () => sendWelcomeCardPreview(),
-    'start-boost-event':          () => startBoostEvent(),
-    'submit-ach-grant':           () => submitAchGrant(),
-    'submit-case-action':         () => submitCaseAction(),
-    'toggle-getting-started':     () => toggleGettingStarted(),
-    'trigger-daily-news-now':     () => triggerDailyNewsNow(),
-    'validate-main-feeds':        () => validateMainFeeds(),
-    // One action, the argument in a data attribute. `saveSettings` alone was
-    // twenty-five `onclick=""` across twenty-five panels.
-    'save':              (el, d) => saveSettings(d.section),
-    'eco-admin':         (el, d) => ecoAdminAction(d.ecoAction),
-    'level-admin':       (el, d) => levelAdminAction(d.levelAction),
-    'sanctions-filter':  (el, d) => setSanctionsFilter(d.filter, el),
-    'analytics-range':   (el, d) => setAnalyticsRange(Number(d.days), el),
-    'prompt-edit':       (el, d) => openPromptEditor(d.promptTarget, d.promptTitle),
-    'level-no-xp-channel-remove': (el, d) => removeLevelNoXpChannel(d.channelId),
-    'level-no-xp-role-remove':    (el, d) => removeLevelNoXpRole(d.noXpRoleId),
-    'activity-image-remove':      (el, d) => removeActivityImage(d.itemId),
-};
+registerPanelActions({
+    click: {
+        'add-auto-role':              () => addAutoRole(),
+        'add-cp-exc-role':            () => addCpExcRole(),
+        'add-daily-news-profile':     () => addDailyNewsProfile(),
+        'add-escalation-step':        () => addEscalationStep(),
+        'add-level-no-xp-channel':    () => addLevelNoXpChannel(),
+        'add-level-no-xp-role':       () => addLevelNoXpRole(),
+        'add-level-role-reward':      () => addLevelRoleReward(),
+        'add-persona':                () => addPersona(),
+        'add-rr-mapping':             () => addRrMapping(),
+        'add-rss-feed':               () => addRssFeed(),
+        'add-season-tier-row':        () => addSeasonTierRow(),
+        'add-summary-job':            () => addSummaryJob(),
+        'clear-shop-item-image':      () => clearShopItemImage(),
+        'close-ach-grant-modal':      () => closeAchGrantModal(),
+        'close-ach-modal':            () => closeAchModal(),
+        'close-case-note-modal':      () => closeCaseNoteModal(),
+        'close-cp-cooldown-modal':    () => closeCpCooldownModal(),
+        'close-cp-rule-modal':        () => closeCpRuleModal(),
+        'close-item-modal':           () => closeItemModal(),
+        'close-job-modal':            () => closeJobModal(),
+        'close-prompt-editor':        () => closePromptEditor(false),
+        'confirm-cancel':             () => _confirmResolve(false),
+        'confirm-ok':                 () => _confirmResolve(true),
+        'dismiss-getting-started':    () => dismissGettingStarted(),
+        'level-leaderboard':          () => loadLevelLeaderboard(1, true),
+        'load-active-sanctions':      () => loadActiveSanctions(),
+        'load-analytics':             () => loadAnalytics(),
+        'load-eco-health':            () => loadEcoHealth(),
+        'publish-rr-panel':           () => publishRrPanel(),
+        'reset-escalation-ladder':    () => resetEscalationLadder(),
+        'reset-mcp-form':             () => resetMcpForm(),
+        'retry-load-summary-jobs':    () => retryLoadSummaryJobs(),
+        'save-ach-modal':             () => saveAchModal(),
+        'save-cp-cooldown-modal':     () => saveCpCooldownModal(),
+        'save-cp-rule-modal':         () => saveCpRuleModal(),
+        'save-daily-digest':          () => saveDailyDigest(),
+        'save-item-modal':            () => saveItemModal(),
+        'save-job-modal':             () => saveJobModal(),
+        'save-mcp-server':            () => saveMcpServer(),
+        'save-prompt-editor':         () => closePromptEditor(true),
+        'send-welcome-card-preview':  () => sendWelcomeCardPreview(),
+        'start-boost-event':          () => startBoostEvent(),
+        'submit-ach-grant':           () => submitAchGrant(),
+        'submit-case-action':         () => submitCaseAction(),
+        'toggle-getting-started':     () => toggleGettingStarted(),
+        'trigger-daily-news-now':     () => triggerDailyNewsNow(),
+        'validate-main-feeds':        () => validateMainFeeds(),
+        // The argument travels in a data attribute. `saveSettings` alone was
+        // twenty-five `onclick=""` across twenty-five panels.
+        'save':              (el, d) => saveSettings(d.section),
+        'eco-admin':         (el, d) => ecoAdminAction(d.ecoAction),
+        'level-admin':       (el, d) => levelAdminAction(d.levelAction),
+        'sanctions-filter':  (el, d) => setSanctionsFilter(d.filter, el),
+        'analytics-range':   (el, d) => setAnalyticsRange(Number(d.days), el),
+        'prompt-edit':       (el, d) => openPromptEditor(d.promptTarget, d.promptTitle),
+        'level-no-xp-channel-remove': (el, d) => removeLevelNoXpChannel(d.channelId),
+        'level-no-xp-role-remove':    (el, d) => removeLevelNoXpRole(d.noXpRoleId),
+        'activity-image-remove':      (el, d) => removeActivityImage(d.itemId),
+        'ach-grant':                  (el, d) => openAchGrantModal(d.achId, d.achName),
+        'summary-delete':             (el, d) => deleteSummaryJob(d.jobId),
+        'persona-remove':             (el, d) => removePersona(d.channelId),
+        'mcp-test':                   (el, d) => testMcpServer(d.serverName, mcpResultSlot(el)),
+        // The approval mode lives on this tab but is part of the ai document, so
+        // it saves through the same section as everything else on the Chat tab.
+        'mcp-save-confirm':                () => saveSettings('ai'),
+        'mcp-oauth-connect':      (el, d) => startMcpOAuth(d.serverName, mcpResultSlot(el)),
+        'mcp-oauth-disconnect':   (el, d) => disconnectMcpOAuth(d.serverName),
+        'mcp-edit':               (el, d) => editMcpServer(d.serverName),
+        'mcp-remove':             (el, d) => removeMcpServer(d.serverName),
+        'autorole-remove':        (el, d) => removeAutoRole(d.roleId),
+        // Both lists are redrawn from the API after every mutation (#689), so their
+        // buttons are delegated rather than bound: a row rendered a moment ago by
+        // renderRssFeeds or renderRrPanels has no listener of its own.
+        'rss-remove':             (el, d) => deleteRssFeed(Number(d.index)),
+        'rr-panel-delete':        (el, d) => deleteRrPanel(d.messageId),
+        // Everything below was an `onclick=""` in the markup these renderers build
+        // (#887). None of it needed to be: the argument is always an index, an id or
+        // a tab name, all of which travel perfectly well in a data-* attribute.
+        // Moving them here is what lets the CSP drop `script-src-attr
+        // 'unsafe-inline'`, the one directive that decides whether an injected
+        // handler attribute runs or is blocked.
+        'escalation-remove':      (el, d) => removeEscalationStep(Number(d.idx)),
+        'dn-remove':              (el, d) => removeDailyNewsProfile(Number(d.idx)),
+        'dn-validate':            (el, d) => validateProfileFeeds(Number(d.idx)),
+        'cp-rule-edit':           (el, d) => openCpRuleModal(Number(d.idx)),
+        'cp-rule-remove':         (el, d) => { _cpRules.splice(Number(d.idx), 1); renderCpRules(); },
+        'cp-cooldown-edit':       (el, d) => openCpCooldownModal(Number(d.idx)),
+        'cp-cooldown-remove':     (el, d) => { _cpCooldowns.splice(Number(d.idx), 1); renderCpCooldowns(); },
+        'item-edit':              (el, d) => openItemModal(Number(d.idx)),
+        'item-delete':            (el, d) => deleteItem(Number(d.idx)),
+        'job-edit':               (el, d) => openJobModal(Number(d.idx)),
+        'job-delete':             (el, d) => deleteJob(Number(d.idx)),
+        'ach-edit':               (el, d) => openAchModal(Number(d.idx)),
+        'ach-delete':             (el, d) => deleteCustomAch(Number(d.idx)),
+        'case-note':              (el, d) => openCaseNoteModal(Number(d.caseId)),
+        'case-close':             (el, d) => closeCase(Number(d.caseId)),
+        'case-page':              (el, d) => loadCaseHistory(Number(d.page)),
+        // A row builder's own delete button. `data-row-selector` names the row when
+        // the button is nested inside it; without one the row is the button's
+        // parent, which is what `this.parentElement.remove()` meant.
+        'row-remove': (el, d) => {
+            const row = d.rowSelector ? el.closest(d.rowSelector) : el.parentElement;
+            const list = row && row.parentElement;
+            if (row) row.remove();
+            // The rows are numbered "Reward 1, Reward 2, …" for screen readers, so
+            // removing one in the middle renumbers the rest.
+            if (list) labelRepeatedRows(list);
+        },
+        // Jumps to another settings tab. The nav item is the thing that knows how to
+        // switch panels, so this clicks it rather than reimplementing the switch.
+        'goto-tab': (el, d, e) => {
+            const nav = document.querySelector('.nav-item[data-tab="' + CSS.escape(d.tab || '') + '"]');
+            if (nav) nav.click();
+            // These are `<a href="#">` as often as buttons, and the inline versions
+            // all ended in `return false` to stop the jump to the top of the page.
+            e.preventDefault();
+        },
+    },
 
-document.addEventListener('click', function(e) {
-    const el = e.target.closest && e.target.closest('[data-action]');
-    if (!el) return;
-    const d = el.dataset;
+    // The rest of the views' `oninput=""` and `onchange=""` (#887), in the same
+    // shape: an element carries what it does rather than how to do it.
+    input: {
+        'member-search':        () => debouncedMemberSearch(),
+        'prompt-editor-count':  () => updatePromptEditorCount(),
+        'prompt-count':  (el, d) => updatePromptCount(d.promptTarget),
+        'msg-preview':   (el, d) => updateMsgPreview(d.previewSource, d.previewTarget),
+        // A range input echoing its own value into a label beside it.
+        'mirror-value':  (el, d) => {
+            const target = document.getElementById(d.mirrorTarget);
+            if (target) target.textContent = el.value;
+        },
+    },
 
-    const simple = CLICK_ACTIONS[d.action];
-    if (simple) { simple(el, d); return; }
-    if (d.action === 'ach-grant')      openAchGrantModal(d.achId, d.achName);
-    else if (d.action === 'summary-delete') deleteSummaryJob(d.jobId);
-    else if (d.action === 'persona-remove') removePersona(d.channelId);
-    else if (d.action === 'mcp-test')       testMcpServer(d.serverName, el.closest('.list-item') && el.closest('.list-item').querySelector('.mcp-test-result'));
-    // The approval mode lives on this tab but is part of the ai document, so
-    // it saves through the same section as everything else on the Chat tab.
-    else if (d.action === 'mcp-save-confirm') saveSettings('ai');
-    else if (d.action === 'mcp-oauth-connect')    startMcpOAuth(d.serverName, el.closest('.list-item') && el.closest('.list-item').querySelector('.mcp-test-result'));
-    else if (d.action === 'mcp-oauth-disconnect') disconnectMcpOAuth(d.serverName);
-    else if (d.action === 'mcp-edit')       editMcpServer(d.serverName);
-    else if (d.action === 'mcp-remove')     removeMcpServer(d.serverName);
-    else if (d.action === 'autorole-remove') removeAutoRole(d.roleId);
-    // Both lists are redrawn from the API after every mutation (#689), so their
-    // buttons are delegated rather than bound: a row rendered a moment ago by
-    // renderRssFeeds or renderRrPanels has no listener of its own.
-    else if (d.action === 'rss-remove')      deleteRssFeed(Number(d.index));
-    else if (d.action === 'rr-panel-delete') deleteRrPanel(d.messageId);
-    // Everything below was an `onclick=""` in the markup these renderers build
-    // (#887). None of it needed to be: the argument is always an index, an id or
-    // a tab name, all of which travel perfectly well in a data-* attribute.
-    // Moving them here is what lets the CSP drop `script-src-attr
-    // 'unsafe-inline'`, the one directive that decides whether an injected
-    // handler attribute runs or is blocked.
-    else if (d.action === 'escalation-remove')  removeEscalationStep(Number(d.idx));
-    else if (d.action === 'dn-remove')          removeDailyNewsProfile(Number(d.idx));
-    else if (d.action === 'dn-validate')        validateProfileFeeds(Number(d.idx));
-    else if (d.action === 'cp-rule-edit')       openCpRuleModal(Number(d.idx));
-    else if (d.action === 'cp-rule-remove')     { _cpRules.splice(Number(d.idx), 1); renderCpRules(); }
-    else if (d.action === 'cp-cooldown-edit')   openCpCooldownModal(Number(d.idx));
-    else if (d.action === 'cp-cooldown-remove') { _cpCooldowns.splice(Number(d.idx), 1); renderCpCooldowns(); }
-    else if (d.action === 'item-edit')          openItemModal(Number(d.idx));
-    else if (d.action === 'item-delete')        deleteItem(Number(d.idx));
-    else if (d.action === 'job-edit')           openJobModal(Number(d.idx));
-    else if (d.action === 'job-delete')         deleteJob(Number(d.idx));
-    else if (d.action === 'ach-edit')           openAchModal(Number(d.idx));
-    else if (d.action === 'ach-delete')         deleteCustomAch(Number(d.idx));
-    else if (d.action === 'case-note')          openCaseNoteModal(Number(d.caseId));
-    else if (d.action === 'case-close')         closeCase(Number(d.caseId));
-    else if (d.action === 'case-page')          loadCaseHistory(Number(d.page));
-    // A row builder's own delete button. `data-row-selector` names the row when
-    // the button is nested inside it; without one the row is the button's
-    // parent, which is what `this.parentElement.remove()` meant.
-    else if (d.action === 'row-remove') {
-        const row = d.rowSelector ? el.closest(d.rowSelector) : el.parentElement;
-        const list = row && row.parentElement;
-        if (row) row.remove();
-        // The rows are numbered "Reward 1, Reward 2, …" for screen readers, so
-        // removing one in the middle renumbers the rest.
-        if (list) labelRepeatedRows(list);
-    }
-    // Jumps to another settings tab. The nav item is the thing that knows how to
-    // switch panels, so this clicks it rather than reimplementing the switch.
-    else if (d.action === 'goto-tab') {
-        const nav = document.querySelector('.nav-item[data-tab="' + CSS.escape(d.tab || '') + '"]');
-        if (nav) nav.click();
-        // These are `<a href="#">` as often as buttons, and the inline versions
-        // all ended in `return false` to stop the jump to the top of the page.
-        e.preventDefault();
-    }
+    change: {
+        'ai-provider':      () => updateAiProviderUI(),
+        'mcp-preset':       () => applyMcpPreset(),
+        'shop-item-image':  el => previewShopItemImage(el),
+        'stock-toggle':     el => toggleStockInput(el),
+        'case-page': (el, d) => loadCaseHistory(Number(d.page)),
+        'activity-image-upload': (el, d) => uploadActivityImage(d.itemId, el),
+    },
 });
+
+// The `.mcp-test-result` slot inside the row a connection button sits in, which
+// is where a test or an OAuth round trip writes what happened.
+function mcpResultSlot(el) {
+    const row = el.closest('.list-item');
+    return row && row.querySelector('.mcp-test-result');
+}
 
 // The Daily News profile editor, which was seven inline handlers across one
 // rendered card (#887). Every field carries the profile index and the key it
@@ -2134,40 +2233,6 @@ document.addEventListener('input', function(e) {
     const el = e.target.closest && e.target.closest('[data-tier-idx][data-field]');
     if (el) updateTierField(el);
 });
-
-// The rest of the views' `oninput=""` and `onchange=""` (#887). Two tables in
-// the shape of CLICK_ACTIONS above, each keyed on the element's own data-input
-// or data-change, so an element carries what it does rather than how to do it.
-const INPUT_ACTIONS = {
-    'member-search':        () => debouncedMemberSearch(),
-    'prompt-editor-count':  () => updatePromptEditorCount(),
-    'prompt-count':  (el, d) => updatePromptCount(d.promptTarget),
-    'msg-preview':   (el, d) => updateMsgPreview(d.previewSource, d.previewTarget),
-    // A range input echoing its own value into a label beside it.
-    'mirror-value':  (el, d) => {
-        const target = document.getElementById(d.mirrorTarget);
-        if (target) target.textContent = el.value;
-    },
-};
-
-const CHANGE_ACTIONS = {
-    'ai-provider':      () => updateAiProviderUI(),
-    'mcp-preset':       () => applyMcpPreset(),
-    'shop-item-image':  el => previewShopItemImage(el),
-    'stock-toggle':     el => toggleStockInput(el),
-    'case-page': (el, d) => loadCaseHistory(Number(d.page)),
-    'activity-image-upload': (el, d) => uploadActivityImage(d.itemId, el),
-};
-
-function runTableAction(table, attribute, e) {
-    const el = e.target.closest && e.target.closest('[' + attribute + ']');
-    if (!el) return;
-    const fn = table[el.getAttribute(attribute)];
-    if (fn) fn(el, el.dataset);
-}
-
-document.addEventListener('input',  e => runTableAction(INPUT_ACTIONS, 'data-input', e));
-document.addEventListener('change', e => runTableAction(CHANGE_ACTIONS, 'data-change', e));
 
 // Forms that exist for their layout and their Enter-to-submit behaviour, never
 // to navigate. This was `onsubmit="return false"`.
@@ -2220,6 +2285,11 @@ var _editingAchIdx = -1;
 
 var ACH_CAT_LABELS = { economy:'Economy', leveling:'Leveling', hunt:'Hunt', fishing:'Fishing', community:'Community', moderation:'Moderation', custom:'Custom' };
 var ACH_CAT_EMOJIS = { economy:'💰', leveling:'📈', hunt:'🏹', fishing:'🎣', community:'👥', moderation:'🛡️', custom:'⚙️' };
+
+registerPayloadSources({
+    disabledAchievements: () => _disabledAchievements,
+    customAchievements:   () => _customAchievements,
+});
 
 function renderBuiltinAchievements() {
     const list = document.getElementById('builtin-ach-list');
@@ -3273,6 +3343,16 @@ var _mcpHydrated = false;
 
 function mcpEl(id) { return document.getElementById(id); }
 
+// A function rather than the values: settings-payload.js calls this itself, so
+// that a Chat-tab save made before loadMcpServers() has answered posts nothing
+// for MCP rather than posting the markup defaults over what is stored.
+function mcpSaveState() {
+    return _mcpHydrated
+        ? { confirm: mcpEl('mcp-confirm').value, route: mcpEl('mcp-route').value }
+        : null;
+}
+registerPayloadSources({ mcpSettings: () => mcpSaveState });
+
 async function loadMcpServers(force) {
     if (_mcpServers && !force) { renderMcpServers(); return; }
     const guildId = BOOT.guildId;
@@ -3823,6 +3903,16 @@ function updatePromptCount(textareaId) {
     counter.textContent = len + ' / ' + max;
     counter.classList.toggle('over', len >= max);
 }
+
+// EJS renders the saved systemPrompt verbatim, so pre-existing values can
+// exceed the textarea's maxlength (e.g. one set through the API). Checked
+// before the POST so an oversized prompt never reaches the server.
+registerSaveGuard('ai', () => {
+    const length = document.getElementById('ai-prompt').value.length;
+    if (length <= 4000) return null;
+    updatePromptCount('ai-prompt');
+    return 'System prompt is ' + length + ' chars — maximum is 4000.';
+});
 
 var _promptEditorTarget = null;
 // Only the commit shortcut: Escape is the shared dialog machinery's job now.
