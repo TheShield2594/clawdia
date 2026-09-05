@@ -14,6 +14,74 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.6.1] - 2026-09-05
+
+Migrations through `022_move_shop_images_to_itemimages`.
+
+The economy audit's third pass takes `/gift` and `/market` (#873), the two
+remaining items on that issue's checklist besides the rest of the casino. They
+are the only two places a player hands something straight to another player, and
+so the only two where a trade that fails halfway has to put value *back*
+somewhere rather than merely not take it. Every finding is on one of those
+unwinds, and the forward direction was sound in both commands: five writes that
+returned coins or an item, none of which read what the write gave back, three of
+which told the player it had worked regardless, and one that did not exist at
+all.
+
+An update whose filter matches nothing resolves exactly as happily as one that
+moved coins, so `/market buy` told a buyer "your coins have been refunded" over
+a balance that was still short, and `/market cancel` replied "Returned 3x
+lucky_charm" having returned nothing — `grantInventoryItem` answers `null` for a
+missing document rather than throwing, and neither read it. `/gift`'s item
+rollback ignored its return value entirely, so the one case it exists to handle
+was the case it reported as handled. One refund had no `catch` at all and its
+rejection escaped the purchase with the buyer already charged; another swallowed
+its own into `console.error` and said the same reassuring sentence. None of the
+five was keyed, so a transient failure lost the value outright, and none was
+written down where `npm run payouts:replay` could see it.
+
+The one that destroyed something outright: a listing row is the only place a
+listed item exists — it leaves the seller's bag when they list it — and
+`/market buy` deletes the listing to claim it *before* crediting the buyer. A
+credit that then failed refunded the buyer and stopped, so the item was in
+nobody's inventory at all, the seller was never told, and no record of it existed
+anywhere but a log line.
+
+All five now go through `grantItemsOrOwe` or `creditCoinsOrOwe` — the second is
+the helper the duel and crew payouts already shared, the first is new and is the
+same thing for items. Each is keyed to the trade it unwinds, so a retry of a
+write that landed moves nothing; each reports whether the value is back,
+recorded as owed, or neither; and each reply is worded from that answer rather
+than from the absence of an exception. `market.js`, `gift.js` and
+`marketService.js` join the per-file coverage floors. The full findings are in
+[docs/AUDIT_LOG.md](docs/AUDIT_LOG.md), including the bound this pass leaves open
+and the parts of both commands it found sound.
+
+Four fixes from a CodeRabbit review (#985). Every `response.ok` check in the
+tree threw or returned without touching the body, which under undici holds the
+socket until the pool times it out — a connection cannot be reused while a body
+is outstanding. `discardBody` cancels it at all seven sites, and swallows
+everything it might raise: it runs one line before the error the caller actually
+wants, and a complaint about the cleanup replacing "Ollama returned HTTP 500"
+would be the one error nobody can act on.
+
+MCP connections now refuse a URL that is not https. Every request one makes
+carries the guild's bearer token, its session id and the arguments the model
+passed to a tool, so http:// is not a weaker connection but a published one; the
+OAuth endpoints already had this rule and the server's own URL did not. It is
+enforced at all four places the credential leaves on. The review left open
+whether local servers need an escape hatch: they do not — `isPrivateIp` already
+covers 127.0.0.0/8 and ::1, so plain-http loopback cannot connect today with or
+without the check.
+
+And two tests that could not fail. The assertion meant to stop an origin being
+added to the dashboard's `connect-src` was a substring match that
+`connect-src 'self' https://attacker` also satisfies; both directives are
+compared whole now. The concurrent MCP discovery test leaned on a single turn of
+the event loop, which serial discovery reaches just as well; both dials are gated
+now, and waiting for both to be in flight is the step serial discovery cannot
+reach.
+
 ## [4.6.0] - 2026-09-04
 
 Migrations through `022_move_shop_images_to_itemimages`.

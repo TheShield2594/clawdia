@@ -274,6 +274,66 @@ function marketSalePayoutKey(listingId) {
 }
 
 /**
+ * The stock coming back out of a listing the seller cancelled (#873).
+ *
+ * Keyed apart from `listingPayoutKey` for the reason `marketSalePayoutKey` is:
+ * only one of a cancel, a sale and an expiry can ever happen to a listing, since
+ * all three claim it by deleting it — but the guard is a string comparison on
+ * the user document with nothing on it to say which one wrote it, and a shared
+ * key would let a replay of one silently satisfy another.
+ */
+function listingCancelPayoutKey(listingId) {
+    return `listing:${listingId}:cancel`;
+}
+
+/**
+ * The seller's stock coming back when a sale could not be finished (#873).
+ *
+ * `/market buy` deletes the listing before crediting the buyer, so a credit that
+ * fails leaves the item in nobody's bag: the buyer's coins go back, and this is
+ * what puts the item back where it came from.
+ */
+function listingUnwindPayoutKey(listingId) {
+    return `listing:${listingId}:unwind`;
+}
+
+/**
+ * The stock coming back when a listing could not be created (#873).
+ *
+ * Keyed by the interaction rather than a listing, because there is no listing:
+ * this is the stock a `/market list` took out of the seller's bag and then could
+ * not find a slot for.
+ */
+function listingCreateRefundPayoutKey(interactionId) {
+    return `market:${interactionId}:relist`;
+}
+
+/**
+ * A market buyer's coins coming back when the purchase could not be completed
+ * (#873).
+ *
+ * Keyed by the interaction rather than the listing, exactly as
+ * `transferRefundPayoutKey` is: the same buyer trying the same listing again a
+ * second later is a different purchase and refunds separately, and the listing
+ * id alone would collide across those attempts and drop the second refund.
+ */
+function marketRefundPayoutKey(interactionId) {
+    return `market:${interactionId}:refund`;
+}
+
+/**
+ * A gifted item coming back to its sender when the recipient's credit missed
+ * (#873).
+ *
+ * Keyed by the interaction, like the coin transfer's refund beside it: the same
+ * sender gifting the same item to the same person again is a different gift and
+ * unwinds separately.
+ */
+function giftItemRollbackPayoutKey(interactionId) {
+    return `gift:${interactionId}:rollback`;
+}
+
+/**
  * One player's stake coming back out of a duel escrow, or the pot going to its
  * winner (#873).
  *
@@ -333,7 +393,10 @@ function transferRefundPayoutKey(interactionId) {
 
 module.exports = {
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
-    marketSalePayoutKey, transferRefundPayoutKey, duelPayoutKey, crewSharePayoutKey,
+    marketSalePayoutKey, listingCancelPayoutKey, listingUnwindPayoutKey,
+    listingCreateRefundPayoutKey,
+    marketRefundPayoutKey, transferRefundPayoutKey, giftItemRollbackPayoutKey,
+    duelPayoutKey, crewSharePayoutKey,
     jackpotPayoutKey,
     payoutKeyGuard, payoutKeyAppendExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, isDuplicateKeyError,

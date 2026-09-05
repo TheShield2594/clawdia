@@ -11,7 +11,11 @@ const { EFFECT_CONFIGS } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { recordOwedPayout } = require('../../utils/owedPayout');
-const { creditCoinsOnce, marketSalePayoutKey } = require('../../utils/payoutKey');
+const {
+    creditCoinsOnce, marketSalePayoutKey, listingCancelPayoutKey,
+    listingUnwindPayoutKey, listingCreateRefundPayoutKey, marketRefundPayoutKey,
+} = require('../../utils/payoutKey');
+const { creditCoinsOrOwe, grantItemsOrOwe } = require('../../utils/creditOrOwe');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
@@ -294,33 +298,21 @@ async function handleList(interaction, currency) {
     // credit that will not land in a command.
     //
     // Returns whether the stock is actually back.
-    const returnStock = async () => {
-        let failure;
-        try {
-            if (await grantInventoryItem(interaction.user.id, interaction.guild.id, itemId, qty)) return true;
-            failure = new Error(`no user document for ${interaction.user.id} in ${interaction.guild.id}`);
-        } catch (restoreErr) {
-            failure = restoreErr;
-        }
-
-        console.error(
-            `[market list] returning ${qty}x ${itemId} to ${interaction.user.id} failed — items owed:`, failure,
-        );
-        await recordOwedPayout({
+    // This was the first of the three to be written and the only one that got it
+    // right; it is `grantItemsOrOwe` now so all three share the rule rather than
+    // one of them carrying it (#873). The one thing it gains is the key: the
+    // record it files could previously be replayed against a write that had in
+    // fact committed and merely lost its response, which would hand the seller a
+    // second copy of the stock.
+    const returnStock = async () => (await grantItemsOrOwe(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        itemId, qty,
+        {
+            payoutKey: listingCreateRefundPayoutKey(interaction.id),
             service: 'market',
             jobName: 'listItem',
-            guildId: interaction.guild.id,
-            payload: {
-                kind:     'items',
-                userId:   interaction.user.id,
-                guildId:  interaction.guild.id,
-                itemId,
-                quantity: qty,
-            },
-            error: failure,
-        });
-        return false;
-    };
+        },
+    )).granted;
 
     // What to tell the seller about their stock. Saying it came back when it did
     // not is the one thing this must never do: they would have no reason to
@@ -595,10 +587,44 @@ async function handleBuy(interaction, currency) {
             });
         }
 
+        // The buyer's coins coming back, on either of the two paths below that
+        // abandon a purchase after the debit committed (#873).
+        //
+        // Both used to be a bare `User.updateOne` with an `$inc`, and both said
+        // "Your coins have been refunded" whatever it did. An update whose
+        // filter matches nothing resolves exactly as happily as one that moved
+        // coins, so a buyer whose document went away between the debit and here
+        // was told their coins were back over a balance that was still short;
+        // one of the two swallowed a rejection into `console.error` and said the
+        // same thing, and the other did not catch at all, so the throw escaped a
+        // purchase that had already taken the money. Neither wrote anything
+        // down, so unlike every other credit in this file there was nothing for
+        // `npm run payouts:replay` to settle.
+        //
+        // Keyed by the interaction, so the retry inside `creditCoinsOrOwe` and a
+        // later replay of the same record cannot refund twice.
+        const refundBuyer = async jobName => creditCoinsOrOwe(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            totalCost,
+            {
+                payoutKey: marketRefundPayoutKey(interaction.id),
+                service: 'market',
+                jobName,
+            },
+        );
+
+        // What to tell the buyer about their coins. Saying they came back when
+        // they did not is the one thing this must never do.
+        const refundNote = ({ credited, owed }) => (credited
+            ? 'Your coins have been refunded.'
+            : owed
+                ? 'Returning your coins failed — it is recorded and an admin can restore them.'
+                : 'Returning your coins failed and could not be recorded. Please contact a server admin.');
+
         const removed = await MarketListing.findOneAndDelete({ _id: listing._id, guildId: interaction.guild.id });
         if (!removed) {
-            await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } });
-            return editReply({ content: 'This listing was just sold. Your coins have been refunded.', embeds: [], components: [] });
+            const refund = await refundBuyer('buyRefundLost');
+            return editReply({ content: `This listing was just sold. ${refundNote(refund)}`, embeds: [], components: [] });
         }
 
         // Update buyer inventory first; roll back the buyer deduction if it fails.
@@ -610,8 +636,37 @@ async function handleBuy(interaction, currency) {
             if (!credited) throw new Error('buyer document not found');
         } catch (inventoryErr) {
             console.error('[market buy] inventory update failed, refunding buyer:', inventoryErr);
-            await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(console.error);
-            return editReply({ content: 'Something went wrong crediting the item. Your coins have been refunded.', embeds: [], components: [] });
+            const refund = await refundBuyer('buyRefundItem');
+
+            // And the item, which nothing used to put anywhere (#873). The
+            // listing row was the only place this stock existed — it left the
+            // seller's bag when they listed it — and the delete above has just
+            // removed it. Refunding the buyer alone left the item in nobody's
+            // inventory at all: destroyed, silently, with the seller never told.
+            //
+            // Returned to the seller rather than the listing being recreated:
+            // the seller's five slots may have filled while this purchase was in
+            // flight, and a return to the bag is what every other unwind in this
+            // file does.
+            const returned = await grantItemsOrOwe(
+                { userId: listing.sellerId, guildId: interaction.guild.id },
+                listing.itemId, listing.quantity,
+                {
+                    payoutKey: listingUnwindPayoutKey(listing._id),
+                    service: 'market',
+                    jobName: 'buyUnwindStock',
+                    extra: { listingId: String(listing._id) },
+                },
+            );
+            if (!returned.granted) {
+                console.error(
+                    `[market buy] listing ${listing._id} was claimed but the sale failed and returning ` +
+                    `${listing.quantity}x ${listing.itemId} to ${listing.sellerId} failed too — ` +
+                    `${returned.owed ? 'items owed, recorded for replay' : 'items owed and NOT recorded'}`,
+                );
+            }
+
+            return editReply({ content: `Something went wrong crediting the item. ${refundNote(refund)}`, embeds: [], components: [] });
         }
 
         // The seller's proceeds, and the one credit in this flow nothing was
@@ -786,17 +841,39 @@ async function handleCancel(interaction, _currency) {
     }
 
     // The listing is already deleted, so this credit is the only copy of the
-    // stock — return it atomically and say so if the return fails, rather than
-    // saving a stale in-memory inventory over concurrent credits.
-    try {
-        await grantInventoryItem(interaction.user.id, interaction.guild.id, listing.itemId, listing.quantity, { upsert: true });
-    } catch (creditErr) {
-        console.error(
-            `[market cancel] listing ${listing._id} was removed but returning ` +
-            `${listing.quantity}x ${listing.itemId} to ${interaction.user.id} failed — items owed:`, creditErr,
-        );
+    // stock — and the delete is what makes it the only copy: nothing will find
+    // this return again, on this tick or any later one.
+    //
+    // It used to be a bare `grantInventoryItem` in a `try`, which got both
+    // halves of that wrong (#873). The call answers `null` rather than throwing
+    // for a seller whose document has gone, and the return value was never
+    // looked at — so the reply said "Returned 3x lucky_charm" over an item that
+    // by then existed nowhere. And the `catch` that did fire wrote a console
+    // line calling the items "owed" without recording anything owed, three
+    // hundred lines below the `returnStock` in `handleList` that records exactly
+    // this for exactly this reason. Both are `grantItemsOrOwe` now, so the
+    // failure the reply describes is the failure that happened.
+    const returned = await grantItemsOrOwe(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        listing.itemId, listing.quantity,
+        {
+            payoutKey: listingCancelPayoutKey(listing._id),
+            service: 'market',
+            jobName: 'cancelListing',
+            extra: { listingId: String(listing._id) },
+            // The seller is standing right here typing the command, so their
+            // document exists; `upsert` is on for the same reason the expiry
+            // sweep has it on — a return that arrives after an account prune is
+            // still theirs, and a stock return is not a resurrection worth
+            // refusing when the alternative is losing the item.
+            upsert: true,
+        },
+    );
+    if (!returned.granted) {
         return interaction.reply({
-            content: 'The listing was cancelled, but returning your items hit an error. Tell an admin — it is recoverable.',
+            content: returned.owed
+                ? 'The listing was cancelled, but returning your items failed. It is recorded and an admin can restore them.'
+                : 'The listing was cancelled, but returning your items failed and could not be recorded. Please contact a server admin.',
             flags: MessageFlags.Ephemeral,
         });
     }

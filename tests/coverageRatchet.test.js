@@ -374,11 +374,23 @@ describe('per-file floors', () => {
         // and recovers the gap on the next boot. It sat at 14.6% statements and
         // 0% branches once before (#784), inside a services directory whose
         // floor is a hundred files wide and could not have noticed.
+        //
+        // market.js, gift.js and marketService.js joined in #873's third pass,
+        // over the two commands where a player hands something straight to
+        // another player. They are the only place in the economy where an item
+        // and coins move in opposite directions in one flow, and the pass found
+        // five unwinds that put value back and reported whether they had done
+        // so from the absence of an exception. Both commands sit inside
+        // directory floors — `src/commands/economy` at 35% statements — that a
+        // file losing its coverage outright would not move.
         expect(Object.keys(floors.files).sort()).toEqual([
             'src/commands/economy/bank.js',
             'src/commands/economy/duel.js',
+            'src/commands/economy/gift.js',
             'src/commands/economy/invest.js',
+            'src/commands/economy/market.js',
             'src/services/casinoJackpotService.js',
+            'src/services/marketService.js',
             'src/utils/balanceDebit.js',
             'src/utils/balanceDelta.js',
             'src/utils/coinTransfer.js',

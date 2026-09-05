@@ -32,7 +32,7 @@
  */
 
 const DEFAULT_USER = require('../models/User');
-const { creditCoinsOnce } = require('./payoutKey');
+const { creditCoinsOnce, grantItemOnce } = require('./payoutKey');
 const { counterSetExpr } = require('./balanceDebit');
 const { recordOwedPayout } = require('./owedPayout');
 const { delay } = require('./delay');
@@ -141,4 +141,126 @@ async function creditCoinsOrOwe(filter, amount, {
     return { credited: false, owed, doc: null, error: lastError };
 }
 
-module.exports = { creditCoinsOrOwe, DEFAULT_ATTEMPTS };
+/**
+ * Grants `quantity` of `itemId` exactly once, and records the grant as owed when
+ * it will not land — `creditCoinsOrOwe` for the half of the economy that moves
+ * items rather than coins.
+ *
+ * The item side had the same three bugs the coin side did, in the same order
+ * (#873). `/market cancel` deletes the listing and then returns the stock with a
+ * bare `grantInventoryItem`, reading the absence of a throw as success — but
+ * that call answers `null` for a seller whose document has gone, so the reply
+ * said "Returned 3x lucky_charm" over an item that no longer existed anywhere.
+ * When it *did* throw, the listing was already gone, so there was nothing left
+ * to find the return again and nothing written down: the item ended in a console
+ * line. And `/gift`'s rollback — the write that hands a sender their item back
+ * when the recipient's credit missed — ignored its return value entirely, so the
+ * one case it exists to handle was the one it reported as handled.
+ *
+ * Same shape as the coin path for the same reasons: keyed, so the retry cannot
+ * grant twice; retried, because a transient failure is the common one; and
+ * filed as an owed payload `npm run payouts:replay` can settle when it still
+ * will not land.
+ *
+ * `upsert` is off by default and passed through, because the two callers want
+ * different answers. A return to a seller whose document was pruned is owed, not
+ * a reason to resurrect the account; the expiry sweep upserts because a listing
+ * outliving its seller's document is the case it was written for.
+ *
+ * @param {object}  filter            the user's `{ userId, guildId }`
+ * @param {string}  itemId
+ * @param {number}  quantity          a non-positive quantity is a no-op
+ * @param {object}  opts
+ * @param {string}  opts.payoutKey    names *this* grant, so neither the retry
+ *                                    below nor a replayed record can grant twice
+ * @param {string}  opts.service      for the owed record and the log line
+ * @param {string}  opts.jobName
+ * @param {object}  [opts.extraSet]   further pipeline `$set` fields written in the
+ *                                    same update, so bookkeeping that belongs
+ *                                    with the grant commits with it. Deliberately
+ *                                    *not* carried on the owed record: unlike
+ *                                    `creditCoinsOrOwe`'s `counters`, these are
+ *                                    aggregation expressions rather than plain
+ *                                    deltas, and the one caller that uses them is
+ *                                    refunding a daily allowance — a replay days
+ *                                    later would take it out of whatever day's
+ *                                    allowance is current then. The item is the
+ *                                    part that must survive; the allowance is a
+ *                                    day's cap
+ * @param {object}  [opts.extra]      further fields on the owed payload, for an
+ *                                    operator reading the queue — a listing id,
+ *                                    say. Not part of the write.
+ * @param {boolean} [opts.upsert]
+ * @param {number}  [opts.attempts]
+ * @param {object}  [opts.Model]
+ * @returns {Promise<{granted: boolean, owed: boolean, doc: ?object, error: ?Error}>}
+ *
+ * `granted: false` with `owed: true` means the item is neither in a bag nor lost
+ * but written down for an operator to settle — the caller has to say so rather
+ * than announcing a return that did not happen. Like `creditCoinsOrOwe`, this
+ * never rejects: a caller unwinding a half-finished trade has other things left
+ * to do, and a throw here would abandon them.
+ */
+async function grantItemsOrOwe(filter, itemId, quantity, {
+    payoutKey, service = 'economy', jobName = 'grantItems', extra = {}, extraSet = {},
+    upsert = false, attempts = DEFAULT_ATTEMPTS, Model = DEFAULT_USER,
+} = {}) {
+    const wanted = Math.floor(quantity) || 0;
+    if (wanted <= 0) return { granted: true, owed: false, doc: null, error: null };
+
+    let lastError = null;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+            // `extraSet` rides the guarded update, so it lands exactly when
+            // the grant does — the key makes the retry a no-op, so it cannot be
+            // applied twice by the loop.
+            const { status, doc } = await grantItemOnce(
+                filter, itemId, wanted, payoutKey, { upsert, extraSet, Model },
+            );
+
+            // 'duplicate' is a success: an earlier attempt landed and only its
+            // response was lost. That is the case the key exists for.
+            if (status === 'paid')      return { granted: true, owed: false, doc, error: null };
+            if (status === 'duplicate') return { granted: true, owed: false, doc: null, error: null };
+
+            lastError = new Error(
+                status === 'missing'
+                    ? `no user document to grant to (${JSON.stringify(filter)})`
+                    : `grant matched nothing but ${payoutKey} is absent`,
+            );
+            // A missing document will still be missing next time round.
+            if (status === 'missing') break;
+        } catch (err) {
+            lastError = err;
+        }
+        if (attempt < attempts) await delay(attempt * 200);
+    }
+
+    console.error(
+        `[${service}] ${jobName}: ${wanted}x ${itemId} for ${filter.userId} in ${filter.guildId} ` +
+        'could not be granted:', lastError?.message,
+    );
+
+    const owed = await recordOwedPayout({
+        service,
+        jobName,
+        guildId: filter.guildId ?? null,
+        payload: {
+            kind:     'items',
+            userId:   filter.userId,
+            guildId:  filter.guildId,
+            itemId,
+            quantity: wanted,
+            payoutKey,
+            ...extra,
+        },
+        error: lastError,
+    }).catch(err => {
+        console.error(`[${service}] ${jobName}: recording the owed payout threw:`, err?.message);
+        return false;
+    });
+
+    return { granted: false, owed, doc: null, error: lastError };
+}
+
+module.exports = { creditCoinsOrOwe, grantItemsOrOwe, DEFAULT_ATTEMPTS };
