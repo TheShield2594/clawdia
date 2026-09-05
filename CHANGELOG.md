@@ -196,6 +196,20 @@ both stack files in step so neither can gain a client the other has not, and
 `docs/SETUP_GUIDE.md` has the procedure, the ordering and the case for leaving it
 off.
 
+The watch on `rss-parser` is written down where it can lapse loudly (#954).
+Nothing is wrong with the package today and nothing here changes how a feed is
+parsed. It is slow-moving, though, and it brings a transitive XML-parsing
+surface — a category with a long history of entity-expansion and parser CVEs —
+that sees any URL a guild admin subscribes to. The fetch side was already
+answered by `safeFeedFetch.js`; what was only in an issue was the parse side and
+the plan if the package is abandoned. `tests/rssParserWatch.test.js` now holds
+the two things that plan depends on: that Dependabot still reaches it, since an
+`ignore` entry added to quiet a weekly bump would take the advisory PRs with it,
+and that the surface stays one method on a string something else already
+fetched and bounded — a `parseURL`, which does its own unpinned, uncapped HTTP,
+or a third call site would each be one line and would each turn a morning of
+vendoring into a migration.
+
 ## [4.5.2] - 2026-09-01
 
 Migrations through `021_market_listing_ttl_grace`.

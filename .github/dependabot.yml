@@ -20,6 +20,15 @@ updates:
           - patch
     labels:
       - dependencies
+    # No `ignore` list, and adding one wants care: Dependabot applies it to
+    # security updates too, so an entry added to quiet a noisy weekly bump takes
+    # that package out of the advisory path with it. One package is watched
+    # deliberately rather than incidentally — `rss-parser` is slow-moving and
+    # carries a transitive XML-parsing surface that processes any feed URL a
+    # guild admin subscribes to (#954). tests/rssParserWatch.test.js holds both
+    # halves of that watch: this schedule still reaching it, and the two call
+    # sites staying small enough that vendoring the parse is a morning's work if
+    # the package is ever abandoned.
 
   # Pin drift in the workflow actions themselves. ci.yml pins actions by commit
   # SHA, which is the right call for supply-chain safety but means nothing ever
