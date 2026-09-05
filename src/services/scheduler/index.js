@@ -7,6 +7,15 @@ const { isPrimaryShard, shardTag } = require('../../utils/sharding');
 // through runJob (overlap protection, DLQ, health tracking), and every
 // start-once service is listed here — nothing else in the codebase should
 // call cron.schedule at bootstrap or hang jobs off a clientReady handler.
+//
+// A registry and nothing else (#931). Ten of the entries below used to point at
+// one `schedulerService.js` — 1,543 lines holding wars, ranked seasons, bank
+// interest, pet-of-the-week, shop prices, market sweeps and weekly champions
+// side by side, directly next to this file and its stated intent. Each job's
+// body now lives in the service that owns its domain, so `service` names a real
+// module: a war change is in warService.js and nowhere near bank interest.
+// Adding a job here means writing it in its domain's service and pointing at
+// it, never growing a module that exists to be scheduled.
 
 // ── Scope: which processes run a job (#889) ─────────────────────────────────
 //
@@ -100,40 +109,40 @@ const JOBS = [
     {
         name: 'resolveExpiredWars',
         scope: SCOPE.GUILD,
-        service: 'schedulerService',
+        service: 'warService',
         schedule: '*/5 * * * *',
-        fn: client => require('../schedulerService').resolveExpiredWars(client),
+        fn: client => require('../warService').resolveExpiredWars(client),
     },
     {
         name: 'resolveExpiredSeasons',
         scope: SCOPE.GUILD,
-        service: 'schedulerService',
+        service: 'economySeasonService',
         schedule: '*/5 * * * *',
-        fn: client => require('../schedulerService').resolveExpiredSeasons(client),
+        fn: client => require('../economySeasonService').resolveExpiredSeasons(client),
     },
     {
         name: 'awardWeeklyLeaderboardBadges',
         scope: SCOPE.GUILD,
-        service: 'schedulerService',
+        service: 'leaderboardBadgeService',
         schedule: '59 23 * * 0',
         timezone: 'Etc/UTC',
-        fn: client => require('../schedulerService').awardWeeklyLeaderboardBadges(client),
+        fn: client => require('../leaderboardBadgeService').awardWeeklyLeaderboardBadges(client),
     },
     {
         name: 'selectPetOfTheWeek',
         scope: SCOPE.GUILD,
-        service: 'schedulerService',
+        service: 'petService',
         schedule: '0 0 * * 1',
         timezone: 'Etc/UTC',
-        fn: client => require('../schedulerService').selectPetOfTheWeek(client),
+        fn: client => require('../petService').selectPetOfTheWeek(client),
     },
     {
         name: 'applyBankInterest',
         scope: SCOPE.GUILD,
-        service: 'schedulerService',
+        service: 'bankService',
         schedule: '1 0 * * 1',
         timezone: 'Etc/UTC',
-        fn: client => require('../schedulerService').applyBankInterest(client),
+        fn: client => require('../bankService').applyBankInterest(client),
     },
     {
         // Monday 00:05 UTC — five minutes into the new week, so the sweep is
@@ -141,31 +150,31 @@ const JOBS = [
         // boundary it is keyed on.
         name: 'announceWeeklyChampions',
         scope: SCOPE.GUILD,
-        service: 'schedulerService',
+        service: 'weeklyChampionService',
         schedule: '5 0 * * 1',
         timezone: 'Etc/UTC',
-        fn: client => require('../schedulerService').announceWeeklyChampions(client),
+        fn: client => require('../weeklyChampionService').announceWeeklyChampions(client),
     },
     {
         name: 'recalcShopPrices',
         scope: SCOPE.GUILD,
-        service: 'schedulerService',
+        service: 'shopPricingService',
         schedule: '*/15 * * * *',
-        fn: client => require('../schedulerService').recalcShopPrices(client),
+        fn: client => require('../shopPricingService').recalcShopPrices(client),
     },
     {
         name: 'resolveRankedSeasons',
         scope: SCOPE.GUILD,
-        service: 'schedulerService',
+        service: 'rankedSeasonService',
         schedule: '*/10 * * * *',
-        fn: client => require('../schedulerService').resolveRankedSeasons(client),
+        fn: client => require('../rankedSeasonService').resolveRankedSeasons(client),
     },
     {
         name: 'returnExpiredMarketListings',
         scope: SCOPE.DEPLOYMENT,
-        service: 'schedulerService',
+        service: 'marketService',
         schedule: '*/10 * * * *',
-        fn: () => require('../schedulerService').returnExpiredMarketListings(),
+        fn: () => require('../marketService').returnExpiredMarketListings(),
     },
     {
         // Both of these used to be a bare setInterval inside their own service,
@@ -199,10 +208,10 @@ const JOBS = [
     {
         name: 'postScheduledNewspapers',
         scope: SCOPE.GUILD,
-        service: 'schedulerService',
+        service: 'newspaperService',
         schedule: '0 * * * *',
         timezone: 'Etc/UTC',
-        fn: client => require('../schedulerService').postScheduledNewspapers(client),
+        fn: client => require('../newspaperService').postScheduledNewspapers(client),
     },
 ];
 

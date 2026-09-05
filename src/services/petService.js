@@ -1,3 +1,9 @@
+const Guild = require('../models/Guild');
+const User  = require('../models/User');
+const { handlesGuild } = require('../utils/sharding');
+const { postAnnouncement } = require('../utils/guildAnnounce');
+const COLORS = require('../utils/embedColors');
+
 // Personality traits assigned randomly on adoption
 const PERSONALITY_TRAITS = {
     lazy:        { label: 'Lazy',        emoji: '😴', desc: 'Perfectly content doing absolutely nothing.' },
@@ -645,6 +651,149 @@ function makeWildPet(level, rng = Math.random) {
     };
 }
 
+// ── Pet of the Week ───────────────────────────────────────────────────────────
+//
+// The one part of this module that reaches the database and Discord: the weekly
+// sweep that crowns each guild's most-loved pet. It moved here from
+// schedulerService.js in #931 — the ribbon it sets, the counter it clears and
+// the sprite it posts are all pet mechanics, and they belong beside them.
+//
+// It does not schedule itself. It is registered as a job in
+// `services/scheduler/index.js`, which owns the cron expression and runs it
+// through `runJob` — so a throw is recorded on the health payload and filed as
+// a dead-letter entry, and a tick is dropped rather than overlapped while the
+// previous run is still going (#611).
+
+// Pet of the Week payout. Overridable per guild via economy.potwReward.
+const POTW_COIN_REWARD = 5_000;
+
+/**
+ * Pick each guild's Pet of the Week and pay its owner — 5,000 coins by default,
+ * overridable per guild with `economy.potwReward`.
+ *
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<void>}
+ */
+async function selectPetOfTheWeek(client) {
+    const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+    const { generatePetSprite } = require('../utils/cardGenerator');
+    const { logTransaction } = require('../utils/logTransaction');
+
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const guilds  = await Guild.find({}, 'guildId economy potwLastRunAt').lean();
+
+    for (const guildDoc of guilds) {
+        const guildId = guildDoc.guildId;
+        // Per-guild job, checked before the claim: a shard that cannot reach
+        // this guild would otherwise take the week's claim and then have
+        // nowhere to announce.
+        if (!handlesGuild(guildId, client)) continue;
+
+        try {
+            // Atomic claim: only proceed if this guild hasn't been processed this week
+            const claimed = await Guild.findOneAndUpdate(
+                { guildId, $or: [{ potwLastRunAt: null }, { potwLastRunAt: { $lte: weekAgo } }] },
+                { $set: { potwLastRunAt: new Date() } },
+                { new: false }
+            );
+            if (!claimed) continue; // another worker already ran POTW for this guild this week
+
+            // Pick the winner in the database rather than loading every user with a
+            // pet into memory and scanning in JS.
+            const [top] = await User.aggregate([
+                { $match: { guildId, 'pets.0': { $exists: true } } },
+                { $unwind: '$pets' },
+                { $match: { 'pets.weeklyInteractions': { $gt: 0 } } },
+                { $sort: { 'pets.weeklyInteractions': -1 } },
+                { $limit: 1 },
+                { $project: { _id: 0, userId: 1, pet: '$pets' } },
+            ]);
+
+            // Crown the winner BEFORE clearing counters. Doing it the other way
+            // round meant a failure between the two left the week with no POTW and
+            // the counts already wiped, with nothing to recompute from.
+            if (top?.pet?._id) {
+                await User.updateOne(
+                    { guildId, userId: top.userId, 'pets._id': top.pet._id },
+                    { $set: { 'pets.$.potw': true } }
+                );
+            }
+
+            // Clear last week's ribbons and counters, leaving the new winner's flag.
+            // Two writes rather than one: mixing $[] and $[old] over the same array
+            // in a single $set is a path conflict MongoDB can reject.
+            await User.updateMany(
+                { guildId },
+                { $set: { 'pets.$[old].potw': false } },
+                { arrayFilters: [{ 'old._id': { $ne: top?.pet?._id ?? null } }] }
+            );
+            await User.updateMany({ guildId }, { $set: { 'pets.$[].weeklyInteractions': 0 } });
+
+            if (!top?.pet) continue;
+            const bestUser  = { userId: top.userId };
+            const bestPet   = top.pet;
+            const bestCount = bestPet.weeklyInteractions ?? 0;
+
+            // Winning is worth something now — it used to be a flag and an embed.
+            const potwCoins = guildDoc.economy?.potwReward ?? POTW_COIN_REWARD;
+            if (potwCoins > 0) {
+                const paid = await User.findOneAndUpdate(
+                    { guildId, userId: bestUser.userId },
+                    { $inc: { balance: potwCoins } },
+                    { new: true }
+                );
+                logTransaction({
+                    userId: bestUser.userId, guildId, type: 'potw_reward', amount: potwCoins,
+                    balance: paid?.balance ?? 0, note: 'Pet of the Week reward',
+                });
+            }
+
+            // Determine announcement channel
+            let channelId = guildDoc.economy?.announcementChannelId ?? null;
+            if (!channelId) {
+                const dg = await client.guilds.fetch(guildId).catch(() => null);
+                if (dg) channelId = dg.systemChannelId ?? null;
+            }
+            if (!channelId) continue;
+
+            const def      = PET_DEFINITIONS[bestPet.petId];
+            const name     = bestPet.name || def?.name || bestPet.petId;
+            const bondDays = Math.floor((Date.now() - new Date(bestPet.adoptedAt).getTime()) / 86400000);
+
+            const embed = new EmbedBuilder()
+                .setColor(COLORS.PRIZE)
+                .setTitle('🌟 Pet of the Week!')
+                .setDescription(
+                    `This week's most beloved pet is:\n\n` +
+                    `${def?.emoji ?? '🐾'} **${name}** — owned by <@${bestUser.userId}>\n\n` +
+                    `_${bestCount} interaction${bestCount !== 1 ? 's' : ''} this week_`
+                )
+                .addFields({ name: '❤️ Bond', value: `${heartBar(bondDays)} ${bondDays} days`, inline: true })
+                .setFooter({ text: 'Earn the ribbon by feeding, playing with, or resting your pet!' })
+                .setTimestamp();
+
+            // Only advertise a prize when one is actually paid; potwReward can be 0.
+            if (potwCoins > 0) {
+                embed.addFields({ name: '🏆 Prize', value: `${potwCoins.toLocaleString()} coins`, inline: true });
+            }
+
+            let files = [];
+            try {
+                const spriteBuf = await generatePetSprite(bestPet.petId, 80, bestPet.evolutionStage ?? 1);
+                embed.setThumbnail('attachment://potw_sprite.png');
+                files = [new AttachmentBuilder(spriteBuf, {
+                    name: 'potw_sprite.png',
+                    description: `Pixel-art sprite of ${name}, the pet of the week.`,
+                })];
+            } catch { /* non-critical */ }
+
+            await postAnnouncement(client, guildId, channelId, { embeds: [embed], files });
+        } catch (err) {
+            console.error(`[scheduler] selectPetOfTheWeek failed for guild ${guildId}:`, err.message);
+        }
+    }
+}
+
 module.exports = {
     PET_DEFINITIONS,
     PERSONALITY_TRAITS,
@@ -698,4 +847,6 @@ module.exports = {
     getPetStats,
     simulateBattle,
     makeWildPet,
+    // Scheduled work (see services/scheduler/index.js)
+    selectPetOfTheWeek,
 };

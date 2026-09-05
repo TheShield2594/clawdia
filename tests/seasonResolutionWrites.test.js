@@ -35,7 +35,7 @@ const Guild        = require('../src/models/Guild');
 const User         = require('../src/models/User');
 const SeasonRecord = require('../src/models/SeasonRecord');
 const { createSeasonRecapCard } = require('../src/utils/cardGenerator');
-const { resolveExpiredSeasons } = require('../src/services/schedulerService');
+const { resolveExpiredSeasons } = require('../src/services/economySeasonService');
 
 /** A thenable that answers every query modifier the job chains onto `find`. */
 function chain(docs) {

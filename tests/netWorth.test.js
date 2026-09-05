@@ -165,7 +165,7 @@ describe('every wealth surface goes through the shared helper', () => {
     const SURFACES = [
         'commands/leveling/leaderboard.js',
         'dashboard/routes/api/economy.js',
-        'services/schedulerService.js',
+        'services/leaderboardBadgeService.js',
         // The newspaper's rich list moved into the signals registry when the
         // paper's sections became one entry each (#836) — the surface is the
         // same, the file it lives in is not.

@@ -27,7 +27,7 @@ jest.mock('../src/models/User',  () => ({ find: jest.fn(), findOne: jest.fn(), f
 const Guild = require('../src/models/Guild');
 const User  = require('../src/models/User');
 const { softResetElo } = require('../src/utils/duelElo');
-const { resolveRankedSeasons } = require('../src/services/schedulerService');
+const { resolveRankedSeasons } = require('../src/services/rankedSeasonService');
 
 const DAY = 86_400_000;
 

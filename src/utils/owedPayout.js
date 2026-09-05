@@ -214,4 +214,30 @@ function describeOwedPayout(payload) {
     return JSON.stringify(payload);
 }
 
-module.exports = { recordOwedPayout, replayOwedPayout, describeOwedPayout, payoutKeyForPayload, isOwedPayout, OWED_SUFFIX };
+// What a sweep says about the payouts it could not deliver.
+//
+// The distinction matters to whoever reads the failure: a payout recorded as
+// owed is one command away from being paid, and one that could not even be
+// recorded is not — the claim is still spent, so nothing will find it again and
+// the log line is all that is left of it. Reporting both as "recorded as owed"
+// would send an operator to `payouts:replay` for a record that is not there.
+//
+// Both callers are sweeps that claim before they pay — the weekly champions and
+// the market listing returns — which is the same pair `recordOwedPayout` above
+// is written for; it sits here rather than in either of them for that reason
+// (#931).
+//
+// @param {number} failed      payouts the sweep could not deliver
+// @param {number} unrecorded  how many of those it could not even write down
+// @returns {string} a clause for the error the sweep throws
+function owedSummary(failed, unrecorded) {
+    const recorded = failed - unrecorded;
+    if (!unrecorded) return 'recorded as owed, replay with `npm run payouts:replay`';
+    if (!recorded) return 'none could be recorded as owed; they must be paid by hand, see the log above';
+    return (
+        `${recorded} recorded as owed (replay with \`npm run payouts:replay\`); ` +
+        `${unrecorded} could not be recorded and must be paid by hand, see the log above`
+    );
+}
+
+module.exports = { recordOwedPayout, replayOwedPayout, describeOwedPayout, payoutKeyForPayload, isOwedPayout, owedSummary, OWED_SUFFIX };

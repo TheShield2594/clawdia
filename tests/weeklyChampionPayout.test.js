@@ -29,14 +29,21 @@ jest.mock('discord.js', () => {
 jest.mock('../src/models/Guild', () => ({ find: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn(), updateOne: jest.fn() }));
 jest.mock('../src/models/User',  () => ({ find: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn(), aggregate: jest.fn(), updateOne: jest.fn(), updateMany: jest.fn(), bulkWrite: jest.fn() }));
 jest.mock('../src/models/WeeklyChampion', () => ({ aggregate: jest.fn(), find: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn(), updateMany: jest.fn() }));
-jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn() }));
+// Only recordOwedPayout is stubbed. `owedSummary` lives in the same module
+// (#931) and is what the sweep's own error message is built from, so
+// replacing the whole module would test the mock's wording rather than the
+// one an operator reads.
+jest.mock('../src/utils/owedPayout', () => ({
+    ...jest.requireActual('../src/utils/owedPayout'),
+    recordOwedPayout: jest.fn(),
+}));
 
 const Guild          = require('../src/models/Guild');
 const User           = require('../src/models/User');
 const WeeklyChampion = require('../src/models/WeeklyChampion');
 const { recordOwedPayout } = require('../src/utils/owedPayout');
 const { getPreviousWeekKey } = require('../src/utils/weeklyChampion');
-const { announceWeeklyChampions } = require('../src/services/schedulerService');
+const { announceWeeklyChampions } = require('../src/services/weeklyChampionService');
 
 const REWARD = 10_000;
 
@@ -189,7 +196,7 @@ describe('announceWeeklyChampions', () => {
         expect(User.findOneAndUpdate).toHaveBeenCalledTimes(2);
         expect(recordOwedPayout).toHaveBeenCalledTimes(1);
         expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
-            service: 'schedulerService',
+            service: 'weeklyChampionService',
             jobName: 'announceWeeklyChampions',
             guildId: 'g1',
             payload: expect.objectContaining({
