@@ -26,6 +26,7 @@ moderation attached, that is what she is built for.
 | [docs/EXTENDING.md](docs/EXTENDING.md) | Adding a command, a route, a model or a dashboard panel |
 | [docs/RELEASING.md](docs/RELEASING.md) | Cutting a release |
 | [docs/CANVAS_BACKEND.md](docs/CANVAS_BACKEND.md) | What the image's native build toolchain is for, and the measured case for replacing it |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | What is planned next, in what order, and the tradeoff that decides the order |
 | [docs/AUDIT_LOG.md](docs/AUDIT_LOG.md) | Which subsystems have been through a line-by-line audit, what each one found, and the much longer list of what has not been audited |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Getting set up, the coverage ratchets, and what surprises people |
 

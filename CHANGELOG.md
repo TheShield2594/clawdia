@@ -172,6 +172,63 @@ own credential in its path and a GitHub-hosted runner reaches nothing that is
 not across the public internet. The URL is never echoed on any path, and a
 failure warns rather than failing a build whose image is already published. `docs/RELEASING.md` has the setup.
 
+MongoDB traffic on `db-network` can be encrypted (#975). Nothing that talked to
+`mongod` used TLS, so with authentication on a process that had joined that
+network could no longer log in but could still read every balance, every audit
+entry and every administrative command off the wire — including the root session
+`mongo-replset-init` uses to initiate the replica set. SCRAM keeps the passwords
+themselves off it; everything after the handshake was in the clear. The exposure
+is bounded by `db-network` being `internal: true`, which is why this is opt-in
+and unset changes nothing: `MONGODB_TLS_ARGS` for `mongod`,
+`MONGODB_CLIENT_TLS_ARGS` for the two `mongosh` probes that connect by host and
+port, and `tls=true&tlsCAFile=…` on the `MONGODB_URI` the bot, `mongodump` and
+`mongorestore` all share — deliberately not command-line flags for those three,
+which the database tools reject as a configuration given twice. It is all five
+clients or none, and the healthcheck is what makes that safe rather than
+sharp-edged: it is one of the probes, so a `mongod` that requires TLS and a
+client that was not told never reports healthy and the bot never starts against
+a database it could not have reached. `scripts/mongo-tls-cert.sh` issues the CA
+and the server certificate, and `--check` prints the days remaining and reports
+to `ERROR_WEBHOOK_URL` under sixty — because a `mongod` that stops accepting
+connections at midnight on a forgotten expiry is a worse outage than the
+cleartext it was turned on to prevent, and it refuses to issue against a CA that
+cannot outlast the certificate, since a leaf outlives its issuer only on paper.
+The mounts name files rather than the directory holding them: `ca.crt` goes to
+all four containers, `server.pem` to `mongod` alone, and `ca.key` — the one thing
+that can mint a certificate this deployment would trust — into none of them.
+`tests/deployStackParity.test.js` holds both stack files in step so neither can
+gain a client the other has not, and fails on a directory mount or a mounted
+`ca.key`; `docs/SETUP_GUIDE.md` has the procedure, the ordering, the CA rollover
+and the case for leaving it off.
+
+The watch on `rss-parser` is written down where it can lapse loudly (#954).
+Nothing is wrong with the package today and nothing here changes how a feed is
+parsed. It is slow-moving, though, and it brings a transitive XML-parsing
+surface — a category with a long history of entity-expansion and parser CVEs —
+that sees any URL a guild admin subscribes to. The fetch side was already
+answered by `safeFeedFetch.js`; what was only in an issue was the parse side and
+the plan if the package is abandoned. `tests/rssParserWatch.test.js` now holds
+the two things that plan depends on: that Dependabot still reaches it, since an
+`ignore` entry added to quiet a weekly bump would take the advisory PRs with it,
+and that the surface stays one method on a string something else already
+fetched and bounded — a `parseURL`, which does its own unpinned, uncapped HTTP,
+or a third call site would each be one line and would each turn a morning of
+vendoring into a migration.
+
+Sequencing becomes a decision with a record (#914). There was no roadmap, no
+milestones and no pinned planning issue, so direction was reconstructable only
+by reading this file backwards and following issue references — and the one
+tradeoff that actually governs the project, audit the economy (#873) or ship the
+next game system, was being made implicitly, one pull request at a time.
+`docs/ROADMAP.md` makes it explicitly: the economy audit comes before net-new
+game features, with the two landed passes and the thirteen critical defects they
+found as the argument, and with bug fixes, security and operational work
+explicitly not blocked behind it. It names the next four items, the order of the
+audit queue within the economy — money-moving first — and, in a section for the
+purpose, the things that were closed with a decision rather than a task, so the
+next reader who notices one finds the reasoning instead of reopening it. No dates
+and no estimates: it would be wrong about both, and what it is for is order.
+
 ## [4.5.2] - 2026-09-01
 
 Migrations through `021_market_listing_ttl_grace`.

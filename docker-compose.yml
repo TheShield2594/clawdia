@@ -45,11 +45,51 @@ services:
     # `mongo-replset-init` does the one-time `rs.initiate()`. See "Running
     # MongoDB as a single-node replica set" in docs/SETUP_GUIDE.md for the full
     # procedure, including the one for a deployment that already has data.
-    command: mongod ${MONGODB_REPLICA_SET_ARGS:-}
+    # TLS on the wire, empty by default so nothing changes for a deployment that
+    # does not set it (#975). db-network is `internal: true` — no gateway, no
+    # published ports — so this is defence in depth and not a live hole: what it
+    # closes is a process that has *already* joined that network. Authentication
+    # stopped such a process logging in; it did not stop it reading. MongoDB
+    # authenticates with SCRAM, so no password is ever on the wire and a captured
+    # session cannot be replayed to log in, but everything after the handshake is
+    # cleartext — every balance, every audit entry, every admin command, and the
+    # root session `mongo-replset-init` uses to initiate the set:
+    #
+    #   MONGODB_TLS_ARGS=--tlsMode requireTLS --tlsCertificateKeyFile /etc/mongo-tls/server.pem --tlsCAFile /etc/mongo-tls/ca.crt --tlsAllowConnectionsWithoutCertificates
+    #
+    # The last flag is not optional and not a weakening. Naming a CA file is
+    # what lets mongod validate the certificate it presents to *itself* over
+    # the replication connection, and it is also what makes mongod start
+    # demanding a certificate from every client — which none of the four here
+    # has, because this is server authentication and not mutual TLS. Without
+    # it the CA file turns every client connection away.
+    #
+    # It is all clients or none. A single client left on cleartext leaves the
+    # traffic readable, and a `requireTLS` mongod with one client that has not
+    # been told is simply a deploy that cannot reach its own database. The other
+    # two halves are MONGODB_CLIENT_TLS_ARGS, for the two mongosh probes that
+    # connect by host and port, and the tls options on MONGODB_URI, which is what
+    # the bot, mongodump and mongorestore all read. Generate the material with
+    # `scripts/mongo-tls-cert.sh` and follow "Encrypting MongoDB traffic with
+    # TLS" in docs/SETUP_GUIDE.md — the ordering matters, and so does the expiry
+    # date: a mongod that stops accepting connections at midnight is a worse
+    # outage than the exposure this prevents.
+    command: mongod ${MONGODB_REPLICA_SET_ARGS:-} ${MONGODB_TLS_ARGS:-}
     volumes:
       - mongodb_data:/data/db
       - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
       # - ./secrets/mongo-keyfile:/etc/mongo-keyfile:ro
+      # The TLS material MONGODB_TLS_ARGS names (#975), produced by
+      # `scripts/mongo-tls-cert.sh`. server.pem is the certificate and its
+      # private key concatenated, which is the single file mongod wants; ca.crt
+      # is what it validates its own replication connection against.
+      #
+      # File by file, not the directory that holds them. ca.key is in there too,
+      # and it is the one thing that can mint a certificate this whole
+      # deployment would trust — it belongs on the host and in no container at
+      # all, this one included. mongod never reads it.
+      # - ./secrets/mongo-tls/server.pem:/etc/mongo-tls/server.pem:ro
+      # - ./secrets/mongo-tls/ca.crt:/etc/mongo-tls/ca.crt:ro
     networks:
       - db-network   # internal-only: no external routing, no published ports
     healthcheck:
@@ -60,7 +100,15 @@ services:
       # which the bot must not be started: its migrations run at boot and would
       # fail against a node that is not primary. A standalone mongod reports
       # itself writable as soon as it is up, so nothing changes there.
-      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.hello().isWritablePrimary ? 0 : 1)"]
+      #
+      # CMD-SHELL rather than CMD because of MONGODB_CLIENT_TLS_ARGS (#975):
+      # unset, it has to expand to no arguments at all, and an exec-form list
+      # would hand mongosh one empty string instead. It is also what makes a
+      # half-configured TLS deployment fail safely — a mongod that requires TLS
+      # and a probe that does not offer it never reports healthy, and the bot and
+      # the backup both wait on that condition, so neither starts against a
+      # database it could not have reached.
+      test: ["CMD-SHELL", "mongosh --quiet ${MONGODB_CLIENT_TLS_ARGS:-} --eval \"quit(db.hello().isWritablePrimary ? 0 : 1)\""]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -124,6 +172,16 @@ services:
     environment:
       MONGODB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-}
       MONGODB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-}
+      # The same flags mongod's own healthcheck passes, for the same reason
+      # (#975): this reaches mongod by host and port rather than through a URI,
+      # so a mongod started with --tlsMode requireTLS has no other way to be
+      # spoken to. The cert mount below has to be uncommented with it.
+      MONGODB_CLIENT_TLS_ARGS: ${MONGODB_CLIENT_TLS_ARGS:-}
+    # Uncomment alongside it — this reaches mongod as a client and so
+    # needs the CA to validate it against, and nothing else in the directory
+    # that CA lives in.
+    # volumes:
+    #   - ./secrets/mongo-tls/ca.crt:/etc/mongo-tls/ca.crt:ro
     # No apostrophes below — not in a comment either (#940). Compose splits a
     # string entrypoint into arguments before the container starts, so the first
     # single quote inside this script closes the one that opened it and
@@ -144,22 +202,27 @@ services:
         # arguments and mongosh would get a truncated one; quoted, it would be a
         # single empty argument when auth is off. Passing the credentials as
         # their own quoted arguments is the only form that is right both ways.
+        # Unquoted, and that is the opposite of the rule above rather than an
+        # oversight: this one is a list of arguments, not a value. Unset it has
+        # to disappear entirely, which is what an unquoted empty expansion does
+        # and a quoted one does not. The password is one value that must survive
+        # a space; this is zero or more flags that must survive being absent.
         authed_mongosh() {
           if [ -n "$$MONGODB_ROOT_USERNAME" ]; then
-            mongosh --host "$$HOST" --quiet --username "$$MONGODB_ROOT_USERNAME" --password "$$MONGODB_ROOT_PASSWORD" --authenticationDatabase admin "$$@";
+            mongosh --host "$$HOST" --quiet $$MONGODB_CLIENT_TLS_ARGS --username "$$MONGODB_ROOT_USERNAME" --password "$$MONGODB_ROOT_PASSWORD" --authenticationDatabase admin "$$@";
           else
-            mongosh --host "$$HOST" --quiet "$$@";
+            mongosh --host "$$HOST" --quiet $$MONGODB_CLIENT_TLS_ARGS "$$@";
           fi;
         };
         # Unauthenticated on purpose: `hello` is answered before login, which is
         # what lets this work on a deployment whose credentials it was not given.
         writable() {
-          mongosh --host "$$HOST" --quiet --eval "quit(db.hello().isWritablePrimary ? 0 : 1)" >/dev/null 2>&1;
+          mongosh --host "$$HOST" --quiet $$MONGODB_CLIENT_TLS_ARGS --eval "quit(db.hello().isWritablePrimary ? 0 : 1)" >/dev/null 2>&1;
         };
         # mongod accepts a TCP connection well before it answers anything, so
         # this waits on an answer and not on the port being open.
         i=0;
-        until mongosh --host "$$HOST" --quiet --eval "db.hello()" >/dev/null 2>&1; do
+        until mongosh --host "$$HOST" --quiet $$MONGODB_CLIENT_TLS_ARGS --eval "db.hello()" >/dev/null 2>&1; do
           i=$$((i + 1));
           if [ $$i -ge 60 ]; then echo "[replset-init] mongod at $$HOST never answered"; exit 1; fi;
           sleep 2;
@@ -274,6 +337,12 @@ services:
       # MCP server list, read at startup. Mounted rather than baked into the
       # image so the file (which can hold OAuth tokens) stays on the host.
       - ./config:/app/config:ro
+      # The CA that validates mongod, when MONGODB_TLS_ARGS is on (#975). The one
+      # file, not the directory it lives in: ca.key and mongod's own private key
+      # sit beside it and nothing here has any use for either.
+      # The bot reads it through MONGODB_URI: add
+      # `?tls=true&tlsCAFile=/etc/mongo-tls/ca.crt` to it in the same edit.
+      # - ./secrets/mongo-tls/ca.crt:/etc/mongo-tls/ca.crt:ro
     networks:
       - db-network      # reaches MongoDB
       - clawdia-network # reaches the internet (Discord API, AI APIs, etc.)
@@ -484,6 +553,12 @@ services:
     #   - backup_encryption_passphrase
     volumes:
       - ./backups:/backups
+      # The CA that validates mongod, when MONGODB_TLS_ARGS is on (#975). The one
+      # file, not the directory it lives in: ca.key and mongod's own private key
+      # sit beside it and nothing here has any use for either.
+      # mongodump and mongorestore read it out of the same MONGODB_URI the
+      # bot uses, so there is no separate flag to set here — only this mount.
+      # - ./secrets/mongo-tls/ca.crt:/etc/mongo-tls/ca.crt:ro
     networks:
       - db-network   # only needs to reach MongoDB
     depends_on:
