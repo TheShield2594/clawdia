@@ -107,10 +107,17 @@ FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a
 # published fix (#961). `--no-cache` is apk's own index cache and does nothing
 # about this.
 #
-# APK_REFRESH is the cache key that unfreezes it: CI passes the current UTC
-# date, so the layer is rebuilt once a day and the upgrade actually re-resolves.
-# It is declared here, inside the runtime stage, so a new day costs one `apk`
-# layer and not a fresh `canvas` compile up in the build stage.
+# APK_REFRESH is the cache key that unfreezes it: CI passes the current UTC date
+# plus a bumpable epoch, so the layer is rebuilt at least once a day and the
+# upgrade actually re-resolves. It is declared here, inside the runtime stage,
+# so a new day costs one `apk` layer and not a fresh `canvas` compile up in the
+# build stage.
+#
+# The epoch is the day-granularity's escape hatch, and it was added because the
+# day lost: a fix published to Alpine after the day's first build cannot reach
+# the image until midnight, and the scan goes red in the meantime on a package
+# whose fix is already in the repository. util-linux 2.42.3-r0 was that case.
+# See the step that computes the key in .github/workflows/ci.yml.
 #
 # It costs no determinism that `apk add` had not already spent — both resolve
 # against whatever Alpine is serving at build time, which is exactly what the

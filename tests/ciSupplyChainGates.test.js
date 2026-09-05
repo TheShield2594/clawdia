@@ -201,6 +201,20 @@ describe('#961 — the apk upgrade layer is not frozen by the cache', () => {
         expect(runScript(buildJob)).toMatch(/date -u\b/);
     });
 
+    test('and an epoch, so a mid-day fix does not have to wait for midnight', () => {
+        // A date alone is only as fresh as the day's first build. A fix Alpine
+        // published after it cannot reach the image until the date rolls, and
+        // the scan above goes red for the rest of the day on a package whose
+        // fix is sitting in the repository — util-linux 2.42.3-r0 was exactly
+        // that. The epoch is the lever that unfreezes it without making every
+        // build a cold apk layer, and it is worth nothing if it is not in the
+        // key that the layer is actually keyed on.
+        const step = stepsOf(buildJob).find(s => s.id === 'apk');
+        expect(step.env).toBeDefined();
+        expect(step.env.APK_EPOCH).toBeDefined();
+        expect(step.run).toContain('APK_EPOCH');
+    });
+
     test('the publish build takes the build job\'s value rather than its own', () => {
         // Recomputing it here would publish an image built from different
         // inputs than the one the scan passed — and miss the cache to do it.

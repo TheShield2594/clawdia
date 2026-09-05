@@ -334,9 +334,26 @@ jobs:
       # every build, which would mean a cold apk layer on every push for a
       # freshness nobody needs. A day is well inside the window that matters and
       # keeps the cache doing its job the rest of the time.
+      #
+      # Except when it is not, which is what `APK_EPOCH` is for. A fix published
+      # to Alpine *after* the day's first build has no way to reach the image
+      # until the date rolls: every build that day restores the layer the first
+      # one cached, and the scan below goes red on a package whose fix is
+      # sitting in the repository. That happened with util-linux
+      # (CVE-2026-53612 and six more, fixed in 2.42.3-r0): `main` was green at
+      # 15:49, the advisory landed in Trivy's database afterwards, and every
+      # build for the rest of the day scanned the same frozen layer.
+      #
+      # Waiting for midnight is not an answer when CI is red now, and making the
+      # key per-build throws away the caching this was written to keep. So the
+      # key is the date plus a number somebody bumps: cheap, explicit, and
+      # inert until it is needed. Bump it when a scan reports a fix Alpine has
+      # already published, and say which advisory in the commit.
       - name: Compute the apk refresh key
         id: apk
-        run: echo "key=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+        env:
+          APK_EPOCH: 1
+        run: echo "key=$(date -u +%Y-%m-%d).${APK_EPOCH}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
