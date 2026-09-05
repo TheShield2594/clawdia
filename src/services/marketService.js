@@ -39,6 +39,14 @@ async function returnExpiredMarketListings() {
     const now = new Date();
     let processed = 0;
     let failed = 0;
+    // Of the failures, the ones that happened *after* the listing was deleted,
+    // and so are owed rather than merely retried. A failure before the claim
+    // leaves the listing in place for the next tick and is owed nothing, so it
+    // counts toward `failed` and must stay out of the owed summary below —
+    // `owedSummary` derives "how many were recorded" by subtraction, and a
+    // pre-claim failure in that subtraction reports a queue entry that is not
+    // there.
+    let owedReturns = 0;
     let unrecordedReturns = 0;
 
     // Batched to avoid large memory spikes, and oldest first.
@@ -128,6 +136,7 @@ async function returnExpiredMarketListings() {
                 // seller who simply has no document; anything here is a real
                 // failure or a concurrent write that beat the guard.
                 failed++;
+                owedReturns++;
                 const reason = creditErr?.message ??
                     `return for ${listing.sellerId} in ${listing.guildId} matched nothing (${status})`;
                 const recorded = await recordOwedPayout({
@@ -177,7 +186,7 @@ async function returnExpiredMarketListings() {
         throw new Error(
             `${failed} of ${expired.length} expired listing(s) could not be returned` +
             (processed ? ` (${processed} were)` : '') +
-            (unrecordedReturns ? ` — ${owedSummary(failed, unrecordedReturns)}` : '')
+            (unrecordedReturns ? ` — ${owedSummary(owedReturns, unrecordedReturns)}` : '')
         );
     }
 }

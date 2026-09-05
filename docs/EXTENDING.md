@@ -739,9 +739,16 @@ file reads is not. `tests/dashboardScriptBoundaries.test.js` holds that, and
 `eslint.config.js` lists the whole shared surface — an addition to that list is
 a sign the thing belongs in `dashboard-core.js` instead.
 
-A new panel is a new `panel-*.js` plus a line in the view, a line in
-`scripts/build-assets.js`, and an entry in `SCRIPT_BASELINE` in
-`tests/dashboardInlineAttributes.test.js` if it renders any inline style.
+A new panel is a new `panel-*.js` plus four small entries elsewhere:
+
+- a `<script defer>` tag in `views/guild-settings.ejs`, in load order;
+- the same filename in `SOURCES` in `scripts/build-assets.js`, in the same
+  order — the view, the build and the suites' boot all read that one list;
+- its path in `neverExecuted` in `coverage-floors.json`. These are browser
+  scripts that no Node test requires, so the file measures zero coverage and
+  `npm run coverage:check` fails on a zero-coverage file that is not recorded;
+- an entry in `SCRIPT_BASELINE` in `tests/dashboardInlineAttributes.test.js`,
+  if it renders any inline style.
 
 `data-input` and `data-change` have their own tables (`INPUT_ACTIONS`,
 `CHANGE_ACTIONS`) for fields rather than buttons.

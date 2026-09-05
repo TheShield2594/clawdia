@@ -177,6 +177,32 @@ describe('lazily loaded settings panels', () => {
         expect(mcp.some(url => /mcp-servers/.test(url))).toBe(true);
     });
 
+    // A repeater's role picker must not depend on another panel having been
+    // opened. This one used to copy its options out of a select already on the
+    // page, falling back to the Leveling panel's no-XP picker — and Leveling is
+    // fetched on a click like every other panel, so a guild adding its first
+    // tier reward without having opened it got a select holding nothing but
+    // "No role".
+    it('builds a repeater\'s role picker without help from another panel', async () => {
+        bootPage();
+        clickTab('season');
+        await settle();
+
+        // A guild with no tier rewards configured yet: the view renders no
+        // rows, so there is no existing select to copy from either.
+        document.getElementById('season-tier-rewards-list').innerHTML = '';
+        expect(document.getElementById('level-no-xp-roles-select')).toBeNull();
+
+        document.querySelector('[data-action="add-season-tier-row"]')
+            .dispatchEvent(new window.Event('click', { bubbles: true }));
+
+        const options = Array.from(
+            document.querySelector('#season-tier-rewards-list .season-tier-role').options,
+        ).map(o => [o.value, o.text]);
+        expect(options[0]).toEqual(['', 'No role']);
+        expect(options.length).toBeGreaterThan(1);
+    });
+
     it('never lets a slow panel steal the view from a later click', async () => {
         const gates = {};
         bootPage({

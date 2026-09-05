@@ -227,14 +227,15 @@ function addSeasonTierRow() {
     const row = document.createElement('div');
     row.className = 'season-tier-row';
     row.style.cssText = 'display:flex;gap:.5rem;align-items:center;flex-wrap:wrap';
-    const roleRef = document.querySelector('#season-tier-rewards-list .season-tier-role')
-                 || document.getElementById('level-no-xp-roles-select');
-    const roleOptionsHtml = roleRef
-        ? '<option value="">No role</option>' + Array.from(roleRef.options)
-            .filter(function(o) { return o.value; })
-            .map(function(o) { return '<option value="' + escHtml(o.value) + '">' + escHtml(o.text) + '</option>'; })
-            .join('')
-        : '<option value="">No role</option>';
+    // Built from the bootstrap role list, the same source partials/role-select
+    // renders every other role picker from — and matching its `@name` option
+    // text. It used to copy the options out of a select already on the page,
+    // falling back to the Leveling panel's no-XP picker, which meant a guild
+    // adding its first tier reward before ever opening Leveling got a select
+    // with nothing in it but "No role".
+    const roleOptionsHtml = '<option value="">No role</option>' + boot('roles')
+        .map(function(r) { return '<option value="' + escHtml(r.id) + '">@' + escHtml(r.name) + '</option>'; })
+        .join('');
     row.innerHTML =
         '<input type="number" class="season-tier-num" min="1" style="width:70px" placeholder="Tier" aria-label="Tier number">' +
         '<input type="number" class="season-tier-coins" min="0" style="width:90px" placeholder="Coins" aria-label="Coin reward">' +

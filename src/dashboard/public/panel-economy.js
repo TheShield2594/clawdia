@@ -130,7 +130,7 @@ function renderStoreItems() {
     }
     grid.innerHTML = storeItems.map(function(item, i) {
         const roleName = item.roleId ? (_roleMap[item.roleId] || item.roleId) : null;
-        const stockText = (item.stock === -1 || item.stock == null) ? '∞ Unlimited' : item.stock + ' left';
+        const stockText = (item.stock === -1 || item.stock == null) ? '∞ Unlimited' : Number(item.stock) + ' left';
         const imgSrc = (item.itemId && _shopItemPendingImages[item.itemId])
             ? _shopItemPendingImages[item.itemId].dataUrl
             : (item.itemId ? '/api/v1/item-image/shop/' + _guildId + '/' + escHtml(item.itemId) : '');
@@ -291,10 +291,10 @@ function renderJobTiers() {
         const badge = JOB_TIER_BADGES[i] || '⚪';
         const isFirst = t.minShifts === 0;
         return '<div class="job-tier-row" style="border-left:3px solid ' + color + '">' +
-            '<span class="job-tier-row-badge">' + badge + ' Tier ' + t.tier + '</span>' +
+            '<span class="job-tier-row-badge">' + badge + ' Tier ' + Number(t.tier) + '</span>' +
             '<input class="job-tier-name-input" data-tier-idx="' + i + '" data-field="name" value="' + escHtml(t.name) + '" placeholder="Tier name">' +
             '<div class="job-tier-row-shifts">' +
-                '<input type="number" class="job-tier-shifts-input" data-tier-idx="' + i + '" data-field="minShifts" value="' + t.minShifts + '" min="0"' + (isFirst ? ' disabled title="Tier 1 always starts at 0 shifts"' : '') + '>' +
+                '<input type="number" class="job-tier-shifts-input" data-tier-idx="' + i + '" data-field="minShifts" value="' + Number(t.minShifts) + '" min="0"' + (isFirst ? ' disabled title="Tier 1 always starts at 0 shifts"' : '') + '>' +
                 '<span class="job-tier-shifts-label">shifts to unlock</span>' +
             '</div>' +
         '</div>';
@@ -342,8 +342,12 @@ function renderJobs() {
                 '</div>';
             lastTier = tier;
         }
-        const minPay = job.minPay != null ? job.minPay : '?';
-        const maxPay = job.maxPay != null ? job.maxPay : '?';
+        // Coerced rather than escaped: these are numbers, and a number is
+        // the one shape that cannot carry markup. They arrive from the
+        // saved settings, which the API can write without going through
+        // the modal's parseInt.
+        const minPay = job.minPay != null ? Number(job.minPay) : '?';
+        const maxPay = job.maxPay != null ? Number(job.maxPay) : '?';
         html += '<div class="job-chip">' +
             (job.emoji ? '<span class="job-chip-emoji">' + escHtml(job.emoji) + '</span>' : '') +
             '<span class="job-name">' + escHtml(job.name) + '</span>' +

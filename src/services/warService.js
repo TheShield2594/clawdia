@@ -148,8 +148,13 @@ async function resolveOneWar(client, guildDoc) {
                     `**${winnerName}** has crushed **${loserName}**!\n\n` +
                     `**Score:** ${winnerScore.toLocaleString()} — ${loserScore.toLocaleString()}\n\n` +
                     `All members receive a **2× coin booster** for 24 hours and a **🎖️ War Victor** badge for 30 days!`
-                )
-                .setImage('attachment://war_victory.png');
+                );
+            // Only when the banner was actually built: announceWar attaches the
+            // file only if it exists, and an embed pointing at an attachment
+            // that was never sent renders as a broken image rather than as no
+            // image. Banner generation is best-effort (it is caught above), so
+            // this is the state a failed render leaves behind.
+            if (bannerAttachment) embed.setImage('attachment://war_victory.png');
             if (mvpUserId) embed.addFields({ name: '🏅 MVP', value: `<@${mvpUserId}> • ${mvpName ?? ''}`, inline: true });
             if (clutchUserId) embed.addFields({ name: '💪 Most Clutch', value: `<@${clutchUserId}> • ${clutchName ?? ''}`, inline: true });
             embed.setTimestamp();

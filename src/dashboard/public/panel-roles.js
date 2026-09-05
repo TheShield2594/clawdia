@@ -93,7 +93,7 @@ function addRrMapping() {
     row.innerHTML =
         '<input type="text" placeholder="Emoji (e.g. 👍)" class="rr-emoji" style="font-size:1.1rem;" aria-label="Emoji">' +
         '<select class="rr-role" aria-label="Role to assign"><option value="">Select role</option>' +
-        rrRoles.map(function(r) { return '<option value="' + r.id + '">@' + escHtml(r.name) + '</option>'; }).join('') +
+        rrRoles.map(function(r) { return '<option value="' + escHtml(r.id) + '">@' + escHtml(r.name) + '</option>'; }).join('') +
         '</select>' +
         '<button class="btn btn-sm btn-danger" type="button" data-action="row-remove" data-row-remove="rr-mapping" aria-label="Remove this reaction role mapping">×</button>';
     list.appendChild(row);

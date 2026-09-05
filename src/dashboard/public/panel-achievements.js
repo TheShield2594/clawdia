@@ -45,13 +45,16 @@ function renderBuiltinAchievements() {
     if (!_BUILTIN_ACHS.length) { list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem">No built-in achievements loaded.</p>'; return; }
     list.innerHTML = _BUILTIN_ACHS.map(function(a) {
         const disabled = _disabledAchievements.indexOf(a.id) !== -1;
-        const catLabel = (ACH_CAT_EMOJIS[a.category] || '🔹') + ' ' + (ACH_CAT_LABELS[a.category] || a.category);
+        // The label falls back to the stored category when the map has no
+        // entry for it, so it carries whatever was saved — escaped like
+        // every other value on this card.
+        const catLabel = escHtml((ACH_CAT_EMOJIS[a.category] || '🔹') + ' ' + (ACH_CAT_LABELS[a.category] || a.category));
         return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
             '<span style="font-size:1.4rem">' + escHtml(a.emoji) + '</span>' +
             '<span style="flex:1"><strong>' + escHtml(a.name) + '</strong> <span style="font-size:.8rem;color:var(--text-dim)">' + catLabel + '</span><br>' +
                 '<span style="font-size:.85rem;color:var(--text-mute)">' + escHtml(a.description) + '</span></span>' +
             '<span style="font-size:.8rem;color:var(--text-dim);margin-right:.5rem">' +
-                (a.xpReward ? '+' + a.xpReward + ' XP' : '') + (a.xpReward && a.coinReward ? ' · ' : '') + (a.coinReward ? '+' + a.coinReward.toLocaleString() + ' coins' : '') +
+                (a.xpReward ? '+' + Number(a.xpReward) + ' XP' : '') + (a.xpReward && a.coinReward ? ' · ' : '') + (a.coinReward ? '+' + a.coinReward.toLocaleString() + ' coins' : '') +
             '</span>' +
             '<label class="switch" style="margin:0"><input type="checkbox"' + (disabled ? '' : ' checked') + ' data-builtin-ach-id="' + escHtml(a.id) + '"><span class="slider"></span></label>' +
         '</div>';
@@ -73,14 +76,15 @@ function renderCustomAchievements() {
         return;
     }
     list.innerHTML = _customAchievements.map(function(a, i) {
-        const catLabel = (ACH_CAT_EMOJIS[a.category] || '🔹') + ' ' + (ACH_CAT_LABELS[a.category] || a.category);
+        // Same fallback, same rule as the built-in list above.
+        const catLabel = escHtml((ACH_CAT_EMOJIS[a.category] || '🔹') + ' ' + (ACH_CAT_LABELS[a.category] || a.category));
         return '<div class="store-card">' +
             '<div class="store-card-body">' +
                 '<div class="store-card-name">' + escHtml(a.emoji || '🏆') + ' ' + escHtml(a.name) + '</div>' +
                 '<div class="store-card-desc">' + (a.description ? escHtml(a.description) : '<em style="color:var(--text-mute)">No description</em>') + '</div>' +
                 '<div class="store-card-meta">' +
                     '<span class="store-meta-tag">' + catLabel + '</span>' +
-                    (a.xpReward ? '<span class="store-meta-tag">+' + a.xpReward + ' XP</span>' : '') +
+                    (a.xpReward ? '<span class="store-meta-tag">+' + Number(a.xpReward) + ' XP</span>' : '') +
                     (a.coinReward ? '<span class="store-meta-tag price-tag">+' + Number(a.coinReward).toLocaleString() + ' coins</span>' : '') +
                 '</div>' +
             '</div>' +

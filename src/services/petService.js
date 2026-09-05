@@ -742,10 +742,22 @@ async function selectPetOfTheWeek(client) {
                     { $inc: { balance: potwCoins } },
                     { new: true }
                 );
-                logTransaction({
-                    userId: bestUser.userId, guildId, type: 'potw_reward', amount: potwCoins,
-                    balance: paid?.balance ?? 0, note: 'Pet of the Week reward',
-                });
+                // `null` means no document matched — the winner's record was
+                // pruned between the aggregation above and this write — so
+                // nothing was credited. The ledger entry is written only for a
+                // credit that landed: one without a matching credit claims
+                // coins nobody was paid.
+                if (paid) {
+                    logTransaction({
+                        userId: bestUser.userId, guildId, type: 'potw_reward', amount: potwCoins,
+                        balance: paid.balance, note: 'Pet of the Week reward',
+                    });
+                } else {
+                    console.error(
+                        `[scheduler] selectPetOfTheWeek could not pay ${potwCoins} coins to ` +
+                        `${bestUser.userId} in ${guildId} — no user document matched`,
+                    );
+                }
             }
 
             // Determine announcement channel
