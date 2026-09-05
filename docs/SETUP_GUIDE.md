@@ -1146,6 +1146,153 @@ the variable back on resumes the same set rather than needing a second
 `rs.initiate()` — and transactions are unavailable again for as long as it is
 off, which is the thing to weigh, not the data.
 
+### Encrypting MongoDB traffic with TLS
+
+Off by default, and genuinely optional — read the tradeoff before turning it on.
+
+`db-network` is declared `internal: true`: it has no gateway, no published ports,
+and nothing outside the Docker host can route to it. So this is defence in depth
+rather than a live hole. What it closes is a process that has *already* joined
+that network. Authentication (the section above) closed half of that position —
+such a process can no longer log in. This is the other half: with auth on and TLS
+off, it still reads every balance, every audit entry and every administrative
+command off the wire, including the root session `mongo-replset-init` uses to
+initiate the replica set.
+
+To be precise about how urgent that is, because it changes the answer: MongoDB
+authenticates with SCRAM, a challenge-response exchange. No password is ever
+transmitted, and a captured session cannot be replayed to log in. Everything
+*after* the handshake is cleartext.
+
+If an `internal: true` network is an acceptable trust boundary for your
+deployment — one host, one operator, nothing else scheduled on it — leaving this
+off is a defensible decision and not a deferred one. What is not defensible is
+turning it on and forgetting the expiry date; see the last part of this section.
+
+**It is all clients or none.** Five things talk to `mongod` on `db-network`, and
+one of them left on cleartext leaves the traffic readable. Worse, a `mongod` in
+`requireTLS` mode with one client that was not told is not a weaker deployment —
+it is a deployment that cannot reach its own database. They are configured by
+three settings, and `tests/deployStackParity.test.js` holds both stack files in
+step so neither can gain a client the other does not have:
+
+| Client | Configured by |
+| --- | --- |
+| the bot | `tls=true&tlsCAFile=…` on `MONGODB_URI` |
+| the nightly `mongodump` and its `mongorestore --dryRun` | the same `MONGODB_URI` |
+| `mongod`'s healthcheck (`mongosh`) | `MONGODB_CLIENT_TLS_ARGS` |
+| `mongo-replset-init` (`mongosh`) | `MONGODB_CLIENT_TLS_ARGS` |
+| `mongod` itself | `MONGODB_TLS_ARGS` |
+
+The two `mongosh` probes need their own setting because they connect by host and
+port and have no connection string to carry the options. The three that do take
+one all read the same `MONGODB_URI`, so they are one edit and cannot disagree
+with each other — and they are deliberately given *no* command-line TLS flags:
+the database tools reject a configuration specified both ways.
+
+**1. Issue the certificate.** On the Docker host, beside `docker-compose.yml`
+(or wherever the stack keeps its secrets):
+
+```bash
+./scripts/mongo-tls-cert.sh                    # writes ./secrets/mongo-tls
+./scripts/mongo-tls-cert.sh /opt/clawdia/mongo-tls    # Portainer host path
+```
+
+That writes `ca.crt` (what clients validate against), `ca.key` (the only thing
+that can mint a replacement — the one file worth moving off the host) and
+`server.pem` (certificate and key concatenated, which is the single file
+`mongod` wants). The certificate is issued for `mongodb`, the service name every
+client dials, plus `localhost` and `127.0.0.1` for a `docker exec` `mongosh`;
+pass any additional hostnames as further arguments. It chowns `server.pem` to
+uid 999, which is what `mongod` runs as inside the image — if you did not run it
+as root it says so, and `mongod` will not start until you do that step.
+
+**2. Mount it.** Uncomment the four `mongo-tls` mounts — on `mongodb`,
+`mongo-replset-init`, `bot` and `backup`. All four, or step 4 locks out whichever
+one you skipped.
+
+**3. Point the clients at it, before `mongod`.** In `.env` or the stack
+environment:
+
+```bash
+MONGODB_CLIENT_TLS_ARGS=--tls --tlsCAFile /etc/mongo-tls/ca.crt
+MONGODB_URI=mongodb://clawdia:<app-password>@mongodb:27017/ultrabot?authSource=ultrabot&tls=true&tlsCAFile=/etc/mongo-tls/ca.crt
+```
+
+**4. Then turn `mongod` over**, in the same edit:
+
+```bash
+MONGODB_TLS_ARGS=--tlsMode requireTLS --tlsCertificateKeyFile /etc/mongo-tls/server.pem --tlsCAFile /etc/mongo-tls/ca.crt --tlsAllowConnectionsWithoutCertificates
+```
+
+```bash
+docker compose up -d --force-recreate
+```
+
+The last flag is not a weakening and not optional. Naming a CA file is what lets
+`mongod` validate the certificate it presents to *itself* over the replication
+connection — a single-node replica set still opens one — and it is also what
+makes `mongod` start demanding a certificate from every client. None of the four
+clients has one, because this is server authentication, not mutual TLS. Without
+that flag the CA file turns every client connection away.
+
+The ordering above is the safe one, but it is not load-bearing, because the
+healthcheck is: `mongod`'s probe is a `mongosh` carrying
+`MONGODB_CLIENT_TLS_ARGS`, so a `mongod` that requires TLS and a probe that was
+not told never reports healthy — and the bot and the `backup` service both wait
+on `service_healthy`. A half-configured deployment stalls with a red container
+instead of starting the bot against a database it cannot reach. The one gap that
+guard does not cover is `MONGODB_URI`: forget the options there and `mongod` goes
+green while the bot fails to connect, which is why it belongs in step 3 rather
+than being left for later.
+
+Check it took:
+
+```bash
+docker exec -it clawdia-mongodb mongosh --tls --tlsCAFile /etc/mongo-tls/ca.crt \
+  --quiet --eval 'db.adminCommand({ getParameter: 1, sslMode: 1 })'
+```
+
+**Turning it back off** is the reverse order — clear `MONGODB_TLS_ARGS` first,
+recreate, then clear the two client settings — and no data is touched either way.
+
+#### The expiry date
+
+This is the part that decides whether the whole thing was worth having on. A
+`mongod` that stops accepting connections at midnight on a date nobody recorded
+is a worse outage than the cleartext it was turned on to prevent, and a
+self-signed CA is very easy to leave un-rotated.
+
+Two things are done about it. The lifetimes are deliberately long — ten years for
+the CA, five for the server certificate — because a private CA on an
+internal-only network gains nothing from short rotation; there is no revocation
+path here that would make it meaningful, and every month shaved off is a month
+closer to that outage. And the script will tell you where you stand:
+
+```bash
+./scripts/mongo-tls-cert.sh --check              # prints the days remaining
+```
+
+It exits non-zero under 60 days (`MONGO_TLS_WARN_DAYS`) and reports to
+`ERROR_WEBHOOK_URL` — the same sink the bot posts crashes to and
+`verify-backup.sh` posts failures to — so it belongs in the host crontab beside
+that one:
+
+```bash
+0 6 * * *  cd /opt/clawdia && ./scripts/mongo-tls-cert.sh --check >> /var/log/clawdia-tls.log 2>&1
+```
+
+Renewing is the same script against the same directory. It reuses the existing
+CA rather than minting a new one — a new CA would mean re-distributing `ca.crt`
+to all four containers, which is exactly the step someone renewing in a hurry
+skips — so only `server.pem` changes, and `mongod` keeps serving the old
+certificate until it is restarted:
+
+```bash
+./scripts/mongo-tls-cert.sh
+docker compose up -d --force-recreate mongodb
+```
+
 ### Automated Backups
 
 Both `docker-compose.yml` and `portainer-stack.yml` run a `backup` service that

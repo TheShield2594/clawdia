@@ -383,7 +383,7 @@ describe('the two files agree where they must', () => {
             // in it, because MongoDB requires internal authentication for an
             // authenticated replica set and refuses to start without the file.
             expect([name, doc.services.mongodb.command])
-                .toEqual([name, 'mongod ${MONGODB_REPLICA_SET_ARGS:-}']);
+                .toEqual([name, 'mongod ${MONGODB_REPLICA_SET_ARGS:-} ${MONGODB_TLS_ARGS:-}']);
         }
     });
 
@@ -415,6 +415,101 @@ describe('the two files agree where they must', () => {
             expect([name, probe]).toEqual([name, expect.stringContaining('isWritablePrimary')]);
             expect([name, probe]).not.toEqual([name, expect.stringContaining("adminCommand('ping')")]);
         }
+    });
+
+    // #975. Nothing on db-network used TLS, so with authentication on a process
+    // that had joined that network could still read every balance, every audit
+    // entry and every administrative command off the wire — including the root
+    // session mongo-replset-init uses to initiate the set. Turning it on is
+    // opt-in, and the property that has to hold is that it is opt-in for *all
+    // five* clients at once: mongod plus one client still speaking cleartext is
+    // not a weaker deployment, it is a deployment that cannot reach its own
+    // database. That is what this asserts, because it is the only place it can
+    // be asserted — the alternative is finding out on the redeploy.
+    describe('TLS on db-network is all of it or none of it (#975)', () => {
+        const CERT_MOUNT = /mongo-tls:\/etc\/mongo-tls:ro/g;
+
+        it('lets mongod be given TLS flags, the same way, in both', () => {
+            for (const [name, doc] of stacks) {
+                // Beside the replica-set flags rather than merged into them:
+                // one deployment may want a replica set and no TLS, another the
+                // reverse, and a single variable holding both makes turning one
+                // off mean retyping the other.
+                expect([name, String(doc.services.mongodb.command)])
+                    .toEqual([name, expect.stringContaining('${MONGODB_TLS_ARGS:-}')]);
+            }
+        });
+
+        it('tells both mongosh probes to speak it', () => {
+            for (const [name, doc] of stacks) {
+                // These two reach mongod by host and port, so unlike every other
+                // client here they have no connection string to carry the
+                // options and must be told separately.
+                const probe = doc.services.mongodb.healthcheck.test;
+                // CMD-SHELL, because unset the variable has to expand to no
+                // arguments at all and an exec-form list would pass mongosh a
+                // single empty string instead.
+                expect([name, probe[0]]).toEqual([name, 'CMD-SHELL']);
+                expect([name, probe.join(' ')])
+                    .toEqual([name, expect.stringContaining('${MONGODB_CLIENT_TLS_ARGS:-}')]);
+
+                const init = doc.services['mongo-replset-init'];
+                expect([name, Object.keys(init.environment)])
+                    .toEqual([name, expect.arrayContaining(['MONGODB_CLIENT_TLS_ARGS'])]);
+                // Every mongosh in that script, not merely one of them: the
+                // wait loop, the writable probe and the authenticated call are
+                // three separate connections and a mongod in requireTLS mode
+                // refuses whichever one was missed.
+                // `mongosh --host` and not `mongosh`: the script also calls its
+                // own authed_mongosh wrapper, whose name ends in the same word.
+                const invocations = String(init.entrypoint).match(/mongosh --host[^;]*/g) || [];
+                expect([name, invocations.length]).toEqual([name, 4]);
+                for (const call of invocations) {
+                    expect([name, call]).toEqual([name, expect.stringContaining('$$MONGODB_CLIENT_TLS_ARGS')]);
+                }
+            }
+        });
+
+        it('leaves the URI clients to the URI, and passes them no flags', () => {
+            for (const [name, doc] of stacks) {
+                // The bot, mongodump and mongorestore all take a connection
+                // string, so `tls=true&tlsCAFile=...` on MONGODB_URI configures
+                // all three in one edit and there is no second setting to
+                // disagree with it. Passing the tools CLI flags *as well* is the
+                // way to get "cannot specify different ssl configuration in the
+                // connection URI and as a command line option" at 03:00.
+                expect([name, String(doc.services.backup.entrypoint)])
+                    .not.toEqual([name, expect.stringContaining('MONGODB_CLIENT_TLS_ARGS')]);
+            }
+        });
+
+        it('offers the certificate to every container that needs it', () => {
+            for (const [name] of stacks) {
+                // Commented out, like the key-file mount beside it, so this
+                // reads the file rather than the parsed YAML. Four: mongod
+                // serves the certificate, and mongo-replset-init, bot and backup
+                // each validate against the CA in it.
+                const text = fs.readFileSync(path.join(ROOT, name), 'utf8');
+                expect([name, (text.match(CERT_MOUNT) || []).length]).toEqual([name, 4]);
+            }
+        });
+
+        it('is issued by a script that names the same three settings', () => {
+            // The script prints the settings to apply once it has written the
+            // certificate. Three copies of these names exist — here, the stack
+            // comments, and SETUP_GUIDE — and the one an operator pastes from is
+            // the script.
+            const script = fs.readFileSync(path.join(ROOT, 'scripts/mongo-tls-cert.sh'), 'utf8');
+            for (const setting of ['MONGODB_CLIENT_TLS_ARGS', 'MONGODB_URI', 'MONGODB_TLS_ARGS']) {
+                expect([setting, script.includes(setting)]).toEqual([setting, true]);
+            }
+            // Naming a CA file makes mongod demand a client certificate from
+            // everything that connects, and nothing here has one — this is
+            // server authentication, not mutual TLS. Without this flag the CA
+            // file turns every client away, which is a deployment that starts
+            // and then refuses the bot.
+            expect(script).toContain('--tlsAllowConnectionsWithoutCertificates');
+        });
     });
 
     it('gives the two services the same MONGODB_URI default', () => {

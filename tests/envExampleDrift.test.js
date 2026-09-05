@@ -37,6 +37,8 @@ const CONSUMED_OUTSIDE_SRC = new Set([
     'MONGODB_APP_USERNAME',
     'MONGODB_APP_PASSWORD',
     'MONGODB_REPLICA_SET_ARGS',
+    'MONGODB_TLS_ARGS',
+    'MONGODB_CLIENT_TLS_ARGS',
     'DISCORD_TOKEN_FILE',
     // Read by the backup service's entrypoint and by the host scripts that
     // write and open archives (#886, #900); the bot process never sees them.
