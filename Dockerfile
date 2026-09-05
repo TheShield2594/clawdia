@@ -27,7 +27,7 @@
 # Dependabot's `docker` ecosystem (.github/dependabot.yml) raises the bump, and
 # tests/imagePinning.test.js fails if any reference here or in either stack file
 # loses its digest.
-FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build
+FROM node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3 AS build
 
 RUN apk add --no-cache \
     cairo-dev \
@@ -69,7 +69,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 #
 # package*.json is copied on its own first, so editing a stylesheet does not
 # invalidate the install layer.
-FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS assets
+FROM node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3 AS assets
 
 WORKDIR /app
 
@@ -82,7 +82,7 @@ RUN node scripts/build-assets.js
 
 # ---- runtime stage -----------------------------------------------------------
 # Same major as the build stage and as .nvmrc — see the note above.
-FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf
+FROM node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3
 
 # Shared libraries canvas links against at runtime (the -dev headers and the
 # compiler are deliberately left behind in the build stage), plus the DejaVu
