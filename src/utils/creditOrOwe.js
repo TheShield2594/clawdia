@@ -34,6 +34,7 @@
 const DEFAULT_USER = require('../models/User');
 const { creditCoinsOnce, grantItemOnce } = require('./payoutKey');
 const { counterSetExpr } = require('./balanceDebit');
+const { windowedRefundExpr } = require('./giftCaps');
 const { recordOwedPayout } = require('./owedPayout');
 const { delay } = require('./delay');
 
@@ -175,18 +176,19 @@ async function creditCoinsOrOwe(filter, amount, {
  *                                    below nor a replayed record can grant twice
  * @param {string}  opts.service      for the owed record and the log line
  * @param {string}  opts.jobName
- * @param {object}  [opts.extraSet]   further pipeline `$set` fields written in the
- *                                    same update, so bookkeeping that belongs
- *                                    with the grant commits with it. Deliberately
- *                                    *not* carried on the owed record: unlike
- *                                    `creditCoinsOrOwe`'s `counters`, these are
- *                                    aggregation expressions rather than plain
- *                                    deltas, and the one caller that uses them is
- *                                    refunding a daily allowance — a replay days
- *                                    later would take it out of whatever day's
- *                                    allowance is current then. The item is the
- *                                    part that must survive; the allowance is a
- *                                    day's cap
+ * @param {object}  [opts.budgetRefund] a daily gift budget to give back in the
+ *                                    same write, as
+ *                                    `{ usedField, resetField, cap, amount, window }`.
+ *                                    Carried onto the owed record too, so a
+ *                                    replay reproduces the whole write rather
+ *                                    than half of it — the same reason
+ *                                    `creditCoinsOrOwe` carries `counters`. It
+ *                                    is stated as a descriptor rather than a
+ *                                    built expression because a `$`-keyed
+ *                                    expression is not a thing to store in a
+ *                                    document, and `window` is what lets the
+ *                                    replay tell whether the allowance it would
+ *                                    refund is still the one that was spent
  * @param {object}  [opts.extra]      further fields on the owed payload, for an
  *                                    operator reading the queue — a listing id,
  *                                    say. Not part of the write.
@@ -202,7 +204,7 @@ async function creditCoinsOrOwe(filter, amount, {
  * to do, and a throw here would abandon them.
  */
 async function grantItemsOrOwe(filter, itemId, quantity, {
-    payoutKey, service = 'economy', jobName = 'grantItems', extra = {}, extraSet = {},
+    payoutKey, service = 'economy', jobName = 'grantItems', extra = {}, budgetRefund = null,
     upsert = false, attempts = DEFAULT_ATTEMPTS, Model = DEFAULT_USER,
 } = {}) {
     const wanted = Math.floor(quantity) || 0;
@@ -211,11 +213,12 @@ async function grantItemsOrOwe(filter, itemId, quantity, {
     let lastError = null;
     for (let attempt = 1; attempt <= attempts; attempt++) {
         try {
-            // `extraSet` rides the guarded update, so it lands exactly when
-            // the grant does — the key makes the retry a no-op, so it cannot be
-            // applied twice by the loop.
+            // The budget refund rides the guarded update, so it lands exactly
+            // when the grant does — the key makes the retry a no-op, so it
+            // cannot be applied twice by the loop.
             const { status, doc } = await grantItemOnce(
-                filter, itemId, wanted, payoutKey, { upsert, extraSet, Model },
+                filter, itemId, wanted, payoutKey,
+                { upsert, extraSet: windowedRefundExpr(budgetRefund ?? {}), Model },
             );
 
             // 'duplicate' is a success: an earlier attempt landed and only its
@@ -252,6 +255,11 @@ async function grantItemsOrOwe(filter, itemId, quantity, {
             itemId,
             quantity: wanted,
             payoutKey,
+            // The bookkeeping that was supposed to land with the item. Without
+            // it the replay returns the item and leaves the allowance where the
+            // failed write left it — a sender charged a day's cap for a gift
+            // that never arrived.
+            ...(budgetRefund ? { budgetRefund } : {}),
             ...extra,
         },
         error: lastError,

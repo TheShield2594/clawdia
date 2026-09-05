@@ -193,6 +193,43 @@ function refundBudgetPipeline({ usedField, cap, amount }) {
 }
 
 /**
+ * `refundBudgetPipeline`, gated on the budget window it was spent in (#873).
+ *
+ * A rollback that lands runs microseconds after the debit, so the window is the
+ * one the debit wrote and the gate is a no-op. It exists for the other case: a
+ * rollback that could not land is filed as an owed payout, and
+ * `npm run payouts:replay` may settle it days later. These counters reset every
+ * 24 hours, so decrementing one then would take the refund out of a window the
+ * gift was never charged against — handing the sender allowance they did not
+ * spend, on a day they did not spend it.
+ *
+ * `window` is the `resetField` value read off the document the debit returned.
+ * Comparing it inside the write is what makes this free: no second read, and no
+ * chance of the window turning over between a check and the update. A `window`
+ * that no longer matches leaves the counter exactly as it is.
+ *
+ * A `window` that arrives in the wrong shape — a payload that went through a
+ * serialiser somewhere and came back a string rather than a Date — compares
+ * unequal and skips the refund. That is the conservative direction: an
+ * allowance that stays spent costs a day's cap, and one refunded twice is a cap
+ * that does not hold.
+ */
+function windowedRefundExpr({ usedField, resetField, cap, amount, window = null }) {
+    if (!cap) return {};
+    const refunded = { $max: [0, { $subtract: [{ $ifNull: [`$${usedField}`, 0] }, amount] }] };
+    if (!window) return { [usedField]: refunded };
+    return {
+        [usedField]: {
+            $cond: [
+                { $eq: [`$${resetField}`, window] },
+                refunded,
+                { $ifNull: [`$${usedField}`, 0] },
+            ],
+        },
+    };
+}
+
+/**
  * Undo a `spendBudget` on the rollback path.
  *
  * Always a `$inc` of the negative, whichever branch was taken: a window the
@@ -215,4 +252,5 @@ module.exports = {
     spendBudgetPipeline,
     refundBudget,
     refundBudgetPipeline,
+    windowedRefundExpr,
 };

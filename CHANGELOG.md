@@ -62,7 +62,18 @@ recorded as owed, or neither; and each reply is worded from that answer rather
 than from the absence of an exception. The buyer's own credit is keyed too, which
 closes the duplication window on that side: a purchase whose credit commits and
 loses its response is read back off the key rather than assumed missing, so the
-seller's stock is never returned while the buyer is holding it. `/market buy`'s
+seller's stock is never returned while the buyer is holding it. Where even that
+read fails the outcome is genuinely unknown, and unwinding on a guess is the
+worst of the three options — it would refund the buyer *and* return the stock,
+minting an item. Nothing is undone there: the delivery is filed under the
+purchase's key, which settles it whichever way it went, and the receipt says the
+delivery is unconfirmed rather than claiming it.
+
+A `/gift` rollback recorded as owed now carries the day's item-gift allowance
+with it, so a replay restores the sender's cap as well as their item instead of
+leaving them charged for a gift that never arrived. It is stamped with the budget
+window it was spent in and gated on that window still being current, so a replay
+days later returns the item and leaves a later day's allowance alone. `/market buy`'s
 money mechanics move to `services/marketService.js` beside the expiry sweep, and
 `market.js`, `gift.js` and `marketService.js` join the per-file coverage floors. The full findings are in
 [docs/AUDIT_LOG.md](docs/AUDIT_LOG.md), including the bound this pass leaves open

@@ -124,6 +124,44 @@ describe('replayOwedPayout', () => {
         expect(grantInventoryItem).toHaveBeenCalledWith('u1', 'g1', 'sword', 2, { upsert: true });
     });
 
+    // #873. The item side's answer to `counters` on the coin side: bookkeeping
+    // the original write was going to move alongside the item, so the replay
+    // reproduces that write rather than half of it. The difference is that this
+    // counter resets every 24 hours, so it is gated on the window it was spent
+    // in — inside the same write, so there is no second read and no gap for the
+    // window to turn over in.
+    test('gates a budget refund on the window it was spent in', async () => {
+        const window = new Date('2026-09-05T10:00:00Z');
+
+        await replayOwedPayout({
+            kind: 'items', userId: 'u1', guildId: 'g1', itemId: 'sword', quantity: 2,
+            payoutKey: 'gift:i-1:rollback',
+            budgetRefund: {
+                usedField: 'dailyGiftItemValueSent', resetField: 'dailyGiftItemValueReset',
+                cap: 250_000, amount: 200, window,
+            },
+        });
+
+        const [, , , , options] = grantInventoryItem.mock.calls[0];
+        expect(options.extraSet.dailyGiftItemValueSent).toEqual({
+            $cond: [
+                { $eq: ['$dailyGiftItemValueReset', window] },
+                { $max: [0, { $subtract: [{ $ifNull: ['$dailyGiftItemValueSent', 0] }, 200] }] },
+                { $ifNull: ['$dailyGiftItemValueSent', 0] },
+            ],
+        });
+    });
+
+    test('replays an item payload with no budget refund exactly as before', async () => {
+        await replayOwedPayout({
+            kind: 'items', userId: 'u1', guildId: 'g1', itemId: 'sword', quantity: 2,
+            payoutKey: 'listing:l-1',
+        });
+
+        const [, , , , options] = grantInventoryItem.mock.calls[0];
+        expect(options.extraSet).toEqual({ paidPayouts: expect.anything() });
+    });
+
     test('an item grant that fails leaves the record owed', async () => {
         grantInventoryItem.mockRejectedValue(new Error('still down'));
 

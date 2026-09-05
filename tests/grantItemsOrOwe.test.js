@@ -43,6 +43,15 @@ const USER  = 'user-1';
 const WHO   = { userId: USER, guildId: GUILD };
 const OPTS  = { payoutKey: 'listing:listing-1:cancel', service: 'market', jobName: 'cancelListing' };
 
+/** The daily item-gift allowance descriptor `/gift`'s rollback hands over. */
+const REFUND = window => ({
+    usedField:  'dailyGiftItemValueSent',
+    resetField: 'dailyGiftItemValueReset',
+    cap:        250_000,
+    amount:     200,
+    window,
+});
+
 beforeEach(() => {
     jest.clearAllMocks();
     jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -85,16 +94,36 @@ describe('a grant that lands', () => {
         expect(recordOwedPayout).not.toHaveBeenCalled();
     });
 
-    test('commits extraSet in the same write as the grant', async () => {
-        mockUsers.seed({ ...WHO, inventory: [], dailyGiftItemValueSent: 500 });
-
-        await grantItemsOrOwe(WHO, 'lucky_charm', 2, {
-            ...OPTS,
-            extraSet: { dailyGiftItemValueSent: { $max: [0, { $subtract: ['$dailyGiftItemValueSent', 200] }] } },
+    test('refunds the budget in the same write as the grant', async () => {
+        const window = new Date('2026-09-05T10:00:00Z');
+        mockUsers.seed({
+            ...WHO, inventory: [],
+            dailyGiftItemValueSent: 500, dailyGiftItemValueReset: window,
         });
+
+        await grantItemsOrOwe(WHO, 'lucky_charm', 2, { ...OPTS, budgetRefund: REFUND(window) });
 
         expect(mockUsers.get(USER).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 2 }]);
         expect(mockUsers.get(USER).dailyGiftItemValueSent).toBe(300);
+    });
+
+    test('leaves a later window\'s allowance alone', async () => {
+        // The gate that makes the owed record safe to replay: the counter resets
+        // every 24 hours, and a refund applied to a window the gift was never
+        // charged against hands the sender allowance they did not spend.
+        mockUsers.seed({
+            ...WHO, inventory: [],
+            dailyGiftItemValueSent: 500,
+            dailyGiftItemValueReset: new Date('2026-09-06T10:00:00Z'),
+        });
+
+        await grantItemsOrOwe(WHO, 'lucky_charm', 2, {
+            ...OPTS, budgetRefund: REFUND(new Date('2026-09-05T10:00:00Z')),
+        });
+
+        // The item still comes back; only the allowance is held.
+        expect(mockUsers.get(USER).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 2 }]);
+        expect(mockUsers.get(USER).dailyGiftItemValueSent).toBe(500);
     });
 
     test('is a no-op for a quantity there is nothing to grant', async () => {
@@ -156,6 +185,20 @@ describe('a grant that does not land', () => {
         expect(result).toMatchObject({ granted: false, owed: true });
         expect(result.error.message).toBe('write failed');
         expect(mockUsers.model.findOneAndUpdate).toHaveBeenCalledTimes(3);
+    });
+
+    test('carries the budget refund onto the owed payload', async () => {
+        // Without it the replay returns the item and leaves the allowance where
+        // the failed write left it — a sender charged a day's cap for a gift
+        // that never arrived. The window travels with it so the replay can tell
+        // whether the allowance it would refund is still the one that was spent.
+        const window = new Date('2026-09-05T10:00:00Z');
+
+        await grantItemsOrOwe(WHO, 'lucky_charm', 2, { ...OPTS, budgetRefund: REFUND(window) });
+
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            payload: expect.objectContaining({ budgetRefund: REFUND(window) }),
+        }));
     });
 
     test('carries the caller\'s extra fields onto the owed payload', async () => {

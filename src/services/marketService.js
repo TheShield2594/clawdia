@@ -18,8 +18,9 @@
 const { recordOwedPayout, owedSummary } = require('../utils/owedPayout');
 const { creditCoinsOrOwe, grantItemsOrOwe } = require('../utils/creditOrOwe');
 const {
-    grantItemOnce, classifyUnmatchedPayout, listingPayoutKey,
+    creditCoinsOnce, grantItemOnce, classifyUnmatchedPayout, listingPayoutKey,
     listingPurchasePayoutKey, listingUnwindPayoutKey, marketRefundPayoutKey,
+    marketSalePayoutKey,
 } = require('../utils/payoutKey');
 
 /**
@@ -208,25 +209,69 @@ async function returnExpiredMarketListings() {
  *
  * The key closes it. It is on the buyer's own document if the credit landed, so
  * a rejection is a question `classifyUnmatchedPayout` can answer rather than an
- * assumption the caller has to make. A classification that itself fails answers
- * "not delivered", which is the safe way round: a refund the buyer did not need
- * is recoverable, an item granted twice is not.
+ * assumption the caller has to make.
  *
- * @returns {Promise<{delivered: boolean, error: ?Error}>}
+ * Three answers, not two, and the third is the point. A classification that
+ * itself fails leaves the outcome genuinely unknown, and *both* guesses are
+ * destructive: reading it as delivered loses the buyer's item, and reading it as
+ * not delivered unwinds — which refunds the buyer's coins **and** hands the
+ * seller their stock back, so a credit that had in fact landed leaves the buyer
+ * holding a free item and the seller holding a second copy of it. Two items
+ * minted, from the branch that exists to prevent one.
+ *
+ * So `indeterminate` is its own state, nothing is undone under it, and the
+ * deferral is filed here rather than left to the caller. The buyer's credit is
+ * keyed, which makes it the one thing in the flow that can be settled later
+ * without knowing the answer now: `grantItemOnce` under the same key is a no-op
+ * if the write landed and a grant if it did not, so `npm run payouts:replay`
+ * reaches the right end either way. The sale stands in the meantime — the buyer
+ * paid and the seller sold; only the delivery is outstanding.
+ *
+ * @returns {Promise<{delivered: boolean, indeterminate: boolean, owed: boolean, error: ?Error}>}
  */
 async function creditPurchasedItem({ buyerId, guildId, listing, Model = require('../models/User') }) {
     const who = { userId: buyerId, guildId };
-    const key = listingPurchasePayoutKey(listing._id);
+    const payoutKey = listingPurchasePayoutKey(listing._id);
+    const answer = (delivered, error) => ({ delivered, indeterminate: false, owed: false, error });
+
+    let unknownError;
     try {
-        const { status } = await grantItemOnce(who, listing.itemId, listing.quantity, key, { Model });
-        if (status === 'paid' || status === 'duplicate') return { delivered: true, error: null };
-        return { delivered: false, error: new Error(`buyer credit matched nothing (${status})`) };
+        const { status } = await grantItemOnce(who, listing.itemId, listing.quantity, payoutKey, { Model });
+        // 'missing' and 'unknown' are *definite* misses: `grantItemOnce` read the
+        // document to say so, and the key would be on it if the write had landed.
+        if (status === 'paid' || status === 'duplicate') return answer(true, null);
+        return answer(false, new Error(`buyer credit matched nothing (${status})`));
     } catch (err) {
-        const delivered = await classifyUnmatchedPayout(Model, who, key)
-            .then(status => status === 'duplicate')
-            .catch(() => false);
-        return { delivered, error: delivered ? null : err };
+        try {
+            const status = await classifyUnmatchedPayout(Model, who, payoutKey);
+            if (status === 'duplicate') return answer(true, null);
+            return answer(false, err);
+        } catch (readErr) {
+            unknownError = readErr;
+        }
     }
+
+    const owed = await recordOwedPayout({
+        service: 'market',
+        jobName: 'buyItemUnknown',
+        guildId,
+        payload: {
+            kind:      'items',
+            userId:    buyerId,
+            guildId,
+            itemId:    listing.itemId,
+            quantity:  listing.quantity,
+            listingId: String(listing._id),
+            payoutKey,
+        },
+        error: unknownError,
+    });
+    console.error(
+        `[market buy] listing ${listing._id}: cannot tell whether ${listing.quantity}x ${listing.itemId} ` +
+        `reached ${buyerId} — ${owed ? 'recorded for replay under the purchase key' : 'NOT RECORDED'}:`,
+        unknownError?.message,
+    );
+    return { delivered: false, indeterminate: true, owed, error: unknownError };
 }
 
 /**
@@ -283,4 +328,74 @@ async function unwindPurchase({
     return { refund, returned };
 }
 
-module.exports = { returnExpiredMarketListings, creditPurchasedItem, unwindPurchase };
+/**
+ * The seller's proceeds from a completed sale, and the balance to file the
+ * ledger row against (#869).
+ *
+ * By the time this runs the buyer has paid, the item has moved and the listing
+ * is deleted, so there is nothing left to retry against. It used to be an
+ * unguarded write with both failure modes swallowed: a `null` return — a seller
+ * with no user document — was ignored and logged as `balance: 0`, and a throw
+ * escaped the purchase entirely with the buyer already charged.
+ *
+ * Keyed by the listing, which the purchase has just deleted and so cannot reuse,
+ * making the credit exactly-once: a write that committed without its response
+ * arriving is not paid again by `npm run payouts:replay`. Anything that still
+ * will not land is written down as owed, which is what the expiry sweep does
+ * with a return it cannot make.
+ *
+ * `balance` is read back rather than assumed. 'duplicate' is a success whose
+ * response was lost on an earlier attempt — the coins are there — but it comes
+ * back with no document, and a failure has none either; `balance` is required on
+ * the Transaction schema, so guessing is not an option and neither is leaving it
+ * out, because the row simply would not be written.
+ *
+ * @returns {Promise<{paid: boolean, owed: boolean, balance: number, payoutKey: string}>}
+ */
+async function payListingSeller({ sellerId, guildId, listing, amount, Model = require('../models/User') }) {
+    const who = { userId: sellerId, guildId };
+    const payoutKey = marketSalePayoutKey(listing._id);
+
+    let status = null;
+    let doc = null;
+    let error = null;
+    try {
+        ({ status, doc } = await creditCoinsOnce(who, amount, payoutKey, {
+            Model, projection: { balance: 1 },
+        }));
+    } catch (err) {
+        error = err;
+    }
+
+    const paid = status === 'paid' || status === 'duplicate';
+    const balance = doc?.balance
+        ?? (await Model.findOne(who, { balance: 1 }).lean().catch(() => null))?.balance
+        ?? 0;
+
+    if (paid) return { paid, owed: false, balance, payoutKey };
+
+    const reason = error?.message ?? `credit for ${sellerId} in ${guildId} matched nothing (${status})`;
+    const owed = await recordOwedPayout({
+        service: 'market',
+        jobName: 'buyListing',
+        guildId,
+        payload: {
+            kind:      'coins',
+            userId:    sellerId,
+            guildId,
+            amount,
+            listingId: String(listing._id),
+            payoutKey,
+        },
+        error: error ?? new Error(reason),
+    });
+    console.error(
+        `[market buy] listing ${listing._id} sold but crediting ${amount} to ${sellerId} failed — ` +
+        `${owed ? 'recorded as owed' : 'NOT RECORDED'}:`, reason,
+    );
+    return { paid, owed, balance, payoutKey };
+}
+
+module.exports = {
+    returnExpiredMarketListings, creditPurchasedItem, unwindPurchase, payListingSeller,
+};

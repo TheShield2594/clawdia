@@ -11,7 +11,6 @@ const { describeItem } = require('../../utils/itemDisplay');
 const { ownedBy } = require('../../utils/collectorOwner');
 const {
     BUDGETS, giftLimits, budgetState, spendBudget, spendBudgetPipeline,
-    refundBudgetPipeline,
 } = require('../../utils/giftCaps');
 const {
     accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
@@ -517,9 +516,19 @@ module.exports = {
                     service: 'gift',
                     jobName: 'giftItemRollback',
                     // The day's item-gift allowance the debit spent, given back
-                    // in the same write as before — an item that comes back and
-                    // an allowance that stays spent is a sender charged twice.
-                    extraSet: refundBudgetPipeline({ ...BUDGETS.itemValueSend, cap: limits.itemValueSend, amount: giftValue }),
+                    // in the same write — an item that comes back and an
+                    // allowance that stays spent is a sender charged twice.
+                    //
+                    // The window comes off the document the debit returned, so a
+                    // rollback filed as owed and replayed days later refunds the
+                    // allowance only if it is still the one the gift was charged
+                    // against; a later day's cap is left alone.
+                    budgetRefund: {
+                        ...BUDGETS.itemValueSend,
+                        cap:    limits.itemValueSend,
+                        amount: giftValue,
+                        window: debited[BUDGETS.itemValueSend.resetField] ?? null,
+                    },
                 },
             );
 

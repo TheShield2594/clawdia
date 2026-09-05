@@ -302,6 +302,64 @@ describe('a rollback that does not land', () => {
         }));
     });
 
+    // The allowance the debit spent travels with the item, so a replay puts the
+    // sender back where they were rather than returning the item and leaving
+    // them charged a day's cap for a gift that never arrived (#873).
+    test('carries the day\'s item-gift allowance, stamped with its window', async () => {
+        mockFailCreditFor = 'recipient';
+        mockNullCreditFor = 'sender';
+        const { interaction } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        const [{ payload }] = recordOwedPayout.mock.calls.at(-1);
+        expect(payload.budgetRefund).toMatchObject({
+            usedField:  'dailyGiftItemValueSent',
+            resetField: 'dailyGiftItemValueReset',
+            amount:     expect.any(Number),
+        });
+        // The window is the one the debit wrote, read off the document it
+        // returned — that is what lets the replay tell whether the allowance it
+        // would refund is still the one that was spent.
+        expect(payload.budgetRefund.window).toEqual(mockStore.sender.dailyGiftItemValueReset);
+    });
+
+    test('replaying it in the same window returns the item and the allowance', async () => {
+        mockFailCreditFor = 'recipient';
+        mockNullCreditFor = 'sender';
+        const { interaction } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        const [{ payload }] = recordOwedPayout.mock.calls.at(-1);
+        const spent = mockStore.sender.dailyGiftItemValueSent;
+        mockNullCreditFor = null;
+
+        const { replayOwedPayout } = jest.requireActual('../src/utils/owedPayout');
+        await replayOwedPayout(payload);
+
+        expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
+        expect(mockStore.sender.dailyGiftItemValueSent).toBe(spent - payload.budgetRefund.amount);
+    });
+
+    test('replaying it after the window turned over returns only the item', async () => {
+        mockFailCreditFor = 'recipient';
+        mockNullCreditFor = 'sender';
+        const { interaction } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        const [{ payload }] = recordOwedPayout.mock.calls.at(-1);
+        mockNullCreditFor = null;
+        // A day passes and the counter resets before the replay runs.
+        mockStore.sender.dailyGiftItemValueReset = new Date('2099-01-01T00:00:00Z');
+        mockStore.sender.dailyGiftItemValueSent = 4_000;
+
+        const { replayOwedPayout } = jest.requireActual('../src/utils/owedPayout');
+        await replayOwedPayout(payload);
+
+        expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
+        // Untouched: this allowance was never what the gift was charged against.
+        expect(mockStore.sender.dailyGiftItemValueSent).toBe(4_000);
+    });
+
     test('says so plainly when even the record could not be written', async () => {
         mockFailCreditFor = 'recipient';
         mockNullCreditFor = 'sender';

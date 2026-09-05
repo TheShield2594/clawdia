@@ -9,12 +9,11 @@ const Transaction    = require('../../models/Transaction');
 const { DEFAULT_SHOP_ITEMS, getItemLore, getItemRarity, RARITY_ORDER } = require('../../data/defaultShopItems');
 const { EFFECT_CONFIGS } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
-const { recordOwedPayout } = require('../../utils/owedPayout');
-const {
-    creditCoinsOnce, marketSalePayoutKey, listingCancelPayoutKey, listingCreateRefundPayoutKey,
-} = require('../../utils/payoutKey');
+const { listingCancelPayoutKey, listingCreateRefundPayoutKey } = require('../../utils/payoutKey');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
-const { creditPurchasedItem, unwindPurchase } = require('../../services/marketService');
+const {
+    creditPurchasedItem, unwindPurchase, payListingSeller,
+} = require('../../services/marketService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
@@ -619,12 +618,11 @@ async function handleBuy(interaction, currency) {
             removed = await MarketListing.findOneAndDelete({ _id: listing._id, guildId: interaction.guild.id });
         } catch (claimErr) {
             console.error('[market buy] claiming the listing failed after the buyer was debited:', claimErr);
-            // The buyer is refunded either way. The stock is not: a rejection
-            // leaves it unknowable whether this delete landed or another buyer's
-            // did, and returning stock for a listing somebody else legitimately
-            // bought mints an item. `marketService` states the rule this follows
-            // — losing a return is recoverable from a log, silently doubling one
-            // is not — so the ambiguity is logged rather than acted on.
+            // The buyer is refunded; the stock is not. A rejection leaves it
+            // unknowable whether this delete landed or another buyer's did, and
+            // returning stock for a listing somebody else bought mints an item —
+            // `marketService`'s rule, that losing a return is recoverable from a
+            // log and silently doubling one is not.
             const { refund } = await unwind('buyRefundClaim', false);
             const stillListed = await MarketListing
                 .findOne({ _id: listing._id, guildId: interaction.guild.id }, '_id').lean().catch(() => null);
@@ -651,81 +649,35 @@ async function handleBuy(interaction, currency) {
         //
         // Keyed, which is what lets the unwind below decide rather than assume —
         // see `creditPurchasedItem`.
-        const { delivered, error: inventoryErr } = await creditPurchasedItem({
+        // `indeterminate` is not `!delivered`, and unwinding on it is worse than
+        // either guess (#873): undoing a purchase whose credit had in fact
+        // landed refunds the buyer *and* returns the seller's stock, so the
+        // buyer keeps a free item and a second copy appears in the seller's bag.
+        // Nothing is undone for that state — `creditPurchasedItem` files it
+        // under the purchase's own key, which settles it whichever way it went.
+        const {
+            delivered, indeterminate, owed: itemOwed, error: inventoryErr,
+        } = await creditPurchasedItem({
             buyerId: interaction.user.id, guildId: interaction.guild.id, listing,
         });
 
-        if (!delivered) {
+        if (!delivered && !indeterminate) {
             console.error('[market buy] inventory update failed, refunding buyer:', inventoryErr);
-            // The listing is claimed, so the stock comes back too: it left the
-            // seller's bag when they listed it and the row that held it is gone.
+            // A definite miss, so the purchase comes apart. The listing is
+            // claimed, so the stock comes back too: it left the seller's bag
+            // when they listed it and the row that held it is gone.
             const { refund } = await unwind('buyRefundItem', true);
             return editReply({ content: `Something went wrong crediting the item. ${refundNote(refund)}`, embeds: [], components: [] });
         }
 
-        // The seller's proceeds, and the one credit in this flow nothing was
-        // watching (#869). By the time it runs the buyer has paid, the item has
-        // moved and the listing is deleted, so there is nothing left to retry
-        // against — and it was an unguarded write whose two failure modes were
-        // both swallowed. A `null` return (a seller with no user document) was
-        // ignored, and logged as `balance: 0` for good measure; a throw escaped
-        // the purchase entirely, with the buyer already charged.
-        //
-        // Keyed by the listing, which this flow has just deleted and so cannot
-        // be reused, making the credit exactly-once: a write that committed
-        // without its response arriving is not paid a second time by
-        // `npm run payouts:replay`. Anything that still will not land is written
-        // down as owed, which is what the expiry sweep does with a return it
-        // cannot make.
-        const saleKey = marketSalePayoutKey(listing._id);
-        let sellerStatus = null;
-        let sellerDoc    = null;
-        let sellerErr    = null;
-        try {
-            ({ status: sellerStatus, doc: sellerDoc } = await creditCoinsOnce(
-                { userId: listing.sellerId, guildId: interaction.guild.id },
-                sellerReceives,
-                saleKey,
-                { projection: { balance: 1 } },
-            ));
-        } catch (err) {
-            sellerErr = err;
-        }
-
-        // 'duplicate' is a success whose response was lost on an earlier attempt
-        // — the coins are there. It comes back with no document though, and a
-        // failure has none either, so in both cases the balance for the audit
-        // log is read rather than assumed. `balance` is required on the
-        // Transaction schema, so guessing is not an option and neither is
-        // leaving it out: the row simply would not be written.
-        const sellerPaid = sellerStatus === 'paid' || sellerStatus === 'duplicate';
-        const sellerBalance = sellerDoc?.balance ?? (await User.findOne(
-            { userId: listing.sellerId, guildId: interaction.guild.id }, { balance: 1 },
-        ).lean().catch(() => null))?.balance ?? 0;
-
-        let owedRecorded = false;
-        if (!sellerPaid) {
-            const reason = sellerErr?.message
-                ?? `credit for ${listing.sellerId} in ${interaction.guild.id} matched nothing (${sellerStatus})`;
-            owedRecorded = await recordOwedPayout({
-                service: 'market',
-                jobName: 'buyListing',
-                guildId: interaction.guild.id,
-                payload: {
-                    kind:      'coins',
-                    userId:    listing.sellerId,
-                    guildId:   interaction.guild.id,
-                    amount:    sellerReceives,
-                    listingId: String(listing._id),
-                    payoutKey: saleKey,
-                },
-                error: sellerErr ?? new Error(reason),
-            });
-            console.error(
-                `[market buy] listing ${listing._id} sold but crediting ${sellerReceives} to ` +
-                `${listing.sellerId} failed — ${owedRecorded ? 'recorded as owed' : 'NOT RECORDED'}:`, reason,
-            );
-        }
+        // The seller's proceeds — keyed, verified and filed as owed when they
+        // will not land, in `payListingSeller` (#869).
+        const {
+            paid: sellerPaid, owed: owedRecorded, balance: sellerBalance, payoutKey: saleKey,
+        } = await payListingSeller({
+            sellerId: listing.sellerId, guildId: interaction.guild.id,
+            listing, amount: sellerReceives,
+        });
 
         // Logged either way: the sale happened, and a row that only appears when
         // the credit lands leaves the coins unaccounted for exactly when someone
@@ -760,6 +712,17 @@ async function handleBuy(interaction, currency) {
                                 : `${currency}${sellerReceives.toLocaleString()} — delayed and not recorded, please contact a server admin`,
                             inline: true,
                         },
+                    // Said out loud rather than left to the buyer to notice. The
+                    // sale is real and the coins are spent either way, but a bag
+                    // that may not have the item in it is not something to find
+                    // out by looking.
+                    ...(indeterminate ? [{
+                        name: 'Your Item',
+                        value: itemOwed
+                            ? 'Delivery could not be confirmed — it is recorded and will be settled without charging you twice'
+                            : 'Delivery could not be confirmed and could not be recorded, please contact a server admin',
+                        inline: false,
+                    }] : []),
                 )
                 .setTimestamp()
             ],

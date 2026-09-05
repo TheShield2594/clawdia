@@ -734,12 +734,17 @@ describe('buying a listing', () => {
         console.error.mockRestore();
     });
 
-    // The other side of the same decision. When the classification *itself*
-    // fails there is no answer to be had, and the two wrong guesses are not
-    // symmetric: assuming delivered destroys the item, assuming not delivered
-    // costs at worst a refund the buyer did not need. It answers "not
-    // delivered" deliberately.
-    it('unwinds when it cannot find out whether the buyer was credited', async () => {
+    // The other side of the same decision, and the one place where neither
+    // guess is safe. When the classification *itself* fails there is no answer
+    // to be had, and unwinding on it is the worse of the two: it refunds the
+    // buyer **and** hands the seller their stock back, so a credit that had in
+    // fact landed leaves the buyer with a free item and the seller with a second
+    // copy of it. Two items minted, from the branch meant to prevent one.
+    //
+    // Nothing is undone. The credit is keyed, so it is filed under that key and
+    // settles later whichever way it went — a no-op if it landed, a grant if it
+    // did not.
+    it('defers rather than unwinding when the buyer credit is indeterminate', async () => {
         seedGuild();
         seedUser(BUYER_ID, { balance: 1000 });
         seedUser(SELLER_ID, { balance: 0, inventory: [] });
@@ -760,9 +765,48 @@ describe('buying a listing', () => {
 
         const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
 
-        expect(repliedText(interaction)).toContain('coins have been refunded');
-        expect(mockUsers.get(BUYER_ID).balance).toBe(1000);
-        expect(mockUsers.get(SELLER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 2 }]);
+        // The sale stands: the buyer paid, the seller was paid, and neither the
+        // coins nor the stock came back.
+        expect(mockUsers.get(BUYER_ID).balance).toBe(800);
+        expect(mockUsers.get(SELLER_ID).balance).toBe(190);
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([]);
+
+        // The delivery is what is outstanding, filed under the purchase's own
+        // key so a replay cannot hand the buyer a second copy.
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'market',
+            jobName: 'buyItemUnknown',
+            payload: expect.objectContaining({
+                kind: 'items', userId: BUYER_ID, guildId: GUILD_ID,
+                itemId: 'lucky_charm', quantity: 2,
+                payoutKey: 'listing:listing-1:buyer',
+            }),
+        }));
+        // And said out loud rather than left to the buyer to notice.
+        expect(repliedText(interaction)).toContain('Delivery could not be confirmed');
+        console.error.mockRestore();
+    });
+
+    it('tells the buyer plainly when an indeterminate delivery is not recorded', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        grantInventoryItem.mockImplementationOnce(async () => { throw new Error('connection reset'); });
+        const realFindOne = mockUsers.model.findOne;
+        const failedRead = () => Promise.reject(new Error('read failed'));
+        mockUsers.model.findOne = jest.fn((query, projection, ...rest) => (projection?.paidPayouts
+            ? { lean: failedRead, select() { return this; }, sort() { return this; },
+                then: (res, rej) => failedRead().then(res, rej),
+                catch: rej => failedRead().catch(rej) }
+            : realFindOne(query, projection, ...rest)));
+        recordOwedPayout.mockResolvedValueOnce(false);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('could not be recorded');
         console.error.mockRestore();
     });
 
@@ -872,6 +916,35 @@ describe('paying the seller', () => {
         expect(sellerCredit().query['paidPayouts.key']).toEqual({ $ne: 'listing:listing-1:sale' });
         expect(mockUsers.get(SELLER_ID).paidPayouts.map(p => p.key)).toEqual(['listing:listing-1:sale']);
         expect(mockUsers.get(SELLER_ID).balance).toBe(190);
+    });
+
+    // `balance` is required on the Transaction schema, so a read-back that fails
+    // cannot simply be left out — the ledger row would not be written at all,
+    // and the sale is exactly when somebody goes looking for it.
+    it('still files the ledger row when the balance read-back fails', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        // Already paid, so the guarded credit returns no document and the
+        // balance has to be read rather than assumed.
+        seedUser(SELLER_ID, { balance: 190, paidPayouts: [{ key: 'listing:listing-1:sale', at: new Date() }] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        const realFindOne = mockUsers.model.findOne;
+        const failedRead = () => Promise.reject(new Error('read failed'));
+        mockUsers.model.findOne = jest.fn((query, projection, ...rest) => (projection?.balance
+            ? { lean: failedRead, select() { return this; }, sort() { return this; },
+                then: (res, rej) => failedRead().then(res, rej),
+                catch: rej => failedRead().catch(rej) }
+            : realFindOne(query, projection, ...rest)));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('Purchase Complete');
+        expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'market_sell', amount: 190, balance: 0,
+        }));
+        console.error.mockRestore();
     });
 
     it('moves no coins a second time when the key is already on the document', async () => {
