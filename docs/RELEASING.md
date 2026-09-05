@@ -69,8 +69,10 @@ The summary page of a green publish carries three lines: the digest, the
 `CLAWDIA_IMAGE_TAG=sha-<commit>` to deploy this build, and the
 `CLAWDIA_IMAGE_TAG=latest@sha256:…` to pin it immutably. It also carries a
 **Scanned-image check** table saying, per platform, whether the layers that were
-published are the ones the boot and vulnerability gates actually looked at. That
-row normally reads "match the scanned image". If it says **DO NOT DEPLOY**, the
+published are the ones the vulnerability scan actually looked at. (amd64 is also
+booted before it is scanned; arm64 is scanned but never booted, because booting
+it would mean running an emulated Node through its whole require graph.) Those
+rows normally read "match the scanned image". If one says **DO NOT DEPLOY**, the
 build cache was evicted between the scan job and the publish job, so the image
 in the registry was rebuilt and never scanned — re-run the workflow before
 deploying that tag.
@@ -133,6 +135,16 @@ Some notes on the edges:
 - **It fires on `main` only.** A `v*` tag push publishes a version tag that
   nothing is pointed at until you choose to be, so firing a redeploy on one
   would deploy something you did not ask for.
+- **It fires only behind the scanned-image check.** If that table reports
+  anything other than a match on every platform — including "not checked" — no
+  redeploy is requested, and the summary says so. A workflow that told you not
+  to deploy an image and then deployed it for you would make the check
+  worthless.
+- **The URL must be `https://`.** It carries its own credential in the path, so
+  a cleartext POST would hand that credential to every hop in between. An
+  `http://` value is refused with a warning rather than being sent. The usual
+  LAN argument does not apply: this runs on a GitHub-hosted runner, so any URL
+  it can reach is one crossing the public internet.
 - **It redeploys whatever the stack is pinned to.** The webhook tells Portainer
   to pull and recreate; it does not change `CLAWDIA_IMAGE_TAG`. A stack pinned to
   `4.2.1` will pull `4.2.1` again and come back on the same image. The webhook is

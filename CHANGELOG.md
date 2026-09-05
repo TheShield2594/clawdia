@@ -131,7 +131,10 @@ Shutdown sequencing is `utils/shutdown.js`, so the order the four steps close in
 — is asserted rather than remembered; extracting it also closed a hole, in that
 `stopScheduler()` sat outside the try, so a throw from it propagated out of the
 signal handler and the gateway, the buffered metrics and the connection were
-never closed at all. The `npm run deploy` guard is `runDeployCli`, returning an
+never closed at all. Each of the four is now attempted independently, in the
+same order: none of them is a precondition for the next — the sequencing is
+about not racing, not about dependency — so a gateway that rejects `destroy()`
+no longer takes the metrics drain and the connection close down with it. The `npm run deploy` guard is `runDeployCli`, returning an
 exit code instead of calling `process.exit`, so the branch deciding whether an
 operator gets a deploy or an error message has tests. The three files stay on
 the list as the thin wrappers they now are.
@@ -150,6 +153,9 @@ so the digests differ on every run even on a perfect cache hit. It warns rather
 than failing — the push has already happened, and a re-run would restore from
 the same evicted cache — and an unreadable manifest is reported as "not checked"
 rather than as a mismatch, so a registry blip cannot be misread as a finding.
+The check exports its verdict, and the webhook below fires only on a clean one:
+a workflow that labels an image **DO NOT DEPLOY** and then deploys it anyway is
+a workflow whose gate is worth less than nothing.
 
 And a published image announces itself (#953). Nothing pulls on its own: a
 Portainer stack holds the image it last deployed until somebody redeploys it, so
@@ -160,9 +166,11 @@ watching CI has the deploy in front of them rather than a fact to act on.
 Optionally, setting a `PORTAINER_WEBHOOK_URL` secret has the publish job POST to
 a Portainer stack webhook after a push to the default branch, which redeploys
 the stack on its own. Off unless configured, default branch only — a `v*` tag
-publishes something nothing is pointed at yet — never echoed, since the URL is a
-deploy credential, and a failure warns rather than failing a build whose image
-is already published. `docs/RELEASING.md` has the setup.
+publishes something nothing is pointed at yet — gated on the scanned-image check
+above, and refused outright unless the URL is `https://`, since it carries its
+own credential in its path and a GitHub-hosted runner reaches nothing that is
+not across the public internet. The URL is never echoed on any path, and a
+failure warns rather than failing a build whose image is already published. `docs/RELEASING.md` has the setup.
 
 ## [4.5.2] - 2026-09-01
 

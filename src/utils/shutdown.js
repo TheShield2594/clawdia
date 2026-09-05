@@ -88,14 +88,35 @@ async function runShutdown(signal, {
         logError('[SHUTDOWN] Error stopping the scheduler:', err);
     }
 
-    try {
-        await client.destroy();
-        await stopCommandMetrics();
-        await connection.close();
-        log('[SHUTDOWN] Clean exit.');
-    } catch (err) {
-        logError('[SHUTDOWN] Error during shutdown:', err);
+    // Each step is attempted on its own, in order. Sequencing is the point of
+    // this function and is unchanged; what a step does *not* do any more is
+    // cancel the ones after it.
+    //
+    // They shared a try until a review pointed out it was the same hole the
+    // scheduler guard above exists to close, one level in: a gateway that
+    // rejects `destroy()` skipped the metrics drain and the connection close,
+    // so the buffered counts (#895) were lost to a failure that had nothing to
+    // do with them. Nothing here is a precondition for what follows it — the
+    // order is about not racing, not about dependency — so a failed step leaves
+    // the next one both safe and worth doing.
+    let failed = false;
+    for (const [what, step] of [
+        ['closing the gateway', () => client.destroy()],
+        ['draining the command metrics', () => stopCommandMetrics()],
+        ['closing the database connection', () => connection.close()],
+    ]) {
+        try {
+            await step();
+        } catch (err) {
+            failed = true;
+            logError(`[SHUTDOWN] Error ${what}:`, err);
+        }
     }
+
+    // Only when every step actually succeeded. "Clean exit" over a shutdown
+    // that dropped a step is the log line that makes the next incident harder
+    // to read.
+    if (!failed) log('[SHUTDOWN] Clean exit.');
 
     exit(0);
 }

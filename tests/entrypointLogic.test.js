@@ -160,26 +160,46 @@ describe('#951 — graceful shutdown ordering', () => {
         expect(exit).toHaveBeenCalledWith(0);
     });
 
-    test('a rejecting client.destroy still exits', async () => {
-        const exit = jest.fn();
-        const deps = harness({ exit });
-        deps.client = { destroy: () => Promise.reject(new Error('gateway hung')) };
-
-        await runShutdown('SIGTERM', deps);
-
-        expect(exit).toHaveBeenCalledWith(0);
-    });
-
-    test('a rejecting metrics drain is logged and still exits', async () => {
+    // A failing step must not cancel the ones after it. The three shared a try
+    // until review caught that a gateway rejecting `destroy()` took the metrics
+    // drain and the connection close down with it — losing the buffered counts
+    // to a failure that had nothing to do with them.
+    test('a rejecting client.destroy still drains metrics and closes the database', async () => {
         const exit = jest.fn();
         const logError = jest.fn();
         const deps = harness({ exit, logError });
-        deps.stopCommandMetrics = () => Promise.reject(new Error('mongo gone'));
+        deps.client = {
+            destroy: () => {
+                deps.calls.push('client.destroy');
+                return Promise.reject(new Error('gateway hung'));
+            },
+        };
 
         await runShutdown('SIGTERM', deps);
 
-        expect(exit).toHaveBeenCalledWith(0);
+        expect(deps.calls).toEqual([
+            'stopScheduler', 'client.destroy', 'stopCommandMetrics', 'connection.close',
+        ]);
         expect(logError).toHaveBeenCalled();
+        expect(exit).toHaveBeenCalledWith(0);
+    });
+
+    test('a rejecting metrics drain still closes the database', async () => {
+        const exit = jest.fn();
+        const logError = jest.fn();
+        const deps = harness({ exit, logError });
+        deps.stopCommandMetrics = () => {
+            deps.calls.push('stopCommandMetrics');
+            return Promise.reject(new Error('mongo gone'));
+        };
+
+        await runShutdown('SIGTERM', deps);
+
+        expect(deps.calls).toContain('connection.close');
+        expect(deps.calls.indexOf('connection.close'))
+            .toBeGreaterThan(deps.calls.indexOf('stopCommandMetrics'));
+        expect(logError).toHaveBeenCalled();
+        expect(exit).toHaveBeenCalledWith(0);
     });
 
     test('a rejecting connection.close still exits', async () => {
@@ -190,6 +210,39 @@ describe('#951 — graceful shutdown ordering', () => {
         await runShutdown('SIGTERM', deps);
 
         expect(exit).toHaveBeenCalledWith(0);
+    });
+
+    test('every step is attempted even when all of them reject', async () => {
+        const exit = jest.fn();
+        const logError = jest.fn();
+        const deps = harness({ exit, logError });
+        const boom = name => () => {
+            deps.calls.push(name);
+            return Promise.reject(new Error(name));
+        };
+        deps.client = { destroy: boom('client.destroy') };
+        deps.stopCommandMetrics = boom('stopCommandMetrics');
+        deps.connection = { close: boom('connection.close') };
+
+        await runShutdown('SIGTERM', deps);
+
+        expect(deps.calls).toEqual([
+            'stopScheduler', 'client.destroy', 'stopCommandMetrics', 'connection.close',
+        ]);
+        // One line per failure, so the log says which steps went wrong rather
+        // than only that something did.
+        expect(logError).toHaveBeenCalledTimes(3);
+        expect(exit).toHaveBeenCalledWith(0);
+    });
+
+    test('does not claim a clean exit when a step failed', async () => {
+        const log = jest.fn();
+        const deps = harness({ log, logError: () => {} });
+        deps.connection = { close: () => Promise.reject(new Error('already closed')) };
+
+        await runShutdown('SIGTERM', deps);
+
+        expect(log.mock.calls.flat().join(' ')).not.toMatch(/Clean exit/);
     });
 
     // The defaults themselves, which are part of the wiring: a default that

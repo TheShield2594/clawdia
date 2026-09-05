@@ -131,6 +131,14 @@ describe('#952 — a publish that is not the scanned image is reported', () => {
     test('the result reaches the run summary, not only the log', () => {
         expect(checkStep.run).toMatch(/GITHUB_STEP_SUMMARY/);
     });
+
+    test('it exports a verified result for the webhook to gate on', () => {
+        // Every path has to set it, the early return included: a check that did
+        // not run must not read as a check that passed.
+        expect(checkStep.id).toBeTruthy();
+        expect(checkStep.run).toMatch(/verified=false[\s\S]*exit 0/);
+        expect(checkStep.run).toMatch(/verified=\$verified" >> "\$GITHUB_OUTPUT"/);
+    });
 });
 
 describe('#953 — a published image announces itself', () => {
@@ -195,6 +203,40 @@ describe('#953 — a published image announces itself', () => {
         // reason to re-publish an image already in the registry.
         expect(hookStep.run).toMatch(/::warning::/);
         expect(hookStep['continue-on-error']).toBeUndefined();
+    });
+
+    test('it does not fire when the published image was not the scanned one', () => {
+        // The check step labels a mismatched platform "DO NOT DEPLOY". A
+        // workflow that then auto-deploys it is one that walks past its own
+        // gate, which is worth less than not having the gate.
+        const check = stepsOf(publishJob).find(s => /imagetools inspect/.test(s.run || ''));
+        expect(hookStep.if).toMatch(
+            new RegExp(`steps\\.${check.id}\\.outputs\\.verified\\s*==\\s*'true'`));
+    });
+
+    test('it refuses a non-HTTPS webhook URL', () => {
+        // The URL carries its own credential in the path, and this runs on a
+        // GitHub-hosted runner — so any URL it can reach crosses the public
+        // internet, and the LAN argument for cleartext does not apply.
+        expect(hookStep.run).toMatch(/https:\/\/\*\)/);
+        // Refused before the request, not after it.
+        const guard = hookStep.run.indexOf('https://*)');
+        expect(guard).toBeGreaterThanOrEqual(0);
+        expect(guard).toBeLessThan(hookStep.run.indexOf('curl'));
+    });
+
+    test('no line in the step prints the URL', () => {
+        // Reading the variable is fine — the `case` guard has to. Printing it
+        // is not, on any path, refusal included.
+        const printing = hookStep.run.split('\n')
+            .filter(line => /\b(echo|printf)\b/.test(line))
+            .filter(line => /PORTAINER_WEBHOOK_URL/.test(line));
+
+        // The one allowed mention is the advice naming the *variable* for the
+        // operator to go and check, which is not its value.
+        for (const line of printing) {
+            expect(line).not.toMatch(/\$\{?PORTAINER_WEBHOOK_URL\}?/);
+        }
     });
 
     test('the webhook runs after the image is pushed', () => {

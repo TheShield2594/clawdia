@@ -777,6 +777,7 @@ jobs:
       # registry blip cannot be misread as a security finding. This is the same
       # rule the npm audit step above follows for the same reason.
       - name: Check the published layers are the ones that were scanned
+        id: scanned
         env:
           SCANNED_AMD64: ${{ needs.image.outputs.scanned-layers }}
           SCANNED_ARM64: ${{ needs.arm64.outputs.scanned-layers }}
@@ -798,8 +799,14 @@ jobs:
           if [ -z "$config" ] || ! printf '%s' "$config" | jq -e . >/dev/null 2>&1; then
             echo "::warning::could not read the published image config, so this run does not say whether the published layers are the scanned ones"
             echo 'Not checked — the published image config could not be read.' >> "$GITHUB_STEP_SUMMARY"
+            # Unverified is not verified. The webhook below reads this, and an
+            # unreadable manifest must not be allowed to auto-deploy on the
+            # strength of a check that never ran.
+            echo 'verified=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          verified=true
 
           {
             echo '| platform | published layers |'
@@ -830,6 +837,7 @@ jobs:
               # job that was skipped, or a manifest shape this cannot read.
               echo "::warning::$platform: nothing to compare, so it is unknown whether the published image is the scanned one"
               echo "| $platform | not checked |" >> "$GITHUB_STEP_SUMMARY"
+              verified=false
             elif [ "$pushed" = "$scanned" ]; then
               echo "$platform: published layers are the ones that were scanned"
               echo "| $platform | match the scanned image |" >> "$GITHUB_STEP_SUMMARY"
@@ -841,8 +849,14 @@ jobs:
               echo "  scanned: $scanned"
               echo "  pushed:  $pushed"
               echo "| $platform | **DO NOT DEPLOY** — rebuilt on a cache miss, never scanned |" >> "$GITHUB_STEP_SUMMARY"
+              verified=false
             fi
           done
+
+          # True only when every platform matched. Read by the webhook step
+          # below, which must not auto-deploy an image this step just told a
+          # human not to deploy.
+          echo "verified=$verified" >> "$GITHUB_OUTPUT"
 
       # The active half of the deploy signal (#953).
       #
@@ -876,10 +890,43 @@ jobs:
       # unreachable for thirty seconds is an operator's problem to retry, not a
       # reason to mark the build red and have somebody re-publish an image that
       # is already in the registry.
+      #
+      # And it only fires behind the check above. Auto-deploying an image that
+      # step has just labelled **DO NOT DEPLOY** would be this workflow telling
+      # an operator not to deploy something while deploying it for them — the
+      # gate is worth less than nothing if the automation walks straight past
+      # it. `verified` is true only when every platform matched, so the
+      # unreadable-manifest and missing-output cases hold the deploy too: a
+      # check that did not run is not a check that passed. The step below says
+      # so on the summary, since the operator then has a redeploy to do by hand
+      # once they are satisfied.
       - name: Tell the Portainer stack there is a new image
-        if: env.PORTAINER_WEBHOOK_URL != '' && github.ref_name == github.event.repository.default_branch
+        if: >-
+          env.PORTAINER_WEBHOOK_URL != ''
+          && github.ref_name == github.event.repository.default_branch
+          && steps.scanned.outputs.verified == 'true'
         run: |
           set -u
+
+          # HTTPS or nothing. The webhook URL carries its own credential in the
+          # path — anyone who sees it can redeploy the stack — so posting to an
+          # http:// endpoint hands that credential to every hop in between. The
+          # usual argument for allowing cleartext, that Portainer is on a LAN,
+          # does not apply here: this runs on a GitHub-hosted runner, so any URL
+          # it can reach at all is one crossing the public internet.
+          #
+          # Refuses rather than downgrading silently, and says nothing about the
+          # value beyond its scheme being wrong — the point is to keep the URL
+          # out of the log, and echoing it in an error message would defeat the
+          # step that is careful not to.
+          case "$PORTAINER_WEBHOOK_URL" in
+            https://*) ;;
+            *)
+              echo "::warning::PORTAINER_WEBHOOK_URL is not an https:// URL, so no redeploy was requested — the webhook URL is a deploy credential and is not sent in cleartext. The image is published; redeploy the stack by hand."
+              echo 'Portainer webhook skipped — the configured URL is not HTTPS.' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+          esac
 
           status=$(curl -sS -o /dev/null -w '%{http_code}' \
             --request POST \
