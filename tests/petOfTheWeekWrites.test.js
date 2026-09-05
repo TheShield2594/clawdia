@@ -35,7 +35,7 @@ const Guild = require('../src/models/Guild');
 const User  = require('../src/models/User');
 const { generatePetSprite } = require('../src/utils/cardGenerator');
 const { logTransaction } = require('../src/utils/logTransaction');
-const { selectPetOfTheWeek } = require('../src/services/schedulerService');
+const { selectPetOfTheWeek } = require('../src/services/petService');
 
 const DEFAULT_REWARD = 5_000;
 const WEEK = 7 * 24 * 3600_000;

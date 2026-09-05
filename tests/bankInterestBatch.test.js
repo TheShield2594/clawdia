@@ -26,7 +26,7 @@ jest.mock('../src/services/districtService', () => ({ isDistrictActive: jest.fn(
 const Guild       = require('../src/models/Guild');
 const User        = require('../src/models/User');
 const Transaction = require('../src/models/Transaction');
-const { applyBankInterest } = require('../src/services/schedulerService');
+const { applyBankInterest } = require('../src/services/bankService');
 
 const INTEREST_BEARING_CAP = 100_000;
 

@@ -139,7 +139,7 @@ describe('exploration competes in the weekly champion race', () => {
         // A category with no label entry is skipped at announcement time — the
         // champion is paid and never mentioned, which reads as the reward being
         // broken. Every category something records must have a label.
-        const scheduler = read('services', 'schedulerService.js');
+        const scheduler = read('services', 'weeklyChampionService.js');
         const labels = scheduler.slice(scheduler.indexOf('WEEKLY_CATEGORY_LABELS'));
         const declared = new Set(
             [...labels.slice(0, labels.indexOf('};')).matchAll(/^\s+(\w+):\s*\{/gm)].map(m => m[1])

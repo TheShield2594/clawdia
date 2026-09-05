@@ -3,11 +3,13 @@ const path = require('path');
 
 const { escHtml } = require('../src/dashboard/public/esc-html');
 
+const { PAGE_SCRIPTS, readScript } = require('./helpers/dashboardScripts');
+
 const VIEW = fs.readFileSync(path.join(__dirname, '../src/dashboard/views/guild-settings.ejs'), 'utf8');
-const SCRIPT = fs.readFileSync(path.join(__dirname, '../src/dashboard/public/guild-settings.js'), 'utf8');
-// The page is the template plus the script it loads; either one could
-// reintroduce the patterns below.
-const PAGE = VIEW + SCRIPT;
+// The page is the template plus every script it loads — a dozen of them since
+// #935 — and any one of them could reintroduce the patterns below. esc-html.js
+// itself is left out: it is the one file that is *supposed* to define escHtml.
+const PAGE = VIEW + PAGE_SCRIPTS.filter(file => file !== 'esc-html.js').map(readScript).join('\n');
 
 describe('escHtml', () => {
     it('escapes the characters that break out of an attribute', () => {

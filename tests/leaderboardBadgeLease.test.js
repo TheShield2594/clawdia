@@ -23,7 +23,7 @@ jest.mock('../src/models/Guild', () => ({ find: jest.fn(), findOneAndUpdate: jes
 jest.mock('../src/models/User', () => ({ find: jest.fn(), aggregate: jest.fn(), updateOne: jest.fn(), bulkWrite: jest.fn() }));
 
 const Guild = require('../src/models/Guild');
-const { awardWeeklyLeaderboardBadges } = require('../src/services/schedulerService');
+const { awardWeeklyLeaderboardBadges } = require('../src/services/leaderboardBadgeService');
 
 /** Every condition in the lease filter, flattened out of any $and wrapper. */
 function conditions(filter) {

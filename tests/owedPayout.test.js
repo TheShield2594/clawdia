@@ -43,7 +43,7 @@ describe('recordOwedPayout', () => {
         const error = new Error('mongo down');
 
         await expect(recordOwedPayout({
-            service: 'schedulerService',
+            service: 'weeklyChampionService',
             jobName: 'announceWeeklyChampions',
             guildId: 'g1',
             payload: { kind: 'coins', userId: 'u1', guildId: 'g1', amount: 500 },
@@ -51,7 +51,7 @@ describe('recordOwedPayout', () => {
         })).resolves.toBe(true);
 
         expect(FailedJob.create).toHaveBeenCalledWith(expect.objectContaining({
-            service: 'schedulerService',
+            service: 'weeklyChampionService',
             guildId: 'g1',
             payload: { kind: 'coins', userId: 'u1', guildId: 'g1', amount: 500 },
             errorMessage: 'mongo down',
@@ -64,7 +64,7 @@ describe('recordOwedPayout', () => {
     // coins", and the replay script has to be able to tell them apart.
     test('suffixes the job name so the run-level entry is distinguishable', async () => {
         await recordOwedPayout({
-            service: 'schedulerService', jobName: 'returnExpiredMarketListings',
+            service: 'marketService', jobName: 'returnExpiredMarketListings',
             payload: { kind: 'items' }, error: new Error('x'),
         });
 
@@ -81,7 +81,7 @@ describe('recordOwedPayout', () => {
         FailedJob.create.mockRejectedValue(new Error('also down'));
 
         await expect(recordOwedPayout({
-            service: 'schedulerService', jobName: 'announceWeeklyChampions',
+            service: 'weeklyChampionService', jobName: 'announceWeeklyChampions',
             payload: { kind: 'coins', userId: 'u1', guildId: 'g1', amount: 500 },
             error: new Error('mongo down'),
         })).resolves.toBe(false);

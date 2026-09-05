@@ -41,7 +41,7 @@ jest.mock('../src/utils/cardGenerator', () => ({
 const Guild = require('../src/models/Guild');
 const User  = require('../src/models/User');
 const { createWarVictoryBanner } = require('../src/utils/cardGenerator');
-const { resolveExpiredWars } = require('../src/services/schedulerService');
+const { resolveExpiredWars } = require('../src/services/warService');
 
 const HOUR = 3600_000;
 

@@ -30,8 +30,7 @@ global.TextDecoder = global.TextDecoder || TextDecoder;
 
 const { bootPage, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
 
-const fs = require('fs');
-const path = require('path');
+const { pageScriptSource } = require('./helpers/dashboardScripts');
 
 const banner = () => document.getElementById('session-expired');
 const toastText = () => document.getElementById('toast-message').textContent;
@@ -288,9 +287,7 @@ describe('the wrapper behaves like the fetch it replaced', () => {
 // page has fifty-odd of them. A bare `fetch(` added later is a call site that
 // silently opts out.
 describe('every request the page makes goes through it', () => {
-    const source = fs.readFileSync(
-        path.join(__dirname, '..', 'src', 'dashboard', 'public', 'guild-settings.js'), 'utf8',
-    );
+    const source = pageScriptSource();
 
     it('leaves no bare fetch() call outside the wrapper itself', () => {
         const bare = source

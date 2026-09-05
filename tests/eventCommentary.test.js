@@ -55,7 +55,7 @@ jest.mock('../src/services/aiService', () => ({
 const Guild = require('../src/models/Guild');
 const User  = require('../src/models/User');
 const { eventCommentary, addCommentary, commentaryEnabled, MAX_CHARS } = require('../src/services/commentaryService');
-const { resolveExpiredWars } = require('../src/services/schedulerService');
+const { resolveExpiredWars } = require('../src/services/warService');
 
 const HOUR = 3600_000;
 

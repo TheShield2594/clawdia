@@ -1,6 +1,7 @@
 // Boots views/guild-settings.ejs inside jsdom the way a browser would: render
 // the page, put its body in the document, then run esc-html.js, the inline
-// bootstrap block and guild-settings.js in order.
+// bootstrap block and the page's dozen scripts, in the order the view loads
+// them.
 //
 // Shared by every suite that exercises the dashboard page, so the panel tests
 // and the accessibility tests boot the same way rather than each keeping its
@@ -15,6 +16,14 @@ const { guildSettingsLocals } = require('./guildSettingsLocals');
 
 const VIEWS = path.join(__dirname, '..', '..', 'src', 'dashboard', 'views');
 const PUBLIC = path.join(__dirname, '..', '..', 'src', 'dashboard', 'public');
+
+// The page's scripts, in the order views/guild-settings.ejs loads them (#935);
+// esc-html.js runs before the inline bootstrap block and is handled separately
+// below. Evaluated one at a time rather than concatenated, so a panel reaching
+// for a `const` in a sibling script fails here the way it would in a browser
+// that ran them as the separate scripts they are — the rule that keeps every
+// cross-file name a `var` or a function declaration.
+const PAGE_SCRIPTS = require('./dashboardScripts').PAGE_SCRIPTS.filter(file => file !== 'esc-html.js');
 
 function renderPage(overrides) {
     const file = path.join(VIEWS, 'guild-settings.ejs');
@@ -191,8 +200,7 @@ function bootPage({ panelFetch, media, minified } = {}) {
     };
     window.eval(script('esc-html.js', minified));
     window.eval(bootstrap);
-    window.eval(script('settings-payload.js', minified));
-    window.eval(script('guild-settings.js', minified));
+    for (const file of PAGE_SCRIPTS) window.eval(script(file, minified));
 
     return { media: mediaControl };
 }
@@ -201,4 +209,4 @@ function clickTab(id) {
     document.querySelector(`.nav-item[data-tab="${id}"]`).dispatchEvent(new window.Event('click', { bubbles: true }));
 }
 
-module.exports = { VIEWS, PUBLIC, renderPage, renderPanel, bootPage, clickTab, settle, forgetDocumentListeners };
+module.exports = { VIEWS, PUBLIC, PAGE_SCRIPTS, renderPage, renderPanel, bootPage, clickTab, settle, forgetDocumentListeners };

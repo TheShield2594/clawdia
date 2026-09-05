@@ -9,15 +9,15 @@
     <%# `defer` rather than a bare tag (#945). This sat in <head> as a synchronous
         script, which stops the parser for a whole round trip before anything is
         painted — and for nothing, because no other script in <head> reads
-        escHtml. Its only consumers are guild-settings.js and the panel renderers
-        it calls, none of which run until after parse.
+        escHtml. Its only consumers are the page scripts at the end of <body>
+        and the panel renderers they call, none of which run until after parse.
 
-        The two tags at the end of <body> below carry `defer` too, and that is
-        load-bearing rather than tidiness: deferred scripts run in document order
-        *after* every parser-executed one, so deferring this alone would move it
-        behind the bundle that calls escHtml at load. All three deferred keeps
-        the order they have always run in — escHtml, then the payload builder,
-        then the bundle — while none of them blocks the parse. The inline
+        Every one of those carries `defer` too, and that is load-bearing rather
+        than tidiness: deferred scripts run in document order *after* every
+        parser-executed one, so deferring this alone would move it behind the
+        scripts that call escHtml at load. Deferring all of them keeps the order
+        they have always run in — escHtml, then the payload builder, then the
+        page's own scripts — while none of them blocks the parse. The inline
         bootstrap block stays inline and undeferred, so window.CLAWDIA_BOOTSTRAP
         is still set before any of them looks at it. %>
     <script defer src="<%= asset('/esc-html.js') %>"></script>
@@ -332,7 +332,7 @@
 
     <script nonce="<%= locals.cspNonce %>">
         // Only the per-request data lives inline; the 200 KB of behaviour that
-        // consumes it is in the cacheable /guild-settings.js below.
+        // consumes it is in the cacheable scripts below.
         window.CLAWDIA_BOOTSTRAP = {
             guildId:                <%- jsonForScript(guild.id) %>,
             guildName:              <%- jsonForScript(guild.name) %>,
@@ -360,6 +360,26 @@
         };
     </script>
     <script defer src="<%= asset('/settings-payload.js') %>"></script>
+    <%# The page's behaviour, in load order (#935). It was one 5,206-line
+        guild-settings.js; it is the shared machinery, then one script per
+        settings panel, then the shell. `defer` keeps them in document order
+        and the order is the contract: dashboard-core.js defines what the
+        panels register into, and guild-settings.js takes the unsaved-changes
+        baseline at its end, which has to happen after every panel above it has
+        rendered into the panel that shipped with the page. %>
+    <script defer src="<%= asset('/dashboard-core.js') %>"></script>
+    <script defer src="<%= asset('/chart-support.js') %>"></script>
+    <script defer src="<%= asset('/panel-messages.js') %>"></script>
+    <script defer src="<%= asset('/panel-overview.js') %>"></script>
+    <script defer src="<%= asset('/panel-analytics.js') %>"></script>
+    <script defer src="<%= asset('/panel-moderation.js') %>"></script>
+    <script defer src="<%= asset('/panel-economy.js') %>"></script>
+    <script defer src="<%= asset('/panel-leveling.js') %>"></script>
+    <script defer src="<%= asset('/panel-achievements.js') %>"></script>
+    <script defer src="<%= asset('/panel-roles.js') %>"></script>
+    <script defer src="<%= asset('/panel-rss.js') %>"></script>
+    <script defer src="<%= asset('/panel-ai.js') %>"></script>
+    <script defer src="<%= asset('/panel-mcp.js') %>"></script>
     <script defer src="<%= asset('/guild-settings.js') %>"></script>
 </body>
 </html>

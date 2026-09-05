@@ -575,7 +575,8 @@ wide, and it is widest exactly where the risk is.
 - starboard, suggestions, and reaction roles
 - command policies and the permission layer
 - reminders (`reminderService.js`), polls, profiles, and the remaining utility commands
-- anti-nuke (`antiNukeService.js`) and the scheduler (`schedulerService.js`)
+- anti-nuke (`antiNukeService.js`) and the scheduler (`services/scheduler/` and
+  the domain services its job table points at)
 - the dashboard beyond the settings validators named above
 
 ---

@@ -16,12 +16,19 @@ jest.mock('../src/models/Guild', () => ({ find: jest.fn(), findOne: jest.fn(), f
 jest.mock('../src/models/User',  () => ({ find: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn(), aggregate: jest.fn(), updateOne: jest.fn(), updateMany: jest.fn(), bulkWrite: jest.fn() }));
 jest.mock('../src/models/MarketListing', () => ({ find: jest.fn(), findOneAndDelete: jest.fn() }));
 jest.mock('../src/utils/inventoryGrant', () => ({ grantInventoryItem: jest.fn() }));
-jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn() }));
+// Only recordOwedPayout is stubbed. `owedSummary` lives in the same module
+// (#931) and is what the sweep's own error message is built from, so
+// replacing the whole module would test the mock's wording rather than the
+// one an operator reads.
+jest.mock('../src/utils/owedPayout', () => ({
+    ...jest.requireActual('../src/utils/owedPayout'),
+    recordOwedPayout: jest.fn(),
+}));
 
 const MarketListing = require('../src/models/MarketListing');
 const { grantInventoryItem } = require('../src/utils/inventoryGrant');
 const { recordOwedPayout } = require('../src/utils/owedPayout');
-const { returnExpiredMarketListings } = require('../src/services/schedulerService');
+const { returnExpiredMarketListings } = require('../src/services/marketService');
 
 function listing(over = {}) {
     return { _id: 'l1', guildId: 'g1', sellerId: 'u1', itemId: 'sword', quantity: 2, expiresAt: new Date(0), ...over };
@@ -156,7 +163,7 @@ describe('returnExpiredMarketListings', () => {
         await expect(returnExpiredMarketListings()).rejects.toThrow(/1 of 1/);
 
         expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
-            service: 'schedulerService',
+            service: 'marketService',
             jobName: 'returnExpiredMarketListings',
             guildId: 'g1',
             payload: {

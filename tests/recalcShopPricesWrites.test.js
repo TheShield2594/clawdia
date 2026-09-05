@@ -31,7 +31,7 @@ jest.mock('../src/models/User', () => ({ find: jest.fn(), aggregate: jest.fn(), 
 
 const Guild = require('../src/models/Guild');
 const { HISTORY_CAP } = require('../src/utils/dynamicPricing');
-const { recalcShopPrices } = require('../src/services/schedulerService');
+const { recalcShopPrices } = require('../src/services/shopPricingService');
 
 const client = { guilds: { fetch: async () => null } };
 
