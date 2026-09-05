@@ -53,7 +53,7 @@
     "openai": "^7.5.0",
     "passport": "^0.7.0",
     "passport-oauth2": "^1.8.0",
-    "pino": "^9.14.0",
+    "pino": "^10.3.1",
     "rss-parser": "^3.13.0",
     "undici": "^6.28.0"
   },
