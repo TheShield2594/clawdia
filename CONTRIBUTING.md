@@ -13,6 +13,12 @@ that will surprise you if nobody says them first.
 - [Adding a command, a route or a model](#adding-a-command-a-route-or-a-model)
 - [Commits and pull requests](#commits-and-pull-requests)
 
+Looking for something to work on, rather than arriving with a change already in
+mind: [docs/ROADMAP.md](docs/ROADMAP.md) is what is planned next and why, and it
+carries the one piece of sequencing worth knowing before you start — new game
+features are waiting on the economy audit, and bug fixes, security work and
+documentation are not.
+
 ## Getting set up
 
 Node **24.19.0** or newer — the version in `.nvmrc`, which CI reads and

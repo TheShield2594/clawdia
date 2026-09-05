@@ -210,6 +210,20 @@ fetched and bounded — a `parseURL`, which does its own unpinned, uncapped HTTP
 or a third call site would each be one line and would each turn a morning of
 vendoring into a migration.
 
+Sequencing becomes a decision with a record (#914). There was no roadmap, no
+milestones and no pinned planning issue, so direction was reconstructable only
+by reading this file backwards and following issue references — and the one
+tradeoff that actually governs the project, audit the economy (#873) or ship the
+next game system, was being made implicitly, one pull request at a time.
+`docs/ROADMAP.md` makes it explicitly: the economy audit comes before net-new
+game features, with the two landed passes and the thirteen critical defects they
+found as the argument, and with bug fixes, security and operational work
+explicitly not blocked behind it. It names the next four items, the order of the
+audit queue within the economy — money-moving first — and, in a section for the
+purpose, the things that were closed with a decision rather than a task, so the
+next reader who notices one finds the reasoning instead of reopening it. No dates
+and no estimates: it would be wrong about both, and what it is for is order.
+
 ## [4.5.2] - 2026-09-01
 
 Migrations through `021_market_listing_ttl_grace`.
