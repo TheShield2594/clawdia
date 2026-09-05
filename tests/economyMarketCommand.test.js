@@ -859,6 +859,47 @@ describe('buying a listing', () => {
         console.error.mockRestore();
     });
 
+    // #873. The re-read has three answers, and `Boolean()` had only two: a read
+    // that *failed* became "the listing is gone", which is guidance ending in
+    // stock returned for a listing that may still be live and sellable — the
+    // duplicate this path exists to avoid, arrived at through the record meant
+    // to prevent it.
+    it('records an unreadable listing as unknown rather than as gone', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        let claimed = false;
+        const realDelete = mockListings.model.findOneAndDelete.getMockImplementation();
+        mockListings.model.findOneAndDelete.mockImplementationOnce(async (...args) => {
+            await realDelete(...args);
+            claimed = true;
+            throw new Error('claim failed');
+        });
+        // The re-read that follows the rejected claim cannot answer either.
+        const realFindOne = mockListings.model.findOne.getMockImplementation();
+        const failedRead = () => Promise.reject(new Error('read failed'));
+        mockListings.model.findOne.mockImplementation((...args) => (claimed
+            ? { lean: failedRead, select() { return this; }, sort() { return this; },
+                then: (res, rej) => failedRead().then(res, rej) }
+            : realFindOne(...args)));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+        mockListings.model.findOne.mockImplementation(realFindOne);
+
+        expect(mockUsers.get(BUYER_ID).balance).toBe(1000);
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([]);
+        const [{ payload }] = FailedJob.create.mock.calls.at(-1);
+        expect(payload.stillListed).toBeNull();
+        expect(payload.adjudicate).toContain('could not be read');
+        // The one sentence it must not carry: an operator acting on "it is
+        // gone" can return stock onto a listing that is still selling.
+        expect(payload.adjudicate).not.toMatch(/^The listing is gone/);
+        console.error.mockRestore();
+    });
+
     it('says so in the log when even the ambiguous-claim record cannot be written', async () => {
         // The last line of defence: the buyer's coins are back either way, but
         // the seller's item is only findable through this record. If the queue

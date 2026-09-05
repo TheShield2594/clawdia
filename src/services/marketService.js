@@ -412,6 +412,30 @@ async function payListingSeller({ sellerId, guildId, listing, amount, Model = re
 }
 
 /**
+ * What an operator has to establish, given what the re-read could say.
+ *
+ * Three answers and three sentences: the listing survived, the listing is gone,
+ * or nobody knows. The third is not the second — telling an operator the
+ * listing is gone when the read simply failed is how a live listing gets its
+ * stock returned on top of itself.
+ */
+function adjudication(listing, stillListed) {
+    const owedIfUnsold =
+        `If no completed purchase exists for it — check for a market_sell row or the `
+        + `${marketSalePayoutKey(listing._id)} key on the seller — then ${listing.quantity}x `
+        + `${listing.itemId} is owed back to ${listing.sellerId}. If one does exist, the item `
+        + 'went to that buyer and nothing is owed.';
+
+    if (stillListed === true) {
+        return 'The listing survived, so the delete did not land: the buyer was refunded and nothing else is owed.';
+    }
+    if (stillListed === false) return `The listing is gone. ${owedIfUnsold}`;
+    return 'Whether the listing still exists could not be read, so nothing here says it is gone. '
+        + `Check for listing ${listing._id} first: if it is still there, the delete did not land and `
+        + `nothing is owed — returning stock would duplicate it. If it is gone: ${owedIfUnsold}`;
+}
+
+/**
  * Write down a listing claim whose outcome nobody can establish.
  *
  * `findOneAndDelete` is the write that claims a listing for a purchase, and a
@@ -419,6 +443,13 @@ async function payListingSeller({ sellerId, guildId, listing, amount, Model = re
  * listing narrows it to two worlds and cannot separate them: the row is gone
  * either because this delete landed and the item is now in nobody's bag, or
  * because a concurrent buyer's delete landed and the item is rightfully theirs.
+ *
+ * And the re-read can fail too, which is a third answer rather than a `false`.
+ * Collapsing it into "the listing is gone" hands the operator guidance that
+ * ends in returning stock for a listing that may still be live and sellable —
+ * the duplicate this whole path is written to avoid, arrived at through the
+ * record meant to prevent it. `stillListed` is therefore a tri-state, and
+ * `null` gets guidance of its own: check the listing first.
  *
  * So nothing is granted. Returning the stock would mint an item in the second
  * world, and this file's own rule — losing a return is recoverable from a
@@ -450,14 +481,11 @@ async function recordAmbiguousClaim({ listing, buyerId, guildId, stillListed, er
             buyerId,
             itemId:       listing.itemId,
             quantity:     listing.quantity,
+            // true, false, or null when the re-read itself failed.
             stillListed,
-            // Spelled out because whoever reads this is deciding between two
+            // Spelled out because whoever reads this is deciding between
             // worlds and needs to know which question to ask.
-            adjudicate: stillListed
-                ? 'The listing survived, so the delete did not land: the buyer was refunded and nothing else is owed.'
-                : `The listing is gone. If no completed purchase exists for it — check for a market_sell row or the `
-                  + `${marketSalePayoutKey(listing._id)} key on the seller — then ${listing.quantity}x ${listing.itemId} `
-                  + `is owed back to ${listing.sellerId}. If one does exist, the item went to that buyer and nothing is owed.`,
+            adjudicate: adjudication(listing, stillListed),
         },
         errorMessage: error?.message ?? 'listing claim rejected with an unknown outcome',
         errorStack:   error?.stack ?? null,

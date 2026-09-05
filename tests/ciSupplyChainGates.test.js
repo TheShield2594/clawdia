@@ -209,10 +209,23 @@ describe('#961 — the apk upgrade layer is not frozen by the cache', () => {
         // that. The epoch is the lever that unfreezes it without making every
         // build a cold apk layer, and it is worth nothing if it is not in the
         // key that the layer is actually keyed on.
+        // Asserted on the key the step actually writes, not on the epoch
+        // merely existing somewhere in the script: an env var that is declared
+        // and never interpolated is a lever wired to nothing, and a test that
+        // only looks for the name would pass on it.
         const step = stepsOf(buildJob).find(s => s.id === 'apk');
-        expect(step.env).toBeDefined();
-        expect(step.env.APK_EPOCH).toBeDefined();
-        expect(step.run).toContain('APK_EPOCH');
+        expect(step.env?.APK_EPOCH ?? '').not.toBe('');
+
+        // The one line that matters: what lands in GITHUB_OUTPUT as `key`.
+        const written = step.run.match(/key=(.*?)"/);
+        expect(written).not.toBeNull();
+        expect(written[1]).toContain('${APK_EPOCH}');
+        expect(written[1]).toMatch(/date -u/);
+
+        // And that the build argument is fed from that output rather than
+        // recomputed, so the key the layer is cached under is the one this
+        // step wrote.
+        expect(buildArgsOf(buildJob)).toMatch(/APK_REFRESH=\$\{\{\s*steps\.apk\.outputs\.key\s*\}\}/);
     });
 
     test('the publish build takes the build job\'s value rather than its own', () => {

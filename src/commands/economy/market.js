@@ -624,16 +624,23 @@ async function handleBuy(interaction, currency) {
             // bought mints an item. But "not granted" must not mean "not written
             // down" (#873): the record goes in first, where an operator can find
             // it, rather than into a log line nobody was reading at the time.
-            const stillListed = Boolean(await MarketListing
-                .findOne({ _id: listing._id, guildId: interaction.guild.id }, '_id').lean().catch(() => null));
+            // Tri-state on purpose: `true`, `false`, or `null` when the
+            // re-read itself failed. `Boolean()` here turned a failed read into
+            // "the listing is gone", which is guidance that ends in stock being
+            // returned for a listing that may still be live.
+            const stillListed = await MarketListing
+                .findOne({ _id: listing._id, guildId: interaction.guild.id }, '_id').lean()
+                .then(Boolean)
+                .catch(() => null);
             const recorded = await recordAmbiguousClaim({
                 listing, buyerId: interaction.user.id, guildId: interaction.guild.id,
                 stillListed, error: claimErr,
             });
             const { refund } = await unwind('buyRefundClaim', false);
-            if (!stillListed) {
+            if (stillListed !== true) {
                 console.error(
-                    `[market buy] listing ${listing._id} is gone after a claim that rejected — ` +
+                    `[market buy] listing ${listing._id} ` +
+                    `${stillListed === false ? 'is gone' : 'could not be re-read'} after a claim that rejected — ` +
                     `${listing.quantity}x ${listing.itemId} may be owed back to ${listing.sellerId}; ` +
                     `${recorded ? 'recorded for an operator to adjudicate' : 'NOT RECORDED'}`,
                 );
