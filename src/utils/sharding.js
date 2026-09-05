@@ -118,6 +118,33 @@ function shardIdForGuild(guildId, shardCount) {
 }
 
 /**
+ * What to hand `ShardingManager` as its `totalShards` (#951).
+ *
+ * SHARD_COUNT pins a number. Anything else — unset, empty, a typo, a zero, a
+ * negative, a float — falls through to `'auto'`, which asks the gateway how
+ * many it wants. That fallback is deliberately not a throw: this is read by
+ * the process an operator starts, and refusing to boot over a mistyped
+ * *optional* variable trades a running deployment for a strict one.
+ *
+ * `'auto'` as the literal string because that is the value discord.js reads.
+ * Returning the unparsed variable instead is the failure this exists to
+ * prevent: the manager takes the string as a number and spawns NaN shards.
+ *
+ * Distinct from `shardCount()` below, which answers a different question — that
+ * one is "how many shards are there", asked by an already-running child that
+ * has a client; this one is "how many should be spawned", asked once by the
+ * manager before any of them exist.
+ *
+ * @param {object} [env] the environment to read; injectable for the tests.
+ * @returns {number|'auto'} a pinned positive integer, or the gateway's call.
+ */
+function resolveTotalShards(env = process.env) {
+    const pinned = Number(env.SHARD_COUNT);
+    if (Number.isInteger(pinned) && pinned > 0) return pinned;
+    return 'auto';
+}
+
+/**
  * How many shards this deployment runs. One when unsharded, which is the
  * default and makes every rule here a no-op rather than a special case.
  */
@@ -225,6 +252,7 @@ function shardTag(client = null) {
 module.exports = {
     GUILD_SHARD_SHIFT,
     shardIdForGuild,
+    resolveTotalShards,
     shardCount,
     shardId,
     isPrimaryShard,

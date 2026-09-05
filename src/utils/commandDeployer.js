@@ -315,8 +315,62 @@ async function recordDeployment(clientId, hash, count, token = null) {
     );
 }
 
+/**
+ * The `npm run deploy` front door: the guard, the logging and the exit code
+ * (#951).
+ *
+ * It was the body of src/deploy-commands.js, which is on the `neverExecuted`
+ * list in coverage-floors.json — so the branch that decides whether an operator
+ * gets a deploy or an error message was never run by anything. It is here
+ * rather than there because that is the difference between logic with a test
+ * and logic without one.
+ *
+ * Returns the exit code instead of calling `process.exit`, for two reasons: a
+ * function that kills the process cannot be tested, and the caller can then do
+ * what the entrypoint has always done — exit explicitly on failure, and fall
+ * off the end on success rather than truncating a pipe that has not drained.
+ *
+ * The two variables are checked here as well as in config/validateEnv.js
+ * because this path deliberately does not run the validator: `npm run deploy`
+ * needs a token and an application id and nothing else, and holding it to the
+ * bot's whole configuration would make an operator set DASHBOARD_URL to
+ * register slash commands.
+ *
+ * @param {object} [deps]
+ * @param {object} [deps.env] the environment to read; injectable for the tests.
+ * @param {function(string, string): Promise<number>} [deps.deploy]
+ * @param {function(...*): void} [deps.log]
+ * @param {function(...*): void} [deps.logError]
+ * @returns {Promise<number>} 0 when the set was published, 1 otherwise.
+ */
+async function runDeployCli({
+    env = process.env,
+    deploy = deployCommands,
+    log = console.log,
+    logError = console.error,
+} = {}) {
+    if (!env.CLIENT_ID || !env.DISCORD_TOKEN) {
+        logError('Missing CLIENT_ID or DISCORD_TOKEN environment variable.');
+        return 1;
+    }
+
+    try {
+        log('Started refreshing application (/) commands.');
+        const count = await deploy(env.CLIENT_ID, env.DISCORD_TOKEN);
+        log(`Successfully reloaded ${count} application (/) commands.`);
+        return 0;
+    } catch (error) {
+        // The whole error, not `error.message`: a Discord rejection carries the
+        // per-command detail in `rawError`, and that detail is the only thing
+        // that says *which* command body it refused.
+        logError('Failed to deploy commands:', error);
+        return 1;
+    }
+}
+
 module.exports = {
     deployCommands,
+    runDeployCli,
     buildCommandPayload,
     deployCommandsIfChanged,
     commandSetHash,

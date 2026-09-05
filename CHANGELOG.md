@@ -118,6 +118,52 @@ zeroes apart. The floors themselves are re-recorded against the current suite �
 from 4 to 10, `src/data` from 61/26/34/61 to 77/57/64/78 — and the global
 thresholds from 50/40/53/51 to 51/41/53/52.
 
+The three process entrypoints stop hiding logic from the test suite (#951).
+`src/index.js`, `src/shard.js` and `src/deploy-commands.js` are all on
+`coverage-floors.json`'s `neverExecuted` list, legitimately — requiring one
+starts a bot — but decisions had accumulated inside them that boot perfectly and
+then do the wrong thing, which is the one class of bug the CI image job's boot
+test cannot see. Shard-count selection is now `resolveTotalShards` in
+`utils/sharding.js`, where the branch that turns a mistyped `SHARD_COUNT` into
+`'auto'` rather than into a manager spawning `NaN` shards is actually run.
+Shutdown sequencing is `utils/shutdown.js`, so the order the four steps close in
+— scheduler, then gateway, then the buffered command metrics, then the database
+— is asserted rather than remembered; extracting it also closed a hole, in that
+`stopScheduler()` sat outside the try, so a throw from it propagated out of the
+signal handler and the gateway, the buffered metrics and the connection were
+never closed at all. The `npm run deploy` guard is `runDeployCli`, returning an
+exit code instead of calling `process.exit`, so the branch deciding whether an
+operator gets a deploy or an error message has tests. The three files stay on
+the list as the thin wrappers they now are.
+
+A publish that is not the image the gates looked at now says so (#952). The
+`publish` job rebuilds rather than promoting the artifact the `image` and
+`arm64` jobs booted and scanned — deliberately, because promoting by digest
+would need `packages: write` in a job that also runs on pull requests — so the
+guarantee rests on a `type=gha` cache hit. What was missing was not the
+guarantee but the alarm: a cache eviction between the jobs would publish an
+image nothing had ever scanned, and the run would be green and silent. Both scan
+jobs now record the layer diff IDs of what they passed, and `publish` compares
+them against what it actually pushed, per platform. Diff IDs rather than
+digests, because `publish` adds OCI labels and a label changes the image config,
+so the digests differ on every run even on a perfect cache hit. It warns rather
+than failing — the push has already happened, and a re-run would restore from
+the same evicted cache — and an unreadable manifest is reported as "not checked"
+rather than as a mismatch, so a registry blip cannot be misread as a finding.
+
+And a published image announces itself (#953). Nothing pulls on its own: a
+Portainer stack holds the image it last deployed until somebody redeploys it, so
+a security fix could sit published and undeployed because nothing said it was
+there. The run summary now carries the `CLAWDIA_IMAGE_TAG=sha-<commit>` line to
+deploy this build alongside the digest to pin it immutably, so an operator
+watching CI has the deploy in front of them rather than a fact to act on.
+Optionally, setting a `PORTAINER_WEBHOOK_URL` secret has the publish job POST to
+a Portainer stack webhook after a push to the default branch, which redeploys
+the stack on its own. Off unless configured, default branch only — a `v*` tag
+publishes something nothing is pointed at yet — never echoed, since the URL is a
+deploy credential, and a failure warns rather than failing a build whose image
+is already published. `docs/RELEASING.md` has the setup.
+
 ## [4.5.2] - 2026-09-01
 
 Migrations through `021_market_listing_ttl_grace`.
