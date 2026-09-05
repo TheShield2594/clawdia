@@ -211,10 +211,10 @@
             "lines": 65
         },
         "src/utils": {
-            "statements": 73,
-            "branches": 71,
-            "functions": 78,
-            "lines": 74
+            "statements": 74,
+            "branches": 72,
+            "functions": 79,
+            "lines": 75
         },
         "src/views": {
             "statements": 62,
@@ -258,17 +258,35 @@
             "functions": 40,
             "lines": 48
         },
+        "src/commands/economy/gift.js": {
+            "statements": 88,
+            "branches": 69,
+            "functions": 86,
+            "lines": 91
+        },
         "src/commands/economy/invest.js": {
             "statements": 93,
             "branches": 84,
             "functions": 86,
             "lines": 93
         },
+        "src/commands/economy/market.js": {
+            "statements": 86,
+            "branches": 65,
+            "functions": 81,
+            "lines": 86
+        },
         "src/services/casinoJackpotService.js": {
             "statements": 95,
             "branches": 81,
             "functions": 87,
             "lines": 97
+        },
+        "src/services/marketService.js": {
+            "statements": 94,
+            "branches": 85,
+            "functions": 97,
+            "lines": 94
         },
         "src/utils/balanceDebit.js": {
             "statements": 97,
@@ -290,7 +308,7 @@
         },
         "src/utils/creditOrOwe.js": {
             "statements": 97,
-            "branches": 70,
+            "branches": 79,
             "functions": 97,
             "lines": 97
         },

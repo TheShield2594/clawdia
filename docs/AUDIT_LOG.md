@@ -1,10 +1,11 @@
 # Feature Audit Log
 
 A record of the subsystems that have been through a line-by-line audit, and what
-was found and fixed in each. **It is not a survey of the whole bot.** Eleven
-subsystems have been audited: nine long-stable, low-churn ones, and two passes
+was found and fixed in each. **It is not a survey of the whole bot.** Twelve
+subsystems have been audited: nine long-stable, low-churn ones, and three passes
 over the economy — the escrow and payout paths of `/duel`, `/heist` and
-`/syndicate`, and the casino's progressive jackpot (#873). The majority of the
+`/syndicate`, the casino's progressive jackpot, and the unwind paths of `/gift`
+and `/market` (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -543,6 +544,154 @@ is still listed under [Not yet reviewed](#not-yet-reviewed).
 
 ---
 
+## Economy — Gift and the Player Market
+
+**Status: Audited — all findings resolved** ✓
+
+The third pass of the economy audit #873 asks for, over `gift` and `market` —
+the two remaining items on that issue's own checklist besides the rest of the
+casino. They are taken together because they are one shape: the only two places
+a player hands something directly to another player, and so the only two where
+an unwind has to put value back somewhere rather than merely not take it.
+
+Every finding below is on an **unwind** path, and that is not a coincidence.
+Both commands debit atomically, guard the debit with the balance or the stack it
+is taking from, and put the freeze in the filter — the forward direction is
+sound, and #869 already fixed the seller's payout on the way out. What nothing
+had looked at is the direction things go when a trade fails halfway: five writes
+that hand coins or an item *back*, none of which read what the write returned,
+three of which told the player it had worked regardless, and one of which did
+not exist at all.
+
+The rest of the economy is **not** audited by this pass and is still listed
+under [Not yet reviewed](#not-yet-reviewed).
+
+**Files reviewed/fixed:**
+- `src/commands/economy/market.js`
+- `src/commands/economy/gift.js`
+- `src/services/marketService.js`
+- `src/utils/creditOrOwe.js`
+- `src/utils/payoutKey.js`
+- `src/utils/coinTransfer.js`
+- `src/utils/giftCaps.js`
+- `src/utils/inventoryGrant.js`
+- `tests/grantItemsOrOwe.test.js` (added)
+- `tests/economyMarketCommand.test.js`
+- `tests/giftItemTransfer.test.js`
+- `coverage-floors.json`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | `/market buy` refunded a buyer whose listing was taken first with a bare `User.updateOne` `$inc`, read nothing back from it, and said "This listing was just sold. Your coins have been refunded." A filter that matches nothing resolves exactly as happily as one that moved coins, so a buyer whose document had gone was told their money was back over a balance that was still short — the #804 failure, in the one write that had never been looked at. It also had no `catch`, so a rejection escaped `executePurchase` with the buyer already charged | Both refunds go through `creditCoinsOrOwe` under a key naming this interaction, and the reply is worded from what the helper reports: returned, recorded as owed, or neither | `market.js`, `payoutKey.js` |
+| 2 | The other refund — the one for a purchase whose item could not be credited — had the same unread result and swallowed its rejection into `console.error`, then said "Your coins have been refunded" either way. Nothing was written down, so unlike every other credit in the file there was nothing for `npm run payouts:replay` to settle | As above; the two are one helper now, so a third failure path cannot be added with a fourth handling of it | `market.js` |
+| 3 | That same failure **destroyed the item**. The listing row is the only place a listed item exists — it left the seller's bag when they listed it — and `/market buy` deletes the listing to claim it *before* crediting the buyer. A credit that then failed refunded the buyer's coins and stopped: the item was in nobody's inventory at all, the seller was never told, and no record of it existed anywhere but a log line | The seller's stock goes back through the new `grantItemsOrOwe`, keyed to the listing, and is recorded as owed when it cannot — and only once the buyer's own keyed credit has been read back as genuinely absent, so a lost response cannot give the item to both. Returned to the bag rather than by recreating the listing: the seller's five slots may have filled while the purchase was in flight | `market.js`, `creditOrOwe.js`, `payoutKey.js` |
+| 4 | `/market cancel` returned the stock with a bare `grantInventoryItem` in a `try`. That call answers `null` rather than throwing when no document matched, and the return value was never read — so a cancel that returned nothing still replied "Returned 3x lucky_charm". The `catch` that did fire wrote a console line calling the items "owed" while recording nothing owed, three hundred lines below the `returnStock` in `handleList` that records exactly this, for exactly this reason. The delete is the claim, so nothing would ever find the return again | `grantItemsOrOwe`, keyed to the listing's cancel, with the reply worded from its result | `market.js` |
+| 5 | `/market buy`'s claim — the `findOneAndDelete` that takes the listing — had no `catch`, so a rejection after the buyer's debit escaped the purchase entirely: the coins gone, nothing written down, and in the non-confirm path an unhandled rejection out of the command | Caught, and the buyer refunded through the same keyed helper. The stock is deliberately *not* returned on this path: a rejection leaves it unknowable whether this delete landed or another buyer's did, and returning stock for a listing somebody else bought mints an item — `marketService`'s own rule, that losing a return is recoverable from a record and silently doubling one is not. The first attempt at this wrote that record as a console line, which is not one; it is a `FailedJob` now (finding 10) | `market.js`, `marketService.js` |
+| 6 | `/gift`'s item rollback — the write that hands a sender their item back when the recipient's credit missed — ignored its return value entirely, so the one case it exists to handle was the case it reported as handled: "Your item was returned" over an item debited from the sender, refused by the recipient, and rolled back into nothing. When it *did* throw, the sender was told to contact an admin and nothing was written down for the admin to act on | `grantItemsOrOwe` under a key naming the gift, with the day's item-gift allowance still refunded in the same write. The three failure wordings say which of the three happened | `gift.js`, `payoutKey.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 7 | All five unwinds were unkeyed and unretried. A transient failure lost the value outright; and the owed record two of them filed was against a write that may have committed and merely lost its response, so a replay could pay it twice — the same reasoning that put a key on the escrow refund and the jackpot credit in the two passes before this | Every one of them is keyed and retried, under the six constructors added to `payoutKey.js`. A retry of a landed write is a no-op by construction rather than by hope | `payoutKey.js`, `creditOrOwe.js` |
+| 8 | Four hand-written versions of "grant this item, and cope if it fails", one of which was right. `handleList`'s `returnStock` checked the null return and filed an owed payload; the other three each got a different part of it wrong. That is the shape #873's first pass found in the three group payouts, one subsystem over | `grantItemsOrOwe` in `utils/creditOrOwe.js`, beside the `creditCoinsOrOwe` the coin side already shares. `/market buy`'s own half moves to `creditPurchasedItem` and `unwindPurchase` in `services/marketService.js`, beside the sweep that unwinds the other way — which is also what keeps the command under the 900-line cap the lint rule holds it to | `creditOrOwe.js`, `market.js`, `gift.js` |
+| 9 | `/gift`'s rollback refunded the day's item-gift allowance in the same write as the item, but the *owed record* carried only the item — so a rollback settled by `payouts:replay` returned the item and left the sender charged a day's cap for a gift that never arrived. The coin side had carried `counters` on the payload for exactly this reason since the first pass; the items branch of `replayOwedPayout` was the gap | A `budgetRefund` descriptor on the payload, stamped with the window the debit wrote, and `windowedRefundExpr` gating the refund on that window still being current — inside the same write, so there is no second read and no gap for the window to turn over in | `giftCaps.js`, `creditOrOwe.js`, `owedPayout.js`, `gift.js` |
+| 10 | The ambiguous claim above was written down as a `console.error` and nothing else, so the seller's item was findable only by someone already reading logs at the right minute. "Recoverable from a record" and "there is a log line" are not the same claim | `recordAmbiguousClaim` files a `FailedJob`, carrying the listing, both parties, and the question an operator has to answer — whether a completed purchase exists for that listing. Deliberately **not** `recordOwedPayout`: that suffixes the job name `.owed`, which is what puts a payload in front of `payouts:replay`, and replaying this one would grant the stock unconditionally — the duplicate the whole finding is about | `marketService.js`, `market.js` |
+| 11 | `payListingSeller` answered `balance: 0` when the seller's balance could not be read, and `handleBuy` filed that into the `market_sell` ledger row — a number nobody observed, recorded as though somebody had, in the one place an operator goes looking when the coins are in question | Three outcomes rather than two: the write's own projection, then a read, and only a read that *threw* is `null`. A read that succeeds and finds no seller document is an answer — they hold nothing — so that row is still filed, which is what #869 added it for. An unknown balance omits the row and logs why | `marketService.js`, `market.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 12 | The market tests broke a return with `mockRejectedValueOnce`, which asserts nothing about a path that is supposed to survive one transient failure, and asserted the *call shape* of the return rather than whether the item came back | Persistent failures where the test is about the failure, a retry test where it is about the retry, and assertions on the bag. The inventory mock now evaluates the payout-key guard for real, without which it would answer `unknown` where the store answers `duplicate` — the exact distinction `creditPurchasedItem` turns on, so a mock that waved it through would report the unwind as safe. `market.js` and `gift.js` join the per-file coverage floors at 86/65/81/86 and 88/69/86/91; `marketService.js` at 94/85/97/94 | `tests/`, `coverage-floors.json` |
+
+**Reviewed and found sound** — recorded so the next pass does not re-derive it:
+
+- `commitCoinTransfer` (`utils/coinTransfer.js`), which is the whole of
+  `/gift type:coins` and of `/bank transfer`. Debit and send cap in one filter,
+  credit and receive cap in another, an E11000-only retry on the upsert, a
+  refund whose `matchedCount` is read, and an owed payout keyed by the
+  interaction when the refund will not land. Nothing to add.
+- The item debits in both commands. Positional `$` rather than an `arrayFilter`,
+  so a duplicate slot is decremented once; `$elemMatch` on the stack, so the
+  check and the debit are one write; and the id is taken from the stack that
+  will actually be debited, so the soulbound test and the `$elemMatch` agree.
+- `MarketListing`'s slot cap. `createListingInFreeSlot` lets the unique index on
+  `{ guildId, sellerId, slot }` be the check, retries once per slot, and counts
+  pre-slot legacy rows against the seller's five.
+- `returnExpiredMarketListings` (`services/marketService.js`). Claim by delete,
+  keyed grant, owed record, oldest-first within the TTL grace. #867, #804 and
+  #807 left it in the state this pass would have asked for.
+- The freeze is not checked in `/market`, and does not need to be: the command
+  gate in `events/interactionCreate.js` is default-deny over the whole `economy`
+  category, so a frozen member cannot reach any of these handlers. What the gate
+  deliberately does not stop is a frozen *seller* being paid or having stock
+  returned, which is the same call `economyFreeze.js` documents — a credit
+  refused in its filter is indistinguishable from one that failed, and the
+  economy's answer to a failed credit is to file it as owed and pay it later.
+- Item value crossing the coin caps is priced, not ignored: `/gift`'s item path
+  charges the guild's shop value of the stack against a separate daily
+  item-value budget, so "buy the item, gift the item, sell it on the market" is
+  not the coin cap with one extra step. `/market` has no cap of its own, by
+  design — a sale is priced by the seller and paid for by the buyer.
+
+**The bound this pass first left open, and where it now stands.** A recipient
+credit that *commits and loses its response* is indistinguishable from one that
+never ran, so an unwind acting on that reading returns an item that may already
+have been delivered — a duplicate rather than a loss. The keys make each unwind
+exactly-once *as an unwind*; they cannot make it conditional on a forward credit
+that carries no key of its own.
+
+- **`/market buy`: closed.** The buyer's credit is keyed by the listing
+  (`listingPurchasePayoutKey`) and `creditPurchasedItem` reads that key back
+  before anything unwinds, so a rejection is a question rather than an
+  assumption. `duplicate` is a success and the seller's stock stays where it is.
+  The cost is one capped `paidPayouts` entry per purchase, which is what the
+  duel, crew and jackpot payouts already pay.
+
+  There are **three** answers, not two, and the first attempt at this got that
+  wrong: a classification that itself fails was read as "not delivered", which
+  unwinds — and unwinding refunds the buyer *and* returns the seller's stock, so
+  a credit that had in fact landed left the buyer with a free item and the seller
+  with a second copy. Two items minted, out of the branch written to prevent one.
+  `indeterminate` is now its own state, nothing is undone under it, and the
+  delivery is filed as an owed payout under the purchase's own key —
+  `grantItemOnce` under that key is a no-op if the write landed and a grant if it
+  did not, so the replay reaches the right end without anyone having to know
+  which it was. The sale stands: the buyer paid, the seller was paid, and the
+  receipt says the delivery is unconfirmed rather than claiming it.
+- **`/gift`: open, deliberately.** The same fix would put a payout key on every
+  ordinary gift. Unlike a purchase there is no listing id to key it by — it
+  would be the interaction — and the gift path has no equivalent of the deleted
+  listing that makes the market's key safe to reuse across a replay. Left as it
+  is, and named here so it is a decision rather than an oversight.
+
+**The item side gets `counters` too.** `/gift`'s rollback refunds the day's
+item-gift allowance in the same write as the item, so a rollback that lands
+restores both — but one recorded as *owed* used to restore only the item, leaving
+the sender charged a day's cap for a gift that never arrived. The coin side had
+already solved this: `creditCoinsOrOwe` carries `counters` on the owed payload
+precisely so "the replay reproduces that write rather than half of it", and the
+items branch of `replayOwedPayout` was the gap.
+
+The one thing that made it more than a copy is that this counter resets every 24
+hours, so replaying the refund days later would take it out of a window the gift
+was never charged against. The payload therefore carries a `budgetRefund`
+descriptor stamped with the window the debit wrote, and `windowedRefundExpr`
+gates the refund on that window still being current — inside the same write, so
+there is no second read and no gap for the window to turn over in. A window that
+comes back in the wrong shape compares unequal and the refund is skipped, which
+is the conservative direction: an allowance that stays spent costs a day's cap,
+one refunded twice is a cap that does not hold.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -561,7 +710,7 @@ wide, and it is widest exactly where the risk is.
 - casino (`src/games/casino/*`, `casino.js`) — the eight games' own wager and
   payout writes, `confirmBet`, and the crash lobby's `pendingCrashRefund`
   escrow. Only the progressive jackpot has been audited
-- core currency (`balance.js`, `bank.js`, `daily.js`, `work.js`, `jobs.js`, `crime.js`, `rob.js`, `invest.js`, `market.js`, `gift.js`)
+- core currency (`balance.js`, `bank.js`, `daily.js`, `work.js`, `jobs.js`, `crime.js`, `rob.js`, `invest.js`) — `market.js` and `gift.js` have had their unwind paths audited above; the rest of both commands has not
 - group and PvP systems (`war.js`, `rivalryService.js`, `tournamentService.js`, and everything in `heistService.js`, `syndicateService.js` and `duel.js` other than the escrow and payout paths audited above)
 - progression (`prestige.js`, `season.js`, `synergyService.js`, `dailychallenge.js`)
 - seasonal events (`seasonalEventService.js`, `eventshop.js`, and the seasonal commands)
@@ -583,5 +732,5 @@ wide, and it is widest exactly where the risk is.
 
 *The nine non-economy subsystems above were last reviewed on 2026-05-28; the
 economy escrow and payout paths on 2026-09-01; the progressive jackpot on
-2026-09-04. "Not yet reviewed" carries no review date, because nothing in it has
-been reviewed.*
+2026-09-04; the gift and market unwind paths on 2026-09-05. "Not yet reviewed"
+carries no review date, because nothing in it has been reviewed.*

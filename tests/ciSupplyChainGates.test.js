@@ -201,6 +201,33 @@ describe('#961 — the apk upgrade layer is not frozen by the cache', () => {
         expect(runScript(buildJob)).toMatch(/date -u\b/);
     });
 
+    test('and an epoch, so a mid-day fix does not have to wait for midnight', () => {
+        // A date alone is only as fresh as the day's first build. A fix Alpine
+        // published after it cannot reach the image until the date rolls, and
+        // the scan above goes red for the rest of the day on a package whose
+        // fix is sitting in the repository — util-linux 2.42.3-r0 was exactly
+        // that. The epoch is the lever that unfreezes it without making every
+        // build a cold apk layer, and it is worth nothing if it is not in the
+        // key that the layer is actually keyed on.
+        // Asserted on the key the step actually writes, not on the epoch
+        // merely existing somewhere in the script: an env var that is declared
+        // and never interpolated is a lever wired to nothing, and a test that
+        // only looks for the name would pass on it.
+        const step = stepsOf(buildJob).find(s => s.id === 'apk');
+        expect(step.env?.APK_EPOCH ?? '').not.toBe('');
+
+        // The one line that matters: what lands in GITHUB_OUTPUT as `key`.
+        const written = step.run.match(/key=(.*?)"/);
+        expect(written).not.toBeNull();
+        expect(written[1]).toContain('${APK_EPOCH}');
+        expect(written[1]).toMatch(/date -u/);
+
+        // And that the build argument is fed from that output rather than
+        // recomputed, so the key the layer is cached under is the one this
+        // step wrote.
+        expect(buildArgsOf(buildJob)).toMatch(/APK_REFRESH=\$\{\{\s*steps\.apk\.outputs\.key\s*\}\}/);
+    });
+
     test('the publish build takes the build job\'s value rather than its own', () => {
         // Recomputing it here would publish an image built from different
         // inputs than the one the scan passed — and miss the cache to do it.

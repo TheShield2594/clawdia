@@ -181,4 +181,37 @@ function assertPublicHttpUrl(raw, label = 'URL') {
     return url;
 }
 
-module.exports = { guardedLookup, guardedDispatcher, assertPublicHttpUrl, literalAddressError };
+/**
+ * `assertPublicHttpUrl`, and https besides — for a request that carries a
+ * credential.
+ *
+ * The guard above answers "can this address be reached", which is a different
+ * question from "can this be read on the way". An MCP connection sends the
+ * guild's `Authorization` header, its session id and its tool arguments on
+ * every request; over http:// all of that is on the wire in the clear, and a
+ * bearer token seen once is a bearer token owned.
+ *
+ * There is no loopback escape hatch, because there is nothing to make an
+ * exception for: `isPrivateIp` covers 127.0.0.0/8 and ::1, so a literal
+ * `http://127.0.0.1` is already refused when the URL is parsed and
+ * `http://localhost` is already refused by `guardedLookup` when it resolves
+ * there. A local MCP server over plain http cannot connect today, with or
+ * without this check, and stdio is how one is meant to be reached anyway.
+ *
+ * @param {string} raw
+ * @param {string} label what the URL is, for the error an admin reads
+ * @returns {URL}
+ */
+function assertHttpsUrl(raw, label = 'URL') {
+    const url = assertPublicHttpUrl(raw, label);
+    if (url.protocol !== 'https:') {
+        throw new Error(
+            `${label} must use https:// — refusing to send credentials over ${url.protocol}//.`
+        );
+    }
+    return url;
+}
+
+module.exports = {
+    guardedLookup, guardedDispatcher, assertPublicHttpUrl, assertHttpsUrl, literalAddressError
+};

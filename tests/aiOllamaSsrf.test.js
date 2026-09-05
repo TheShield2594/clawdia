@@ -13,8 +13,10 @@
 
 const http = require('http');
 
-const { guardedLookup, guardedDispatcher, assertPublicHttpUrl } = require('../src/utils/outboundGuard');
-const { jsonResponse, payloadOf } = require('./helpers/fetchResponse');
+const {
+    guardedLookup, guardedDispatcher, assertPublicHttpUrl, assertHttpsUrl,
+} = require('../src/utils/outboundGuard');
+const { jsonResponse, textResponse, payloadOf } = require('./helpers/fetchResponse');
 const ollama = require('../src/services/ai/providers/ollama');
 const { validateAiUpdate } = require('../src/dashboard/routes/api/settings');
 
@@ -200,6 +202,25 @@ describe('the provider actually uses the policy', () => {
 
         expect(mockFetch.mock.calls[0][1].dispatcher).toBe(guardedDispatcher());
     });
+
+    // A refused connection costs nothing, but an endpoint that answers 500 has
+    // a body, and neither path here reads it — so both have to let it go or the
+    // socket is held until the pool times it out (#985). Ollama is the provider
+    // where this bites hardest: it is self-hosted, so a misconfigured one
+    // answers non-2xx on every message rather than once.
+    test.each([
+        ['complete()', async baseUrl => ollama.complete({ ...args, baseUrl })],
+        ['stream()', async baseUrl => {
+            // eslint-disable-next-line no-unused-vars
+            for await (const _chunk of ollama.stream({ ...args, baseUrl })) { /* drain */ }
+        }],
+    ])('%s lets go of a non-2xx body instead of holding its socket', async (_label, run) => {
+        const errorPage = textResponse('model not found', 500);
+        mockFetch.mockImplementation(async () => errorPage);
+
+        await expect(run('http://ollama.example.com')).rejects.toThrow(/Ollama returned HTTP 500/);
+        expect(errorPage.bodyUsed).toBe(true);
+    });
 });
 
 // The whole point is that nothing reaches the address, so the test is a real
@@ -245,5 +266,34 @@ describe('end to end: a private endpoint is not connected to', () => {
 
         await expect(drain()).rejects.toThrow(/private or reserved address/);
         expect(hits).toBe(0);
+    });
+});
+
+describe('assertHttpsUrl', () => {
+    // The guard above answers "can this address be reached"; this answers "can
+    // this be read on the way", which is a different question and the one that
+    // matters for a request carrying a bearer token (#985).
+    test('accepts https and hands back the parsed URL', () => {
+        expect(assertHttpsUrl('https://mcp.example.com/mcp').toString())
+            .toBe('https://mcp.example.com/mcp');
+    });
+
+    test('refuses http, naming the scheme it was given', () => {
+        expect(() => assertHttpsUrl('http://mcp.example.com/mcp', 'MCP server URL'))
+            .toThrow(/MCP server URL must use https:\/\/ — refusing to send credentials over http:\/\//);
+    });
+
+    // There is no loopback escape hatch because there is nothing to except:
+    // `isPrivateIp` covers 127.0.0.0/8, so a local endpoint over plain http is
+    // already refused a step earlier, with or without this check.
+    test('still refuses loopback for the older reason', () => {
+        expect(() => assertHttpsUrl('http://127.0.0.1:8080/mcp'))
+            .toThrow(/private or reserved address/);
+    });
+
+    test('keeps everything assertPublicHttpUrl refuses', () => {
+        expect(() => assertHttpsUrl('')).toThrow(/non-empty URL/);
+        expect(() => assertHttpsUrl('ftp://example.com')).toThrow(/http:\/\/ or https:\/\//);
+        expect(() => assertHttpsUrl('https://user:pw@example.com')).toThrow(/must not embed credentials/);
     });
 });

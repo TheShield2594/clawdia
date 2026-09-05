@@ -98,6 +98,11 @@ function mockApplyUpdate(doc, update, options = {}) {
 // Set from a test to make the recipient's credit fail.
 let mockFailCreditFor = null;
 
+// Set from a test to make a user's inventory credit answer `null` instead of
+// throwing — which is what `grantInventoryItem` does for a document that is not
+// there, and the failure mode the rollback used to ignore entirely (#873).
+let mockNullCreditFor = null;
+
 // Set from a test to freeze a party *between* the pre-flight read and the write
 // that acts on it — the race a read-then-act check cannot see. Called with each
 // update just before it is matched, so the filter is evaluated against a
@@ -123,6 +128,7 @@ jest.mock('../src/models/User', () => ({
         if (mockFailCreditFor && doc.userId === mockFailCreditFor && (Array.isArray(update) || update.$inc || update.$push)) {
             throw new Error('simulated write failure');
         }
+        if (mockNullCreditFor && doc.userId === mockNullCreditFor && Array.isArray(update)) return null;
         mockApplyUpdate(doc, update, options);
         return doc;
     }),
@@ -147,6 +153,7 @@ jest.mock('../src/models/Guild', () => ({
 jest.mock('../src/models/ItemImage', () => ({ findOne: jest.fn(async () => null) }));
 
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
+jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 
 const giftCommand = require('../src/commands/economy/gift.js');
 
@@ -155,6 +162,9 @@ const OLD_ACCOUNT = Date.now() - 365 * 24 * 60 * 60 * 1000;
 function buildInteraction({ itemId = 'pet_food', quantity = 1 } = {}) {
     const state = { replies: [], followUps: [] };
     const interaction = {
+        // The rollback's payout key is built from this, so a fake without one
+        // would key every gift the same.
+        id: 'interaction-1',
         guild: { id: 'g1' },
         guildId: 'g1',
         user: {
@@ -196,6 +206,7 @@ function mockTotalHeld(itemId) {
 
 beforeEach(() => {
     mockFailCreditFor = null;
+    mockNullCreditFor = null;
     mockFreezeOnWrite = null;
     mockWrites = [];
     mockStore = {
@@ -245,6 +256,144 @@ test('a failed credit rolls the debit back instead of duplicating the item', asy
     expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
     expect(mockTotalHeld('pet_food')).toBe(3); // no duplication, no loss
     expect(state.replies.at(-1).content).toContain('Your item was returned');
+});
+
+// #873. `addInventoryItem` answers `null` rather than throwing when no document
+// matched, and the rollback never read its return value — so the one case it
+// exists to handle was the one it reported as handled. The sender was told
+// "Your item was returned" over an item that by then existed nowhere: debited
+// from them, refused by the recipient, rolled back into nothing.
+describe('a rollback that does not land', () => {
+    const { recordOwedPayout } = require('../src/utils/owedPayout');
+
+    beforeEach(() => {
+        recordOwedPayout.mockClear();
+        recordOwedPayout.mockResolvedValue(true);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+    });
+    afterEach(() => console.error.mockRestore());
+
+    test('does not tell the sender their item came back', async () => {
+        mockFailCreditFor = 'recipient';
+        mockNullCreditFor = 'sender';
+        const { interaction, state } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        expect(state.replies.at(-1).content).not.toContain('item was returned');
+        expect(state.replies.at(-1).content).toContain('is recorded');
+    });
+
+    test('writes the item down where payouts:replay can settle it', async () => {
+        mockFailCreditFor = 'recipient';
+        mockNullCreditFor = 'sender';
+        const { interaction } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'gift',
+            jobName: 'giftItemRollback',
+            payload: expect.objectContaining({
+                kind: 'items', userId: 'sender', guildId: 'g1',
+                itemId: 'pet_food', quantity: 2,
+                // Keyed by the interaction, so neither the retry nor a replay
+                // can hand the sender a second copy.
+                payoutKey: 'gift:interaction-1:rollback',
+            }),
+        }));
+    });
+
+    // The allowance the debit spent travels with the item, so a replay puts the
+    // sender back where they were rather than returning the item and leaving
+    // them charged a day's cap for a gift that never arrived (#873).
+    test('carries the day\'s item-gift allowance, stamped with its window', async () => {
+        mockFailCreditFor = 'recipient';
+        mockNullCreditFor = 'sender';
+        const { interaction } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        const [{ payload }] = recordOwedPayout.mock.calls.at(-1);
+        expect(payload.budgetRefund).toMatchObject({
+            usedField:  'dailyGiftItemValueSent',
+            resetField: 'dailyGiftItemValueReset',
+            amount:     expect.any(Number),
+        });
+        // The window is the one the debit wrote, read off the document it
+        // returned — that is what lets the replay tell whether the allowance it
+        // would refund is still the one that was spent.
+        expect(payload.budgetRefund.window).toEqual(mockStore.sender.dailyGiftItemValueReset);
+    });
+
+    test('replaying it in the same window returns the item and the allowance', async () => {
+        mockFailCreditFor = 'recipient';
+        mockNullCreditFor = 'sender';
+        const { interaction } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        const [{ payload }] = recordOwedPayout.mock.calls.at(-1);
+        const spent = mockStore.sender.dailyGiftItemValueSent;
+        mockNullCreditFor = null;
+
+        const { replayOwedPayout } = jest.requireActual('../src/utils/owedPayout');
+        await replayOwedPayout(payload);
+
+        expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
+        expect(mockStore.sender.dailyGiftItemValueSent).toBe(spent - payload.budgetRefund.amount);
+    });
+
+    test('replaying it after the window turned over returns only the item', async () => {
+        mockFailCreditFor = 'recipient';
+        mockNullCreditFor = 'sender';
+        const { interaction } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        const [{ payload }] = recordOwedPayout.mock.calls.at(-1);
+        mockNullCreditFor = null;
+        // A day passes and the counter resets before the replay runs.
+        mockStore.sender.dailyGiftItemValueReset = new Date('2099-01-01T00:00:00Z');
+        mockStore.sender.dailyGiftItemValueSent = 4_000;
+
+        const { replayOwedPayout } = jest.requireActual('../src/utils/owedPayout');
+        await replayOwedPayout(payload);
+
+        expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
+        // Untouched: this allowance was never what the gift was charged against.
+        expect(mockStore.sender.dailyGiftItemValueSent).toBe(4_000);
+    });
+
+    test('says so plainly when even the record could not be written', async () => {
+        mockFailCreditFor = 'recipient';
+        mockNullCreditFor = 'sender';
+        recordOwedPayout.mockResolvedValue(false);
+        const { interaction, state } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        expect(state.replies.at(-1).content).toContain('contact a server admin');
+    });
+
+    test('still returns the item when the rollback fails once and lands on the retry', async () => {
+        // The rollback retries now, so a single transient rejection is not a
+        // reason to tell the sender their item is gone.
+        mockFailCreditFor = 'recipient';
+        let firstSenderCredit = true;
+        mockNullCreditFor = null;
+        const User = require('../src/models/User');
+        const realUpdate = User.findOneAndUpdate.getMockImplementation();
+        User.findOneAndUpdate.mockImplementation(async (query, update, options) => {
+            if (query.userId === 'sender' && Array.isArray(update) && firstSenderCredit) {
+                firstSenderCredit = false;
+                throw new Error('transient');
+            }
+            return realUpdate(query, update, options);
+        });
+
+        const { interaction, state } = buildInteraction({ quantity: 2 });
+        await giftCommand.execute(interaction);
+
+        User.findOneAndUpdate.mockImplementation(realUpdate);
+        expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
+        expect(state.replies.at(-1).content).toContain('Your item was returned');
+        expect(recordOwedPayout).not.toHaveBeenCalled();
+    });
 });
 
 test('a rolled-back gift of a whole stack restores the slot', async () => {

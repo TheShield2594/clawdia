@@ -15,7 +15,7 @@ const { fakeCollection } = require('./helpers/fakeCollection');
 const { makeInteraction, repliedText } = require('./helpers/fakeInteraction');
 const { expectNonNegativeBalance } = require('./helpers/balanceInvariant');
 
-const mockUsers = fakeCollection('User', { balance: 0, bank: 0, inventory: [], activeEffects: [], pets: [] });
+const mockUsers = fakeCollection('User', { balance: 0, bank: 0, inventory: [], activeEffects: [], pets: [], paidPayouts: [] });
 const mockGuilds = fakeCollection('Guild');
 const mockListings = fakeCollection('MarketListing', {}, { unique: [] });
 const mockTransactions = fakeCollection('Transaction', {}, { unique: [] });
@@ -32,10 +32,14 @@ jest.mock('../src/utils/inventoryGrant', () => ({
     inventoryAddExpr: jest.fn(() => ({})),
 }));
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
+// An ambiguous listing claim is filed as a plain FailedJob rather than an owed
+// payout, so it reaches an operator without `payouts:replay` acting on it.
+jest.mock('../src/models/FailedJob', () => ({ create: jest.fn(async () => ({})) }));
 
 const market = require('../src/commands/economy/market');
 const { grantInventoryItem } = require('../src/utils/inventoryGrant');
 const { recordOwedPayout } = require('../src/utils/owedPayout');
+const FailedJob = require('../src/models/FailedJob');
 const { logTransaction } = require('../src/utils/logTransaction');
 
 const GUILD_ID = 'guild-1';
@@ -81,14 +85,29 @@ beforeEach(() => {
     mockListings.reset();
     mockTransactions.reset();
     jest.clearAllMocks();
+    FailedJob.create.mockResolvedValue({});
     // `/market browse` renders a seller-reputation column from a Transaction
     // aggregation. Nothing here is about reputation, and the fake collections
     // do not run pipelines, so it answers empty.
     mockTransactions.model.aggregate = jest.fn(async () => []);
     // The default: the credit lands. Individual tests make it fail.
-    grantInventoryItem.mockImplementation(async (userId, guildId, itemId, quantity) => {
+    //
+    // The payout-key guard is evaluated for real rather than waved through
+    // (#873). Every unwind in this file is keyed, and a mock that ignored the
+    // key would report a retry as safe when the key is the only reason it is —
+    // and would answer 'unknown' where the real store answers 'duplicate', which
+    // is the exact distinction `creditPurchasedItem` turns on.
+    grantInventoryItem.mockImplementation(async (userId, guildId, itemId, quantity, options = {}) => {
         const doc = mockUsers.get(userId);
         if (!doc) return false;
+        const key = options.guard?.['paidPayouts.key']?.$ne;
+        if (key) {
+            doc.paidPayouts = doc.paidPayouts ?? [];
+            // The guard is `$ne`, so a document already carrying the key matches
+            // nothing and the write does not happen.
+            if (doc.paidPayouts.some(entry => entry.key === key)) return null;
+            doc.paidPayouts.push({ key });
+        }
         const slot = doc.inventory.find(s => s.itemId === itemId);
         if (slot) slot.quantity += quantity;
         else doc.inventory.push({ itemId, quantity });
@@ -234,7 +253,9 @@ describe('listing an item', () => {
         });
 
         expect(repliedText(interaction)).toContain('only have 5 active listings');
-        expect(grantInventoryItem).toHaveBeenCalledWith(BUYER_ID, GUILD_ID, 'lucky_charm', 2);
+        // The bag rather than the call: the return goes through the keyed
+        // `grantItemsOrOwe` now, so what matters is that the nine are back.
+        expect(mockUsers.get(BUYER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 9 }]);
         expect(mockListings.all().filter(l => l.sellerId === BUYER_ID)).toHaveLength(5);
     });
 
@@ -277,9 +298,12 @@ describe('listing an item', () => {
     // The debit has committed by the time the return runs, so a return that does
     // not land leaves the player without the item and without a listing. Saying
     // it came back is the one answer that gives them no reason to mention it.
+    //
+    // The failures are persistent rather than one-shot: the return retries now,
+    // and a single transient rejection is one the retry is supposed to survive.
     it.each([
-        ['the update rejects', () => grantInventoryItem.mockRejectedValueOnce(new Error('write failed'))],
-        ['the update matches no document', () => grantInventoryItem.mockResolvedValueOnce(false)],
+        ['the update rejects', () => grantInventoryItem.mockRejectedValue(new Error('write failed'))],
+        ['the update matches no document', () => grantInventoryItem.mockResolvedValue(false)],
     ])('records the stock as owed, and says so, when %s', async (_case, breakReturn) => {
         seedGuild();
         seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 5 }] });
@@ -298,8 +322,29 @@ describe('listing an item', () => {
             service: 'market',
             payload: {
                 kind: 'items', userId: BUYER_ID, guildId: GUILD_ID, itemId: 'lucky_charm', quantity: 2,
+                // Keyed, so a replay cannot hand the seller a second copy of
+                // stock whose write had in fact committed.
+                payoutKey: 'market:interaction-1:relist',
             },
         }));
+        console.error.mockRestore();
+    });
+
+    it('does not promise a record that was not written either', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 5 }] });
+        mockListings.model.create.mockRejectedValueOnce(new Error('write failed'));
+        grantInventoryItem.mockResolvedValue(false);
+        recordOwedPayout.mockResolvedValueOnce(false);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({
+            subcommand: 'list',
+            options: { item: 'lucky_charm', quantity: 2, price: 100 },
+        });
+
+        expect(repliedText(interaction)).toContain('could not be recorded');
+        expect(repliedText(interaction)).not.toContain('recorded as owed');
         console.error.mockRestore();
     });
 
@@ -315,7 +360,6 @@ describe('listing an item', () => {
         });
 
         expect(repliedText(interaction)).toContain('item has been returned');
-        expect(grantInventoryItem).toHaveBeenCalledWith(BUYER_ID, GUILD_ID, 'lucky_charm', 2);
         expect(mockUsers.get(BUYER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 5 }]);
         // The stock is back, so there is nothing owed to write down.
         expect(recordOwedPayout).not.toHaveBeenCalled();
@@ -529,6 +573,358 @@ describe('buying a listing', () => {
         console.error.mockRestore();
     });
 
+    // #873. Both of the paths above abandon a purchase *after* the buyer's debit
+    // has committed, and both used to put the coins back with a bare
+    // `User.updateOne` whose result was never read — then say "Your coins have
+    // been refunded" whatever it did. An update whose filter matches nothing
+    // resolves exactly as happily as one that moved coins.
+    it.each([
+        ['the listing was taken first', () => mockListings.model.findOneAndDelete.mockResolvedValueOnce(null), 'just sold'],
+        ['the item could not be credited', () => grantInventoryItem.mockResolvedValue(false), 'crediting the item'],
+    ])('does not claim a refund it could not make when %s', async (_case, breakPurchase, expected) => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0 });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        breakPurchase();
+        // The buyer's document vanishes between the debit and the refund, which
+        // is the case the unread result hid: nothing to match, nothing refunded.
+        const realFindOneAndUpdate = mockUsers.model.findOneAndUpdate;
+        mockUsers.model.findOneAndUpdate = jest.fn(async (query, ...rest) =>
+            (query?.userId === BUYER_ID && Array.isArray(rest[0])
+                ? null
+                : realFindOneAndUpdate(query, ...rest)));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain(expected);
+        expect(repliedText(interaction)).toContain('Returning your coins failed');
+        expect(repliedText(interaction)).not.toContain('coins have been refunded');
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'market',
+            payload: expect.objectContaining({
+                kind: 'coins', userId: BUYER_ID, guildId: GUILD_ID, amount: 200,
+                // Keyed by the interaction, so the retry above and a later
+                // replay of this record cannot refund the same purchase twice.
+                payoutKey: 'market:interaction-1:refund',
+            }),
+        }));
+        console.error.mockRestore();
+    });
+
+    it('does not let a refund that rejects escape the purchase', async () => {
+        // The lost-listing refund had no `catch` at all, so a rejection came out
+        // of `executePurchase` with the buyer already charged.
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0 });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        mockListings.model.findOneAndDelete.mockResolvedValueOnce(null);
+        mockUsers.model.findOneAndUpdate = jest.fn(async (query, ...rest) => {
+            if (query?.userId === BUYER_ID && Array.isArray(rest[0])) throw new Error('write failed');
+            return pristineUserModel.findOneAndUpdate(query, ...rest);
+        });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('Returning your coins failed');
+        expect(recordOwedPayout).toHaveBeenCalled();
+        console.error.mockRestore();
+    });
+
+    // #873. The listing row was the only place this stock existed — it left the
+    // seller's bag when they listed it — and the delete above has removed it. A
+    // purchase that then fails to credit the buyer used to refund the coins and
+    // stop there, so the item was in nobody's inventory at all: destroyed,
+    // silently, with the seller never told.
+    it('returns the seller their stock when the item cannot be credited', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        // Only the buyer's credit fails; the seller's return uses the same call.
+        grantInventoryItem.mockImplementationOnce(async () => false);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('coins have been refunded');
+        expect(mockUsers.get(BUYER_ID).balance).toBe(1000);
+        expect(mockUsers.get(BUYER_ID).inventory).toEqual([]);
+        // The item is back where it came from rather than nowhere.
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 2 }]);
+        expect(mockUsers.get(SELLER_ID).balance).toBe(0);
+        console.error.mockRestore();
+    });
+
+    it('writes the stock down as owed when it cannot go back to the seller either', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        grantInventoryItem.mockResolvedValue(false);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'market',
+            jobName: 'buyUnwindStock',
+            payload: expect.objectContaining({
+                kind: 'items', userId: SELLER_ID, guildId: GUILD_ID,
+                itemId: 'lucky_charm', quantity: 2,
+                payoutKey: 'listing:listing-1:unwind',
+                listingId: 'listing-1',
+            }),
+        }));
+        console.error.mockRestore();
+    });
+
+    // #873. The claim is the one write in the flow whose *rejection* says
+    // nothing about its outcome, and it had no `catch` at all — so it escaped a
+    // purchase that had already taken the buyer's money, with nothing written
+    // down anywhere.
+    it('refunds the buyer when claiming the listing rejects after the debit', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        mockListings.model.findOneAndDelete.mockRejectedValueOnce(new Error('claim failed'));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('claiming the listing');
+        expect(repliedText(interaction)).toContain('coins have been refunded');
+        expect(mockUsers.get(BUYER_ID).balance).toBe(1000);
+        expect(mockUsers.get(BUYER_ID).inventory).toEqual([]);
+        // The listing survived the rejected delete, so the item is still in it —
+        // returning stock as well would be a second copy of the same item.
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([]);
+        expect(await mockListings.model.countDocuments({})).toBe(1);
+        // Written down, not merely logged: the outcome of the claim is unknowable
+        // and a console line is not a record anyone can act on later.
+        expect(FailedJob.create).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'market',
+            // No `.owed` suffix: replaying this unattended would grant the stock
+            // even in the world where a concurrent buyer legitimately took it.
+            jobName: 'buyClaimAmbiguous',
+            payload: expect.objectContaining({
+                listingId: 'listing-1', sellerId: SELLER_ID, buyerId: BUYER_ID,
+                itemId: 'lucky_charm', quantity: 2, stillListed: true,
+            }),
+        }));
+        console.error.mockRestore();
+    });
+
+    it('records the stranded stock when the listing is gone after a rejected claim', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        // The delete commits and only its response is lost — so the row really
+        // is gone by the time the catch re-reads, and the item is in nobody's
+        // bag. Simulated by doing the delete and then throwing, rather than by
+        // stubbing the re-read, which `handleBuy` also uses to load the listing.
+        const realDelete = mockListings.model.findOneAndDelete.getMockImplementation();
+        mockListings.model.findOneAndDelete.mockImplementationOnce(async (...args) => {
+            await realDelete(...args);
+            throw new Error('claim failed');
+        });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(mockUsers.get(BUYER_ID).balance).toBe(1000);
+        // Still not granted — a concurrent buyer may hold it — but the record
+        // names the question an operator has to answer.
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([]);
+        expect(FailedJob.create).toHaveBeenCalledWith(expect.objectContaining({
+            jobName: 'buyClaimAmbiguous',
+            payload: expect.objectContaining({
+                stillListed: false,
+                adjudicate: expect.stringContaining('listing:listing-1:sale'),
+            }),
+        }));
+        console.error.mockRestore();
+    });
+
+    // #873, the bound the previous pass left open. A write that commits and
+    // loses its response is indistinguishable from one that never ran, so
+    // unwinding on that reading hands the seller their stock back while the
+    // buyer is holding it — an item minted, not merely misreported. The key on
+    // the buyer's credit is what turns that assumption into a question.
+    it('does not give the seller the stock back when the buyer already has it', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        // The credit commits and *then* the response is lost.
+        const landed = grantInventoryItem.getMockImplementation();
+        grantInventoryItem.mockImplementationOnce(async (...args) => {
+            await landed(...args);
+            throw new Error('connection reset after the write committed');
+        });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        // The purchase is a success: the key says the item arrived.
+        expect(repliedText(interaction)).toContain('Purchase Complete');
+        expect(mockUsers.get(BUYER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 2 }]);
+        expect(mockUsers.get(BUYER_ID).balance).toBe(800);
+        // Neither the coins nor the item come back — the trade completed.
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([]);
+        expect(mockUsers.get(SELLER_ID).balance).toBe(190);
+        expect(recordOwedPayout).not.toHaveBeenCalled();
+        console.error.mockRestore();
+    });
+
+    // The other side of the same decision, and the one place where neither
+    // guess is safe. When the classification *itself* fails there is no answer
+    // to be had, and unwinding on it is the worse of the two: it refunds the
+    // buyer **and** hands the seller their stock back, so a credit that had in
+    // fact landed leaves the buyer with a free item and the seller with a second
+    // copy of it. Two items minted, from the branch meant to prevent one.
+    //
+    // Nothing is undone. The credit is keyed, so it is filed under that key and
+    // settles later whichever way it went — a no-op if it landed, a grant if it
+    // did not.
+    it('defers rather than unwinding when the buyer credit is indeterminate', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        grantInventoryItem.mockImplementationOnce(async () => { throw new Error('connection reset'); });
+        // A Query-shaped stub, not a bare rejected promise: `findOne` is chained
+        // `.lean()` here, and a rejection created before anything can attach a
+        // handler is an unhandled rejection rather than the failure under test.
+        const realFindOne = mockUsers.model.findOne;
+        const failedRead = () => Promise.reject(new Error('read failed'));
+        mockUsers.model.findOne = jest.fn((query, projection, ...rest) => (projection?.paidPayouts
+            ? { lean: failedRead, select() { return this; }, sort() { return this; },
+                then: (res, rej) => failedRead().then(res, rej),
+                catch: rej => failedRead().catch(rej) }
+            : realFindOne(query, projection, ...rest)));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        // The sale stands: the buyer paid, the seller was paid, and neither the
+        // coins nor the stock came back.
+        expect(mockUsers.get(BUYER_ID).balance).toBe(800);
+        expect(mockUsers.get(SELLER_ID).balance).toBe(190);
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([]);
+
+        // The delivery is what is outstanding, filed under the purchase's own
+        // key so a replay cannot hand the buyer a second copy.
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'market',
+            jobName: 'buyItemUnknown',
+            payload: expect.objectContaining({
+                kind: 'items', userId: BUYER_ID, guildId: GUILD_ID,
+                itemId: 'lucky_charm', quantity: 2,
+                payoutKey: 'listing:listing-1:buyer',
+            }),
+        }));
+        // And said out loud rather than left to the buyer to notice.
+        expect(repliedText(interaction)).toContain('Delivery could not be confirmed');
+        console.error.mockRestore();
+    });
+
+    it('tells the buyer plainly when an indeterminate delivery is not recorded', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        grantInventoryItem.mockImplementationOnce(async () => { throw new Error('connection reset'); });
+        const realFindOne = mockUsers.model.findOne;
+        const failedRead = () => Promise.reject(new Error('read failed'));
+        mockUsers.model.findOne = jest.fn((query, projection, ...rest) => (projection?.paidPayouts
+            ? { lean: failedRead, select() { return this; }, sort() { return this; },
+                then: (res, rej) => failedRead().then(res, rej),
+                catch: rej => failedRead().catch(rej) }
+            : realFindOne(query, projection, ...rest)));
+        recordOwedPayout.mockResolvedValueOnce(false);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('could not be recorded');
+        console.error.mockRestore();
+    });
+
+    // #873. The re-read has three answers, and `Boolean()` had only two: a read
+    // that *failed* became "the listing is gone", which is guidance ending in
+    // stock returned for a listing that may still be live and sellable — the
+    // duplicate this path exists to avoid, arrived at through the record meant
+    // to prevent it.
+    it('records an unreadable listing as unknown rather than as gone', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        let claimed = false;
+        const realDelete = mockListings.model.findOneAndDelete.getMockImplementation();
+        mockListings.model.findOneAndDelete.mockImplementationOnce(async (...args) => {
+            await realDelete(...args);
+            claimed = true;
+            throw new Error('claim failed');
+        });
+        // The re-read that follows the rejected claim cannot answer either.
+        const realFindOne = mockListings.model.findOne.getMockImplementation();
+        const failedRead = () => Promise.reject(new Error('read failed'));
+        mockListings.model.findOne.mockImplementation((...args) => (claimed
+            ? { lean: failedRead, select() { return this; }, sort() { return this; },
+                then: (res, rej) => failedRead().then(res, rej) }
+            : realFindOne(...args)));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+        mockListings.model.findOne.mockImplementation(realFindOne);
+
+        expect(mockUsers.get(BUYER_ID).balance).toBe(1000);
+        expect(mockUsers.get(SELLER_ID).inventory).toEqual([]);
+        const [{ payload }] = FailedJob.create.mock.calls.at(-1);
+        expect(payload.stillListed).toBeNull();
+        expect(payload.adjudicate).toContain('could not be read');
+        // The one sentence it must not carry: an operator acting on "it is
+        // gone" can return stock onto a listing that is still selling.
+        expect(payload.adjudicate).not.toMatch(/^The listing is gone/);
+        console.error.mockRestore();
+    });
+
+    it('says so in the log when even the ambiguous-claim record cannot be written', async () => {
+        // The last line of defence: the buyer's coins are back either way, but
+        // the seller's item is only findable through this record. If the queue
+        // write fails too, the log has to say that rather than imply a record
+        // exists.
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0, inventory: [] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+        const realDelete = mockListings.model.findOneAndDelete.getMockImplementation();
+        mockListings.model.findOneAndDelete.mockImplementationOnce(async (...args) => {
+            await realDelete(...args);
+            throw new Error('claim failed');
+        });
+        FailedJob.create.mockRejectedValue(new Error('queue is down'));
+        const errors = [];
+        jest.spyOn(console, 'error').mockImplementation((...args) => errors.push(args.join(' ')));
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(mockUsers.get(BUYER_ID).balance).toBe(1000);
+        expect(errors.some(line => line.includes('NOT RECORDED'))).toBe(true);
+        console.error.mockRestore();
+    });
+
     it('refuses a listing that is gone', async () => {
         seedGuild();
         seedUser(BUYER_ID, { balance: 1000 });
@@ -635,6 +1031,36 @@ describe('paying the seller', () => {
         expect(sellerCredit().query['paidPayouts.key']).toEqual({ $ne: 'listing:listing-1:sale' });
         expect(mockUsers.get(SELLER_ID).paidPayouts.map(p => p.key)).toEqual(['listing:listing-1:sale']);
         expect(mockUsers.get(SELLER_ID).balance).toBe(190);
+    });
+
+    // #873. `balance` is required on the Transaction schema, and the figure used
+    // to fall back to `0` when it could not be read — a number nobody observed,
+    // filed in the ledger as though somebody had. A missing row is a gap an
+    // operator can see; a fabricated balance is one they cannot.
+    it('files no ledger row rather than a fabricated balance when the read fails', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        // Already paid, so the guarded credit returns no document and the
+        // balance has to be read rather than assumed.
+        seedUser(SELLER_ID, { balance: 190, paidPayouts: [{ key: 'listing:listing-1:sale', at: new Date() }] });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        const realFindOne = mockUsers.model.findOne;
+        const failedRead = () => Promise.reject(new Error('read failed'));
+        mockUsers.model.findOne = jest.fn((query, projection, ...rest) => (projection?.balance
+            ? { lean: failedRead, select() { return this; }, sort() { return this; },
+                then: (res, rej) => failedRead().then(res, rej),
+                catch: rej => failedRead().catch(rej) }
+            : realFindOne(query, projection, ...rest)));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('Purchase Complete');
+        expect(logTransaction).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'market_sell' }));
+        // The buyer's own row is unaffected — their balance was read from the debit.
+        expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ type: 'market_buy' }));
+        console.error.mockRestore();
     });
 
     it('moves no coins a second time when the key is already on the document', async () => {
@@ -776,16 +1202,68 @@ describe('cancelling a listing', () => {
         expect(await mockListings.model.countDocuments({})).toBe(1);
     });
 
-    it('says the items are owed when the return fails after the delete', async () => {
+    // The delete is the claim: nothing will find this return again, on this tick
+    // or any later one. So a return that does not land has to be written down
+    // where `npm run payouts:replay` can settle it — which is what the
+    // `returnStock` in `handleList`, three hundred lines above, has always done
+    // for the identical failure (#873).
+    //
+    // Both failure modes, because the old code only had a `catch`:
+    // `grantInventoryItem` answers `null` for a seller with no document rather
+    // than throwing, and that return value was never read.
+    it.each([
+        ['the return rejects', () => grantInventoryItem.mockRejectedValue(new Error('credit failed'))],
+        ['the return matches no document', () => grantInventoryItem.mockResolvedValue(false)],
+    ])('records the items as owed, and says so, when %s', async (_case, breakReturn) => {
         seedGuild();
         seedUser(BUYER_ID, { inventory: [] });
-        seedListing({ sellerId: BUYER_ID });
-        grantInventoryItem.mockRejectedValueOnce(new Error('credit failed'));
+        seedListing({ sellerId: BUYER_ID, quantity: 2 });
+        breakReturn();
         jest.spyOn(console, 'error').mockImplementation(() => {});
 
         const interaction = await run({ subcommand: 'cancel', options: { listing_id: 'listing-1' } });
 
-        expect(repliedText(interaction)).toContain('recoverable');
+        expect(repliedText(interaction)).toContain('recorded');
+        // The one thing it must never say when the item is not there.
+        expect(repliedText(interaction)).not.toContain('Returned');
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'market',
+            jobName: 'cancelListing',
+            payload: expect.objectContaining({
+                kind: 'items', userId: BUYER_ID, guildId: GUILD_ID,
+                itemId: 'lucky_charm', quantity: 2,
+                payoutKey: 'listing:listing-1:cancel',
+            }),
+        }));
+        console.error.mockRestore();
+    });
+
+    it('tells the seller when the owed record could not be written either', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [] });
+        seedListing({ sellerId: BUYER_ID, quantity: 2 });
+        grantInventoryItem.mockResolvedValue(false);
+        recordOwedPayout.mockResolvedValueOnce(false);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'cancel', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('contact a server admin');
+        console.error.mockRestore();
+    });
+
+    it('survives a return that fails once and lands on the retry', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [] });
+        seedListing({ sellerId: BUYER_ID, quantity: 2 });
+        grantInventoryItem.mockRejectedValueOnce(new Error('transient'));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ subcommand: 'cancel', options: { listing_id: 'listing-1' } });
+
+        expect(repliedText(interaction)).toContain('Listing Cancelled');
+        expect(mockUsers.get(BUYER_ID).inventory).toEqual([{ itemId: 'lucky_charm', quantity: 2 }]);
+        expect(recordOwedPayout).not.toHaveBeenCalled();
         console.error.mockRestore();
     });
 });

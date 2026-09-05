@@ -1133,3 +1133,56 @@ describe('what the client tells a server it can do', () => {
         expect(capabilities).not.toHaveProperty('sampling');
     });
 });
+
+describe('a connection that is not encrypted', () => {
+    // Every request this client makes carries `headers()` — the guild's bearer
+    // token, the session id, and with them the arguments the model passed to a
+    // tool. Over http:// that is not a weaker connection, it is a published
+    // one, and a bearer token read once is a bearer token owned (#985).
+    const INSECURE = 'http://mcp.example.com/mcp';
+
+    test('refuses to POST before the request goes out', async () => {
+        const client = new McpHttpClient({ url: INSECURE, authorizationToken: 'secret' });
+
+        const error = await client.listTools().catch(err => err);
+
+        expect(error).toBeInstanceOf(McpError);
+        expect(error.code).toBe('EINSECURETRANSPORT');
+        expect(error.message).toMatch(/must use https:\/\//);
+        expect(http.post).not.toHaveBeenCalled();
+    });
+
+    test('refuses before minting an access token for it', async () => {
+        // `authorize` runs after the check, so an OAuth connection does not
+        // spend a refresh on a URL it will not send to.
+        const getAccessToken = jest.fn(async () => 'fresh-token');
+        const client = new McpHttpClient({ url: INSECURE, getAccessToken });
+
+        await expect(client.listTools()).rejects.toThrow(/must use https:\/\//);
+
+        expect(getAccessToken).not.toHaveBeenCalled();
+    });
+
+    test('does not DELETE the session on close either', async () => {
+        // Teardown is best effort and swallows everything, so the assertion is
+        // that no request went out — and that the connection is still reset,
+        // which is what every other failure here does.
+        const client = new McpHttpClient({ url: INSECURE });
+        client.sessionId = 'sess-42';
+        client.initialized = true;
+
+        await client.close();
+
+        expect(http.del).not.toHaveBeenCalled();
+        expect(client.sessionId).toBeNull();
+        expect(client.initialized).toBe(false);
+    });
+
+    test('leaves https alone', async () => {
+        respondBy({ ...HANDSHAKE, 'tools/list': { result: { tools: [{ name: 'ask' }] } } });
+
+        const client = new McpHttpClient({ url: URL, authorizationToken: 'secret' });
+
+        expect(await client.listTools()).toEqual([{ name: 'ask' }]);
+    });
+});

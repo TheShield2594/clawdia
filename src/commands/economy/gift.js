@@ -11,12 +11,13 @@ const { describeItem } = require('../../utils/itemDisplay');
 const { ownedBy } = require('../../utils/collectorOwner');
 const {
     BUDGETS, giftLimits, budgetState, spendBudget, spendBudgetPipeline,
-    refundBudgetPipeline,
 } = require('../../utils/giftCaps');
 const {
     accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
 } = require('../../utils/coinTransfer');
 const { NOT_FROZEN } = require('../../utils/economyFreeze');
+const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
+const { giftItemRollbackPayoutKey } = require('../../utils/payoutKey');
 const { isSoulbound } = require('../../data/soulboundItems');
 const { resolveEffectType } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
@@ -493,13 +494,48 @@ module.exports = {
             console.error(`[gift] item credit failed — recipient=${target.id} guild=${guildId} item=${itemId} qty=${qty}:`, creditErr);
         }
         if (!credited) {
-            try {
-                await addInventoryItem(interaction.user.id, guildId, itemId, qty, {
-                    extraSet: refundBudgetPipeline({ ...BUDGETS.itemValueSend, cap: limits.itemValueSend, amount: giftValue }),
-                });
-            } catch (rollbackErr) {
-                console.error(`[gift] CRITICAL: item rollback failed — sender=${interaction.user.id} guild=${guildId} item=${itemId} qty=${qty}:`, rollbackErr);
-                return deny('Something went wrong returning your item — please contact a server admin.');
+            // The sender's item coming back, and the one write in this command
+            // that had none of the care the coin path beside it has (#873).
+            //
+            // `addInventoryItem` answers `null` rather than throwing when no
+            // document matched, and the return value was never read — so a
+            // sender whose document had gone was told "Your item was returned"
+            // over an item that by then existed in nobody's inventory: debited
+            // from them, refused by the recipient, and rolled back to nowhere.
+            // The `catch` that did fire told them to contact an admin and wrote
+            // nothing down, so there was no owed record for an admin to act on.
+            //
+            // Keyed by the interaction so the retry inside `grantItemsOrOwe`
+            // cannot hand the sender two copies, and so the record it files
+            // replays under the same guard.
+            const returned = await grantItemsOrOwe(
+                { userId: interaction.user.id, guildId },
+                itemId, qty,
+                {
+                    payoutKey: giftItemRollbackPayoutKey(interaction.id),
+                    service: 'gift',
+                    jobName: 'giftItemRollback',
+                    // The day's item-gift allowance the debit spent, given back
+                    // in the same write — an item that comes back and an
+                    // allowance that stays spent is a sender charged twice.
+                    //
+                    // The window comes off the document the debit returned, so a
+                    // rollback filed as owed and replayed days later refunds the
+                    // allowance only if it is still the one the gift was charged
+                    // against; a later day's cap is left alone.
+                    budgetRefund: {
+                        ...BUDGETS.itemValueSend,
+                        cap:    limits.itemValueSend,
+                        amount: giftValue,
+                        window: debited[BUDGETS.itemValueSend.resetField] ?? null,
+                    },
+                },
+            );
+
+            if (!returned.granted) {
+                return deny(returned.owed
+                    ? `Could not complete the transfer, and returning your ${qty}× ${label} failed too. It is recorded and an admin can restore it.`
+                    : `Could not complete the transfer, and returning your ${qty}× ${label} failed and could not be recorded. Please contact a server admin.`);
             }
             return deny(`Could not complete the transfer — <@${target.id}> may have reached their daily item-gift cap. Your item was returned.`);
         }

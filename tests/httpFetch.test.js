@@ -15,7 +15,9 @@
 const http = require('http');
 const { Readable } = require('stream');
 
-const { request, fetchHeaders, bodyStream, readCapped, readCappedText } = require('../src/utils/httpFetch');
+const {
+    request, fetchHeaders, discardBody, bodyStream, readCapped, readCappedText,
+} = require('../src/utils/httpFetch');
 
 let server;
 let base;
@@ -171,5 +173,52 @@ describe('readCapped', () => {
         };
 
         expect((await readCapped(await request(`${base}/`), 8)).length).toBe(4);
+    });
+});
+
+describe('discardBody', () => {
+    test('releases the body of a response nobody is going to read', async () => {
+        handler = (_req, res) => { res.writeHead(503); res.end('the server explains itself'); };
+
+        const response = await request(`${base}/`);
+        expect(response.bodyUsed).toBe(false);
+
+        await discardBody(response);
+
+        // Cancelling is what actually lets undici return the socket to the
+        // pool; a body left outstanding holds the connection until the agent
+        // times it out.
+        expect(response.bodyUsed).toBe(true);
+    });
+
+    test.each([
+        ['a 204, which has no body at all', async () => {
+            handler = (_req, res) => { res.writeHead(204); res.end(); };
+            return request(`${base}/`);
+        }],
+        ['a body already consumed', async () => {
+            handler = (_req, res) => { res.writeHead(500); res.end('read once'); };
+            const response = await request(`${base}/`);
+            await response.text();
+            return response;
+        }],
+        ['nothing at all', async () => null],
+    ])('throws nothing for %s', async (_label, make) => {
+        // It runs one line before the error the caller actually wants to raise.
+        // A complaint about the cleanup replacing that error would turn "Ollama
+        // returned HTTP 500" into something nobody can act on.
+        await expect(discardBody(await make())).resolves.toBeUndefined();
+    });
+
+    test('swallows a cancel that rejects rather than replacing the caller\'s error', async () => {
+        // A locked body — one a reader still holds — is the case that throws.
+        handler = (_req, res) => { res.writeHead(502); res.end('bad gateway'); };
+        const response = await request(`${base}/`);
+        const reader = response.body.getReader();
+
+        await expect(discardBody(response)).resolves.toBeUndefined();
+
+        reader.releaseLock();
+        await response.body.cancel();
     });
 });

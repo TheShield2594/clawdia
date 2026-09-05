@@ -124,13 +124,22 @@ function payoutKeyForPayload(payload) {
  * Two kinds, one per claim site:
  *
  *   coins  { kind: 'coins', userId, guildId, amount,           payoutKey?, counters? }
- *   items  { kind: 'items', userId, guildId, itemId, quantity, payoutKey? }
+ *   items  { kind: 'items', userId, guildId, itemId, quantity, payoutKey?, budgetRefund? }
  *
  * `counters` is `{ path: delta }` — bookkeeping the original write was going to
  * move alongside the coins, carried here so the replay reproduces that write
  * rather than half of it. A duel refund reverses `lifetimeGambled` with the
  * stake; paying the stake back a week later without it leaves the player counted
  * as having gambled coins they were given back.
+ *
+ * `budgetRefund` is the same idea for the item side, with one difference that is
+ * the whole reason it is a descriptor rather than a delta: the counter it moves
+ * resets every 24 hours. A `/gift` rollback gives the sender back the day's
+ * item-gift allowance the gift spent, and replaying that days later would take
+ * it out of a window the gift was never charged against. So it carries the
+ * window it was spent in, and the refund is gated on that window still being
+ * current — inside the same write, so there is no second read and no gap for the
+ * window to turn over in.
  */
 async function replayOwedPayout(payload) {
     const kind = payload?.kind;
@@ -189,8 +198,10 @@ async function replayOwedPayout(payload) {
             return;
         }
 
+        const { windowedRefundExpr } = require('./giftCaps');
         const { status } = await grantItemOnce(
-            { userId, guildId }, itemId, quantity, key, { upsert: true },
+            { userId, guildId }, itemId, quantity, key,
+            { upsert: true, extraSet: windowedRefundExpr(payload.budgetRefund ?? {}) },
         );
         if (status === 'paid') return;
         if (status === 'duplicate') {
