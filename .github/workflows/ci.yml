@@ -314,6 +314,9 @@ jobs:
       # Read by `publish` so both builds carry the same value — see the step
       # that computes it, and the note on the publish build.
       apk-refresh: ${{ steps.apk.outputs.key }}
+      # The amd64 layers this job actually booted and scanned, for `publish` to
+      # check what it pushed against (#952).
+      scanned-layers: ${{ steps.layers.outputs.diff-ids }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -423,6 +426,37 @@ jobs:
           exit-code: '1'
           format: table
 
+      # What "the tested image" actually is, written down so the publish job can
+      # be held to it (#952).
+      #
+      # `publish` rebuilds rather than promoting this artifact, and the note at
+      # the top of this job explains why that is not fixed by pushing a staging
+      # tag from here: it would need `packages: write` in a job that also runs
+      # on pull requests, which is a wider exposure than the gap it closes. What
+      # was missing is not the guarantee — it is that a *breach* of the
+      # guarantee was silent. A cache eviction between the two jobs would have
+      # published an image nothing in this job ever looked at, and nothing
+      # anywhere would have said so.
+      #
+      # Diff IDs rather than the image digest, because the digest cannot answer
+      # the question. `publish` adds OCI labels from docker/metadata-action, and
+      # a label lands in the image config — so the config digest, and with it
+      # the manifest digest, differ between the two builds every single time
+      # even on a perfect cache hit. Diff IDs are the uncompressed content
+      # hashes of the filesystem layers, which is precisely "the same bytes" and
+      # is untouched by labels.
+      #
+      # This step runs after the scan, so what it records is only ever an image
+      # that passed. A failing scan stops the job here and there is nothing to
+      # compare against.
+      - name: Record the layers that were booted and scanned
+        id: layers
+        run: |
+          diff_ids=$(docker image inspect --format '{{json .RootFS.Layers}}' "$SMOKE_IMAGE")
+          echo "amd64 layers that passed the smoke test and the scan:"
+          printf '%s\n' "$diff_ids"
+          echo "diff-ids=$diff_ids" >> "$GITHUB_OUTPUT"
+
   # The arm64 half of what `publish` pushes, built and scanned before it goes
   # out. Added because the multi-platform publish of #941 put an image into the
   # manifest list that the Trivy gate had never looked at — the gate's whole
@@ -445,6 +479,9 @@ jobs:
     needs: image
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    outputs:
+      # The arm64 half of the same check the amd64 job records (#952).
+      scanned-layers: ${{ steps.layers.outputs.diff-ids }}
     # Emulated, and cold on the first build after a Dockerfile or lockfile
     # change: tens of minutes rather than the handful the native build takes.
     timeout-minutes: 90
@@ -500,6 +537,20 @@ jobs:
           exit-code: '1'
           format: table
 
+      # The arm64 half of the record the amd64 job keeps — same reasoning, same
+      # reason it is diff IDs and not a digest. See that step (#952).
+      #
+      # Both platforms or neither: `publish` assembles one manifest list out of
+      # two caches, and either restore can miss independently. Checking only
+      # amd64 would report half of the thing that can go wrong.
+      - name: Record the arm64 layers that were scanned
+        id: layers
+        run: |
+          diff_ids=$(docker image inspect --format '{{json .RootFS.Layers}}' "${SMOKE_IMAGE}-arm64")
+          echo "arm64 layers that passed the scan:"
+          printf '%s\n' "$diff_ids"
+          echo "diff-ids=$diff_ids" >> "$GITHUB_OUTPUT"
+
   # Publishing lives here, behind `needs: [test, image, arm64]`, rather than in its own
   # workflow. It used to be a separate file triggered on `push: main`, which
   # ran alongside the tests instead of after them: a commit that broke the
@@ -526,6 +577,14 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+    # Lifted to the job so the step below can be conditional on it (#953). A
+    # step `if:` cannot read the `secrets` context, but it can read `env`, and
+    # this is the documented way to spell "only if the operator configured one".
+    # Unset — which is the default, and every fork — it is the empty string and
+    # the step is skipped.
+    env:
+      PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
 
     # Every action below is pinned to a commit SHA, not a floating tag. This is
     # the job holding `packages: write` and pushing the `:latest` that
@@ -655,13 +714,24 @@ jobs:
           provenance: mode=max
           sbom: true
 
-      # The digest, on the run's summary page. Every tag above can be repointed
-      # by a later build — including sha-<commit>, by a re-run of this very
-      # workflow — so the digest is the only reference that always names *this*
-      # build. Recording it here is what makes it available at rollback time,
-      # when the run that produced it is weeks old and nobody wants to go
-      # spelunking in the registry API for it.
-      - name: Record image digest
+      # What was published, on the run's summary page.
+      #
+      # The digest is here because every tag above can be repointed by a later
+      # build — including sha-<commit>, by a re-run of this very workflow — so
+      # it is the only reference that always names *this* build. Recording it is
+      # what makes it available at rollback time, when the run that produced it
+      # is weeks old and nobody wants to go spelunking in the registry API.
+      #
+      # The sha- tag is here for the other direction (#953). Nothing tells a
+      # deployment that a newer image exists: the Portainer stack needs a manual
+      # redeploy to pick up a repointed `:latest`, and a deployment pinned to a
+      # specific CLAWDIA_IMAGE_TAG gets no signal at all — so a security fix can
+      # sit published and undeployed indefinitely because nothing announced it.
+      # The webhook below is the active half of that answer and is opt-in; this
+      # is the half that always runs, and it is written as the line to paste
+      # rather than as a bare tag so that an operator reading CI has the deploy
+      # in front of them rather than a fact to act on.
+      - name: Record what was published
         run: |
           {
             echo '### Image'
@@ -669,5 +739,214 @@ jobs:
             echo '| | |'
             echo '|---|---|'
             echo "| digest | \`${{ steps.build.outputs.digest }}\` |"
-            echo "| rollback to this build | \`CLAWDIA_IMAGE_TAG=latest@${{ steps.build.outputs.digest }}\` |"
+            echo "| deploy this build | \`CLAWDIA_IMAGE_TAG=sha-${{ github.sha }}\` |"
+            echo "| pin it immutably | \`CLAWDIA_IMAGE_TAG=latest@${{ steps.build.outputs.digest }}\` |"
+            echo
+            echo 'Set that in the stack environment and redeploy. See docs/RELEASING.md.'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Whether the bytes that were just pushed are the bytes the gates looked
+      # at (#952).
+      #
+      # This job rebuilds rather than promoting the artifact `image` and `arm64`
+      # checked, and the note at the top of the `image` job says why promoting
+      # by digest is not done: it needs `packages: write` in a job that also
+      # runs on pull requests, which is a wider exposure than the gap it closes.
+      # The guarantee therefore rests on the two `cache-from` scopes above being
+      # hits rather than misses — which they almost always are, and which
+      # nothing checked. A cache eviction between the jobs would publish an
+      # image that was never booted and never scanned, and the run would be
+      # green and silent about it. That silence is what this step removes.
+      #
+      # Diff IDs, not digests: this job adds OCI labels from metadata-action,
+      # and a label changes the image config — so the config and manifest
+      # digests differ from the scanned build's on every run, cache hit or not.
+      # Diff IDs are the uncompressed hashes of the filesystem layers, which is
+      # exactly "the same bytes" and is unaffected by labels or by the
+      # provenance and SBOM manifests attached alongside.
+      #
+      # It warns rather than fails, deliberately. The push has already happened,
+      # so failing here cannot unpublish anything — and a re-run would restore
+      # from the same evicted cache and fail again, which is a red main branch
+      # that no action clears. What the operator needs is to know the image is
+      # unscanned so they can decide; that is a warning annotation and a row in
+      # the summary, both of which this writes.
+      #
+      # Nothing here can fail the job on its own account either: an unreadable
+      # manifest is reported as "not checked" rather than as a mismatch, so a
+      # registry blip cannot be misread as a security finding. This is the same
+      # rule the npm audit step above follows for the same reason.
+      - name: Check the published layers are the ones that were scanned
+        id: scanned
+        env:
+          SCANNED_AMD64: ${{ needs.image.outputs.scanned-layers }}
+          SCANNED_ARM64: ${{ needs.arm64.outputs.scanned-layers }}
+          PUSHED: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -u
+
+          # stdout only. Folding stderr in would let a buildx warning land in
+          # front of the JSON and turn a perfectly good manifest into a "not
+          # checked", which is the quiet failure this step is meant to remove
+          # rather than add.
+          config=$(docker buildx imagetools inspect "$PUSHED" --format '{{json .Image}}' 2>/dev/null) || config=''
+
+          {
+            echo '### Scanned-image check'
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$config" ] || ! printf '%s' "$config" | jq -e . >/dev/null 2>&1; then
+            echo "::warning::could not read the published image config, so this run does not say whether the published layers are the scanned ones"
+            echo 'Not checked — the published image config could not be read.' >> "$GITHUB_STEP_SUMMARY"
+            # Unverified is not verified. The webhook below reads this, and an
+            # unreadable manifest must not be allowed to auto-deploy on the
+            # strength of a check that never ran.
+            echo 'verified=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          verified=true
+
+          {
+            echo '| platform | published layers |'
+            echo '|---|---|'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for platform in linux/amd64 linux/arm64; do
+            case "$platform" in
+              linux/amd64) scanned=$SCANNED_AMD64 ;;
+              linux/arm64) scanned=$SCANNED_ARM64 ;;
+            esac
+
+            pushed=$(printf '%s' "$config" \
+              | jq -c --arg p "$platform" 'if type=="object" and has($p) then .[$p].rootfs.diff_ids else null end' 2>/dev/null) \
+              || pushed=null
+            scanned=$(printf '%s' "$scanned" | jq -c . 2>/dev/null) || scanned=null
+
+            # Empty as well as the literal `null`: jq exits 0 and prints nothing
+            # when handed an empty stdin, which is what an upstream job that did
+            # not run leaves in these variables. Read as a value it would
+            # compare unequal to everything and report a mismatch — a false
+            # alarm of exactly the kind this step must not raise.
+            [ -z "$pushed" ] && pushed=null
+            [ -z "$scanned" ] && scanned=null
+
+            if [ "$pushed" = 'null' ] || [ "$scanned" = 'null' ]; then
+              # One side is missing, which says nothing either way — an upstream
+              # job that was skipped, or a manifest shape this cannot read.
+              echo "::warning::$platform: nothing to compare, so it is unknown whether the published image is the scanned one"
+              echo "| $platform | not checked |" >> "$GITHUB_STEP_SUMMARY"
+              verified=false
+            elif [ "$pushed" = "$scanned" ]; then
+              echo "$platform: published layers are the ones that were scanned"
+              echo "| $platform | match the scanned image |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              # The case the whole step exists for. Say what it means, not just
+              # that two strings differ — this line is read by whoever has to
+              # decide whether to deploy the image.
+              echo "::warning::$platform: the published image is NOT the one that was scanned. The build cache missed between the scan job and this one, so these layers were never booted or scanned. Re-run the workflow to rebuild and re-scan before deploying this tag."
+              echo "  scanned: $scanned"
+              echo "  pushed:  $pushed"
+              echo "| $platform | **DO NOT DEPLOY** — rebuilt on a cache miss, never scanned |" >> "$GITHUB_STEP_SUMMARY"
+              verified=false
+            fi
+          done
+
+          # True only when every platform matched. Read by the webhook step
+          # below, which must not auto-deploy an image this step just told a
+          # human not to deploy.
+          echo "verified=$verified" >> "$GITHUB_OUTPUT"
+
+      # The active half of the deploy signal (#953).
+      #
+      # `publish` repoints `:latest`, and that is where the story used to end: a
+      # Portainer stack does not poll, so the new image sat in the registry
+      # until somebody opened the UI and redeployed. Nothing announced that
+      # there was anything to redeploy, which is how a published security fix
+      # can stay undeployed for weeks.
+      #
+      # Opt-in, and off unless an operator sets the secret. Self-hosted
+      # deployments are operator-driven by design — this repo has no idea where
+      # anybody's Portainer is, and a workflow that assumed one would be wrong
+      # for every fork. Portainer's stack webhook is a single URL that redeploys
+      # the stack when POSTed to, which an operator creates in Portainer >
+      # Stacks > Webhooks and pastes into the repository secret named here.
+      # docs/RELEASING.md has the setup.
+      #
+      # Only on the default branch, because that is the only branch that moves
+      # `:latest` (see `enable={{is_default_branch}}` in the tags above) and
+      # `:latest` is what the stack pulls by default. A v* tag push publishes a
+      # version tag nothing is pointed at until an operator chooses to be, so
+      # firing a redeploy on one would deploy something they had not asked for.
+      #
+      # The URL is a deploy credential — anyone holding it can redeploy the
+      # stack — so it is never echoed. `-o /dev/null` keeps the response body
+      # out of the log for the same reason, since Portainer answers with the
+      # stack definition.
+      #
+      # A failure here warns rather than fails the job. The image is published
+      # and the scan passed, which is what this job is for; a Portainer that was
+      # unreachable for thirty seconds is an operator's problem to retry, not a
+      # reason to mark the build red and have somebody re-publish an image that
+      # is already in the registry.
+      #
+      # And it only fires behind the check above. Auto-deploying an image that
+      # step has just labelled **DO NOT DEPLOY** would be this workflow telling
+      # an operator not to deploy something while deploying it for them — the
+      # gate is worth less than nothing if the automation walks straight past
+      # it. `verified` is true only when every platform matched, so the
+      # unreadable-manifest and missing-output cases hold the deploy too: a
+      # check that did not run is not a check that passed. The step below says
+      # so on the summary, since the operator then has a redeploy to do by hand
+      # once they are satisfied.
+      - name: Tell the Portainer stack there is a new image
+        if: >-
+          env.PORTAINER_WEBHOOK_URL != ''
+          && github.ref_name == github.event.repository.default_branch
+          && steps.scanned.outputs.verified == 'true'
+        run: |
+          set -u
+
+          # HTTPS or nothing. The webhook URL carries its own credential in the
+          # path — anyone who sees it can redeploy the stack — so posting to an
+          # http:// endpoint hands that credential to every hop in between. The
+          # usual argument for allowing cleartext, that Portainer is on a LAN,
+          # does not apply here: this runs on a GitHub-hosted runner, so any URL
+          # it can reach at all is one crossing the public internet.
+          #
+          # Refuses rather than downgrading silently, and says nothing about the
+          # value beyond its scheme being wrong — the point is to keep the URL
+          # out of the log, and echoing it in an error message would defeat the
+          # step that is careful not to.
+          case "$PORTAINER_WEBHOOK_URL" in
+            https://*) ;;
+            *)
+              echo "::warning::PORTAINER_WEBHOOK_URL is not an https:// URL, so no redeploy was requested — the webhook URL is a deploy credential and is not sent in cleartext. The image is published; redeploy the stack by hand."
+              echo 'Portainer webhook skipped — the configured URL is not HTTPS.' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+          esac
+
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            --request POST \
+            --max-time 30 --retry 3 --retry-delay 5 --retry-connrefused \
+            "$PORTAINER_WEBHOOK_URL" 2>/dev/null) || status=000
+
+          case "$status" in
+            2*)
+              echo "Portainer accepted the redeploy request (HTTP $status)."
+              echo 'Portainer stack webhook fired — the stack is pulling this image.' >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            000)
+              echo "::warning::could not reach the Portainer webhook. The image is published; redeploy the stack by hand."
+              echo 'Portainer webhook unreachable — redeploy by hand.' >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              # 404 is the one worth calling out: Portainer invalidates a stack
+              # webhook when the stack is recreated, so the commonest cause is a
+              # secret still holding the URL of a stack that no longer exists.
+              echo "::warning::the Portainer webhook answered HTTP $status. The image is published but the stack was not redeployed — check that PORTAINER_WEBHOOK_URL still names an existing stack."
+              echo "Portainer webhook answered HTTP $status — redeploy by hand." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac

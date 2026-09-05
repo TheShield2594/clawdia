@@ -4,19 +4,15 @@ require('dotenv').config();
 // straight after dotenv so .env can set the *_FILE paths too, and before
 // anything reads process.env.
 require('./config/fileSecrets').loadFileSecrets();
-const { deployCommands } = require('./utils/commandDeployer');
+const { runDeployCli } = require('./utils/commandDeployer');
 
-(async () => {
-    if (!process.env.CLIENT_ID || !process.env.DISCORD_TOKEN) {
-        console.error('Missing CLIENT_ID or DISCORD_TOKEN environment variable.');
-        process.exit(1);
-    }
-    try {
-        console.log('Started refreshing application (/) commands.');
-        const count = await deployCommands(process.env.CLIENT_ID, process.env.DISCORD_TOKEN);
-        console.log(`Successfully reloaded ${count} application (/) commands.`);
-    } catch (error) {
-        console.error('Failed to deploy commands:', error);
-        process.exit(1);
-    }
-})();
+// Everything this used to do is in `runDeployCli`, where it is tested — this
+// file is on the `neverExecuted` list, and the guard it holds is the difference
+// between a deploy and an error message (#951). What is left is the exit.
+//
+// Only a failure exits explicitly. On success the process falls off the end of
+// the event loop, which is what lets the last `console.log` finish draining to
+// a pipe; `process.exit(0)` here would sometimes cut it off.
+runDeployCli().then(code => {
+    if (code !== 0) process.exit(code);
+});

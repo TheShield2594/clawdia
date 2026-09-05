@@ -65,6 +65,18 @@ does not pin the base image or the apt packages under it. For a rollback target
 that cannot move at all, use the **digest** — the publish job writes it to the
 run's summary page, along with the exact `CLAWDIA_IMAGE_TAG` value to paste.
 
+The summary page of a green publish carries three lines: the digest, the
+`CLAWDIA_IMAGE_TAG=sha-<commit>` to deploy this build, and the
+`CLAWDIA_IMAGE_TAG=latest@sha256:…` to pin it immutably. It also carries a
+**Scanned-image check** table saying, per platform, whether the layers that were
+published are the ones the vulnerability scan actually looked at. (amd64 is also
+booted before it is scanned; arm64 is scanned but never booted, because booting
+it would mean running an emulated Node through its whole require graph.) Those
+rows normally read "match the scanned image". If one says **DO NOT DEPLOY**, the
+build cache was evicted between the scan job and the publish job, so the image
+in the registry was rebuilt and never scanned — re-run the workflow before
+deploying that tag.
+
 ## Pinning the deploy
 
 `portainer-stack.yml` reads its tag from `CLAWDIA_IMAGE_TAG`:
@@ -90,6 +102,61 @@ needs no change to the stack file:
 ```dotenv
 CLAWDIA_IMAGE_TAG=latest@sha256:3f8a…
 ```
+
+## Getting told there is something to deploy
+
+Nothing pulls on its own. A Portainer stack holds whatever image it last
+deployed until somebody redeploys it, so a repointed `:latest` — or a newer
+`sha-` tag, for a deployment pinned to one — changes nothing until an operator
+acts. Left at that, a published security fix can sit undeployed indefinitely
+because nothing announced it.
+
+There are two signals, and the first always runs:
+
+1. **The run summary.** Every green publish writes the `CLAWDIA_IMAGE_TAG` line
+   for that build, as above. An operator watching CI sees what to move to
+   without having to work it out from a commit sha.
+
+2. **A Portainer stack webhook**, which is opt-in and off by default. Portainer
+   can expose a URL that redeploys a stack when it is POSTed to; give the
+   workflow that URL and a push to `main` redeploys the stack on its own.
+
+To turn the second one on:
+
+1. In Portainer, open the stack, and under **Webhooks** create (or copy) the
+   stack webhook URL. It looks like
+   `https://portainer.example.com/api/stacks/webhooks/<uuid>`.
+2. In GitHub, add it as a repository secret named `PORTAINER_WEBHOOK_URL`
+   (Settings > Secrets and variables > Actions).
+
+The publish job then POSTs to it after a successful push to the default branch.
+Some notes on the edges:
+
+- **It fires on `main` only.** A `v*` tag push publishes a version tag that
+  nothing is pointed at until you choose to be, so firing a redeploy on one
+  would deploy something you did not ask for.
+- **It fires only behind the scanned-image check.** If that table reports
+  anything other than a match on every platform — including "not checked" — no
+  redeploy is requested, and the summary says so. A workflow that told you not
+  to deploy an image and then deployed it for you would make the check
+  worthless.
+- **The URL must be `https://`.** It carries its own credential in the path, so
+  a cleartext POST would hand that credential to every hop in between. An
+  `http://` value is refused with a warning rather than being sent. The usual
+  LAN argument does not apply: this runs on a GitHub-hosted runner, so any URL
+  it can reach is one crossing the public internet.
+- **It redeploys whatever the stack is pinned to.** The webhook tells Portainer
+  to pull and recreate; it does not change `CLAWDIA_IMAGE_TAG`. A stack pinned to
+  `4.2.1` will pull `4.2.1` again and come back on the same image. The webhook is
+  useful precisely when the stack tracks `latest`.
+- **The URL is a deploy credential.** Anyone holding it can redeploy the stack,
+  so it belongs in a secret and nowhere else. The workflow never echoes it.
+- **A failure does not fail the build.** The image is published and scanned
+  either way; an unreachable Portainer is logged as a warning on the run, with a
+  line in the summary saying to redeploy by hand.
+- Portainer invalidates a stack's webhook when the stack is recreated. If the
+  run starts warning about an HTTP 404, the secret is naming a stack that no
+  longer exists — create a new webhook and update it.
 
 ## Rolling back
 

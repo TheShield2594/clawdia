@@ -35,6 +35,7 @@ const { makeCache, sweepers } = require('./utils/cacheOptions');
 const { isPrimaryShard, shardTag } = require('./utils/sharding');
 const { loadCommandModules } = require('./utils/commandLoader');
 const { startCooldownSweeper } = require('./utils/commandCooldowns');
+const { runShutdown } = require('./utils/shutdown');
 
 const client = new Client({
     intents: [
@@ -202,26 +203,22 @@ async function startDashboard() {
     }
 }
 
-// Graceful shutdown: close DB and destroy Discord client before exiting
-async function shutdown(signal) {
-    console.log(`[SHUTDOWN] Received ${signal}. Shutting down gracefully...`);
-    const { stopScheduler } = require('./services/scheduler');
-    stopScheduler();
-    try {
-        await client.destroy();
-        // After the client, before the connection closes. Command metrics are
-        // buffered in memory between 30s flushes (#895), so a deploy would
-        // otherwise drop up to an interval of counts on every restart — and
-        // draining them after the gateway is closed means no new command can
-        // arrive behind the write and be reported as lost.
-        const { stopCommandMetrics } = require('./utils/commandMetricsBuffer');
-        await stopCommandMetrics();
-        await connection.close();
-        console.log('[SHUTDOWN] Clean exit.');
-    } catch (err) {
-        console.error('[SHUTDOWN] Error during shutdown:', err);
-    }
-    process.exit(0);
+// Graceful shutdown: close DB and destroy Discord client before exiting.
+//
+// The sequence itself is in utils/shutdown.js, where it can be tested — the
+// order the four steps happen in is the whole of the logic, and this file is on
+// the `neverExecuted` list (#951). What is left here is binding it to this
+// process's client and connection.
+function shutdown(signal) {
+    return runShutdown(signal, {
+        client,
+        connection,
+        // Required rather than defaulted inside utils/shutdown.js: `services`
+        // is a layer above `utils` and may not be required from there. Lazy, as
+        // it always was, so the scheduler's graph is pulled in at shutdown
+        // rather than at boot.
+        stopScheduler: () => require('./services/scheduler').stopScheduler(),
+    });
 }
 
 async function startBot() {

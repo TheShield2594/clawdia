@@ -30,6 +30,10 @@ require('./config/fileSecrets').loadFileSecrets();
 
 const path = require('path');
 const { ShardingManager } = require('discord.js');
+// How SHARD_COUNT is read. It lives in utils/sharding.js with the rest of the
+// shard arithmetic rather than here, because this file is on the
+// `neverExecuted` list and that made the one branch in it untested (#951).
+const { resolveTotalShards } = require('./utils/sharding');
 
 // The same rules the children apply, applied once here first (#639). A shard
 // manager that spawns N processes to watch each of them exit on the same missing
@@ -42,17 +46,9 @@ require('./config/validateEnv').assertEnv({ label: 'SHARD' });
 // structured too rather than being the one unparsed thing in the stream.
 require('./utils/logger').installConsoleBridge();
 
-function resolveShardCount() {
-    const pinned = Number(process.env.SHARD_COUNT);
-    if (Number.isInteger(pinned) && pinned > 0) return pinned;
-    // 'auto' asks the gateway what it wants. Anything else and the manager would
-    // read the string as a number and spawn NaN shards.
-    return 'auto';
-}
-
 const manager = new ShardingManager(path.join(__dirname, 'index.js'), {
     token: process.env.DISCORD_TOKEN,
-    totalShards: resolveShardCount(),
+    totalShards: resolveTotalShards(),
     // The child reads its own identity from `client.shard`, but the singleton
     // gate runs before login — so the count is passed down as an env var too,
     // and `shardCount()` falls back to it.
