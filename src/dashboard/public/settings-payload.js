@@ -59,21 +59,26 @@ function buildSettingsPayload(section, ctx = {}) {
         };
     } else if (section === 'moderation') {
         const immunityRoleIds = Array.from(document.getElementById('mod-immunity-roles').selectedOptions).map(o => o.value);
+        const exemptChannelIds = Array.from(document.getElementById('mod-exempt-channels').selectedOptions).map(o => o.value).filter(Boolean);
         return {
             'moderation.enabled': document.getElementById('mod-enabled').checked,
             'moderation.logChannelId': document.getElementById('mod-log-channel').value || null,
             'moderation.muteRoleId': document.getElementById('mod-mute-role').value || null,
             'moderation.autoModEnabled': document.getElementById('mod-automod').checked,
             'moderation.immunityRoleIds': immunityRoleIds,
+            'moderation.exemptChannelIds': exemptChannelIds,
+            'moderation.scanEdits': document.getElementById('mod-scan-edits').checked,
             'moderation.spamProtection': document.getElementById('mod-spam').checked,
             'moderation.spamThreshold': parseInt(document.getElementById('mod-spam-threshold').value, 10) || 5,
             'moderation.spamWindow': parseInt(document.getElementById('mod-spam-window').value, 10) || 5,
             'moderation.inviteFilter': document.getElementById('mod-invites').checked,
             'moderation.inviteAllowlist': document.getElementById('mod-invite-allowlist').value.split('\n').map(s => s.trim()).filter(Boolean),
+            'moderation.allowOwnServerInvites': document.getElementById('mod-allow-own-invites').checked,
             'moderation.linkFilter': document.getElementById('mod-links').checked,
             'moderation.linkAllowlist': document.getElementById('mod-link-allowlist').value.split('\n').map(s => s.trim()).filter(Boolean),
             'moderation.profanityFilter': document.getElementById('mod-profanity').checked,
             'moderation.customBadWords': document.getElementById('mod-bad-words').value.split('\n').map(w => w.trim()).filter(Boolean),
+            'moderation.profanityAllowlist': document.getElementById('mod-allowed-words').value.split('\n').map(w => w.trim()).filter(Boolean),
             'moderation.repeatedTextFilter': document.getElementById('mod-repeated').checked,
             'moderation.excessiveCapsFilter': document.getElementById('mod-caps').checked,
             'moderation.capsThresholdPercent': parseInt(document.getElementById('mod-caps-threshold').value, 10) || 70,
@@ -82,6 +87,7 @@ function buildSettingsPayload(section, ctx = {}) {
             'moderation.zalgoFilter': document.getElementById('mod-zalgo').checked,
             'moderation.excessiveMentionsFilter': document.getElementById('mod-mentions').checked,
             'moderation.mentionThreshold': parseInt(document.getElementById('mod-mention-threshold').value, 10) || 5,
+            'moderation.everyoneMentionFilter': document.getElementById('mod-everyone-mentions').checked,
             'moderation.warnThreshold': parseInt(document.getElementById('mod-warn-threshold').value, 10) || 3,
             'moderation.kickThreshold': parseInt(document.getElementById('mod-kick-threshold').value, 10) || 0,
             'moderation.banThreshold': parseInt(document.getElementById('mod-ban-threshold').value, 10) || 0,

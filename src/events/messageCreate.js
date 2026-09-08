@@ -1,9 +1,7 @@
 const User = require('../models/User');
 const Guild = require('../models/Guild');
-const Case = require('../models/Case');
 const Reminder = require('../models/Reminder');
 const { handleAIChat } = require('../services/aiService');
-const { logModeration } = require('../services/moderationLogService');
 const { ensureQuests, onMessage, onStreakUpdate, notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset } = require('../services/questService');
 const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMultiplier');
 const { hasEffect, consumeEffect, getXpMultiplier, getServerXpMultiplier } = require('../services/effectsService');
@@ -12,55 +10,12 @@ const { checkAndAward, announceAchievements } = require('../services/achievement
 const { checkAndBroadcastWealthMilestone } = require('../utils/wealthMilestone');
 const { maybeTriggerChatEvent } = require('../services/chatEventService');
 const { applyXpGain, announceLevelUp } = require('../services/levelingService');
-const BASE_BAD_WORDS = require('../data/profanityList');
+const autoMod = require('../services/autoModService');
+const { handleAutoModeration } = autoMod;
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const { BoundedRateLimiter } = require('../utils/boundedRateLimiter');
 const { withUserLock } = require('../utils/userMutex');
-
-function compileBadWordRegex(word) {
-    const escaped = word.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`\\b${escaped}\\b`, 'i');
-}
-
-// Pre-compile base word regexes once at module load — avoids per-message regex construction
-const BASE_BAD_WORD_REGEXES = BASE_BAD_WORDS.map(compileBadWordRegex);
-
-// The base list above is compiled once, but a guild's own additions used to be
-// rebuilt from scratch on every message that reached the profanity filter. They
-// change only when an admin edits the word list, so they are compiled once and
-// kept here until that happens.
-//
-// The entry is keyed on the word list itself rather than on a settings version:
-// the cached settings object is replaced wholesale on every invalidation, and a
-// TTL expiry alone would otherwise force a recompile that changed nothing. A
-// guild whose list is unchanged keeps its regexes across settings reloads.
-//
-// guildId -> { signature, regexes }
-const customBadWordRegexes = new Map();
-
-// Bounds memory across a large guild count, the same way guildSettingsCache
-// does: FIFO by insertion order, and an evicted guild simply recompiles on its
-// next filtered message.
-const MAX_CUSTOM_BAD_WORD_GUILDS = 5_000;
-
-function getCustomBadWordRegexes(guildId, customBadWords) {
-    const words = customBadWords || [];
-    if (!words.length) return [];
-
-    // A NUL separator cannot appear in a word an admin typed into the
-    // dashboard, so no two distinct lists share a signature.
-    const signature = words.join('\u0000');
-    const cached = customBadWordRegexes.get(guildId);
-    if (cached && cached.signature === signature) return cached.regexes;
-
-    const regexes = words.map(compileBadWordRegex);
-    if (customBadWordRegexes.size >= MAX_CUSTOM_BAD_WORD_GUILDS && !customBadWordRegexes.has(guildId)) {
-        customBadWordRegexes.delete(customBadWordRegexes.keys().next().value);
-    }
-    customBadWordRegexes.set(guildId, { signature, regexes });
-    return regexes;
-}
 
 // The bot's own mention token, as a regex.
 //
@@ -80,59 +35,13 @@ function getMentionPattern(botId) {
     return mentionPattern.regex;
 }
 
-// Leet-speak normalization map
-const LEET_MAP = {
-    '4': 'a', '@': 'a', '3': 'e', '€': 'e', '1': 'i', '!': 'i',
-    '0': 'o', '5': 's', '$': 's', '7': 't', '+': 't', '9': 'g',
-    '6': 'b', '8': 'b'
-};
-
-// One entry per (guild, user) seen inside the spam window.
-//
-// This was a `Map<guildId, Map<userId, timestamps>>` with nothing that ever
-// removed an entry: a user's array was pruned only when *that same user* posted
-// again, so a visitor who said one word in one guild two months ago was still
-// resident, and the outer map grew a guild entry per guild for the life of the
-// process (#600). The bounded limiter is what the rest of the bot already uses
-// for exactly this — a hard key ceiling with FIFO eviction, plus a sweep that
-// drops keys whose timestamps have all aged out.
-//
-// The key is `guildId:userId` rather than a nested map because the ceiling has
-// to bound the whole thing; a cap on the outer map alone bounds nothing, since
-// the arrays hang off the inner ones. Eviction only forgives whatever a user
-// had accumulated, which costs them a longer run-up to the threshold — the same
-// trade every other limiter here makes.
-const SPAM_MAX_KEYS = 20_000;
-
-// The dashboard offers 1–60 seconds for the window, so 60s is the longest one
-// any guild can be running. The sweep uses it, which is what makes the sweep
-// safe: `cleanup` only drops a key once every timestamp on it predates the
-// window it is given, so sweeping on the *widest* configurable window can never
-// forget a message some guild's narrower window would still have counted.
-const SPAM_MIN_WINDOW_MS = 1_000;
-const SPAM_MAX_WINDOW_MS = 60_000;
-
-const spamLimiter = new BoundedRateLimiter(SPAM_MAX_KEYS);
-setInterval(() => spamLimiter.cleanup(SPAM_MAX_WINDOW_MS), SPAM_MAX_WINDOW_MS).unref();
-
-// Normalize leet-speak and obfuscation attempts before profanity check
-function normalizeToxic(text) {
-    let s = text.toLowerCase();
-    // Replace leet characters
-    for (const [char, replacement] of Object.entries(LEET_MAP)) {
-        s = s.split(char).join(replacement);
-    }
-    // Collapse 3+ repeated characters to one (fuuuuck -> fuck)
-    s = s.replace(/(.)\1{2,}/g, '$1');
-    // Strip spaces/dots/dashes between individual letters (f u c k, f.u.c.k)
-    s = s.replace(/\b(\w)([\s.\-_*]{1,2}(?=\w))+/g, (m) => m.replace(/[\s.\-_*]/g, ''));
-    return s;
-}
-
 module.exports = {
     name: 'messageCreate',
-    // Exported for unit testing only
-    _getCustomBadWordRegexes: getCustomBadWordRegexes,
+    // Exported for unit testing only. Auto-moderation moved to
+    // services/autoModService (messageUpdate needs it too); these stay here so
+    // the tests that pin the two caches keep addressing them where they always
+    // have.
+    _getCustomBadWordRegexes: autoMod._getCustomBadWordRegexes,
     // Likewise: the mention pattern is built once per bot id (#930), and the
     // only way to see that from outside is to ask for it twice.
     _getMentionPattern: getMentionPattern,
@@ -140,7 +49,7 @@ module.exports = {
     // actually reclaims it (#600) — a leak is invisible from the outside,
     // because a tracker that never forgets behaves identically until it is the
     // thing using the memory.
-    _spamLimiter: spamLimiter,
+    _spamLimiter: autoMod._spamLimiter,
     async execute(message, client) {
         if (message.author.bot || !message.guild) return;
 
@@ -560,8 +469,6 @@ async function handleLeveling(message, guildSettings, announcements = []) {
     }
 }
 
-// Offense weights for behavioral scoring
-const OFFENSE_WEIGHTS = { spam: 1, invite: 2, link: 1, profanity: 2 };
 
 async function handleSuggestions(message, guildSettings) {
     const s = guildSettings.suggestions;
@@ -571,236 +478,6 @@ async function handleSuggestions(message, guildSettings) {
         await message.react(s.upvoteEmoji || '👍').catch(() => {});
         await message.react(s.downvoteEmoji || '👎').catch(() => {});
     } catch {}
-}
-
-async function handleAutoModeration(message, guildSettings) {
-    const mod = guildSettings.moderation;
-    const isModerator = message.member.permissions.has('ManageMessages')
-        || (mod.immunityRoleIds?.length && message.member.roles.cache.some(r => mod.immunityRoleIds.includes(r.id)));
-
-    if (!mod.autoModEnabled) return false;
-
-    if (mod.spamProtection && !isModerator) {
-        const guildId = message.guild.id;
-        const userId = message.author.id;
-        // Clamped to the range the dashboard's own input offers. Nothing
-        // validates `spamWindow` on the way into the database, and the sweep
-        // above is only sound while no guild's window outruns it.
-        //
-        // `??`, not `||`: an out-of-range value is the clamp's job, so a stored
-        // 0 becomes the one-second floor rather than being read as "unset" and
-        // silently given the five-second default.
-        const windowMs = Math.min(
-            Math.max((mod.spamWindow ?? 5) * 1000, SPAM_MIN_WINDOW_MS),
-            SPAM_MAX_WINDOW_MS
-        );
-        const threshold = mod.spamThreshold || 5;
-
-        const key = `${guildId}:${userId}`;
-
-        if (spamLimiter.hit(key, windowMs) >= threshold) {
-            // Forget the burst that just earned a punishment, so the next
-            // message starts a fresh count instead of tripping the same
-            // still-full window again.
-            spamLimiter.reset(key);
-            await message.delete().catch(console.error);
-            const warn = await message.channel.send(`${message.author}, slow down! You're sending messages too fast.`);
-            setTimeout(() => warn.delete().catch(() => {}), 5000);
-            await applyAutoModAction(message, guildSettings, 'spam', OFFENSE_WEIGHTS.spam);
-            return true;
-        }
-    }
-
-    if (mod.inviteFilter && !isModerator && /(discord\.gg\/|discord\.com\/invite\/)/i.test(message.content)) {
-        await message.delete().catch(console.error);
-        const warn = await message.channel.send(`${message.author}, invite links are not allowed!`);
-        setTimeout(() => warn.delete().catch(() => {}), 5000);
-        await applyAutoModAction(message, guildSettings, 'posting an invite link', OFFENSE_WEIGHTS.invite);
-        return true;
-    }
-
-    if (mod.linkFilter && !isModerator && (message.content.includes('http://') || message.content.includes('https://'))) {
-        await message.delete().catch(console.error);
-        const warn = await message.channel.send(`${message.author}, links are not allowed!`);
-        setTimeout(() => warn.delete().catch(() => {}), 5000);
-        await applyAutoModAction(message, guildSettings, 'posting a link', OFFENSE_WEIGHTS.link);
-        return true;
-    }
-
-    if (mod.repeatedTextFilter && !isModerator) {
-        const normalized = message.content.toLowerCase().replace(/\s+/g, ' ').trim();
-        if (normalized.length > 12 && /(.)\1{8,}/.test(normalized)) {
-            await message.delete().catch(console.error);
-            const warn = await message.channel.send(`${message.author}, please avoid repeated/spammy text.`);
-            setTimeout(() => warn.delete().catch(() => {}), 5000);
-            await applyAutoModAction(message, guildSettings, 'repeated text spam', OFFENSE_WEIGHTS.spam);
-            return true;
-        }
-    }
-
-    if (mod.excessiveCapsFilter && !isModerator) {
-        const letters = (message.content.match(/[a-z]/gi) || []);
-        const caps = (message.content.match(/[A-Z]/g) || []);
-        const ratio = letters.length ? (caps.length / letters.length) * 100 : 0;
-        if (letters.length >= 10 && ratio >= (mod.capsThresholdPercent || 70)) {
-            await message.delete().catch(console.error);
-            const warn = await message.channel.send(`${message.author}, please avoid excessive caps.`);
-            setTimeout(() => warn.delete().catch(() => {}), 5000);
-            await applyAutoModAction(message, guildSettings, 'excessive caps', OFFENSE_WEIGHTS.spam);
-            return true;
-        }
-    }
-
-    if (mod.excessiveEmojisFilter && !isModerator) {
-        const unicodeEmojiCount = (message.content.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || []).length;
-        const customEmojiCount = (message.content.match(/<a?:\w+:\d+>/g) || []).length;
-        if ((unicodeEmojiCount + customEmojiCount) >= (mod.emojiThreshold || 8)) {
-            await message.delete().catch(console.error);
-            const warn = await message.channel.send(`${message.author}, too many emojis in one message.`);
-            setTimeout(() => warn.delete().catch(() => {}), 5000);
-            await applyAutoModAction(message, guildSettings, 'excessive emojis', OFFENSE_WEIGHTS.spam);
-            return true;
-        }
-    }
-
-    if (mod.zalgoFilter && !isModerator) {
-        const combiningMarks = (message.content.normalize('NFD').match(/[\u0300-\u036f]/g) || []).length;
-        if (combiningMarks >= 6) {
-            await message.delete().catch(console.error);
-            const warn = await message.channel.send(`${message.author}, zalgo/combining text is not allowed.`);
-            setTimeout(() => warn.delete().catch(() => {}), 5000);
-            await applyAutoModAction(message, guildSettings, 'zalgo text', OFFENSE_WEIGHTS.spam);
-            return true;
-        }
-    }
-
-    if (mod.excessiveMentionsFilter && !isModerator) {
-        const mentionCount = message.mentions.users.size + message.mentions.roles.size;
-        if (mentionCount >= (mod.mentionThreshold || 5)) {
-            await message.delete().catch(console.error);
-            const warn = await message.channel.send(`${message.author}, too many mentions in one message.`);
-            setTimeout(() => warn.delete().catch(() => {}), 5000);
-            await applyAutoModAction(message, guildSettings, 'excessive mentions', OFFENSE_WEIGHTS.spam);
-            return true;
-        }
-    }
-
-    if (mod.profanityFilter && !isModerator) {
-        const normalized = normalizeToxic(message.content);
-        const customRegexes = getCustomBadWordRegexes(message.guild.id, mod.customBadWords);
-        const hasBadWord = BASE_BAD_WORD_REGEXES.some(re => re.test(normalized))
-            || customRegexes.some(re => re.test(normalized));
-
-        if (hasBadWord) {
-            await message.delete().catch(console.error);
-            const warn = await message.channel.send(`${message.author}, please watch your language!`);
-            setTimeout(() => warn.delete().catch(() => {}), 5000);
-            await applyAutoModAction(message, guildSettings, 'using prohibited language', OFFENSE_WEIGHTS.profanity);
-            return true;
-        }
-    }
-
-    return false;
-}
-
-async function applyAutoModAction(message, guildSettings, reason, scoreWeight = 1) {
-    const mod = guildSettings.moderation;
-    const member = message.member;
-    if (!member) return;
-
-    try {
-        const evidence = {
-            messageId: message.id,
-            jumpUrl: message.url,
-            content: message.content.slice(0, 500),
-            attachmentUrls: [...message.attachments.values()].map(a => a.url)
-        };
-        await logModeration(
-            message.guild.id, 'warn', message.author, message.client.user,
-            `[AutoMod] ${reason}`, { evidence }
-        );
-
-        // Behavioral score (with decay)
-        let user = await User.findOne({ userId: member.id, guildId: message.guild.id });
-        if (!user) {
-            user = await User.create({ userId: member.id, guildId: message.guild.id });
-        }
-
-        // Apply decay: 50% every N days
-        const decayDays = mod.behaviorScoreDecayDays || 7;
-        if (user.lastScoreDecay) {
-            const daysSince = (Date.now() - user.lastScoreDecay.getTime()) / 86400000;
-            if (daysSince >= decayDays) {
-                const periods = Math.floor(daysSince / decayDays);
-                user.behaviorScore = user.behaviorScore * Math.pow(0.5, periods);
-                user.lastScoreDecay = new Date();
-            }
-        } else {
-            user.lastScoreDecay = new Date();
-        }
-
-        user.behaviorScore = (user.behaviorScore || 0) + scoreWeight;
-        await user.save();
-
-        const score = user.behaviorScore;
-        // `??`, not `||`. Each of these is documented as "0 = disabled" beside
-        // its dashboard field, the schema allows `min: 0`, and the guards below
-        // test `> 0` for exactly that reason — but `||` reads 0 as absent and
-        // hands back the default, so an operator who turned auto-ban off got it
-        // silently re-armed at 30 and the `> 0` guards were unreachable (#783).
-        const banAt = mod.behaviorScoreBanAt ?? 30;
-        const kickAt = mod.behaviorScoreKickAt ?? 20;
-        const muteAt = mod.behaviorScoreMuteAt ?? 10;
-
-        if (banAt > 0 && score >= banAt && member.bannable) {
-            await member.ban({ reason: `[AutoMod] Behavior score ${Math.round(score)} reached ban threshold` });
-            await logModeration(message.guild.id, 'ban', message.author, message.client.user,
-                `[AutoMod] Behavior score ${Math.round(score)} >= ${banAt}`);
-        } else if (kickAt > 0 && score >= kickAt && member.kickable) {
-            await member.kick(`[AutoMod] Behavior score ${Math.round(score)} reached kick threshold`);
-            await logModeration(message.guild.id, 'kick', message.author, message.client.user,
-                `[AutoMod] Behavior score ${Math.round(score)} >= ${kickAt}`);
-        } else if (muteAt > 0 && score >= muteAt && member.moderatable) {
-            await member.timeout(10 * 60 * 1000, `[AutoMod] Behavior score ${Math.round(score)} reached mute threshold`);
-            await logModeration(message.guild.id, 'mute', message.author, message.client.user,
-                `[AutoMod] Behavior score ${Math.round(score)} >= ${muteAt}`, { duration: 10 });
-            // Notify user with appeal info if enabled
-            if (mod.appealsEnabled) {
-                const latestCase = await require('../models/Case').findOne(
-                    { guildId: message.guild.id, targetUserId: member.id },
-                    {}, { sort: { createdAt: -1 } }
-                );
-                if (latestCase) {
-                    await message.author.send(
-                        `You have been auto-muted in **${message.guild.name}**.\n` +
-                        `Reason: ${reason}\n\n` +
-                        `To appeal, use \`/appeal\` in ${message.guild.name} with Case ID **#${latestCase.caseId}**.`
-                    ).catch(() => {});
-                }
-            }
-        } else {
-            const warnCount = await Case.countDocuments({ guildId: message.guild.id, targetUserId: member.id, type: 'warn' });
-            const kickThreshold = mod.kickThreshold || 0;
-            const banThreshold = mod.banThreshold || 0;
-
-            if (banThreshold > 0 && warnCount >= banThreshold && member.bannable) {
-                await member.ban({ reason: `[AutoMod] Warning count ${warnCount} reached ban threshold (${banThreshold})` });
-                await logModeration(message.guild.id, 'ban', message.author, message.client.user,
-                    `[AutoMod] Warning count ${warnCount} >= ban threshold ${banThreshold}`);
-            } else if (kickThreshold > 0 && warnCount >= kickThreshold && member.kickable) {
-                await member.kick(`[AutoMod] Warning count ${warnCount} reached kick threshold (${kickThreshold})`);
-                await logModeration(message.guild.id, 'kick', message.author, message.client.user,
-                    `[AutoMod] Warning count ${warnCount} >= kick threshold ${kickThreshold}`);
-            } else if (warnCount >= (mod.warnThreshold || 3)) {
-                await message.author.send(
-                    `You have received **${warnCount}** warnings in **${message.guild.name}**. ` +
-                    `Further violations may result in a mute or kick.`
-                ).catch(() => {});
-            }
-        }
-    } catch (err) {
-        console.error('AutoMod action error:', err);
-    }
 }
 
 async function handleBibleVerseDetection(message, guildSettings) {

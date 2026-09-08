@@ -1,5 +1,6 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
+const { handleAutoModeration } = require('../services/autoModService');
 const COLORS = require('../utils/embedColors');
 
 module.exports = {
@@ -9,7 +10,39 @@ module.exports = {
         if (oldMessage.content === newMessage.content) return;
 
         const guildSettings = await getGuildSettings(newMessage.guild.id);
-        if (!guildSettings?.eventLog?.enabled || !guildSettings.eventLog.logMessageEdit) return;
+        if (!guildSettings) return;
+
+        // Auto-moderation only ever saw messageCreate, which left one opening
+        // that needed no skill at all: post something harmless, then edit it
+        // into the invite link, the slur, the wall of caps. The filters never
+        // saw the text that ended up on screen.
+        //
+        // This runs before the edit log below and independently of it: a guild
+        // that never turned event logging on is exactly a guild that would
+        // never notice the hole.
+        if (guildSettings.moderation?.enabled && guildSettings.moderation.scanEdits !== false) {
+            try {
+                // `Message#member` is a cache lookup (`guild.members.resolve`),
+                // not a field on the payload, so it is null for an author the
+                // member cache has dropped — and auto-moderation refuses to act
+                // without one, since it cannot check immunity. That would make
+                // edit scanning quietly conditional on the author having been
+                // active lately, which is the opposite of what it is for.
+                // Fetching populates the cache the getter reads.
+                if (!newMessage.member && newMessage.author) {
+                    await newMessage.guild.members.fetch(newMessage.author.id).catch(() => {});
+                }
+
+                const deleted = await handleAutoModeration(newMessage, guildSettings, { isEdit: true });
+                // Nothing left to log an edit for, and the audit trail already
+                // has the case the filter filed, with the offending text on it.
+                if (deleted) return;
+            } catch (err) {
+                console.error('messageUpdate automod error:', err);
+            }
+        }
+
+        if (!guildSettings.eventLog?.enabled || !guildSettings.eventLog.logMessageEdit) return;
 
         const logChannel = newMessage.guild.channels.cache.get(guildSettings.eventLog.channelId);
         if (!logChannel) return;

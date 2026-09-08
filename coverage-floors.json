@@ -145,10 +145,10 @@
             "lines": 78
         },
         "src/events": {
-            "statements": 67,
-            "branches": 53,
-            "functions": 47,
-            "lines": 71
+            "statements": 62,
+            "branches": 46,
+            "functions": 43,
+            "lines": 66
         },
         "src/games/casino": {
             "statements": 40,

@@ -57,7 +57,28 @@ describe('custom bad-word regex memoization', () => {
 
         expect(re.test('what a blorp')).toBe(true);
         expect(re.test('BLORP')).toBe(true);
-        expect(re.test('blorpy')).toBe(false);
+        // Still bounded on both sides: an unrelated word that merely starts
+        // with the entry is not a match.
+        expect(re.test('blorpenstein')).toBe(false);
+    });
+
+    it('matches the grammatical endings of an entered word', () => {
+        // `blorpy` was pinned as a non-match here, from when matching was a
+        // literal `\bword\b`. That exemption is what let "assholes",
+        // "bitching" and "fucks" through a filter holding all three roots, so
+        // a closed set of endings now counts (see utils/contentFilters).
+        const [re] = getCustomBadWordRegexes('g7b', ['blorp']);
+
+        expect(re.test('blorpy')).toBe(true);
+        expect(re.test('blorps')).toBe(true);
+        expect(re.test('blorping')).toBe(true);
+    });
+
+    it('matches padded and spaced-out spellings of an entered word', () => {
+        const [re] = getCustomBadWordRegexes('g7c', ['blorp']);
+
+        expect(re.test('bloorp')).toBe(true);
+        expect(re.test('blorrrp')).toBe(true);
     });
 
     it('escapes regex metacharacters in an admin-entered word', () => {
