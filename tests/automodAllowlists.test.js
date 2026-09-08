@@ -20,7 +20,11 @@ const User = require('../src/models/User');
 const Case = require('../src/models/Case');
 const { logModeration } = require('../src/services/moderationLogService');
 const { makeMessage, makeModerationSettings } = require('./helpers/messageCreateMessage');
-const { handleAutoModeration, _inviteGuildCache } = require('../src/services/autoModService');
+const {
+    handleAutoModeration,
+    _inviteGuildCache,
+    _getCustomBadWordRegexes,
+} = require('../src/services/autoModService');
 
 /** A user quiet enough that no escalation rung fires -- the filters are what is under test. */
 function calmUser() {
@@ -270,5 +274,53 @@ describe('guards', () => {
             moderation: { enabled: true, autoModEnabled: false, profanityFilter: true },
         });
         expect(deleted).toBe(false);
+    });
+});
+
+describe('edits', () => {
+    it('does not charge the rate window for an edit', async () => {
+        // The rate filter counts events, not content: an edit re-running it
+        // would make fixing typos indistinguishable from posting.
+        const settings = { spamProtection: true, spamThreshold: 2, spamWindow: 5 };
+
+        // One real message, then an edit. Without the opt-out the edit is the
+        // second event in the window and trips the threshold.
+        await run('first message', settings);
+        const edited = makeMessage('fixed typo');
+        const deleted = await handleAutoModeration(edited, makeModerationSettings(settings), { isEdit: true });
+
+        expect(deleted).toBe(false);
+        expect(edited.delete).not.toHaveBeenCalled();
+    });
+
+    it('still applies the content filters to an edit', async () => {
+        const edited = makeMessage('you fuck');
+        const deleted = await handleAutoModeration(
+            edited,
+            makeModerationSettings({ profanityFilter: true }),
+            { isEdit: true }
+        );
+
+        expect(deleted).toBe(true);
+    });
+});
+
+describe('bad-word cache keys', () => {
+    it('does not confuse one entry containing the separator with two entries', () => {
+        // The signature joined the entries on a NUL. That is unambiguous only
+        // while no entry can contain one -- and while the dashboard textarea
+        // cannot produce a NUL, the settings API takes arbitrary strings. These
+        // two word lists produced an identical signature, so the second guild
+        // configuration was served the first one's compiled patterns: one
+        // pattern for the literal `alpha\0beta`, reused where two separate
+        // words were meant.
+        const NUL = String.fromCharCode(0);
+
+        const joined = _getCustomBadWordRegexes('gA', [`alpha${NUL}beta`]);
+        const separate = _getCustomBadWordRegexes('gA', ['alpha', 'beta']);
+
+        expect(joined).toHaveLength(1);
+        expect(separate).toHaveLength(2);
+        expect(separate[1].test('beta')).toBe(true);
     });
 });

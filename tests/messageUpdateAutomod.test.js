@@ -16,20 +16,23 @@ const { getGuildSettings } = require('../src/utils/guildSettingsCache');
 const { handleAutoModeration } = require('../src/services/autoModService');
 const messageUpdate = require('../src/events/messageUpdate');
 
-function makeEdit({ before = 'hello', after = 'discord.gg/raid', logging = false } = {}) {
+function makeEdit({ before = 'hello', after = 'discord.gg/raid', logging = false, member = {} } = {}) {
     const logChannel = { send: jest.fn(async () => {}), permissionsFor: () => ({ has: () => true }) };
+    const fetch = jest.fn(async () => ({}));
     const guild = {
         id: 'guild1',
         channels: { cache: new Map([['log1', logChannel]]) },
-        members: { me: {} },
+        members: { me: {}, fetch },
     };
     return {
         logChannel,
         logging,
+        fetch,
         oldMessage: { content: before },
         newMessage: {
             content: after,
-            author: { bot: false, username: 'someone', globalName: null, displayAvatarURL: () => 'https://cdn.discordapp.com/avatars/1/a.png' },
+            member,
+            author: { id: 'author1', bot: false, username: 'someone', globalName: null, displayAvatarURL: () => 'https://cdn.discordapp.com/avatars/1/a.png' },
             guild,
             channel: { id: 'chan1' },
             url: 'https://discord.com/channels/guild1/chan1/msg1',
@@ -138,4 +141,51 @@ it('ignores a bot editing its own message', async () => {
     await messageUpdate.execute(oldMessage, newMessage);
 
     expect(handleAutoModeration).not.toHaveBeenCalled();
+});
+
+it('tells the service this is an edit, so the rate filter does not count it', () => {
+    // The spam filter counts events rather than content. Charging a user's rate
+    // window for fixing a typo is a deletion, a case and a behaviour-score bump
+    // for tidying up, so the edit path has to opt out of that one filter.
+    const { oldMessage, newMessage } = makeEdit();
+    getGuildSettings.mockResolvedValue(settings());
+
+    return messageUpdate.execute(oldMessage, newMessage).then(() => {
+        expect(handleAutoModeration.mock.calls[0][2]).toEqual({ isEdit: true });
+    });
+});
+
+it('fetches an uncached author before filtering the edit', async () => {
+    // `Message#member` is a cache lookup, not a payload field, so it is null
+    // for an author the member cache dropped -- and the service refuses to act
+    // without one. Unfetched, edit scanning would be conditional on the author
+    // having been active lately.
+    const { oldMessage, newMessage, fetch } = makeEdit({ member: null });
+    getGuildSettings.mockResolvedValue(settings());
+
+    await messageUpdate.execute(oldMessage, newMessage);
+
+    expect(fetch).toHaveBeenCalledWith('author1');
+    expect(handleAutoModeration).toHaveBeenCalledTimes(1);
+});
+
+it('does not fetch when the member is already there', async () => {
+    const { oldMessage, newMessage, fetch } = makeEdit();
+    getGuildSettings.mockResolvedValue(settings());
+
+    await messageUpdate.execute(oldMessage, newMessage);
+
+    expect(fetch).not.toHaveBeenCalled();
+});
+
+it('still filters when the member fetch fails', async () => {
+    // A failed fetch leaves the service to make its own call on a null member;
+    // it must not take the edit handler down with it.
+    const { oldMessage, newMessage, fetch } = makeEdit({ member: null });
+    fetch.mockRejectedValue(new Error('rate limited'));
+    getGuildSettings.mockResolvedValue(settings());
+
+    await messageUpdate.execute(oldMessage, newMessage);
+
+    expect(handleAutoModeration).toHaveBeenCalledTimes(1);
 });

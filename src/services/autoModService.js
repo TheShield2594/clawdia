@@ -55,7 +55,7 @@ function getBaseBadWordRegexes(allowlist) {
     const words = allowlist || [];
     if (!words.length) return BASE_BAD_WORD_REGEXES;
 
-    const signature = words.join('\u0000');
+    const signature = JSON.stringify(words);
     const cached = baseBadWordVariants.get(signature);
     if (cached) return cached;
 
@@ -89,10 +89,16 @@ function getCustomBadWordRegexes(guildId, customBadWords, allowlist = []) {
     const words = customBadWords || [];
     if (!words.length) return [];
 
-    // A NUL separator cannot appear in a word an admin typed into the
-    // dashboard, so no two distinct lists share a signature. The allowlist is
-    // part of it because it decides which of these words compile at all.
-    const signature = `${(allowlist || []).join('\u0000')}${words.join('\u0000')}`;
+    // Serialized, not joined on separators. A separator is unambiguous only
+    // while it cannot occur inside an entry: the dashboard's textarea cannot
+    // produce one, but the settings API takes arbitrary strings, so
+    // `['a<sep>b'] + ['c']` and `['a'] + ['b<sep>c']` collided on one signature
+    // and the second configuration was handed the first one's compiled
+    // patterns -- the wrong words blocked, the wrong words allowed. (The
+    // separator here was also a literal control character sitting invisibly in
+    // the source, which is its own reason not to keep one.) The allowlist is
+    // part of the key because it decides which of these words compile at all.
+    const signature = JSON.stringify([allowlist || [], words]);
     const cached = customBadWordRegexes.get(guildId);
     if (cached && cached.signature === signature) return cached.regexes;
 
@@ -249,7 +255,7 @@ function isExemptChannel(message, mod) {
  * Returns true when the message was deleted, which is the caller's signal to
  * stop processing it.
  */
-async function handleAutoModeration(message, guildSettings) {
+async function handleAutoModeration(message, guildSettings, { isEdit = false } = {}) {
     const mod = guildSettings?.moderation;
     if (!mod?.autoModEnabled) return false;
     // No member means no permissions to read and no roles to check -- an
@@ -261,7 +267,12 @@ async function handleAutoModeration(message, guildSettings) {
     const isModerator = isImmune(message, mod);
     const content = message.content ?? '';
 
-    if (mod.spamProtection && !isModerator) {
+    // Every other filter reads the message's content, so re-running it on an
+    // edit asks the same question of new text. This one counts events, not
+    // content: it would charge a user's rate window for fixing two typos, and
+    // at the default five-in-five-seconds that is a deletion, a case and a
+    // behaviour-score bump for tidying up. An edit is not a new message.
+    if (mod.spamProtection && !isModerator && !isEdit) {
         const guildId = message.guild.id;
         const userId = message.author.id;
         // Clamped to the range the dashboard's own input offers. Nothing

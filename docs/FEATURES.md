@@ -328,7 +328,9 @@ Enable in dashboard for automatic enforcement:
   server the invite points at. Invites back to your own server are allowed by
   default; turn `Allow invites to this server` off to filter those too.
 - **Allowed words** (`profanityAllowlist`) remove an entry from the built-in
-  list — for mild profanity, or for a word that is also a name.
+  list *and* from your own custom word list — for mild profanity, or for a word
+  that is also a name. Allowlisting a word you also added to the custom list
+  switches that custom rule off.
 
 Every filter trip deletes the message, files a case, and adds to the author's
 behavior score; the score thresholds and the warning ladder decide when that

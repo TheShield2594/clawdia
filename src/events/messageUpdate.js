@@ -22,7 +22,18 @@ module.exports = {
         // never notice the hole.
         if (guildSettings.moderation?.enabled && guildSettings.moderation.scanEdits !== false) {
             try {
-                const deleted = await handleAutoModeration(newMessage, guildSettings);
+                // `Message#member` is a cache lookup (`guild.members.resolve`),
+                // not a field on the payload, so it is null for an author the
+                // member cache has dropped — and auto-moderation refuses to act
+                // without one, since it cannot check immunity. That would make
+                // edit scanning quietly conditional on the author having been
+                // active lately, which is the opposite of what it is for.
+                // Fetching populates the cache the getter reads.
+                if (!newMessage.member && newMessage.author) {
+                    await newMessage.guild.members.fetch(newMessage.author.id).catch(() => {});
+                }
+
+                const deleted = await handleAutoModeration(newMessage, guildSettings, { isEdit: true });
                 // Nothing left to log an edit for, and the audit trail already
                 // has the case the filter filed, with the offending text on it.
                 if (deleted) return;

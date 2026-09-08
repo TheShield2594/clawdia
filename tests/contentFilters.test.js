@@ -99,6 +99,32 @@ describe('profanity matching', () => {
         expect(re.test('abc')).toBe(false);
     });
 
+    it('compiles a padded entry without exponential backtracking', () => {
+        // Per character, an entry with two of anything in a row produced two
+        // quantified atoms over the same set (`a+a+`, or two `[\s._\-]+` for
+        // two spaces), and adjacent quantifiers that can match the same input
+        // backtrack exponentially when the match fails. `#` plus ten spaces
+        // took 311ms on a 34-character message and quadrupled every four
+        // characters after that -- one guild's word list stalling the event
+        // loop for every guild. Runs compile to one atom each now.
+        const re = compileBadWordRegex(`#${' '.repeat(10)}a`);
+        const attack = normalizeToxic(`#${'.-'.repeat(2000)}b`);
+
+        const started = Date.now();
+        expect(re.test(attack)).toBe(false);
+        expect(Date.now() - started).toBeLessThan(1000);
+    });
+
+    it('keeps a repeated letter significant when collapsing the run', () => {
+        // The run collapse must not turn `a+s+s+` into `a+s+`, which would
+        // match the word "as".
+        const re = compileBadWordRegex('ass');
+
+        expect(re.test('what an ass')).toBe(true);
+        expect(re.test('asss')).toBe(true);
+        expect(re.test('as a matter of fact')).toBe(false);
+    });
+
     it('matches a listed phrase across any separator', () => {
         const re = compileBadWordRegex('porch monkey');
 
@@ -158,6 +184,12 @@ describe('invite detection', () => {
 
 describe('link detection', () => {
     it.each([
+        // The scheme pattern captures the comma, and an uncleaned `youtube.com,`
+        // matched no allowlist entry -- so a permitted link was deleted for
+        // having a sentence continue after it.
+        ['a host followed by prose punctuation', 'see https://youtube.com, it is good', ['youtube.com']],
+        ['a host in parentheses', '(https://youtube.com)', ['youtube.com']],
+        ['a host ending a sentence', 'go to https://youtube.com.', ['youtube.com']],
         ['a scheme URL', 'see http://evil.tld/x', ['evil.tld']],
         ['a www host with no scheme', 'see www.evil.com/x', ['www.evil.com']],
         ['a bare domain', 'see evil.com/free-nitro', ['evil.com']],

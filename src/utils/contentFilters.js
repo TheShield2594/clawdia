@@ -107,22 +107,50 @@ function escapeRe(str) {
 // `pussycat`, `niggardly`, `cocktail`, `shitake` and `hello` all stay clean).
 const SUFFIX_GROUP = '(?:s|es|ed|er|ers|ing|ings|in|y|ies|z|zz)';
 
+// Characters that stand in for each other between the letters of a word:
+// whitespace, and the punctuation people pad a slur with. One class, so a run
+// of them compiles to a single atom.
+const SEPARATOR_CLASS = '[\\s._\\-]';
+const SEPARATOR_CHAR_RE = /[\s._-]/;
+
 /**
  * Compile one blocked word into a pattern that tolerates the spellings
  * normalization cannot reach.
  *
- * Each character is allowed to repeat (`f+u+c+k+`), which covers the padded
- * spellings — `shitt`, `biitch`, `fuuuck` — that survived the repeat collapse
- * because collapsing only fires at three. Spaces inside a listed phrase match
- * any run of separator, so "porch monkey" also catches "porch-monkey".
+ * Each character is allowed to repeat, which covers the padded spellings —
+ * `shitt`, `biitch`, `fuuuck` — that survive the repeat collapse because
+ * collapsing only fires at three. Separators inside a listed phrase match any
+ * run of separator, so "porch monkey" also catches "porch-monkey".
+ *
+ * The pattern is built from *runs* rather than characters, and that is a
+ * correctness requirement rather than a tidiness one. Per character, an entry
+ * holding two of anything in a row produced two quantified atoms over the same
+ * character set — `a+a+`, or `[\s._\-]+[\s._\-]+` for two spaces — and
+ * adjacent quantifiers that can match the same input backtrack exponentially
+ * when the match ultimately fails. An entry of `#` and ten spaces took 311ms on
+ * a 34-character message and quadrupled with every four characters after that,
+ * which is an event loop stalled for every guild by one guild's word list.
+ * Collapsing each run to a single atom — `a{2,}`, one `[\s._\-]+` — leaves
+ * neighbouring atoms with disjoint character sets, so there is nothing to
+ * backtrack across. `{n,}` rather than `+` keeps the run length significant:
+ * "ass" stays two esses, and so still does not match "as".
  */
 function compileBadWordRegex(word) {
     const chars = [...String(word ?? '').toLowerCase().trim()];
     if (!chars.length) return null;
 
-    const body = chars
-        .map(ch => (/\s/.test(ch) ? '[\\s._\\-]+' : `${escapeRe(ch)}+`))
-        .join('');
+    let body = '';
+    for (let i = 0; i < chars.length;) {
+        if (SEPARATOR_CHAR_RE.test(chars[i])) {
+            while (i < chars.length && SEPARATOR_CHAR_RE.test(chars[i])) i += 1;
+            body += `${SEPARATOR_CLASS}+`;
+            continue;
+        }
+        const ch = chars[i];
+        let run = 0;
+        while (i < chars.length && chars[i] === ch) { run += 1; i += 1; }
+        body += `${escapeRe(ch)}{${run},}`;
+    }
 
     // `\b` is only meaningful next to a word character. A list entry that
     // starts or ends with punctuation gets no boundary on that side, rather
@@ -231,8 +259,18 @@ const BARE_TLDS = new Set([
 const SCHEME_URL_RE = /\b[a-z][a-z0-9+.-]*:\/\/([^\s/?#"'<>|)\]]+)/gi;
 const BARE_HOST_RE = /(?:^|[\s(<|"'>])((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24}))(?=[/:?#]|[\s)>|"'.,!?]|$)/gi;
 
+// Trailing prose punctuation, which the scheme pattern happily captures: the
+// comma in "see https://youtube.com, it's good" ended up part of the host, so
+// the allowlist compared `youtube.com,` against `youtube.com`, missed, and the
+// filter deleted a link the guild had explicitly permitted.
+const TRAILING_PUNCTUATION_RE = /[.,;:!?'")\]}>]+$/;
+
 function cleanHost(host) {
-    return String(host).toLowerCase().replace(/^.*@/, '').replace(/:\d+$/, '').replace(/\.$/, '');
+    return String(host)
+        .toLowerCase()
+        .replace(/^.*@/, '')
+        .replace(/:\d+$/, '')
+        .replace(TRAILING_PUNCTUATION_RE, '');
 }
 
 /**
