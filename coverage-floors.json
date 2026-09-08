@@ -2,9 +2,9 @@
     "directories": {
         "src": {
             "statements": 10,
-            "branches": 42,
+            "branches": 44,
             "functions": 13,
-            "lines": 10
+            "lines": 11
         },
         "src/bot": {
             "statements": 92,
@@ -115,10 +115,10 @@
             "lines": 83
         },
         "src/dashboard/lib": {
-            "statements": 87,
-            "branches": 81,
+            "statements": 90,
+            "branches": 83,
             "functions": 89,
-            "lines": 89
+            "lines": 92
         },
         "src/dashboard/public": {
             "statements": 0,
@@ -135,7 +135,7 @@
         "src/dashboard/routes/api": {
             "statements": 69,
             "branches": 66,
-            "functions": 65,
+            "functions": 66,
             "lines": 70
         },
         "src/data": {
@@ -151,20 +151,20 @@
             "lines": 71
         },
         "src/games/casino": {
-            "statements": 31,
-            "branches": 23,
-            "functions": 35,
-            "lines": 31
+            "statements": 40,
+            "branches": 30,
+            "functions": 45,
+            "lines": 40
         },
         "src/migrations": {
-            "statements": 55,
+            "statements": 56,
             "branches": 48,
-            "functions": 46,
-            "lines": 57
+            "functions": 47,
+            "lines": 58
         },
         "src/models": {
             "statements": 79,
-            "branches": 10,
+            "branches": 13,
             "functions": 67,
             "lines": 83
         },
@@ -183,7 +183,7 @@
         "src/services/ai/mcp": {
             "statements": 92,
             "branches": 84,
-            "functions": 90,
+            "functions": 91,
             "lines": 94
         },
         "src/services/ai/providers": {
@@ -273,8 +273,14 @@
         "src/commands/economy/market.js": {
             "statements": 86,
             "branches": 65,
-            "functions": 81,
+            "functions": 83,
             "lines": 86
+        },
+        "src/games/casino/payout.js": {
+            "statements": 97,
+            "branches": 82,
+            "functions": 97,
+            "lines": 97
         },
         "src/services/casinoJackpotService.js": {
             "statements": 95,
@@ -283,7 +289,7 @@
             "lines": 97
         },
         "src/services/marketService.js": {
-            "statements": 94,
+            "statements": 95,
             "branches": 85,
             "functions": 97,
             "lines": 94
@@ -308,7 +314,7 @@
         },
         "src/utils/creditOrOwe.js": {
             "statements": 97,
-            "branches": 79,
+            "branches": 80,
             "functions": 97,
             "lines": 97
         },

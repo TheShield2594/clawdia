@@ -383,12 +383,21 @@ describe('per-file floors', () => {
         // so from the absence of an exception. Both commands sit inside
         // directory floors — `src/commands/economy` at 35% statements — that a
         // file losing its coverage outright would not move.
+        //
+        // games/casino/payout.js joined in #873's fourth pass. It is the single
+        // funnel every casino hand's coins now pass through — eight games,
+        // twenty-odd settlement sites — and it sits inside a directory floor of
+        // 31% statements that a file losing its coverage outright would not
+        // move. Its branches are the three answers a settlement can give
+        // (paid, owed, neither) and the balance to print for each; an
+        // uncovered one is a hand that says it paid and did not.
         expect(Object.keys(floors.files).sort()).toEqual([
             'src/commands/economy/bank.js',
             'src/commands/economy/duel.js',
             'src/commands/economy/gift.js',
             'src/commands/economy/invest.js',
             'src/commands/economy/market.js',
+            'src/games/casino/payout.js',
             'src/services/casinoJackpotService.js',
             'src/services/marketService.js',
             'src/utils/balanceDebit.js',

@@ -12,6 +12,7 @@ const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
 const { rouletteSettlement } = require('./settlement');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3a1.png';
@@ -108,7 +109,7 @@ function historyLine(history) {
     return history.map(n => pocketEmoji(n)).join(' ') + '\n\n';
 }
 
-function resultEmbed({ result, won, betKey, target, bet, profit, balance, interaction, history }) {
+function resultEmbed({ result, won, betKey, target, bet, profit, balance, interaction, history, note = '' }) {
     const color    = won ? '#2ecc71' : '#e74c3c';
     const netStr   = profit >= 0 ? `+${profit.toLocaleString()}` : `${profit.toLocaleString()}`;
     const headline = won
@@ -130,7 +131,7 @@ function resultEmbed({ result, won, betKey, target, bet, profit, balance, intera
         .setColor(color)
         .setTitle(`🎡 Roulette — ${won ? 'Winner!' : 'No Luck'}`)
         .setDescription(
-            `${pocketStrip(result)}\n\n${headline}\n*${colorDesc}*\n\n` +
+            `${pocketStrip(result)}\n\n${headline}${note}\n*${colorDesc}*\n\n` +
             (historyStr ? `${historyStr}\n` : '') +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
             `  📊 Net: **${netStr}**  ·  💰 Balance: **${balance.toLocaleString()}** coins\n` +
@@ -218,6 +219,7 @@ module.exports = {
 // starts a brand-new hand with its own atomic debit, so it doesn't need the
 // lock re-held.
 async function playRoulette(interaction, betKey, bet, target, releaseLock, onWager) {
+    const handId = newHandId();
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -276,14 +278,8 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock, onWag
             }).catch(() => {});
         }
 
-        let updated = debited;
-        if (credit > 0) {
-            updated = await User.findOneAndUpdate(
-                userFilter,
-                { $inc: { balance: credit } },
-                { new: true },
-            );
-        }
+        const paid = await payHand(userFilter, credit,
+            { game: 'roulette', handId, phase: 'settle' });
         settled = true;
         releaseLock?.();
 
@@ -302,7 +298,11 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock, onWag
             new ButtonBuilder().setCustomId(replayId).setLabel('🎡 Spin Again').setStyle(ButtonStyle.Primary),
         );
 
-        const rouletteResultEmbed = resultEmbed({ result, won, betKey, target, bet, profit, balance: updated.balance, interaction, history: rouletteHistory });
+        const rouletteResultEmbed = resultEmbed({
+            result, won, betKey, target, bet, profit, interaction, history: rouletteHistory,
+            balance: await settledBalance(userFilter, paid.balance),
+            note: payoutNote(paid),
+        });
         if (charmTriggered) {
             const desc = rouletteResultEmbed.data.description ?? '';
             rouletteResultEmbed.setDescription(desc + (won ? '\n> 🍀 *Lucky Charm re-spun the wheel for you!*' : ''));
@@ -351,12 +351,14 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock, onWag
     } catch (err) {
         console.error('[Roulette] error:', err);
         releaseLock?.();
-        if (debited && !settled) {
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }).catch(e =>
-                console.error('[Roulette] rollback failed:', e));
-        }
+        const rolled = debited && !settled
+            ? await payHand(userFilter, bet, { game: 'roulette', handId, phase: 'rollback' })
+            : null;
+        const outcome = !debited ? 'No wager was taken.'
+            : settled ? 'Your hand had already been settled.'
+            : rolled.credited ? 'Your wager has been refunded — please try again.' : 'Your wager could not be refunded.';
         await interaction.editReply({
-            content: 'Something went wrong. Your wager has been refunded — please try again.',
+            content: `Something went wrong. ${outcome}${rolled ? payoutNote(rolled) : ''}`,
             components: [],
         }).catch(() => {});
     }

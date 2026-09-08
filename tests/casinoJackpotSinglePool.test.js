@@ -43,7 +43,7 @@ jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 
 const User  = require('../src/models/User');
 const Guild = require('../src/models/Guild');
-const { makeInteraction, walletDoc, GUILD_ID, USER_ID, BET } = require('./helpers/casinoInteraction');
+const { makeInteraction, walletDoc, GUILD_ID, BET } = require('./helpers/casinoInteraction');
 
 const slots   = require('../src/games/casino/slots');
 const casino  = require('../src/commands/economy/casino');
@@ -78,16 +78,28 @@ function poolShownBySlots(interaction) {
     return null;
 }
 
-/** Every coin the spin itself credited, through its own `$inc` payout write. */
-const totalCredited = () => User.findOneAndUpdate.mock.calls
-    .filter(([, update]) => update?.$inc?.balance !== undefined)
-    .reduce((sum, [, update]) => sum + update.$inc.balance, 0);
-
 /**
- * The keyed credits the jackpot service issued — pipeline updates, because the
- * payout key has to go in the same write as the coins (src/utils/payoutKey.js).
+ * Every keyed coin credit the spin made, as `{ key, amount }`.
+ *
+ * Both the jackpot service and the spin's own payout are keyed pipeline updates
+ * now (#873) — the spin's used to be a bare `$inc`, which is what made it
+ * unrecoverable — so the two are told apart by the key in the write's guard
+ * rather than by the shape of the update.
  */
-const keyedCredits = () => User.findOneAndUpdate.mock.calls.filter(([, update]) => Array.isArray(update));
+const keyedCoinCredits = () => User.findOneAndUpdate.mock.calls
+    .filter(([filter, update]) => Array.isArray(update) && filter?.['paidPayouts.key']?.$ne)
+    .map(([filter, update]) => ({
+        key:    filter['paidPayouts.key'].$ne,
+        amount: update[0]?.$set?.balance?.$add?.[1],
+    }));
+
+/** What the spin's own payout credited, as opposed to the pot. */
+const totalCredited = () => keyedCoinCredits()
+    .filter(({ key }) => key.startsWith('casino:'))
+    .reduce((sum, { amount }) => sum + amount, 0);
+
+/** The keyed credits the jackpot service issued for the pot itself. */
+const keyedCredits = () => keyedCoinCredits().filter(({ key }) => key.startsWith('jackpot:'));
 
 let randomSpy;
 let errorSpy;
@@ -162,11 +174,11 @@ describe('a Triple Wild claims the shared pool', () => {
         // twice, so the spin's own write has to be for nothing.
         expect(keyedCredits()).toHaveLength(1);
         expect(totalCredited()).toBe(0);
-        expect(User.findOneAndUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ userId: USER_ID, guildId: GUILD_ID }),
-            { $inc: { balance: 0 } },
-            expect.anything(),
-        );
+        // The spin's own payout is now keyed like the pot's, and a zero credit
+        // is short-circuited before it reaches the database — so the assertion
+        // is that no `casino:` credit was issued at all, not that one was
+        // issued for nothing.
+        expect(keyedCoinCredits().map(({ key }) => key.split(':')[0])).toEqual(['jackpot']);
     }, 20_000);
 
     test('the pool is reseeded, and the reseeded figure is what the spin reports', async () => {

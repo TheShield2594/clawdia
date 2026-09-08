@@ -26,6 +26,9 @@ const {
     ticksUntilCrash,
     multLabel,
 } = require('./crashCurve');
+const { creditCoinsOnce, casinoPayoutKey } = require('../../utils/payoutKey');
+const { counterSetExpr } = require('../../utils/balanceDebit');
+const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
 
 const TICK_MS = 1200;
 const MIN_BET = 10;
@@ -211,12 +214,17 @@ async function buildFinalEmbed(crashPoint, bet, players, client, _guildId) {
     const crashLabel = multLabel(crashPoint);
     const lines = [];
     for (const [uid, state] of players.entries()) {
-        const user = await client.users.fetch(uid).catch(() => ({ username: uid }));
+        const user = await client.users.fetch(uid).catch(() => null) ?? { username: uid };
         if (state.cashedOutAt) {
             const payout = Math.floor(bet * state.cashedOutAt);
             const net    = payout - bet;
             const auto   = state.autoTriggered ? ' *(auto)*' : '';
             lines.push(`✅ **${user.username}** cashed at **${multLabel(state.cashedOutAt)}**${auto} (+${net.toLocaleString()} coins)`);
+        } else if (state.cashFailed) {
+            const net = Math.floor(bet * state.cashFailedAt) - bet;
+            lines.push(state.cashOutcome === 'owed'
+                ? `⏳ **${user.username}** cashed at **${multLabel(state.cashFailedAt)}** (+${net.toLocaleString()} coins) — recorded, not yet paid`
+                : `⚠️ **${user.username}** cashed at **${multLabel(state.cashFailedAt)}** — payout could not be credited or recorded`);
         } else {
             lines.push(`💀 **${user.username}** didn't cash out (-${bet.toLocaleString()} coins)`);
         }
@@ -314,7 +322,7 @@ async function openLobby(interaction, bet, hostAutoCashout, releaseLock, onWager
     async function updateLobbyEmbed() {
         const names = [];
         for (const uid of lobby.players.keys()) {
-            const u = await interaction.client.users.fetch(uid).catch(() => ({ username: uid }));
+            const u = await interaction.client.users.fetch(uid).catch(() => null) ?? { username: uid };
             names.push(u.username);
         }
         await interaction.editReply({
@@ -413,11 +421,13 @@ async function startCrashGame(interaction, lobby, lobbyId) {
 
     // Instant crash
     if (crash <= 1.00) {
+        // Nobody can have cashed out yet — the game ends before the first tick —
+        // so every player is a loser here and none has a marker worth keeping.
         const loserIds = [...lobby.players.keys()];
         if (loserIds.length > 0) {
             User.updateMany(
-                { userId: { $in: loserIds }, guildId },
-                { $set: { pendingCrashRefund: 0 } }
+                { userId: { $in: loserIds }, guildId, pendingCrashRefund: { $gte: bet } },
+                { $inc: { pendingCrashRefund: -bet } }
             ).catch(err => console.error('[crash] failed to clear pendingCrashRefund on instant crash:', err));
         }
         const finalEmbed = await buildFinalEmbed(crash, bet, lobby.players, interaction.client, guildId);
@@ -434,10 +444,12 @@ async function startCrashGame(interaction, lobby, lobbyId) {
     async function getPlayerLines() {
         const lines = [];
         for (const [uid, state] of lobby.players.entries()) {
-            const u = await interaction.client.users.fetch(uid).catch(() => ({ username: uid }));
+            const u = await interaction.client.users.fetch(uid).catch(() => null) ?? { username: uid };
             if (state.cashedOutAt) {
                 const auto = state.autoTriggered ? ' *(auto)*' : '';
                 lines.push(`✅ **${u.username}** cashed at **${multLabel(state.cashedOutAt)}**${auto}`);
+            } else if (state.cashFailed) {
+                lines.push(`⏳ **${u.username}** cashed at **${multLabel(state.cashFailedAt)}** — payout pending`);
             } else {
                 const acHint = state.autoCashout ? ` *(auto @ ${multLabel(state.autoCashout)})*` : '';
                 lines.push(`🎮 **${u.username}** — still in${acHint}`);
@@ -446,27 +458,77 @@ async function startCrashGame(interaction, lobby, lobbyId) {
         return lines;
     }
 
-    // Shared cash-out function used by both manual and auto triggers.
-    // State is only marked cashed-out after the DB write succeeds so the
-    // emergency-refund path still sees an unresolved player on DB failure.
+    /**
+     * Shared cash-out, for both the button and the auto-cash-out trigger.
+     *
+     * The payout and the clearing of `pendingCrashRefund` are one keyed write,
+     * because they are two halves of one fact. `pendingCrashRefund` is the
+     * marker `src/events/ready.js` reconciles on restart: while it is set, the
+     * stake is considered still owed back. Crediting the payout without
+     * clearing it would have the reconciler return the stake *as well as* the
+     * winnings the moment the bot next restarted.
+     *
+     * It is decremented by the stake rather than set to zero. A player sitting
+     * in two channels' lobbies has both stakes counted in the one field, and
+     * zeroing it for one hand discarded the other hand's marker — losing that
+     * stake if the second lobby then errored.
+     *
+     * On failure the state is deliberately left unresolved (`cashedOutAt` stays
+     * null) so the tick-error path still sees a player to refund. What the
+     * state must *also* record is that this was a failure rather than a player
+     * still riding the multiplier, which `cashFailed` does: the crash
+     * resolution below clears the marker for everyone who did not cash out, and
+     * without the distinction it cleared it for these players too — destroying
+     * the one record that could have paid them, on top of the payout that had
+     * already been lost.
+     *
+     * @returns {Promise<'paid'|'owed'|'lost'|'already'>}
+     */
     async function cashOutPlayer(uid, mult, autoTriggered = false) {
         const state = lobby.players.get(uid);
-        if (!state || state.cashedOutAt !== null) return false;
+        if (!state || state.cashedOutAt !== null || state.cashFailed) return 'already';
 
-        const payout    = Math.floor(bet * mult);
-        const credited  = await User.findOneAndUpdate(
+        const payout = Math.floor(bet * mult);
+        const { status } = await creditCoinsOnce(
             { userId: uid, guildId },
-            { $inc: { balance: payout }, $set: { pendingCrashRefund: 0 } }
-        ).catch(err => { console.error('[crash] cashOut DB write failed:', err); return null; });
+            payout,
+            casinoPayoutKey('crash', lobbyId, `cashout:${uid}`),
+            { extraSet: counterSetExpr({ pendingCrashRefund: -bet }) },
+        ).catch(err => {
+            console.error('[crash] cashOut DB write failed:', err);
+            return { status: 'unknown' };
+        });
 
-        if (!credited) return false;
+        if (status !== 'paid' && status !== 'duplicate') {
+            // The multiplier and the outcome are recorded beside the flag: this
+            // player *did* cash out, and both the live lines and the final embed
+            // read `cashedOutAt` to decide what to say. Left null with nothing
+            // beside it, the round reported them as still in and then as never
+            // having cashed out — contradicting the reply they had just been
+            // given, and telling the channel they lost a hand they had won.
+            state.cashFailed   = true;
+            state.cashFailedAt = mult;
+            // The stake is still covered by the untouched `pendingCrashRefund`,
+            // so what is owed here is the winnings on top of it and not the
+            // whole payout — recording the payout would pay the stake twice
+            // once the reconciler returns it. At a 1.00x cash-out the net is
+            // zero and this is a no-op, which is correct: the marker alone
+            // makes the player whole.
+            const { owed } = await creditCoinsOrOwe({ userId: uid, guildId }, payout - bet, {
+                payoutKey: casinoPayoutKey('crash', lobbyId, `cashout-net:${uid}`),
+                service:   'casino',
+                jobName:   'crash:cashout',
+            });
+            state.cashOutcome = owed ? 'owed' : 'lost';
+            return state.cashOutcome;
+        }
 
         state.cashedOutAt   = mult;
         state.autoTriggered = autoTriggered;
 
         // Update weekly leaderboard stats (store username to avoid N+1 fetches in leaderboard)
         await updateCrashStats(uid, guildId, mult, state.username);
-        return true;
+        return 'paid';
     }
 
     await interaction.editReply({
@@ -498,12 +560,26 @@ async function startCrashGame(interaction, lobby, lobbyId) {
             return i.reply({ content: "You've already cashed out.", flags: MessageFlags.Ephemeral });
         }
 
-        const cashed = await cashOutPlayer(i.user.id, currentMult, false);
-        if (!cashed) {
+        const outcome = await cashOutPlayer(i.user.id, currentMult, false);
+        if (outcome === 'already') {
             return i.reply({ content: "You've already cashed out.", flags: MessageFlags.Ephemeral });
         }
 
         const payout = Math.floor(bet * currentMult);
+        // A failed cash-out used to answer "You've already cashed out" as well,
+        // which is the one case where that sentence costs the player money: they
+        // read it as being safely out, stopped watching, and lost the hand at
+        // the crash. Their stake is covered by the untouched marker either way,
+        // so the wording only has to be honest about the winnings.
+        if (outcome !== 'paid') {
+            return i.reply({
+                content: outcome === 'owed'
+                    ? `⚠️ Cashed out at **${multLabel(currentMult)}**, but the payout could not be credited right now. It has been recorded and will be paid automatically.`
+                    : `⚠️ Cashed out at **${multLabel(currentMult)}**, but the payout could not be credited or recorded. Please contact a server admin.`,
+                flags: MessageFlags.Ephemeral,
+            }).catch(() => {});
+        }
+
         await i.reply({
             content: `✅ Cashed out at **${multLabel(currentMult)}** — **+${(payout - bet).toLocaleString()} coins**!`,
             flags: MessageFlags.Ephemeral,
@@ -532,13 +608,22 @@ async function startCrashGame(interaction, lobby, lobbyId) {
             clearInterval(lobby.interval);
             collector.stop('crashed');
 
+            // `cashFailed` is excluded on purpose. Those players did cash out —
+            // only the write did not land — and their `pendingCrashRefund` is
+            // the record that returns their stake, either through the
+            // tick-error refund or through the reconciler in
+            // src/events/ready.js. Clearing it here, as this once did, threw
+            // away the stake of the one group that had already lost the payout.
             const loserIds = [...lobby.players.entries()]
-                .filter(([, s]) => s.cashedOutAt === null)
+                .filter(([, s]) => s.cashedOutAt === null && !s.cashFailed)
                 .map(([uid]) => uid);
             if (loserIds.length > 0) {
                 User.updateMany(
-                    { userId: { $in: loserIds }, guildId },
-                    { $set: { pendingCrashRefund: 0 } }
+                    { userId: { $in: loserIds }, guildId, pendingCrashRefund: { $gte: bet } },
+                    // Decremented rather than zeroed, for the same reason the
+                    // cash-out decrements it: a player in a second channel's
+                    // lobby has that stake counted in the same field.
+                    { $inc: { pendingCrashRefund: -bet } }
                 ).catch(err => console.error('[crash] failed to clear pendingCrashRefund:', err));
             }
 
@@ -595,15 +680,32 @@ async function startCrashGame(interaction, lobby, lobbyId) {
                 console.error('[crash] tick error, refunding all bets:', tickErr);
                 gameOver = true;
                 clearInterval(lobby.interval);
-                const unresolvedIds = [...lobby.players.entries()]
-                    .filter(([, s]) => s.cashedOutAt === null)
+                // Two groups, and they are refunded differently.
+                //
+                // Players still riding the multiplier never got a result, so
+                // their stake comes back as an unwind: as with the join refund,
+                // a returned stake is an uncounted one and the wager counter
+                // comes back with it.
+                //
+                // Players whose cash-out write failed are not in that position.
+                // Their hand did resolve — they pressed the button and won —
+                // and the stake coming back is one half of a payout whose other
+                // half is already written down as owed. So they keep the
+                // `lifetimeGambled` they earned; taking it back would say the
+                // hand never happened when it is about to be paid out.
+                const byOutcome = (failed) => [...lobby.players.entries()]
+                    .filter(([, s]) => s.cashedOutAt === null && Boolean(s.cashFailed) === failed)
                     .map(([uid]) => uid);
-                if (unresolvedIds.length > 0) {
+
+                const refunds = [
+                    [byOutcome(false), { $inc: { balance: bet, lifetimeGambled: -bet, pendingCrashRefund: -bet } }],
+                    [byOutcome(true),  { $inc: { balance: bet, pendingCrashRefund: -bet } }],
+                ];
+                for (const [ids, update] of refunds) {
+                    if (ids.length === 0) continue;
                     await User.updateMany(
-                        { userId: { $in: unresolvedIds }, guildId, pendingCrashRefund: { $gt: 0 } },
-                        // As with the join refund: a returned stake is an
-                        // uncounted one, so the wager counter comes back too.
-                        { $inc: { balance: bet, lifetimeGambled: -bet }, $set: { pendingCrashRefund: 0 } }
+                        { userId: { $in: ids }, guildId, pendingCrashRefund: { $gte: bet } },
+                        update,
                     ).catch(e => console.error('[crash] emergency refund failed:', e));
                 }
                 deleteLobby(channelId);

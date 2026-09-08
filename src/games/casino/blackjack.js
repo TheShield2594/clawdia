@@ -31,6 +31,7 @@ const {
     insuranceCost: halfBet,
 } = require('./settlement');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -211,14 +212,13 @@ module.exports = {
         if (!shouldProceed) { releaseLock?.(); return; }
         const sendInitial = (payload) => alreadyReplied ? interaction.editReply(payload) : interaction.reply(payload);
 
+        const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+        const handId     = newHandId();
+
         // The opening wager, and the only debit of this hand that reports one:
         // insurance, a split and a double down below are all further money on
         // the same hand, not another game played.
-        const debited = await placeWager(
-            { userId: interaction.user.id, guildId: interaction.guild.id },
-            bet,
-            { onWager },
-        );
+        const debited = await placeWager(userFilter, bet, { onWager });
         if (!debited) {
             releaseLock?.();
             return interaction.reply({ content: `❌ Not enough ${currency}! Your balance may have changed.`, flags: MessageFlags.Ephemeral });
@@ -233,35 +233,30 @@ module.exports = {
         // Natural blackjack check
         if (handTotal(playerHand) === 21) {
             if (handTotal(dealerHand) === 21) {
-                const pushUser = await User.findOneAndUpdate(
-                    { userId: interaction.user.id, guildId: interaction.guild.id },
-                    { $inc: { balance: bet } },
-                    { new: true },
-                );
+                const push = await payHand(userFilter, bet,
+                    { game: 'blackjack', handId, phase: 'natural-push' });
                 const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, bet,
-                    '🃏 Blackjack — Push', 'Both got blackjack. Bet returned.', '#f39c12', pushUser?.balance ?? user.balance);
+                    '🃏 Blackjack — Push', `Both got blackjack. Bet returned.${payoutNote(push)}`, '#f39c12',
+                    await settledBalance(userFilter, push.balance));
                 releaseLock?.();
                 return sendInitial({ embeds: [embed], components: buildButtons(gameId, true) });
             }
             const bjCoinMult   = getCoinMultiplier(user);
             const bjServerMult = getServerCoinMultiplier(guildSettings);
             const payout = naturalBlackjackProfit(bet, bjCoinMult * bjServerMult);
-            const bjWinUser = await User.findOneAndUpdate(
-                { userId: interaction.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: bet + payout } },
-                { new: true },
-            );
+            const bjWin = await payHand(userFilter, bet + payout,
+                { game: 'blackjack', handId, phase: 'natural' });
             const boostNote = (bjCoinMult * bjServerMult) > 1.0 ? ` *(🚀 ${(bjCoinMult * bjServerMult).toFixed(1)}x)*` : '';
             const embed = new EmbedBuilder()
                 .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
                 .setThumbnail(THUMB)
                 .setColor(COLORS.PRIZE)
                 .setTitle('🃏 Blackjack — Natural 21')
-                .setDescription(`> Perfect hand. Pays 3:2.`)
+                .setDescription(`> Perfect hand. Pays 3:2.${payoutNote(bjWin)}`)
                 .addFields(
                     { name: 'Your Hand', value: `${displayHand(playerHand)} ━━ Blackjack`, inline: false },
                     { name: `💰 Payout`, value: `${currency}${(bet + payout).toLocaleString()}  (+${currency}${payout.toLocaleString()} net)${boostNote}`, inline: false },
-                    { name: 'Balance', value: `${currency}${(bjWinUser?.balance ?? user.balance).toLocaleString()}`, inline: false },
+                    { name: 'Balance', value: `${currency}${(await settledBalance(userFilter, bjWin.balance)).toLocaleString()}`, inline: false },
                 )
                 .setFooter({ text: 'Blackjack pays 3:2 · Dealer stands on 17' })
                 .setTimestamp();
@@ -317,10 +312,8 @@ module.exports = {
                 peekStatus += `\n🛡️ Insurance paid! +${currency}${insuranceProfit(peekInsuranceBet).toLocaleString()}`;
             }
             if (peekCredit > 0) {
-                await User.updateOne(
-                    { userId: interaction.user.id, guildId: interaction.guild.id },
-                    { $inc: { balance: peekCredit } },
-                );
+                peekStatus += payoutNote(await payHand(userFilter, peekCredit,
+                    { game: 'blackjack', handId, phase: 'peek-insurance' }));
             }
             const peekEmbed = buildEmbed(interaction, playerHand, dealerHand, bet, currency, peekStatus, '#e74c3c', false);
             releaseLock?.();
@@ -519,15 +512,12 @@ module.exports = {
         collector.on('end', async (_, reason) => {
             if (reason === 'bust') {
                 if (insuranceBet > 0 && isNaturalBlackjack(dealerHand.slice(0, 2))) {
-                    await User.updateOne(
-                        { userId: interaction.user.id, guildId: interaction.guild.id },
-                        { $inc: { balance: insuranceCredit(insuranceBet) } },
-                    );
-                    const insUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+                    const ins = await payHand(userFilter, insuranceCredit(insuranceBet),
+                        { game: 'blackjack', handId, phase: 'bust-insurance' });
                     const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, activeBet,
                         '🃏 Blackjack — Bust',
-                        `Went over. The house collects.\n🛡️ Insurance paid! +${currency}${insuranceProfit(insuranceBet).toLocaleString()}`,
-                        '#e74c3c', insUser?.balance ?? 0);
+                        `Went over. The house collects.\n🛡️ Insurance paid! +${currency}${insuranceProfit(insuranceBet).toLocaleString()}${payoutNote(ins)}`,
+                        '#e74c3c', await settledBalance(userFilter, ins.balance));
                     await interaction.editReply({ embeds: [embed], components: buildButtons(gameId, true) }).catch(() => {});
                 }
                 releaseLock?.();
@@ -638,12 +628,16 @@ module.exports = {
                 }
             }
 
-            await User.updateOne(
-                { userId: interaction.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: totalCredit } },
-            );
+            // This sits in a collector's `end` handler, which has no `try` around
+            // it: a rejection here used to become an unhandled rejection that
+            // took the final embed and the lock release with it, leaving the
+            // hand frozen mid-reveal with the stake gone. `payHand` does not
+            // reject — it records instead — so the reveal always completes.
+            const settled = await payHand(userFilter, totalCredit,
+                { game: 'blackjack', handId, phase: 'settle' });
+            description += payoutNote(settled);
 
-            const finalUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+            const finalBalance = await settledBalance(userFilter, settled.balance);
 
             if (splitActive) {
                 const splitState = { splitHands, splitBets, currentSplitHand: -1, splitHandDone: [true, true] };
@@ -652,7 +646,7 @@ module.exports = {
                 await interaction.editReply({ embeds: [embed], components: buildButtons(gameId, true) }).catch(() => {});
             } else {
                 const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, activeBet,
-                    title, description, color, finalUser?.balance ?? 0);
+                    title, description, color, finalBalance);
                 await interaction.editReply({ embeds: [embed], components: buildButtons(gameId, true) }).catch(() => {});
             }
 

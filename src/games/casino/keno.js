@@ -21,6 +21,7 @@ const {
     nearMissCount,
 } = require('./kenoPaytable');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b1.png';
 const MIN_BET = 10;
@@ -73,6 +74,7 @@ function phaseTitle(hits, _total) {
 // rerolls don't need it re-held since they re-debit atomically like any
 // fresh bet.
 async function playKeno(interaction, bet, picked, alreadyDebited = false, releaseLock, onWager) {
+    const handId = newHandId();
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -216,14 +218,9 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
         }
 
         const credit = adjustedPayout;
-        let updated = debited;
-        if (credit > 0) {
-            updated = await User.findOneAndUpdate(
-                userFilter,
-                { $inc: { balance: credit } },
-                { new: true }
-            );
-        }
+        const paid   = await payHand(userFilter, credit,
+            { game: 'keno', handId, phase: 'settle' });
+        const balanceAfter = await settledBalance(userFilter, paid.balance);
         settled = true;
         releaseLock?.();
 
@@ -318,7 +315,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
                 { name: '🎯 Your Picks', value: pickedStr,                                                 inline: false },
                 { name: '🗺️ Board',      value: formatKenoGrid(picked, drawn),                             inline: false },
                 { name: '✅ Matches',    value: `${hitBar(matches)}  **${matches} / ${PICK_COUNT}**`,      inline: true  },
-                { name: '💰 Balance',    value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`,   inline: true  },
+                { name: '💰 Balance',    value: `**${balanceAfter.toLocaleString()}** coins${payoutNote(paid)}`,   inline: true  },
             )
             .setFooter({ text: PAYTABLE_FOOTER })
             .setTimestamp();
@@ -334,7 +331,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
         const replayId  = `keno_replay_${interaction.id}_${Date.now()}`;
         const rerollId  = `keno_reroll_${interaction.id}_${Date.now()}`;
         const rerollCost = Math.ceil(bet / 2);
-        const canReroll  = nearMisses >= 3 && matches <= 1 && (updated?.balance ?? 0) >= rerollCost;
+        const canReroll  = nearMisses >= 3 && matches <= 1 && balanceAfter >= rerollCost;
 
         const buttons = [
             new ButtonBuilder().setCustomId(replayId).setLabel('🎱 Play Again').setStyle(ButtonStyle.Primary),
@@ -379,11 +376,16 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
     } catch (err) {
         console.error('[Keno] error:', err);
         releaseLock?.();
-        if (debited && !settled) {
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } })
-                .catch(e => console.error('[Keno] rollback failed:', e));
-        }
-        await interaction.editReply({ content: 'Something went wrong. Your wager was refunded.', components: [] }).catch(() => {});
+        const rolled = debited && !settled
+            ? await payHand(userFilter, bet, { game: 'keno', handId, phase: 'rollback' })
+            : null;
+        const outcome = !debited ? 'No wager was taken.'
+            : settled ? 'Your hand had already been settled.'
+            : rolled.credited ? 'Your wager was refunded.' : 'Your wager could not be refunded.';
+        await interaction.editReply({
+            content: `Something went wrong. ${outcome}${rolled ? payoutNote(rolled) : ''}`,
+            components: [],
+        }).catch(() => {});
     }
 }
 

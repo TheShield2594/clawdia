@@ -400,6 +400,31 @@ function jackpotPayoutKey(guildId, claimId) {
 }
 
 /**
+ * One settlement of one casino hand (#873).
+ *
+ * A hand is not one payment. Blackjack alone can credit a natural, a peeked
+ * insurance side bet, two split halves and a doubled bet; a Monte run pays on
+ * whichever round the player takes the money; higher-or-lower pays a cash-out
+ * that may arrive from the button or from the collector timing out. Each of
+ * those is a separate credit that has to be replayable on its own, so the phase
+ * is in the key.
+ *
+ * `handId` is the opening interaction's id, which is the one identifier that
+ * survives the whole hand: the collectors that settle it fire minutes later on
+ * their own callbacks, and `Date.now()` read at settlement time would give the
+ * retry inside `creditCoinsOrOwe` a different key from the attempt it is
+ * retrying — which is the one thing the key exists to prevent.
+ *
+ * The phase is not the outcome. 'settle' is the same phase whether the hand won,
+ * pushed or was saved by a lucky charm, because those are three amounts for one
+ * payment and only one of them is ever credited. Naming the outcome instead
+ * would let a replay of a push top up a win.
+ */
+function casinoPayoutKey(game, handId, phase) {
+    return `casino:${game}:${handId}:${phase}`;
+}
+
+/**
  * The sender's refund when a coin transfer could not be completed (#868).
  *
  * Keyed by the interaction, which is the one identifier that names *this*
@@ -418,7 +443,7 @@ module.exports = {
     listingCreateRefundPayoutKey,
     marketRefundPayoutKey, transferRefundPayoutKey, giftItemRollbackPayoutKey,
     duelPayoutKey, crewSharePayoutKey,
-    jackpotPayoutKey,
+    jackpotPayoutKey, casinoPayoutKey,
     payoutKeyGuard, payoutKeyAppendExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, isDuplicateKeyError,
     RETENTION_DAYS, RETENTION_MS, KEY_CAP,

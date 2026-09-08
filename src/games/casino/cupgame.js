@@ -18,6 +18,7 @@ const {
     payoutForRound,
 } = require('./cupgameOdds');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0bd.png';
 const MIN_BET = 10;
@@ -42,7 +43,12 @@ function buildReveal(queenPos) {
 // hand) and called once the hand truly settles — final loss/win or a cash-out
 // — but not held through "Play Again", since a replay re-debits atomically
 // just like any fresh bet.
-async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
+// `handId` names one Monte run, not one interaction. The double-or-nothing
+// recursion below is the same run and passes its id down, so the run pays at
+// most once whichever round it ends on; the two "Play Again" buttons start a new
+// run and mint a new one, which is what keeps a replay from being read as a
+// duplicate of the hand it replaced.
+async function playMonte(interaction, bet, round = 1, releaseLock, onWager, handId = newHandId()) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -191,10 +197,11 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
         } catch {
             settled = true;
             const timeoutRefund = round > 1 ? payoutForRound(bet, round - 1) : bet;
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: timeoutRefund } });
-            const timeoutMsg = round > 1
+            const lapsed = await payHand(userFilter, timeoutRefund,
+                { game: 'monte', handId, phase: 'timeout' });
+            const timeoutMsg = (round > 1
                 ? `⏱️ Time's up! Paid out **${timeoutRefund.toLocaleString()}** coins (your Round ${round - 1} winnings).`
-                : '⏱️ Time\'s up! Your bet was refunded.';
+                : "⏱️ Time's up! Your bet was refunded.") + payoutNote(lapsed);
             releaseLock?.();
             return interaction.editReply({ content: timeoutMsg, embeds: [], components: [] }).catch(() => {});
         }
@@ -231,10 +238,8 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
 
         if (!won || round >= MAX_ROUNDS || charmTriggered || streakTriggered) {
             // Final result — pay out and show Play Again
-            let updated = userDoc;
-            if (adjustedPayout > 0) {
-                updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: adjustedPayout } }, { new: true });
-            }
+            const paid = await payHand(userFilter, adjustedPayout,
+                { game: 'monte', handId, phase: 'settle' });
             settled = true;
 
             const net    = adjustedPayout - bet;
@@ -269,12 +274,12 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
                     .setThumbnail(THUMB)
                     .setColor(color)
                     .setTitle(title)
-                    .setDescription(desc)
+                    .setDescription(desc + payoutNote(paid))
                     .addFields(
                         { name: '💰 Bet',     value: `**${bet.toLocaleString()}** coins`,                                                   inline: true },
                         { name: adjustedPayout > 0 ? '🏆 Payout' : '💀 Lost', value: `${(adjustedPayout > 0 ? adjustedPayout : bet).toLocaleString()} coins`, inline: true },
                         { name: '📊 Net',     value: `**${netStr}** coins`,                                                                 inline: true },
-                        { name: '💰 Balance', value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`,                               inline: true },
+                        { name: '💰 Balance', value: `**${(await settledBalance(userFilter, paid.balance)).toLocaleString()}** coins`,      inline: true },
                     )
                     .setFooter({ text: `Round ${round}/${MAX_ROUNDS} · ${steps} shuffles · Queen odds 1-in-3` })
                     .setTimestamp()],
@@ -328,7 +333,15 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
             });
 
             const decisionMsg = await interaction.fetchReply();
+            // The take is the same amount however it is reached — pressed,
+            // timed out, or recovered in the catch below — so it is computed
+            // once, above all three.
+            const adjustedTake = totalCoinMult > 1.0
+                ? bet + Math.round((currentPayout - bet) * totalCoinMult)
+                : currentPayout;
             let decided = false;
+            let tookMoney = false;
+            let took = { credited: true, owed: false, balance: null };
             try {
                 const decision = await decisionMsg.awaitMessageComponent({
                     filter: ownedBy(interaction.user.id, i => [takeId, doubleId].includes(i.customId), "This isn't your game."),
@@ -338,12 +351,9 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
                 await decision.deferUpdate();
 
                 if (decision.customId === takeId) {
-                    // Cash out with current round payout
-                    let adjustedTake = currentPayout;
-                    if (totalCoinMult > 1.0) {
-                        adjustedTake = bet + Math.round((currentPayout - bet) * totalCoinMult);
-                    }
-                    const updated  = await User.findOneAndUpdate(userFilter, { $inc: { balance: adjustedTake } }, { new: true });
+                    tookMoney      = true;
+                    took           = await payHand(userFilter, adjustedTake,
+                        { game: 'monte', handId, phase: 'take' });
                     const net      = adjustedTake - bet;
                     const netStr   = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
                     const replayId = `monte_replay_${interaction.id}_${Date.now()}`;
@@ -354,12 +364,12 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
                             .setThumbnail(THUMB)
                             .setColor(COLORS.SUCCESS)
                             .setTitle('🃏 Cashed Out!')
-                            .setDescription(`> ${reveal.join('   ')}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\n💰 You took the money after Round ${round}!`)
+                            .setDescription(`> ${reveal.join('   ')}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\n💰 You took the money after Round ${round}!${payoutNote(took)}`)
                             .addFields(
                                 { name: '💰 Bet',     value: `**${bet.toLocaleString()}** coins`,              inline: true },
                                 { name: '🏆 Payout',  value: `**${adjustedTake.toLocaleString()}** coins`,     inline: true },
                                 { name: '📊 Net',     value: `**${netStr}** coins`,                           inline: true },
-                                { name: '💰 Balance', value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true },
+                                { name: '💰 Balance', value: `**${(await settledBalance(userFilter, took.balance)).toLocaleString()}** coins`, inline: true },
                             )
                             .setTimestamp()],
                         components: [new ActionRowBuilder().addComponents(
@@ -381,19 +391,32 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
 
                 } else {
                     // Double or Nothing — recurse with next round (no payout yet)
-                    await playMonte(interaction, bet, round + 1, releaseLock, onWager);
+                    await playMonte(interaction, bet, round + 1, releaseLock, onWager, handId);
                 }
 
-            } catch {
-                if (!decided) {
-                    // Timeout — auto cash out
-                    let adjustedTake = currentPayout;
-                    if (totalCoinMult > 1.0) {
-                        adjustedTake = bet + Math.round((currentPayout - bet) * totalCoinMult);
-                    }
-                    const updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: adjustedTake } }, { new: true });
+            } catch (decisionErr) {
+                // Three ways in, and they are not the same.
+                //
+                // Nothing decided: the 30 seconds lapsed, which is an auto
+                // cash-out at the round already won.
+                //
+                // Decided on the take, then something threw — `deferUpdate`,
+                // the payout, the edit that reports it. This branch used to do
+                // nothing at all: `decided` was true, so the timeout arm was
+                // skipped, and `settled` had been set before the decision, so
+                // the outer rollback was skipped too. The player pressed "take
+                // the money" and got neither the money nor a message nor their
+                // lock back. Paying here is safe because it is the same key as
+                // the press: if that credit did land, this one is a no-op.
+                //
+                // Decided on double-or-nothing: `playMonte` owns the hand from
+                // there and does not reject, so there is nothing to settle.
+                if (!decided || tookMoney) {
+                    if (decided) console.error('[Monte] take failed after the button:', decisionErr);
+                    const auto = await payHand(userFilter, adjustedTake,
+                        { game: 'monte', handId, phase: 'take' });
                     await interaction.editReply({
-                        content: `⏱️ Time's up — cashed out **${adjustedTake.toLocaleString()}** coins automatically! Balance: **${(updated?.balance ?? 0).toLocaleString()}**`,
+                        content: `${decided ? '💰' : "⏱️ Time's up —"} cashed out **${adjustedTake.toLocaleString()}** coins! Balance: **${(await settledBalance(userFilter, auto.balance)).toLocaleString()}**${payoutNote(auto)}`,
                         embeds: [], components: [],
                     }).catch(() => {});
                     releaseLock?.();
@@ -403,12 +426,24 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
 
     } catch (err) {
         console.error('[Monte] error:', err);
+        // Three different things can be true here and they used to share one
+        // sentence. A settled hand has already paid what it owed and no rollback
+        // is issued, so saying "your wager was refunded" named a payment that
+        // did not happen; and an unsettled hand whose rollback did not land has
+        // not been refunded either.
+        let rolled = null;
         if (!settled) {
             const rollbackAmount = round > 1 ? payoutForRound(bet, round - 1) : bet;
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: rollbackAmount } })
-                .catch(e => console.error('[Monte] rollback failed:', e));
+            rolled = await payHand(userFilter, rollbackAmount,
+                { game: 'monte', handId, phase: 'rollback' });
         }
-        await interaction.editReply({ content: 'Something went wrong. Your wager was refunded.', components: [] }).catch(() => {});
+        const outcome = rolled === null
+            ? 'Your hand had already been settled.'
+            : rolled.credited ? 'Your wager was refunded.' : 'Your wager could not be refunded.';
+        await interaction.editReply({
+            content: `Something went wrong. ${outcome}${rolled ? payoutNote(rolled) : ''}`,
+            components: [],
+        }).catch(() => {});
         releaseLock?.();
     }
 }

@@ -48,6 +48,7 @@ const DEFAULTS = {
  * @param {string} [opts.subcommand]  what getSubcommand() returns
  * @param {object} [opts.user]        overrides for interaction.user
  * @param {Array}  [opts.components]  button presses to hand back, in order; each
+ *                 may carry `updateRejects: true` to make its own `update` fail
  *                                    is `{ customId, user? }` and becomes a
  *                                    component interaction. Once the queue is
  *                                    empty the window closes, as it does live.
@@ -59,6 +60,7 @@ function makeInteraction({
     subcommand = null,
     user: userOverrides = {},
     components = [],
+    holdCollectors = false,
     channels = new Map(),
     guildId = DEFAULTS.guildId,
     userId = DEFAULTS.userId,
@@ -76,7 +78,11 @@ function makeInteraction({
         customId: press.customId,
         user: { id: press.user ?? userId },
         deferUpdate: jest.fn().mockResolvedValue(undefined),
-        update: jest.fn(record),
+        // `updateRejects` makes this press's render fail, which is how a test
+        // reaches the catch that runs *after* a hand has already been settled.
+        update: press.updateRejects
+            ? jest.fn(() => Promise.reject(new Error('update failed')))
+            : jest.fn(record),
         reply: jest.fn(record),
         editReply: jest.fn(record),
         followUp: jest.fn(record),
@@ -109,21 +115,33 @@ function makeInteraction({
             };
             const collector = {
                 on(event, fn) { (handlers[event] ??= []).push(fn); return this; },
-                stop: () => end('stopped'),
+                stop: reason => end(reason ?? 'stopped'),
+                end,
             };
             collectors.push(collector);
             // Deliver once the command has finished wiring its handlers on,
             // which is the tick after it asked for the collector.
             setTimeout(() => {
-                while (pending.length && !ended) {
-                    const press = componentInteraction(pending.shift());
-                    // A rejected press is dropped and the next one tried, the
-                    // way a real collector goes on listening.
-                    if (!accepts(opts.filter, press)) continue;
+                // A press this collector's filter turns away is left in the
+                // queue rather than discarded: a message can carry more than
+                // one collector — crash opens a lobby collector and then a
+                // cash-out collector on the same message — and in Discord the
+                // press goes to whichever one accepts it, not to whichever was
+                // created first.
+                for (let i = 0; i < pending.length && !ended;) {
+                    const press = componentInteraction(pending[i]);
+                    if (!accepts(opts.filter, press)) { i++; continue; }
+                    pending.splice(i, 1);
                     collected.set(`${collected.size}`, press);
                     (handlers.collect ?? []).forEach(fn => fn(press));
                 }
-                end('time');
+                // A collector that ends the moment its queue empties is right
+                // for a command that settles in one press, and wrong for one
+                // whose collector is meant to outlive a running game: crash
+                // stops its own ticking on `end`, so the round died before its
+                // first tick. `holdCollectors` leaves them open, and the test
+                // ends them through `endCollectors` when it wants to.
+                if (!holdCollectors) end('time');
             }, 0);
             return collector;
         },
@@ -206,6 +224,8 @@ function makeInteraction({
         // The message every reply resolves to, for a test that wants to reach it
         // without going through a return value.
         message,
+        /** Closes every collector opened so far — the counterpart to `holdCollectors`. */
+        endCollectors: (reason = 'time') => collectors.forEach(c => c.end(reason)),
     };
 
     return interaction;

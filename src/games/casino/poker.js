@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const { placeWager } = require('../../utils/placeWager');
+const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
@@ -102,8 +103,14 @@ function embedAuthor(interaction) {
 // a brand-new hand with its own atomic debit, so it isn't passed releaseLock.
 async function playPoker(interaction, bet, releaseLock, onWager) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+    const handId = newHandId();
     let debited = null;
     let settled = false;
+    // Hoisted out of the `try` so the rollback at the bottom can see it. Every
+    // raise the player makes goes through `placeWager` and adds to this, and
+    // the rollback refunded a flat `bet` — so a hand that errored after two
+    // raises returned the opening bet and quietly kept the rest.
+    let playerStake = bet;
 
     try {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
@@ -127,7 +134,6 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
 
         // Dealer antes the same as the player — pot starts at 2× bet
         let pot         = bet * 2; // player ante + dealer ante (simulated house money)
-        let playerStake = bet;
         let folded      = false;
 
         const dealerCategory = preFlopCategory(dealerHole);
@@ -146,7 +152,8 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             // that ended before it started.
             const winAmount  = pokerFoldWinPayout(bet, totalMult);
 
-            const updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: winAmount } }, { new: true });
+            const foldWin = await payHand(userFilter, winAmount,
+                { game: 'poker', handId, phase: 'fold-win' });
             releaseLock?.();
 
             return interaction.editReply({
@@ -163,7 +170,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
                         { name: '🃏 Dealer Hand',  value: handStr(dealerHole),                          inline: true },
                         { name: '🏆 Payout',       value: `**${winAmount.toLocaleString()}** coins`,    inline: true },
                         { name: '📊 Net',          value: `**+${(winAmount - bet).toLocaleString()}** coins`, inline: true },
-                        { name: '💰 Balance',      value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true },
+                        { name: '💰 Balance',      value: `**${(await settledBalance(userFilter, foldWin.balance)).toLocaleString()}** coins`, inline: true },
                     )
                     .setFooter({ text: 'Dealer had a weak hand — quick win!' })
                     .setTimestamp()],
@@ -222,9 +229,10 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             preFlopAction = r.customId.split('_')[1]; // check / raise / call / fold
         } catch {
             settled = true;
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } });
+            const lapsed = await payHand(userFilter, bet,
+                { game: 'poker', handId, phase: 'timeout:preflop' });
             releaseLock?.();
-            return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
+            return interaction.editReply({ content: `⏱️ Time's up! Bet refunded.${payoutNote(lapsed)}`, embeds: [], components: [] }).catch(() => {});
         }
 
         if (preFlopAction === 'fold') {
@@ -281,7 +289,8 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             const totalMult  = coinMult * serverMult;
             const winPayout  = pokerPotPayout(playerStake, pot, totalMult);
 
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
+            const potWin = await payHand(userFilter, winPayout,
+                { game: 'poker', handId, phase: 'pot-win:flop' });
             releaseLock?.();
 
             return interaction.editReply({
@@ -298,7 +307,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
                     .addFields(
                         { name: '🃏 Your Hand',  value: handStr(playerHole),          inline: true },
                         { name: '🏆 Payout',     value: `**${winPayout.toLocaleString()}** coins`, inline: true },
-                        { name: '📊 Net',        value: `**+${(winPayout - playerStake).toLocaleString()}** coins`, inline: true },
+                        { name: '📊 Net',        value: `**+${(winPayout - playerStake).toLocaleString()}** coins${payoutNote(potWin)}`, inline: true },
                     )
                     .setFooter({ text: 'Dealer\'s pot odds didn\'t justify calling' })
                     .setTimestamp()],
@@ -348,9 +357,10 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             flopAction = r.customId.split('_')[1];
         } catch {
             settled = true;
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
+            const lapsedStreet = await payHand(userFilter, playerStake,
+                { game: 'poker', handId, phase: 'timeout:flop' });
             releaseLock?.();
-            return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
+            return interaction.editReply({ content: `⏱️ Time's up! Bet refunded.${payoutNote(lapsedStreet)}`, embeds: [], components: [] }).catch(() => {});
         }
 
         if (flopAction === 'fold') {
@@ -408,7 +418,8 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             const serverMult = getServerCoinMultiplier(guildSettings);
             const totalMult  = coinMult * serverMult;
             const winPayout  = pokerPotPayout(playerStake, pot, totalMult);
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
+            const potWin = await payHand(userFilter, winPayout,
+                { game: 'poker', handId, phase: 'pot-win:turn' });
             releaseLock?.();
             return interaction.editReply({
                 embeds: [new EmbedBuilder()
@@ -420,7 +431,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
                     .addFields(
                         { name: '🃏 Your Hand',  value: handStr(playerHole),           inline: true },
                         { name: '🏆 Payout',     value: `**${winPayout.toLocaleString()}** coins`, inline: true },
-                        { name: '📊 Net',        value: `**+${(winPayout - playerStake).toLocaleString()}** coins`, inline: true },
+                        { name: '📊 Net',        value: `**+${(winPayout - playerStake).toLocaleString()}** coins${payoutNote(potWin)}`, inline: true },
                     )
                     .setFooter({ text: "Dealer's pot odds didn't justify calling the turn" })
                     .setTimestamp()],
@@ -470,9 +481,10 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             turnAction = r.customId.split('_')[1];
         } catch {
             settled = true;
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
+            const lapsedStreet = await payHand(userFilter, playerStake,
+                { game: 'poker', handId, phase: 'timeout:turn' });
             releaseLock?.();
-            return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
+            return interaction.editReply({ content: `⏱️ Time's up! Bet refunded.${payoutNote(lapsedStreet)}`, embeds: [], components: [] }).catch(() => {});
         }
 
         if (turnAction === 'fold') {
@@ -528,7 +540,8 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             const serverMult = getServerCoinMultiplier(guildSettings);
             const totalMult  = coinMult * serverMult;
             const winPayout  = pokerPotPayout(playerStake, pot, totalMult);
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
+            const potWin = await payHand(userFilter, winPayout,
+                { game: 'poker', handId, phase: 'pot-win:river' });
             releaseLock?.();
             return interaction.editReply({
                 embeds: [new EmbedBuilder()
@@ -540,7 +553,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
                     .addFields(
                         { name: '🃏 Your Hand',  value: handStr(playerHole),           inline: true },
                         { name: '🏆 Payout',     value: `**${winPayout.toLocaleString()}** coins`, inline: true },
-                        { name: '📊 Net',        value: `**+${(winPayout - playerStake).toLocaleString()}** coins`, inline: true },
+                        { name: '📊 Net',        value: `**+${(winPayout - playerStake).toLocaleString()}** coins${payoutNote(potWin)}`, inline: true },
                     )
                     .setFooter({ text: "Dealer missed the river — their loss, your gain" })
                     .setTimestamp()],
@@ -590,9 +603,10 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             riverAction = r.customId.split('_')[1];
         } catch {
             settled = true;
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
+            const lapsedStreet = await payHand(userFilter, playerStake,
+                { game: 'poker', handId, phase: 'timeout:river' });
             releaseLock?.();
-            return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
+            return interaction.editReply({ content: `⏱️ Time's up! Bet refunded.${payoutNote(lapsedStreet)}`, embeds: [], components: [] }).catch(() => {});
         }
 
         if (riverAction === 'fold') {
@@ -649,10 +663,8 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
 
         const adjustedPayout = pokerShowdownPayout(outcome, playerStake, totalCoinMult);
 
-        let updated = debited;
-        if (adjustedPayout > 0) {
-            updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: adjustedPayout } }, { new: true });
-        }
+        const showdown = await payHand(userFilter, adjustedPayout,
+            { game: 'poker', handId, phase: 'showdown' });
         settled = true;
         releaseLock?.();
 
@@ -684,7 +696,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
                     { name: '💰 Pot',                value: `**${pot.toLocaleString()}** coins`, inline: true },
                     { name: adjustedPayout > 0 ? '🏆 Payout' : '💀 Lost', value: adjustedPayout > 0 ? `${adjustedPayout.toLocaleString()} coins` : `${playerStake.toLocaleString()} coins`, inline: true },
                     { name: '📊 Net',                value: `**${netStr}** coins`,   inline: true },
-                    { name: '💰 Balance',            value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true },
+                    { name: '💰 Balance',            value: `**${(await settledBalance(userFilter, showdown.balance)).toLocaleString()}** coins`, inline: true },
                 )
                 .setFooter({ text: 'Texas Hold\'em · Best 5 of 7 · Dealer AI uses pre-flop ranges + pot odds' })
                 .setTimestamp()],
@@ -708,11 +720,16 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
     } catch (err) {
         console.error('[Poker] error:', err);
         releaseLock?.();
-        if (debited && !settled) {
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } })
-                .catch(e => console.error('[Poker] rollback failed:', e));
-        }
-        await interaction.editReply({ content: 'Something went wrong. Your wager was refunded.', components: [] }).catch(() => {});
+        const refunded = debited && !settled
+            ? await payHand(userFilter, playerStake, { game: 'poker', handId, phase: 'rollback' })
+            : null;
+        const outcome = !debited ? 'No wager was taken.'
+            : settled ? 'Your hand had already been settled.'
+            : refunded.credited ? 'Your wager was refunded.' : 'Your wager could not be refunded.';
+        await interaction.editReply({
+            content: `Something went wrong. ${outcome}${refunded ? payoutNote(refunded) : ''}`,
+            components: [],
+        }).catch(() => {});
     }
 }
 

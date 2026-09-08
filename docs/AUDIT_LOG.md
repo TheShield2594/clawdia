@@ -692,6 +692,94 @@ one refunded twice is a cap that does not hold.
 
 ---
 
+## Economy — Casino Hand Payouts
+
+**Status: Audited — all findings resolved** ✓
+
+The fourth pass of the economy audit #873 asks for, over the item its checklist
+calls *casino payouts*: the coins the eight games under `src/games/casino` credit
+when a hand settles. The progressive jackpot they play for was audited
+separately (above); this is everything else the casino pays.
+
+The forward direction was sound and had been for a while. Every stake goes
+through `utils/placeWager`'s compare-and-set, which is one debit with the balance
+check and the freeze in its filter, and #785's settlement extraction had already
+moved the arithmetic — rounding order, multiplier stacking — into
+`games/casino/settlement.js` where it is tested to 100%. What no pass had looked
+at is the write that follows: the `$inc` that puts the winnings in.
+
+`src/utils/economyLock.js` argues that those writes are safe, and for the
+property it is arguing about they are. A `$inc` is atomic, so a hand settling
+alongside a grind command cannot lose a payout to a stale read. But atomic is not
+durable. Every one of the twenty-odd payout sites was an unkeyed `$inc` with no
+retry, no record and — at several sites — no `catch`; the stake had left the
+wallet minutes earlier when the hand opened. A write that never landed left
+nothing behind but an embed announcing winnings over a balance that had not
+moved. The jackpot credited from the same spin already went through
+`creditCoinsOrOwe`, so the pot built from other players' stakes was recoverable
+and the hand's own payout beside it was not. That asymmetry is finding 1, and
+findings 2 through 5 are the places it did specific damage.
+
+The rest of the casino — `confirmBet`, the bet guards, the games' own odds and
+their leaderboard writes — is **not** audited by this pass, and neither is the
+rest of the economy. Both are still listed under
+[Not yet reviewed](#not-yet-reviewed).
+
+**Files reviewed/fixed:**
+- `src/games/casino/payout.js` (added)
+- `src/games/casino/crash.js`
+- `src/games/casino/blackjack.js`
+- `src/games/casino/poker.js`
+- `src/games/casino/cupgame.js`
+- `src/games/casino/higherlower.js`
+- `src/games/casino/keno.js`
+- `src/games/casino/roulette.js`
+- `src/games/casino/slots.js`
+- `src/utils/payoutKey.js`
+- `tests/casinoPayoutRecovery.test.js` (added)
+- `tests/casinoJackpotSinglePool.test.js`
+- `tests/helpers/fakeInteraction.js` — collectors can be held open across a
+  running game, a press one collector's filter turns away stays queued for
+  another collector on the same message, and a queued press can be made to fail
+  its own render
+- `tests/coverageRatchet.test.js`
+- `coverage-floors.json`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | Every payout in the casino was an unkeyed `$inc` with nothing reading it back. A write that matched nothing — a removed document, a stepdown, a lost response — resolved exactly as happily as one that moved coins, and the embed printed the winnings and `updated?.balance ?? 0` regardless. The stake was already gone, taken by `placeWager` when the hand opened, so the player was out the bet and the winnings with no trace anywhere. Several sites had no `catch` either; `blackjack`'s final settle sat in a collector's `end` handler, where a rejection became an unhandled rejection that took the result embed *and* the lock release with it, freezing the hand mid-reveal | All of them go through the new `games/casino/payout.js`, which wraps `creditCoinsOrOwe`: keyed, retried, and filed for `npm run payouts:replay` when it will not land. `creditCoinsOrOwe` documents that it never rejects, which is what lets these sit unguarded in a collector callback. Each site reports which of the three happened, and `payoutNote` puts it in the embed that announces the win | all eight games, `payout.js`, `payoutKey.js` |
+| 2 | `/casino crash` cleared `pendingCrashRefund` for every player not marked cashed-out when the round busted. `cashOutPlayer` deliberately leaves a player unmarked when their credit write fails — its own comment says so, "so the emergency-refund path still sees an unresolved player on DB failure" — so the sweep could not tell a player still riding the multiplier from one whose cash-out had just been lost. `pendingCrashRefund` is the marker `src/events/ready.js` reconciles on restart; zeroing it destroyed the one record that could have made those players whole, on top of the payout they had already lost | The failure is recorded on the player's state as `cashFailed` and excluded from the sweep, so the marker survives to be reconciled. The sweep decrements by the stake rather than zeroing, because a player sitting in a second channel's lobby has that stake counted in the same field and zeroing discarded it | `crash.js` |
+| 3 | A crash cash-out whose write failed replied **"You've already cashed out."** — the one sentence that costs the player money. They read it as being safely out at 5×, stopped watching, and lost the hand at the bust. `cashOutPlayer` returned a boolean, so "already cashed out" and "the write did not land" were the same answer | `cashOutPlayer` returns `'paid' \| 'owed' \| 'lost' \| 'already'` and each gets its own wording. The payout is credited and the marker cleared in **one keyed write**, so a credit cannot land with the marker left set — which would have the reconciler return the stake on top of winnings already paid | `crash.js` |
+| 4 | `/casino poker`'s error rollback refunded a flat `bet`. Every raise the player makes goes through `placeWager` and adds to `playerStake`, which the three street timeouts refund correctly — but `playerStake` was declared inside the `try`, so the `catch` could not see it and refunded the opening bet alone. A hand that errored after two raises quietly kept the rest | `playerStake` is hoisted to the function scope and the rollback refunds it, through the keyed helper like every other return | `poker.js` |
+| 5 | `/casino cupgame`'s decision handler did nothing at all when a throw followed the button press. `decided` was set before `deferUpdate`, so the timeout arm was skipped; `settled` had been set before the decision, so the outer rollback was skipped too. A player who pressed "take the money" got neither the money, nor a message, nor their lock back | The catch now settles a decided take as well as an undecided timeout. Paying there is safe *because* the payout is keyed: it is the same key as the press, so a credit that did land makes this one a no-op — the property that turns a "pay again to be sure" into something a money path can do | `cupgame.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 6 | Every game's "Play Again" re-enters its play function with the **original interaction**, so keying the payout on `interaction.id` — the obvious choice — would classify a replay's winnings as a duplicate of the hand it replaced and drop them silently. That is a worse failure than the unkeyed write being replaced, and it would have shipped invisibly: the first hand of a session always pays | `newHandId` mints a UUID per hand and it is threaded through the recursion inside one — Monte's double-or-nothing rounds, higher-or-lower's streak — while a replay calls the play function again and gets a new one. Covered by a test that plays two hands through one interaction and asserts the keys differ | `payout.js`, all eight games |
+| 7 | `/casino slots` never refunded the stake when a spin errored between the wager and the payout: the catch logged, said "An error occurred… Please try again", and kept the coins | A keyed rollback, guarded on the settle not having already happened | `slots.js` |
+| 8 | `/casino roulette` read `updated.balance` off a write that can answer `null`. When it did, the `TypeError` landed in the outer catch — which, with `settled` already true, skipped the refund and told the player their wager had been refunded anyway | The balance comes from `settledBalance`, which reads the document back when the credit returned none rather than falling back to a pre-hand figure that is higher than the truth | `roulette.js` |
+| 9 | `/casino crash` read `.username` off `client.users.fetch`'s result at three sites. The `.catch` there covers a rejected fetch; discord.js can also *resolve* `null` for a user it cannot see, and reading through that threw out of a tick, aborting the round mid-multiplier | `?? { username: uid }` on the resolved value as well as the rejection | `crash.js` |
+| 10 | The rewrite itself introduced four defects, all found reviewing this pass. `cashOutPlayer` returned `true` from its success path while the button handler compared against `'paid'`, so **every successful manual cash-out reported a failure** — the auto-cash-out path the tests drove does not read the return value, which is why the suite missed it. A lucky save in higher-or-lower credited the bet and then rendered it, and a render that threw dropped into the outer catch, which refunded the bet a *second* time under its own key. Slots' new rollback read a `debited` scoped inside the `try`, so an error raised before the wager refunded a stake that had never been taken. And a `cashFailed` crash player — left with `cashedOutAt` null so the tick-error refund could still see them — was rendered as "still in" and then as "didn't cash out", contradicting the reply they had just been given | The return value is `'paid'`; the save records that it settled and the catch reads it; `debited` is hoisted and gates the rollback; the failed cash-out records its multiplier and outcome, and both renderers read them. Each is covered by a test that reproduces the defect | `crash.js`, `higherlower.js`, `slots.js` |
+| 11 | Five rollback messages claimed "your wager was refunded" and then appended a note saying it had not been — one sentence contradicting the next — and said the same thing when no rollback had been attempted at all | Each reports which of the four things happened: no wager was taken, the hand had already been settled, the wager was refunded, or it could not be | `keno.js`, `poker.js`, `roulette.js`, `slots.js`, `cupgame.js` |
+
+#### Informational
+
+| # | Note |
+|---|------|
+| 12 | The zero-amount payout is now a no-op that issues no write. Slots credited `$inc: { balance: 0 }` on a jackpot spin — deliberately, so the pot was not paid twice — and a losing hand did the same. It was one more round trip and one more way for a settled hand to fail; `creditCoinsOrOwe` short-circuits a non-positive amount before it reaches the database. `tests/casinoJackpotSinglePool.test.js` asserted that write's shape and now asserts that no `casino:` credit is issued at all, which is the same property stated better |
+| 13 | The crash join refund is left as a bare `$inc`. It fires immediately, in the same request, when a seat is lost to a lobby that filled — and if it fails, `pendingCrashRefund` is still set, so `ready.js` recovers the stake on the next boot. It is the one unkeyed coin write left under `src/games/casino`, and it already has the record the others lacked |
+| 14 | A leaked `releaseLock` locks a player out of the casino for the primitive's ten-minute lease rather than permanently, so the paths above that failed to release it were a nuisance and not an outage. Left as it is; the lease is the backstop and shortening it belongs with `activeGameLock`, not here |
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -707,9 +795,11 @@ wide, and it is widest exactly where the risk is.
 - `pet` (`petService.js`, `pet.js`)
 - `use` / items / effects (`use.js`, `effectsService.js`, `inventory.js`, `shop.js`)
 - exploration (`exploreService.js`, `explore.js`, `map.js`)
-- casino (`src/games/casino/*`, `casino.js`) — the eight games' own wager and
-  payout writes, `confirmBet`, and the crash lobby's `pendingCrashRefund`
-  escrow. Only the progressive jackpot has been audited
+- casino (`src/games/casino/*`, `casino.js`) — `confirmBet`, the bet guards, the
+  eight games' odds and their leaderboard writes. The progressive jackpot and the
+  hand payout paths (including the crash lobby's `pendingCrashRefund` escrow) have
+  been audited above; the stakes those hands are played for go through
+  `placeWager`, which #785 covered
 - core currency (`balance.js`, `bank.js`, `daily.js`, `work.js`, `jobs.js`, `crime.js`, `rob.js`, `invest.js`) — `market.js` and `gift.js` have had their unwind paths audited above; the rest of both commands has not
 - group and PvP systems (`war.js`, `rivalryService.js`, `tournamentService.js`, and everything in `heistService.js`, `syndicateService.js` and `duel.js` other than the escrow and payout paths audited above)
 - progression (`prestige.js`, `season.js`, `synergyService.js`, `dailychallenge.js`)
@@ -732,5 +822,6 @@ wide, and it is widest exactly where the risk is.
 
 *The nine non-economy subsystems above were last reviewed on 2026-05-28; the
 economy escrow and payout paths on 2026-09-01; the progressive jackpot on
-2026-09-04; the gift and market unwind paths on 2026-09-05. "Not yet reviewed"
-carries no review date, because nothing in it has been reviewed.*
+2026-09-04; the gift and market unwind paths on 2026-09-05; the casino hand
+payouts on 2026-09-08. "Not yet reviewed" carries no review date, because nothing
+in it has been reviewed.*
