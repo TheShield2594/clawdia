@@ -20,6 +20,7 @@ const {
     probabilities,
 } = require('./higherlowerOdds');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -123,7 +124,7 @@ function lossEmbed(interaction, current, next, pickedHigher, bet, newBalance) {
         .setTimestamp();
 }
 
-function cashOutEmbed(interaction, bet, payout, newBalance, streak) {
+function cashOutEmbed(interaction, bet, payout, newBalance, streak, note = '') {
     const mult   = sessionMult(streak);
     const net    = payout - bet;
     const netStr = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
@@ -132,7 +133,7 @@ function cashOutEmbed(interaction, bet, payout, newBalance, streak) {
         .setThumbnail(THUMB)
         .setColor(COLORS.SUCCESS)
         .setTitle(`🃏 Cashed Out! 🔥×${streak}`)
-        .setDescription(`💰 You locked in **${payout.toLocaleString()}** coins at **${mult.toFixed(1)}×**!`)
+        .setDescription(`💰 You locked in **${payout.toLocaleString()}** coins at **${mult.toFixed(1)}×**!${note}`)
         .addFields(
             { name: '💰 Bet',     value: `**${bet.toLocaleString()}** coins`,          inline: true },
             { name: '🏆 Payout',  value: `**${payout.toLocaleString()}** coins`,       inline: true },
@@ -142,13 +143,13 @@ function cashOutEmbed(interaction, bet, payout, newBalance, streak) {
         .setTimestamp();
 }
 
-function timeoutEmbed(interaction, card, bet, newBalance) {
+function timeoutEmbed(interaction, card, bet, newBalance, note = '') {
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
         .setColor(COLORS.NEUTRAL)
         .setTitle('🃏 Higher or Lower — Timed Out')
-        .setDescription(`⏱️ You didn't pick in time. Your bet of **${bet.toLocaleString()}** coins has been refunded.`)
+        .setDescription(`⏱️ You didn't pick in time. Your bet of **${bet.toLocaleString()}** coins has been refunded.${note}`)
         .addFields(
             { name: '🃏 Card Was',  value: cardInline(card),                          inline: true },
             { name: '💰 Balance',   value: `**${newBalance.toLocaleString()}** coins`, inline: true },
@@ -231,7 +232,7 @@ module.exports = {
 // loss/cash-out/timeout) — NOT held through "Play Again", since a replay
 // re-runs the same atomic debit as any fresh bet and can't double-spend even
 // if another casino game starts in parallel once this hand has settled.
-async function playHigherLower(interaction, bet, userFilter, guildSettings, history, streak, releaseLock, onWager) {
+async function playHigherLower(interaction, bet, userFilter, guildSettings, history, streak, releaseLock, onWager, handId = newHandId()) {
     const current = rollCard();
     const canHigh = probabilities(current.value).higher > 0;
     const canLow  = probabilities(current.value).lower  > 0;
@@ -282,7 +283,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                 // Tie: push — refund this round and continue session without changing streak
                 const newHistory = [...history, current];
                 await i.deferUpdate();
-                await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), streak, releaseLock, onWager);
+                await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), streak, releaseLock, onWager, handId);
                 return;
             }
 
@@ -290,7 +291,8 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
 
             // Lucky Charm on loss: return bet silently and end session (low-stakes bets only)
             if (!won && luckySaveEligible(bet) && luckyActive && Math.random() < 0.20) {
-                const updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }, { new: true });
+                const saved = await payHand(userFilter, bet,
+                    { game: 'higherlower', handId, phase: 'lucky-save:charm' });
                 const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                 await i.update({
                     embeds: [new EmbedBuilder()
@@ -298,8 +300,8 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                         .setThumbnail(THUMB)
                         .setColor(COLORS.WARN)
                         .setTitle('🃏 Wrong — Lucky Save!')
-                        .setDescription(`${cardInline(current)} → ${cardInline(next)}\n🍀 **Lucky Charm** returned your bet!`)
-                        .addFields({ name: '💰 Balance', value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true })
+                        .setDescription(`${cardInline(current)} → ${cardInline(next)}\n🍀 **Lucky Charm** returned your bet!${payoutNote(saved)}`)
+                        .addFields({ name: '💰 Balance', value: `**${(await settledBalance(userFilter, saved.balance)).toLocaleString()}** coins`, inline: true })
                         .setTimestamp()],
                     components: [playAgainRow(replayId)],
                 });
@@ -310,7 +312,8 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
 
             // Lucky Streak on loss: return bet silently and end session (low-stakes bets only)
             if (!won && luckySaveEligible(bet) && lsBonus > 0 && Math.random() < lsBonus) {
-                const updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }, { new: true });
+                const saved = await payHand(userFilter, bet,
+                    { game: 'higherlower', handId, phase: 'lucky-save:streak' });
                 const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                 await i.update({
                     embeds: [new EmbedBuilder()
@@ -318,8 +321,8 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                         .setThumbnail(THUMB)
                         .setColor(COLORS.WARN)
                         .setTitle('🃏 Wrong — Lucky Streak Save!')
-                        .setDescription(`${cardInline(current)} → ${cardInline(next)}\n🎯 **Lucky Streak** returned your bet!`)
-                        .addFields({ name: '💰 Balance', value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true })
+                        .setDescription(`${cardInline(current)} → ${cardInline(next)}\n🎯 **Lucky Streak** returned your bet!${payoutNote(saved)}`)
+                        .addFields({ name: '💰 Balance', value: `**${(await settledBalance(userFilter, saved.balance)).toLocaleString()}** coins`, inline: true })
                         .setTimestamp()],
                     components: [playAgainRow(replayId)],
                 });
@@ -384,11 +387,12 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                 try {
                     if (r.customId === cashId) {
                         // Cash out — credit the accumulated payout
-                        const updated  = await User.findOneAndUpdate(userFilter, { $inc: { balance: rawPayout } }, { new: true });
+                        const cashed   = await payHand(userFilter, rawPayout,
+                            { game: 'higherlower', handId, phase: 'cashout' });
                         payoutCredited = true;
                         const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                         await r.update({
-                            embeds:     [cashOutEmbed(interaction, bet, rawPayout, updated?.balance ?? 0, newStreak)],
+                            embeds:     [cashOutEmbed(interaction, bet, rawPayout, await settledBalance(userFilter, cashed.balance), newStreak, payoutNote(cashed))],
                             components: [playAgainRow(replayId)],
                         });
                         attachReplay(riskMsg, replayId, interaction, bet, userFilter, guildSettings, onWager);
@@ -396,13 +400,14 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                     } else {
                         // Risk another card — recurse without paying out
                         await r.deferUpdate();
-                        await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), newStreak, releaseLock, onWager);
+                        await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), newStreak, releaseLock, onWager, handId);
                     }
                 } catch (riskErr) {
                     console.error('[HigherLower] risk collect error:', riskErr);
                     await interaction.editReply({ content: 'Something went wrong. Your wager was refunded.', embeds: [], components: [] }).catch(() => {});
                     if (!payoutCredited) {
-                        await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }).catch(() => {});
+                        await payHand(userFilter, bet,
+                            { game: 'higherlower', handId, phase: 'risk-error' });
                     }
                     releaseLock?.();
                 }
@@ -411,10 +416,11 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
             riskCollector.on('end', async (collected, _reason) => {
                 if (collected.size > 0) return;
                 // Timeout on risk screen — auto cash out
-                const updated  = await User.findOneAndUpdate(userFilter, { $inc: { balance: rawPayout } }, { new: true });
+                const cashed   = await payHand(userFilter, rawPayout,
+                    { game: 'higherlower', handId, phase: 'cashout' });
                 const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                 await interaction.editReply({
-                    embeds:     [cashOutEmbed(interaction, bet, rawPayout, updated?.balance ?? 0, newStreak)],
+                    embeds:     [cashOutEmbed(interaction, bet, rawPayout, await settledBalance(userFilter, cashed.balance), newStreak, payoutNote(cashed))],
                     components: [playAgainRow(replayId)],
                 }).catch(() => {});
                 attachReplay(riskMsg, replayId, interaction, bet, userFilter, guildSettings, onWager);
@@ -423,18 +429,22 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
 
         } catch (collectErr) {
             console.error('[HigherLower] collect error:', collectErr);
-            await i.update({ content: 'Something went wrong. Your wager was refunded.', embeds: [], components: [] }).catch(() => {});
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }).catch(() => {});
+            const refunded = await payHand(userFilter, bet,
+                { game: 'higherlower', handId, phase: 'collect-error' });
+            await i.update({
+                content: `Something went wrong. Your wager was refunded.${payoutNote(refunded)}`,
+                embeds: [], components: [],
+            }).catch(() => {});
             releaseLock?.();
         }
     });
 
     collector.on('end', async (collected, _reason) => {
         if (collected.size > 0) return;
-        await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }).catch(() => {});
-        const fresh = await User.findOne(userFilter);
+        const lapsed = await payHand(userFilter, bet,
+            { game: 'higherlower', handId, phase: 'timeout' });
         await interaction.editReply({
-            embeds:     [timeoutEmbed(interaction, current, bet, fresh?.balance ?? 0)],
+            embeds:     [timeoutEmbed(interaction, current, bet, await settledBalance(userFilter, lapsed.balance), payoutNote(lapsed))],
             components: [],
         }).catch(() => {});
         releaseLock?.();

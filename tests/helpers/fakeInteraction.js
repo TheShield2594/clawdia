@@ -59,6 +59,7 @@ function makeInteraction({
     subcommand = null,
     user: userOverrides = {},
     components = [],
+    holdCollectors = false,
     channels = new Map(),
     guildId = DEFAULTS.guildId,
     userId = DEFAULTS.userId,
@@ -109,7 +110,8 @@ function makeInteraction({
             };
             const collector = {
                 on(event, fn) { (handlers[event] ??= []).push(fn); return this; },
-                stop: () => end('stopped'),
+                stop: reason => end(reason ?? 'stopped'),
+                end,
             };
             collectors.push(collector);
             // Deliver once the command has finished wiring its handlers on,
@@ -123,7 +125,13 @@ function makeInteraction({
                     collected.set(`${collected.size}`, press);
                     (handlers.collect ?? []).forEach(fn => fn(press));
                 }
-                end('time');
+                // A collector that ends the moment its queue empties is right
+                // for a command that settles in one press, and wrong for one
+                // whose collector is meant to outlive a running game: crash
+                // stops its own ticking on `end`, so the round died before its
+                // first tick. `holdCollectors` leaves them open, and the test
+                // ends them through `endCollectors` when it wants to.
+                if (!holdCollectors) end('time');
             }, 0);
             return collector;
         },
@@ -206,6 +214,8 @@ function makeInteraction({
         // The message every reply resolves to, for a test that wants to reach it
         // without going through a return value.
         message,
+        /** Closes every collector opened so far — the counterpart to `holdCollectors`. */
+        endCollectors: (reason = 'time') => collectors.forEach(c => c.end(reason)),
     };
 
     return interaction;

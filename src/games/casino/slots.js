@@ -14,6 +14,7 @@ const { randomFrom, SLOTS_LOSE_LINES, SLOTS_WIN_LINES } = require('../../utils/c
 const { claimJackpot, DEFAULT_SEED: JACKPOT_SEED } = require('../../services/casinoJackpotService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
 const {
     SYMBOLS,
     HIGH_VALUE_SYMBOLS,
@@ -67,7 +68,7 @@ function spinEmbed(display, bet, stage, interaction, jackpotPool) {
         );
 }
 
-function resultEmbed(reels, result, bet, balance, interaction, jackpotPool) {
+function resultEmbed(reels, result, bet, balance, interaction, jackpotPool, note = '') {
     const { payout, outcome, symbol, wildCount, multFactor } = result;
     const display = reels.map(s => s.emoji).join('  ┃  ');
     const net     = payout - bet;
@@ -99,7 +100,7 @@ function resultEmbed(reels, result, bet, balance, interaction, jackpotPool) {
             `> **[ ${display} ]**\n\n${line}${extras}\n\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
             `  💸 Bet: ${bet.toLocaleString()}  ·  ${payoutLabel}: ${payoutVal.toLocaleString()}  ·  📊 Net: **${netStr}**\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━`
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━` + note
         )
         .addFields(
             { name: '💰 Balance',      value: `**${balance.toLocaleString()}** coins`,      inline: true },
@@ -208,6 +209,8 @@ module.exports = {
 // starts a brand-new hand with its own atomic debit, so it doesn't need the
 // lock re-held.
 async function playSlots(interaction, bet, releaseLock, onWager) {
+    const handId = newHandId();
+    let settled  = false;
     const userFilter  = { userId: interaction.user.id, guildId: interaction.guild.id };
     const guildFilter = { guildId: interaction.guild.id };
     try {
@@ -337,11 +340,12 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
 
         // Credit the payout (bet already debited above). casinoJackpotService credits
         // a claimed jackpot itself — including it here would pay the pool out twice.
-        let user = await User.findOneAndUpdate(
-            userFilter,
-            { $inc: { balance: jackpotWon ? 0 : adjustedPayout } },
-            { new: true }
-        );
+        // A claimed jackpot is credited by casinoJackpotService under its own
+        // key; paying it here as well would pay the pool out twice.
+        const paid = await payHand(userFilter, jackpotWon ? 0 : adjustedPayout,
+            { game: 'slots', handId, phase: 'settle' });
+        settled    = true;
+        let balanceAfter = await settledBalance(userFilter, paid.balance);
 
         const delay = ms => new Promise(r => setTimeout(r, ms));
 
@@ -368,6 +372,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         // ── Scatter: play free spins automatically ──────────────────────────────
         if (freeSpinCount > 0) {
             let freeTotalPayout = 0;
+            let freeSpinNote    = '';
             const freeResults = [];
             for (let fs = 0; fs < freeSpinCount; fs++) {
                 const freeReels = [spinReel(), spinReel(), spinReel()];
@@ -380,11 +385,10 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 freeResults.push({ reels: freeReels, payout: freePayout, outcome: freeResult.outcome });
             }
             if (freeTotalPayout > 0) {
-                user = await User.findOneAndUpdate(
-                    userFilter,
-                    { $inc: { balance: freeTotalPayout } },
-                    { new: true }
-                );
+                const freeSpins = await payHand(userFilter, freeTotalPayout,
+                    { game: 'slots', handId, phase: 'free-spins' });
+                balanceAfter = await settledBalance(userFilter, freeSpins.balance);
+                freeSpinNote = payoutNote(freeSpins);
             }
             const freeResultLines = freeResults.map((fr, i) =>
                 `Spin ${i + 1}: ${fr.reels.map(r => r.emoji).join(' ')} → **+${fr.payout.toLocaleString()}**`
@@ -395,7 +399,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 .setDescription(freeResultLines)
                 .addFields(
                     { name: '🎁 Free Spin Total', value: `**+${freeTotalPayout.toLocaleString()}** coins`, inline: true },
-                    { name: '💰 Balance',          value: `**${(user?.balance ?? 0).toLocaleString()}** coins`, inline: true },
+                    { name: '💰 Balance',          value: `**${balanceAfter.toLocaleString()}** coins${freeSpinNote}`, inline: true },
                 )
                 .setTimestamp();
             await interaction.editReply({ embeds: [scatterEmbed], components: [] });
@@ -441,7 +445,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
             finalJackpotPool = fresh?.casinoJackpot?.pool ?? finalJackpotPool;
         }
 
-        const finalEmbed = resultEmbed(reels, { ...result, payout: adjustedPayout }, bet, user?.balance ?? 0, interaction, finalJackpotPool);
+        const finalEmbed = resultEmbed(reels, { ...result, payout: adjustedPayout }, bet, balanceAfter, interaction, finalJackpotPool, payoutNote(paid));
         if (hotReelTriggered) {
             const desc = finalEmbed.data.description ?? '';
             finalEmbed.setDescription(desc + '\n> 🔥 *Hot Reel activated — first reel was locked to a high-value symbol!*');
@@ -493,6 +497,12 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
     } catch (err) {
         console.error('[Slots] error:', err);
         releaseLock?.();
-        await interaction.editReply({ content: 'An error occurred while playing slots. Please try again.', components: [] }).catch(() => {});
+        const rolled = settled
+            ? { credited: true, owed: false, balance: null }
+            : await payHand(userFilter, bet, { game: 'slots', handId, phase: 'rollback' });
+        await interaction.editReply({
+            content: `An error occurred while playing slots. Your wager was refunded — please try again.${payoutNote(rolled)}`,
+            components: [],
+        }).catch(() => {});
     }
 }
