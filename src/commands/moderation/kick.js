@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../services/moderationLogService');
-const { hierarchyDenial } = require('../../utils/moderationHierarchy');
+const { hierarchyDenial, resolveMember } = require('../../utils/moderationHierarchy');
 const COLORS = require('../../utils/embedColors');
 
 module.exports = {
@@ -22,7 +22,16 @@ module.exports = {
     async execute(interaction) {
         const user = interaction.options.getUser('user');
         const reason = interaction.options.getString('reason') || 'No reason provided';
-        const member = interaction.guild.members.cache.get(user.id);
+        // Not `members.cache.get`. The member cache is capped at 200 per guild
+        // and swept hourly (utils/cacheOptions), so a miss says "this member has
+        // been quiet", not "this member has left" -- and every quiet member was
+        // unkickable with a flat "not in this server". `resolveMember` fetches,
+        // and distinguishes a confirmed absence from a fetch that failed.
+        const { member, indeterminate } = await resolveMember(interaction.guild, user.id);
+
+        if (indeterminate) {
+            return interaction.reply({ content: 'Could not look that member up just now — try again in a moment.', flags: MessageFlags.Ephemeral });
+        }
 
         if (!member) {
             return interaction.reply({ content: 'User not found in this server!', flags: MessageFlags.Ephemeral });

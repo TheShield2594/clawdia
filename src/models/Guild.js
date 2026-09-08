@@ -88,15 +88,31 @@ const guildSchema = new Schema({
         muteRoleId: { type: String, default: null },
         autoModEnabled: { type: Boolean, default: false },
         immunityRoleIds: [{ type: String }],
+        // Channels (or whole categories) the filters skip entirely -- the
+        // bot-command channel, a memes channel where caps are the point.
+        exemptChannelIds: [{ type: String }],
+        // Re-run the filters when a message is edited. Off, this is a hole
+        // anyone can walk through: post something harmless, edit in the link.
+        scanEdits: { type: Boolean, default: true },
         spamProtection: { type: Boolean, default: false },
         spamThreshold: { type: Number, default: 5 },
         spamWindow: { type: Number, default: 5 },
         inviteFilter: { type: Boolean, default: false },
+        // Invite codes, or the ids of servers those invites point at. Both are
+        // accepted because the dashboard asks for one and a link carries the
+        // other.
         inviteAllowlist: [{ type: String }],
+        // An invite back to this server is not the thing an invite filter is
+        // for, so it is allowed unless a guild says otherwise.
+        allowOwnServerInvites: { type: Boolean, default: true },
         linkFilter: { type: Boolean, default: false },
         linkAllowlist: [{ type: String }],
         profanityFilter: { type: Boolean, default: false },
         customBadWords: [{ type: String }],
+        // Words struck out of the built-in list. It bundles slurs with mild
+        // profanity and with words that are also names ("dick"), and until this
+        // existed the list could only be added to.
+        profanityAllowlist: [{ type: String }],
         repeatedTextFilter: { type: Boolean, default: false },
         excessiveCapsFilter: { type: Boolean, default: false },
         capsThresholdPercent: { type: Number, default: 70 },
@@ -105,6 +121,7 @@ const guildSchema = new Schema({
         zalgoFilter: { type: Boolean, default: false },
         excessiveMentionsFilter: { type: Boolean, default: false },
         mentionThreshold: { type: Number, default: 5 },
+        everyoneMentionFilter: { type: Boolean, default: false },
         warnThreshold: { type: Number, default: 3 },
         kickThreshold: { type: Number, default: 5 },
         banThreshold: { type: Number, default: 0 },

@@ -45,6 +45,7 @@ const NON_JOB_TIMERS = new Set([
     'services/ai/deepTask.js',          // tool-status repaint for one task, cleared when it ends
     'services/ai/rateLimit.js',         // in-memory rate-limit bucket sweep
     'events/messageCreate.js',          // in-memory reminder-cooldown sweep
+    'services/autoModService.js',       // in-memory spam-window sweep (#600), moved here with the filters
     'dashboard/lib/middleware.js',      // in-memory HTTP rate-limit sweep
     'utils/imageRateLimit.js',          // in-memory rate-limit bucket sweep
     'utils/cardRenderQueue.js',         // in-memory welcome-card budget sweep (#592)

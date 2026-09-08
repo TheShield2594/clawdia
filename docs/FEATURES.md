@@ -299,14 +299,40 @@ in the dashboard's Daily News panel. There is no slash command for it.
 
 Enable in dashboard for automatic enforcement:
 
-- **Spam Protection**: Duplicate messages
-- **Invite Filter**: Discord invite links
-- **Link Filter**: HTTP/HTTPS links
-- **Profanity Filter**: Custom word list
-- **Caps Filter**: Excessive capitalization
-- **Emoji Filter**: Emoji flooding
-- **Mention Filter**: Mass mentions
+- **Spam Protection**: Message rate per user, inside a configurable window
+- **Invite Filter**: Discord invites, including `discord.com/invite`,
+  `discordapp.com/invite`, `discord.me`/`.io`/`.li` and the `dsc.gg` /
+  `invite.gg` shorteners, and spellings broken up with spaces or line breaks
+- **Link Filter**: Any URL, including bare hosts written without a scheme
+  (`www.example.com`, `example.com/path`)
+- **Profanity Filter**: Built-in list plus your own words, matched through
+  padding (`shitt`), stretching (`fuuuck`), spacing (`f u c k`), leet
+  (`b17ch`), accents, fullwidth text, zero-width characters and Cyrillic
+  look-alikes, and through the grammatical endings of a listed word
+- **Caps Filter**: Excessive capitalization, in any cased script
+- **Emoji Filter**: Emoji flooding — flags and joined sequences each count once
+- **Mention Filter**: Mass mentions, counting repeats of one target
+- **@everyone Filter**: Real `@everyone` / `@here` pings from non-exempt members
 - **Zalgo Filter**: Corrupted/zalgo text
+
+**Scope and exceptions:**
+
+- **Edited messages** are re-checked by default, so a harmless message edited
+  into something else does not slip through (`Re-check edited messages`).
+- **Exempt channels** take whole channels — or a whole category — out of the
+  filters' reach.
+- **Immunity roles**, plus anyone holding Manage Messages, bypass every filter.
+- **Allowed domains** (`linkAllowlist`) let a link through by host, subdomains
+  included: `youtube.com` also allows `m.youtube.com`.
+- **Allowed invites** (`inviteAllowlist`) take an invite code or the id of the
+  server the invite points at. Invites back to your own server are allowed by
+  default; turn `Allow invites to this server` off to filter those too.
+- **Allowed words** (`profanityAllowlist`) remove an entry from the built-in
+  list — for mild profanity, or for a word that is also a name.
+
+Every filter trip deletes the message, files a case, and adds to the author's
+behavior score; the score thresholds and the warning ladder decide when that
+becomes a mute, kick or ban.
 
 ### Logging
 

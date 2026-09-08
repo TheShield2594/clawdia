@@ -24,6 +24,15 @@
                         <%- include('../role-select', { id: 'mod-immunity-roles', multiple: true, size: 4, selected: settings.moderation.immunityRoleIds || [] }) %>
                         <small>Members with these roles bypass auto-moderation. Hold Ctrl/Cmd to select multiple.</small>
                     </div>
+                    <div class="field">
+                        <label class="field-label" for="mod-exempt-channels">Exempt channels</label>
+                        <%- include('../channel-select', { id: 'mod-exempt-channels', multiple: true, size: 4, selected: settings.moderation.exemptChannelIds || [] }) %>
+                        <small>Auto-moderation skips these channels entirely. Selecting a category exempts everything inside it.</small>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Re-check edited messages</strong><span>Run the filters again when a message is edited</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-scan-edits" <%= settings.moderation.scanEdits !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Spam protection</strong><span>Throttle rapid repeat messages</span></span>
                         <span class="switch"><input type="checkbox" id="mod-spam" <%= settings.moderation.spamProtection ? 'checked' : '' %>><span class="slider"></span></span>
@@ -39,8 +48,12 @@
                     <div class="field" style="margin-left:1rem;">
                         <label class="field-label" for="mod-invite-allowlist">Allowed server IDs (one per line)</label>
                         <textarea id="mod-invite-allowlist" rows="3" placeholder="123456789012345678"><%= (settings.moderation.inviteAllowlist || []).join('\n') %></textarea>
-                        <small>Invites to these server IDs will not be blocked.</small>
+                        <small>Invites to these server IDs will not be blocked. An invite code (the part after the slash) works here too.</small>
                     </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Allow invites to this server</strong><span>Do not delete links that point back here</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-allow-own-invites" <%= settings.moderation.allowOwnServerInvites !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Filter links</strong><span>Block external URLs in messages</span></span>
                         <span class="switch"><input type="checkbox" id="mod-links" <%= settings.moderation.linkFilter ? 'checked' : '' %>><span class="slider"></span></span>
@@ -54,7 +67,8 @@
                         <span class="toggle-text"><strong>Filter profanity</strong><span>Delete messages containing blocked words (uses built-in + custom list)</span></span>
                         <span class="switch"><input type="checkbox" id="mod-profanity" <%= settings.moderation.profanityFilter ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
-                    <div class="field"><label class="field-label" for="mod-bad-words">Custom blocked words</label><textarea id="mod-bad-words" rows="3"><%= (settings.moderation.customBadWords || []).join('\n') %></textarea><small>One word/phrase per line. Added on top of the built-in list.</small></div>
+                    <div class="field"><label class="field-label" for="mod-bad-words">Custom blocked words</label><textarea id="mod-bad-words" rows="3"><%= (settings.moderation.customBadWords || []).join('\n') %></textarea><small>One word/phrase per line. Added on top of the built-in list. Padding, spacing and leet spellings are matched too.</small></div>
+                    <div class="field"><label class="field-label" for="mod-allowed-words">Allowed words</label><textarea id="mod-allowed-words" rows="3" placeholder="hell&#10;damn&#10;dick"><%= (settings.moderation.profanityAllowlist || []).join('\n') %></textarea><small>One per line. Removes a word from the built-in list — for mild profanity, or a word that is also a name.</small></div>
                     <label class="toggle"><span class="toggle-text"><strong>Filter repeated text</strong></span><span class="switch"><input type="checkbox" id="mod-repeated" <%= settings.moderation.repeatedTextFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text"><strong>Filter excessive caps</strong></span><span class="switch"><input type="checkbox" id="mod-caps" <%= settings.moderation.excessiveCapsFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <div class="field"><label class="field-label" for="mod-caps-threshold">Caps threshold %</label><input type="number" id="mod-caps-threshold" value="<%= settings.moderation.capsThresholdPercent || 70 %>" min="1" max="100"></div>
@@ -63,6 +77,7 @@
                     <label class="toggle"><span class="toggle-text"><strong>Filter Zalgo text</strong></span><span class="switch"><input type="checkbox" id="mod-zalgo" <%= settings.moderation.zalgoFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text"><strong>Filter excessive mentions</strong></span><span class="switch"><input type="checkbox" id="mod-mentions" <%= settings.moderation.excessiveMentionsFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <div class="field"><label class="field-label" for="mod-mention-threshold">Mention threshold</label><input type="number" id="mod-mention-threshold" value="<%= settings.moderation.mentionThreshold || 5 %>" min="1" max="25"></div>
+                    <label class="toggle"><span class="toggle-text"><strong>Block @everyone / @here</strong><span>Delete mass pings from members who are not exempt</span></span><span class="switch"><input type="checkbox" id="mod-everyone-mentions" <%= settings.moderation.everyoneMentionFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <div class="actions-row">
                         <button class="btn btn-primary" data-action="save" data-section="moderation">Save changes</button>
                     </div>

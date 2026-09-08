@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../services/moderationLogService');
-const { hierarchyDenial } = require('../../utils/moderationHierarchy');
+const { hierarchyDenial, resolveMember } = require('../../utils/moderationHierarchy');
 const COLORS = require('../../utils/embedColors');
 
 module.exports = {
@@ -29,7 +29,13 @@ module.exports = {
         const user = interaction.options.getUser('user');
         const duration = interaction.options.getInteger('duration');
         const reason = interaction.options.getString('reason') || 'No reason provided';
-        const member = interaction.guild.members.cache.get(user.id);
+        // See kick.js: a cache miss is "quiet lately", not "gone". Muting the
+        // quiet ones is most of what a timeout command is for.
+        const { member, indeterminate } = await resolveMember(interaction.guild, user.id);
+
+        if (indeterminate) {
+            return interaction.reply({ content: 'Could not look that member up just now — try again in a moment.', flags: MessageFlags.Ephemeral });
+        }
 
         if (!member) {
             return interaction.reply({ content: 'User not found!', flags: MessageFlags.Ephemeral });

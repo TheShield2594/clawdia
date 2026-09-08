@@ -81,7 +81,11 @@ const FILTERS = [
         name:    'links',
         setting: { linkFilter: true },
         trips:   'look at https://example.com',
-        under:   'look at example.com',
+        // `example.com` used to sit here as the under-threshold case, because
+        // the filter tested for the literal string `http://`. A bare domain is
+        // the shape a scam link actually takes, so it now trips; the
+        // under-threshold case has to be text with no host in it at all.
+        under:   'look at that thing over there',
         warning: /links are not allowed/,
         weight:  1,
         reason:  'posting a link',
