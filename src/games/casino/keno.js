@@ -376,13 +376,14 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
     } catch (err) {
         console.error('[Keno] error:', err);
         releaseLock?.();
-        let rolled = { credited: true, owed: false, balance: null };
-        if (debited && !settled) {
-            rolled = await payHand(userFilter, bet,
-                { game: 'keno', handId, phase: 'rollback' });
-        }
+        const rolled = debited && !settled
+            ? await payHand(userFilter, bet, { game: 'keno', handId, phase: 'rollback' })
+            : null;
+        const outcome = !debited ? 'No wager was taken.'
+            : settled ? 'Your hand had already been settled.'
+            : rolled.credited ? 'Your wager was refunded.' : 'Your wager could not be refunded.';
         await interaction.editReply({
-            content: `Something went wrong. Your wager was refunded.${payoutNote(rolled)}`,
+            content: `Something went wrong. ${outcome}${rolled ? payoutNote(rolled) : ''}`,
             components: [],
         }).catch(() => {});
     }

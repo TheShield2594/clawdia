@@ -266,6 +266,11 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
     });
 
     collector.on('collect', async i => {
+        // Set as soon as a settlement has been credited, and read by the outer
+        // catch below. The lucky saves pay and then render; a render that threw
+        // sent the catch down its own refund path, under a different key, and
+        // the player was paid twice for one hand.
+        let settledHere = false;
         try {
             const next         = rollCard();
             const pickedHigher = i.customId === upId;
@@ -293,6 +298,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
             if (!won && luckySaveEligible(bet) && luckyActive && Math.random() < 0.20) {
                 const saved = await payHand(userFilter, bet,
                     { game: 'higherlower', handId, phase: 'lucky-save:charm' });
+                settledHere = true;
                 const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                 await i.update({
                     embeds: [new EmbedBuilder()
@@ -314,6 +320,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
             if (!won && luckySaveEligible(bet) && lsBonus > 0 && Math.random() < lsBonus) {
                 const saved = await payHand(userFilter, bet,
                     { game: 'higherlower', handId, phase: 'lucky-save:streak' });
+                settledHere = true;
                 const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                 await i.update({
                     embeds: [new EmbedBuilder()
@@ -404,11 +411,16 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                     }
                 } catch (riskErr) {
                     console.error('[HigherLower] risk collect error:', riskErr);
-                    await interaction.editReply({ content: 'Something went wrong. Your wager was refunded.', embeds: [], components: [] }).catch(() => {});
-                    if (!payoutCredited) {
-                        await payHand(userFilter, bet,
+                    const returned = payoutCredited
+                        ? { credited: true, owed: false, balance: null }
+                        : await payHand(userFilter, bet,
                             { game: 'higherlower', handId, phase: 'risk-error' });
-                    }
+                    await interaction.editReply({
+                        content: payoutCredited
+                            ? `Something went wrong showing the result — your cash-out was settled.${payoutNote(returned)}`
+                            : `Something went wrong. ${returned.credited ? 'Your wager was refunded.' : 'Your wager could not be refunded.'}${payoutNote(returned)}`,
+                        embeds: [], components: [],
+                    }).catch(() => {});
                     releaseLock?.();
                 }
             });
@@ -429,10 +441,14 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
 
         } catch (collectErr) {
             console.error('[HigherLower] collect error:', collectErr);
-            const refunded = await payHand(userFilter, bet,
-                { game: 'higherlower', handId, phase: 'collect-error' });
+            const refunded = settledHere
+                ? { credited: true, owed: false, balance: null }
+                : await payHand(userFilter, bet,
+                    { game: 'higherlower', handId, phase: 'collect-error' });
             await i.update({
-                content: `Something went wrong. Your wager was refunded.${payoutNote(refunded)}`,
+                content: settledHere
+                    ? `Something went wrong showing the result — your hand was settled.${payoutNote(refunded)}`
+                    : `Something went wrong. Your wager was refunded.${payoutNote(refunded)}`,
                 embeds: [], components: [],
             }).catch(() => {});
             releaseLock?.();

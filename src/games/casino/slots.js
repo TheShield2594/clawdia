@@ -211,6 +211,10 @@ module.exports = {
 async function playSlots(interaction, bet, releaseLock, onWager) {
     const handId = newHandId();
     let settled  = false;
+    // Hoisted so the rollback below can tell "the spin errored" from "the spin
+    // errored before the stake was ever taken" — refunding the second mints
+    // coins that were never debited.
+    let debited  = null;
     const userFilter  = { userId: interaction.user.id, guildId: interaction.guild.id };
     const guildFilter = { guildId: interaction.guild.id };
     try {
@@ -230,7 +234,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         const totalCoinMult    = coinMult * serverMult;
 
         // ── Debit the bet FIRST, before any pool mutations ─────────────────
-        const debited = await placeWager(userFilter, bet, { onWager });
+        debited = await placeWager(userFilter, bet, { onWager });
         if (!debited) {
             releaseLock?.();
             const fresh = await User.findOne(userFilter);
@@ -497,11 +501,14 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
     } catch (err) {
         console.error('[Slots] error:', err);
         releaseLock?.();
-        const rolled = settled
-            ? { credited: true, owed: false, balance: null }
-            : await payHand(userFilter, bet, { game: 'slots', handId, phase: 'rollback' });
+        const rolled = debited && !settled
+            ? await payHand(userFilter, bet, { game: 'slots', handId, phase: 'rollback' })
+            : null;
+        const outcome = !debited ? 'No wager was taken.'
+            : settled ? 'Your hand had already been settled.'
+            : rolled.credited ? 'Your wager was refunded — please try again.' : 'Your wager could not be refunded.';
         await interaction.editReply({
-            content: `An error occurred while playing slots. Your wager was refunded — please try again.${payoutNote(rolled)}`,
+            content: `An error occurred while playing slots. ${outcome}${rolled ? payoutNote(rolled) : ''}`,
             components: [],
         }).catch(() => {});
     }

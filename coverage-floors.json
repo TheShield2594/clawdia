@@ -151,10 +151,10 @@
             "lines": 71
         },
         "src/games/casino": {
-            "statements": 36,
-            "branches": 28,
-            "functions": 41,
-            "lines": 36
+            "statements": 40,
+            "branches": 30,
+            "functions": 45,
+            "lines": 40
         },
         "src/migrations": {
             "statements": 56,

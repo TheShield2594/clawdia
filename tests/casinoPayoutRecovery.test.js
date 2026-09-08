@@ -339,6 +339,28 @@ describe('a crash cash-out whose write does not land', () => {
         expect(payload.payoutKey).toContain('cashout-net');
     }, 20_000);
 
+    test('is reported as a pending payout, not as a player who never cashed out', async () => {
+        User.findOneAndUpdate.mockImplementation((_filter, update) =>
+            Promise.resolve(Array.isArray(update) ? null : walletDoc()));
+        User.findOne.mockImplementation(() => {
+            const doc = { ...walletDoc(), paidPayouts: [] };
+            const query = Promise.resolve(doc);
+            query.lean = () => Promise.resolve(doc);
+            return query;
+        });
+
+        const spin = await playRound();
+
+        // `cashedOutAt` stays null on purpose — the tick-error refund keys off
+        // it — so with nothing else recorded the live lines called this player
+        // "still in" and the final embed called them a loser, contradicting the
+        // reply they had already been given.
+        const final = spin.replies.at(-1).embeds[0].data.description;
+        expect(final).not.toContain("didn't cash out");
+        expect(final).toMatch(/cashed at/);
+        expect(final).toContain('not yet paid');
+    }, 20_000);
+
     test('a round that pays cleanly clears the marker in the same write as the coins', async () => {
         await playRound();
 
@@ -354,3 +376,108 @@ describe('a crash cash-out whose write does not land', () => {
     }, 20_000);
 });
 
+
+describe('a cash-out the player pressed for', () => {
+    const crash = require('../src/games/casino/crash');
+    const { deleteLobby } = require('../src/utils/crashLobby');
+
+    const CRASH_AT_495 = 0.2;
+    const CHANNEL_ID   = 'channel-1';
+    const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+
+    beforeEach(() => {
+        deleteLobby(CHANNEL_ID);
+        User.updateMany.mockResolvedValue({});
+        jest.spyOn(Math, 'random').mockReturnValue(CRASH_AT_495);
+        jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+        deleteLobby(CHANNEL_ID);
+        jest.useRealTimers();
+        Math.random.mockRestore();
+    });
+
+    test('is told it succeeded, not that it could not be credited', async () => {
+        // `cashOutPlayer` answers with a string the handler compares against
+        // 'paid'; returning `true` from the success path made every successful
+        // manual cash-out fall into the failure wording — the hand paid and the
+        // player was told it had not.
+        const lobbyId = `${CHANNEL_ID}_${Date.now()}`;
+        const spin = baseInteraction({
+            options: { bet: BET, auto_cashout: null },
+            userId: USER_ID, guildId: GUILD_ID, holdCollectors: true,
+            components: [{ customId: `crash_co_${lobbyId}` }],
+        });
+        spin.client.users.fetch = jest.fn().mockResolvedValue({ username: 'player' });
+
+        await crash.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
+        await jest.advanceTimersByTimeAsync(0);
+        await flush();
+        spin.endCollectors('time');   // nobody joined — start the round
+        await flush();
+        for (let step = 0; step < 40; step++) {
+            await jest.advanceTimersByTimeAsync(1_200);
+            await flush();
+        }
+
+        const cashOutReply = spin.replies.map(r => r.content).filter(Boolean)
+            .find(c => c.includes('Cashed out'));
+        expect(cashOutReply).toContain('✅');
+        expect(cashOutReply).not.toContain('could not be credited');
+    }, 20_000);
+});
+
+describe('a Lucky Save whose result cannot be rendered', () => {
+    const higherlower = require('../src/games/casino/higherlower');
+
+    /**
+     * `rollCard` takes two randoms — value then suit — so the sequence is
+     * current card, next card, then the save roll. A King followed by an Ace
+     * makes "Higher" a loss, and the last value puts the save roll on the true
+     * side of both the charm's flat 20% and the streak's 25%.
+     */
+    const LOSES_THEN_SAVES = [0.99, 0, 0, 0, 0.1];
+
+    test.each(['charm', 'streak'])('settles once for the %s save, not again for the failed render', async (kind) => {
+        jest.useFakeTimers();
+        const doc = {
+            ...walletDoc(),
+            activeEffects: [{
+                type:      kind === 'charm' ? 'lucky_charm' : 'lucky_streak',
+                expiresAt: new Date(Date.now() + 3.6e6),
+            }],
+        };
+        User.findOne.mockImplementation(() => {
+            const query = Promise.resolve(doc);
+            query.lean = () => Promise.resolve(doc);
+            return query;
+        });
+        const rolls  = [...LOSES_THEN_SAVES];
+        const random = jest.spyOn(Math, 'random').mockImplementation(() => rolls.shift() ?? 0);
+
+        // The button ids carry `Date.now()`, which the fake timers pin.
+        const now = Date.now();
+        const hand = baseInteraction({
+            options: { bet: BET },
+            userId: USER_ID, guildId: GUILD_ID,
+            // One press. The collector takes `max: 1`, and a second queued press
+            // would be a second hand, not a second attempt at this one.
+            components: [{ customId: `hl_up_interaction-1_${now}`, updateRejects: true }],
+        });
+
+        await higherlower.execute(hand, { releaseLock: jest.fn(), onWager: jest.fn() });
+        await jest.advanceTimersByTimeAsync(0);
+        for (let i = 0; i < 40; i++) await Promise.resolve();
+
+        random.mockRestore();
+        jest.useRealTimers();
+
+        // The save credits the bet and then renders it. A render that threw
+        // dropped into the outer catch, which refunded the bet a *second* time
+        // under its own key — a different key, so nothing stopped it.
+        const settlements = keyedCredits().filter(({ key }) => key.startsWith('casino:higherlower:'));
+        expect(settlements).toHaveLength(1);
+        expect(settlements[0].key).toContain('lucky-save');
+    }, 20_000);
+});

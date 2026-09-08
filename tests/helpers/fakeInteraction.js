@@ -48,6 +48,7 @@ const DEFAULTS = {
  * @param {string} [opts.subcommand]  what getSubcommand() returns
  * @param {object} [opts.user]        overrides for interaction.user
  * @param {Array}  [opts.components]  button presses to hand back, in order; each
+ *                 may carry `updateRejects: true` to make its own `update` fail
  *                                    is `{ customId, user? }` and becomes a
  *                                    component interaction. Once the queue is
  *                                    empty the window closes, as it does live.
@@ -77,7 +78,11 @@ function makeInteraction({
         customId: press.customId,
         user: { id: press.user ?? userId },
         deferUpdate: jest.fn().mockResolvedValue(undefined),
-        update: jest.fn(record),
+        // `updateRejects` makes this press's render fail, which is how a test
+        // reaches the catch that runs *after* a hand has already been settled.
+        update: press.updateRejects
+            ? jest.fn(() => Promise.reject(new Error('update failed')))
+            : jest.fn(record),
         reply: jest.fn(record),
         editReply: jest.fn(record),
         followUp: jest.fn(record),
@@ -117,11 +122,16 @@ function makeInteraction({
             // Deliver once the command has finished wiring its handlers on,
             // which is the tick after it asked for the collector.
             setTimeout(() => {
-                while (pending.length && !ended) {
-                    const press = componentInteraction(pending.shift());
-                    // A rejected press is dropped and the next one tried, the
-                    // way a real collector goes on listening.
-                    if (!accepts(opts.filter, press)) continue;
+                // A press this collector's filter turns away is left in the
+                // queue rather than discarded: a message can carry more than
+                // one collector — crash opens a lobby collector and then a
+                // cash-out collector on the same message — and in Discord the
+                // press goes to whichever one accepts it, not to whichever was
+                // created first.
+                for (let i = 0; i < pending.length && !ended;) {
+                    const press = componentInteraction(pending[i]);
+                    if (!accepts(opts.filter, press)) { i++; continue; }
+                    pending.splice(i, 1);
                     collected.set(`${collected.size}`, press);
                     (handlers.collect ?? []).forEach(fn => fn(press));
                 }

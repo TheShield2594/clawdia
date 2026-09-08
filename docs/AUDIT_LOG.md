@@ -738,7 +738,10 @@ rest of the economy. Both are still listed under
 - `src/utils/payoutKey.js`
 - `tests/casinoPayoutRecovery.test.js` (added)
 - `tests/casinoJackpotSinglePool.test.js`
-- `tests/helpers/fakeInteraction.js`
+- `tests/helpers/fakeInteraction.js` — collectors can be held open across a
+  running game, a press one collector's filter turns away stays queued for
+  another collector on the same message, and a queued press can be made to fail
+  its own render
 - `tests/coverageRatchet.test.js`
 - `coverage-floors.json`
 
@@ -764,14 +767,16 @@ rest of the economy. Both are still listed under
 | 7 | `/casino slots` never refunded the stake when a spin errored between the wager and the payout: the catch logged, said "An error occurred… Please try again", and kept the coins | A keyed rollback, guarded on the settle not having already happened | `slots.js` |
 | 8 | `/casino roulette` read `updated.balance` off a write that can answer `null`. When it did, the `TypeError` landed in the outer catch — which, with `settled` already true, skipped the refund and told the player their wager had been refunded anyway | The balance comes from `settledBalance`, which reads the document back when the credit returned none rather than falling back to a pre-hand figure that is higher than the truth | `roulette.js` |
 | 9 | `/casino crash` read `.username` off `client.users.fetch`'s result at three sites. The `.catch` there covers a rejected fetch; discord.js can also *resolve* `null` for a user it cannot see, and reading through that threw out of a tick, aborting the round mid-multiplier | `?? { username: uid }` on the resolved value as well as the rejection | `crash.js` |
+| 10 | The rewrite itself introduced four defects, all found reviewing this pass. `cashOutPlayer` returned `true` from its success path while the button handler compared against `'paid'`, so **every successful manual cash-out reported a failure** — the auto-cash-out path the tests drove does not read the return value, which is why the suite missed it. A lucky save in higher-or-lower credited the bet and then rendered it, and a render that threw dropped into the outer catch, which refunded the bet a *second* time under its own key. Slots' new rollback read a `debited` scoped inside the `try`, so an error raised before the wager refunded a stake that had never been taken. And a `cashFailed` crash player — left with `cashedOutAt` null so the tick-error refund could still see them — was rendered as "still in" and then as "didn't cash out", contradicting the reply they had just been given | The return value is `'paid'`; the save records that it settled and the catch reads it; `debited` is hoisted and gates the rollback; the failed cash-out records its multiplier and outcome, and both renderers read them. Each is covered by a test that reproduces the defect | `crash.js`, `higherlower.js`, `slots.js` |
+| 11 | Five rollback messages claimed "your wager was refunded" and then appended a note saying it had not been — one sentence contradicting the next — and said the same thing when no rollback had been attempted at all | Each reports which of the four things happened: no wager was taken, the hand had already been settled, the wager was refunded, or it could not be | `keno.js`, `poker.js`, `roulette.js`, `slots.js`, `cupgame.js` |
 
 #### Informational
 
 | # | Note |
 |---|------|
-| 10 | The zero-amount payout is now a no-op that issues no write. Slots credited `$inc: { balance: 0 }` on a jackpot spin — deliberately, so the pot was not paid twice — and a losing hand did the same. It was one more round trip and one more way for a settled hand to fail; `creditCoinsOrOwe` short-circuits a non-positive amount before it reaches the database. `tests/casinoJackpotSinglePool.test.js` asserted that write's shape and now asserts that no `casino:` credit is issued at all, which is the same property stated better |
-| 11 | The crash join refund is left as a bare `$inc`. It fires immediately, in the same request, when a seat is lost to a lobby that filled — and if it fails, `pendingCrashRefund` is still set, so `ready.js` recovers the stake on the next boot. It is the one unkeyed coin write left under `src/games/casino`, and it already has the record the others lacked |
-| 12 | A leaked `releaseLock` locks a player out of the casino for the primitive's ten-minute lease rather than permanently, so the paths above that failed to release it were a nuisance and not an outage. Left as it is; the lease is the backstop and shortening it belongs with `activeGameLock`, not here |
+| 12 | The zero-amount payout is now a no-op that issues no write. Slots credited `$inc: { balance: 0 }` on a jackpot spin — deliberately, so the pot was not paid twice — and a losing hand did the same. It was one more round trip and one more way for a settled hand to fail; `creditCoinsOrOwe` short-circuits a non-positive amount before it reaches the database. `tests/casinoJackpotSinglePool.test.js` asserted that write's shape and now asserts that no `casino:` credit is issued at all, which is the same property stated better |
+| 13 | The crash join refund is left as a bare `$inc`. It fires immediately, in the same request, when a seat is lost to a lobby that filled — and if it fails, `pendingCrashRefund` is still set, so `ready.js` recovers the stake on the next boot. It is the one unkeyed coin write left under `src/games/casino`, and it already has the record the others lacked |
+| 14 | A leaked `releaseLock` locks a player out of the casino for the primitive's ten-minute lease rather than permanently, so the paths above that failed to release it were a nuisance and not an outage. Left as it is; the lease is the backstop and shortening it belongs with `activeGameLock`, not here |
 
 ---
 

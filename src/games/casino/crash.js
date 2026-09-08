@@ -220,6 +220,11 @@ async function buildFinalEmbed(crashPoint, bet, players, client, _guildId) {
             const net    = payout - bet;
             const auto   = state.autoTriggered ? ' *(auto)*' : '';
             lines.push(`✅ **${user.username}** cashed at **${multLabel(state.cashedOutAt)}**${auto} (+${net.toLocaleString()} coins)`);
+        } else if (state.cashFailed) {
+            const net = Math.floor(bet * state.cashFailedAt) - bet;
+            lines.push(state.cashOutcome === 'owed'
+                ? `⏳ **${user.username}** cashed at **${multLabel(state.cashFailedAt)}** (+${net.toLocaleString()} coins) — recorded, not yet paid`
+                : `⚠️ **${user.username}** cashed at **${multLabel(state.cashFailedAt)}** — payout could not be credited or recorded`);
         } else {
             lines.push(`💀 **${user.username}** didn't cash out (-${bet.toLocaleString()} coins)`);
         }
@@ -443,6 +448,8 @@ async function startCrashGame(interaction, lobby, lobbyId) {
             if (state.cashedOutAt) {
                 const auto = state.autoTriggered ? ' *(auto)*' : '';
                 lines.push(`✅ **${u.username}** cashed at **${multLabel(state.cashedOutAt)}**${auto}`);
+            } else if (state.cashFailed) {
+                lines.push(`⏳ **${u.username}** cashed at **${multLabel(state.cashFailedAt)}** — payout pending`);
             } else {
                 const acHint = state.autoCashout ? ` *(auto @ ${multLabel(state.autoCashout)})*` : '';
                 lines.push(`🎮 **${u.username}** — still in${acHint}`);
@@ -493,7 +500,14 @@ async function startCrashGame(interaction, lobby, lobbyId) {
         });
 
         if (status !== 'paid' && status !== 'duplicate') {
-            state.cashFailed = true;
+            // The multiplier and the outcome are recorded beside the flag: this
+            // player *did* cash out, and both the live lines and the final embed
+            // read `cashedOutAt` to decide what to say. Left null with nothing
+            // beside it, the round reported them as still in and then as never
+            // having cashed out — contradicting the reply they had just been
+            // given, and telling the channel they lost a hand they had won.
+            state.cashFailed   = true;
+            state.cashFailedAt = mult;
             // The stake is still covered by the untouched `pendingCrashRefund`,
             // so what is owed here is the winnings on top of it and not the
             // whole payout — recording the payout would pay the stake twice
@@ -505,7 +519,8 @@ async function startCrashGame(interaction, lobby, lobbyId) {
                 service:   'casino',
                 jobName:   'crash:cashout',
             });
-            return owed ? 'owed' : 'lost';
+            state.cashOutcome = owed ? 'owed' : 'lost';
+            return state.cashOutcome;
         }
 
         state.cashedOutAt   = mult;
@@ -513,7 +528,7 @@ async function startCrashGame(interaction, lobby, lobbyId) {
 
         // Update weekly leaderboard stats (store username to avoid N+1 fetches in leaderboard)
         await updateCrashStats(uid, guildId, mult, state.username);
-        return true;
+        return 'paid';
     }
 
     await interaction.editReply({

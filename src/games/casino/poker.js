@@ -720,13 +720,14 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
     } catch (err) {
         console.error('[Poker] error:', err);
         releaseLock?.();
-        let refunded = { credited: true, owed: false, balance: null };
-        if (debited && !settled) {
-            refunded = await payHand(userFilter, playerStake,
-                { game: 'poker', handId, phase: 'rollback' });
-        }
+        const refunded = debited && !settled
+            ? await payHand(userFilter, playerStake, { game: 'poker', handId, phase: 'rollback' })
+            : null;
+        const outcome = !debited ? 'No wager was taken.'
+            : settled ? 'Your hand had already been settled.'
+            : refunded.credited ? 'Your wager was refunded.' : 'Your wager could not be refunded.';
         await interaction.editReply({
-            content: `Something went wrong. Your wager was refunded.${payoutNote(refunded)}`,
+            content: `Something went wrong. ${outcome}${refunded ? payoutNote(refunded) : ''}`,
             components: [],
         }).catch(() => {});
     }

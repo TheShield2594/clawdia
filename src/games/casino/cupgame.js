@@ -426,14 +426,22 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
 
     } catch (err) {
         console.error('[Monte] error:', err);
-        let rolled = { credited: true, owed: false, balance: null };
+        // Three different things can be true here and they used to share one
+        // sentence. A settled hand has already paid what it owed and no rollback
+        // is issued, so saying "your wager was refunded" named a payment that
+        // did not happen; and an unsettled hand whose rollback did not land has
+        // not been refunded either.
+        let rolled = null;
         if (!settled) {
             const rollbackAmount = round > 1 ? payoutForRound(bet, round - 1) : bet;
             rolled = await payHand(userFilter, rollbackAmount,
                 { game: 'monte', handId, phase: 'rollback' });
         }
+        const outcome = rolled === null
+            ? 'Your hand had already been settled.'
+            : rolled.credited ? 'Your wager was refunded.' : 'Your wager could not be refunded.';
         await interaction.editReply({
-            content: `Something went wrong. Your wager was refunded.${payoutNote(rolled)}`,
+            content: `Something went wrong. ${outcome}${rolled ? payoutNote(rolled) : ''}`,
             components: [],
         }).catch(() => {});
         releaseLock?.();

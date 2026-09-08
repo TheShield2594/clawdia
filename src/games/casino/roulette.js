@@ -351,13 +351,14 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock, onWag
     } catch (err) {
         console.error('[Roulette] error:', err);
         releaseLock?.();
-        let rolled = { credited: true, owed: false, balance: null };
-        if (debited && !settled) {
-            rolled = await payHand(userFilter, bet,
-                { game: 'roulette', handId, phase: 'rollback' });
-        }
+        const rolled = debited && !settled
+            ? await payHand(userFilter, bet, { game: 'roulette', handId, phase: 'rollback' })
+            : null;
+        const outcome = !debited ? 'No wager was taken.'
+            : settled ? 'Your hand had already been settled.'
+            : rolled.credited ? 'Your wager has been refunded — please try again.' : 'Your wager could not be refunded.';
         await interaction.editReply({
-            content: `Something went wrong. Your wager has been refunded — please try again.${payoutNote(rolled)}`,
+            content: `Something went wrong. ${outcome}${rolled ? payoutNote(rolled) : ''}`,
             components: [],
         }).catch(() => {});
     }
