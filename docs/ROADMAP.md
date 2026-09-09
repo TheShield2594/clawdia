@@ -60,7 +60,9 @@ so that there is only ever one copy to correct.
    payouts. `confirmBet`, the bet guards and the games' leaderboard writes were
    explicitly out of its scope and are still unaudited — smaller than a pass of
    its own, and worth folding into whichever one next touches that code.
-4. **Ratchet the coverage floors.** `src/commands/economy/fish` and
+4. **Ratchet the coverage floors.**
+   ([#998](https://github.com/TheShield2594/clawdia/issues/998))
+   `src/commands/economy/fish` and
    `src/commands/economy/mine` sit at 14% and 16% statements with branch floors
    of 0 — recorded in `coverage-floors.json`'s `unguarded` list, so they may
    shrink and must not grow. Four passes have now gone where the money-moving
