@@ -22,11 +22,13 @@ coverage, which is [#873](https://github.com/TheShield2594/clawdia/issues/873):
 audit coverage is widest exactly where the risk is not.
 
 So net-new game features wait, and every currency-mutation path gets the
-treatment the nine long-stable subsystems got. Two passes have landed under that
+treatment the nine long-stable subsystems got. Four passes have landed under that
 decision already — `/duel` escrow and the `/heist` and `/syndicate` crew splits
-in v4.5.2, the casino's progressive jackpot in v4.6.0 — and between them they
-found thirteen critical defects in code that was live. That is the argument for
-the order, and it is worth re-reading before anybody proposes suspending it.
+in v4.5.2, the casino's progressive jackpot in v4.6.0, `/gift` and `/market` in
+v4.6.1, the casino's hand payouts in v4.7.0 — and between them they found
+twenty-four critical defects in code that was live, every one of them on a path
+that moves coins. That is the argument for the order, and it is worth re-reading
+before anybody proposes suspending it.
 
 What this does *not* mean: bug fixes, security work, operational work and
 documentation are not features and are not blocked. Nothing below is sequenced
@@ -37,26 +39,36 @@ behind the audit except new game systems.
 Each item links to the issue that holds the detail. Nothing is restated here,
 so that there is only ever one copy to correct.
 
-1. **Economy audit, pass 3 — the rest of the casino.**
-   ([#873](https://github.com/TheShield2594/clawdia/issues/873)) The progressive
-   jackpot is audited. The eight games' own wager and payout writes,
-   `confirmBet`, and the crash lobby's `pendingCrashRefund` escrow are not — and
-   they are where every ordinary casino payout is made.
-2. **Economy audit, pass 4 — `gift` and `market`.**
-   ([#873](https://github.com/TheShield2594/clawdia/issues/873)) The last two
-   unticked entries on that issue's checklist, and the two remaining paths where
-   coins move between users outside a game.
-3. **The unapplied CodeRabbit findings.**
-   ([#985](https://github.com/TheShield2594/clawdia/issues/985)) Four items:
-   undrained response bodies leaking sockets, MCP requests that carry
-   credentials over plain HTTP, and two tests that pass whether or not the thing
-   they name is true. Independent of the audit and small enough to take whenever
-   a pass is waiting on review.
-4. **Ratchet the coverage floors each pass earns.** `src/commands/economy/fish`
-   and `src/commands/economy/mine` sit at 14% and 16% statements with branch
-   floors of 0 — recorded in `coverage-floors.json`'s `unguarded` list, so they
-   may shrink and must not grow. Neither pass has reached them yet. The floors
-   move when a pass lands on that code, not before and not by hand.
+1. **Acknowledge moderation interactions before the slow work.**
+   ([#995](https://github.com/TheShield2594/clawdia/issues/995)) The dispatcher
+   awaits settings, the frozen-economy read and the cooldown claim before
+   `execute`, and `/ban`, `/softban`, `/kick` and `/mute` can then await a member
+   fetch on a cache miss — which is normal, at 200 cached members swept hourly.
+   The three-second acknowledgement window is not guaranteed to survive that.
+   Deferred out of #994 deliberately, because the fix is in the shared dispatcher
+   and the response-visibility policy has to be decided before the code changes:
+   a public deferral makes refusals public, an ephemeral one hides successful
+   moderation embeds from the channel. **Settle that first** — it is the whole
+   of the work that cannot be started without a decision.
+2. **Economy audit, pass 5 — the core currency commands.**
+   ([#873](https://github.com/TheShield2594/clawdia/issues/873)) `balance`,
+   `bank`, `daily`, `work`, `jobs`, `crime`, `invest`. Next in the money-moving
+   order below, now that every path where value passes between two players has
+   been through a pass.
+3. **What is left of the casino.**
+   ([#873](https://github.com/TheShield2594/clawdia/issues/873)) Pass 4 took the
+   payouts. `confirmBet`, the bet guards and the games' leaderboard writes were
+   explicitly out of its scope and are still unaudited — smaller than a pass of
+   its own, and worth folding into whichever one next touches that code.
+4. **Ratchet the coverage floors.**
+   ([#998](https://github.com/TheShield2594/clawdia/issues/998))
+   `src/commands/economy/fish` and
+   `src/commands/economy/mine` sit at 14% and 16% statements with branch floors
+   of 0 — recorded in `coverage-floors.json`'s `unguarded` list, so they may
+   shrink and must not grow. Four passes have now gone where the money-moving
+   code is rather than where the coverage is worst, and those are not the same
+   ordering: this will not happen as a side effect of the audit, and wanting it
+   means scheduling a pass for it.
 
 ## The audit queue
 
@@ -64,16 +76,19 @@ so that there is only ever one copy to correct.
 each pass found; its
 [Not yet reviewed](AUDIT_LOG.md#not-yet-reviewed) section is the queue. That list
 is long and mostly unordered, deliberately — it is a survey, not a plan. The
-order this roadmap commits to, within the economy, is money-moving first:
+order this roadmap commits to, within the economy, is money-moving first.
+Four passes have landed against it — `/duel` escrow and the crew splits, the
+progressive jackpot, `/gift` and `/market`, and the casino's hand payouts and
+crash refunds — which leaves:
 
-1. the rest of the casino — per-game wagers and payouts, `confirmBet`, the crash
-   lobby's refunds
-2. `gift` and `market`
-3. the core currency commands — `balance`, `bank`, `daily`, `work`, `jobs`,
+1. the core currency commands — `balance`, `bank`, `daily`, `work`, `jobs`,
    `crime`, `invest`
-4. the gathering loops — `hunt`, `fish`, `mine`, `explore` — and items, effects
+2. the gathering loops — `hunt`, `fish`, `mine`, `explore` — and items, effects
    and `use`
-5. progression, the group and PvP systems, seasonal events
+3. progression, the group and PvP systems, seasonal events
+
+Plus the remainder of the casino — `confirmBet`, the bet guards, the leaderboard
+writes — which pass 4 named as out of its scope rather than dropping.
 
 Everything outside the economy stays in the audit log's list and is not sequenced
 ahead of any of the above.
