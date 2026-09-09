@@ -145,7 +145,13 @@ jobs:
       - name: Check the image exists
         id: image
         run: |
-          ref="${REGISTRY}/${IMAGE_NAME}:latest"
+          # `github.repository` carries the owner's case — `TheShield2594/clawdia`
+          # — and a registry reference must be lowercase, so every run of this
+          # job died here with `invalid reference format` before it inspected
+          # anything. ci.yml is unaffected because `docker/metadata-action`
+          # lowercases what it is given; this half talks to the registry
+          # directly and has to do it itself.
+          ref="${REGISTRY}/$(printf '%s' "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]'):latest"
 
           if output=$(docker manifest inspect "$ref" 2>&1); then
             echo "found=true" >> "$GITHUB_OUTPUT"

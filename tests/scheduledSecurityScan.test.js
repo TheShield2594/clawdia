@@ -161,9 +161,19 @@ describe('the existence check', () => {
      * Run the step's own script with `docker` stubbed to the given output and
      * exit status.
      *
+     * `image` is what `${{ github.repository }}` expands to. It defaulted to
+     * `owner/repo` and only ever ran as that, which is how the case bug below
+     * survived a suite that drives this step for real: the one fixture it had
+     * was already lowercase.
+     *
+     * The stub refuses a reference carrying an upper-case letter, in the
+     * client's own words and before the scripted reply, because that is what
+     * the real one does — so a regression fails here the way it failed on the
+     * runner rather than only tripping an assertion about a string.
+     *
      * @returns {{status: number, stdout: string, outputs: string}}
      */
-    const runWith = ({ says, exits }) => {
+    const runWith = ({ says, exits, image = 'owner/repo' }) => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdia-scan-'));
         try {
             const bin = path.join(dir, 'bin');
@@ -171,6 +181,13 @@ describe('the existence check', () => {
             fs.writeFileSync(
                 path.join(bin, 'docker'),
                 `#!/bin/sh
+for arg in "$@"; do :; done
+case "$arg" in
+  *[A-Z]*)
+    echo "invalid reference format: repository name ($arg) must be lowercase" >&2
+    exit 1
+    ;;
+esac
 printf '%s\n' ${JSON.stringify(says)} >&2
 exit ${exits}
 `,
@@ -189,7 +206,7 @@ exit ${exits}
                     ...process.env,
                     PATH: `${bin}:${process.env.PATH}`,
                     REGISTRY: 'ghcr.io',
-                    IMAGE_NAME: 'owner/repo',
+                    IMAGE_NAME: image,
                     GITHUB_OUTPUT: outputs,
                 },
             });
@@ -233,6 +250,32 @@ exit ${exits}
 
         expect(run.status).toBe(0);
         expect(run.outputs).toContain('found=false');
+    });
+
+    // Every scheduled run since #902 failed here, in three seconds, having
+    // inspected nothing: `IMAGE_NAME` is `github.repository`, which preserves
+    // the owner's case, and a registry reference must be lowercase. The job
+    // went red rather than green, which is the branch above working as written
+    // — not scanning is not the same as nothing to scan — and nobody was
+    // reading it. ci.yml never hit this because `docker/metadata-action`
+    // lowercases what it is handed; this workflow asks the registry itself.
+    test('lowercases the owner, which github.repository does not', () => {
+        const run = runWith({
+            says: '{"schemaVersion":2}',
+            exits: 0,
+            image: 'TheShield2594/clawdia',
+        });
+
+        expect(run.stdout).not.toContain('must be lowercase');
+        expect(run.status).toBe(0);
+        expect(run.outputs).toContain('ref=ghcr.io/theshield2594/clawdia:latest');
+        expect(run.outputs).toContain('found=true');
+    });
+
+    test('and the workflow really does feed it github.repository', () => {
+        // Without this the fixture above is a case nothing produces, and the
+        // test it anchors proves nothing about the runner.
+        expect(scanner.doc.env.IMAGE_NAME).toMatch(/github\.repository/);
     });
 
     test.each([
