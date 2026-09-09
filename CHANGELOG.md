@@ -14,6 +14,108 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.7.0] - 2026-09-09
+
+Migrations through `022_move_shop_images_to_itemimages`.
+
+The economy audit's fourth pass takes the coins the casino pays when a hand
+settles (#873) — everything the pot audited in 4.6.0 sat beside. The forward
+direction was already sound: every stake goes through `placeWager`'s
+compare-and-set, and #785 had moved the arithmetic into `games/casino/settlement.js`
+where it is tested to 100%. The write that follows was not. All twenty-odd payout
+sites were unkeyed `$inc`s with nothing reading them back, several with no
+`catch` at all, and the stake had left the wallet minutes earlier when the hand
+opened — so a write that matched nothing left the player out the bet *and* the
+winnings, under an embed announcing the win over a balance that had not moved.
+The jackpot credited from the same spin went through `creditCoinsOrOwe` and was
+recoverable; the hand's own payout beside it was not. All of them go through the
+new `games/casino/payout.js` now, which wraps that same helper: keyed, retried,
+filed for `npm run payouts:replay` when it will not land, and reported in the
+embed rather than asserted. Four more findings came out of the same pass.
+`/casino crash` cleared `pendingCrashRefund` for every player not marked
+cashed-out when a round busted — including the ones left unmarked *because*
+their cash-out write had failed, which is the one record that could have made
+them whole — and told them "You've already cashed out", the single sentence that
+costs a player money. `/casino poker`'s error rollback refunded the opening bet
+and kept every raise, because `playerStake` was scoped where the `catch` could
+not see it. `/casino cupgame`'s decision handler did nothing at all when a throw
+followed the button press: no money, no message, no lock back. And the rewrite
+introduced four defects of its own, all caught on review, of which the loudest
+had every successful manual cash-out reporting a failure. Detail in
+[docs/AUDIT_LOG.md](docs/AUDIT_LOG.md). This ticks the last item on #873's
+checklist; `confirmBet`, the bet guards, the leaderboard writes and the rest of
+the economy are still unaudited, and the audit log says so.
+
+Moderation's filters, measured against what they actually stop (#994). Eleven
+checks, run as real messages through the real handler rather than read off the
+code, came back wrong. Two dashboard settings were wired to nothing:
+`inviteAllowlist` and `linkAllowlist` were collected, stored on the guild and
+rendered back into their textareas, and read by no code — a server that allowed
+`youtube.com` had its YouTube links deleted anyway, with nothing from the outside
+to say the box did nothing. The profanity normalizer glued one-letter words onto
+the next, so `you are a bitch` normalized to `you are abitch` and `\bbitch\b`
+had no boundary left to match: the most ordinary phrasing of an insult in English
+was the one spelling the filter could not see. Auto-moderation ran only on
+`messageCreate`, so posting something harmless and editing the invite in walked
+past every filter in the list. Matching had no tolerance for padding or grammar
+(`shitt`, `biitch`, `assholes`, `fucks`) and no Unicode folding, which made
+accents, fullwidth text, zero-width characters and Cyrillic look-alikes four more
+free bypasses. Caps were scored with `[a-z]`/`[A-Z]`, so shouting in Cyrillic
+scored zero percent caps; emoji were counted as code points, so two family emoji
+counted as eight and deleted the message while four flags counted as none;
+mentions were counted from `mentions.users`, which Discord collapses by user, so
+fifty pings of one victim counted as one. `Scunthorpe`, `assassin`, `pussycat`,
+`shitake`, `niggardly` and `bob@example.com` still pass, and are tests now rather
+than luck. `/kick` and `/mute` resolved their target through `members.cache.get`,
+a 200-entry cache swept hourly, so every quiet member was unkickable behind "User
+not found in this server"; they use `resolveMember` like `/ban` already did.
+
+Five new moderation settings come with it, each defaulting to today's behaviour
+so no guild's enforcement changes without them asking: `exemptChannelIds` (a
+channel or a whole category out of the filters' reach), `scanEdits`,
+`allowOwnServerInvites`, `profanityAllowlist` — which is what makes
+`Dick Grayson is Robin` a decision rather than a deleted message and a filed case
+— and `everyoneMentionFilter`. The matching itself moved into
+`src/utils/contentFilters.js` as pure functions and the filters into
+`src/services/autoModService.js`, which is what let each evasion and each false
+positive become a test case instead of a fake message pushed through an event
+handler. Review of that work found six more defects, one of them reachable by
+anyone who can edit a guild's custom blocked words: `compileBadWordRegex` built
+one quantified atom per character, so an entry holding two of anything in a row
+produced adjacent quantifiers over the same character set and backtracked
+exponentially on a failed match — an entry of `#` and ten spaces stalled the
+event loop for 311ms against a 34-character message, quadrupling every four
+characters after that, for every guild. It compiles from runs now, which leaves
+neighbouring atoms with disjoint character sets and nothing to backtrack across.
+Also fixed there: the spam filter charged a user's rate window for fixing a typo,
+edit scanning was conditional on the author having posted recently (which is
+close to the opposite of what it is for), a cache signature joined word lists on
+a separator an entry could itself contain and served one guild's compiled
+patterns to another, `https://youtube.com,` reached the allowlist with its
+trailing comma attached and was deleted as unpermitted, and `profanityAllowlist`
+silently switched off custom words as well as built-in ones while the docs said
+otherwise.
+
+The weekly security scan had never once run. `security-scan.yml` (#902) exists to
+re-scan the published `:latest` during the quiet stretches between pushes, when
+neither gate in `ci.yml` fires at all. Its `IMAGE_NAME` is `github.repository`,
+which preserves the owner's case, and it hands that straight to
+`docker manifest inspect`, which refuses a reference that is not lowercase — so
+its first scheduled run, on 7 September, died in three seconds on
+`invalid reference format` without looking at anything, as every run after it
+would have. It went red rather than green, which is that branch working
+exactly as written: not scanning is not the same as nothing to scan. Nobody was
+reading it. `ci.yml` never hit this because `docker/metadata-action` lowercases
+what it is given; this workflow talks to the registry itself. The reference is
+lowercased now. The step was not untested — `tests/scheduledSecurityScan.test.js`
+already drove it as shell against a stubbed registry, over every answer it
+distinguishes — but its one fixture for the image name was `owner/repo`, which
+is lowercase, so the suite exercised the one case the runner never sees. It now
+runs the owner's real case, against a stub that refuses an upper-case reference
+in the client's own words, and asserts separately that the workflow does feed
+that step `github.repository`, so the fixture cannot quietly stop matching what
+production does.
+
 ## [4.6.1] - 2026-09-05
 
 Migrations through `022_move_shop_images_to_itemimages`.
