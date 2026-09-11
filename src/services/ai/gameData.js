@@ -176,10 +176,22 @@ function scalar(value) {
     return null;
 }
 
-/** A flat object as `key value/key value`, or null when it has no scalars. */
+/**
+ * A flat object as `label/key value/key value`, or null when it has nothing.
+ *
+ * A nested object keeps its own name where the record it sits in does not: the
+ * record's name is rendered above its facts, so repeating it inside them is
+ * noise, but nothing is rendered above `specialDrop`, and skipping the name
+ * there turned "Opossum Pelt, 3% of the time" into `specialDrop: chance 0.03`.
+ * The label leads and is not printed with its key, because `name Opossum Pelt`
+ * reads worse than the thing itself.
+ */
 function flatten(value) {
     if (!value || typeof value !== 'object') return null;
-    const parts = [];
+
+    const label = firstOf(value, NAME_KEYS);
+    const parts = label ? [label] : [];
+
     for (const [key, inner] of Object.entries(value)) {
         if (SKIPPED_KEYS.has(key)) continue;
         const rendered = scalar(inner);

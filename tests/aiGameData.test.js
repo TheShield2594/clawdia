@@ -73,6 +73,15 @@ describe('the index', () => {
         expect(byName('Crumbling Ruins').facts).not.toMatch(/Curator/);
     });
 
+    // A nested object is the one place a name has to survive: nothing is
+    // rendered above it, so skipping the name the way the record's own name is
+    // skipped left `specialDrop: chance 0.03` with no idea what dropped.
+    test('a nested object keeps its own name', () => {
+        expect(byName('Opossum').facts).toContain('specialDrop: Opossum Pelt/chance 0.03');
+        // And one with no name of its own still renders its fields.
+        expect(byName('Luck Charm ×1').facts).toContain('material rabbits_foot/qty 3');
+    });
+
     test('no entry is longer than a couple of paragraphs', () => {
         const longest = Math.max(...index.map(entry => gameDataSection([entry]).items[0].length));
 
