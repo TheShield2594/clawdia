@@ -19,7 +19,8 @@
  *   1. knowledge injected as *background* — entries nobody's question matched
  *   2. the oldest turns of the conversation
  *   3. MCP resources, lowest-scoring document first
- *   4. knowledge that did match the question
+ *   4. the bot's own commands the question matched, worst match first
+ *   5. knowledge that did match the question
  *
  * and, only if all of that still leaves it over, the message itself is
  * truncated. Nothing marked `required` is ever dropped: the system prompt, the
@@ -217,6 +218,12 @@ function removalSteps(sections, history) {
 const BACKGROUND_PRIORITY = 10;
 const HISTORY_PRIORITY = 20;
 const RESOURCE_PRIORITY = 30;
+// The bot's own command reference (ai/commandHelp.js). Above a fetched document
+// — a question that matched a command is usually a question *about* the bot,
+// and the command is the answer — and below a knowledge entry somebody in this
+// guild wrote on purpose, which is the one thing here that knows something the
+// command tree does not.
+const COMMAND_PRIORITY = 35;
 const MATCHED_KNOWLEDGE_PRIORITY = 40;
 
 /**
@@ -333,5 +340,6 @@ module.exports = {
     BACKGROUND_PRIORITY,
     HISTORY_PRIORITY,
     RESOURCE_PRIORITY,
+    COMMAND_PRIORITY,
     MATCHED_KNOWLEDGE_PRIORITY
 };

@@ -37,14 +37,32 @@ cannot see it, so it says so instead of answering from the caption alone. The
 same happens to an image too large or too numerous to send. Nothing is
 downloaded for a model that cannot use it.
 
+**Knowing its own commands**:
+
+Ask the chat "how do I equip my rifle" and it answers `/hunt inv equip`, because
+the commands it matched against the question are in front of it when it replies.
+Nobody has to write them down first: the reference is derived from the command
+tree this process loaded — the same `SlashCommandBuilder` definitions Discord
+renders in the command picker, down to subcommand descriptions, option types and
+choice lists — so a new command is answerable the moment it loads and there is
+no second list to fall out of date.
+
+Only what the question matched goes in, at most five commands of the hundred-odd
+that exist, so ordinary conversation costs nothing: "hey, how are you today"
+retrieves none of them. A question the retrieval did not match is a question the
+model is told to answer with `/help` rather than a guess — which is what it used
+to do, inventing a command that sounded right and sending somebody off to type
+it.
+
 **Context budgeting**:
 
-The assembled prompt — system prompt, knowledge base, MCP documents, history
-and the message — is measured against the model's context window before it is
-sent, and trimmed to fit if it does not: background knowledge goes first, then
-the oldest turns, then the least relevant fetched document, then knowledge the
-question matched, and only after all of that is the message itself cut. The
-system prompt, the tool rules and the pinned memories are never dropped.
+The assembled prompt — system prompt, knowledge base, command reference, MCP
+documents, history and the message — is measured against the model's context
+window before it is sent, and trimmed to fit if it does not: background
+knowledge goes first, then the oldest turns, then the least relevant fetched
+document, then the worst-matching command, then knowledge the question matched,
+and only after all of that is the message itself cut. The system prompt, the
+tool rules and the pinned memories are never dropped.
 
 The knowledge base has no size cliff any more: retrieval always runs, and the
 few newest entries ride along as background whatever the size of the base. Only

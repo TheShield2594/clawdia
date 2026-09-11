@@ -3,12 +3,14 @@ const { resolveMcpServers } = require('../../config/mcpServers');
 const { providers, mcpMode, usesClientTools, supportsVision } = require('./providers');
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
 const { retrieveKnowledge, knowledgeSection } = require('./knowledge');
+const { retrieveCommands, commandSection } = require('./commandHelp');
 const { collectImages, loadImages, visionNotice } = require('./vision');
 const {
     fitPrompt,
     inputBudget,
     BACKGROUND_PRIORITY,
     RESOURCE_PRIORITY,
+    COMMAND_PRIORITY,
     MATCHED_KNOWLEDGE_PRIORITY
 } = require('./budget');
 const { loadHistory, appendHistory, clearHistory } = require('./history');
@@ -258,6 +260,19 @@ async function handleAIChat(message, aiSettings, promptContent) {
             ...knowledgeSection(kbBackground, { background: true })
         });
     }
+    // The other reference, and the one nobody had to write: what the bot can
+    // actually do, derived from the commands this process loaded and matched
+    // against the question. "How do I equip my rifle" is answerable from
+    // `/hunt inv equip`'s own definition, and without it the model either says
+    // it does not know or — worse, and what it used to do — invents a command
+    // that sounds right. Below the guild's own knowledge in the budget: an
+    // admin who wrote an entry about hunting knows something the command tree
+    // does not.
+    const commandMatches = retrieveCommands(message.client?.commands, content);
+    if (commandMatches.length) {
+        sections.push({ id: 'commandHelp', priority: COMMAND_PRIORITY, ...commandSection(commandMatches) });
+    }
+
     // Every provider can reach MCP servers now — Anthropic through its own
     // connector, the rest through the bot's MCP client — so this only asks
     // whether the provider supports them at all and whether any resolve after

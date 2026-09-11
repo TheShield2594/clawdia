@@ -18,6 +18,7 @@ const {
     BACKGROUND_PRIORITY,
     HISTORY_PRIORITY,
     RESOURCE_PRIORITY,
+    COMMAND_PRIORITY,
     MATCHED_KNOWLEDGE_PRIORITY
 } = require('../src/services/ai/budget');
 
@@ -224,6 +225,41 @@ describe('trimming the conversation', () => {
         expect(fitted.report.historyDropped).toBe(1);
         expect(fitted.systemPrompt).toBe(chars(200));
         expect(HISTORY_PRIORITY).toBeLessThan(RESOURCE_PRIORITY);
+    });
+
+    // The bot's own command reference sits between the two: a fetched document
+    // goes first, and an entry somebody in this guild wrote by hand outlives
+    // it, because that is the one thing in the prompt that knows something the
+    // command tree does not.
+    test('a fetched document is dropped ahead of the command reference', () => {
+        const fitted = fitPrompt({
+            sections: [
+                { id: 'mcpResources', priority: RESOURCE_PRIORITY, header: '', joiner: '', items: [chars(200)] },
+                { id: 'commandHelp', priority: COMMAND_PRIORITY, header: '', joiner: '', items: [chars(200)] }
+            ],
+            history: [],
+            prompt: '',
+            budget: estimateTokens(chars(200))
+        });
+
+        expect(fitted.report.dropped).toEqual({ mcpResources: 1 });
+        expect(fitted.systemPrompt).toBe(chars(200));
+    });
+
+    test('and the command reference ahead of knowledge the question matched', () => {
+        const fitted = fitPrompt({
+            sections: [
+                { id: 'commandHelp', priority: COMMAND_PRIORITY, header: '', joiner: '', items: [chars(200)] },
+                { id: 'knowledge', priority: MATCHED_KNOWLEDGE_PRIORITY, header: '', joiner: '', items: [chars(200)] }
+            ],
+            history: [],
+            prompt: '',
+            budget: estimateTokens(chars(200))
+        });
+
+        expect(fitted.report.dropped).toEqual({ commandHelp: 1 });
+        expect(RESOURCE_PRIORITY).toBeLessThan(COMMAND_PRIORITY);
+        expect(COMMAND_PRIORITY).toBeLessThan(MATCHED_KNOWLEDGE_PRIORITY);
     });
 });
 
