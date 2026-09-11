@@ -482,6 +482,38 @@ describe('validateAiUpdate', () => {
         expect(validateAiUpdate({ ai: { contextTokens: 12.5 } })).toEqual(expect.any(String));
         expect(validateAiUpdate({ ai: { provider: 'anthropic', model: 'claude' } })).toBeNull();
     });
+
+    // `ai.mcpServers` belongs to the MCP routes, which drop a connection's OAuth
+    // grant when its URL moves (#796). This endpoint cannot do that, and the
+    // allow-list bounds the first path segment only — so `ai.mcpServers.0.url`
+    // used to arrive as an ordinary field write, move the URL, and leave the
+    // stored grant attached to it. The next chat turn then sent the guild's
+    // access token to whatever host had just been written, which no outbound
+    // guard refuses: it is public https, exactly what they exist to allow.
+    it.each([
+        'ai.mcpServers',
+        'ai.mcpServers.0',
+        'ai.mcpServers.0.url',
+        'ai.mcpServers.0.oauth.tokenEndpoint',
+    ])('refuses %s, which would move a connection without re-authorizing it', key => {
+        expect(validateAiUpdate({ [key]: 'https://attacker.example/mcp' }))
+            .toEqual(expect.stringContaining('ai.mcpServers cannot be set'));
+    });
+
+    it('refuses mcpServers smuggled inside a whole-object ai update', () => {
+        expect(validateAiUpdate({ ai: { mcpServers: [{ name: 'linear', url: 'https://attacker.example/mcp' }] } }))
+            .toEqual(expect.stringContaining('ai.mcpServers cannot be set'));
+        // An `ai` write that does not mention them is still an ordinary update.
+        expect(validateAiUpdate({ ai: { provider: 'ollama' } })).toBeNull();
+    });
+
+    it('leaves the ai fields that are not connections writable', () => {
+        // The refusal is the mcpServers subtree, not anything whose name starts
+        // similarly, and not the MCP settings that really do live here.
+        expect(validateAiUpdate({ 'ai.mcpConfirm': CONFIRM_MODES[0] })).toBeNull();
+        expect(validateAiUpdate({ 'ai.mcpRoute': MCP_ROUTES[0] })).toBeNull();
+        expect(validateAiUpdate({ 'ai.mcpServersEnabled': true })).toBeNull();
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -533,6 +565,21 @@ describe('POST /guild/:guildId/settings', () => {
         expect(doc.set).not.toHaveBeenCalled();
         expect(doc.save).not.toHaveBeenCalled();
         expect({}.polluted).toBeUndefined();
+    });
+
+    it('refuses to repoint an MCP connection, before anything is written', async () => {
+        // The regression this endpoint exists to not have: a guild admin with
+        // Manage Server posting a new URL onto a connection that holds an OAuth
+        // grant. Mongoose applies `ai.mcpServers.0.url` as a field write, so the
+        // grant survives the move and the bot's next turn hands the guild's
+        // access token to the host named here. It has to be refused before
+        // `.set()` sees it, which is what the `set` assertion pins.
+        const res = await post({ 'ai.mcpServers.0.url': 'https://attacker.example/mcp' });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('ai.mcpServers cannot be set');
+        expect(doc.set).not.toHaveBeenCalled();
+        expect(doc.save).not.toHaveBeenCalled();
     });
 
     it('names every disallowed key it refused', async () => {

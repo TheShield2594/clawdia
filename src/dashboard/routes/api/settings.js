@@ -322,9 +322,37 @@ function validateContextTokens(value) {
     return null;
 }
 
+// `ai.mcpServers` is not writable through this endpoint — only through the MCP
+// routes in src/dashboard/routes/api/mcpServers.js.
+//
+// Those routes enforce something this one structurally cannot: an OAuth grant is
+// bound to the resource it was issued for, so moving a connection's URL drops
+// the grant instead of leaving a live credential pointed at a server it was
+// never issued for (#796). The allow-list bounds the *first* path segment only,
+// so `ai.mcpServers.0.url` arrived here as an ordinary field write and reached
+// `guildSettings.set()` intact: the URL moved, the stored grant stayed attached
+// to it, and the next chat turn put the guild's access token on a request to
+// whatever host had just been written. Neither outbound guard covers that —
+// the host in that attack is public https, which is precisely what
+// `assertHttpsUrl` and the guarded dispatcher exist to allow.
+//
+// The dashboard only ever sends this subtree through the dedicated routes, so
+// refusing it here costs the UI nothing.
+function validateMcpServersUpdate(key, value, isWholeAi) {
+    const refusal = 'ai.mcpServers cannot be set through the settings endpoint — use the MCP '
+        + 'server endpoints, which drop a connection\'s OAuth grant when its URL changes';
+
+    if (key === 'ai.mcpServers' || key.startsWith('ai.mcpServers.')) return refusal;
+    if (isWholeAi && Object.prototype.hasOwnProperty.call(value, 'mcpServers')) return refusal;
+    return null;
+}
+
 function validateAiUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
         const isWholeAi = key === 'ai' && value && typeof value === 'object';
+
+        const mcpServersError = validateMcpServersUpdate(key, value, isWholeAi);
+        if (mcpServersError) return mcpServersError;
 
         let baseUrl;
         if (key === 'ai.ollamaBaseUrl') baseUrl = value;
