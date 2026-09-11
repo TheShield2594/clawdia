@@ -162,6 +162,7 @@ const MAX_VALUE_CHARS = 120;
 const MAX_FACTS_CHARS = 320;
 const MAX_DESCRIPTION_CHARS = 300;
 
+/** `text`, cut to `limit` characters with an ellipsis when it runs past it. */
 function truncate(text, limit) {
     return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
 }
@@ -242,6 +243,15 @@ function factsOf(record) {
     return parts.join(' · ');
 }
 
+/**
+ * The first of `keys` this record carries as a non-empty string.
+ *
+ * Which word a table uses for a name or a description is the table's business
+ * — `label`, `itemId`, `desc`, `lore`, `tagline` are all in use — so the order
+ * of `keys` is the preference and the first hit wins.
+ *
+ * @returns {string} '' when the record has none of them
+ */
 function firstOf(record, keys) {
     for (const key of keys) {
         const value = record[key];
@@ -406,6 +416,7 @@ function retrieveGameData(query, limit = GAME_DATA_LIMIT) {
 
 // ─── THE PROMPT SECTION ───────────────────────────────────────────────────────
 
+/** One record as it appears in the prompt: what it is, then prose, then facts. */
 function gameBlock(entry) {
     const lines = [`**${entry.name}** — ${entry.kind}${entry.command ? ` (\`${entry.command}\`)` : ''}`];
     if (entry.description) lines.push(entry.description);

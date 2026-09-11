@@ -72,6 +72,7 @@ const SYNONYMS = new Map([
 
 const SYNONYM_WEIGHT = 0.5;
 
+/** `text` with every regular-expression metacharacter escaped. */
 function escapeRegExp(text) {
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -84,6 +85,13 @@ function escapeRegExp(text) {
 const WORD_PATTERN_CACHE_MAX = 512;
 const wordPatterns = new Map();
 
+/**
+ * A cached whole-word matcher for `form`.
+ *
+ * @param {string} form one spelling of a question word
+ * @returns {RegExp} anchored on word boundaries, so `inv` does not match
+ *   "invest"
+ */
 function wordPattern(form) {
     let pattern = wordPatterns.get(form);
     if (!pattern) {

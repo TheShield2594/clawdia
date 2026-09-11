@@ -74,6 +74,14 @@ const FIELD_WEIGHTS = { usage: 5, description: 3, options: 2, choices: 2, contex
 // else needs a second question word landing somewhere in the same entry.
 const PATH_FIELD = 'usage';
 
+/**
+ * One command option as the prompt needs it: what to call its type in a
+ * sentence, whether it has to be given, and what may be given for it.
+ *
+ * @param {object} option one entry of a builder's `options`
+ * @returns {{name: string, label: string, required: boolean,
+ *   description: string, choices: string[]}}
+ */
 function optionEntry(option) {
     return {
         name: option.name,
@@ -84,6 +92,18 @@ function optionEntry(option) {
     };
 }
 
+/**
+ * One leaf of the command tree, as a searchable, renderable entry.
+ *
+ * @param {object} leaf
+ * @param {string[]} leaf.path        the words a user types, `['hunt', 'inv', 'equip']`
+ * @param {string} leaf.description   the leaf's own description
+ * @param {object[]} [leaf.options]   the leaf's options, subcommands included
+ * @param {string} leaf.category      the folder the command was loaded from
+ * @param {object} [leaf.root]        the top-level command this hangs off
+ * @param {object} [leaf.group]       the subcommand group, where there is one
+ * @returns {object} with a `fields` of lowercased text for the scorer
+ */
 function indexEntry({ path, description, options, category, root, group }) {
     const entryOptions = (options || [])
         .filter(option => option.type !== SUBCOMMAND && option.type !== SUBCOMMAND_GROUP)
@@ -167,6 +187,12 @@ function flattenCommand(command) {
 // size, so a test that swaps in a different set gets a different index.
 const indexCache = new WeakMap();
 
+/**
+ * The loaded command modules behind whatever the caller passed.
+ *
+ * @param {object} commands a discord.js Collection, an array, or any iterable
+ * @returns {object[]} empty for anything else, including nothing at all
+ */
 function commandModules(commands) {
     if (!commands) return [];
     if (typeof commands.values === 'function') return [...commands.values()];
@@ -220,6 +246,7 @@ function retrieveCommands(commands, query, limit = COMMAND_LIMIT) {
     return rankMatches(matches, { limit, perGroup: PER_COMMAND_LIMIT });
 }
 
+/** One option as the line that sits under its command in the prompt. */
 function optionLine(option) {
     const shape = [option.label, option.required ? 'required' : 'optional'].join(', ');
     const parts = [`\`${option.name}\` (${shape})`];
