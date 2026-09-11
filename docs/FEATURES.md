@@ -54,15 +54,38 @@ model is told to answer with `/help` rather than a guess — which is what it us
 to do, inventing a command that sounded right and sending somebody off to type
 it.
 
+**Knowing what the commands are about**:
+
+The command tree says `/hunt shop weapon` exists. It does not say what a Cobalt
+Rifle costs, which zone opossums live in, what a Luck Charm does, or what the
+Whisperwood Charm is — that lives in the tables under `src/data/` that the
+economy reads at runtime. Those are indexed the same way, so "what does the
+cobalt rifle cost" reaches the model with the rifle's own row attached: its
+price, tier, durability, success rate, ammunition and repair cost, straight out
+of `huntData.js`, plus the command you buy it with.
+
+Roughly 640 records across hunting, fishing, mining, exploring, crafting,
+achievements, jobs, heists, the shop and seasonal events. A price edited in a
+data file is in the bot's answers on the next restart; nothing is transcribed.
+The same five-match cap applies, and the model is told these numbers are exact
+and not to round them.
+
+Two things are deliberately left out. `/quiz`'s question bank is not indexed —
+a bot that hands out the answer to the question it just asked you is not a quiz
+— and neither is the automod word list. Nor is anything `/explore` hides until
+somebody finds it: region secrets, their rewards and their reveal text are
+skipped on purpose rather than left to a length limit.
+
 **Context budgeting**:
 
-The assembled prompt — system prompt, knowledge base, command reference, MCP
-documents, history and the message — is measured against the model's context
-window before it is sent, and trimmed to fit if it does not: background
-knowledge goes first, then the oldest turns, then the least relevant fetched
-document, then the worst-matching command, then knowledge the question matched,
-and only after all of that is the message itself cut. The system prompt, the
-tool rules and the pinned memories are never dropped.
+The assembled prompt — system prompt, knowledge base, command reference, game
+content, MCP documents, history and the message — is measured against the
+model's context window before it is sent, and trimmed to fit if it does not:
+background knowledge goes first, then the oldest turns, then the least relevant
+fetched document, then the worst-matching game record, then the worst-matching
+command, then knowledge the question matched, and only after all of that is the
+message itself cut. The system prompt, the tool rules and the pinned memories
+are never dropped.
 
 The knowledge base has no size cliff any more: retrieval always runs, and the
 few newest entries ride along as background whatever the size of the base. Only

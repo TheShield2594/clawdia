@@ -1,12 +1,13 @@
 'use strict';
 
-// The command reference reaching the model, rather than merely existing.
+// What the bot knows about itself reaching the model, rather than merely
+// existing.
 //
-// tests/aiCommandHelp.test.js covers what retrieval finds. This covers the
-// wiring: that the chat transport asks the loaded command set about the
-// question, that what comes back is in the system prompt the provider is
-// called with, and that a message about nothing in particular does not put a
-// command listing in front of the model on every "hey".
+// tests/aiCommandHelp.test.js and tests/aiGameData.test.js cover what the two
+// indexes find. This covers the wiring: that the chat transport asks both about
+// the question, that what comes back is in the system prompt the provider is
+// called with, and that a message about nothing in particular puts neither a
+// command listing nor an item table in front of the model on every "hey".
 
 jest.mock('../src/models/User', () => ({
     findOne: jest.fn(() => ({ lean: async () => null })),
@@ -99,11 +100,24 @@ test('the question this feature exists for reaches the model with its answer att
     expect(prompt).toMatch(/never invent a command/i);
 });
 
-test('a message about nothing in particular carries no command listing', async () => {
+// The game tables are not mocked here: they are literals in src/data/, and the
+// point of this one is that the real ones reach the real prompt.
+test('a question about an item reaches the model with the item\'s own numbers', async () => {
+    const ask = 'what does the cobalt rifle cost';
+    await handleAIChat(fakeMessage(ask), SETTINGS, ask);
+
+    const prompt = systemPromptSent();
+    expect(prompt).toContain('**Cobalt Rifle**');
+    expect(prompt).toContain('cost: 30,000');
+    expect(prompt).toMatch(/never round or estimate/i);
+});
+
+test('a message about nothing in particular carries neither', async () => {
     await handleAIChat(fakeMessage('hey there, how are you today'), SETTINGS, 'hey there, how are you today');
 
     expect(mockComplete).toHaveBeenCalled();
     expect(systemPromptSent()).not.toContain('/hunt');
+    expect(systemPromptSent()).not.toContain('Cobalt Rifle');
 });
 
 // The transport runs before the client has a command collection on it in some
@@ -112,5 +126,5 @@ test('a client with no commands loaded still answers', async () => {
     await handleAIChat(fakeMessage('how do I equip my rifle', null), SETTINGS, 'how do I equip my rifle');
 
     expect(mockComplete).toHaveBeenCalled();
-    expect(systemPromptSent()).not.toContain('/hunt');
+    expect(systemPromptSent()).not.toContain('/hunt inv equip');
 });

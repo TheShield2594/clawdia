@@ -22,6 +22,8 @@
 // ~100 commands with their subcommands and options is a large fraction of a
 // small model's context, spent on every "hey" as well as every "how do I".
 
+const { queryTerms, scoreFields, rankMatches } = require('./retrieval');
+
 // Discord's application-command option types. The two structural ones drive the
 // walk below; the rest are only ever rendered, in the word a player would use
 // rather than the API's.
@@ -54,11 +56,7 @@ const MAX_OPTIONS_SHOWN = 6;
 const MAX_CHOICES_SHOWN = 6;
 
 // How many leaves of the same top-level command may take slots before the rest
-// get one. Without it a question about fishing spends all five on /fish, and
-// "where do I sell my fish" never reaches /market — every /fish subcommand
-// scores on the word "fish" whether or not it has anything to do with selling.
-// Leftover slots still go to the best remaining entries, so a question that
-// really is about one command is not padded out with worse answers.
+// get one. See rankMatches in retrieval.js.
 const PER_COMMAND_LIMIT = 2;
 
 // Where a query word hit, and what that is worth. A word in the command path
@@ -75,162 +73,6 @@ const FIELD_WEIGHTS = { usage: 5, description: 3, options: 2, choices: 2, contex
 // "hey there, how are you today" is not a question about any of them. Anything
 // else needs a second question word landing somewhere in the same entry.
 const PATH_FIELD = 'usage';
-
-// Words that carry no signal about which command is meant. Deliberately only
-// grammar, and nothing that is a command name: `/use`, `/work`, `/mine`,
-// `/shop` and `/help` all read as filler in an English sentence, and a stopword
-// list that ate them would be a list that silently stopped answering the
-// questions it exists for. tests/aiCommandHelp.test.js holds that to the
-// command set, so a command named after a preposition fails the suite rather
-// than quietly becoming unfindable.
-const STOPWORDS = new Set([
-    'the', 'and', 'for', 'with', 'you', 'your', 'yours', 'his', 'her', 'their', 'its',
-    'how', 'what', 'where', 'when', 'why', 'who', 'which', 'whose',
-    'can', 'could', 'would', 'should', 'will', 'shall', 'may', 'might', 'must',
-    'does', 'did', 'done', 'doing', 'are', 'was', 'were', 'been', 'being',
-    'have', 'has', 'had', 'having', 'about', 'this', 'that', 'these', 'those',
-    'there', 'here', 'from', 'into', 'onto', 'than', 'then', 'them', 'they',
-    'but', 'not', 'any', 'all', 'some', 'more', 'most', 'much', 'many',
-    'please', 'thanks', 'tell', 'know', 'want', 'need', 'again',
-    'just', 'like', 'now', 'one', 'two', 'out', 'own', 'way', 'got'
-]);
-
-// Everyday words for things the command tree calls something else, so that the
-// question does not have to be phrased in the bot's own vocabulary. Boosting
-// only, and at half weight: nothing here is required for a match, and removing
-// the map entirely would make retrieval worse, never wrong. Keep it to words a
-// player would actually type.
-const SYNONYMS = new Map([
-    ['gun', ['rifle', 'weapon']],
-    ['weapon', ['rifle', 'gun']],
-    ['rifle', ['weapon']],
-    ['money', ['coins', 'balance', 'wallet']],
-    ['cash', ['coins', 'balance']],
-    ['coins', ['balance', 'wallet']],
-    ['broke', ['balance', 'daily']],
-    ['gamble', ['casino', 'bet']],
-    ['gambling', ['casino', 'bet']],
-    ['pickaxe', ['mine', 'mining']],
-    ['rod', ['fish', 'fishing']],
-    ['bait', ['fish', 'fishing']],
-    ['stats', ['profile', 'level']],
-    ['level', ['rank', 'xp']],
-    ['leveling', ['rank', 'xp']],
-    ['rank', ['level', 'leaderboard']],
-    ['inventory', ['inv', 'items']],
-    ['items', ['inventory', 'inv']],
-    ['gear', ['inv', 'equip', 'weapon']],
-    ['sell', ['market', 'shop', 'sale']],
-    ['buy', ['shop', 'market']],
-    ['trade', ['market', 'gift']],
-    ['job', ['work', 'jobs']]
-]);
-
-const SYNONYM_WEIGHT = 0.5;
-
-function escapeRegExp(text) {
-    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// Whole-word patterns for the short forms, kept because the same handful of
-// them is tested against every entry in the index on every message, and the
-// vocabulary a question can use is small and repeats. The keys come from what
-// people type, so the cache is bounded and dropped whole when it fills rather
-// than grown by anyone willing to send three-letter nonsense all day.
-const WORD_PATTERN_CACHE_MAX = 512;
-const wordPatterns = new Map();
-
-function wordPattern(form) {
-    let pattern = wordPatterns.get(form);
-    if (!pattern) {
-        if (wordPatterns.size >= WORD_PATTERN_CACHE_MAX) wordPatterns.clear();
-        pattern = new RegExp(`\\b${escapeRegExp(form)}\\b`);
-        wordPatterns.set(form, pattern);
-    }
-    return pattern;
-}
-
-/**
- * The spellings of one query word worth looking for.
- *
- * A crude stem, not a stemmer: drop a plural or a tense off the end so that
- * "equipping" still finds "Equip a weapon" and "rifles" still finds "Rifle".
- * It only ever adds forms, so over-stemming costs a wasted `includes` rather
- * than a wrong answer.
- */
-function wordForms(word) {
-    const forms = new Set([word]);
-    const add = form => { if (form.length >= 3 && form !== word) forms.add(form); };
-
-    // Plurals, in both spellings: dropping -es is right for "matches" and
-    // wrong for "horses", and carrying the wrong one costs a lookup.
-    if (word.endsWith('s')) {
-        add(word.slice(0, -1));
-        if (word.endsWith('es')) add(word.slice(0, -2));
-    }
-
-    // Tenses, and the two things English does to a stem before adding one: the
-    // doubled consonant ("equipping" → "equipp" → "equip") and the dropped
-    // silent e ("mining" → "min" → "mine", which is the difference between
-    // "how does mining work" finding /mine and finding /work). The bare short
-    // stem is never added — "min" on its own would match anything — only the
-    // spellings that put a real word back together.
-    const tense = word.replace(/(ing|ed)$/, '');
-    if (tense !== word && tense.length >= 3) {
-        if (tense.length >= 4) {
-            add(tense);
-            if (/(.)\1$/.test(tense)) add(tense.slice(0, -1));
-        }
-        add(`${tense}e`);
-    }
-
-    // A stem can land on grammar: "whats" is not in the list above and "what"
-    // is. Filtered here rather than before stemming, or "hey whats up"
-    // retrieves every command whose description contains the word "what".
-    return [...forms].filter(form => !STOPWORDS.has(form));
-}
-
-/** The words of a question that could name a command, with their synonyms. */
-function queryTerms(query) {
-    const words = String(query || '')
-        .toLowerCase()
-        .split(/[^a-z0-9]+/)
-        .filter(word => word.length > 2 && !STOPWORDS.has(word));
-
-    const terms = [];
-    const seen = new Set();
-
-    for (const word of new Set(words)) {
-        const forms = wordForms(word);
-        if (!forms.length) continue;
-        terms.push({ word, forms, weight: 1 });
-        seen.add(word);
-    }
-    for (const word of [...seen]) {
-        for (const synonym of SYNONYMS.get(word) || []) {
-            if (seen.has(synonym)) continue;
-            const forms = wordForms(synonym);
-            seen.add(synonym);
-            if (!forms.length) continue;
-            terms.push({ word: synonym, forms, weight: SYNONYM_WEIGHT, synonym: true });
-        }
-    }
-
-    return terms;
-}
-
-/**
- * Whether `form` appears in `text`.
- *
- * Substring for anything long enough that a substring means something, and a
- * whole word for the short ones: `inv` has to match "/hunt inv equip" without
- * also matching "invest" and "inventory" on every question that says "inv".
- */
-function fieldHas(text, form) {
-    if (!text) return false;
-    if (form.length <= 3) return wordPattern(form).test(text);
-    return text.includes(form);
-}
 
 function optionEntry(option) {
     return {
@@ -350,24 +192,6 @@ function buildCommandIndex(commands) {
     return index;
 }
 
-function scoreEntry(entry, terms) {
-    let score = 0;
-    let named = false;
-    const matched = new Set();
-
-    for (const term of terms) {
-        for (const [field, weight] of Object.entries(FIELD_WEIGHTS)) {
-            const text = entry.fields[field];
-            if (!term.forms.some(form => fieldHas(text, form))) continue;
-            score += weight * term.weight;
-            if (!term.synonym) matched.add(term.word);
-            if (field === PATH_FIELD) named = true;
-        }
-    }
-
-    return { score, named, matched: matched.size };
-}
-
 /**
  * The commands this question is about, best first, or [] when it is about none.
  *
@@ -385,32 +209,15 @@ function retrieveCommands(commands, query, limit = COMMAND_LIMIT) {
     const terms = queryTerms(query);
     if (!terms.length) return [];
 
-    const scored = [];
+    const matches = [];
     for (const entry of buildCommandIndex(commands)) {
-        const { score, named, matched } = scoreEntry(entry, terms);
+        const { score, named, matched } = scoreFields(entry.fields, terms, FIELD_WEIGHTS, PATH_FIELD);
         if (!score) continue;
         if (!named && matched < 2) continue;
-        scored.push({ entry, score });
+        matches.push({ value: entry, score, group: entry.command, tiebreak: entry.usage });
     }
 
-    const ranked = scored
-        .sort((a, b) => b.score - a.score || a.entry.usage.localeCompare(b.entry.usage))
-        .map(s => s.entry);
-
-    const perCommand = new Map();
-    const picked = [];
-    const overflow = [];
-    for (const entry of ranked) {
-        const taken = perCommand.get(entry.command) || 0;
-        if (taken < PER_COMMAND_LIMIT && picked.length < limit) {
-            perCommand.set(entry.command, taken + 1);
-            picked.push(entry);
-        } else {
-            overflow.push(entry);
-        }
-    }
-
-    return picked.concat(overflow.slice(0, Math.max(0, limit - picked.length)));
+    return rankMatches(matches, { limit, perGroup: PER_COMMAND_LIMIT });
 }
 
 function optionLine(option) {
@@ -474,8 +281,5 @@ module.exports = {
     retrieveCommands,
     commandSection,
     buildCommandContext,
-    COMMAND_LIMIT,
-    // For the guard in tests/aiCommandHelp.test.js, which is the only thing
-    // outside this file that has any business reading it.
-    _STOPWORDS: STOPWORDS
+    COMMAND_LIMIT
 };

@@ -18,6 +18,7 @@ const {
     BACKGROUND_PRIORITY,
     HISTORY_PRIORITY,
     RESOURCE_PRIORITY,
+    GAME_DATA_PRIORITY,
     COMMAND_PRIORITY,
     MATCHED_KNOWLEDGE_PRIORITY
 } = require('../src/services/ai/budget');
@@ -227,15 +228,15 @@ describe('trimming the conversation', () => {
         expect(HISTORY_PRIORITY).toBeLessThan(RESOURCE_PRIORITY);
     });
 
-    // The bot's own command reference sits between the two: a fetched document
-    // goes first, and an entry somebody in this guild wrote by hand outlives
-    // it, because that is the one thing in the prompt that knows something the
-    // command tree does not.
-    test('a fetched document is dropped ahead of the command reference', () => {
+    // What the bot knows about itself sits between the two: a fetched document
+    // goes first, and an entry somebody in this guild wrote by hand outlives it
+    // all, because that is the one thing in the prompt that knows something
+    // neither the command tree nor the game tables do.
+    test('a fetched document is dropped ahead of the bot\'s own tables', () => {
         const fitted = fitPrompt({
             sections: [
                 { id: 'mcpResources', priority: RESOURCE_PRIORITY, header: '', joiner: '', items: [chars(200)] },
-                { id: 'commandHelp', priority: COMMAND_PRIORITY, header: '', joiner: '', items: [chars(200)] }
+                { id: 'gameData', priority: GAME_DATA_PRIORITY, header: '', joiner: '', items: [chars(200)] }
             ],
             history: [],
             prompt: '',
@@ -244,6 +245,25 @@ describe('trimming the conversation', () => {
 
         expect(fitted.report.dropped).toEqual({ mcpResources: 1 });
         expect(fitted.systemPrompt).toBe(chars(200));
+    });
+
+    // Game data before the command reference, because a command's rendered
+    // choice list repeats several of the same names and prices the item records
+    // carry, so the thinner half survives the bulkier one usefully.
+    test('game content is dropped ahead of the command reference', () => {
+        const fitted = fitPrompt({
+            sections: [
+                { id: 'gameData', priority: GAME_DATA_PRIORITY, header: '', joiner: '', items: [chars(200)] },
+                { id: 'commandHelp', priority: COMMAND_PRIORITY, header: '', joiner: '', items: [chars(200)] }
+            ],
+            history: [],
+            prompt: '',
+            budget: estimateTokens(chars(200))
+        });
+
+        expect(fitted.report.dropped).toEqual({ gameData: 1 });
+        expect(RESOURCE_PRIORITY).toBeLessThan(GAME_DATA_PRIORITY);
+        expect(GAME_DATA_PRIORITY).toBeLessThan(COMMAND_PRIORITY);
     });
 
     test('and the command reference ahead of knowledge the question matched', () => {

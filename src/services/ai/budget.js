@@ -19,8 +19,9 @@
  *   1. knowledge injected as *background* — entries nobody's question matched
  *   2. the oldest turns of the conversation
  *   3. MCP resources, lowest-scoring document first
- *   4. the bot's own commands the question matched, worst match first
- *   5. knowledge that did match the question
+ *   4. the game content the question matched, worst match first
+ *   5. the bot's own commands the question matched, worst match first
+ *   6. knowledge that did match the question
  *
  * and, only if all of that still leaves it over, the message itself is
  * truncated. Nothing marked `required` is ever dropped: the system prompt, the
@@ -218,11 +219,18 @@ function removalSteps(sections, history) {
 const BACKGROUND_PRIORITY = 10;
 const HISTORY_PRIORITY = 20;
 const RESOURCE_PRIORITY = 30;
-// The bot's own command reference (ai/commandHelp.js). Above a fetched document
-// — a question that matched a command is usually a question *about* the bot,
-// and the command is the answer — and below a knowledge entry somebody in this
-// guild wrote on purpose, which is the one thing here that knows something the
-// command tree does not.
+// The game's own content tables (ai/gameData.js) and the command reference
+// derived from the command tree (ai/commandHelp.js), both above a fetched
+// document — a question that matched either is usually a question *about* the
+// bot, and they are the answer — and both below a knowledge entry somebody in
+// this guild wrote on purpose, which is the one thing here that knows something
+// neither table does.
+//
+// Game data goes first of the two because it is the bulkier half and the
+// thinner half survives it usefully: a command's rendered choice list carries
+// several of the same names and prices the item records do, so a prompt that
+// keeps only the command reference can still often answer the question.
+const GAME_DATA_PRIORITY = 33;
 const COMMAND_PRIORITY = 35;
 const MATCHED_KNOWLEDGE_PRIORITY = 40;
 
@@ -340,6 +348,7 @@ module.exports = {
     BACKGROUND_PRIORITY,
     HISTORY_PRIORITY,
     RESOURCE_PRIORITY,
+    GAME_DATA_PRIORITY,
     COMMAND_PRIORITY,
     MATCHED_KNOWLEDGE_PRIORITY
 };

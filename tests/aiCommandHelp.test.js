@@ -14,9 +14,9 @@ const {
     buildCommandIndex,
     retrieveCommands,
     commandSection,
-    buildCommandContext,
-    _STOPWORDS
+    buildCommandContext
 } = require('../src/services/ai/commandHelp');
+const { STOPWORDS } = require('../src/services/ai/retrieval');
 
 // A command module as the loader hands one over: `data.toJSON()` plus the
 // category the folder walk stamps on.
@@ -227,7 +227,7 @@ describe('against the real command set', () => {
         const pathWords = new Set(
             buildCommandIndex(modules).flatMap(entry => entry.usage.slice(1).split(' '))
         );
-        const eaten = [...pathWords].filter(word => _STOPWORDS.has(word));
+        const eaten = [...pathWords].filter(word => STOPWORDS.has(word));
 
         expect(eaten).toEqual([]);
     });
