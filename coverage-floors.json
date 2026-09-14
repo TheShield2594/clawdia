@@ -55,10 +55,10 @@
             "lines": 14
         },
         "src/commands/economy/hunt": {
-            "statements": 37,
-            "branches": 18,
-            "functions": 50,
-            "lines": 37
+            "statements": 43,
+            "branches": 32,
+            "functions": 55,
+            "lines": 44
         },
         "src/commands/economy/hunt/shop": {
             "statements": 27,
@@ -389,7 +389,6 @@
         "src/commands/economy/hunt/shop/unlock.js",
         "src/commands/economy/hunt/shop/upgrade.js",
         "src/commands/economy/hunt/shop/use.js",
-        "src/commands/economy/hunt/zone.js",
         "src/commands/economy/jobs.js",
         "src/commands/economy/mine/inventory.js",
         "src/commands/economy/mine/profile.js",
