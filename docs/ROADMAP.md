@@ -60,15 +60,19 @@ so that there is only ever one copy to correct.
    payouts. `confirmBet`, the bet guards and the games' leaderboard writes were
    explicitly out of its scope and are still unaudited — smaller than a pass of
    its own, and worth folding into whichever one next touches that code.
-4. **Ratchet the coverage floors.**
-   ([#998](https://github.com/TheShield2594/clawdia/issues/998))
-   `src/commands/economy/fish` and
-   `src/commands/economy/mine` sit at 14% and 16% statements with branch floors
-   of 0 — recorded in `coverage-floors.json`'s `unguarded` list, so they may
-   shrink and must not grow. Four passes have now gone where the money-moving
-   code is rather than where the coverage is worst, and those are not the same
-   ordering: this will not happen as a side effect of the audit, and wanting it
-   means scheduling a pass for it.
+4. **Ratchet the coverage floors — `hunt` next.**
+   ([#998](https://github.com/TheShield2594/clawdia/issues/998)) `fish` and
+   `mine` are done: both were at a branch floor of 0, which every possible state
+   satisfies, and both now carry a real one — 18% and 23% branches, 31% and 32%
+   statements — so neither is in `coverage-floors.json`'s `unguarded` list any
+   more. What that pass did was take the two files in each folder that read as
+   pure functions of their arguments, `embeds.js`, and the smallest handler
+   beside them, which together hold about a third of each directory's branches.
+   `src/commands/economy/hunt` is the same shape at 40%/21% and is the largest
+   of the three; `fish/shop` still has branch and function floors of 0. Neither
+   will happen as a side effect of the audit — four passes have now gone where
+   the money-moving code is rather than where the coverage is worst, and those
+   are not the same ordering.
 
 ## The audit queue
 

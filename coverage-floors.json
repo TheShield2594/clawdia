@@ -43,10 +43,10 @@
             "lines": 25
         },
         "src/commands/economy/fish": {
-            "statements": 14,
-            "branches": 0,
-            "functions": 31,
-            "lines": 15
+            "statements": 31,
+            "branches": 18,
+            "functions": 42,
+            "lines": 30
         },
         "src/commands/economy/fish/shop": {
             "statements": 13,
@@ -67,10 +67,10 @@
             "lines": 28
         },
         "src/commands/economy/mine": {
-            "statements": 16,
-            "branches": 0,
-            "functions": 30,
-            "lines": 17
+            "statements": 32,
+            "branches": 23,
+            "functions": 41,
+            "lines": 33
         },
         "src/commands/economy/mine/shop": {
             "statements": 27,
@@ -169,10 +169,10 @@
             "lines": 83
         },
         "src/services": {
-            "statements": 65,
-            "branches": 56,
-            "functions": 62,
-            "lines": 68
+            "statements": 66,
+            "branches": 57,
+            "functions": 63,
+            "lines": 69
         },
         "src/services/ai": {
             "statements": 81,
@@ -372,8 +372,6 @@
         "src/commands/economy/featured.js",
         "src/commands/economy/feed.js",
         "src/commands/economy/fish/craft.js",
-        "src/commands/economy/fish/embeds.js",
-        "src/commands/economy/fish/location.js",
         "src/commands/economy/fish/profile.js",
         "src/commands/economy/fish/quests.js",
         "src/commands/economy/fish/shop/buy.js",
@@ -393,7 +391,6 @@
         "src/commands/economy/hunt/shop/use.js",
         "src/commands/economy/hunt/zone.js",
         "src/commands/economy/jobs.js",
-        "src/commands/economy/mine/embeds.js",
         "src/commands/economy/mine/inventory.js",
         "src/commands/economy/mine/profile.js",
         "src/commands/economy/mine/quests.js",
@@ -452,15 +449,9 @@
         "src/commands/economy/event": [
             "branches"
         ],
-        "src/commands/economy/fish": [
-            "branches"
-        ],
         "src/commands/economy/fish/shop": [
             "branches",
             "functions"
-        ],
-        "src/commands/economy/mine": [
-            "branches"
         ],
         "src/commands/utility": [
             "branches"
