@@ -37,6 +37,23 @@ const mongoose = require('mongoose');
 // clean checkout, including CI.
 const BOOT_TIMEOUT_MS = 120_000;
 
+// Teardown needs a budget of its own for the same reason boot does: Jest's
+// default 5s applies to *every* hook that does not name one, and both teardown
+// hooks here wait on a server rather than on this process. Stopping the mongod
+// is a process shutdown — a checkpoint, then a signal, then waiting for the
+// exit — and the per-test cleanup is a write and a DDL command per collection;
+// on a runner with four Jest workers competing for the disk either can take
+// longer than five seconds without anything being wrong. That is what failed
+// CI: the suite's 64 tests all passed and the run went red in `afterAll`.
+//
+// Generous rather than tight, because a hook timeout is a cap and not a wait:
+// a teardown that finishes in 200ms is unaffected by the number here, and the
+// only thing a small number buys is a red run for a slow machine. A genuine
+// hang still fails, just later — and `npm test` runs without `--forceExit`
+// (#630), so a mongod this never stopped would be reported as a leaked handle
+// anyway.
+const TEARDOWN_TIMEOUT_MS = 60_000;
+
 /**
  * Boots a mongod for the calling test file and connects Mongoose to it.
  *
@@ -98,12 +115,12 @@ function useMongo() {
                 if (err?.code !== 26) throw err;
             });
         }));
-    });
+    }, TEARDOWN_TIMEOUT_MS);
 
     afterAll(async () => {
         await mongoose.disconnect();
         await handle.server?.stop();
-    });
+    }, TEARDOWN_TIMEOUT_MS);
 
     return handle;
 }
@@ -130,4 +147,6 @@ async function indexesByName(model) {
     return Object.fromEntries(list.map(i => [i.name, i]));
 }
 
-module.exports = { useMongo, buildIndexes, indexesByName, BOOT_TIMEOUT_MS };
+module.exports = {
+    useMongo, buildIndexes, indexesByName, BOOT_TIMEOUT_MS, TEARDOWN_TIMEOUT_MS,
+};
