@@ -21,6 +21,11 @@ const { handleMap } = require('../src/commands/economy/mine/map');
 const { DEPTHS, MATERIAL_NAMES } = require('../src/data/mineData');
 const { RAID_MAX_PER_MATERIAL } = require('../src/services/mineService');
 
+/**
+ * A player document whose `mining` starts empty, so the real `ensureMineData`
+ * fills the defaults the handler then renders — which is what makes the map,
+ * the depth and the 100-cell grid the service's answer rather than the test's.
+ */
 function seedUser(mining = {}) {
     const user = {
         userId: 'user-1',

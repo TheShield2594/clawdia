@@ -36,6 +36,11 @@ function fieldsOf(embed) {
     return Object.fromEntries((embed.data.fields ?? []).map(f => [f.name, f.value]));
 }
 
+/**
+ * A miner mid-ladder with no buff running and no daily window open, so
+ * `msUntilDailyReset` reads null and the reset note is a decision each test
+ * makes by seeding `dailyWindowStart` rather than one the fixture makes for it.
+ */
 function makeUser(mining = {}) {
     return {
         balance: 98_765,
@@ -56,10 +61,12 @@ function makeUser(mining = {}) {
     };
 }
 
+/** A pickaxe at 60/80 — healthy, and above the 20% mark the low-durability warning fires at. */
 function makePickaxe(over = {}) {
     return { name: 'Wooden Pickaxe', status: 'good', currentDurability: 60, maxDurability: 80, ...over };
 }
 
+/** A plain common strike: no multiplier, no cap, no drop, so a test turns on only what it asserts. */
 function digResult(over = {}) {
     return {
         success: true,
@@ -76,6 +83,7 @@ function digResult(over = {}) {
     };
 }
 
+/** The mildest failure — no injury, no collapse — for the same reason: nothing on by default. */
 function failureResult(over = {}) {
     return {
         success: false,

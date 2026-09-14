@@ -57,6 +57,11 @@ function fieldsOf(embed) {
     return Object.fromEntries((embed.data.fields ?? []).map(f => [f.name, f.value]));
 }
 
+/**
+ * A fisher mid-ladder with no consumable running: prestige 2 is one rung past
+ * the stamina bonus, so `getMaxStamina` reads 11 rather than the base 10 and a
+ * stamina line that silently lost the prestige term would show.
+ */
 function makeUser(fishing = {}) {
     return {
         balance: 12_345,
@@ -75,10 +80,12 @@ function makeUser(fishing = {}) {
     };
 }
 
+/** A rod at 60/80 — healthy, and above the 20% mark the low-durability warning fires at. */
 function makeRod(over = {}) {
     return { name: 'Bamboo Rod', status: 'good', currentDurability: 60, maxDurability: 80, ...over };
 }
 
+/** A plain common catch: every optional field off, so a test turns on only the one it is about. */
 function fishResult(over = {}) {
     return {
         success: true,
@@ -98,6 +105,7 @@ function fishResult(over = {}) {
     };
 }
 
+/** The mildest failure — no injury, no XP — for the same reason: nothing on by default. */
 function failureResult(over = {}) {
     return {
         success: false,
