@@ -45,6 +45,7 @@ const {
 } = require('../src/commands/economy/hunt/embeds');
 
 const {
+    AMMO_PACKS,
     ANIMALS,
     ANIMAL_TRAITS,
     HUNTER_LEVELS,
@@ -566,10 +567,17 @@ describe('the small formatters', () => {
         expect(formatExpiry(45 * 60_000)).toBe('45m');
     });
 
-    test('the weapon table and the ammo packs agree on every ammo type', () => {
-        for (const tier of Object.values(WEAPON_BY_TIER).filter(w => w.requiresAmmo)) {
-            expect([tier.tier, ammoContext(makeUser(), { tier: tier.tier })?.label])
-                .not.toEqual([tier.tier, undefined]);
+    // This is what makes `pack?.emoji ?? '🔶'` and `pack?.name ?? …` in
+    // ammoContext unreachable, so it has to assert the pack lookup itself.
+    // Asserting on the returned `label` would not: that is derived from
+    // `weaponData.ammoType` rather than from the pack, so it stays defined for
+    // an ammo type AMMO_PACKS has never heard of.
+    test('every ammo type the weapon table names has a pack to buy', () => {
+        const fed = Object.values(WEAPON_BY_TIER).filter(w => w.requiresAmmo);
+        expect(fed.length).toBeGreaterThan(0);
+        for (const tier of fed) {
+            expect([tier.ammoType, AMMO_PACKS.some(pack => pack.ammoType === tier.ammoType)])
+                .toEqual([tier.ammoType, true]);
         }
     });
 });

@@ -76,7 +76,8 @@ so that there is only ever one copy to correct.
    `fish/shop` still has branch and function floors of 0, and `hunt/shop`
    (10% branches) and `mine/shop` (9%) are barely above it. Those three are the
    remaining hole, and they are one shape: seven near-identical handlers each —
-   buy, list, repair, unlock, upgrade, use — so a harness written for one folder
+   buy, list, repair, unlock, upgrade, use, and the one that sells the tool
+   itself (`rod`, `weapon`, `pickaxe`) — so a harness written for one folder
    covers the other two. This will not happen as a side effect of the audit;
    four passes have now gone where the money-moving code is rather than where
    the coverage is worst, and those are not the same ordering.
