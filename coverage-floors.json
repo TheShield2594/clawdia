@@ -147,7 +147,7 @@
         "src/events": {
             "statements": 62,
             "branches": 46,
-            "functions": 43,
+            "functions": 44,
             "lines": 66
         },
         "src/games/casino": {
@@ -175,10 +175,10 @@
             "lines": 69
         },
         "src/services/ai": {
-            "statements": 81,
-            "branches": 73,
-            "functions": 76,
-            "lines": 84
+            "statements": 83,
+            "branches": 74,
+            "functions": 80,
+            "lines": 86
         },
         "src/services/ai/mcp": {
             "statements": 92,
@@ -213,7 +213,7 @@
         "src/utils": {
             "statements": 74,
             "branches": 72,
-            "functions": 79,
+            "functions": 80,
             "lines": 75
         },
         "src/views": {
