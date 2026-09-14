@@ -169,10 +169,10 @@
             "lines": 83
         },
         "src/services": {
-            "statements": 65,
-            "branches": 56,
-            "functions": 62,
-            "lines": 68
+            "statements": 66,
+            "branches": 57,
+            "functions": 63,
+            "lines": 69
         },
         "src/services/ai": {
             "statements": 81,
