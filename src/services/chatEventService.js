@@ -16,7 +16,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
 const { grantInventoryItem } = require('../utils/inventoryGrant');
-const QUIZ_FALLBACK = require('../data/quizFallback');
+const { getQuestion } = require('./triviaQuestionService');
 const COLORS = require('../utils/embedColors');
 
 const EVENT_CHANCE         = 0.04;
@@ -47,8 +47,18 @@ const guildState = new Map(); // guildId -> { lastEventAt, messagesSince }
 // MIN_MESSAGES_BETWEEN messages; nothing fires early and no money moves.
 const MAX_TRACKED_GUILDS = 5_000;
 
-const randInt    = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-const randomFrom = arr => arr[Math.floor(Math.random() * arr.length)];
+const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+// Fisher–Yates: `.sort(() => Math.random() - 0.5)` is not a uniform shuffle,
+// so the correct answer was not equally likely to land in each button slot.
+function shuffle(arr) {
+    const copy = [...arr];
+    for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+}
 
 function weightedPick(items) {
     const total = items.reduce((s, i) => s + i.weight, 0);
@@ -239,11 +249,11 @@ async function spawnCrate(message, _guildSettings) {
 
 async function spawnTrivia(message, guildSettings) {
     const currency = guildSettings?.economy?.currency ?? '💰';
-    const pool     = [...(QUIZ_FALLBACK.medium ?? []), ...(QUIZ_FALLBACK.hard ?? [])];
-    if (pool.length === 0) return spawnAirdrop(message, guildSettings);
-
-    const q       = randomFrom(pool);
-    const answers = [q.correct_answer, ...q.incorrect_answers].sort(() => Math.random() - 0.5);
+    // Same no-repeat deck /quiz deals from: OpenTDB under a session token,
+    // with the offline bank behind it. Medium and hard only — the reward is a
+    // flat 1,000 coins, so easy questions would be a giveaway.
+    const q       = await getQuestion(Math.random() < 0.5 ? 'medium' : 'hard');
+    const answers = shuffle([q.correct_answer, ...q.incorrect_answers]);
     const baseId  = `chatev_triv_${message.id}`;
 
     const embed = new EmbedBuilder()
