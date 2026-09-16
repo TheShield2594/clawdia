@@ -6,11 +6,10 @@ const {
     StringSelectMenuOptionBuilder,
     MessageFlags,
 } = require('discord.js');
-const { request, discardBody } = require('../../utils/httpFetch');
 const User  = require('../../models/User');
 const { advanceMissions } = require('../../services/seasonMissionService');
+const { getQuestion } = require('../../services/triviaQuestionService');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
-const FALLBACK_QUESTIONS = require('../../data/quizFallback');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { debitUpTo } = require('../../utils/balanceDebit');
 const COLORS = require('../../utils/embedColors');
@@ -18,7 +17,6 @@ const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB         = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f393.png';
 const TIMER_SECONDS = 30;
-const OPENTDB_URL   = 'https://opentdb.com/api.php';
 
 const REWARDS = {
     easy:   { win: 250, lose: 50  },
@@ -41,39 +39,6 @@ const QUIZ_COOLDOWN_MS = 300 * 1000;
 function todayUTC() {
     const now = new Date();
     return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-}
-
-function decodeHtml(str) {
-    return str
-        .replace(/&amp;/g,   '&').replace(/&lt;/g,    '<').replace(/&gt;/g,    '>')
-        .replace(/&quot;/g,  '"').replace(/&#039;/g,  "'").replace(/&ldquo;/g, '"')
-        .replace(/&rdquo;/g, '"').replace(/&lsquo;/g, '‘').replace(/&rsquo;/g, '’')
-        .replace(/&ndash;/g, '–').replace(/&mdash;/g, '—').replace(/&deg;/g,   '°')
-        .replace(/&hellip;/g,'…');
-}
-
-async function fetchQuestion(difficulty) {
-    const params = new URLSearchParams({ amount: '1', type: 'multiple' });
-    if (difficulty !== 'any') params.set('difficulty', difficulty);
-    // Every failure here lands in the same place — the caller falls back to the
-    // offline bank — so a refusal is thrown rather than inspected. `fetch` only
-    // rejects for a transport failure, so the status is the caller's to check.
-    const response = await request(`${OPENTDB_URL}?${params}`, { timeout: 4000 });
-    if (!response.ok) {
-        await discardBody(response);
-        throw new Error(`OpenTDB returned HTTP ${response.status}`);
-    }
-    const data = await response.json();
-    if (data.response_code !== 0 || !data.results?.length)
-        throw new Error(`OpenTDB response_code: ${data.response_code}`);
-    return { raw: data.results[0], offline: false };
-}
-
-function fetchFallbackQuestion(difficulty) {
-    const key = difficulty === 'any' ? ['easy', 'medium', 'hard'][Math.floor(Math.random() * 3)] : difficulty;
-    const bank = FALLBACK_QUESTIONS[key] ?? FALLBACK_QUESTIONS.medium;
-    const raw  = bank[Math.floor(Math.random() * bank.length)];
-    return { raw: { ...raw, difficulty: key, category: 'General Knowledge' }, offline: true };
 }
 
 function shuffleArray(arr) {
@@ -283,15 +248,11 @@ async function runQuiz(interaction, diffChoice, guildSettings = null) {
 async function runQuizWithUser(interaction, diffChoice, user, guildSettings = null) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
-    let raw, offline;
-    try {
-        ({ raw, offline } = await fetchQuestion(diffChoice));
-    } catch (err) {
-        console.error('[Quiz] fetch error — using fallback:', err.message);
-        ({ raw, offline } = fetchFallbackQuestion(diffChoice));
-    }
-
-    const difficulty    = raw.difficulty;
+    // Dealt from the shared no-repeat deck (OpenTDB under a session token, or
+    // the offline bank when the API is unavailable). Strings arrive decoded.
+    const q          = await getQuestion(diffChoice);
+    const offline    = q.offline;
+    const difficulty = q.difficulty;
 
     // Enforce daily per-difficulty attempt cap (resets at midnight UTC). The slot is
     // claimed atomically up front (reset-if-stale, then increment-if-under-limit in a
@@ -329,10 +290,10 @@ async function runQuizWithUser(interaction, diffChoice, user, guildSettings = nu
         user[countField] = claimedSlot[countField];
     }
     const rewards       = REWARDS[difficulty] ?? REWARDS.medium;
-    const category      = decodeHtml(raw.category);
-    const question      = decodeHtml(raw.question);
-    const correctAnswer = decodeHtml(raw.correct_answer);
-    const allAnswers    = shuffleArray([correctAnswer, ...raw.incorrect_answers.map(decodeHtml)]);
+    const category      = q.category;
+    const question      = q.question;
+    const correctAnswer = q.correct_answer;
+    const allAnswers    = shuffleArray([correctAnswer, ...q.incorrect_answers]);
     const menuId        = `quiz_${interaction.id}_${Date.now()}`;
 
     const select = new StringSelectMenuBuilder()
