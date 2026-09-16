@@ -17,7 +17,7 @@ jest.mock('../src/utils/httpFetch', () => ({
 
 const { request } = require('../src/utils/httpFetch');
 const FALLBACK    = require('../src/data/quizFallback');
-const { getQuestion, decodeHtml, __test__ } = require('../src/services/triviaQuestionService');
+const { getQuestion, decodeText, __test__ } = require('../src/services/triviaQuestionService');
 const { resetForTests, BATCH_SIZE, LOW_WATER, REQUEST_SPACING_MS, FAILURE_BACKOFF_MS } = __test__;
 
 const ok  = body => ({ ok: true, status: 200, json: async () => body });
@@ -25,7 +25,7 @@ const err = status => ({ ok: false, status, json: async () => ({}), body: { canc
 
 function batch(difficulty, tag = difficulty, n = BATCH_SIZE) {
     return Array.from({ length: n }, (_, i) => ({
-        category:          'Science &amp; Nature',
+        category:          'Science%20%26%20Nature',   // url3986, as requested
         type:              'multiple',
         difficulty,
         question:          `${tag} question ${i}?`,
@@ -68,6 +68,7 @@ describe('OpenTDB session token', () => {
             expect(url.searchParams.get('token')).toBe('tok1');
             expect(url.searchParams.get('amount')).toBe(String(BATCH_SIZE));
             expect(url.searchParams.get('difficulty')).toBe('easy');
+            expect(url.searchParams.get('encode')).toBe('url3986');
             return ok({ response_code: 0, results: batch('easy') });
         });
 
@@ -156,7 +157,42 @@ describe('OpenTDB session token', () => {
 
         const q = await drive(getQuestion('easy'));
         expect(q.offline).toBe(false);
-        expect(__test__.state.token).toBe('tok2');
+        expect(__test__.state.tokens.easy).toBe('tok2');
+    });
+
+    test('exhausting one difficulty resets only its own token', async () => {
+        // A reset wipes a token's whole memory, so if the difficulties shared
+        // one, running easy dry would let medium and hard repeat early.
+        let tokens = 0, easyCalls = 0;
+        const calls = [];
+        respond(url => {
+            calls.push(`${url.pathname}?${url.searchParams}`);
+            if (isTokenCall(url)) {
+                return url.searchParams.get('command') === 'reset'
+                    ? ok({ response_code: 0, token: url.searchParams.get('token') })
+                    : ok({ response_code: 0, token: `tok${++tokens}` });
+            }
+            if (url.searchParams.get('difficulty') === 'easy' && ++easyCalls === 2) {
+                return ok({ response_code: 4, results: [] });
+            }
+            return ok({ response_code: 0, results: batch(url.searchParams.get('difficulty')) });
+        });
+
+        await drive(getQuestion('easy'));     // tok1
+        await drive(getQuestion('medium'));   // tok2
+        expect(__test__.state.tokens).toEqual({ easy: 'tok1', medium: 'tok2', hard: null });
+
+        // Run easy down to the low-water mark; the refill that follows is the
+        // second easy call, which the API answers with "token empty".
+        for (let i = 1; i < BATCH_SIZE - LOW_WATER; i++) await getQuestion('easy');
+        await drive(getQuestion('easy'));
+        expect(__test__.state.refills.easy).toBeNull();
+
+        expect(calls).toContain('/api_token.php?command=reset&token=tok1');
+        expect(calls).not.toContain('/api_token.php?command=reset&token=tok2');
+        expect(__test__.state.tokens).toEqual({ easy: 'tok1', medium: 'tok2', hard: null });
+        expect(__test__.state.decks.easy.length).toBeGreaterThan(0);
+        expect(tokens).toBe(2);   // no third token was requested
     });
 
     test('keeps consecutive OpenTDB calls at least the spacing apart', async () => {
@@ -221,9 +257,14 @@ describe('offline bank', () => {
     });
 });
 
-describe('decodeHtml', () => {
-    test('decodes the entities OpenTDB uses', () => {
-        expect(decodeHtml('&quot;Rock &amp; Roll&quot; &ndash; who&#039;s first?'))
-            .toBe('"Rock & Roll" – who\'s first?');
+describe('decodeText', () => {
+    test('decodes OpenTDB\'s RFC 3986 encoding, non-ASCII included', () => {
+        // OpenTDB's own documentation example for encode=url3986.
+        expect(decodeText('Don%27t%20forget%20that%20%CF%80%20%3D%203.14%20%26%20doesn%27t%20equal%203.'))
+            .toBe('Don\'t forget that π = 3.14 & doesn\'t equal 3.');
+    });
+
+    test('returns a string it cannot decode unchanged rather than throwing', () => {
+        expect(decodeText('100% sure')).toBe('100% sure');
     });
 });

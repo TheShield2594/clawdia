@@ -16,11 +16,13 @@
  *
  * Now:
  *
- *   - questions arrive in batches under one OpenTDB session token. The token is
- *     the API's own no-repeat guarantee: it never returns a question it has
- *     already served under that token until the pool for the requested
- *     difficulty is exhausted, at which point the token is reset and the cycle
- *     starts over;
+ *   - questions arrive in batches under an OpenTDB session token, one per
+ *     difficulty. The token is the API's own no-repeat guarantee: it never
+ *     returns a question it has already served under that token until the pool
+ *     is exhausted, at which point the token is reset and the cycle starts
+ *     over. One token per difficulty rather than one shared, because a reset
+ *     wipes the token's whole memory: exhausting easy must not let medium and
+ *     hard start repeating early;
  *   - each difficulty is dealt from an in-memory deck, refilled in the
  *     background when it runs low, so almost no play waits on the network and
  *     the API sees one request per BATCH_SIZE questions rather than one per
@@ -32,7 +34,7 @@
  *     has been seen.
  *
  * A question is `{ question, category, difficulty, correct_answer,
- * incorrect_answers, offline }`, with every string already HTML-decoded.
+ * incorrect_answers, offline }`, with every string already decoded.
  * `getQuestion` does not throw: when OpenTDB is unreachable, rate-limited or
  * returns nothing usable, the offline bank answers instead and `offline` says so.
  */
@@ -73,7 +75,7 @@ const state = freshState();
 
 function freshState() {
     return {
-        token:         null,
+        tokens:        { easy: null, medium: null, hard: null },
         decks:         { easy: [], medium: [], hard: [] },
         refills:       { easy: null, medium: null, hard: null },   // in-flight fetch per difficulty
         offline:       { easy: [], medium: [], hard: [] },
@@ -86,13 +88,19 @@ function freshState() {
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-function decodeHtml(str) {
-    return String(str)
-        .replace(/&amp;/g,   '&').replace(/&lt;/g,    '<').replace(/&gt;/g,    '>')
-        .replace(/&quot;/g,  '"').replace(/&#039;/g,  "'").replace(/&ldquo;/g, '"')
-        .replace(/&rdquo;/g, '"').replace(/&lsquo;/g, '‘').replace(/&rsquo;/g, '’')
-        .replace(/&ndash;/g, '–').replace(/&mdash;/g, '—').replace(/&deg;/g,   '°')
-        .replace(/&hellip;/g,'…').replace(/&eacute;/g, 'é').replace(/&shy;/g, '');
+// OpenTDB is asked for RFC 3986 percent-encoding (`encode=url3986`) rather
+// than its default HTML entities. The default needs an entity table — `&pi;`,
+// `&eacute;`, `&hellip;` and so on — that a hand-written list is always missing
+// a row of, and a missed row reaches the player as literal `&pi;`. Percent-
+// encoding is one call to decodeURIComponent. A string it refuses (a stray
+// `%` that is not an escape) is returned as it came rather than lost.
+function decodeText(str) {
+    const s = String(str);
+    try {
+        return decodeURIComponent(s);
+    } catch {
+        return s;
+    }
 }
 
 function shuffle(arr) {
@@ -130,24 +138,24 @@ function callOpenTdb(url) {
     return turn;
 }
 
-async function ensureToken() {
-    if (state.token) return state.token;
+async function ensureToken(difficulty) {
+    if (state.tokens[difficulty]) return state.tokens[difficulty];
     const data = await callOpenTdb(`${OPENTDB_TOKEN}?command=request`);
     if (data.response_code !== CODE_OK || !data.token) {
         throw new Error(`OpenTDB token request failed: response_code ${data.response_code}`);
     }
-    state.token = data.token;
-    return state.token;
+    state.tokens[difficulty] = data.token;
+    return data.token;
 }
 
-async function resetToken() {
-    const token = state.token;
-    state.token = null;
+async function resetToken(difficulty) {
+    const token = state.tokens[difficulty];
+    state.tokens[difficulty] = null;
     const data = await callOpenTdb(`${OPENTDB_TOKEN}?command=reset&token=${encodeURIComponent(token)}`);
     if (data.response_code !== CODE_OK) {
         throw new Error(`OpenTDB token reset failed: response_code ${data.response_code}`);
     }
-    state.token = data.token ?? token;
+    state.tokens[difficulty] = data.token ?? token;
 }
 
 /**
@@ -157,28 +165,34 @@ async function resetToken() {
 async function fetchBatch(difficulty, retry = true) {
     let token = null;
     try {
-        token = await ensureToken();
+        token = await ensureToken(difficulty);
     } catch (err) {
-        console.warn('[trivia] no OpenTDB session token — questions may repeat:', err.message);
+        console.warn(`[trivia] no OpenTDB session token for ${difficulty} — questions may repeat:`, err.message);
     }
 
-    const params = new URLSearchParams({ amount: String(BATCH_SIZE), type: 'multiple', difficulty });
+    const params = new URLSearchParams({
+        amount: String(BATCH_SIZE),
+        type:   'multiple',
+        encode: 'url3986',
+        difficulty,
+    });
     if (token) params.set('token', token);
     const data = await callOpenTdb(`${OPENTDB_API}?${params}`);
 
     if (data.response_code === CODE_OK && data.results?.length) return data.results;
 
     if (token && retry) {
-        // Every question at this difficulty has been served under this token:
-        // reset it and start the cycle over. "No results" is treated the same
-        // way, since with a token it means fewer than a batch remain.
+        // Every question at this difficulty has been served under its token:
+        // reset that token and start the cycle over. "No results" is treated
+        // the same way, since with a token it means fewer than a batch remain.
+        // The other difficulties' tokens keep their memory.
         if (data.response_code === CODE_TOKEN_EMPTY || data.response_code === CODE_NO_RESULTS) {
-            await resetToken();
+            await resetToken(difficulty);
             return fetchBatch(difficulty, false);
         }
         // The token expired while the bot was quiet; get a new one.
         if (data.response_code === CODE_TOKEN_NOT_FOUND) {
-            state.token = null;
+            state.tokens[difficulty] = null;
             return fetchBatch(difficulty, false);
         }
     }
@@ -188,11 +202,11 @@ async function fetchBatch(difficulty, retry = true) {
 
 function normalise(raw) {
     return {
-        question:          decodeHtml(raw.question),
-        category:          decodeHtml(raw.category),
+        question:          decodeText(raw.question),
+        category:          decodeText(raw.category),
         difficulty:        DIFFICULTIES.includes(raw.difficulty) ? raw.difficulty : 'medium',
-        correct_answer:    decodeHtml(raw.correct_answer),
-        incorrect_answers: (raw.incorrect_answers ?? []).map(decodeHtml),
+        correct_answer:    decodeText(raw.correct_answer),
+        incorrect_answers: (raw.incorrect_answers ?? []).map(decodeText),
     };
 }
 
@@ -275,6 +289,6 @@ function resetForTests() {
 
 module.exports = {
     getQuestion,
-    decodeHtml,
+    decodeText,
     __test__: { state, resetForTests, BATCH_SIZE, LOW_WATER, REQUEST_SPACING_MS, FAILURE_BACKOFF_MS },
 };
