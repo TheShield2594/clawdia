@@ -7,6 +7,7 @@ const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/
 const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { validateBaseUrl: validateOllamaBaseUrl } = require('../../../services/ai/providers/ollama');
 const { CONFIRM_MODES, MCP_ROUTES } = require('../../../config/mcpServers');
+const { isValidSlug } = require('../../lib/publicData');
 
 // Top-level Guild schema keys that the dashboard is allowed to update.
 // This whitelist prevents prototype pollution (__proto__, constructor, etc.)
@@ -26,7 +27,7 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'autoRoles', 'reactionRoles',
     'giveaways', 'notifications',
     'newspaper', 'heist', 'exploration',
-    'dynamicPricing'
+    'dynamicPricing', 'publicPage'
 ]);
 
 // Segments that must never appear anywhere in a dotted path (#920). The
@@ -376,6 +377,62 @@ function validateAiUpdate(updates) {
     return null;
 }
 
+// The public page (#1018) is off by default and every field below is either a
+// boolean or the vanity slug. The slug is the one value that reaches the open web
+// as a URL, so it is bounded to the same lowercase [a-z0-9-] shape the route that
+// serves it accepts (isValidSlug), and null/'' clears it back to "id only". A bad
+// slug here would otherwise be saved and then silently never resolve.
+const PUBLIC_PAGE_BOOLEANS = new Set([
+    'enabled',
+    'showChampions', 'showEvent', 'showDistricts',
+    'leaderboards.level', 'leaderboards.wealth', 'leaderboards.streak', 'leaderboards.achievements',
+]);
+
+function validatePublicPageBoolean(field, value) {
+    if (PUBLIC_PAGE_BOOLEANS.has(field) && typeof value !== 'boolean') {
+        return `publicPage.${field} must be a boolean`;
+    }
+    return null;
+}
+
+function validatePublicPageSlug(value) {
+    if (value === null || value === '' || value === undefined) return null;
+    if (typeof value !== 'string' || !isValidSlug(value)) {
+        return 'publicPage.slug must be 3–32 characters of lowercase letters, digits and hyphens (or empty to use the server id)';
+    }
+    return null;
+}
+
+function validatePublicPageUpdate(updates) {
+    for (const [key, value] of Object.entries(updates)) {
+        // A whole-object patch: validate each field it carries.
+        if (key === 'publicPage' && value && typeof value === 'object') {
+            const err = validatePublicPageSlug(value.slug);
+            if (err) return err;
+            for (const flag of ['enabled', 'showChampions', 'showEvent', 'showDistricts']) {
+                const e = validatePublicPageBoolean(flag, value[flag] ?? true);
+                if (value[flag] !== undefined && e) return e;
+            }
+            for (const [k, v] of Object.entries(value.leaderboards ?? {})) {
+                const e = validatePublicPageBoolean(`leaderboards.${k}`, v);
+                if (e) return e;
+            }
+            continue;
+        }
+        // A dotted patch: publicPage.enabled, publicPage.slug, publicPage.leaderboards.level, …
+        if (!key.startsWith('publicPage.')) continue;
+        const field = key.slice('publicPage.'.length);
+        if (field === 'slug') {
+            const err = validatePublicPageSlug(value);
+            if (err) return err;
+        } else {
+            const err = validatePublicPageBoolean(field, value);
+            if (err) return err;
+        }
+    }
+    return null;
+}
+
 function validateHeistUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
         if (!key.startsWith('heist.') && key !== 'heist') continue;
@@ -431,6 +488,9 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
     const explorationError = validateExplorationUpdate(updates);
     if (explorationError) return res.status(400).json({ error: explorationError });
+
+    const publicPageError = validatePublicPageUpdate(updates);
+    if (publicPageError) return res.status(400).json({ error: publicPageError });
 
     try {
         const guildSettings = await Guild.findOne({ guildId });
@@ -507,6 +567,13 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
         if (error.name === 'ValidationError') {
             return res.status(400).json({ error: error.message });
         }
+        // Two guilds cannot share a public-page slug — the unique partial index on
+        // `publicPage.slug` (#1018) rejects the second, which arrives here as a
+        // duplicate-key error rather than a validation one. Reported as a conflict
+        // the admin can act on (pick another slug) instead of a bare 500.
+        if (error.code === 11000 && /publicPage\.slug/.test(error.message || '')) {
+            return res.status(409).json({ error: 'That public page slug is already taken by another server.' });
+        }
         console.error('API error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
@@ -542,4 +609,5 @@ Object.assign(module.exports, {
     validateDynamicPricingUpdate,
     validateAiUpdate,
     validateHeistUpdate,
+    validatePublicPageUpdate,
 });

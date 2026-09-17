@@ -1009,6 +1009,40 @@ const guildSchema = new Schema({
         announceSecrets:    { type: Boolean, default: true }
     },
 
+    // Public server page (#1018) — the guild's read-only, opt-in public face at
+    // /s/:guildId. Off by default: a guild that never turns this on serves 404
+    // for both the server page and every player card under it, so enabling the
+    // dashboard does not put anyone's server on the open web without a choice.
+    //
+    // `slug` is an optional vanity id the page can also be reached by (/s/:slug);
+    // null means the guild id is the only address. `leaderboards` is which boards
+    // the admin has ticked to show — nothing is shown by default beyond the
+    // server header, so an admin turns the page on and then chooses what it says.
+    publicPage: {
+        enabled: { type: Boolean, default: false },
+        // Lowercase letters, digits and hyphens; 3–32 chars. Validated where it
+        // is written (dashboard settings route) and unique where it is set — see
+        // the sparse index below.
+        slug:    { type: String, default: null },
+        // Which top-ten leaderboards the public page renders. All off by default:
+        // turning the page on shows the server header only until the admin ticks
+        // a board, so nothing about members is exposed by the mere act of
+        // enabling it.
+        leaderboards: {
+            level:        { type: Boolean, default: false },
+            wealth:       { type: Boolean, default: false },
+            streak:       { type: Boolean, default: false },
+            achievements: { type: Boolean, default: false },
+        },
+        // The three server-wide sections, each drawn from data the guild already
+        // publishes inside Discord. On by default because none of them names a
+        // member who has not opted in: champions shows the weekly race leaders by
+        // username, districts is a coin total, the event is server-wide.
+        showChampions: { type: Boolean, default: true },
+        showEvent:     { type: Boolean, default: true },
+        showDistricts: { type: Boolean, default: true },
+    },
+
     // Scheduler claim timestamps — prevent duplicate runs across cron restarts
     potwLastRunAt:          { type: Date, default: null },
     bankInterestLastRunAt:  { type: Date, default: null },
@@ -1070,6 +1104,21 @@ guildSchema.index(
 guildSchema.index(
     { 'districts.districtId': 1, 'districts.activeUntil': 1 },
     { name: 'idx_guilds_district_active' }
+);
+
+// The public page's vanity slug lookup — routes/public.js resolves /s/:slug to a
+// guild. Partial rather than sparse: only guilds that set a slug are indexed, and
+// the unique constraint makes two guilds claiming the same slug a write error the
+// dashboard route reports rather than a silent collision that serves the wrong
+// server's page. A null slug is not in the index, so any number of guilds may
+// leave it unset.
+guildSchema.index(
+    { 'publicPage.slug': 1 },
+    {
+        name: 'idx_guilds_public_slug',
+        unique: true,
+        partialFilterExpression: { 'publicPage.slug': { $type: 'string' } },
+    }
 );
 
 // Not indexed, deliberately: the hourly and per-minute sweeps in

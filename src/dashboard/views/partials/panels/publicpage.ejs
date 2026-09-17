@@ -1,0 +1,51 @@
+                <section id="publicpage" class="panel">
+                    <div class="panel-head">
+                        <h2>Public Page</h2>
+                        <p>A read-only public web page for your server at <code>/s/&lt;server&gt;</code> — weekly champions, the leaderboards you tick, and opted-in member cards, shareable by link.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable public page</strong><small>Off by default. While off, the page and every player card under it answer 404.</small></span>
+                        <span class="switch"><input type="checkbox" id="pp-enabled" <%= settings.publicPage?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <div class="field">
+                        <label class="field-label" for="pp-slug">Custom URL slug <small>— optional; the page is also reachable at <code>/s/&lt;slug&gt;</code></small></label>
+                        <input type="text" id="pp-slug" value="<%= settings.publicPage?.slug || '' %>" maxlength="32" placeholder="my-server" autocomplete="off">
+                        <small>Lowercase letters, digits and hyphens, 3–32 characters. Leave blank to use the server id.</small>
+                    </div>
+
+                    <h3>Leaderboards to show</h3>
+                    <p class="field-hint">Only members who ran <code>/profile public on</code> are linkable; everyone else appears by name only.</p>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Top levels</strong></span>
+                        <span class="switch"><input type="checkbox" id="pp-lb-level" <%= settings.publicPage?.leaderboards?.level ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Wealthiest</strong></span>
+                        <span class="switch"><input type="checkbox" id="pp-lb-wealth" <%= settings.publicPage?.leaderboards?.wealth ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Longest active streaks</strong></span>
+                        <span class="switch"><input type="checkbox" id="pp-lb-streak" <%= settings.publicPage?.leaderboards?.streak ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Most achievements</strong></span>
+                        <span class="switch"><input type="checkbox" id="pp-lb-achievements" <%= settings.publicPage?.leaderboards?.achievements ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <h3>Server sections</h3>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Weekly champions</strong></span>
+                        <span class="switch"><input type="checkbox" id="pp-champions" <%= settings.publicPage?.showChampions !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Active seasonal event</strong></span>
+                        <span class="switch"><input type="checkbox" id="pp-event" <%= settings.publicPage?.showEvent !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>District funding</strong></span>
+                        <span class="switch"><input type="checkbox" id="pp-districts" <%= settings.publicPage?.showDistricts !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <div class="actions-row"><button class="btn btn-primary" data-action="save" data-section="publicpage">Save changes</button></div>
+                </section>

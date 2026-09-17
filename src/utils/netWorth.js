@@ -29,10 +29,16 @@ function netWorthOf(user) {
  * `_id` breaks ties so two surfaces listing the same guild produce the same
  * order rather than whichever order the storage engine happened to return.
  * Results are plain objects: `{ userId, balance, bank, netWorth, ...extra }`.
+ *
+ * `extraMatch` narrows the population *before* the sort and limit, so a caller
+ * that must exclude some members (the public leaderboard drops former members
+ * with `{ leftAt: null }`, #1018) still gets a true top-N of what is left rather
+ * than a top-N filtered down to fewer rows. It defaults to `{}`, so every
+ * existing caller ranks the whole guild exactly as before.
  */
-async function topByNetWorth(User, guildId, limit, extraProject = {}) {
+async function topByNetWorth(User, guildId, limit, extraProject = {}, extraMatch = {}) {
     return User.aggregate([
-        { $match: { guildId } },
+        { $match: { guildId, ...extraMatch } },
         { $addFields: { netWorth: NET_WORTH_EXPR } },
         { $sort: { netWorth: -1, _id: 1 } },
         { $limit: limit },

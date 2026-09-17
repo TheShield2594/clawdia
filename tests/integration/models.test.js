@@ -462,6 +462,30 @@ describe('Guild', () => {
             expect(found.map(g => g.guildId)).toEqual([GUILD]);
         });
     });
+
+    // #1018. The public page's vanity slug is unique across guilds that set one
+    // and absent for those that do not — a partial unique index, so any number of
+    // guilds may leave it null while two cannot claim the same string. The route
+    // that resolves /s/:slug relies on that uniqueness to serve the right server.
+    describe('the public page slug (#1018)', () => {
+        test('is a unique index', async () => {
+            const built = await indexesByName(Guild);
+            expect(built.idx_guilds_public_slug.unique).toBe(true);
+        });
+
+        test('refuses two guilds the same slug', async () => {
+            await Guild.create({ guildId: GUILD, name: 'One', publicPage: { slug: 'shared' } });
+
+            await expect(Guild.create({ guildId: OTHER, name: 'Two', publicPage: { slug: 'shared' } }))
+                .rejects.toMatchObject({ code: DUPLICATE_KEY });
+        });
+
+        test('allows any number of guilds with no slug', async () => {
+            await Guild.create({ guildId: GUILD, name: 'One' });
+
+            await expect(Guild.create({ guildId: OTHER, name: 'Two' })).resolves.toBeDefined();
+        });
+    });
 });
 
 // ── Transaction ─────────────────────────────────────────────────────────────

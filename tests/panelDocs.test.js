@@ -74,10 +74,11 @@ describe('the sections it finds', () => {
         expect(sections.map(s => s.panel).sort()).toEqual([...declaredPanels()].sort());
     });
 
-    // The count in the issue. 20 documented against 25 existing is the state
-    // this whole file exists to make unreachable.
-    test('cover all 25 of them', () => {
-        expect(sections).toHaveLength(25);
+    // The count grows with the sidebar. 20 documented against 25 existing was
+    // the state (#705) this whole file exists to make unreachable; the Public
+    // Page panel (#1018) is the 26th.
+    test('cover all 26 of them', () => {
+        expect(sections).toHaveLength(26);
     });
 
     test('each carry a label, an emoji and a group', () => {

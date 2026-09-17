@@ -348,10 +348,18 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
 
     const authRoutes = require('./routes/auth');
     const dashboardRoutes = require('./routes/dashboard');
+    const publicRoutes = require('./routes/public');
     const apiRoutes = require('./routes/api');
 
     app.use('/auth', authRoutes);
     app.use('/dashboard', dashboardRoutes);
+
+    // The public, session-free server pages and player cards (#1018). Mounted
+    // beside the authenticated routers rather than under them: everything under
+    // /s is unauthenticated by design and gated on the guild's own opt-in toggle,
+    // not on a Discord session. It sits after the CSP/asset-locals middleware
+    // above, so its views still render with a nonce and hashed asset URLs.
+    app.use('/s', publicRoutes);
 
     // Versioned mount (#582). Everything the dashboard's own JavaScript calls
     // goes to /api/v1; /api stays mounted beside it because it is what every
