@@ -492,7 +492,11 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
             // an unhandled rejection here counts toward the process-level
             // rejection guard in src/index.js.
             req.bot.rescheduleBibleVerse(guildId)
-                .catch(err => console.error(`[DASHBOARD] Bible reschedule for ${guildId} failed:`, err.message));
+                // guildId is a route param (#162, js/tainted-format-string): a
+                // constant format string with %s placeholders, not a template
+                // literal, so a specifier smuggled into guildId cannot consume
+                // err.message.
+                .catch(err => console.error('[DASHBOARD] Bible reschedule for %s failed: %s', guildId, err.message));
         }
 
         // Deliberately does not echo the saved document: up to 3000

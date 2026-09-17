@@ -172,7 +172,9 @@ function runPanelInit(id, fn) {
         fn(document.getElementById(id));
     } catch (err) {
         // One panel's setup blowing up must not take the others with it.
-        console.error('[dashboard] init for panel "' + id + '" failed:', err);
+        // id is a constant format-string %s argument, not concatenated in
+        // (js/tainted-format-string): a specifier hidden in id cannot consume err.
+        console.error('[dashboard] init for panel "%s" failed:', id, err);
     }
 }
 
@@ -217,7 +219,9 @@ function loadPanel(id) {
             return panel;
         })
         .catch(err => {
-            console.error('[dashboard] could not load panel "' + id + '":', err);
+            // id passed as a constant format-string %s argument, not concatenated
+            // in (js/tainted-format-string), so it cannot consume err as a specifier.
+            console.error('[dashboard] could not load panel "%s":', id, err);
             // Forget the attempt so the next click retries instead of sticking.
             panelRequests.delete(id);
             const message = stub.querySelector('.panel-stub-message');
@@ -355,7 +359,9 @@ function announceShown(id) {
             fn();
         } catch (err) {
             // One panel's fetch blowing up must not take the tab switch with it.
-            console.error('[dashboard] shown handler for "' + id + '" failed:', err);
+            // id as a constant format-string %s argument, not concatenated in
+            // (js/tainted-format-string), so it cannot consume err as a specifier.
+            console.error('[dashboard] shown handler for "%s" failed:', id, err);
         }
     }
 }
