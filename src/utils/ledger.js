@@ -40,13 +40,18 @@ const DEFAULT_PAGE_SIZE = 10;
  * @returns {Promise<{items: object[], total: number, page: number, pages: number, pageSize: number}>}
  */
 async function fetchTransactions({ userId, guildId, page = 1, pageSize = DEFAULT_PAGE_SIZE, Model = Transaction } = {}) {
+    // String-coerced at the query, not trusted from the caller: these reach this
+    // sink from a dashboard route's `req.params`, and coercion is what keeps a
+    // crafted `{ $ne: … }` from becoming a query operator (the repo's NoSQL-
+    // injection barrier — see String(userId) in routes/api/economy.js).
+    const filter = { guildId: String(guildId), userId: String(userId) };
     const size = Math.max(1, Math.floor(pageSize) || DEFAULT_PAGE_SIZE);
-    const total = await Model.countDocuments({ guildId, userId });
+    const total = await Model.countDocuments(filter);
     const pages = Math.max(1, Math.ceil(total / size));
     const wanted = Math.max(1, Math.floor(page) || 1);
     const current = Math.min(wanted, pages);
 
-    const items = total === 0 ? [] : await Model.find({ guildId, userId })
+    const items = total === 0 ? [] : await Model.find(filter)
         .sort({ createdAt: -1 })
         .skip((current - 1) * size)
         .limit(size)
@@ -73,9 +78,9 @@ async function fetchTransactions({ userId, guildId, page = 1, pageSize = DEFAULT
  */
 async function fetchOwedPayouts({ userId, guildId, OwedModel = FailedJob } = {}) {
     const records = await OwedModel.find({
-        guildId,
+        guildId: String(guildId),
         status: { $ne: 'resolved' },
-        'payload.userId': userId,
+        'payload.userId': String(userId),
     }).sort({ createdAt: -1 }).lean();
 
     return records.filter(isOwedPayout).map(r => ({
