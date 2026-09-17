@@ -16,6 +16,9 @@ moderation attached, that is what she is built for.
 
 ## Documentation
 
+Start at the [documentation index](docs/README.md), which groups every doc by
+what you are trying to do. The whole set:
+
 | | |
 |---|---|
 | [docs/COMMANDS.md](docs/COMMANDS.md) | Every slash command, generated from the command set |
