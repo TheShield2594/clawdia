@@ -47,6 +47,7 @@ const NON_JOB_TIMERS = new Set([
     'events/messageCreate.js',          // in-memory reminder-cooldown sweep
     'services/autoModService.js',       // in-memory spam-window sweep (#600), moved here with the filters
     'dashboard/lib/middleware.js',      // in-memory HTTP rate-limit sweep
+    'dashboard/routes/public.js',       // in-memory public-page rate-limit sweep (#1018)
     'utils/imageRateLimit.js',          // in-memory rate-limit bucket sweep
     'utils/cardRenderQueue.js',         // in-memory welcome-card budget sweep (#592)
     'utils/commandCooldowns.js',        // in-memory cooldown map sweep (#621)

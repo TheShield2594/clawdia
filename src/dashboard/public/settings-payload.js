@@ -449,6 +449,20 @@ function buildSettingsPayload(section, ctx = {}) {
             'exploration.announceSecrets':    document.getElementById('exploration-announce-secrets').checked,
             'exploration.disabledRegions':    disabledRegions,
         };
+    } else if (section === 'publicpage') {
+        return {
+            'publicPage.enabled': document.getElementById('pp-enabled').checked,
+            // '' clears the slug back to "server id only"; the server maps it to
+            // null, the same as an unset one.
+            'publicPage.slug': document.getElementById('pp-slug').value.trim() || null,
+            'publicPage.leaderboards.level': document.getElementById('pp-lb-level').checked,
+            'publicPage.leaderboards.wealth': document.getElementById('pp-lb-wealth').checked,
+            'publicPage.leaderboards.streak': document.getElementById('pp-lb-streak').checked,
+            'publicPage.leaderboards.achievements': document.getElementById('pp-lb-achievements').checked,
+            'publicPage.showChampions': document.getElementById('pp-champions').checked,
+            'publicPage.showEvent': document.getElementById('pp-event').checked,
+            'publicPage.showDistricts': document.getElementById('pp-districts').checked
+        };
     }
     // A section with no branch above sends nothing, which is what saveSettings()
     // did with its `let data = {}` before this moved out of it.

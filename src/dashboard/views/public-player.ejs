@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<%
+    const base = '/s/' + (card.guild.slug || card.guild.id);
+    const cardPath = base + '/u/' + card.userId;
+    const pageTitle = card.name + ' — ' + card.guild.name;
+    const pageDescription = 'Level ' + card.level + ' · Rank #' + card.rank + ' in ' + card.guild.name + '. A public Clawdia profile.';
+    // The share card is this player's own drawn card (#1018), so a link shared in
+    // Discord unfurls into their stats rather than the generic brand card. Absolute
+    // off the validated DASHBOARD_URL, and conditional on it, for the same reason
+    // the landing page's is.
+    const cardImage = locals.baseUrl ? locals.baseUrl + cardPath + '/card.png' : null;
+%>
+<head>
+    <%- include('partials/head', { title: pageTitle, description: pageDescription }) %>
+    <meta property="og:type" content="profile">
+    <meta property="og:site_name" content="Clawdia">
+    <meta property="og:title" content="<%= pageTitle %>">
+    <meta property="og:description" content="<%= pageDescription %>">
+    <%_ if (cardImage) { _%>
+    <meta property="og:url" content="<%= baseUrl %><%= cardPath %>">
+    <meta property="og:image" content="<%= cardImage %>">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <link rel="canonical" href="<%= baseUrl %><%= cardPath %>">
+    <%_ } _%>
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="<%= pageTitle %>">
+    <meta name="twitter:description" content="<%= pageDescription %>">
+    <%_ if (cardImage) { _%>
+    <meta name="twitter:image" content="<%= cardImage %>">
+    <%_ } _%>
+    <meta name="theme-color" content="#faf6ef">
+    <style>
+        body { background: var(--cream-50); color: var(--ink-950); }
+        .cwp-wrap { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
+        .cwp-head { display: flex; align-items: center; gap: 20px; }
+        .cwp-av, .cwp-av-fallback { width: 88px; height: 88px; border-radius: 24px; flex: none; }
+        .cwp-av-fallback { background: var(--ink-950); color: var(--cream-50); display: flex; align-items: center; justify-content: center; font-family: 'Instrument Serif', serif; font-size: 40px; }
+        .cwp-head h1 { font-family: 'Instrument Serif', serif; font-size: 40px; margin: 0; line-height: 1.05; }
+        .cwp-sub { font-family: 'JetBrains Mono', monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-500); margin-top: 6px; }
+        .cwp-prestige { display: inline-block; margin-top: 10px; padding: 4px 12px; border-radius: 999px; background: var(--ink-950); color: var(--cream-50); font-size: 13px; }
+        .cwp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-top: 36px; }
+        .cwp-stat { background: var(--cream-100); border-radius: 14px; padding: 16px 18px; }
+        .cwp-stat .k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-500); }
+        .cwp-stat .v { font-size: 24px; font-weight: 700; margin-top: 6px; }
+        .cwp-section { margin-top: 40px; }
+        .cwp-section > h2 { font-family: 'JetBrains Mono', monospace; font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-500); margin: 0 0 14px; }
+        .cwp-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+        .cwp-chip { background: var(--cream-100); border-radius: 999px; padding: 8px 14px; font-size: 14px; }
+        .cwp-foot { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--cream-200); font-size: 13px; color: var(--ink-500); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+        .cwp-foot a { color: var(--ink-950); }
+        @media (max-width: 520px) { .cwp-head h1 { font-size: 30px; } }
+    </style>
+</head>
+<body>
+    <main class="cwp-wrap">
+        <header class="cwp-head">
+            <% if (card.avatarUrl) { %>
+                <img class="cwp-av" width="88" height="88" loading="eager" decoding="async"
+                     src="<%= card.avatarUrl %>" alt="Avatar for <%= card.name %>"
+                     data-fallback-class="cwp-av-fallback"
+                     data-fallback-text="<%= card.name.charAt(0).toUpperCase() %>">
+            <% } else { %>
+                <div class="cwp-av-fallback"><%= card.name.charAt(0).toUpperCase() %></div>
+            <% } %>
+            <div>
+                <h1><%= card.name %></h1>
+                <div class="cwp-sub"><a href="<%= base %>"><%= card.guild.name %></a> · Rank #<%= card.rank %></div>
+                <% if (card.prestigeTitle) { %>
+                    <span class="cwp-prestige"><%= card.prestigeBadge %> <%= card.prestigeTitle %></span>
+                <% } %>
+            </div>
+        </header>
+
+        <div class="cwp-stats">
+            <div class="cwp-stat"><div class="k">Level</div><div class="v"><%= card.level.toLocaleString() %></div></div>
+            <div class="cwp-stat"><div class="k">Net worth</div><div class="v"><%= card.currency %><%= card.netWorth.toLocaleString() %></div></div>
+            <div class="cwp-stat"><div class="k">Streak</div><div class="v"><%= card.streak %>🔥</div></div>
+            <div class="cwp-stat"><div class="k">Achievements</div><div class="v"><%= card.achievementsCount.toLocaleString() %></div></div>
+        </div>
+
+        <section class="cwp-section">
+            <h2>Grind levels</h2>
+            <div class="cwp-chips">
+                <span class="cwp-chip">🏹 Hunt <%= card.grind.hunt %></span>
+                <span class="cwp-chip">🎣 Fish <%= card.grind.fishing %></span>
+                <span class="cwp-chip">⛏️ Mine <%= card.grind.mining %></span>
+                <span class="cwp-chip">🧭 Explore <%= card.grind.exploration %></span>
+            </div>
+        </section>
+
+        <% if (card.topAchievements && card.topAchievements.length) { %>
+            <section class="cwp-section">
+                <h2>Top achievements</h2>
+                <div class="cwp-chips">
+                    <% card.topAchievements.forEach(function(a) { %>
+                        <span class="cwp-chip"><%= a.emoji %> <%= a.name %></span>
+                    <% }); %>
+                </div>
+            </section>
+        <% } %>
+
+        <% if (card.topMaterials && card.topMaterials.length) { %>
+            <section class="cwp-section">
+                <h2>Rarest finds</h2>
+                <div class="cwp-chips">
+                    <% card.topMaterials.forEach(function(m) { %>
+                        <span class="cwp-chip"><%= m.emoji %> <%= m.label %> <%= m.stars %></span>
+                    <% }); %>
+                </div>
+            </section>
+        <% } %>
+
+        <footer class="cwp-foot">
+            <span>Public profile · read-only · <a href="/">Clawdia</a></span>
+            <span>v<%= version %></span>
+        </footer>
+    </main>
+</body>
+</html>

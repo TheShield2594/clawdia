@@ -30,16 +30,39 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('profile')
         .setDescription('View a unified profile card showing all your key stats.')
-        .addUserOption(option =>
-            option.setName('user')
-                .setDescription('User whose profile to display (defaults to yourself).')
-                .setRequired(false))
-        .addBooleanOption(option =>
-            option.setName('private')
-                .setDescription('Show profile only to you. Default: false (public).')
-                .setRequired(false)),
+        // `view` and `public` are subcommands rather than options because they do
+        // opposite things: one reads a card, the other flips a stored flag. The
+        // public opt-in (#1018) is what the dashboard's public page at
+        // /s/:guildId/u/:userId gates on — a member is served there only after
+        // running `/profile public on`, and is a 404 until then.
+        .addSubcommand(sub => sub
+            .setName('view')
+            .setDescription('View a unified profile card showing all your key stats.')
+            .addUserOption(option =>
+                option.setName('user')
+                    .setDescription('User whose profile to display (defaults to yourself).')
+                    .setRequired(false))
+            .addBooleanOption(option =>
+                option.setName('private')
+                    .setDescription('Show profile only to you. Default: false (public).')
+                    .setRequired(false)))
+        .addSubcommand(sub => sub
+            .setName('public')
+            .setDescription('Choose whether your profile is shown on the server\'s public web page.')
+            .addStringOption(option =>
+                option.setName('setting')
+                    .setDescription('Turn your public profile page on or off.')
+                    .setRequired(true)
+                    .addChoices(
+                        { name: 'On — anyone with the link can see your card', value: 'on' },
+                        { name: 'Off — your card is private again (the default)', value: 'off' },
+                    ))),
 
     async execute(interaction) {
+        if (interaction.options.getSubcommand() === 'public') {
+            return setPublicProfile(interaction);
+        }
+
         const targetUser = interaction.options.getUser('user') ?? interaction.user;
         const isPrivate  = interaction.options.getBoolean('private') ?? false;
         const isSelf     = targetUser.id === interaction.user.id;
@@ -230,4 +253,32 @@ function buildProgressBar(current, total, length = 20) {
     const filled = Math.min(length, Math.max(0, Math.round((current / total) * length)));
     const pct    = Math.min(100, Math.max(0, Math.round((current / total) * 100)));
     return `${'█'.repeat(filled)}${'░'.repeat(length - filled)} ${pct}%`;
+}
+
+// The public-profile opt-in behind /s/:guildId/u/:userId (#1018). Off by default,
+// so a card is never on the open web unless its owner put it there; turning it off
+// makes the URL a 404 again. Upserted so a member who has never run another economy
+// command can still opt in — the row is created just to hold the flag.
+async function setPublicProfile(interaction) {
+    const on = interaction.options.getString('setting') === 'on';
+    try {
+        await User.updateOne(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            { $set: { 'publicProfile.enabled': on } },
+            { upsert: true },
+        );
+    } catch (error) {
+        console.error('Profile public toggle error:', error);
+        return interaction.reply({ content: 'Failed to update your public profile setting.', flags: MessageFlags.Ephemeral });
+    }
+
+    const embed = new EmbedBuilder()
+        .setColor(on ? COLORS.SUCCESS : COLORS.NEUTRAL)
+        .setTitle(on ? '🌐 Public profile enabled' : '🔒 Public profile disabled')
+        .setDescription(on
+            ? 'Your profile card can now be viewed on this server\'s public web page (if the server has one turned on). Run `/profile public off` to make it private again.'
+            : 'Your profile card is private again and will 404 on the public web page.')
+        .setFooter({ text: 'Only members who opt in are ever shown publicly.' });
+
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }

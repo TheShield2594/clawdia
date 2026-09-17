@@ -243,6 +243,15 @@ const userSchema = new Schema({
         }
     },
 
+    // Public profile opt-in (#1018). The guild's public page at /s/:guildId only
+    // serves a member's card (/s/:guildId/u/:userId) once they have run
+    // `/profile public on`; everyone else is a 404, so the URL space never
+    // confirms who is a member. Off by default: appearing on the open web is a
+    // choice each member makes, like the /notifications opt-outs above.
+    publicProfile: {
+        enabled: { type: Boolean, default: false }
+    },
+
     // Leaderboard rivalry anti-spam timestamps
     leaderboard: {
         lastOvertakenNotification: { type: Date, default: null },

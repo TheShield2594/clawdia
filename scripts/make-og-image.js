@@ -205,9 +205,26 @@ function main() {
     console.log(`[OG] Wrote ${path.relative(process.cwd(), PNG)} (${WIDTH}×${HEIGHT}).`);
 }
 
-try {
-    main();
-} catch (err) {
-    console.error('[OG]', err.message);
-    process.exit(1);
+// The player-card image for the public pages (#1018) reuses the same paw, pill
+// and palette so a shared card reads as the same product as the landing card.
+// These are exported rather than copied for that reason; the CLI below still
+// owns the committed landing PNG.
+module.exports = {
+    drawPaw,
+    roundedRect,
+    render,
+    check,
+    WIDTH,
+    HEIGHT,
+    MARGIN,
+    palette: { CREAM_50, CREAM_100, CREAM_200, INK_950, INK_500, RUST },
+};
+
+if (require.main === module) {
+    try {
+        main();
+    } catch (err) {
+        console.error('[OG]', err.message);
+        process.exit(1);
+    }
 }

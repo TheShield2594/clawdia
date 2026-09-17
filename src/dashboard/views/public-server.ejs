@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<%
+    // The page's own address, preferring the vanity slug when the guild set one,
+    // so every card link and the canonical URL read the way it was shared.
+    const base = '/s/' + (page.slug || page.guild.id);
+    const pageTitle = page.guild.name + ' — Clawdia';
+    const pageDescription = 'The public leaderboards and weekly champions for ' + page.guild.name + ', powered by Clawdia.';
+    // The share card reuses the landing card (#1018): the server page has no
+    // single subject to draw, so the brand card is the honest image. Absolute and
+    // conditional, exactly as the landing page's is — an unfurler resolves nothing
+    // relative to the page it fetched, and baseUrl is null only in the
+    // misconfiguration that already refuses to start.
+    const cardImage = locals.baseUrl ? locals.baseUrl + asset('/og-image.png') : null;
+%>
+<head>
+    <%- include('partials/head', { title: pageTitle, description: pageDescription }) %>
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Clawdia">
+    <meta property="og:title" content="<%= pageTitle %>">
+    <meta property="og:description" content="<%= pageDescription %>">
+    <%_ if (cardImage) { _%>
+    <meta property="og:url" content="<%= baseUrl %><%= base %>">
+    <meta property="og:image" content="<%= cardImage %>">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <link rel="canonical" href="<%= baseUrl %><%= base %>">
+    <%_ } _%>
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="<%= pageTitle %>">
+    <meta name="twitter:description" content="<%= pageDescription %>">
+    <%_ if (cardImage) { _%>
+    <meta name="twitter:image" content="<%= cardImage %>">
+    <%_ } _%>
+    <meta name="theme-color" content="#faf6ef">
+    <style>
+        body { background: var(--cream-50); color: var(--ink-950); }
+        .cwp-wrap { max-width: 920px; margin: 0 auto; padding: 40px 20px 80px; }
+        .cwp-head { display: flex; align-items: center; gap: 18px; padding-bottom: 28px; border-bottom: 1px solid var(--cream-200); }
+        .cwp-icon, .cwp-icon-fallback { width: 72px; height: 72px; border-radius: 18px; flex: none; }
+        .cwp-icon-fallback { background: var(--ink-950); color: var(--cream-50); display: flex; align-items: center; justify-content: center; font-family: 'Instrument Serif', serif; font-size: 34px; }
+        .cwp-head h1 { font-family: 'Instrument Serif', serif; font-size: 40px; margin: 0; line-height: 1.05; }
+        .cwp-head .cwp-tag { font-family: 'JetBrains Mono', monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-500); }
+        .cwp-section { margin-top: 44px; }
+        .cwp-section > h2 { font-family: 'JetBrains Mono', monospace; font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-500); margin: 0 0 16px; }
+        .cwp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+        .cwp-card { background: var(--cream-100); border-radius: 14px; padding: 16px 18px; }
+        .cwp-card .k { font-size: 13px; color: var(--ink-500); }
+        .cwp-card .v { font-size: 18px; font-weight: 600; margin-top: 4px; }
+        .cwp-event { background: var(--ink-950); color: var(--cream-50); border-radius: 16px; padding: 20px 24px; display: flex; align-items: center; gap: 16px; }
+        .cwp-event .e { font-size: 32px; }
+        .cwp-event .n { font-family: 'Instrument Serif', serif; font-size: 24px; }
+        .cwp-event .m { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--cream-200); margin-top: 4px; }
+        .cwp-board { background: var(--cream-100); border-radius: 16px; padding: 8px 4px; }
+        .cwp-row { display: grid; grid-template-columns: 42px 1fr auto; align-items: center; gap: 12px; padding: 10px 16px; }
+        .cwp-row + .cwp-row { border-top: 1px solid var(--cream-200); }
+        .cwp-rank { font-family: 'JetBrains Mono', monospace; color: var(--ink-500); font-size: 14px; }
+        .cwp-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cwp-name a { color: var(--rust, #d97742); text-decoration: none; }
+        .cwp-name a:hover { text-decoration: underline; }
+        .cwp-val { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--ink-950); }
+        .cwp-progress { appearance: none; -webkit-appearance: none; width: 100%; height: 6px; margin-top: 8px; border: none; border-radius: 999px; background: var(--cream-200); overflow: hidden; }
+        .cwp-progress::-webkit-progress-bar { background: var(--cream-200); }
+        .cwp-progress::-webkit-progress-value { background: var(--rust, #d97742); }
+        .cwp-progress::-moz-progress-bar { background: var(--rust, #d97742); }
+        .cwp-foot { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--cream-200); font-size: 13px; color: var(--ink-500); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+        .cwp-foot a { color: var(--ink-950); }
+        @media (max-width: 520px) { .cwp-head h1 { font-size: 30px; } }
+    </style>
+</head>
+<body>
+    <main class="cwp-wrap">
+        <header class="cwp-head">
+            <% if (page.guild.icon) { %>
+                <img class="cwp-icon" width="72" height="72" loading="eager" decoding="async"
+                     src="https://cdn.discordapp.com/icons/<%= page.guild.id %>/<%= page.guild.icon %>.png?size=128"
+                     alt="Server icon for <%= page.guild.name %>"
+                     data-fallback-class="cwp-icon-fallback"
+                     data-fallback-text="<%= page.guild.name.charAt(0).toUpperCase() %>">
+            <% } else { %>
+                <div class="cwp-icon-fallback"><%= page.guild.name.charAt(0).toUpperCase() %></div>
+            <% } %>
+            <div>
+                <div class="cwp-tag">// public server page</div>
+                <h1><%= page.guild.name %></h1>
+            </div>
+        </header>
+
+        <% if (page.event) { %>
+            <section class="cwp-section">
+                <h2>Active event</h2>
+                <div class="cwp-event">
+                    <span class="e"><%= page.event.emoji %></span>
+                    <div>
+                        <div class="n"><%= page.event.name %></div>
+                        <div class="m"><%= page.event.coinMultiplier %>× coins · <%= page.event.xpMultiplier %>× XP</div>
+                    </div>
+                </div>
+            </section>
+        <% } %>
+
+        <% if (page.champions && page.champions.length) { %>
+            <section class="cwp-section">
+                <h2>Weekly champions</h2>
+                <div class="cwp-grid">
+                    <% page.champions.forEach(function(c) { %>
+                        <div class="cwp-card">
+                            <div class="k"><%= c.title %></div>
+                            <div class="v"><%= c.name %></div>
+                            <div class="k"><%= c.value %></div>
+                        </div>
+                    <% }); %>
+                </div>
+            </section>
+        <% } %>
+
+        <% page.boards.forEach(function(board) { %>
+            <section class="cwp-section">
+                <h2><%= board.title %></h2>
+                <div class="cwp-board">
+                    <% board.rows.forEach(function(row) { %>
+                        <div class="cwp-row">
+                            <span class="cwp-rank">#<%= row.rank %></span>
+                            <span class="cwp-name"><% if (row.userId) { %><a href="<%= base %>/u/<%= row.userId %>"><%= row.name %></a><% } else { %><%= row.name %><% } %></span>
+                            <span class="cwp-val"><%= row.value %></span>
+                        </div>
+                    <% }); %>
+                </div>
+            </section>
+        <% }); %>
+
+        <% if (page.districts && page.districts.length) { %>
+            <section class="cwp-section">
+                <h2>District funding</h2>
+                <div class="cwp-grid">
+                    <% page.districts.forEach(function(d) { %>
+                        <div class="cwp-card">
+                            <div class="k"><%= d.districtId %><% if (d.active) { %> · active<% } %></div>
+                            <div class="v"><%= d.pool.toLocaleString() %> / <%= d.goal.toLocaleString() %></div>
+                            <progress class="cwp-progress" value="<%= d.pool %>" max="<%= Math.max(d.goal, 1) %>"><%= d.pct %>%</progress>
+                        </div>
+                    <% }); %>
+                </div>
+            </section>
+        <% } %>
+
+        <footer class="cwp-foot">
+            <span>Public page · read-only · <a href="/">Clawdia</a></span>
+            <span>v<%= version %></span>
+        </footer>
+    </main>
+</body>
+</html>

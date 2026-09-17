@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <%- include('partials/head', { title: 'Not found — Clawdia' }) %>
+    <%#
+        Deliberately no Open Graph tags and no member-specific text. This is the
+        one answer every failed gate gives — a guild whose public page is off, a
+        member who has not opted in, a member who is not here at all — so it must
+        describe none of them, or the 404 itself would confirm which case it is.
+    -%>
+    <meta name="robots" content="noindex">
+    <meta name="theme-color" content="#faf6ef">
+    <style>
+        body { background: var(--cream-50); color: var(--ink-950); }
+        .cwp-empty { max-width: 620px; margin: 0 auto; padding: 120px 24px; text-align: center; }
+        .cwp-empty h1 { font-family: 'Instrument Serif', serif; font-size: 44px; margin: 0 0 12px; }
+        .cwp-empty p { color: var(--ink-500); font-size: 16px; margin: 0 0 28px; }
+    </style>
+</head>
+<body>
+    <main class="cwp-empty">
+        <h1>Nothing here</h1>
+        <p>This page is private, does not exist, or has not been turned on. Public server pages are opt-in.</p>
+        <a href="/" class="cw-btn cw-btn-dark">← Back to Clawdia</a>
+    </main>
+</body>
+</html>

@@ -23,6 +23,7 @@ const PANELS = [
     'progressiontracks',
     'suggestions',
     'reactionroles',
+    'publicpage',
     'rss',
     'tempvoice',
     'commandpolicies',

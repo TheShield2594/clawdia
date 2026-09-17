@@ -1,11 +1,13 @@
-# Everything on this host except the landing page needs a session cookie.
-# /dashboard and /auth answer a crawler with a redirect into Discord's OAuth,
-# and /api answers 401 — so the rules below save the crawl rather than protect
-# anything. They are not an access control: the middleware in
-# src/dashboard/lib/middleware.js is (#947).
+# The crawlable pages are the landing page and the opt-in public server pages
+# under /s (#1018); everything else needs a session cookie. /dashboard and /auth
+# answer a crawler with a redirect into Discord's OAuth, and /api answers 401 —
+# so the rules below save the crawl rather than protect anything. They are not an
+# access control: the middleware in src/dashboard/lib/middleware.js is (#947), and
+# a guild whose public page is off answers 404 under /s regardless of this file.
 User-agent: *
 Disallow: /dashboard
 Disallow: /api
 Disallow: /auth
 
-# Deliberately no Sitemap: line. There is one public page.
+# Deliberately no Sitemap: line. The public pages under /s are opt-in per guild
+# and per member, so there is no fixed set of URLs to enumerate here.
