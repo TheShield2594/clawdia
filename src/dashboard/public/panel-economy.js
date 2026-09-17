@@ -545,6 +545,83 @@ async function ecoAdminAction(action) {
     }
 }
 
+// ── Member Ledger ─────────────────────────────────────────────────────────
+// Read-only view of one member's transactions, plus the owed payouts sitting in
+// the dead-letter queue for them (#1009). Reuses the User ID box the admin
+// actions above already read.
+let _ledgerUserId = null;
+let _ledgerPage = 1;
+
+function ledgerAmountCell(amount) {
+    const n = Number(amount) || 0;
+    if (n === 0) return '<span class="eco-ledger-mute">0</span>';
+    const cls = n > 0 ? 'eco-ledger-credit' : 'eco-ledger-debit';
+    const text = (n > 0 ? '+' : '') + n.toLocaleString();
+    return `<span class="${cls}">${text}</span>`;
+}
+
+function renderLedgerOwed(owed) {
+    const box = document.getElementById('eco-ledger-owed');
+    if (!owed || !owed.length) { box.classList.add('eco-ledger-hidden'); box.innerHTML = ''; return; }
+    const rows = owed.map(o => {
+        const what = o.kind === 'items'
+            ? `${(o.quantity || 0).toLocaleString()}× ${escHtml(o.itemId || 'item')}`
+            : `${(o.amount || 0).toLocaleString()} coins`;
+        const key = o.payoutKey ? `<code class="eco-ledger-key">${escHtml(o.payoutKey)}</code>` : '<span class="eco-ledger-mute">no key</span>';
+        return `<li><strong>${escHtml(o.status)}</strong> · ${what} · ${key}<br><span class="eco-ledger-sub">${escHtml(o.jobName || '')} — ${escHtml(o.errorMessage || '')}</span></li>`;
+    }).join('');
+    box.innerHTML = `<div class="analytics-error-card"><strong>⚠ ${owed.length} owed payout${owed.length === 1 ? '' : 's'} outstanding</strong> — settle with <code>npm run payouts:replay</code><ul class="eco-ledger-owed-list">${rows}</ul></div>`;
+    box.classList.remove('eco-ledger-hidden');
+}
+
+async function loadLedger(page) {
+    const guildId = BOOT.guildId;
+    const userId = document.getElementById('eco-admin-user-id').value.trim();
+    const msgEl = document.getElementById('eco-ledger-msg');
+    if (!userId) { msgEl.textContent = 'Enter a user ID above first.'; msgEl.style.color = 'var(--red)'; return; }
+
+    _ledgerUserId = userId;
+    msgEl.textContent = 'Loading…';
+    msgEl.style.color = '';
+    try {
+        const resp = await apiFetch(`/api/v1/guild/${guildId}/members/${userId}/ledger?page=${page}&limit=20`);
+        const data = await resp.json();
+        if (!resp.ok) { msgEl.textContent = data.error || 'Failed to load ledger.'; msgEl.style.color = 'var(--red)'; return; }
+
+        _ledgerPage = data.page || 1;
+        renderLedgerOwed(data.owed);
+
+        const tbody = document.getElementById('eco-ledger-tbody');
+        const wrap = document.getElementById('eco-ledger-wrap');
+        const pager = document.getElementById('eco-ledger-pager');
+        tbody.innerHTML = '';
+        if (!data.total) {
+            msgEl.textContent = 'No transactions on record for this member.';
+            wrap.classList.add('eco-ledger-hidden');
+            pager.classList.remove('is-shown');
+            return;
+        }
+        msgEl.textContent = '';
+        for (const t of data.items) {
+            const when = t.createdAt ? new Date(t.createdAt).toLocaleString() : '—';
+            const cp = t.relatedUserId
+                ? `<span title="${escHtml(t.relatedUserId)}">${escHtml(t.relatedUserTag || t.relatedUserId)}</span>`
+                : '<span class="eco-ledger-mute">—</span>';
+            const note = t.note ? escHtml(t.note) : '<span class="eco-ledger-mute">—</span>';
+            tbody.insertAdjacentHTML('beforeend',
+                `<tr><td class="eco-ledger-nowrap">${escHtml(when)}</td><td>${escHtml(t.type || '')}</td><td>${ledgerAmountCell(t.amount)}</td><td>${(t.balance || 0).toLocaleString()}</td><td>${cp}</td><td>${note}</td></tr>`);
+        }
+        wrap.classList.remove('eco-ledger-hidden');
+        document.getElementById('eco-ledger-page').textContent = `Page ${data.page} / ${data.pages}`;
+        document.querySelector('[data-action="eco-ledger-prev"]').disabled = data.page <= 1;
+        document.querySelector('[data-action="eco-ledger-next"]').disabled = data.page >= data.pages;
+        pager.classList.add('is-shown');
+    } catch {
+        msgEl.textContent = 'Request failed.';
+        msgEl.style.color = 'var(--red)';
+    }
+}
+
 // Clicking the backdrop closes the dialog it belongs to. Registered here rather
 // than in the shared dialog machinery because these are this panel's dialogs.
 document.addEventListener('click', function(e) {
@@ -565,6 +642,9 @@ registerPanelActions({
         'job-edit':         (el, d) => openJobModal(Number(d.idx)),
         'job-delete':       (el, d) => deleteJob(Number(d.idx)),
         'eco-admin':        (el, d) => ecoAdminAction(d.ecoAction),
+        'eco-ledger':       () => loadLedger(1),
+        'eco-ledger-prev':  () => loadLedger(Math.max(1, _ledgerPage - 1)),
+        'eco-ledger-next':  () => loadLedger(_ledgerPage + 1),
         'activity-image-remove': (el, d) => removeActivityImage(d.itemId),
     },
     change: {
