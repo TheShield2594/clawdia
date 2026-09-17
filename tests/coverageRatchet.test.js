@@ -420,7 +420,6 @@ describe('per-file floors', () => {
             'src/utils/owedPayout.js',
             'src/utils/payoutKey.js',
             'src/utils/placeWager.js',
-            'src/utils/refundWager.js',
             'src/utils/tradeEscrow.js',
         ]);
     });

@@ -78,6 +78,12 @@
             "functions": 11,
             "lines": 28
         },
+        "src/commands/economy/rob": {
+            "statements": 50,
+            "branches": 34,
+            "functions": 34,
+            "lines": 50
+        },
         "src/commands/fun": {
             "statements": 29,
             "branches": 16,
@@ -360,12 +366,6 @@
             "functions": 97,
             "lines": 97
         },
-        "src/utils/refundWager.js": {
-            "statements": 97,
-            "branches": 47,
-            "functions": 97,
-            "lines": 97
-        },
         "src/utils/tradeEscrow.js": {
             "statements": 82,
             "branches": 71,
@@ -412,6 +412,8 @@
         "src/commands/economy/mine/shop/unlock.js",
         "src/commands/economy/mine/shop/upgrade.js",
         "src/commands/economy/mine/shop/use.js",
+        "src/commands/economy/rob/status.js",
+        "src/commands/economy/rob/trap.js",
         "src/commands/economy/synergies.js",
         "src/commands/utility/help.js",
         "src/commands/utility/ping.js",
@@ -437,6 +439,7 @@
         "src/migrations/015_drop_dead_giveaway_index.js",
         "src/migrations/019_drop_hourly_winners.js",
         "src/migrations/020_narrow_failed_job_ttl.js",
+        "src/migrations/023_drop_coinflip_roll_toggles.js",
         "src/models/Poll.js",
         "src/services/districtService.js",
         "src/services/syndicateService.js",
