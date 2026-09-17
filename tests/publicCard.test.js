@@ -44,4 +44,12 @@ describe('renderPlayerCard', () => {
     test('does not overflow on a very long name', async () => {
         await expect(renderPlayerCard({ ...CARD, name: 'A'.repeat(200) })).resolves.toBeInstanceOf(Buffer);
     });
+
+    test('fills in every missing field and singularizes a one-day streak', async () => {
+        // A sparse card exercises the `?? fallback` branches and the singular
+        // "1 day" — the card must draw rather than print "undefined".
+        await expect(renderPlayerCard({
+            guild: {}, level: 1, rank: 1, streak: 1,
+        })).resolves.toBeInstanceOf(Buffer);
+    });
 });
