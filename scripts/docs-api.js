@@ -57,6 +57,7 @@ const MIDDLEWARE_LABELS = [
     ['checkAuth', 'session'],
     ['checkGuildAccess', 'guild admin'],
     ['checkWriteRateLimit', 'write limit'],
+    ['checkImageReadRateLimit', 'image read limit'],
     ['uploadImage', 'multipart'],
 ];
 
