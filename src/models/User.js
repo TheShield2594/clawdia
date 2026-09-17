@@ -396,6 +396,19 @@ const userSchema = new Schema({
     questsCompleted: { type: Number, default: 0 },
     lastWarnedAt:    { type: Date, default: null },
 
+    // Membership lifecycle, for the retention cohorts on the Insights panel
+    // (#1015). `createdAt` above is when this economy/leveling record was first
+    // written, which is not when the member joined — a lurker who never ran a
+    // command has no record at all, and an old member's record dates from their
+    // first command, not their join. These three are written from the gateway
+    // instead: `joinedAt`/`firstSeenAt` on guildMemberAdd, `leftAt` on
+    // guildMemberRemove. `firstSeenAt` is the first join we ever saw and never
+    // moves; `joinedAt` is the most recent join (a rejoin updates it and clears
+    // `leftAt`), so a cohort follows the membership that is actually current.
+    firstSeenAt: { type: Date, default: null },
+    joinedAt:    { type: Date, default: null },
+    leftAt:      { type: Date, default: null },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });
@@ -423,6 +436,7 @@ userSchema.index({ guildId: 1, seasonCoins: -1 }); // used by executeLeaderboard
 userSchema.index({ guildId: 1, syndicateId: 1 });  // used by syndicate member lookups
 userSchema.index({ guildId: 1, level: -1, xp: -1 });          // leaderboard level sort + rank.js countDocuments
 userSchema.index({ guildId: 1, balance: -1, bank: -1 });      // leaderboard wealth sort
+userSchema.index({ guildId: 1, joinedAt: -1 });               // retention cohorts (dashboard Insights, #1015)
 
 // Mongoose 9 calls document middleware with no `next` callback (kareem's
 // execPre is async and awaits whatever the hook returns), so a hook aborts a

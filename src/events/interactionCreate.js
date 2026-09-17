@@ -74,10 +74,15 @@ async function handleGiveawayEntry(interaction) {
 // buffer batches an interval's worth into one push per guild. See
 // utils/commandMetricsBuffer.js for what that costs on a crash.
 function logCommandMetric(interaction, success, reason = null) {
+    const at = new Date();
     recordCommandMetric(interaction.guild.id, {
         command: interaction.commandName,
         channelId: interaction.channelId || null,
-        hour: new Date().getUTCHours(),
+        hour: at.getUTCHours(),
+        // UTC weekday for the Insights heatmap (#1015), stamped here beside the
+        // hour so the two always agree; the dashboard rotates both into the
+        // guild's timezone at read time.
+        weekday: at.getUTCDay(),
         success,
         reason
     });

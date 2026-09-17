@@ -1688,6 +1688,46 @@ only when the set changes.
   you move the database URI to a file. Its entrypoint prefers the file over
   `MONGODB_URI`, so unlike the bot's, its `MONGODB_URI` mapping can stay.
 
+#### Knowing When the Security Scan Stops
+
+The two security gates — `npm audit` and the Trivy image scan — run in `ci.yml`
+on every push and pull request, so a dependency advisory or a base-layer CVE is
+caught the moment somebody commits. But a self-hosted bot between releases can go
+quiet for weeks, and a CVE disclosed into that quiet is exactly what those gates
+would otherwise miss, because nothing is pushing for them to fire on. So
+`.github/workflows/security-scan.yml` re-runs the same two checks on a weekly
+cron and mails the repo owner on a finding — that is the notification path, since
+there is no pull request for it to be a red check on.
+
+That weekly scan has one failure mode worth knowing about, because it is silent:
+**GitHub disables a repository's scheduled workflows after 60 days with no
+activity.** The workflow that exists for the quiet stretches is the one a long
+enough quiet stretch switches off, and a disabled schedule does not go red — it
+simply stops appearing on the Actions tab, so "scanned, nothing found" and "not
+scanned since the spring" look identical from the outside.
+
+Two things guard against that, and neither needs anything running outside GitHub:
+
+- **A heartbeat on the triggers that cannot be disabled.** `ci.yml` carries a
+  `scan-heartbeat` job that runs on every push and pull request — triggers
+  GitHub never disables — and asks the API when the weekly scan last ran. If the
+  answer is older than three weeks, well before the 60-day cutoff, the job fails
+  with a red check that names the fix. So a lapsed scan is announced on the next
+  thing anybody does to the repository, which is when an operator is there to act
+  on it. (An API it cannot reach, or a repository with no scan history yet, warns
+  and passes rather than crying wolf.)
+- **Dependabot keeps the repository active.** The weekly dependency PRs it opens
+  (see `.github/dependabot.yml`) are themselves activity, and each one triggers
+  the heartbeat, so under normal operation the schedule stays enabled and a lapse
+  would surface on the next dependency PR even with no human push.
+
+If the heartbeat does go red, or the Actions tab shows the scheduled scan has
+stopped: open **Actions → Scheduled security scan → Enable workflow**. That is
+the step that restores it and resets the 60-day clock — a disabled workflow does
+not respond to `workflow_dispatch`, so enabling has to come first. Once it is
+enabled you can optionally use **Run workflow** to scan immediately rather than
+waiting for the next Monday.
+
 ### Performance
 
 - Use MongoDB indexes for large servers

@@ -112,6 +112,194 @@ function median(nums) {
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * Midnight UTC on the Monday of the week containing `ms` (#1015). The retention
+ * cohorts group by `$dateTrunc … startOfWeek: 'monday'`, so the aggregation's
+ * lower bound has to land on a Monday too — an exact "N weeks ago" cutoff can
+ * fall mid-week and leave the oldest cohort holding only the members who joined
+ * after that day while still labelling it with the whole week. Flooring the
+ * cutoff to its Monday makes the oldest cohort complete.
+ */
+function startOfIsoWeekUTC(ms) {
+    const d = new Date(ms);
+    const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    // getUTCDay: 0 = Sunday … 6 = Saturday; days back to Monday.
+    monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+    return monday;
+}
+
+/**
+ * Turns the join-week aggregation into the cohort rows the panel draws (#1015).
+ *
+ * The aggregation groups members by the week they joined and counts, per
+ * window, how many were still members that long after joining (`tenureMs` is
+ * `leftAt − joinedAt`, or `now − joinedAt` for a member still present, so
+ * `tenureMs ≥ N days` is exactly "retained at day N"). What it cannot decide is
+ * whether a window is *ripe*: a cohort that joined ten days ago has no honest
+ * D30 figure, because its members have not had thirty days to leave — counting
+ * them as churned would read as a retention cliff that is really just the
+ * present catching up. So a window is reported only once the whole cohort has
+ * had time to reach it (the latest possible join in the week, plus the window,
+ * is in the past); until then it is null, and the panel shows it as pending
+ * rather than as zero.
+ *
+ * @param {{_id: (Date|string), size: number, r1: number, r7: number, r30: number}[]} rows
+ * @param {number} [nowMs]
+ * @returns {{cohort: string, size: number, d1Pct: ?number, d7Pct: ?number, d30Pct: ?number}[]}
+ */
+function finalizeRetentionCohorts(rows, nowMs = Date.now()) {
+    return (rows || [])
+        .filter(row => row && row._id)
+        .map(row => {
+            const weekStart = new Date(row._id);
+            // The last member counted in this cohort could have joined right up
+            // to the end of the week, so maturity is measured from the week's
+            // end, not its start.
+            const weekEnd = weekStart.getTime() + 7 * DAY_MS;
+            const size = row.size || 0;
+            const pct = (retained, windowDays) => {
+                if (nowMs < weekEnd + windowDays * DAY_MS) return null;
+                return size ? Number(((retained / size) * 100).toFixed(1)) : 0;
+            };
+            return {
+                cohort: weekStart.toISOString().slice(0, 10),
+                size,
+                d1Pct:  pct(row.r1 || 0, 1),
+                d7Pct:  pct(row.r7 || 0, 7),
+                d30Pct: pct(row.r30 || 0, 30),
+            };
+        });
+}
+
+/**
+ * Minutes to add to a UTC clock to read it in `timeZone` at `at` — positive
+ * east of UTC. Used to rotate the UTC activity buckets into the guild's own
+ * time (#1015). It is the offset in effect at one reference instant, so a
+ * fixed-offset zone is exact and a DST zone is read at whichever side of the
+ * changeover `at` falls on; the buckets carry only a UTC hour and weekday, not
+ * a date, so an offset is the most a UTC-only bucket can honestly be shifted by.
+ *
+ * @param {string} timeZone an IANA zone name, e.g. 'America/New_York'.
+ * @param {Date} [at]
+ * @returns {number} offset in minutes, or 0 if the zone is not understood.
+ */
+function tzOffsetMinutes(timeZone, at = new Date()) {
+    if (!timeZone || timeZone === 'UTC') return 0;
+    try {
+        const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+            timeZone, hour12: false,
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+        }).formatToParts(at).map(p => [p.type, p.value]));
+        // `hour` comes back as '24' at midnight in some engines; fold it to 0.
+        const hour = Number(parts.hour) % 24;
+        const asUTC = Date.UTC(
+            Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+            hour, Number(parts.minute), Number(parts.second),
+        );
+        return Math.round((asUTC - at.getTime()) / 60000);
+    } catch {
+        return 0;
+    }
+}
+
+const WEEKDAY_INDEX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+/**
+ * The weekday (0 = Sunday … 6 = Saturday) and hour (0–23) of `date` in
+ * `timeZone`, read straight from the full timestamp. Returns null if the zone
+ * is not understood, so the caller can fall back.
+ */
+function localWeekdayHour(date, timeZone) {
+    try {
+        const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+            timeZone, hour12: false, weekday: 'short', hour: '2-digit',
+        }).formatToParts(date).map(p => [p.type, p.value]));
+        const weekday = WEEKDAY_INDEX[parts.weekday];
+        const hour = Number(parts.hour) % 24; // some engines print '24' at midnight
+        if (weekday === undefined || !Number.isInteger(hour)) return null;
+        return { weekday, hour };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Builds the 7×24 weekday-by-hour activity grid for the Insights heatmap
+ * (#1015), in `timeZone`.
+ *
+ * Each command-usage entry carries a `createdAt`, so its local weekday and hour
+ * are read straight from that timestamp in the zone — exact across a
+ * daylight-saving change and for a fractional-offset zone, neither of which a
+ * single reference offset applied to a whole-hour bucket can get right. Only an
+ * entry written before `createdAt` existed falls back to its stored UTC `hour`
+ * (and `weekday`, if any) rotated by the zone's current offset; one with no
+ * weekday to recover is kept on a separate `unknownWeekday` row by hour rather
+ * than guessed onto a day it may not have run on.
+ *
+ * @param {{hour: number, weekday: ?number, createdAt: ?(Date|string)}[]} entries
+ * @param {string} [timeZone]
+ * @param {Date} [at] reference instant for the fallback zone offset.
+ * @returns {{timezone: string, weekdays: string[], grid: number[][],
+ *            unknownWeekday: number[], hasUnknown: boolean, total: number}}
+ */
+function buildActiveHoursHeatmap(entries, timeZone = 'UTC', at = new Date()) {
+    const offsetMinutes = tzOffsetMinutes(timeZone, at);
+    const grid = Array.from({ length: 7 }, () => new Array(24).fill(0));
+    const unknownWeekday = new Array(24).fill(0);
+    let total = 0;
+    let hasUnknown = false;
+
+    for (const entry of entries || []) {
+        // Preferred path: the full timestamp, placed in the zone directly.
+        const createdAt = entry?.createdAt ? new Date(entry.createdAt) : null;
+        if (createdAt && !Number.isNaN(createdAt.getTime())) {
+            const local = localWeekdayHour(createdAt, timeZone);
+            if (local) {
+                total += 1;
+                grid[local.weekday][local.hour] += 1;
+                continue;
+            }
+        }
+
+        // Fallback: a legacy entry with only a UTC hour (and maybe weekday),
+        // rotated by the zone's current offset.
+        const hour = Number(entry?.hour);
+        if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue;
+        total += 1;
+
+        const weekday = entry?.weekday;
+        const hasWeekday = Number.isInteger(weekday) && weekday >= 0 && weekday <= 6;
+
+        // Shift the whole (weekday, hour) position by the offset so a bucket
+        // that rolls past midnight lands on the next or previous day.
+        const localHourFloat = (hour * 60 + offsetMinutes) / 60;
+        const dayShift = Math.floor(localHourFloat / 24);
+        const localHour = ((Math.floor(localHourFloat) % 24) + 24) % 24;
+
+        if (hasWeekday) {
+            const localWeekday = (((weekday + dayShift) % 7) + 7) % 7;
+            grid[localWeekday][localHour] += 1;
+        } else {
+            hasUnknown = true;
+            // No day to shift, but the hour still moves into the zone.
+            unknownWeekday[localHour] += 1;
+        }
+    }
+
+    return {
+        timezone: timeZone || 'UTC',
+        weekdays: WEEKDAY_LABELS,
+        grid,
+        unknownWeekday,
+        hasUnknown,
+        total,
+    };
+}
+
 function parseChannelIdFromJumpUrl(url) {
     if (!url || typeof url !== 'string') return null;
     const parts = url.split('/').filter(Boolean);
@@ -128,4 +316,9 @@ module.exports = {
     computeRetention,
     median,
     parseChannelIdFromJumpUrl,
+    finalizeRetentionCohorts,
+    startOfIsoWeekUTC,
+    tzOffsetMinutes,
+    buildActiveHoursHeatmap,
+    WEEKDAY_LABELS,
 };

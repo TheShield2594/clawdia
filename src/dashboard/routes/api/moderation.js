@@ -71,6 +71,26 @@ router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, check
         }
 
         await c.save();
+
+        // First-response time is write-once and has to survive two moderators
+        // acting on the same case at once, so it is a guarded atomic update
+        // rather than a field on the save above (#1015). `save()` persists only
+        // the paths it touched, and this never touches `firstActionAt`, so this
+        // is its sole writer: the `firstActionAt: null` filter lets the first
+        // action to land set it and a later one match nothing, with no
+        // read-then-write window for a concurrent request to slip through.
+        const firstActionAt = new Date();
+        const firstActionUpdate = await Case.updateOne(
+            { guildId, caseId: parsedId, firstActionAt: null },
+            { $set: { firstActionAt } },
+        );
+        // Only this request's timestamp is the persisted one when its guarded
+        // write actually matched. If a concurrent moderator's action set
+        // `firstActionAt` first, this update matches nothing — so leave `c` as it
+        // loaded rather than echoing a timestamp the document never took (#1023
+        // review).
+        if (firstActionUpdate.matchedCount) c.firstActionAt = firstActionAt;
+
         await logAuditEvent(req, guildId, 'case_update', { caseId: parsedId, action });
         res.json({ success: true, case: c });
     } catch (error) {

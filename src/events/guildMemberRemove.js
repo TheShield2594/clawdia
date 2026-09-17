@@ -1,5 +1,6 @@
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const GuildAnalytics = require('../models/GuildAnalytics');
+const User = require('../models/User');
 const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 const { trackAction } = require('../services/antiNukeService');
 const COLORS = require('../utils/embedColors');
@@ -48,6 +49,20 @@ module.exports = {
                 await trackMemberEvent(member.guild.id, dateKey, 'leaves');
             } catch (analyticsError) {
                 console.error('Member leave analytics error:', analyticsError);
+            }
+
+            // Stamp the departure for the retention cohorts (#1015). No upsert:
+            // a member who never had a record has no join date either, so there
+            // is no cohort for them to fall out of, and creating one here would
+            // be a row with a leave and no join. An atomic update, so it does
+            // not race the economy writers that own this document.
+            try {
+                await User.updateOne(
+                    { userId: member.id, guildId: member.guild.id },
+                    { $set: { leftAt: new Date() } }
+                );
+            } catch (leaveDateError) {
+                console.error('Member leave-date tracking error:', leaveDateError);
             }
 
             if (!guildSettings.farewell.enabled) return;

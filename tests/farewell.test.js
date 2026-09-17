@@ -23,6 +23,7 @@ jest.mock('discord.js', () => {
 
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
 jest.mock('../src/models/GuildAnalytics', () => ({ updateOne: jest.fn().mockResolvedValue({ matchedCount: 1 }) }));
+jest.mock('../src/models/User', () => ({ updateOne: jest.fn().mockResolvedValue({}) }));
 jest.mock('../src/services/antiNukeService', () => ({ trackAction: jest.fn().mockResolvedValue(undefined) }));
 
 const { clearGuildSettingsCache } = require('../src/utils/guildSettingsCache');

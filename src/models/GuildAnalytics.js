@@ -26,6 +26,12 @@ const guildAnalyticsSchema = new Schema({
         command: { type: String, required: true },
         channelId: { type: String, default: null },
         hour: { type: Number, required: true },
+        // UTC day of week, 0 = Sunday … 6 = Saturday (#1015). Added so the
+        // Insights weekday heatmap has a day dimension, not just the hour. Null
+        // on entries written before this field existed — those cannot be
+        // reconstructed (the day they ran is not recorded anywhere else), so the
+        // heatmap reads a null weekday as an "unknown" row rather than guessing.
+        weekday: { type: Number, default: null },
         success: { type: Boolean, default: true },
         reason: { type: String, default: null },
         createdAt: { type: Date, default: Date.now }

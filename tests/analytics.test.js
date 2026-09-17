@@ -44,7 +44,7 @@ jest.mock('../src/services/antiNukeService', () => ({
     trackAction: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('../src/utils/cardGenerator', () => ({ createWelcomeCard: jest.fn().mockResolvedValue(Buffer.from('img')) }));
-jest.mock('../src/models/User', () => ({ findOne: jest.fn(), create: jest.fn() }));
+jest.mock('../src/models/User', () => ({ findOne: jest.fn(), create: jest.fn(), updateOne: jest.fn() }));
 jest.mock('../src/services/questService', () => ({
     ensureQuests: jest.fn(),
     onCommandUse: jest.fn().mockResolvedValue({ completed: [], nearComplete: [] }),
@@ -72,6 +72,7 @@ jest.mock('express', () => {
 });
 
 const { computeRetention } = require('../src/dashboard/routes/api');
+const mockUser = require('../src/models/User');
 const guildMemberAdd = require('../src/events/guildMemberAdd');
 const guildMemberRemove = require('../src/events/guildMemberRemove');
 const interactionCreate = require('../src/events/interactionCreate');
@@ -135,6 +136,7 @@ describe('trackMemberEvent (guildMemberAdd)', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockGuild.findOne.mockResolvedValue(makeGuildSettings());
+        mockUser.updateOne.mockResolvedValue({});
     });
 
     it('increments joins on existing today entry', async () => {
@@ -182,6 +184,40 @@ describe('trackMemberEvent (guildMemberAdd)', () => {
         expect(after[0]).toMatchObject({ 'memberEvents.date': '2026-03-30' });
     });
 
+    it('records the join date on the member’s User record (#1015)', async () => {
+        mockGuildAnalytics.updateOne.mockResolvedValue({ matchedCount: 1 });
+        const joinedAt = new Date('2026-03-29T23:30:00Z');
+        const member = makeMember({ joinedAt });
+
+        await guildMemberAdd.execute(member, {});
+
+        expect(mockUser.updateOne).toHaveBeenCalledWith(
+            { userId: member.id, guildId: member.guild.id },
+            // joinedAt is Discord's own timestamp; leftAt is cleared so a rejoin
+            // starts a fresh membership; firstSeenAt is filled from joinedAt only
+            // when it is still empty, on an existing record as well as an insert.
+            [{ $set: { joinedAt, leftAt: null, firstSeenAt: { $ifNull: ['$firstSeenAt', joinedAt] } } }],
+            { updatePipeline: true, upsert: true },
+        );
+    });
+
+    it('falls back to now for the join date when Discord gives none', async () => {
+        mockGuildAnalytics.updateOne.mockResolvedValue({ matchedCount: 1 });
+        const member = makeMember({ joinedAt: null });
+
+        await guildMemberAdd.execute(member, {});
+
+        const [, update, opts] = mockUser.updateOne.mock.calls[0];
+        expect(update[0].$set.joinedAt).toBeInstanceOf(Date);
+        expect(opts).toEqual({ updatePipeline: true, upsert: true });
+    });
+
+    it('a failed join-date write does not crash the join flow', async () => {
+        mockGuildAnalytics.updateOne.mockResolvedValue({ matchedCount: 1 });
+        mockUser.updateOne.mockRejectedValueOnce(new Error('DB error'));
+        await expect(guildMemberAdd.execute(makeMember(), {})).resolves.not.toThrow();
+    });
+
     it('does not throw if guild not found', async () => {
         mockGuild.findOne.mockResolvedValue(null);
         const member = makeMember();
@@ -208,6 +244,7 @@ describe('trackMemberEvent (guildMemberRemove)', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockGuild.findOne.mockResolvedValue(makeGuildSettings());
+        mockUser.updateOne.mockResolvedValue({});
     });
 
     it('increments leaves on existing today entry', async () => {
@@ -236,6 +273,21 @@ describe('trackMemberEvent (guildMemberRemove)', () => {
             joins: 0,
             leaves: 1,
         });
+    });
+
+    it('stamps the leave date on the User record without creating one (#1015)', async () => {
+        mockGuildAnalytics.updateOne.mockResolvedValue({ matchedCount: 1 });
+        const member = makeMember();
+
+        await guildMemberRemove.execute(member, {});
+
+        expect(mockUser.updateOne).toHaveBeenCalledTimes(1);
+        const [filter, update, opts] = mockUser.updateOne.mock.calls[0];
+        expect(filter).toEqual({ userId: member.id, guildId: member.guild.id });
+        expect(update.$set.leftAt).toBeInstanceOf(Date);
+        // No upsert: a member with no record has no join date to fall out of, so
+        // a leave-only row would be meaningless.
+        expect(opts).toBeUndefined();
     });
 
     it('swallows analytics errors without crashing the leave flow', async () => {
@@ -382,6 +434,15 @@ describe('logCommandMetric (interactionCreate)', () => {
         const [entry] = await flushedEntries();
         expect(entry.hour).toBeGreaterThanOrEqual(0);
         expect(entry.hour).toBeLessThanOrEqual(23);
+    });
+
+    it('records the UTC weekday of the command (0–6) for the heatmap (#1015)', async () => {
+        const interaction = makeInteraction();
+        await interactionCreate.execute(interaction, mockClient);
+
+        const [entry] = await flushedEntries();
+        expect(entry.weekday).toBeGreaterThanOrEqual(0);
+        expect(entry.weekday).toBeLessThanOrEqual(6);
     });
 
     it('logs unknown_command reason when command not found', async () => {

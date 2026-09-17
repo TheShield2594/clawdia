@@ -276,6 +276,12 @@
             "functions": 83,
             "lines": 86
         },
+        "src/commands/economy/trade.js": {
+            "statements": 25,
+            "branches": 24,
+            "functions": 16,
+            "lines": 26
+        },
         "src/games/casino/payout.js": {
             "statements": 97,
             "branches": 82,
@@ -359,6 +365,12 @@
             "branches": 47,
             "functions": 97,
             "lines": 97
+        },
+        "src/utils/tradeEscrow.js": {
+            "statements": 82,
+            "branches": 71,
+            "functions": 84,
+            "lines": 86
         }
     },
     "loadedButNeverRun": [

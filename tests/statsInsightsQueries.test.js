@@ -180,7 +180,14 @@ describe('/insights newcomer conversion', () => {
     ];
 
     beforeEach(() => {
-        User.aggregate.mockImplementation(async stages => runPipeline(population, stages));
+        // /insights now issues two aggregations: newcomer conversion (matches on
+        // createdAt, groups the whole set — the runner handles it) and retention
+        // cohorts (matches on joinedAt, groups by join-week — the runner cannot,
+        // and it is tested on its own in insightsHelpers.test.js). Route the
+        // cohort pipeline to empty here so the conversion assertions below still
+        // see exactly the numbers the fixture was built for.
+        User.aggregate.mockImplementation(async stages =>
+            (stages.some(s => s.$match && 'joinedAt' in s.$match) ? [] : runPipeline(population, stages)));
     });
 
     test('counts the same four numbers the array filters produced', async () => {
@@ -208,17 +215,34 @@ describe('/insights newcomer conversion', () => {
         await get('/guild/g1/insights');
 
         // The unbounded `User.find({ guildId })` this replaced is the whole point:
-        // peak memory grew with the size of the server, to compute four integers.
+        // peak memory grew with the size of the server, to compute a few integers.
+        // Both the conversion and the cohort counts are done in the pipeline, so
+        // there are two aggregations and still no document read.
         expect(User.find).not.toHaveBeenCalled();
-        expect(User.aggregate).toHaveBeenCalledTimes(1);
+        expect(User.aggregate).toHaveBeenCalledTimes(2);
     });
 
     test('narrows to the wider cohort in the match, not in the process', async () => {
         await get('/guild/g1/insights');
 
-        const [stages] = User.aggregate.mock.calls[0];
+        // Found by shape rather than call order, since the cohort aggregation
+        // runs alongside it: the conversion one is the pipeline matching createdAt.
+        const conversion = User.aggregate.mock.calls.find(([stages]) => stages[0].$match.createdAt);
+        expect(conversion).toBeDefined();
+        const [stages] = conversion;
         expect(stages[0].$match.guildId).toBe('g1');
         expect(stages[0].$match.createdAt.$lte).toBeInstanceOf(Date);
+    });
+
+    test('groups the retention cohorts by join week without reading the documents', async () => {
+        await get('/guild/g1/insights');
+
+        const cohort = User.aggregate.mock.calls.find(([stages]) => stages[0].$match.joinedAt);
+        expect(cohort).toBeDefined();
+        const [stages] = cohort;
+        expect(stages[0].$match.guildId).toBe('g1');
+        expect(stages[0].$match.joinedAt.$gte).toBeInstanceOf(Date);
+        expect(stages.some(s => s.$group && s.$group._id === '$weekStart')).toBe(true);
     });
 
     test('reports zeroes rather than dividing by an empty cohort', async () => {
@@ -237,23 +261,37 @@ describe('/insights reads', () => {
 
         await get('/guild/g1/insights');
 
-        expect(seen.select).toBe('type createdAt resolvedAt evidence.jumpUrl');
+        // firstActionAt joined the projection for the first-response SLA (#1015).
+        expect(seen.select).toBe('type createdAt firstActionAt resolvedAt evidence.jumpUrl');
         expect(seen.lean).toBe(true);
         expect(seen.limit).toBe(1000);
     });
 
-    test('reads telemetry from GuildAnalytics and only existence from Guild', async () => {
+    test('reads telemetry from GuildAnalytics and only the timezone from Guild', async () => {
+        const seen = stubGuildFindOne({ guildId: 'g1', dailyNews: { timezone: 'UTC' } });
+
         await get('/guild/g1/insights');
 
-        // Telemetry moved to its own collection — the route never pulls the
-        // Guild document (with its shop image Buffers) at all.
+        // Telemetry lives in its own collection; the Guild read is a projection
+        // of the one field the heatmap needs, never the document with its shop
+        // image Buffers.
         expect(GuildAnalytics.findOne).toHaveBeenCalledWith({ guildId: 'g1' });
-        expect(Guild.exists).toHaveBeenCalledWith({ guildId: 'g1' });
-        expect(Guild.findOne).not.toHaveBeenCalled();
+        expect(Guild.findOne).toHaveBeenCalledWith({ guildId: 'g1' });
+        expect(seen.select).toBe('dailyNews.timezone');
+    });
+
+    test('renders the heatmap in the guild timezone', async () => {
+        stubGuildFindOne({ guildId: 'g1', dailyNews: { timezone: 'America/New_York' } });
+        stubAnalyticsFindOne({ guildId: 'g1', memberEvents: [], commandUsage: [] });
+
+        const { body } = await get('/guild/g1/insights');
+
+        expect(body.activeHours.heatmap.timezone).toBe('America/New_York');
+        expect(body.activeHours.heatmap.grid).toHaveLength(7);
     });
 
     test('still 404s a guild that is not there', async () => {
-        Guild.exists.mockResolvedValue(null);
+        stubGuildFindOne(null);
         stubAnalyticsFindOne(null);
 
         const { status } = await get('/guild/nope/insights');

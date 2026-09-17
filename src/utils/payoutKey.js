@@ -370,6 +370,34 @@ function duelPayoutKey(duelId, userId, phase) {
 }
 
 /**
+ * The keys a two-way trade credits under (#1010).
+ *
+ * A trade delivers up to four things that can each happen at most once: each
+ * side receives the other's coins and the other's item. They are keyed apart —
+ * by the trade, the party being credited and, for items, the item — because the
+ * guard is a string comparison on the recipient's document with nothing on it to
+ * say which credit wrote it, so a shared key would let a replay of one satisfy
+ * another. The unwind that hands a committed asset back to its owner is keyed
+ * apart again, since a return and a delivery of the same item are two grants
+ * that must not stand in for each other.
+ *
+ * `tradeId` is `${aId}_${bId}_${Date.now()}`, minted when the trade opens, so it
+ * names this trade and nothing else — the same shape `duelPayoutKey` uses, for
+ * the same reason.
+ */
+function tradeCoinPayoutKey(tradeId, userId) {
+    return `trade:${tradeId}:pay:${userId}`;
+}
+
+function tradeItemDeliverPayoutKey(tradeId, userId, itemId) {
+    return `trade:${tradeId}:give:${userId}:${itemId}`;
+}
+
+function tradeItemReturnPayoutKey(tradeId, userId, itemId) {
+    return `trade:${tradeId}:return:${userId}:${itemId}`;
+}
+
+/**
  * One crew member's share of a group job — a `/heist` or a `/syndicate` raid
  * (#873).
  *
@@ -443,6 +471,7 @@ module.exports = {
     listingCreateRefundPayoutKey,
     marketRefundPayoutKey, transferRefundPayoutKey, giftItemRollbackPayoutKey,
     duelPayoutKey, crewSharePayoutKey,
+    tradeCoinPayoutKey, tradeItemDeliverPayoutKey, tradeItemReturnPayoutKey,
     jackpotPayoutKey, casinoPayoutKey,
     payoutKeyGuard, payoutKeyAppendExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, isDuplicateKeyError,

@@ -29,6 +29,21 @@ on:
 # days, and this workflow exists precisely for the quiet stretches. If the
 # Actions tab shows it stopped firing, that is why: re-enable it there, or push
 # anything.
+#
+# #997: that silence used to be the whole failure — a disabled schedule does not
+# go red, it just stops appearing, and nothing distinguished "scanned, clean"
+# from "not scanned since the spring". A schedule cannot notice its own
+# disabling (the thing that would notice is the thing that stopped), so the
+# heartbeat that does live in ci.yml — the `scan-heartbeat` job — because that
+# workflow runs on push and pull_request, the triggers GitHub never disables. It
+# asks the API when this workflow last ran and fails, loudly, when the answer is
+# older than a weekly cron can explain. The guarantee is therefore not "the scan
+# never lapses" but "a lapse is told the moment activity resumes" — which is
+# when an operator is there to act, and which Dependabot's weekly PRs (see
+# .github/dependabot.yml) count as, so the heartbeat fires roughly weekly even
+# with no human push and a disabled schedule surfaces as a red check on the next
+# dependency PR rather than as months of nothing. docs/SETUP_GUIDE.md, under
+# "Knowing When the Security Scan Stops", is the operator-facing version.
 
 concurrency:
   group: security-scan

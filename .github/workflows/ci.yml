@@ -263,6 +263,120 @@ jobs:
             attempt=$(( attempt + 1 ))
           done
 
+  # #997: security-scan.yml runs the two gates on a weekly cron, for the quiet
+  # stretches between releases when nothing pushes and the copies above never
+  # fire. But GitHub disables a repository's `schedule:` triggers after 60 days
+  # with no activity — so the workflow whose whole purpose is the quiet stretch
+  # is switched off by a long enough one, and silently: a disabled schedule does
+  # not go red, it just stops appearing, and nothing tells "scanned, clean" from
+  # "not scanned since the spring".
+  #
+  # A schedule cannot notice its own disabling — the thing that would notice is
+  # the thing that stopped. So this heartbeat lives here, in the workflow that
+  # runs on push and pull_request, the triggers GitHub never disables. It asks
+  # the API when security-scan.yml last ran and fails when the answer is older
+  # than a weekly cron can explain. The guarantee is not "the scan never lapses"
+  # but "a lapse is told the moment activity resumes" — which is when an operator
+  # is there to act — and Dependabot's weekly PRs (see .github/dependabot.yml)
+  # are activity, so this fires roughly weekly even with no human push and a
+  # disabled schedule surfaces as a red check on the next dependency PR.
+  #
+  # It gates nothing: it is deliberately not in `publish: needs:`, because a
+  # lapsed scan is a reason to re-enable the scan, not to stop shipping. And its
+  # own uncertainty is one-sided — an API it could not reach, or a repo with no
+  # scan history yet (a fork, or this repo before its first scheduled run), warn
+  # and pass. "Could not check" is not "found a lapse", the same rule the audit
+  # and image steps in this file already follow. tests/scanHeartbeat.test.js
+  # runs the script below for real against a stubbed API, the way the scan's own
+  # steps are tested.
+  scan-heartbeat:
+    name: Check the scheduled security scan is still firing
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # To read the run history of security-scan.yml. A read scope, so it is
+      # available even on the read-only token a fork or Dependabot pull request
+      # runs with — which is the case this most needs to work in.
+      actions: read
+    steps:
+      - name: Check when the scheduled security scan last ran
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The workflow whose schedule this watches, by file name — the runs
+          # API takes either the name or the numeric id, and the name needs no
+          # checkout to resolve and reads plainly here.
+          SCAN_WORKFLOW: security-scan.yml
+          # A weekly cron that has not run in this many days has missed several
+          # cycles — past any scheduler contention or a run or two skipped, and
+          # comfortably before the 60-day auto-disable, so crossing it is a real
+          # lapse caught with time left to fix it, not a false alarm on a delay.
+          STALE_DAYS: 21
+        run: |
+          set -u
+
+          api="${GITHUB_API_URL:-https://api.github.com}"
+          url="${api}/repos/${GITHUB_REPOSITORY}/actions/workflows/${SCAN_WORKFLOW}/runs?per_page=1"
+
+          # Any conclusion, not just success: the question is whether it *ran*. A
+          # scan that ran and failed mails the owner on its own account; a scan
+          # that never started is the silence this exists to break.
+          body=$(curl -sS --max-time 30 --retry 3 --retry-connrefused \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$url" 2>/dev/null) || body=''
+
+          {
+            echo '### Scan heartbeat'
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # A request that never came back, or came back as something other than
+          # the JSON expected, says nothing about the scan. Warn and pass:
+          # reading an API blip as a lapse would fail the build for a reason that
+          # has nothing to do with the scan — the false alarm the rest of this
+          # file is careful to avoid.
+          if [ -z "$body" ] || ! printf '%s' "$body" | jq -e 'has("workflow_runs")' >/dev/null 2>&1; then
+            echo "::warning::could not ask the API when ${SCAN_WORKFLOW} last ran, so this run does not say whether the scheduled scan is still firing"
+            echo "Not checked — the workflow-runs API could not be read." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          count=$(printf '%s' "$body" | jq -r '.total_count // 0')
+          last=$(printf '%s' "$body" | jq -r '.workflow_runs[0].created_at // empty')
+
+          # No history at all is a fork, or this repo before the scan's first
+          # scheduled or dispatched run. Said out loud — "publishing has been
+          # broken since setup" looks the same from here — but not failed: there
+          # is nothing an operator of a quiet fork can act on.
+          if [ "$count" = '0' ] || [ -z "$last" ]; then
+            echo "::warning::${SCAN_WORKFLOW} has no runs on record — expected on a fork or before its first run; if this is the primary repo it may never have been enabled"
+            echo "${SCAN_WORKFLOW} has never run." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          now=$(date -u +%s)
+          then_ts=$(date -u -d "$last" +%s 2>/dev/null || echo 0)
+
+          # An unparseable timestamp is another "could not check", not a lapse.
+          if [ "$then_ts" -eq 0 ]; then
+            echo "::warning::could not parse the last-run timestamp (${last}) for ${SCAN_WORKFLOW}"
+            echo "Not checked — the last-run timestamp could not be parsed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          age_days=$(( (now - then_ts) / 86400 ))
+
+          if [ "$age_days" -gt "$STALE_DAYS" ]; then
+            echo "::error::${SCAN_WORKFLOW} last ran ${age_days} days ago (threshold ${STALE_DAYS}). GitHub disables a schedule after 60 days of no activity, and the weekly security scan appears to have stopped firing. On the Actions tab, open the workflow and select 'Enable workflow' — a disabled workflow does not respond to workflow_dispatch, so enabling is what restores it (and resets the clock); you can then optionally 'Run workflow' to scan immediately."
+            echo "**The weekly security scan has not run in ${age_days} days.** On the Actions tab, open it and select 'Enable workflow' (a disabled workflow ignores workflow_dispatch); then optionally 'Run workflow' to scan now." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "${SCAN_WORKFLOW} last ran ${age_days} days ago — the schedule is still firing."
+          echo "Last ran ${age_days} days ago — the schedule is still firing." >> "$GITHUB_STEP_SUMMARY"
+
   # #646: the Dockerfile was built in exactly one place — the publish job below,
   # which runs on `main` after a merge. So a Dockerfile regression was found by
   # the deploy rather than by the pull request that caused it, and the first

@@ -29,6 +29,7 @@ jest.mock('discord.js', () => {
 
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn(), updateOne: jest.fn() }));
 jest.mock('../src/models/GuildAnalytics', () => ({ updateOne: jest.fn().mockResolvedValue({ matchedCount: 1 }) }));
+jest.mock('../src/models/User', () => ({ updateOne: jest.fn().mockResolvedValue({}) }));
 jest.mock('../src/utils/cardGenerator', () => ({ createWelcomeCard: jest.fn() }));
 
 const Guild = require('../src/models/Guild');

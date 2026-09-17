@@ -15,9 +15,10 @@ const GLOBAL_COMMAND_LIMIT = 100;
 // shape /hunt, /fish and /explore use).
 // Lower it when a consolidation lands; raising it spends the last of the
 // headroom between here and a deploy that cannot be undone by a revert. It
-// last moved for #875, which folded five single-holiday commands into the
-// /event group they were already gated by.
-const COMMAND_BUDGET = 92;
+// last moved for #1010, which added /trade — a new top-level command, since a
+// two-party escrow flow does not fit under an existing group; before that #875
+// folded five single-holiday commands into the /event group they were gated by.
+const COMMAND_BUDGET = 93;
 
 /**
  * Serialize the command set that is about to be published, and refuse to
