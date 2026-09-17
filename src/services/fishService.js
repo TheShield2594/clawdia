@@ -24,6 +24,7 @@ const { getPityBonus } = require('../utils/pityBonus');
 const { getBonusMultipliers } = require('../utils/prestige');
 const grind = require('./grindEngine');
 const { WILDERNESS_YIELD_BONUS } = require('../data/crossSystemData');
+const { randomInt } = require('crypto');
 
 const DAILY_QUEST_COUNT = 3;
 const WEEK_MS = 7 * 24 * 3_600_000;
@@ -139,9 +140,22 @@ function calculateCritChance(user) {
 
 // ─── RNG HELPERS ─────────────────────────────────────────────────────────────
 
+// Every fishing roll below feeds `finalPayout`, which is submitted as a
+// tournament `score` — and those scores decide how the real-currency prize
+// pool is split. That makes this a security context: a predictable
+// `Math.random()` sequence could be used to steer a catch's payout and so the
+// standings (CodeQL js/insecure-randomness, alert #154). `crypto.randomInt` is
+// not predictable, so every roll draws from it. `secureRandom()` is the drop-in
+// replacement for a `Math.random()` float in [0, 1); it keeps 47 bits of
+// resolution, which is ample for these comparisons and weightings. (`randomInt`
+// caps its bound at 2**48 - 1, so 2**47 stays comfortably in range.)
+function secureRandom() {
+    return randomInt(2 ** 47) / 2 ** 47;
+}
+
 function weightedRoll(items) {
     const total = items.reduce((s, i) => s + i.weight, 0);
-    let r = Math.random() * total;
+    let r = secureRandom() * total;
     for (const item of items) {
         r -= item.weight;
         if (r <= 0) return item;
@@ -150,7 +164,7 @@ function weightedRoll(items) {
 }
 
 function randInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+    return Math.floor(secureRandom() * (max - min + 1)) + min;
 }
 
 // ─── CATCH TYPE ROLL ─────────────────────────────────────────────────────────
@@ -162,7 +176,7 @@ function randInt(min, max) {
 function rollCatchType(location, weather) {
     const junkMod       = weather?.locationBonus?.[location.id]?.junkMod ?? 0;
     const adjustedJunk  = Math.min(1, Math.max(0, location.junkChance + junkMod));
-    const r = Math.random();
+    const r = secureRandom();
     if (r < adjustedJunk)                              return 'junk';
     if (r < adjustedJunk + location.treasureChance)    return 'treasure';
     return 'fish';
@@ -260,15 +274,15 @@ function rollFish(tier, locationId) {
     if (!pool.length) {
         const fallback = FISH_BY_TIER[tier];
         if (!fallback?.length) return FISH_BY_TIER['common'][0];
-        return fallback[Math.floor(Math.random() * fallback.length)];
+        return fallback[Math.floor(secureRandom() * fallback.length)];
     }
-    return pool[Math.floor(Math.random() * pool.length)];
+    return pool[Math.floor(secureRandom() * pool.length)];
 }
 
 // ─── FAILURE ROLL ─────────────────────────────────────────────────────────────
 
 function rollFailureSeverity() {
-    return FAILURE_SEVERITIES[Math.floor(Math.random() * FAILURE_SEVERITIES.length)];
+    return FAILURE_SEVERITIES[Math.floor(secureRandom() * FAILURE_SEVERITIES.length)];
 }
 
 // ─── PAYOUT MODIFIERS ─────────────────────────────────────────────────────────
@@ -523,7 +537,7 @@ function executeCast(user, locationId, options = {}) {
 
     const successChance = calculateSuccessChance(user, rod, location);
     // reactionFactor === 0 means the player missed the reel-in window; treat as a miss
-    const success       = reactionFactor > 0 && Math.random() < successChance;
+    const success       = reactionFactor > 0 && secureRandom() < successChance;
     const baitBefore    = f.activeBait;
 
     const result = { success, xpEarned: 0, durabilityLost: 0, rodBroke: false, reactionFactor: options.reactionFactor !== undefined ? reactionFactor : undefined };
@@ -596,7 +610,7 @@ function executeCast(user, locationId, options = {}) {
             let traitSuccessMod = 0;
             if (traits.slippery && FISH_TRAITS.slippery) traitSuccessMod += FISH_TRAITS.slippery.successMod;
             if (traits.elusive  && FISH_TRAITS.elusive)  traitSuccessMod += FISH_TRAITS.elusive.successMod;
-            if (traitSuccessMod < 0 && Math.random() < Math.abs(traitSuccessMod)) {
+            if (traitSuccessMod < 0 && secureRandom() < Math.abs(traitSuccessMod)) {
                 // Fish escaped despite success roll
                 const severity = { id: 'slipped', label: 'Slipped Away', durLoss: 1, injuryMs: 0, xp: 2,
                     msg: `The ${fish.name} slipped free — its ${traits.slippery ? 'slippery scales' : 'elusive nature'} made it impossible to hold!` };
@@ -621,7 +635,7 @@ function executeCast(user, locationId, options = {}) {
             // ── Size / weight (Issue #152) ──────────────────────────────────
             let sizeLabel = null, sizeTierId = 'average', sizeMultiplier = 1.0, weightLbs = 0;
             if (fish.sizeVariance) {
-                const r = Math.random();
+                const r = secureRandom();
                 let cum = 0;
                 for (const st of SIZE_TIERS) {
                     cum += st.chance;
@@ -631,7 +645,7 @@ function executeCast(user, locationId, options = {}) {
                         sizeMultiplier  = st.multiplier;
                         // Calculate weight
                         const baseW = FISH_BASE_WEIGHTS[fish.tier] ?? { min: 1, max: 10 };
-                        const base  = baseW.min + Math.random() * (baseW.max - baseW.min);
+                        const base  = baseW.min + secureRandom() * (baseW.max - baseW.min);
                         weightLbs   = parseFloat((base * st.weightMult).toFixed(1));
                         break;
                     }
@@ -648,8 +662,8 @@ function executeCast(user, locationId, options = {}) {
             let critChance = calculateCritChance(user);
             // Armored trait: crit resistance
             if (traits.armored) critChance *= 0.5;
-            const isCrit         = Math.random() < critChance;
-            const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
+            const isCrit         = secureRandom() < critChance;
+            const critMultiplier = isCrit ? (1.5 + secureRandom() * 1.0) : 1.0;
             const preModPayout   = Math.round(sizedPayout * critMultiplier * traitPayoutMult * streakMult * reactionFactor);
 
             const { adjustedPayout, cappedByHard, gatheringYield } = applyPayoutModifiers(user, preModPayout, location);
@@ -661,7 +675,7 @@ function executeCast(user, locationId, options = {}) {
             if (isCrit)                       dropChance *= 2;
             if (traits.ancient)               dropChance *= 2; // ancient trait doubles mat chance
             if (options.marketplaceActive)    dropChance *= 1.10;
-            if (fish.specialDrop && Math.random() < dropChance) {
+            if (fish.specialDrop && secureRandom() < dropChance) {
                 specialDrop = fish.specialDrop;
                 const matKey = fish.specialDrop.itemId;
                 if (f.materials[matKey] != null) f.materials[matKey] += 1;
@@ -739,7 +753,7 @@ function executeCast(user, locationId, options = {}) {
             // ── Boss encounter check (Issue #154) ──────────────────────────
             // 12% chance for legendary, 8% for epic, 3% for rare, skipped for others
             const bossTierChance = tier === 'legendary' ? 0.12 : tier === 'epic' ? 0.08 : tier === 'rare' ? 0.03 : 0;
-            if (bossTierChance > 0 && Math.random() < bossTierChance) {
+            if (bossTierChance > 0 && secureRandom() < bossTierChance) {
                 result.bossEncounter = { fish, tier };
                 // Payout/rewards handled when player responds to the encounter
             }
@@ -812,7 +826,7 @@ function assignDailyFishQuests(user) {
 
     const shuffled = eligible.slice();
     for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = Math.floor(secureRandom() * (i + 1));
         [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
     const toAssign  = shuffled.slice(0, DAILY_QUEST_COUNT);
@@ -896,7 +910,7 @@ function updateFishQuestProgress(user, result, locationId) {
  */
 function rollBossType() {
     const keys = Object.keys(BOSS_TYPES);
-    return BOSS_TYPES[keys[Math.floor(Math.random() * keys.length)]];
+    return BOSS_TYPES[keys[Math.floor(secureRandom() * keys.length)]];
 }
 
 /**
@@ -1236,6 +1250,9 @@ function applyCastBonuses(user, result, { petFishYieldPct = 0, isFeaturedSpot = 
 function rollWinterHuntMaterial(user, result, crossSystemType, locationId) {
     if (!result.success || crossSystemType !== 'winter_hunt' || locationId !== 'lake') return null;
     const ARCTIC_MATERIALS = ['arctic_fox_pelt', 'snowy_feather', 'thick_hide', 'polar_claw', 'mammoth_tusk'];
+    // This drop is a hunt-material bonus, not a coin payout — it never becomes a
+    // tournament score, so it stays on Math.random() (outside the security
+    // context the rolls above sit in).
     if (Math.random() >= 0.40) return null;
     const matId = ARCTIC_MATERIALS[Math.floor(Math.random() * ARCTIC_MATERIALS.length)];
     // The bag may not exist yet for an angler who has never hunted; prepareCastUser
