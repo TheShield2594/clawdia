@@ -39,6 +39,7 @@ const DEFAULT_USER = require('../models/User');
 const { NOT_FROZEN } = require('./economyFreeze');
 const { debitCoinsOrKnow, reverseKeyedDebit, resolveKeyedDebit } = require('./debitKey');
 const { creditCoinsOrOwe, grantItemsOrOwe } = require('./creditOrOwe');
+const { recordOwedPayout } = require('./owedPayout');
 const {
     tradeCoinPayoutKey, tradeItemDeliverPayoutKey, tradeItemReturnPayoutKey,
 } = require('./payoutKey');
@@ -70,21 +71,35 @@ function takeCoins(userId, guildId, amount, tradeId, Model = DEFAULT_USER) {
  * is unknown it reports not-returned rather than guessing — the escrow key on the
  * document is the durable record, and a later attempt settles it. This is the
  * `rollbackStake` reasoning from duelEscrow.js, applied to a trade.
+ *
+ * A reversal that stays unconfirmed after its retries leaves the coins stuck on
+ * the taker, so it is written down as an owed *reversal* (#1023 review) before
+ * reporting the failure: a `FailedJob` whose payload names the escrow key, which
+ * `npm run payouts:replay` re-runs through `reverseKeyedDebit` — not a blind
+ * credit, which could pay twice against a reversal that later lands. Recording is
+ * best-effort and the escrow key is still the ground truth, so a write that does
+ * not land only loses the operator's shortcut to it, not the record itself.
  */
 async function rollbackCoins(userId, guildId, amount, tradeId, Model = DEFAULT_USER) {
     if (amount <= 0) return { credited: true };
-    const undo = await reverseKeyedDebit({ userId, guildId }, amount, tradeCoinEscrowKey(tradeId, userId), { Model });
+    const key = tradeCoinEscrowKey(tradeId, userId);
+    const undo = await reverseKeyedDebit({ userId, guildId }, amount, key, { Model });
     if (undo.resolved) return { credited: true };
 
     let state = null;
     try {
-        state = await resolveKeyedDebit(Model, { userId, guildId }, tradeCoinEscrowKey(tradeId, userId));
+        state = await resolveKeyedDebit(Model, { userId, guildId }, key);
     } catch (err) {
         console.error(`[trade] could not read the escrow key for ${userId} in ${guildId}:`, err.message);
     }
     if (state && (!state.landed || state.reversed)) return { credited: true };
 
     console.error(`[trade] coin reversal for ${userId} in ${guildId} is unconfirmed; the escrow key is the record`);
+    await recordOwedPayout({
+        service: 'trade', jobName: 'tradeCoinReversal', guildId,
+        payload: { kind: 'reversal', userId, guildId, amount, payoutKey: key },
+        error: undo.error,
+    });
     return { credited: false };
 }
 

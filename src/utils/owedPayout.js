@@ -121,10 +121,22 @@ function payoutKeyForPayload(payload) {
  * on a payout that has been paid. `classifyUnmatchedPayout` is what tells them
  * apart; the silent-skip #804 closed does not come back under a new name.
  *
- * Two kinds, one per claim site:
+ * Three kinds:
  *
- *   coins  { kind: 'coins', userId, guildId, amount,           payoutKey?, counters? }
- *   items  { kind: 'items', userId, guildId, itemId, quantity, payoutKey?, budgetRefund? }
+ *   coins    { kind: 'coins',    userId, guildId, amount,           payoutKey?, counters? }
+ *   items    { kind: 'items',    userId, guildId, itemId, quantity, payoutKey?, budgetRefund? }
+ *   reversal { kind: 'reversal', userId, guildId, amount,           payoutKey }
+ *
+ * `reversal` is not a credit — it is a debit that could not be given back (#1023
+ * review). A trade escrow debit that landed but whose keyed reversal could not be
+ * confirmed leaves the coins stuck on the taker, and the recovery is not a blind
+ * credit: that would move coins without marking `spentDebits[].reversed`, so a
+ * later reversal that does land would pay a second time. Instead the replay
+ * re-runs `reverseKeyedDebit` against the same escrow key, which credits back
+ * only a recorded, un-reversed debit and marks it reversed in the same write —
+ * idempotent, so a debit that never landed or was already reversed is a no-op.
+ * `payoutKey` is therefore required here, not optional: it is the escrow key the
+ * reversal is conditioned on, and without it there is nothing safe to replay.
  *
  * `counters` is `{ path: delta }` — bookkeeping the original write was going to
  * move alongside the coins, carried here so the replay reproduces that write
@@ -211,6 +223,28 @@ async function replayOwedPayout(payload) {
         throw new Error(`return for ${userId} in ${guildId} matched nothing (${status}) — retry`);
     }
 
+    if (kind === 'reversal') {
+        const { userId, guildId, amount } = payload;
+        // The escrow key is load-bearing here — see the docstring. A reversal
+        // payload without one cannot be replayed safely, so refuse rather than
+        // fall back to a blind credit.
+        if (!userId || !guildId || !(amount > 0) || !key) {
+            throw new Error(`owed reversal payload is incomplete: ${JSON.stringify(payload)}`);
+        }
+
+        const { reverseKeyedDebit } = require('./debitKey');
+        const { resolved, reversed, error } = await reverseKeyedDebit({ userId, guildId }, amount, key);
+        // `resolved` means the write was made and the key read: the debit was
+        // either given back on this call or there was nothing un-reversed to give
+        // back (it never landed, or a prior attempt already reversed it). Both are
+        // settled — the escrow key is the record and it cannot pay twice.
+        if (resolved) {
+            if (!reversed) console.log(`[owedPayout] ${key} had nothing left to reverse — no coins moved`);
+            return;
+        }
+        throw new Error(`escrow reversal for ${userId} in ${guildId} could not be written (${error?.message ?? 'unknown'}) — retry`);
+    }
+
     throw new Error(`unknown owed payout kind: ${JSON.stringify(kind)}`);
 }
 
@@ -221,6 +255,9 @@ function describeOwedPayout(payload) {
     }
     if (payload?.kind === 'items') {
         return `${payload.quantity}x ${payload.itemId} to ${payload.userId} in ${payload.guildId}`;
+    }
+    if (payload?.kind === 'reversal') {
+        return `reverse ${payload.amount} coins held from ${payload.userId} in ${payload.guildId}`;
     }
     return JSON.stringify(payload);
 }

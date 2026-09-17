@@ -29,6 +29,7 @@ const { recordOwedPayout } = require('../src/utils/owedPayout');
 const { logTransaction } = require('../src/utils/logTransaction');
 const {
     settleTrade, checkTradeBudgets, tradeBudgetFlows,
+    takeCoins, rollbackCoins, tradeCoinEscrowKey,
 } = require('../src/utils/tradeEscrow');
 
 const GUILD = 'guild-1';
@@ -172,6 +173,58 @@ describe('delivery is owed-on-failure, never lost', () => {
         expect(recordOwedPayout).toHaveBeenCalled();
         // A still received B's item — the take succeeded, only one delivery failed.
         expect(qtyOf(A, 'gem')).toBe(1);
+    });
+});
+
+describe('a reversal that cannot be confirmed is written down for replay', () => {
+    // #1023 review. If the keyed give-back of an escrowed stake cannot be
+    // confirmed, the coins are stuck on the taker. The escrow key is the durable
+    // record, but recovering from it by hand needs knowing it is there — so a
+    // stuck reversal files an owed *reversal*, keyed to the escrow debit, that
+    // `payouts:replay` re-runs through `reverseKeyedDebit` (never a blind credit,
+    // which could pay twice against a reversal that later lands).
+    test('records an owed reversal when the give-back cannot be confirmed', async () => {
+        seed({ userId: A, balance: 500 });
+
+        // The escrow debit lands: A's 200 coins are now held.
+        const took = await takeCoins(A, GUILD, 200, TID);
+        expect(took.debited).toBe(true);
+        expect(get(A).balance).toBe(300);
+
+        // Every reversal write throws, so reverseKeyedDebit exhausts its retries
+        // unresolved; the resolve read still shows the debit landed un-reversed —
+        // the coins are genuinely stuck.
+        const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (f, u, o) => {
+            const isReversal = u?.$set && Object.keys(u.$set).some(k => k.includes('reversed'));
+            if (isReversal) throw new Error('mongo is down');
+            return store(f, u, o);
+        });
+
+        const result = await rollbackCoins(A, GUILD, 200, TID);
+
+        expect(result.credited).toBe(false);
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'trade', jobName: 'tradeCoinReversal', guildId: GUILD,
+            payload: {
+                kind: 'reversal', userId: A, guildId: GUILD, amount: 200,
+                payoutKey: tradeCoinEscrowKey(TID, A),
+            },
+        }));
+        // The debit still stands — the coins really are stuck, which is why the
+        // record exists.
+        expect(get(A).balance).toBe(300);
+    });
+
+    test('a reversal that lands needs no record', async () => {
+        seed({ userId: A, balance: 500 });
+        await takeCoins(A, GUILD, 200, TID);
+
+        const result = await rollbackCoins(A, GUILD, 200, TID);
+
+        expect(result.credited).toBe(true);
+        expect(recordOwedPayout).not.toHaveBeenCalled();
+        expect(get(A).balance).toBe(500); // handed straight back
     });
 });
 

@@ -10,10 +10,12 @@
 jest.mock('../src/models/FailedJob', () => ({ create: jest.fn() }));
 jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn(), findOne: jest.fn() }));
 jest.mock('../src/utils/inventoryGrant', () => ({ grantInventoryItem: jest.fn() }));
+jest.mock('../src/utils/debitKey', () => ({ reverseKeyedDebit: jest.fn() }));
 
 const FailedJob = require('../src/models/FailedJob');
 const User = require('../src/models/User');
 const { grantInventoryItem } = require('../src/utils/inventoryGrant');
+const { reverseKeyedDebit } = require('../src/utils/debitKey');
 const {
     recordOwedPayout, replayOwedPayout, describeOwedPayout, payoutKeyForPayload, isOwedPayout, OWED_SUFFIX,
 } = require('../src/utils/owedPayout');
@@ -27,6 +29,7 @@ beforeEach(() => {
     FailedJob.create.mockResolvedValue({});
     User.findOneAndUpdate.mockResolvedValue({});
     grantInventoryItem.mockResolvedValue({});
+    reverseKeyedDebit.mockResolvedValue({ reversed: true, resolved: true, doc: {}, error: null });
     errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
     warnLog  = jest.spyOn(console, 'warn').mockImplementation(() => {});
     infoLog  = jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -347,12 +350,65 @@ describe('replayOwedPayout with bookkeeping counters', () => {
     });
 });
 
+// #1023 review. A trade escrow debit that landed but whose keyed reversal could
+// not be confirmed leaves the coins stuck on the taker. The recovery is not a
+// blind credit — that would move coins without marking `spentDebits[].reversed`,
+// so a reversal that later lands would pay a second time. The replay re-runs
+// `reverseKeyedDebit` against the same escrow key, which is idempotent: it
+// credits back only a recorded, un-reversed debit and marks it reversed in the
+// same write.
+describe('replayOwedPayout with a reversal', () => {
+    const reversal = {
+        kind: 'reversal', userId: 'u1', guildId: 'g1', amount: 300,
+        payoutKey: 'trade:t1:escrow:u1',
+    };
+
+    test('re-runs the keyed reversal against the escrow key', async () => {
+        await expect(replayOwedPayout(reversal)).resolves.toBeUndefined();
+
+        expect(reverseKeyedDebit).toHaveBeenCalledWith(
+            { userId: 'u1', guildId: 'g1' }, 300, 'trade:t1:escrow:u1',
+        );
+    });
+
+    // The idempotent no-op: the debit never landed, or a prior attempt already
+    // reversed it. Nothing was owed, so the record is settled, not still owed.
+    test('a debit with nothing left to reverse is settled, not retried forever', async () => {
+        reverseKeyedDebit.mockResolvedValue({ reversed: false, resolved: true, doc: null, error: null });
+
+        await expect(replayOwedPayout(reversal)).resolves.toBeUndefined();
+        expect(infoLog.mock.calls.flat().join(' ')).toContain('nothing left to reverse');
+    });
+
+    // The write itself could not be made — the escrow key is still on the
+    // document, so this stays owed and retryJob will try again.
+    test('a reversal whose write could not be made stays owed', async () => {
+        reverseKeyedDebit.mockResolvedValue({ reversed: false, resolved: false, doc: null, error: new Error('mongo down') });
+
+        await expect(replayOwedPayout(reversal)).rejects.toThrow('could not be written');
+    });
+
+    test.each([
+        ['no user',       { kind: 'reversal', guildId: 'g1', amount: 300, payoutKey: 'k' }],
+        ['no amount',     { kind: 'reversal', userId: 'u1', guildId: 'g1', payoutKey: 'k' }],
+        ['a zero amount', { kind: 'reversal', userId: 'u1', guildId: 'g1', amount: 0, payoutKey: 'k' }],
+        // A reversal with no key cannot be replayed safely — refuse rather than
+        // fall back to a blind credit that could pay twice.
+        ['no escrow key', { kind: 'reversal', userId: 'u1', guildId: 'g1', amount: 300 }],
+    ])('refuses to replay an incomplete reversal payload: %s', async (_label, payload) => {
+        await expect(replayOwedPayout(payload)).rejects.toThrow('incomplete');
+        expect(reverseKeyedDebit).not.toHaveBeenCalled();
+    });
+});
+
 describe('describeOwedPayout', () => {
     test('names who is owed what', () => {
         expect(describeOwedPayout({ kind: 'coins', userId: 'u1', guildId: 'g1', amount: 500 }))
             .toBe('500 coins to u1 in g1');
         expect(describeOwedPayout({ kind: 'items', userId: 'u1', guildId: 'g1', itemId: 'sword', quantity: 2 }))
             .toBe('2x sword to u1 in g1');
+        expect(describeOwedPayout({ kind: 'reversal', userId: 'u1', guildId: 'g1', amount: 300 }))
+            .toBe('reverse 300 coins held from u1 in g1');
     });
 
     test('falls back to the raw payload rather than saying nothing', () => {
