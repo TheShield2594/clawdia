@@ -391,12 +391,22 @@ describe('per-file floors', () => {
         // move. Its branches are the three answers a settlement can give
         // (paid, owed, neither) and the balance to print for each; an
         // uncovered one is a hand that says it paid and did not.
+        //
+        // trade.js and tradeEscrow.js joined in #1010, the third place value
+        // moves between two players. tradeEscrow.js is the two-sided escrow — a
+        // symmetric duel escrow that swaps rather than pays a winner — and every
+        // branch of it makes or unmakes a coin, so it is floored high. trade.js
+        // carries the confirm-time validation and the finalize path; the
+        // interactive collector around them is thin, so its floor is lower than
+        // the escrow's but far above the `src/commands/economy` directory floor a
+        // file losing its coverage outright would slip under.
         expect(Object.keys(floors.files).sort()).toEqual([
             'src/commands/economy/bank.js',
             'src/commands/economy/duel.js',
             'src/commands/economy/gift.js',
             'src/commands/economy/invest.js',
             'src/commands/economy/market.js',
+            'src/commands/economy/trade.js',
             'src/games/casino/payout.js',
             'src/services/casinoJackpotService.js',
             'src/services/marketService.js',
@@ -411,6 +421,7 @@ describe('per-file floors', () => {
             'src/utils/payoutKey.js',
             'src/utils/placeWager.js',
             'src/utils/refundWager.js',
+            'src/utils/tradeEscrow.js',
         ]);
     });
 
