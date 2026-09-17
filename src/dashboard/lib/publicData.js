@@ -33,6 +33,15 @@ const MATERIAL_TRACKS = ['hunt', 'fishing', 'mining', 'exploration'];
 const SLUG_RE = /^(?=.*[a-z])[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SNOWFLAKE_RE = /^\d{17,20}$/;
 
+// Every public read is scoped to members who are *currently* in the guild.
+// `leftAt` is set when a member leaves (guildMemberRemove) and cleared to null
+// when they rejoin (guildMemberAdd), so `{ leftAt: null }` keeps a member who
+// opted in and then left off the leaderboards and 404s their card — otherwise
+// their identity would stay public and linkable after they were gone (#1018).
+// In MongoDB `{ leftAt: null }` also matches records written before the field
+// existed, which is what a never-left member has.
+const CURRENT_MEMBER = { leftAt: null };
+
 function isValidSlug(slug) {
     return typeof slug === 'string' && slug.length >= 3 && slug.length <= 32 && SLUG_RE.test(slug);
 }
@@ -47,7 +56,7 @@ const LEADERBOARDS = [
         title: 'Top Levels',
         unit: 'level',
         async top(guildId) {
-            const rows = await User.find({ guildId, $or: [{ level: { $gt: 0 } }, { xp: { $gt: 0 } }] })
+            const rows = await User.find({ guildId, ...CURRENT_MEMBER, $or: [{ level: { $gt: 0 } }, { xp: { $gt: 0 } }] })
                 .sort({ level: -1, xp: -1 })
                 .limit(10)
                 .select('userId level xp publicProfile.enabled')
@@ -64,7 +73,7 @@ const LEADERBOARDS = [
         title: 'Wealthiest',
         unit: 'net worth',
         async top(guildId, currency) {
-            const rows = await topByNetWorth(User, guildId, 10, { 'publicProfile.enabled': 1 });
+            const rows = await topByNetWorth(User, guildId, 10, { 'publicProfile.enabled': 1 }, CURRENT_MEMBER);
             return rows
                 .filter(u => netWorthOf(u) > 0)
                 .map(u => ({
@@ -79,7 +88,7 @@ const LEADERBOARDS = [
         title: 'Longest Active Streaks',
         unit: 'streak',
         async top(guildId) {
-            const rows = await User.find({ guildId, 'streak.current': { $gt: 0 } })
+            const rows = await User.find({ guildId, ...CURRENT_MEMBER, 'streak.current': { $gt: 0 } })
                 .sort({ 'streak.current': -1 })
                 .limit(10)
                 .select('userId streak.current publicProfile.enabled')
@@ -96,7 +105,7 @@ const LEADERBOARDS = [
         title: 'Most Achievements',
         unit: 'achievements',
         async top(guildId) {
-            const rows = await User.find({ guildId, achievementsCount: { $gt: 0 } })
+            const rows = await User.find({ guildId, ...CURRENT_MEMBER, achievementsCount: { $gt: 0 } })
                 .sort({ achievementsCount: -1 })
                 .limit(10)
                 .select('userId achievementsCount publicProfile.enabled')
@@ -298,7 +307,10 @@ function topAchievements(user) {
 async function buildPlayerCard(bot, guild, userId) {
     if (!SNOWFLAKE_RE.test(String(userId ?? ''))) return null;
 
-    const user = await User.findOne({ userId, guildId: guild.guildId });
+    // `leftAt: null` so a member who opted in and then left the guild is the same
+    // 404 as one who never opted in — their card must not keep resolving their
+    // identity after they are gone (#1018).
+    const user = await User.findOne({ userId, guildId: guild.guildId, ...CURRENT_MEMBER });
     if (!user || user.publicProfile?.enabled !== true) return null;
 
     await attachGrind(user);

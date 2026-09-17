@@ -277,7 +277,7 @@ async function setPublicProfile(interaction) {
         .setTitle(on ? '🌐 Public profile enabled' : '🔒 Public profile disabled')
         .setDescription(on
             ? 'Your profile card can now be viewed on this server\'s public web page (if the server has one turned on). Run `/profile public off` to make it private again.'
-            : 'Your profile card is private again and will 404 on the public web page.')
+            : 'Your profile card is private again. New requests to the public web page 404; a copy already cached by a browser or CDN may linger for a few minutes before it does.')
         .setFooter({ text: 'Only members who opt in are ever shown publicly.' });
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });

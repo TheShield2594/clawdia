@@ -156,6 +156,10 @@ describe('buildServerPage withholds ids for members who have not opted in', () =
         });
 
         expect(page.boards.map(b => b.key)).toEqual(['level', 'wealth', 'streak', 'achievements']);
+        // Every board is scoped to current members: a member who opted in and
+        // then left the guild (leftAt set) must not appear (#1018).
+        for (const call of User.find.mock.calls) expect(call[0]).toMatchObject({ leftAt: null });
+        expect(topByNetWorth).toHaveBeenCalledWith(User, '1', 10, expect.any(Object), { leftAt: null });
         // The wealth board drops the zero-net-worth member, keeping the funded one.
         expect(page.boards.find(b => b.key === 'wealth').rows).toHaveLength(1);
         expect(page.champions).toEqual([{ category: 'hunt', title: 'Hunter', name: 'Hunter Joe', value: '4,200 coins' }]);
@@ -175,9 +179,12 @@ describe('buildServerPage withholds ids for members who have not opted in', () =
 describe('buildPlayerCard is gated on the member opt-in', () => {
     const guild = { guildId: '1', economy: { currency: '$' }, publicPage: {} };
 
-    test('null for a member with no record', async () => {
+    test('null for a member with no record, and the lookup excludes former members', async () => {
         User.findOne.mockResolvedValue(null);
         expect(await buildPlayerCard(bot, guild, '111111111111111111')).toBeNull();
+        // A former member (leftAt set) is filtered out at the query, so their
+        // card 404s even if they once opted in (#1018).
+        expect(User.findOne).toHaveBeenCalledWith(expect.objectContaining({ leftAt: null }));
     });
 
     test('null for a member who has not opted in', async () => {

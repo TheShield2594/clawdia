@@ -168,12 +168,13 @@ The **Requires** column lists what a caller must satisfy beyond the read limit:
 - **write limit** — counts against the 60/minute write budget
   (`checkWriteRateLimit`), on top of the read limit when the route is a `GET`
 - **multipart** — body is `multipart/form-data` with an `image` file part
-- **public** — no middleware at all. Nothing in the `/api/v1` table below is
-  public: the item-image `GET`s included, they carry the dashboard's own
-  session cookie like every other read (#565), so an `<img src>` pointing at
-  one from outside a logged-in dashboard page gets a 401. The only public
+- **public** — requires no browser session. Nothing in the `/api/v1` table
+  below is public: the item-image `GET`s included, they carry the dashboard's
+  own session cookie like every other read (#565), so an `<img src>` pointing
+  at one from outside a logged-in dashboard page gets a 401. The only public
   routes the dashboard serves are the `/s` pages in their own section further
-  down, which take no session by design
+  down; they take no session, but they are not middleware-free — each still
+  applies a per-IP read limiter and the opt-in 404 gates described there
 
 <!-- BEGIN GENERATED ENDPOINTS — npm run docs:api -->
 
