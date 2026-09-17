@@ -9,6 +9,33 @@ path.
 
 This is the process that replaces that.
 
+## Which versions have tags
+
+**Tagging starts at `v4.7.0`. There is deliberately no `v4.3.0` through
+`v4.6.1`, and their absence is a decision, not an omission.**
+
+The process below was written for #708 and followed for every release from 4.3.0
+on — pick the bump, edit the changelog, merge — except the last step: no release
+was ever tagged (#996). `git ls-remote --tags origin` was empty, the releases
+list was empty, and so none of `ghcr.io/theshield2594/clawdia:4.6.1`, `:4.6`, or
+any other version tag was ever built. The only immutable rollback target was the
+digest buried in a run summary. 4.7.0 is where that is fixed and where tagging
+begins.
+
+The earlier versions are not backfilled, and the reason is that a tag pushed
+today would lie. CI turns a `v*` tag into an image by *building* it now — `apk
+add` and `npm ci` resolve whatever Alpine and the registry are serving at the
+moment of the build, and the Dockerfile pins the base by digest but not the
+packages under it (see the `APK_REFRESH` note in `ci.yml`). So a `v4.6.1` pushed
+today would publish an image that is *not* the one 4.6.1 ran, under a name that
+claims it is — which is worse than no tag, because a rollback would reach for it
+believing otherwise. The commit each version shipped from is recorded in
+[`CHANGELOG.md`](../CHANGELOG.md) and can still be checked out; what cannot be
+recovered is the image, so it is not manufactured.
+
+From 4.7.0 forward every released version gets its tag as the last step of
+cutting it, so the tag names the image CI built from that commit at release time.
+
 ## Versioning rule
 
 [Semantic versioning](https://semver.org/spec/v2.0.0.html), read against what an
