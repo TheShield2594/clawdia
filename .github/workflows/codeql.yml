@@ -1,0 +1,93 @@
+name: CodeQL
+
+# GitHub code scanning for this repository. CodeQL builds a semantic database
+# of the source and runs a suite of security queries over it, then uploads the
+# findings as SARIF to the repository's Security > Code scanning tab and, on a
+# pull request, surfaces new alerts inline on the diff.
+#
+# This is deliberately separate from ci.yml and security-scan.yml. Those two
+# gate the *dependencies* and the *built image* (npm audit, Trivy); nothing
+# before this looked at the first-party code itself for the bug classes CodeQL
+# knows — command injection, path traversal, unsafe deserialization, ReDoS,
+# tainted-data flows into `eval`/child_process, and the like. It is its own
+# workflow rather than a job in ci.yml because it uploads to a different place
+# (the code-scanning API, not a check log), wants its own `security-events:
+# write` grant that the rest of CI has no need for, and runs on a schedule of
+# its own so the code is re-scanned as CodeQL ships new queries even during the
+# quiet stretches between commits.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    # No branch filter: a pull request targeting any branch should have its new
+    # code scanned before it merges, which is where an alert is cheapest to act
+    # on. Only pushes to `main` (above) update the baseline the PR alerts are
+    # diffed against.
+  schedule:
+    # Weekly, Monday morning UTC, off the hour for the same reason security-scan.yml
+    # is — GitHub's scheduler is contended at :00 and delays runs queued there.
+    # The schedule matters even when the code has not changed: CodeQL's query
+    # packs are updated continuously, so a re-scan of unchanged code turns up
+    # findings that did not exist as queries when the code last shipped.
+    - cron: '41 6 * * 1'
+  workflow_dispatch:
+
+# One run per ref, newest wins. A force-push to a PR cancels its own in-flight
+# scan rather than leaving two analyses racing to upload SARIF for the same ref;
+# `main` and the weekly cron key on the ref itself, so they serialize without
+# cancelling each other's history.
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Least privilege by default; the job below adds only what the upload needs.
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze JavaScript
+    runs-on: ubuntu-latest
+    # CodeQL database build + query run for a codebase this size is minutes, not
+    # tens of minutes. The cap is here so a hung analysis surfaces instead of
+    # sitting until GitHub's 6-hour default, matching the timeouts in ci.yml.
+    timeout-minutes: 30
+
+    permissions:
+      # Writing the analysis results back to the code-scanning API is the whole
+      # point of the job and the one privilege ci.yml deliberately does not have.
+      security-events: write
+      # `actions: read` lets CodeQL correlate the run with the workflow that
+      # produced it; `contents: read` is the checkout. Both are needed on a
+      # private repository and harmless on a public one.
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # `javascript-typescript` is the single CodeQL language that covers this
+      # repo — everything under src/ and scripts/ is JavaScript (plus EJS
+      # templates, which the JS extractor reads). `build-mode: none` because
+      # JavaScript is interpreted: CodeQL reads the sources directly and there is
+      # nothing to compile, so no autobuild step follows.
+      #
+      # The default query suite (the `code-scanning` pack) is used deliberately.
+      # It is the high-signal set; switching to `security-extended` here would
+      # broaden coverage at the cost of more to triage, and that is a decision to
+      # make once the baseline is clean rather than on day one.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          languages: javascript-typescript
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          category: /language:javascript-typescript
