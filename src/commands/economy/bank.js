@@ -271,7 +271,7 @@ function buildStatementEmbed({ items, page, pages, total }, { currency, user }) 
     const embed = new EmbedBuilder()
         .setColor(COLORS.PRIZE)
         .setAuthor({ name: `${user.username}'s statement`, iconURL: user.displayAvatarURL({ dynamic: true }) })
-        .setFooter({ text: `Page ${page} / ${pages} · ${total.toLocaleString()} transaction${total === 1 ? '' : 's'} · last 90 days` })
+        .setFooter({ text: `Page ${page} / ${pages} · ${total.toLocaleString()} transaction${total === 1 ? '' : 's'}` })
         .setTimestamp();
 
     if (!total) {
@@ -309,6 +309,11 @@ function statementButtons(id, { page, pages }, expired = false) {
 async function handleStatement(interaction) {
     const guildId = interaction.guild.id;
     const userId = interaction.user.id;
+
+    // Defer first: the currency read plus the count and the page query are three
+    // awaits before the first response, and a slow database would otherwise blow
+    // Discord's three-second initial-response deadline and void the token.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const currency = await getCurrency(guildId);
 
     let page = interaction.options.getInteger('page') || 1;
@@ -316,11 +321,9 @@ async function handleStatement(interaction) {
     page = data.page;
 
     const single = data.pages <= 1;
-    const message = await interaction.reply({
+    const message = await interaction.editReply({
         embeds: [buildStatementEmbed(data, { currency, user: interaction.user })],
         components: single ? [] : [statementButtons(interaction.id, data)],
-        flags: MessageFlags.Ephemeral,
-        fetchReply: true,
     });
     if (single) return;
 
@@ -333,14 +336,28 @@ async function handleStatement(interaction) {
         time: STATEMENT_WINDOW_MS,
     });
 
+    // The collector runs after handleStatement returns, so the command's own
+    // error handler cannot catch a rejection here. An unhandled one counts
+    // against the process-level rejection budget, so a slow page read or a lost
+    // interaction must be caught locally rather than allowed to escape.
     collector.on('collect', async btn => {
-        page = btn.customId.startsWith('stmt_prev_') ? page - 1 : page + 1;
-        data = await fetchTransactions({ userId, guildId, page, pageSize: DEFAULT_PAGE_SIZE });
-        page = data.page;
-        await btn.update({
-            embeds: [buildStatementEmbed(data, { currency, user: interaction.user })],
-            components: [statementButtons(interaction.id, data)],
-        });
+        try {
+            const next = btn.customId.startsWith('stmt_prev_') ? page - 1 : page + 1;
+            data = await fetchTransactions({ userId, guildId, page: next, pageSize: DEFAULT_PAGE_SIZE });
+            page = data.page;
+            await btn.update({
+                embeds: [buildStatementEmbed(data, { currency, user: interaction.user })],
+                components: [statementButtons(interaction.id, data)],
+            });
+        } catch (err) {
+            console.error('[bank statement] pagination failed:', err.message);
+            if (!btn.replied && !btn.deferred) {
+                // The interaction may already be gone; a failed acknowledgement
+                // must not throw out of the collector.
+                try { await btn.reply({ content: "Couldn't load that page — please try again.", flags: MessageFlags.Ephemeral }); }
+                catch { /* interaction expired */ }
+            }
+        }
     });
 
     collector.on('end', async () => {

@@ -51,7 +51,7 @@ describe('GET member ledger', () => {
     test('answers with the list envelope, owed payouts attached alongside', async () => {
         fetchTransactions.mockResolvedValue({
             items: [{ _id: 't1', type: 'gift_receive', amount: 500, balance: 1500, bank: null, note: 'Coin gift', relatedUserId: OTHER, createdAt: new Date('2026-02-01') }],
-            total: 1,
+            total: 1, page: 1,
         });
         fetchOwedPayouts.mockResolvedValue([{ id: 'o1', status: 'exhausted', kind: 'coins', amount: 500, payoutKey: 'k1' }]);
         const app = appWith(async () => ({ [OTHER]: { tag: 'bob#0002', avatarUrl: null } }));
@@ -69,7 +69,7 @@ describe('GET member ledger', () => {
     });
 
     test('scopes both reads to the member and guild in the path', async () => {
-        fetchTransactions.mockResolvedValue({ items: [], total: 0 });
+        fetchTransactions.mockResolvedValue({ items: [], total: 0, page: 1 });
         fetchOwedPayouts.mockResolvedValue([]);
         const app = appWith();
 
@@ -80,7 +80,7 @@ describe('GET member ledger', () => {
     });
 
     test('pages by number derived from the shared page/limit parser', async () => {
-        fetchTransactions.mockResolvedValue({ items: [], total: 200 });
+        fetchTransactions.mockResolvedValue({ items: [], total: 200, page: 3 });
         fetchOwedPayouts.mockResolvedValue([]);
         const app = appWith();
 
@@ -89,8 +89,21 @@ describe('GET member ledger', () => {
         expect(fetchTransactions).toHaveBeenCalledWith(expect.objectContaining({ page: 3, pageSize: 20 }));
     });
 
+    // The route must report the page the ledger actually served, not the raw
+    // request: fetchTransactions clamps an out-of-range page, and the envelope
+    // has to agree with the rows it returned.
+    test('reports the clamped page, not the raw request page', async () => {
+        fetchTransactions.mockResolvedValue({ items: [{ _id: 't1', type: 'daily', amount: 1, balance: 1, createdAt: new Date() }], total: 25, page: 3 });
+        fetchOwedPayouts.mockResolvedValue([]);
+        const app = appWith();
+
+        const res = await request(app).get(`/api/v1/guild/g1/members/${USER}/ledger?page=999&limit=10`);
+
+        expect(res.body.page).toBe(3);
+    });
+
     test('caps the page size a caller can ask for', async () => {
-        fetchTransactions.mockResolvedValue({ items: [], total: 0 });
+        fetchTransactions.mockResolvedValue({ items: [], total: 0, page: 1 });
         fetchOwedPayouts.mockResolvedValue([]);
         const app = appWith();
 

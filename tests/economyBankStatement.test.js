@@ -39,7 +39,10 @@ const run = async ({ page, components } = {}) => {
     return interaction;
 };
 
-const description = interaction => interaction.replies[0].embeds[0].data.description;
+// The command defers first, so the statement embed lands in an editReply
+// payload, not the initial reply — find the payload that actually carries it.
+const embedReply = interaction => interaction.replies.find(r => r && Array.isArray(r.embeds) && r.embeds.length);
+const description = interaction => embedReply(interaction).embeds[0].data.description;
 
 // The fake harness delivers a queued press on the tick after the collector is
 // wired, and the collect handler is async — so a pagination test has to let
@@ -73,8 +76,8 @@ describe('/bank statement', () => {
         expect(desc).toContain('+500');
         expect(desc).toContain('-200');
         expect(desc).toContain('with <@friend-1>');
-        // The reply is the caller's alone.
-        expect(interaction.replies[0].flags).toBeDefined();
+        // Deferred ephemerally before the reads, so the token cannot expire.
+        expect(interaction.deferReply).toHaveBeenCalledWith(expect.objectContaining({ flags: expect.anything() }));
         // Read-only.
         expect(logTransaction).not.toHaveBeenCalled();
     });
@@ -84,7 +87,7 @@ describe('/bank statement', () => {
 
         const interaction = await run();
 
-        expect(interaction.replies[0].components).toEqual([]);
+        expect(embedReply(interaction).components).toEqual([]);
     });
 
     test('an empty ledger says so rather than showing a blank embed', async () => {
@@ -93,7 +96,7 @@ describe('/bank statement', () => {
         const interaction = await run();
 
         expect(description(interaction)).toMatch(/No transactions/i);
-        expect(interaction.replies[0].components).toEqual([]);
+        expect(embedReply(interaction).components).toEqual([]);
     });
 
     test('opens the page the caller asked for', async () => {
@@ -113,9 +116,24 @@ describe('/bank statement', () => {
         await flush();
 
         // Page 1 went out with a control row.
-        expect(interaction.replies[0].components).toHaveLength(1);
+        expect(embedReply(interaction).components).toHaveLength(1);
         // The press asked for the next (older) page.
         expect(fetchTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
+    });
+
+    test('a page read that fails mid-pagination is caught, not left to crash the process', async () => {
+        fetchTransactions
+            .mockResolvedValueOnce({ items: [txn()], total: 25, page: 1, pages: 3, pageSize: 10 })
+            .mockRejectedValueOnce(new Error('mongo blip'));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        const interaction = await run({ components: [{ customId: 'stmt_next_interaction-1' }] });
+        await flush();
+
+        // The failure was swallowed and surfaced to the presser, not thrown.
+        expect(console.error).toHaveBeenCalled();
+        const acked = interaction.replies.some(r => typeof r?.content === 'string' && /try again/i.test(r.content));
+        expect(acked).toBe(true);
     });
 
     // When the window closes the buttons are disabled with a final edit; if the
@@ -124,12 +142,19 @@ describe('/bank statement', () => {
     test('swallows a failed final edit when the window closes', async () => {
         fetchTransactions.mockResolvedValue({ items: [txn()], total: 25, page: 1, pages: 3, pageSize: 10 });
         const interaction = makeInteraction({ subcommand: 'statement', options: {}, userId: USER_ID, guildId: GUILD_ID });
-        interaction.editReply = jest.fn(() => Promise.reject(new Error('Unknown Message')));
+        // The initial render must succeed (it returns the message the collector
+        // attaches to); only the disable-buttons edit at window close fails.
+        const realEditReply = interaction.editReply;
+        let editCalls = 0;
+        interaction.editReply = jest.fn((...args) => {
+            editCalls += 1;
+            return editCalls === 1 ? realEditReply(...args) : Promise.reject(new Error('Unknown Message'));
+        });
 
         await expect(bank.execute(interaction)).resolves.toBeUndefined();
         await flush();
 
-        expect(interaction.editReply).toHaveBeenCalled();
+        expect(editCalls).toBeGreaterThanOrEqual(2);
     });
 });
 

@@ -60,12 +60,12 @@ router.get('/guild/:guildId/members/resolve', checkAuth, checkGuildAccess, check
 router.get('/guild/:guildId/members/:userId/ledger', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid user ID' });
-    const { page, limit, skip } = readPage(req, { defaultLimit: 20, maxLimit: 50 });
+    const { limit, skip } = readPage(req, { defaultLimit: 20, maxLimit: 50 });
 
     try {
         // `readPage` gives a skip; the ledger util pages by number, so hand it a
         // page derived from the same skip and limit and the two stay in step.
-        const [{ items, total }, owed] = await Promise.all([
+        const [{ items, total, page: currentPage }, owed] = await Promise.all([
             fetchTransactions({ userId, guildId, page: Math.floor(skip / limit) + 1, pageSize: limit }),
             fetchOwedPayouts({ userId, guildId }),
         ]);
@@ -87,7 +87,7 @@ router.get('/guild/:guildId/members/:userId/ledger', checkAuth, checkGuildAccess
                 relatedUserTag:  t.relatedUserId ? (userMap[t.relatedUserId]?.tag || null) : null,
                 createdAt:       t.createdAt,
             })),
-            total, page, limit,
+            total, page: currentPage, limit,
         });
         body.owed = owed;
         res.json(body);

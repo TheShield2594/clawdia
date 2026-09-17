@@ -551,6 +551,11 @@ async function ecoAdminAction(action) {
 // actions above already read.
 let _ledgerUserId = null;
 let _ledgerPage = 1;
+// Monotonic request token: a moderator who switches members mid-flight must not
+// have a slow earlier response paint over the later one (the member-search
+// widgets solve the same race, #691). Each load claims the next token and only
+// the newest one is allowed to touch the DOM.
+let _ledgerReq = 0;
 
 function ledgerAmountCell(amount) {
     const n = Number(amount) || 0;
@@ -581,11 +586,19 @@ async function loadLedger(page) {
     if (!userId) { msgEl.textContent = 'Enter a user ID above first.'; msgEl.style.color = 'var(--red)'; return; }
 
     _ledgerUserId = userId;
+    const reqId = ++_ledgerReq;
+    // Clear the previous member's rows immediately, so a failed or slow request
+    // cannot leave someone else's ledger showing under this User ID.
+    document.getElementById('eco-ledger-tbody').innerHTML = '';
+    document.getElementById('eco-ledger-wrap').classList.add('eco-ledger-hidden');
+    document.getElementById('eco-ledger-pager').classList.remove('is-shown');
+    renderLedgerOwed(null);
     msgEl.textContent = 'Loading…';
     msgEl.style.color = '';
     try {
         const resp = await apiFetch(`/api/v1/guild/${guildId}/members/${userId}/ledger?page=${page}&limit=20`);
         const data = await resp.json();
+        if (reqId !== _ledgerReq) return; // a newer request superseded this one
         if (!resp.ok) { msgEl.textContent = data.error || 'Failed to load ledger.'; msgEl.style.color = 'var(--red)'; return; }
 
         _ledgerPage = data.page || 1;
@@ -617,6 +630,7 @@ async function loadLedger(page) {
         document.querySelector('[data-action="eco-ledger-next"]').disabled = data.page >= data.pages;
         pager.classList.add('is-shown');
     } catch {
+        if (reqId !== _ledgerReq) return; // a newer request owns the view now
         msgEl.textContent = 'Request failed.';
         msgEl.style.color = 'var(--red)';
     }
