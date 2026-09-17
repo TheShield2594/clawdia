@@ -7,6 +7,7 @@
 
 const {
     finalizeRetentionCohorts,
+    startOfIsoWeekUTC,
     tzOffsetMinutes,
     buildActiveHoursHeatmap,
 } = require('../src/dashboard/lib/apiHelpers');
@@ -64,6 +65,24 @@ describe('finalizeRetentionCohorts', () => {
         const weekStart = new Date('2026-03-02T00:00:00Z'); // a Monday
         const [cohort] = finalizeRetentionCohorts([{ _id: weekStart, size: 1, r1: 1, r7: 1, r30: 1 }], NOW);
         expect(cohort.cohort).toBe('2026-03-02');
+    });
+});
+
+describe('startOfIsoWeekUTC', () => {
+    const iso = ms => new Date(startOfIsoWeekUTC(ms)).toISOString();
+
+    test('floors a mid-week instant to its Monday 00:00 UTC', () => {
+        // 2026-04-01 is a Wednesday → Monday of that week is 2026-03-30.
+        expect(iso(Date.parse('2026-04-01T15:30:00Z'))).toBe('2026-03-30T00:00:00.000Z');
+    });
+
+    test('leaves a Monday on itself', () => {
+        expect(iso(Date.parse('2026-03-30T00:00:00Z'))).toBe('2026-03-30T00:00:00.000Z');
+    });
+
+    test('treats Sunday as the end of the week, not the start', () => {
+        // 2026-04-05 is a Sunday → still belongs to the week starting 2026-03-30.
+        expect(iso(Date.parse('2026-04-05T23:00:00Z'))).toBe('2026-03-30T00:00:00.000Z');
     });
 });
 
@@ -130,5 +149,34 @@ describe('buildActiveHoursHeatmap', () => {
             'UTC');
         expect(hm.total).toBe(1);
         expect(hm.grid[1][5]).toBe(1);
+    });
+
+    test('places an entry from its createdAt timestamp, exactly, in the zone', () => {
+        // 2026-06-01 20:00 UTC is a Monday; in Asia/Kolkata (+5:30) that is
+        // Tuesday 01:30 → weekday 2, hour 1. Read from the timestamp, so the
+        // half-hour offset lands on the right hour where the stored-hour
+        // fallback (whole-hour shift) could not.
+        const hm = buildActiveHoursHeatmap([{ createdAt: '2026-06-01T20:00:00Z' }], 'Asia/Kolkata');
+        expect(hm.grid[2][1]).toBe(1);
+        expect(hm.total).toBe(1);
+        expect(hm.hasUnknown).toBe(false);
+    });
+
+    test('uses the per-event offset across a daylight-saving change', () => {
+        // New York is EST (−5) in January and EDT (−4) in July. Two 12:00 UTC
+        // events land on 07:00 and 08:00 local respectively — a single offset
+        // could not place both.
+        const hm = buildActiveHoursHeatmap([
+            { createdAt: '2026-01-15T12:00:00Z' },
+            { createdAt: '2026-07-15T12:00:00Z' },
+        ], 'America/New_York');
+        // 2026-01-15 is a Thursday (4), 2026-07-15 is a Wednesday (3).
+        expect(hm.grid[4][7]).toBe(1);
+        expect(hm.grid[3][8]).toBe(1);
+    });
+
+    test('falls back to the stored hour/weekday when createdAt is absent', () => {
+        const hm = buildActiveHoursHeatmap([{ hour: 14, weekday: 1 }], 'UTC');
+        expect(hm.grid[1][14]).toBe(1);
     });
 });

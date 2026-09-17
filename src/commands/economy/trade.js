@@ -159,6 +159,10 @@ module.exports = {
         const sides = { [a.id]: emptySide(), [b.id]: emptySide() };
         const confirmed = { [a.id]: false, [b.id]: false };
         let settling = false;
+        // Cleared when the collector ends (timeout/settle/cancel). A modal can
+        // outlive it — opened before the window closed, submitted after — and
+        // its handler checks this before touching anything.
+        let active = true;
 
         const cid = suffix => `trade_${suffix}_${tradeId}`;
         const controls = () => [
@@ -193,7 +197,17 @@ module.exports = {
 
         const resetConfirms = () => { confirmed[a.id] = false; confirmed[b.id] = false; };
 
+        // A submit is only allowed to change the offer while the trade is still
+        // open and not already settling. Editing clears both confirmations, so
+        // a change can never ride a confirmation the other side gave against the
+        // old offer.
+        const staleSubmit = () => settling || !active;
+
         const askCoins = async btn => {
+            // Reset before the modal opens: while it is open the offer is being
+            // changed, so neither prior confirmation still stands.
+            resetConfirms();
+            await interaction.editReply({ embeds: [render()], components: controls() }).catch(() => {});
             const modal = new ModalBuilder().setCustomId(`${cid('coinsm')}`).setTitle('Set coins to offer');
             modal.addComponents(new ActionRowBuilder().addComponents(
                 new TextInputBuilder().setCustomId('amount').setLabel('Coins (0 to clear)').setStyle(TextInputStyle.Short).setRequired(true),
@@ -201,6 +215,7 @@ module.exports = {
             await btn.showModal(modal);
             const submit = await btn.awaitModalSubmit({ time: 60_000, filter: i => i.user.id === btn.user.id && i.customId === cid('coinsm') }).catch(() => null);
             if (!submit) return;
+            if (staleSubmit()) return submit.deferUpdate().catch(() => {});
             const raw = Number(submit.fields.getTextInputValue('amount'));
             if (!Number.isFinite(raw) || raw < 0 || !Number.isInteger(raw)) {
                 return submit.reply({ content: 'Enter a whole number of coins (0 or more).', flags: MessageFlags.Ephemeral });
@@ -216,6 +231,8 @@ module.exports = {
         };
 
         const askItem = async btn => {
+            resetConfirms();
+            await interaction.editReply({ embeds: [render()], components: controls() }).catch(() => {});
             const modal = new ModalBuilder().setCustomId(`${cid('itemm')}`).setTitle('Set an item to offer');
             modal.addComponents(
                 new ActionRowBuilder().addComponents(
@@ -228,6 +245,7 @@ module.exports = {
             await btn.showModal(modal);
             const submit = await btn.awaitModalSubmit({ time: 60_000, filter: i => i.user.id === btn.user.id && i.customId === cid('itemm') }).catch(() => null);
             if (!submit) return;
+            if (staleSubmit()) return submit.deferUpdate().catch(() => {});
             const typed = submit.fields.getTextInputValue('item').trim();
             if (!typed) {
                 sides[btn.user.id].item = null;
@@ -267,8 +285,14 @@ module.exports = {
                     settling = true;
                     await btn.update({ embeds: [render()], components: [] }).catch(() => {});
 
+                    // Snapshot both offers as they stand at the moment both sides
+                    // confirmed, so a modal submit landing during finalize's
+                    // database reads cannot change what settles. Editing has
+                    // already cleared confirmations, so this is only defence in
+                    // depth — but it is the values both parties agreed to.
+                    const snapshot = side => ({ coins: side.coins, item: side.item });
                     const outcome = await finalizeTrade({
-                        tradeId, guildId, a, b, aSide: sides[a.id], bSide: sides[b.id], limits, currency,
+                        tradeId, guildId, a, b, aSide: snapshot(sides[a.id]), bSide: snapshot(sides[b.id]), limits, currency,
                     });
 
                     if (!outcome.ok) {
@@ -291,6 +315,7 @@ module.exports = {
         });
 
         collector.on('end', async (_collected, reason) => {
+            active = false;
             if (['done', 'cancelled'].includes(reason)) return;
             await interaction.editReply({ embeds: [render('expired')], components: [] }).catch(() => {});
         });

@@ -13,7 +13,7 @@
 const express = require('express');
 const request = require('supertest');
 
-jest.mock('../src/models/Case', () => ({ find: jest.fn(), countDocuments: jest.fn(), findOne: jest.fn() }));
+jest.mock('../src/models/Case', () => ({ find: jest.fn(), countDocuments: jest.fn(), findOne: jest.fn(), updateOne: jest.fn(async () => ({})) }));
 jest.mock('../src/dashboard/lib/middleware', () => ({
     checkAuth: (req, _res, next) => { req.user = { id: 'admin-1', username: 'admin' }; next(); },
     checkGuildAccess: (_req, _res, next) => next(),
@@ -172,6 +172,12 @@ describe('PATCH /guild/:guildId/cases/:caseId', () => {
         expect(c.notes[0].moderatorId).toBe('admin-1');
         expect(c.notes[0].content).toHaveLength(1000);
         expect(c.save).toHaveBeenCalled();
+        // firstActionAt is stamped write-once by a guarded atomic update, not
+        // via save(), so two moderators acting at once cannot clobber it (#1015).
+        expect(Case.updateOne).toHaveBeenCalledWith(
+            { guildId: 'g1', caseId: 7, firstActionAt: null },
+            { $set: { firstActionAt: expect.any(Date) } },
+        );
         expect(logAuditEvent).toHaveBeenCalledWith(expect.anything(), 'g1', 'case_update', { caseId: 7, action: 'add_note' });
     });
 

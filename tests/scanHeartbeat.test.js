@@ -186,8 +186,9 @@ describe('a scan that has stopped fails loudly', () => {
 
         expect(run.status).toBe(1);
         expect(run.stdout).toContain('::error::');
-        // The message names the fix, not just the fact.
-        expect(run.stdout).toMatch(/Actions tab|workflow_dispatch/);
+        // The message names the fix — and names enabling specifically, because a
+        // disabled workflow does not respond to workflow_dispatch (#1023 review).
+        expect(run.stdout).toMatch(/Enable workflow/);
         expect(run.summary).toMatch(/has not run in \d+ days/);
     });
 });

@@ -1722,9 +1722,11 @@ Two things guard against that, and neither needs anything running outside GitHub
   would surface on the next dependency PR even with no human push.
 
 If the heartbeat does go red, or the Actions tab shows the scheduled scan has
-stopped: open **Actions → Scheduled security scan → Enable workflow**, or run it
-once with **Run workflow** (`workflow_dispatch`). Either re-enables the schedule
-and resets the 60-day clock.
+stopped: open **Actions → Scheduled security scan → Enable workflow**. That is
+the step that restores it and resets the 60-day clock — a disabled workflow does
+not respond to `workflow_dispatch`, so enabling has to come first. Once it is
+enabled you can optionally use **Run workflow** to scan immediately rather than
+waiting for the next Monday.
 
 ### Performance
 

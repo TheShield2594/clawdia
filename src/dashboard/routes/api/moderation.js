@@ -70,11 +70,22 @@ router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, check
             }
         }
 
-        // Both actions are a moderator responding to the case; the first one to
-        // land marks the first-response time (#1015). Set once and never moved.
-        if (!c.firstActionAt) c.firstActionAt = new Date();
-
         await c.save();
+
+        // First-response time is write-once and has to survive two moderators
+        // acting on the same case at once, so it is a guarded atomic update
+        // rather than a field on the save above (#1015). `save()` persists only
+        // the paths it touched, and this never touches `firstActionAt`, so this
+        // is its sole writer: the `firstActionAt: null` filter lets the first
+        // action to land set it and a later one match nothing, with no
+        // read-then-write window for a concurrent request to slip through.
+        const firstActionAt = new Date();
+        await Case.updateOne(
+            { guildId, caseId: parsedId, firstActionAt: null },
+            { $set: { firstActionAt } },
+        );
+        if (!c.firstActionAt) c.firstActionAt = firstActionAt;
+
         await logAuditEvent(req, guildId, 'case_update', { caseId: parsedId, action });
         res.json({ success: true, case: c });
     } catch (error) {

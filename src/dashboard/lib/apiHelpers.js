@@ -116,6 +116,22 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /**
+ * Midnight UTC on the Monday of the week containing `ms` (#1015). The retention
+ * cohorts group by `$dateTrunc … startOfWeek: 'monday'`, so the aggregation's
+ * lower bound has to land on a Monday too — an exact "N weeks ago" cutoff can
+ * fall mid-week and leave the oldest cohort holding only the members who joined
+ * after that day while still labelling it with the whole week. Flooring the
+ * cutoff to its Monday makes the oldest cohort complete.
+ */
+function startOfIsoWeekUTC(ms) {
+    const d = new Date(ms);
+    const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    // getUTCDay: 0 = Sunday … 6 = Saturday; days back to Monday.
+    monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+    return monday;
+}
+
+/**
  * Turns the join-week aggregation into the cohort rows the panel draws (#1015).
  *
  * The aggregation groups members by the week they joined and counts, per
@@ -190,19 +206,43 @@ function tzOffsetMinutes(timeZone, at = new Date()) {
     }
 }
 
+const WEEKDAY_INDEX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+/**
+ * The weekday (0 = Sunday … 6 = Saturday) and hour (0–23) of `date` in
+ * `timeZone`, read straight from the full timestamp. Returns null if the zone
+ * is not understood, so the caller can fall back.
+ */
+function localWeekdayHour(date, timeZone) {
+    try {
+        const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+            timeZone, hour12: false, weekday: 'short', hour: '2-digit',
+        }).formatToParts(date).map(p => [p.type, p.value]));
+        const weekday = WEEKDAY_INDEX[parts.weekday];
+        const hour = Number(parts.hour) % 24; // some engines print '24' at midnight
+        if (weekday === undefined || !Number.isInteger(hour)) return null;
+        return { weekday, hour };
+    } catch {
+        return null;
+    }
+}
+
 /**
  * Builds the 7×24 weekday-by-hour activity grid for the Insights heatmap
- * (#1015), rotated from the UTC buckets into `timeZone`.
+ * (#1015), in `timeZone`.
  *
- * Each command-usage entry carries a UTC `hour` and (since #1015) a UTC
- * `weekday`. Entries written before the weekday field have none, and their day
- * cannot be recovered, so they are kept on a separate `unknownWeekday` row by
- * hour rather than dropped or guessed onto a day they may not have run on. The
- * hour, which every entry has, is still shifted into the zone for that row.
+ * Each command-usage entry carries a `createdAt`, so its local weekday and hour
+ * are read straight from that timestamp in the zone — exact across a
+ * daylight-saving change and for a fractional-offset zone, neither of which a
+ * single reference offset applied to a whole-hour bucket can get right. Only an
+ * entry written before `createdAt` existed falls back to its stored UTC `hour`
+ * (and `weekday`, if any) rotated by the zone's current offset; one with no
+ * weekday to recover is kept on a separate `unknownWeekday` row by hour rather
+ * than guessed onto a day it may not have run on.
  *
- * @param {{hour: number, weekday: ?number}[]} entries
+ * @param {{hour: number, weekday: ?number, createdAt: ?(Date|string)}[]} entries
  * @param {string} [timeZone]
- * @param {Date} [at] reference instant for the zone offset.
+ * @param {Date} [at] reference instant for the fallback zone offset.
  * @returns {{timezone: string, weekdays: string[], grid: number[][],
  *            unknownWeekday: number[], hasUnknown: boolean, total: number}}
  */
@@ -214,6 +254,19 @@ function buildActiveHoursHeatmap(entries, timeZone = 'UTC', at = new Date()) {
     let hasUnknown = false;
 
     for (const entry of entries || []) {
+        // Preferred path: the full timestamp, placed in the zone directly.
+        const createdAt = entry?.createdAt ? new Date(entry.createdAt) : null;
+        if (createdAt && !Number.isNaN(createdAt.getTime())) {
+            const local = localWeekdayHour(createdAt, timeZone);
+            if (local) {
+                total += 1;
+                grid[local.weekday][local.hour] += 1;
+                continue;
+            }
+        }
+
+        // Fallback: a legacy entry with only a UTC hour (and maybe weekday),
+        // rotated by the zone's current offset.
         const hour = Number(entry?.hour);
         if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue;
         total += 1;
@@ -264,6 +317,7 @@ module.exports = {
     median,
     parseChannelIdFromJumpUrl,
     finalizeRetentionCohorts,
+    startOfIsoWeekUTC,
     tzOffsetMinutes,
     buildActiveHoursHeatmap,
     WEEKDAY_LABELS,

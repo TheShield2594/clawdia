@@ -194,9 +194,10 @@ describe('trackMemberEvent (guildMemberAdd)', () => {
         expect(mockUser.updateOne).toHaveBeenCalledWith(
             { userId: member.id, guildId: member.guild.id },
             // joinedAt is Discord's own timestamp; leftAt is cleared so a rejoin
-            // starts a fresh membership; firstSeenAt is written only on insert.
-            { $set: { joinedAt, leftAt: null }, $setOnInsert: { firstSeenAt: joinedAt } },
-            { upsert: true },
+            // starts a fresh membership; firstSeenAt is filled from joinedAt only
+            // when it is still empty, on an existing record as well as an insert.
+            [{ $set: { joinedAt, leftAt: null, firstSeenAt: { $ifNull: ['$firstSeenAt', joinedAt] } } }],
+            { updatePipeline: true, upsert: true },
         );
     });
 
@@ -207,8 +208,8 @@ describe('trackMemberEvent (guildMemberAdd)', () => {
         await guildMemberAdd.execute(member, {});
 
         const [, update, opts] = mockUser.updateOne.mock.calls[0];
-        expect(update.$set.joinedAt).toBeInstanceOf(Date);
-        expect(opts).toEqual({ upsert: true });
+        expect(update[0].$set.joinedAt).toBeInstanceOf(Date);
+        expect(opts).toEqual({ updatePipeline: true, upsert: true });
     });
 
     it('a failed join-date write does not crash the join flow', async () => {

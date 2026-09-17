@@ -369,8 +369,8 @@ jobs:
           age_days=$(( (now - then_ts) / 86400 ))
 
           if [ "$age_days" -gt "$STALE_DAYS" ]; then
-            echo "::error::${SCAN_WORKFLOW} last ran ${age_days} days ago (threshold ${STALE_DAYS}). GitHub disables a schedule after 60 days of no activity, and the weekly security scan appears to have stopped firing. Re-enable it on the Actions tab, or run it once via workflow_dispatch — either resets the clock."
-            echo "**The weekly security scan has not run in ${age_days} days.** Re-enable it on the Actions tab (or run it via workflow_dispatch)." >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::${SCAN_WORKFLOW} last ran ${age_days} days ago (threshold ${STALE_DAYS}). GitHub disables a schedule after 60 days of no activity, and the weekly security scan appears to have stopped firing. On the Actions tab, open the workflow and select 'Enable workflow' — a disabled workflow does not respond to workflow_dispatch, so enabling is what restores it (and resets the clock); you can then optionally 'Run workflow' to scan immediately."
+            echo "**The weekly security scan has not run in ${age_days} days.** On the Actions tab, open it and select 'Enable workflow' (a disabled workflow ignores workflow_dispatch); then optionally 'Run workflow' to scan now." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
 

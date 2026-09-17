@@ -6,7 +6,7 @@ const User = require('../../../models/User');
 const Case = require('../../../models/Case');
 const { checkAuth, checkGuildAccess } = require('../../lib/middleware');
 const { computeRetention, median, parseChannelIdFromJumpUrl,
-    finalizeRetentionCohorts, buildActiveHoursHeatmap } = require('../../lib/apiHelpers');
+    finalizeRetentionCohorts, startOfIsoWeekUTC, buildActiveHoursHeatmap } = require('../../lib/apiHelpers');
 const { cachedAggregate } = require('../../lib/aggregateCache');
 
 // Telemetry lives in its own GuildAnalytics collection; the Guild document is
@@ -226,7 +226,9 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
         // `now − joinedAt` while they are still here, so `tenureMs ≥ N days` is
         // "still a member N days after joining". Whether each window is ripe is
         // decided in finalizeRetentionCohorts, which has the maturity rule.
-        const cohortSince = new Date(Date.now() - COHORT_WEEKS * 7 * 864e5);
+        // Floored to the Monday of its week so the oldest cohort is a whole
+        // week, not a partial one wearing a full week's label (#1015).
+        const cohortSince = startOfIsoWeekUTC(Date.now() - COHORT_WEEKS * 7 * 864e5);
         const cohortRows = await cachedAggregate(`${guildId}:insights:retentionCohorts`, () => User.aggregate([
             { $match: { guildId, joinedAt: { $gte: cohortSince } } },
             { $set: {
@@ -274,8 +276,7 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
         // this always was — creation to resolution. Time-to-first-response is
         // creation to the first moderator action on the case (`firstActionAt`),
         // which is the figure the panel used to label "Mod SLA" while actually
-        // showing the former. Both get the same monthly trend, keyed by the
-        // resolution month so a case contributes to both from one bucket.
+        // showing the former.
         const resolvedCases = recentCases.filter(c => c.createdAt && c.resolvedAt);
         const resolutionHours = resolvedCases.map(c => (new Date(c.resolvedAt) - new Date(c.createdAt)) / 36e5).filter(h => h >= 0);
         const medianResolutionHours = median(resolutionHours);
@@ -284,16 +285,20 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
         const firstResponseHours = respondedCases.map(c => (new Date(c.firstActionAt) - new Date(c.createdAt)) / 36e5).filter(h => h >= 0);
         const medianFirstResponseHours = median(firstResponseHours);
 
+        // Each median's trend keyed by its own month: resolution by the month a
+        // case closed, response by the month it was first acted on — an open
+        // case that has been responded to but not resolved still counts toward
+        // the response trend, which keying both off `resolvedAt` would drop.
+        const monthKey = date => `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
         const monthlyTrend = {};
+        const trendBucket = key => (monthlyTrend[key] ??= { resolution: [], response: [] });
         for (const c of resolvedCases) {
-            const dt = new Date(c.resolvedAt);
-            const key = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
-            if (!monthlyTrend[key]) monthlyTrend[key] = { resolution: [], response: [] };
-            monthlyTrend[key].resolution.push((new Date(c.resolvedAt) - new Date(c.createdAt)) / 36e5);
-            if (c.firstActionAt) {
-                const fr = (new Date(c.firstActionAt) - new Date(c.createdAt)) / 36e5;
-                if (fr >= 0) monthlyTrend[key].response.push(fr);
-            }
+            const hours = (new Date(c.resolvedAt) - new Date(c.createdAt)) / 36e5;
+            if (hours >= 0) trendBucket(monthKey(new Date(c.resolvedAt))).resolution.push(hours);
+        }
+        for (const c of respondedCases) {
+            const hours = (new Date(c.firstActionAt) - new Date(c.createdAt)) / 36e5;
+            if (hours >= 0) trendBucket(monthKey(new Date(c.firstActionAt))).response.push(hours);
         }
         const modSlaTrends = Object.entries(monthlyTrend)
             .map(([month, { resolution, response }]) => {

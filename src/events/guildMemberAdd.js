@@ -81,11 +81,18 @@ module.exports = {
                 // Discord's own join timestamp when it is there, so a cohort is
                 // keyed on when the member actually joined rather than when this
                 // handler ran; `new Date()` only as a fallback.
+                //
+                // A pipeline update rather than `$setOnInsert` for `firstSeenAt`:
+                // a member who has already run a command has a record, so the
+                // insert branch never fires and `$setOnInsert` would leave their
+                // `firstSeenAt` null forever. `$ifNull` fills it from this join
+                // when it is empty and keeps a populated value untouched, on an
+                // insert and an existing document alike.
                 const joinedAt = member.joinedAt ?? new Date();
                 await User.updateOne(
                     { userId: member.id, guildId: member.guild.id },
-                    { $set: { joinedAt, leftAt: null }, $setOnInsert: { firstSeenAt: joinedAt } },
-                    { upsert: true }
+                    [{ $set: { joinedAt, leftAt: null, firstSeenAt: { $ifNull: ['$firstSeenAt', joinedAt] } } }],
+                    { updatePipeline: true, upsert: true }
                 );
             } catch (joinDateError) {
                 console.error('Member join-date tracking error:', joinDateError);
