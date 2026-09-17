@@ -14,7 +14,7 @@ const MAX_SUMMARY_JOBS_PER_GUILD = 10;
 // cap would have stranded the jobs above it exactly as the knowledge base
 // stranded its entries. The page size defaults to the cap so the common case is
 // still one request.
-router.get('/guild/:guildId/summary-jobs', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/summary-jobs', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { page, limit, skip } = readPage(req, { defaultLimit: MAX_SUMMARY_JOBS_PER_GUILD, maxLimit: 100 });
     try {

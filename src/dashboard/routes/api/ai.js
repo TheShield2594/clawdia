@@ -71,7 +71,7 @@ router.delete('/guild/:guildId/persona/:channelId', checkAuth, checkGuildAccess,
 
 // Token and request usage for the last `?days=` (1-90, default 14), plus the
 // configured rate limits and what is left of the monthly ceiling (#831).
-router.get('/guild/:guildId/ai/usage', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/ai/usage', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 14));
 

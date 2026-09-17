@@ -10,7 +10,7 @@ const { readPage, pageEnvelope } = require('../../lib/apiPage');
 // guild's hundred-and-first entry was not merely off the first page — it was
 // unreachable through the API, and unremovable through the dashboard that lists
 // it. Paged the same way cases and the leveling leaderboard are.
-router.get('/guild/:guildId/knowledge-base', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/knowledge-base', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { page, limit, skip } = readPage(req, { defaultLimit: 25, maxLimit: 100 });
     try {

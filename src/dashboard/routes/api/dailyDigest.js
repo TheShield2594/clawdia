@@ -7,7 +7,7 @@ const SNOWFLAKE_RE = /^\d{17,19}$/;
 function isSnowflake(id) { return typeof id === 'string' && SNOWFLAKE_RE.test(id); }
 
 // The guild's AI daily digest settings.
-router.get('/guild/:guildId/daily-digest', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/daily-digest', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     try {
         const settings = await Guild.findOne({ guildId });

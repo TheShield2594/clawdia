@@ -6,7 +6,7 @@ const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
 const { readPage, pageEnvelope } = require('../../lib/apiPage');
 
 // One page of moderation cases, filterable by `?type=` and `?status=`.
-router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { page, limit, skip } = readPage(req, { defaultLimit: 20, maxLimit: 50 });
     const type = req.query.type || null;
@@ -101,7 +101,7 @@ router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, check
 
 // Up to 200 active bans and 200 active timeouts, read live from Discord.
 // Each gateway call is capped at 200, so a guild past either cap is truncated.
-router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     try {
         if (!await req.bot.hasGuild(guildId)) return res.status(404).json({ error: 'Guild not found or bot not in guild' });

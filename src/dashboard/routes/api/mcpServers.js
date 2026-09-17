@@ -312,7 +312,7 @@ function effectiveMcpRoute(guildSettings) {
 }
 
 // The guild's MCP servers, the operator's global ones, the presets, and whether editing is allowed at all.
-router.get('/guild/:guildId/mcp-servers', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/mcp-servers', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
 
     try {
@@ -598,7 +598,7 @@ router.post('/guild/:guildId/mcp-servers/:name/test', checkAuth, checkGuildAcces
 // failing when nobody was looking. A server that went down last Tuesday shows
 // up here as a run of unreachable turns rather than as a console warning on a
 // host the admin cannot read.
-router.get('/guild/:guildId/mcp-servers/usage', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/mcp-servers/usage', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
 
     const requested = Number.parseInt(req.query.days, 10);

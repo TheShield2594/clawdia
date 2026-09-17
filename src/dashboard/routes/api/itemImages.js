@@ -53,7 +53,7 @@ function uploadImage(req, res, next) {
 //
 // So nothing needed them open, and open meant anyone who could guess a guild id
 // and an item id could read that guild's uploaded artwork.
-router.get('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     try {
         // One keyed lookup on `{ guildId, itemId }` against a document holding
         // one image, rather than a read of the whole guild settings document to
@@ -164,7 +164,7 @@ function invalidItemId(itemId) {
 
 // Serves a guild's activity item image, falling back to the shared pre-#561 one.
 // Gated for the same reason as the shop route above (#565).
-router.get('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, itemId } = req.params;
     try {
         const img = await ItemImage.findOne({ guildId, itemId })

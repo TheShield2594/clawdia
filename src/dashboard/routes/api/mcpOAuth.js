@@ -376,7 +376,7 @@ async function disconnect(req, res) {
 router.post('/guild/:guildId/mcp-servers/:name/oauth/start', checkAuth, checkGuildAccess, checkWriteRateLimit, startFlow);
 
 // The redirect back from the authorization server, exchanging the code for a stored grant.
-router.get('/mcp/oauth/callback', checkAuth, handleCallback);
+router.get('/mcp/oauth/callback', checkAuth, checkWriteRateLimit, handleCallback);
 
 // Forgets one MCP server's OAuth login, leaving the connection unauthenticated.
 router.delete('/guild/:guildId/mcp-servers/:name/oauth', checkAuth, checkGuildAccess, checkWriteRateLimit, disconnect);

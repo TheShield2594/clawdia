@@ -14,7 +14,7 @@ const ECONOMY_ANALYTICS_FIELDS = 'commandUsage';
 // Economy overview: richest members by net worth, coins in circulation, the
 // count of members who worked, claimed a daily or fished in the last 7 days,
 // and the top commands.
-router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     try {
         // The net-worth ranking sorts on a field the aggregation computes, so no index

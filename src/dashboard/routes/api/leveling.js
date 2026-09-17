@@ -8,7 +8,7 @@ const { readPage, pageEnvelope } = require('../../lib/apiPage');
 const { normalizeLevelProgress, xpToAdvance } = require('../../../services/levelingService');
 
 // One page of members ranked by level then XP, 25 to a page.
-router.get('/guild/:guildId/leveling/leaderboard', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/leveling/leaderboard', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { page, limit, skip } = readPage(req, { defaultLimit: 25, maxLimit: 25 });
     try {
