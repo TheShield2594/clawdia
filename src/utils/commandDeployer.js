@@ -14,11 +14,11 @@ const GLOBAL_COMMAND_LIMIT = 100;
 // have to displace an old one or become a subcommand of an existing group (the
 // shape /hunt, /fish and /explore use).
 // Lower it when a consolidation lands; raising it spends the last of the
-// headroom between here and a deploy that cannot be undone by a revert. It
-// last moved for #1010, which added /trade — a new top-level command, since a
-// two-party escrow flow does not fit under an existing group; before that #875
+// headroom between here and a deploy that cannot be undone by a revert. It last
+// moved for #1021/#1022, which deleted /achievement and folded /robstatus, /trap
+// and /xpinfo into /rob and /rank; before that #1010 added /trade, and #875
 // folded five single-holiday commands into the /event group they were gated by.
-const COMMAND_BUDGET = 93;
+const COMMAND_BUDGET = 89;
 
 /**
  * Serialize the command set that is about to be published, and refuse to

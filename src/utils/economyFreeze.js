@@ -90,13 +90,19 @@ function frozenTargetNotice(mention) {
  * tests/economyFreezeGate.test.js holds the list to that rule by scanning the
  * command sources, so an entry that grows a write fails the suite rather than
  * quietly re-opening the hole.
+ *
+ * `/robstatus` was here for that read-only reason, but #1022 folded it into
+ * `/rob status`, and `/rob` as a whole arms tripwires and moves coins on its
+ * other branches — so the command cannot be exempt, and a frozen member's
+ * scouting is gated along with the rest of `/rob`. The gate keys on the
+ * top-level command name and has no per-subcommand granularity to give the
+ * scout back on its own.
  */
 const FREEZE_EXEMPT_COMMANDS = new Set([
     'balance',
     'featured',
     'inventory',
     'jobs',
-    'robstatus',
     'showcase',
     'synergies',
 ]);
