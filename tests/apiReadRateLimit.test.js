@@ -62,30 +62,23 @@ describe('readRateLimitOptions builds a working limiter', () => {
     });
 });
 
-// The ordering, read from source: a limiter after the guarded handler does not
-// guard it, to CodeQL or at runtime.
-const ROUTES = [
-    ['stats.js',      "router.get('/guild/:guildId/stats'",                  'statsReadRateLimit'],
-    ['stats.js',      "router.get('/guild/:guildId/insights'",               'statsReadRateLimit'],
-    ['itemImages.js', "router.get('/item-image/shop/:guildId/:itemId'",      'imageReadRateLimit'],
-    ['itemImages.js', "router.get('/item-image/activity/:guildId/:itemId'",  'imageReadRateLimit'],
+// The install, read from source: the limiter is mounted with router.use ahead of
+// every route in the file, which is what guards them — to CodeQL and at runtime.
+// A router.use placed after a route would not cover it.
+const FILES = [
+    ['stats.js',      'statsReadRateLimit'],
+    ['itemImages.js', 'imageReadRateLimit'],
 ];
 
-describe('each flagged read gates authorization behind the limiter', () => {
-    const cache = {};
-    const routeLine = (file, marker) => {
-        cache[file] ??= fs.readFileSync(
+describe('each router installs its read limiter ahead of its routes', () => {
+    test.each(FILES)('%s mounts %s with router.use before any route', (file, limiter) => {
+        const src = fs.readFileSync(
             path.join(__dirname, '..', 'src', 'dashboard', 'routes', 'api', file), 'utf8',
-        ).split('\n');
-        const line = cache[file].find(l => l.includes(marker));
-        expect(line).toBeDefined();
-        return line;
-    };
-
-    test.each(ROUTES)('%s %s carries %s between checkAuth and checkGuildAccess', (file, marker, limiter) => {
-        const line = routeLine(file, marker);
-        expect(line).toContain(limiter);
-        expect(line.indexOf('checkAuth')).toBeLessThan(line.indexOf(limiter));
-        expect(line.indexOf(limiter)).toBeLessThan(line.indexOf('checkGuildAccess'));
+        );
+        const useIdx = src.indexOf(`router.use(${limiter})`);
+        const firstRoute = src.search(/router\.(get|post|put|patch|delete)\(/);
+        expect(useIdx).toBeGreaterThan(-1);
+        expect(firstRoute).toBeGreaterThan(-1);
+        expect(useIdx).toBeLessThan(firstRoute);
     });
 });

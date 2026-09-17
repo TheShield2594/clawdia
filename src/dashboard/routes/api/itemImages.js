@@ -11,9 +11,12 @@ const { shopImageId } = require('../../../models/itemImageKeys');
 // Recognised read limiter for the item-image reads. They are <img> subresources
 // a single page loads in bulk (the activity-items page renders the whole
 // ~80-item catalogue), so the ceiling sits above a full page's worth while still
-// bounding a client that scrapes ids. Built here, beside the routes, so CodeQL
-// sees it guarding them (see lib/readRateLimit.js).
+// bounding a client that scrapes ids. Installed with router.use so it guards
+// every route in this router — to CodeQL and at runtime (see lib/readRateLimit.js).
+// The writes it also covers are already the tighter-limited path, so the 300/min
+// read ceiling never binds first for them.
 const imageReadRateLimit = rateLimit(readRateLimitOptions(300));
+router.use(imageReadRateLimit);
 
 // M4: Validate image files by magic bytes rather than trusting the client-supplied
 // MIME type. Prevents disguised file uploads (e.g. PHP named as image/jpeg).
@@ -62,7 +65,7 @@ function uploadImage(req, res, next) {
 //
 // So nothing needed them open, and open meant anyone who could guess a guild id
 // and an item id could read that guild's uploaded artwork.
-router.get('/item-image/shop/:guildId/:itemId', checkAuth, imageReadRateLimit, checkGuildAccess, async (req, res) => {
+router.get('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
     try {
         // One keyed lookup on `{ guildId, itemId }` against a document holding
         // one image, rather than a read of the whole guild settings document to
@@ -173,7 +176,7 @@ function invalidItemId(itemId) {
 
 // Serves a guild's activity item image, falling back to the shared pre-#561 one.
 // Gated for the same reason as the shop route above (#565).
-router.get('/item-image/activity/:guildId/:itemId', checkAuth, imageReadRateLimit, checkGuildAccess, async (req, res) => {
+router.get('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId, itemId } = req.params;
     try {
         const img = await ItemImage.findOne({ guildId, itemId })

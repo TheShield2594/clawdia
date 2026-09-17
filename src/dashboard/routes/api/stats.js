@@ -12,9 +12,11 @@ const { computeRetention, median, parseChannelIdFromJumpUrl,
 const { cachedAggregate } = require('../../lib/aggregateCache');
 
 // Recognised read limiter for the two collection-wide aggregations, tighter than
-// the general read ceiling because each call is expensive. Built here, beside the
-// routes, so CodeQL sees it guarding them (see lib/readRateLimit.js).
+// the general read ceiling because each call is expensive. Installed with
+// router.use below so it guards every route in this router — to CodeQL and at
+// runtime — rather than being listed on each one (see lib/readRateLimit.js).
 const statsReadRateLimit = rateLimit(readRateLimitOptions(60));
+router.use(statsReadRateLimit);
 
 // Telemetry lives in its own GuildAnalytics collection; the Guild document is
 // read only for the handful of settings the recommendations look at, named so
@@ -188,12 +190,8 @@ async function buildGuildStats(guildId) {
 }
 
 // The dashboard's headline numbers for a guild: members, messages, coins in
-// circulation, top levels and average XP.
-//
-// statsReadRateLimit sits before checkGuildAccess so the collection-wide
-// aggregation is rate-limited by a limiter CodeQL recognises; see the note in
-// lib/middleware.js.
-router.get('/guild/:guildId/stats', checkAuth, statsReadRateLimit, checkGuildAccess, async (req, res) => {
+// circulation, top levels and average XP. Rate-limited by the router.use above.
+router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
     try {
@@ -209,8 +207,8 @@ router.get('/guild/:guildId/stats', checkAuth, statsReadRateLimit, checkGuildAcc
 });
 
 // Derived analytics: 7 and 30 day retention, activity by hour, and command usage.
-// Rate-limited before checkGuildAccess for the same reason as /stats above.
-router.get('/guild/:guildId/insights', checkAuth, statsReadRateLimit, checkGuildAccess, async (req, res) => {
+// Rate-limited by the router.use above.
+router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
     try {

@@ -8,21 +8,22 @@
 // limiter is invisible to it and it flags each of these handlers as performing
 // authorization (checkGuildAccess) with nothing rate-limiting it.
 //
-// The fix is an express-rate-limit limiter placed before checkGuildAccess on
-// those routes. Only the OPTIONS live here; the `rateLimit(...)` call itself is
-// made in each route file, next to the route that uses it, because that is what
-// lets CodeQL's routing model connect the limiter to the handler it guards — a
-// limiter built behind a factory in another module is not traced to the route.
+// The fix is an express-rate-limit limiter mounted with router.use() ahead of
+// those routes — the form CodeQL's routing model connects to the handlers it
+// guards. Only the OPTIONS live here; the `rateLimit(...)` call itself is made in
+// each route file, next to the router.use that installs it, so the source and its
+// installation stay local.
 //
-// Keyed by session (the routes place the limiter after checkAuth, so req.user is
-// always set), never by IP, which is why the package's proxy/IP startup checks
-// are switched off and no bounded key store is needed: the key set is the admins
-// currently online.
+// router.use runs before the route's checkAuth, so an unauthenticated request
+// reaches the limiter with no req.user: it is keyed by session where there is one
+// and by address otherwise (the same scheme the shared read limiter uses), and
+// the package's proxy/IP startup checks are switched off because the key is built
+// by hand.
 function readRateLimitOptions(limit) {
     return {
         windowMs: 60 * 1000,
         limit,
-        keyGenerator: req => `u:${req.user.id}`,
+        keyGenerator: req => (req.user?.id ? `u:${req.user.id}` : `ip:${req.ip}`),
         standardHeaders: true,
         legacyHeaders: false,
         validate: false,
