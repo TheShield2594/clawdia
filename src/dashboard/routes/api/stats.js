@@ -227,8 +227,11 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
         // "still a member N days after joining". Whether each window is ripe is
         // decided in finalizeRetentionCohorts, which has the maturity rule.
         // Floored to the Monday of its week so the oldest cohort is a whole
-        // week, not a partial one wearing a full week's label (#1015).
-        const cohortSince = startOfIsoWeekUTC(Date.now() - COHORT_WEEKS * 7 * 864e5);
+        // week, not a partial one wearing a full week's label (#1015). Anchored
+        // to this week's Monday and stepped back COHORT_WEEKS − 1 whole weeks, so
+        // the window is exactly COHORT_WEEKS join-weeks (this week plus the
+        // preceding eleven) rather than thirteen (#1023 review).
+        const cohortSince = new Date(startOfIsoWeekUTC(Date.now()).getTime() - (COHORT_WEEKS - 1) * 7 * 864e5);
         const cohortRows = await cachedAggregate(`${guildId}:insights:retentionCohorts`, () => User.aggregate([
             { $match: { guildId, joinedAt: { $gte: cohortSince } } },
             { $set: {
