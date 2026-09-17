@@ -4,10 +4,17 @@ const Guild = require('../../../models/Guild');
 const GuildAnalytics = require('../../../models/GuildAnalytics');
 const User = require('../../../models/User');
 const Case = require('../../../models/Case');
-const { checkAuth, checkGuildAccess, statsReadRateLimit } = require('../../lib/middleware');
+const { rateLimit } = require('express-rate-limit');
+const { checkAuth, checkGuildAccess } = require('../../lib/middleware');
+const { readRateLimitOptions } = require('../../lib/readRateLimit');
 const { computeRetention, median, parseChannelIdFromJumpUrl,
     finalizeRetentionCohorts, startOfIsoWeekUTC, buildActiveHoursHeatmap } = require('../../lib/apiHelpers');
 const { cachedAggregate } = require('../../lib/aggregateCache');
+
+// Recognised read limiter for the two collection-wide aggregations, tighter than
+// the general read ceiling because each call is expensive. Built here, beside the
+// routes, so CodeQL sees it guarding them (see lib/readRateLimit.js).
+const statsReadRateLimit = rateLimit(readRateLimitOptions(60));
 
 // Telemetry lives in its own GuildAnalytics collection; the Guild document is
 // read only for the handful of settings the recommendations look at, named so
