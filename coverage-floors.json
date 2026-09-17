@@ -413,7 +413,6 @@
         "src/commands/economy/mine/shop/upgrade.js",
         "src/commands/economy/mine/shop/use.js",
         "src/commands/economy/synergies.js",
-        "src/commands/leveling/xpinfo.js",
         "src/commands/utility/help.js",
         "src/commands/utility/ping.js",
         "src/commands/utility/serverinfo.js",

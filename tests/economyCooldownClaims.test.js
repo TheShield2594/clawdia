@@ -41,7 +41,7 @@ const CLAIMS = [
     { file: 'event/trickortreat.js', field: 'lastTrickOrTreat', shape: 'floor' },
     { file: 'event/trackhunt.js',    field: 'lastTrackHunt',    shape: 'floor' },
     { file: 'event/lovenote.js',     field: 'lastLoveNote',     shape: 'floor' },
-    { file: 'rob.js',          field: 'lastRob',          shape: 'cas' },
+    { file: 'rob/attempt.js',  field: 'lastRob',          shape: 'cas' },
 ];
 
 // The four grind systems keep their cooldown on GrindProfile rather than User.

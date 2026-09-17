@@ -14,6 +14,38 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.8.0] - 2026-09-17
+
+Migrations through `023_drop_coinflip_roll_toggles`.
+
+Command-slot consolidation, ahead of the 100-command global cap. `/coinflip` and
+`/roll` were coin-wagering games living in `src/commands/fun/` outside the
+casino, and they had missed every guard the casino accumulated: their debits and
+payouts were raw `$inc`s — the "unkeyed `$inc`s with nothing reading them back"
+that 4.7.0 replaced everywhere else — so `casinoMaxBet` did not bound them,
+`betConfirmThreshold` did not prompt on them, and the progressive jackpot never
+saw them. They are folded into the casino as `/casino coinflip` and `/casino
+dice` (#1019): the stake goes through `placeWager`'s compare-and-set, the win
+through `games/casino/payout.js` (keyed, retried, filed for
+`npm run payouts:replay` when it will not land), and the jackpot feed applies
+like any other bet. The odds maths split into pure, tested modules
+(`coinflipOdds.js`, `diceOdds.js`) the way `slotsReels.js` and `kenoPaytable.js`
+are. The casual no-stakes flip/roll and the PvP challenge did not fit a
+house-vs-player game and were dropped — `/duel` covers player-vs-player wagering.
+`economy.coinflipEnabled` and `economy.rollEnabled` are removed from the schema,
+the dashboard economy panel and `settings-payload.js`; `casinoEnabled` is the
+switch now, and migration 023 drops the stored fields.
+
+Three more top-level commands were subcommands of something that already
+existed, so they move under it (#1022): `/robstatus` → `/rob status`, `/trap` →
+`/rob trap set|status`, and the bare `/rob` becomes `/rob attempt`; `/xpinfo` →
+`/rank info`, with the card at `/rank card`. Each keeps its own cooldown, and a
+per-subcommand cooldown key stops the folded leaves from sharing one bucket.
+`/achievement` — a Minecraft-popup meme generator one letter from the
+`/achievements` progression command — is deleted; the card renderer it shared
+with real achievement announcements stays (#1021). `docs/COMMANDS.md` and the
+README shape table are regenerated and the deploy budget drops from 93 to 87.
+
 ## [4.7.0] - 2026-09-09
 
 Migrations through `022_move_shop_images_to_itemimages`.

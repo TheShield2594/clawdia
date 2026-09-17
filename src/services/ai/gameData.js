@@ -89,7 +89,7 @@ const COLLECTIONS = [
 
     // The rest of the economy
     { module: 'defaultShopItems', export: 'DEFAULT_SHOP_ITEMS', kind: 'shop item',   system: 'shop', command: '/shop buy' },
-    { module: 'achievements', export: 'ACHIEVEMENTS', kind: 'achievement',           system: 'achievements', command: '/achievement' },
+    { module: 'achievements', export: 'ACHIEVEMENTS', kind: 'achievement',           system: 'achievements', command: '/achievements view' },
     { module: 'defaultJobs',                         kind: 'job',                    system: 'jobs', command: '/jobs' },
     { module: 'defaultTiers',                        kind: 'work tier',              system: 'jobs', command: '/work' },
     { module: 'heistData', export: 'ROLES',          kind: 'heist role',             system: 'heists', command: '/heist start' },

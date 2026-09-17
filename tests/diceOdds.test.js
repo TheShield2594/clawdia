@@ -1,19 +1,23 @@
 'use strict';
 
-// /roll's wager maths, now that the payout is quoted to the player before the
-// dice land: the number shown while rolling has to be the number that pays.
+// The dice game's payout maths (#1019), now a pure module of its own after
+// `/roll`'s betting mode folded into `/casino dice`. The number quoted to the
+// player while the dice are in the air has to be the number that pays, and the
+// house edge has to hold whichever way a call is made.
 
-jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn() }));
-jest.mock('../src/models/Guild', () => ({ findOne: jest.fn().mockResolvedValue(null) }));
-jest.mock('../src/models/Transaction', () => ({ create: jest.fn().mockResolvedValue({}) }));
+const {
+    HOUSE_CUT, payoutMultiplier, grossPayout, callWon, callLabel, rollBar,
+} = require('../src/games/casino/diceOdds');
 
-const { __test__ } = require('../src/commands/fun/roll');
-const { payoutMultiplier, callWon, callLabel, rollBar } = __test__;
-
-const HOUSE_CUT = 0.05;
 const high = { type: 'high' };
 const low  = { type: 'low' };
 const exact = number => ({ type: 'exact', number });
+
+function countWins(call, sides) {
+    let wins = 0;
+    for (let r = 1; r <= sides; r++) if (callWon(call, r, sides)) wins++;
+    return wins;
+}
 
 describe('payoutMultiplier', () => {
     test('exact-number bets pay at the die odds', () => {
@@ -44,12 +48,6 @@ describe('payoutMultiplier', () => {
     });
 });
 
-function countWins(call, sides) {
-    let wins = 0;
-    for (let r = 1; r <= sides; r++) if (callWon(call, r, sides)) wins++;
-    return wins;
-}
-
 describe('callWon', () => {
     test('splits an even die down the middle', () => {
         expect([1, 2, 3].every(r => callWon(low, r, 6))).toBe(true);
@@ -72,12 +70,13 @@ describe('callWon', () => {
     });
 });
 
-describe('display', () => {
-    test('the quoted payout is what a winning stake actually returns', () => {
+describe('grossPayout and display', () => {
+    test('grossPayout is the quoted multiplier applied to the stake', () => {
         const bet = 250;
         for (const sides of [6, 7, 100]) {
             for (const call of [high, low, exact(2)]) {
-                const gross  = Math.floor(bet * payoutMultiplier(call, sides) * (1 - HOUSE_CUT));
+                const gross  = grossPayout(bet, call, sides);
+                expect(gross).toBe(Math.floor(bet * payoutMultiplier(call, sides) * (1 - HOUSE_CUT)));
                 const quoted = Number((gross / bet).toFixed(2));
                 expect(Math.abs(quoted * bet - gross)).toBeLessThanOrEqual(bet * 0.005);
             }

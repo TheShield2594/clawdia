@@ -191,10 +191,12 @@ const guildSchema = new Schema({
         workMax: { type: Number, default: 150 },
         shopEnabled: { type: Boolean, default: true },
         gamesEnabled: { type: Boolean, default: true },
-        coinflipEnabled: { type: Boolean, default: true },
         // Ambient chat events (airdrops, crates, flash trivia) — see chatEventService
         chatEventsEnabled: { type: Boolean, default: true },
-        rollEnabled: { type: Boolean, default: true },
+        // `coinflipEnabled`/`rollEnabled` were removed in #1019 when the two
+        // wagering games folded into the casino as `/casino coinflip` and
+        // `/casino dice`; `casinoEnabled` is the switch for both now. Migration
+        // 023 drops the stored fields.
         blackjackEnabled: { type: Boolean, default: true },
         jobsEnabled: { type: Boolean, default: true },
         robEnabled: { type: Boolean, default: true },

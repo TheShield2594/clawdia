@@ -15,10 +15,11 @@ const GLOBAL_COMMAND_LIMIT = 100;
 // shape /hunt, /fish and /explore use).
 // Lower it when a consolidation lands; raising it spends the last of the
 // headroom between here and a deploy that cannot be undone by a revert. It last
-// moved for #1021/#1022, which deleted /achievement and folded /robstatus, /trap
-// and /xpinfo into /rob and /rank; before that #1010 added /trade, and #875
-// folded five single-holiday commands into the /event group they were gated by.
-const COMMAND_BUDGET = 89;
+// moved for #1019/#1021/#1022, which folded /coinflip and /roll into the casino,
+// folded /robstatus, /trap and /xpinfo into /rob and /rank, and deleted
+// /achievement; before that #1010 added /trade, and #875 folded five
+// single-holiday commands into the /event group they were gated by.
+const COMMAND_BUDGET = 87;
 
 /**
  * Serialize the command set that is about to be published, and refuse to

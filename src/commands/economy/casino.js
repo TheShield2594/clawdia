@@ -10,8 +10,10 @@ const { economyLockKey, casinoLockKey, busyMessage, GRIND_TTL_MS } = require('..
 
 const games = [
     require('../../games/casino/blackjack'),
+    require('../../games/casino/coinflip'),
     require('../../games/casino/crash'),
     require('../../games/casino/cupgame'),
+    require('../../games/casino/dice'),
     require('../../games/casino/higherlower'),
     require('../../games/casino/keno'),
     require('../../games/casino/poker'),
