@@ -20,26 +20,6 @@ const READ_RL_LIMIT = 120;
 const readRateLimiter = new BoundedRateLimiter(10_000);
 setInterval(() => readRateLimiter.cleanup(READ_RL_WINDOW_MS), 60 * 1000).unref();
 
-// The item-image reads (routes/api/itemImages.js) do a keyed database read per
-// request, and CodeQL's js/missing-rate-limiting flags a data read with no rate
-// limiter in the handler's own chain — it does not trace the router-wide read
-// limiter above, which is applied through the conditional `router.use` wrapper in
-// routes/api.js (#1009). So they carry a limiter directly, like every write route
-// does. It is a limiter of their own rather than `checkWriteRateLimit` or
-// `checkReadRateLimit`, because those two are the wrong budget for these routes:
-// they are `<img>` subresources, and a single dashboard page fires one GET per
-// uploaded icon — the activity-items page alone renders the ~80-item catalogue.
-// Counted against the write budget, a page load would leave an admin unable to
-// save; against the shared read budget (which already runs for every GET), it
-// would count twice and starve the page's own data GETs. This budget is theirs
-// alone, and its ceiling sits well above the largest page's worth of images so a
-// legitimate render never trips it, while a client looping guessed ids still
-// does. The router-wide read limiter remains the general per-user ceiling.
-const IMAGE_READ_RL_WINDOW_MS = 60 * 1000;
-const IMAGE_READ_RL_LIMIT = 240;
-const imageReadRateLimiter = new BoundedRateLimiter(10_000);
-setInterval(() => imageReadRateLimiter.cleanup(IMAGE_READ_RL_WINDOW_MS), 60 * 1000).unref();
-
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
     res.status(401).json({ error: 'Unauthorized' });
@@ -98,18 +78,6 @@ function checkReadRateLimit(req, res, next) {
     next();
 }
 
-// Counted per session where there is one, per address otherwise — the same key
-// scheme checkReadRateLimit uses, on a budget of its own so image loads and data
-// reads never spend each other's. Placed after checkAuth on its routes, so an
-// unauthenticated request is answered by that, not counted here.
-function checkImageReadRateLimit(req, res, next) {
-    const key = req.user?.id ? `u:${req.user.id}` : `ip:${req.ip}`;
-    if (!imageReadRateLimiter.check(key, IMAGE_READ_RL_WINDOW_MS, IMAGE_READ_RL_LIMIT)) {
-        return res.status(429).json({ error: 'Too many requests. Please slow down.' });
-    }
-    next();
-}
-
 // M2: CSRF origin validation for all state-changing API requests, applied
 // router-wide in routes/api.js. Complements sameSite: 'lax' cookies — a
 // POST/PUT/DELETE is admitted only when the browser says, one way or another,
@@ -150,4 +118,4 @@ function checkCsrfOrigin(req, res, next) {
 // correct authorization is "administers something, somewhere", and leaving the
 // helper in place is an invitation for the next route to reach for it.
 
-module.exports = { checkAuth, checkGuildAccess, checkWriteRateLimit, checkReadRateLimit, checkImageReadRateLimit, checkCsrfOrigin };
+module.exports = { checkAuth, checkGuildAccess, checkWriteRateLimit, checkReadRateLimit, checkCsrfOrigin };
