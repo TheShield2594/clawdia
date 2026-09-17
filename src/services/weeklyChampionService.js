@@ -28,24 +28,10 @@ const { creditCoinsOnce, weeklyChampionPayoutKey } = require('../utils/payoutKey
 const { postAnnouncement } = require('../utils/guildAnnounce');
 const { eventCommentary, addCommentary } = require('./commentaryService');
 const COLORS = require('../utils/embedColors');
-
-const WEEKLY_CATEGORY_LABELS = {
-    // `unit` because `total` is not the same quantity in every category: three
-    // of these accumulate coins and fish accumulates rarity tiers, and a line
-    // reading "4,200 coins" for a scoreboard that never counted coins is a
-    // number members will try to reconcile against their balance.
-    fish:    { title: '🎣 Angler of the Week',   emoji: '🐟', unit: 'rarity score' },
-    mine:    { title: '⛏️ Miner of the Week',     emoji: '💎', unit: 'coins mined' },
-    hunt:    { title: '🏹 Hunter of the Week',    emoji: '🦌', unit: 'coins hunted' },
-    // A category with no entry here is skipped when the week is announced — the
-    // champion is still paid, just never named — so a new competition has to be
-    // added in both places or it wins in silence.
-    explore: { title: '🧭 Explorer of the Week',  emoji: '🗺️', unit: 'coins recovered' },
-};
-
-// Fixed order so the four lines of an announcement read the same way every
-// week, whatever order the aggregation happened to group them in.
-const WEEKLY_CATEGORY_ORDER = ['hunt', 'mine', 'fish', 'explore'];
+// The label/unit map and display order live in utils/weeklyChampion — the
+// lowest layer this sweep and the live `/leaderboard` boards both reach — so a
+// category is named the same way in the Monday announcement and in the board.
+const { WEEKLY_CATEGORY_LABELS, WEEKLY_CATEGORY_ORDER } = require('../utils/weeklyChampion');
 
 // One prize per category per guild. Deliberately not 500 × 168: the hourly
 // payout was a firehose that scaled with how often people played rather than
@@ -68,7 +54,7 @@ async function announceWeeklyChampions(client) {
     const { EmbedBuilder } = require('discord.js');
     const WeeklyChampion = require('../models/WeeklyChampion');
     const User           = require('../models/User');
-    const { getPreviousWeekKey } = require('../utils/weeklyChampion');
+    const { getPreviousWeekKey, WEEKLY_STANDINGS_SORT } = require('../utils/weeklyChampion');
 
     const prevWeek = getPreviousWeekKey();
 
@@ -80,8 +66,10 @@ async function announceWeeklyChampions(client) {
     const candidates = await WeeklyChampion.aggregate([
         { $match: { week: prevWeek } },
         // `runs` then `createdAt` break a tie the same way every run, so a
-        // re-run after a partial failure cannot crown a different player.
-        { $sort: { total: -1, runs: -1, createdAt: 1 } },
+        // re-run after a partial failure cannot crown a different player. The
+        // same order the live `/leaderboard` week board reads, so the board and
+        // the crown agree by construction (#1016).
+        { $sort: WEEKLY_STANDINGS_SORT },
         { $group: { _id: { guildId: '$guildId', category: '$category' }, top: { $first: '$$ROOT' } } },
         { $replaceRoot: { newRoot: '$top' } },
     ]);

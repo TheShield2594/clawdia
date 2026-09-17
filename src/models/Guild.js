@@ -131,6 +131,21 @@ const guildSchema = new Schema({
         behaviorScoreDecayDays: { type: Number, default: 7, min: 1 },
         appealsEnabled: { type: Boolean, default: false },
         appealChannelId: { type: String, default: null },
+        // An AI second opinion on filter trips (#1017). When a filter deletes a
+        // message and files a case, the bot asks the guild's configured provider
+        // whether it reads as a genuine violation of the named rule or a false
+        // positive, and attaches the one-line answer to the case. Off by default
+        // even when AI is on — the same "off even when AI is on" reasoning as
+        // event commentary: it is an AI call nobody typed, spending the guild's
+        // own budget. It only does anything when a provider is configured, and a
+        // provider outage or a budget refusal costs the case its review, never
+        // the case itself.
+        aiReviewEnabled: { type: Boolean, default: false },
+        // When the review calls a trip a false positive, do not add to the
+        // member's behaviour score for it, so one wrong filter cannot walk them
+        // up the escalation ladder. Off by default: the review is advisory, and a
+        // guild opts in to letting it hold the score back.
+        aiReviewSkipScoreOnFalsePositive: { type: Boolean, default: false },
         escalation: {
             enabled: { type: Boolean, default: true },
             ladder: {
@@ -196,8 +211,10 @@ const guildSchema = new Schema({
         // `coinflipEnabled`/`rollEnabled` were removed in #1019 when the two
         // wagering games folded into the casino as `/casino coinflip` and
         // `/casino dice`; `casinoEnabled` is the switch for both now. Migration
-        // 023 drops the stored fields.
-        blackjackEnabled: { type: Boolean, default: true },
+        // 023 drops the stored fields. `blackjackEnabled` went the same way in
+        // #1020 — blackjack was a standalone command before the casino existed
+        // and kept a toggle no other casino game has; `casinoEnabled` gates it
+        // now and migration 024 drops the stored field.
         jobsEnabled: { type: Boolean, default: true },
         robEnabled: { type: Boolean, default: true },
         robMinWallet: { type: Number, default: 100, min: 0 },

@@ -440,6 +440,7 @@
         "src/migrations/019_drop_hourly_winners.js",
         "src/migrations/020_narrow_failed_job_ttl.js",
         "src/migrations/023_drop_coinflip_roll_toggles.js",
+        "src/migrations/024_drop_blackjack_toggle.js",
         "src/models/Poll.js",
         "src/services/districtService.js",
         "src/services/syndicateService.js",

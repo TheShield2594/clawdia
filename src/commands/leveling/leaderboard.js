@@ -3,6 +3,7 @@ const User = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { netWorthOf, topByNetWorth, netWorthRank } = require('../../utils/netWorth');
 const COLORS = require('../../utils/embedColors');
+const { GRIND_TRACKS, buildGrindBoard, buildChampionsHall } = require('../../utils/grindLeaderboard');
 
 // A leaderboard page prints ten names and one number each. Hydrating whole user
 // documents to do it dragged the pet, inventory, achievement and quest arrays
@@ -36,12 +37,37 @@ module.exports = {
                     { name: 'Streaks',         value: 'streaks' },
                     { name: 'Streaks (Longest All-Time)', value: 'streaks_longest' },
                     { name: 'Duels (Most Wins)',          value: 'duels'           },
-                    { name: 'Achievements',               value: 'achievements'    }
+                    { name: 'Achievements',               value: 'achievements'    },
+                    { name: 'Hunting',   value: 'hunting'   },
+                    { name: 'Fishing',   value: 'fishing'   },
+                    { name: 'Mining',    value: 'mining'    },
+                    { name: 'Exploring', value: 'exploring' },
+                    { name: 'Hall of Champions', value: 'champions' }
+                ))
+        .addStringOption(option =>
+            option.setName('period')
+                .setDescription('For the grind boards: this week\'s live race, or all-time (default: All-time).')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'All-time',  value: 'all-time' },
+                    { name: 'This week', value: 'week'     }
                 )),
     async execute(interaction) {
         const type = interaction.options.getString('type') || 'levels';
 
         try {
+            // The grind-track boards and the Hall of Champions are self-contained
+            // (their own queries, embeds and empty-state messages) and live in
+            // one module so this command's own boards stay readable. They return
+            // a reply payload; the single reply and the catch below are shared.
+            if (GRIND_TRACKS[type]) {
+                const period = interaction.options.getString('period') === 'week' ? 'week' : 'all-time';
+                return interaction.reply(await buildGrindBoard(interaction, type, period));
+            }
+            if (type === 'champions') {
+                return interaction.reply(await buildChampionsHall(interaction));
+            }
+
             let users;
             let title;
             let descriptionHeader;

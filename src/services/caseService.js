@@ -17,7 +17,7 @@ async function getNextCaseId(guildId) {
     return result.caseSettings.nextCaseId;
 }
 
-async function createCase({ guildId, type, targetUserId, moderatorId, reason, evidence = null, duration = null }) {
+async function createCase({ guildId, type, targetUserId, moderatorId, reason, evidence = null, duration = null, aiReview = null }) {
     try {
         const guildSettings = await Guild.findOne({ guildId });
         const slaHours = guildSettings?.caseSettings?.slaHours ?? 48;
@@ -36,6 +36,9 @@ async function createCase({ guildId, type, targetUserId, moderatorId, reason, ev
             reason,
             duration,
             evidence: evidence ?? {},
+            // Only set when a review was produced (#1017); the schema defaults
+            // every sub-field to null otherwise.
+            ...(aiReview ? { aiReview } : {}),
             status: 'open',
             slaDeadline
         });

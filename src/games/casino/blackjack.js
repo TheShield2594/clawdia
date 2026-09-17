@@ -187,9 +187,9 @@ module.exports = {
 
     async execute(interaction, { releaseLock, onWager } = {}) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-        if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false || guildSettings?.economy?.blackjackEnabled === false) {
+        if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
             releaseLock?.();
-            return interaction.reply({ content: 'Blackjack is disabled on this server.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: 'Casino games are disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const currency     = guildSettings?.economy?.currency || '💰';

@@ -14,6 +14,74 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.11.0] - 2026-09-17
+
+Migrations through `024_drop_blackjack_toggle`.
+
+An opt-in AI second opinion on filter trips (#1017). The AI layer and the
+moderation layer shared nothing; the one place they obviously help each other is
+the false positive a filter cannot solve by regex (`Dick Grayson is Robin` was a
+decision only because an admin added it to `profanityAllowlist` after the fact).
+A new **Enable AI review** toggle under **Moderation → Auto-Mod**, off by default
+and shown only when an AI provider is configured, sends a filtered message (and
+the two before it, for context) to the guild's provider with one fixed question —
+genuine violation of the named rule, or false positive, and why in one sentence.
+The answer is attached to the `Case` as `aiReview: { verdict, reason, model, at }`
+and shown in the mod-log embed and the dashboard case view. It changes nothing on
+its own: the message stays deleted, the case stays filed, the score stays applied
+— it is a note for the human who looks next. An optional second setting,
+**Skip the behaviour score on a false positive**, holds the score back on a
+false-positive verdict so one wrong filter cannot walk a member up the ladder.
+
+It follows the event-commentary contract exactly: the case is filed first and the
+review is a field on top, so a provider outage or a budget refusal costs the case
+its review and never the case; it is billed to the guild and bound by the same
+monthly token and cost ceilings; and it is off even when AI is on. The message
+content is data inside a fixed prompt and the verdict is coerced out of a
+two-value enum, so prompt-injection text in a message cannot change the shape of
+what is stored — and the review never sees or calls MCP tools (`mcp: false`).
+
+## [4.10.0] - 2026-09-17
+
+Migrations through `024_drop_blackjack_toggle`.
+
+Grind-track leaderboards (#1016). Hunting, fishing, mining and exploration are
+the largest part of the bot and had no board at all: the only competitive
+surface was the Monday champion announcement, so between Mondays a player could
+not see where they stood, and after Monday the winner was gone. `/leaderboard`
+gains four track choices — `hunting`, `fishing`, `mining`, `exploring` — each
+with a `period` of `all-time` (track level, then lifetime coins as the tiebreak)
+or `week` (this week's live race). The week board shows the caller's own rank and
+how far they are from first, and reads the same `getWeeklyChampionStandings`
+function — with the same `WEEKLY_STANDINGS_SORT` order — that Monday's sweep
+crowns from, so the board and the announcement agree by construction. A new
+`/leaderboard champions` view is a **Hall of Champions**: past weekly winners per
+track, read from the `rewarded` rows the sweep already stamps (a rolling window,
+since those rows carry WeeklyChampion's 21-day retention). Every board is a
+bounded, indexed query, not a full collection sort (#922 on cases): a new
+`{ guildId, system, data.level: -1, data.totalEarned: -1 }` index on
+`GrindProfile` serves the all-time boards and a partial index over just the
+`rewarded` rows of `WeeklyChampion` serves the hall. The category label/unit map
+moved from `weeklyChampionService` down to `utils/weeklyChampion` so the live
+boards and the Monday announcement name each track the same way.
+
+## [4.9.0] - 2026-09-17
+
+Migrations through `024_drop_blackjack_toggle`.
+
+`economy.blackjackEnabled` was a second switch for one casino game (#1020).
+Blackjack was a standalone command before the casino existed, and when it moved
+under `/casino` it kept a per-game toggle no other casino game has — so an admin
+who turned the casino on and found blackjack missing had to know about a checkbox
+that exists for one of eight games. The field is gone: the redundant check in
+`games/casino/blackjack.js` (the casino command already gates every game on
+`economy.casinoEnabled`), the schema field in `models/Guild.js`, the dashboard
+checkbox in the economy panel and its entry in `settings-payload.js`. Migration
+`024_drop_blackjack_toggle` `$unset`s the stored field on every guild so a stale
+`false` cannot come back if the read is ever reintroduced. Per-game toggles, if
+they are ever wanted, are a different feature — a `disabledGames` list read
+through one helper, not one Boolean per game — and this does not add them.
+
 ## [4.8.0] - 2026-09-17
 
 Migrations through `023_drop_coinflip_roll_toggles`.

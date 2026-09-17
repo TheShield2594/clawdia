@@ -20,6 +20,7 @@
 const User = require('../models/User');
 const Case = require('../models/Case');
 const { logModeration } = require('./moderationLogService');
+const { reviewFilterTrip, aiReviewEnabled } = require('./aiFilterReviewService');
 const BASE_BAD_WORDS = require('../data/profanityList');
 const { BoundedRateLimiter } = require('../utils/boundedRateLimiter');
 const {
@@ -225,12 +226,44 @@ async function inviteIsAllowed(message, mod, code) {
 // Filters
 // ---------------------------------------------------------------------------
 
+// How many preceding messages the AI review reads for context. Two, per #1017:
+// enough to tell a running joke from a real slur, without shipping a channel's
+// history to a provider.
+const AI_REVIEW_CONTEXT_LIMIT = 2;
+
+/**
+ * The messages just before the one being punished, oldest first — the context
+ * the AI review reads (#1017). Fetched before the delete, because after it the
+ * surrounding conversation is the only place the deleted line's meaning lives.
+ * Best-effort: a failed fetch just means the review judges the message alone.
+ */
+async function fetchPrecedingContext(message) {
+    try {
+        const fetched = await message.channel.messages.fetch({
+            limit: AI_REVIEW_CONTEXT_LIMIT,
+            before: message.id,
+        });
+        // The API returns newest-first; reverse so the prompt reads in order.
+        return [...fetched.values()]
+            .reverse()
+            .map(m => ({ author: m.author?.username ?? 'unknown', content: m.content ?? '' }));
+    } catch {
+        return [];
+    }
+}
+
 /** Delete the message, post a self-deleting notice, and file the offence. */
 async function punish(message, guildSettings, notice, reason, weight) {
+    // Grab the context the AI review needs before the delete removes it — but
+    // only when the review is actually on, so a guild without it never pays a
+    // Discord fetch on every trip.
+    const precedingMessages = aiReviewEnabled(guildSettings)
+        ? await fetchPrecedingContext(message)
+        : [];
     await message.delete().catch(console.error);
     const warn = await message.channel.send(notice).catch(() => null);
     if (warn) setTimeout(() => warn.delete().catch(() => {}), WARNING_TTL_MS);
-    await applyAutoModAction(message, guildSettings, reason, weight);
+    await applyAutoModAction(message, guildSettings, reason, weight, { precedingMessages });
     return true;
 }
 
@@ -412,7 +445,7 @@ async function handleAutoModeration(message, guildSettings, { isEdit = false } =
     return false;
 }
 
-async function applyAutoModAction(message, guildSettings, reason, scoreWeight = 1) {
+async function applyAutoModAction(message, guildSettings, reason, scoreWeight = 1, { precedingMessages = [] } = {}) {
     const mod = guildSettings.moderation;
     const member = message.member;
     if (!member) return;
@@ -424,9 +457,19 @@ async function applyAutoModAction(message, guildSettings, reason, scoreWeight = 
             content: (message.content ?? '').slice(0, 500),
             attachmentUrls: [...message.attachments.values()].map(a => a.url)
         };
+
+        // A best-effort AI second opinion on the trip (#1017). Null when the
+        // guild has it off, has no usable provider, or the call failed — the
+        // case is filed either way, so a provider outage never costs the case.
+        const aiReview = await reviewFilterTrip(guildSettings, {
+            rule: reason,
+            message,
+            precedingMessages,
+        });
+
         await logModeration(
             message.guild.id, 'warn', message.author, message.client.user,
-            `[AutoMod] ${reason}`, { evidence }
+            `[AutoMod] ${reason}`, { evidence, aiReview }
         );
 
         // Behavioral score (with decay)
@@ -448,7 +491,14 @@ async function applyAutoModAction(message, guildSettings, reason, scoreWeight = 
             user.lastScoreDecay = new Date();
         }
 
-        user.behaviorScore = (user.behaviorScore || 0) + scoreWeight;
+        // A false-positive verdict holds the score back when the guild asked it
+        // to (#1017), so one wrong filter cannot walk a member up the ladder.
+        // The case is still filed with the verdict attached; only the score is
+        // spared. Any other verdict — or no review at all — scores as before.
+        const scoreDelta = (aiReview?.verdict === 'false_positive' && mod.aiReviewSkipScoreOnFalsePositive)
+            ? 0
+            : scoreWeight;
+        user.behaviorScore = (user.behaviorScore || 0) + scoreDelta;
         await user.save();
 
         const score = user.behaviorScore;
