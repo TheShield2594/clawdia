@@ -124,6 +124,12 @@ let dispatcher = null;
  * dispatcher is one object covering both schemes, and it is also what every
  * redirect hop is dialled through — which is the property this whole module
  * exists for.
+ *
+ * This Agent is handed to the platform `fetch`, whose request-handler protocol
+ * is that of the undici bundled *inside* Node. So the `undici` in `package.json`
+ * has to track Node's major: a v6 Agent dispatched by a v7 `fetch` (Node 24)
+ * dies with `invalid onRequestStart method` when the two disagree on the
+ * handler shape. Keep this dependency pinned to the major Node ships.
  */
 function guardedDispatcher() {
     // Required here rather than at the top of the file. `assertPublicHttpUrl`
