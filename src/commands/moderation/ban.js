@@ -1,6 +1,7 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { logModeration } = require('../../services/moderationLogService');
 const { hierarchyDenial, resolveMember } = require('../../utils/moderationHierarchy');
+const { sendPublicResponse, sendEphemeralResponse } = require('../../utils/interactionAck');
 const TempBan = require('../../models/TempBan');
 const COLORS = require('../../utils/embedColors');
 
@@ -56,6 +57,13 @@ module.exports = {
     // Re-checked inside the gate in events/interactionCreate — the builder line
     // above is only Discord's default, which a guild admin can reassign.
     requiredPermissions: [PermissionFlagsBits.BanMembers],
+
+    // Acknowledged up front by the dispatcher (#995): resolveMember below can
+    // miss the member cache and fetch from the gateway, which — stacked on the
+    // dispatcher's own settings and cooldown reads — can outrun Discord's
+    // three-second window. A public deferral keeps the success embed in the
+    // channel; refusals are delivered ephemerally by sendEphemeralResponse.
+    deferral: { ephemeral: false },
     async execute(interaction) {
         const user        = interaction.options.getUser('user');
         const reason      = interaction.options.getString('reason') || 'No reason provided';
@@ -63,38 +71,37 @@ module.exports = {
         const deleteDays  = interaction.options.getInteger('delete_days') || 0;
 
         if (user.id === interaction.user.id) {
-            return interaction.reply({ content: 'You cannot ban yourself.', flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: 'You cannot ban yourself.' });
         }
         if (user.id === interaction.client.user.id) {
-            return interaction.reply({ content: 'I cannot ban myself.', flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: 'I cannot ban myself.' });
         }
 
         const { member, indeterminate } = await resolveMember(interaction.guild, user.id);
         // Not the same as "not in the guild": we could not find out. Proceeding
         // would skip both checks below on a target who may well outrank you.
         if (indeterminate) {
-            return interaction.reply({
+            return sendEphemeralResponse(interaction, {
                 content: 'I could not look this user up just now, so I have not banned them. Try again in a moment.',
-                flags: MessageFlags.Ephemeral
             });
         }
 
         if (member && !member.bannable) {
-            return interaction.reply({ content: 'I cannot ban this user — they may have higher permissions.', flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: 'I cannot ban this user — they may have higher permissions.' });
         }
 
         // `bannable` above answered whether the bot outranks the target. This
         // answers whether the moderator does.
         const denial = hierarchyDenial(interaction.member, member, 'ban');
         if (denial) {
-            return interaction.reply({ content: denial, flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: denial });
         }
 
         let durationMs = null;
         if (durationStr) {
             durationMs = parseDuration(durationStr);
             if (durationMs === null) {
-                return interaction.reply({ content: 'Invalid duration format. Use e.g. `30m`, `12h`, `7d`.', flags: MessageFlags.Ephemeral });
+                return sendEphemeralResponse(interaction, { content: 'Invalid duration format. Use e.g. `30m`, `12h`, `7d`.' });
             }
         }
 
@@ -126,16 +133,12 @@ module.exports = {
                 );
             }
 
-            await interaction.reply({ embeds: [embed] });
+            await sendPublicResponse(interaction, { embeds: [embed] });
             await logModeration(interaction.guild.id, 'ban', user, interaction.user, reason,
                 durationMs ? { duration: Math.round(durationMs / 60000) } : {});
         } catch (error) {
             console.error('Ban error:', error);
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ content: 'Failed to ban the user.', flags: MessageFlags.Ephemeral }).catch(() => {});
-            } else {
-                await interaction.reply({ content: 'Failed to ban the user.', flags: MessageFlags.Ephemeral }).catch(() => {});
-            }
+            await sendEphemeralResponse(interaction, { content: 'Failed to ban the user.' }).catch(() => {});
         }
     }
 };

@@ -1,6 +1,7 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { logModeration } = require('../../services/moderationLogService');
 const { hierarchyDenial, resolveMember } = require('../../utils/moderationHierarchy');
+const { sendPublicResponse, sendEphemeralResponse } = require('../../utils/interactionAck');
 const COLORS = require('../../utils/embedColors');
 
 module.exports = {
@@ -19,6 +20,12 @@ module.exports = {
     // Re-checked inside the gate in events/interactionCreate — the builder line
     // above is only Discord's default, which a guild admin can reassign.
     requiredPermissions: [PermissionFlagsBits.KickMembers],
+
+    // Acknowledged up front by the dispatcher (#995): resolveMember below can
+    // miss the member cache and fetch from the gateway, which can outrun
+    // Discord's three-second window. Public deferral keeps the success embed in
+    // the channel; refusals go out ephemerally via sendEphemeralResponse.
+    deferral: { ephemeral: false },
     async execute(interaction) {
         const user = interaction.options.getUser('user');
         const reason = interaction.options.getString('reason') || 'No reason provided';
@@ -30,26 +37,26 @@ module.exports = {
         const { member, indeterminate } = await resolveMember(interaction.guild, user.id);
 
         if (indeterminate) {
-            return interaction.reply({ content: 'Could not look that member up just now — try again in a moment.', flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: 'Could not look that member up just now — try again in a moment.' });
         }
 
         if (!member) {
-            return interaction.reply({ content: 'User not found in this server!', flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: 'User not found in this server!' });
         }
 
         if (user.id === interaction.user.id) {
-            return interaction.reply({ content: 'You cannot kick yourself!', flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: 'You cannot kick yourself!' });
         }
 
         if (!member.kickable) {
-            return interaction.reply({ content: 'I cannot kick this user! They may have higher permissions.', flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: 'I cannot kick this user! They may have higher permissions.' });
         }
 
         // `kickable` above answered whether the bot outranks the target. This
         // answers whether the moderator does.
         const denial = hierarchyDenial(interaction.member, member, 'kick');
         if (denial) {
-            return interaction.reply({ content: denial, flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: denial });
         }
 
         try {
@@ -65,11 +72,11 @@ module.exports = {
                 )
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed] });
+            await sendPublicResponse(interaction, { embeds: [embed] });
             await logModeration(interaction.guild.id, 'kick', user, interaction.user, reason);
         } catch (error) {
             console.error('Kick error:', error);
-            await interaction.reply({ content: 'Failed to kick the user.', flags: MessageFlags.Ephemeral });
+            await sendEphemeralResponse(interaction, { content: 'Failed to kick the user.' }).catch(() => {});
         }
     }
 };

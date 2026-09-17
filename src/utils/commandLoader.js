@@ -89,6 +89,7 @@ const CONTRACT_KEYS = [
     'cooldownKey',
     'autocomplete',
     'requiredPermissions',
+    'deferral',
     'category',
 ];
 

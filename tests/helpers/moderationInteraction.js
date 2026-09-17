@@ -21,6 +21,7 @@
  */
 
 const { PermissionFlagsBits, PermissionsBitField } = require('discord.js');
+const { markDeferred } = require('../../src/utils/interactionAck');
 
 const GUILD_ID = 'guild-1';
 const OWNER_ID = 'owner-1';
@@ -150,6 +151,12 @@ function makeInteraction({
     permissions = [PermissionFlagsBits.Administrator],
     channel = null,
     users = new Map(),
+    // Simulate the dispatcher having already acknowledged the interaction, the
+    // way it does for a command that exports a `deferral` hook (#995). `'public'`
+    // or `'ephemeral'` mirrors the two visibilities; the default leaves the
+    // interaction unacknowledged, which is a command driven straight from a fresh
+    // slash command.
+    deferredAs = null,
 } = {}) {
     const replies = [];
     const record = payload => { replies.push(payload); return Promise.resolve(payload); };
@@ -192,6 +199,16 @@ function makeInteraction({
     interaction.editReply = jest.fn(p => { interaction.replied = true; return record(p); });
     interaction.followUp  = jest.fn(record);
     interaction.deferReply = jest.fn(async () => { interaction.deferred = true; });
+    // A public deferral leaves a channel-visible placeholder that an ephemeral
+    // refusal has to remove; the helper deletes it before following up. It never
+    // pushed a `replies` entry, so there is nothing to pop — this only records
+    // that the tidy-up happened.
+    interaction.deleteReply = jest.fn(async () => {});
+
+    if (deferredAs) {
+        interaction.deferred = true;
+        markDeferred(interaction, deferredAs === 'ephemeral');
+    }
 
     return interaction;
 }

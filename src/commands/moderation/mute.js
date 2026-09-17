@@ -1,6 +1,7 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { logModeration } = require('../../services/moderationLogService');
 const { hierarchyDenial, resolveMember } = require('../../utils/moderationHierarchy');
+const { sendPublicResponse, sendEphemeralResponse } = require('../../utils/interactionAck');
 const COLORS = require('../../utils/embedColors');
 
 module.exports = {
@@ -25,6 +26,12 @@ module.exports = {
     // Re-checked inside the gate in events/interactionCreate — the builder line
     // above is only Discord's default, which a guild admin can reassign.
     requiredPermissions: [PermissionFlagsBits.ModerateMembers],
+
+    // Acknowledged up front by the dispatcher (#995): resolveMember below can
+    // miss the member cache and fetch from the gateway, which can outrun
+    // Discord's three-second window. Public deferral keeps the success embed in
+    // the channel; refusals go out ephemerally via sendEphemeralResponse.
+    deferral: { ephemeral: false },
     async execute(interaction) {
         const user = interaction.options.getUser('user');
         const duration = interaction.options.getInteger('duration');
@@ -34,22 +41,22 @@ module.exports = {
         const { member, indeterminate } = await resolveMember(interaction.guild, user.id);
 
         if (indeterminate) {
-            return interaction.reply({ content: 'Could not look that member up just now — try again in a moment.', flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: 'Could not look that member up just now — try again in a moment.' });
         }
 
         if (!member) {
-            return interaction.reply({ content: 'User not found!', flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: 'User not found!' });
         }
 
         if (!member.moderatable) {
-            return interaction.reply({ content: 'I cannot mute this user!', flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: 'I cannot mute this user!' });
         }
 
         // `moderatable` above answered whether the bot outranks the target. This
         // answers whether the moderator does.
         const denial = hierarchyDenial(interaction.member, member, 'mute');
         if (denial) {
-            return interaction.reply({ content: denial, flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: denial });
         }
 
         try {
@@ -66,15 +73,11 @@ module.exports = {
                 )
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed] });
+            await sendPublicResponse(interaction, { embeds: [embed] });
             await logModeration(interaction.guild.id, 'mute', user, interaction.user, reason);
         } catch (error) {
             console.error('Mute error:', error);
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ content: 'Failed to mute the user.', flags: MessageFlags.Ephemeral }).catch(() => {});
-            } else {
-                await interaction.reply({ content: 'Failed to mute the user.', flags: MessageFlags.Ephemeral }).catch(() => {});
-            }
+            await sendEphemeralResponse(interaction, { content: 'Failed to mute the user.' }).catch(() => {});
         }
     }
 };
