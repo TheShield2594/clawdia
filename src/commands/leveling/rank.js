@@ -35,12 +35,25 @@ module.exports = {
     cooldown: 5,
     data: new SlashCommandBuilder()
         .setName('rank')
-        .setDescription('View your rank card showing level, XP, and server position.')
-        .addUserOption(option =>
-            option.setName('user')
+        .setDescription('View a rank card, or the server’s XP settings.')
+        // `/xpinfo` folded in here as `/rank info` (#1022): where XP is earned
+        // belongs next to the card that shows the XP, not beside it as its own
+        // top-level command.
+        .addSubcommand(sub => sub
+            .setName('card')
+            .setDescription('View your rank card showing level, XP, and server position.')
+            .addUserOption(option => option
+                .setName('user')
                 .setDescription('User whose rank to display (defaults to yourself).')
-                .setRequired(false)),
+                .setRequired(false)))
+        .addSubcommand(sub => sub
+            .setName('info')
+            .setDescription('See which channels and roles are excluded from XP gain in this server.')),
     async execute(interaction) {
+        if (interaction.options.getSubcommand() === 'info') {
+            return showXpInfo(interaction);
+        }
+
         const targetUser = interaction.options.getUser('user') || interaction.user;
 
         try {
@@ -88,7 +101,7 @@ module.exports = {
             const hasExclusions = (guildSettings?.leveling?.noXpChannelIds?.length > 0) ||
                                   (guildSettings?.leveling?.noXpRoleIds?.length > 0);
             const xpHint = hasExclusions
-                ? '💡 Some channels or roles may not earn XP. Use /xpinfo to see details.'
+                ? '💡 Some channels or roles may not earn XP. Use /rank info to see details.'
                 : null;
 
             // Prestige + ranked summary lines (appended to whichever embed we send)
@@ -147,3 +160,71 @@ module.exports = {
         }
     }
 };
+
+// ── /rank info (was /xpinfo) ─────────────────────────────────────────────────
+
+const XP_COOLDOWN_SECONDS = 60;
+const FIELD_LIMIT = 1024;
+
+// A comma-joined mention list that never overruns an embed field: once adding
+// the next mention would push past the 1024-char field limit, the rest are
+// summarised as "… and N more" rather than truncated mid-mention.
+function truncateMentionList(ids, format) {
+    const items = [];
+    let length = 0;
+    for (let i = 0; i < ids.length; i++) {
+        const mention = format(ids[i]);
+        const separator = items.length > 0 ? ', ' : '';
+        const added = separator.length + mention.length;
+        const remaining = ids.length - i;
+        const suffix = `, … and ${remaining} more`;
+        if (length + added + (remaining > 1 ? suffix.length : 0) > FIELD_LIMIT) {
+            items.push(`… and ${remaining} more`);
+            break;
+        }
+        items.push(mention);
+        length += added;
+    }
+    return items.length > 0 ? items.join(', ') : 'None';
+}
+
+async function showXpInfo(interaction) {
+    if (!interaction.inGuild()) return;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+        const guildSettings = await getGuildSettings(interaction.guild.id);
+        const leveling = guildSettings?.leveling ?? {};
+
+        const xpRate = leveling.xpRate ?? 1.0;
+        const voiceEnabled = leveling.voiceXpEnabled ?? false;
+        const excludedChannelIds = leveling.noXpChannelIds ?? [];
+        const excludedRoleIds = leveling.noXpRoleIds ?? [];
+
+        const channelMentions = truncateMentionList(excludedChannelIds, id => `<#${id}>`);
+        const roleMentions = truncateMentionList(excludedRoleIds, id => `<@&${id}>`);
+
+        const xpRateLabel = xpRate === 1.0 ? `${xpRate}x (default)` : `${xpRate}x`;
+
+        const hasExclusions = excludedChannelIds.length > 0 || excludedRoleIds.length > 0;
+        const statusLine = hasExclusions
+            ? 'Some channels or roles may limit your XP gain — see above.'
+            : 'You are currently earning XP normally.';
+
+        const embed = new EmbedBuilder()
+            .setColor(COLORS.INFO)
+            .setTitle(`📊 XP Settings for ${interaction.guild.name}`)
+            .addFields(
+                { name: 'XP Rate', value: xpRateLabel, inline: true },
+                { name: 'Cooldown', value: `${XP_COOLDOWN_SECONDS} seconds`, inline: true },
+                { name: 'Voice XP', value: voiceEnabled ? 'Enabled' : 'Disabled', inline: true },
+                { name: '🚫 XP-Excluded Channels', value: channelMentions, inline: false },
+                { name: '🚫 XP-Excluded Roles', value: roleMentions, inline: false }
+            )
+            .setFooter({ text: statusLine });
+
+        await interaction.editReply({ embeds: [embed] });
+    } catch (error) {
+        console.error('XP info error:', error);
+        await interaction.editReply({ content: 'Failed to fetch XP settings.' });
+    }
+}

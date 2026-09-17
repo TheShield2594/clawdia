@@ -604,9 +604,9 @@ coin goal and, once funded, activates its benefit for **7 days**:
 /syndicate create|join|leave|invite|kick|open|info
 /syndicate leaderboard|heist|sabotage|upgrade
 /war challenge|accept|status|cancel  - Server-vs-server war (admin)
-/rob <user>               - Rob another player
-/robstatus <user>         - Spy on a target's active rob protections
-/trap set|status          - Arm a tripwire that fires when someone robs you
+/rob attempt <user>       - Rob another player
+/rob status <user>        - Spy on a target's active rob protections
+/rob trap set|status      - Arm a tripwire that fires when someone robs you
 ```
 
 **Heists** are role-based group runs. Each participant takes a role — Hacker
@@ -634,9 +634,9 @@ leadership itself is gated behind Prestige III.
 admin on each side uses `/war challenge` and `/war accept`; points accrue from
 member activity and `/war status` shows the live scoreboard.
 
-**Rob protections:** `/trap` arms a 12-hour tripwire for 6,000 coins that fires
-on a successful rob against you. `/robstatus` lets a would-be robber scout a
-target's active protections first — at the cost of a 2-minute cooldown per check.
+**Rob protections:** `/rob trap set` arms a 12-hour tripwire for 6,000 coins that
+fires on a successful rob against you. `/rob status` lets a would-be robber scout
+a target's active protections first — at the cost of a 2-minute cooldown per check.
 
 ### Progression
 

@@ -398,6 +398,23 @@ function tradeItemReturnPayoutKey(tradeId, userId, itemId) {
 }
 
 /**
+ * One side's reserved daily-cap allowance coming back when a trade unwinds
+ * (#1025).
+ *
+ * A trade reserves the net value each side moves against their daily caps in the
+ * take phase; a later take that fails hands those reservations back. The refund
+ * is a counter decrement, not a coin credit, but it needs the same exactly-once
+ * guard for the same reason the coin reversals do: a refund whose response is
+ * lost is written down as owed and replayed, and a bare decrement replayed would
+ * hand back the allowance twice. Keyed by the trade, the party and the budget
+ * field so the four budgets a trade can touch refund independently and a replay
+ * of one cannot satisfy another.
+ */
+function tradeBudgetRefundKey(tradeId, userId, field) {
+    return `trade:${tradeId}:budget:${userId}:${field}`;
+}
+
+/**
  * One crew member's share of a group job — a `/heist` or a `/syndicate` raid
  * (#873).
  *
@@ -472,6 +489,7 @@ module.exports = {
     marketRefundPayoutKey, transferRefundPayoutKey, giftItemRollbackPayoutKey,
     duelPayoutKey, crewSharePayoutKey,
     tradeCoinPayoutKey, tradeItemDeliverPayoutKey, tradeItemReturnPayoutKey,
+    tradeBudgetRefundKey,
     jackpotPayoutKey, casinoPayoutKey,
     payoutKeyGuard, payoutKeyAppendExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, isDuplicateKeyError,

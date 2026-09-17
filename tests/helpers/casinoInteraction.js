@@ -42,8 +42,10 @@ const makeInteraction = options => baseInteraction({ options, userId: USER_ID, g
 /** Every game's opening bet, with whatever options it reads to get there. */
 const GAMES = [
     { name: 'blackjack',   options: { bet: BET } },
+    { name: 'coinflip',    options: { bet: BET, side: null } },
     { name: 'crash',       options: { bet: BET, auto_cashout: null } },
     { name: 'cupgame',     options: { bet: BET } },
+    { name: 'dice',        options: { bet: BET, guess: 'high', number: null, sides: null } },
     { name: 'higherlower', options: { bet: BET } },
     { name: 'keno',        options: { bet: BET, numbers: '3 12 21 33 39' } },
     { name: 'poker',       options: { bet: BET } },

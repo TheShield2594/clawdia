@@ -131,8 +131,6 @@ function buildSettingsPayload(section, ctx = {}) {
             'economy.workMax': safeInt('economy-work-max', 150),
             'economy.shopEnabled': document.getElementById('economy-shop-enabled').checked,
             'economy.gamesEnabled': document.getElementById('economy-games-enabled').checked,
-            'economy.coinflipEnabled': document.getElementById('economy-coinflip-enabled').checked,
-            'economy.rollEnabled': document.getElementById('economy-roll-enabled').checked,
             'economy.blackjackEnabled': document.getElementById('economy-blackjack-enabled').checked,
             'economy.casinoEnabled': document.getElementById('economy-casino-enabled').checked,
             'economy.duelEnabled': document.getElementById('economy-duel-enabled').checked,

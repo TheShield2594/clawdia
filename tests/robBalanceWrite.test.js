@@ -104,7 +104,9 @@ jest.mock('../src/services/achievementService', () => ({
 jest.mock('../src/services/petService', () => ({ getTotalBonus: jest.fn(() => 0) }));
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 
-const robCommand = require('../src/commands/economy/rob.js');
+// `/rob attempt` — the heist logic, folded under `/rob` by #1022 but driven
+// here directly, as it was when it was `/rob`.
+const robCommand = require('../src/commands/economy/rob/attempt');
 
 const OLD_ACCOUNT = Date.now() - 365 * 24 * 60 * 60 * 1000;
 

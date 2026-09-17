@@ -45,7 +45,7 @@ const REVIEWED = new Map([
     // saveRobState turns the robber's and victim's in-memory changes into
     // guarded `$inc`s. The `robber.save()` calls live on the branches that
     // absorbed the fine and moved no coins at all.
-    ['commands/economy/rob.js|robber', 'coin movement goes through saveRobState as $inc deltas'],
+    ['commands/economy/rob/attempt.js|robber', 'coin movement goes through saveRobState as $inc deltas'],
 ]);
 
 function sourceFiles(dir) {

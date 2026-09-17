@@ -131,18 +131,25 @@ describe('/casino advertises the games it actually has', () => {
 
         // A derivation that filters can collapse to nothing and still report
         // "every one is registered".
-        expect(gameNames).toHaveLength(8);
+        expect(gameNames).toHaveLength(10);
         expect(gameNames.filter(name => !subcommands.includes(name))).toEqual([]);
     });
 
-    test('names every game in the description, and nothing else', () => {
-        const named = casino.data.description
-            .replace(/^Play casino games: /, '')
-            .replace(/\.$/, '')
-            .split(', ')
-            .sort();
+    test('names the games from the roster, eliding only to fit the limit', () => {
+        // The roster of ten games no longer fits Discord's 100-char description,
+        // so it is elided (#1019) — the generator trims to fit and appends "…"
+        // rather than failing the deploy. When it fits, it names every game; when
+        // it does not, every game it names in full is a real one.
+        const desc    = casino.data.description;
+        const body    = desc.replace(/^Play casino games: /, '').replace(/[.…]+$/, '');
+        const elided  = desc.endsWith('…');
+        const named   = body.split(', ').map(s => s.trim()).filter(Boolean);
+        // A trailing entry may be cut mid-word when elided; the rest are whole.
+        const whole   = elided ? named.slice(0, -1) : named;
 
-        expect(named).toEqual(gameNames);
+        expect(whole.length).toBeGreaterThan(0);
+        expect(whole.every(name => gameNames.includes(name))).toBe(true);
+        if (!elided) expect([...named].sort()).toEqual(gameNames);
     });
 
     test('fits inside the Discord description limit', () => {

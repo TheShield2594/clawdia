@@ -205,7 +205,7 @@ const userSchema = new Schema({
     // limit. Migration: src/migrations/005_grind_profiles.js.
 
 
-    // Rob trap — set via /trap set; triggers on successful rob against this user
+    // Rob trap — set via /rob trap set; triggers on successful rob against this user
     trap: {
         setAt:     { type: Date, default: null },
         expiresAt: { type: Date, default: null }

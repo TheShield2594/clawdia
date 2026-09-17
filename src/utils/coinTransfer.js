@@ -36,7 +36,7 @@
  */
 
 const DEFAULT_USER = require('../models/User');
-const { BUDGETS, budgetState, spendBudget, refundBudget } = require('./giftCaps');
+const { BUDGETS, budgetState, spendBudgetGuarded, refundBudget } = require('./giftCaps');
 const { recordOwedPayout } = require('./owedPayout');
 const { transferRefundPayoutKey, isDuplicateKeyError } = require('./payoutKey');
 const { NOT_FROZEN, FROZEN_NOTICE, frozenTargetNotice } = require('./economyFreeze');
@@ -134,25 +134,26 @@ async function commitCoinTransfer({
     senderId, receiverId, guildId, amount, limits, budgets,
     refundKey, service = 'economy', jobName = 'coinTransfer', Model = DEFAULT_USER,
 }) {
-    const sendSpend = spendBudget({
-        ...BUDGETS.coinSend, cap: limits.coinSend, expired: budgets.send.expired, amount,
-    });
-
     // The balance guard and the cap guard in one filter: if either has moved
     // since the pre-flight read, this matches nothing and no coins leave.
-    const sender = await Model.findOneAndUpdate(
-        { userId: senderId, guildId, ...NOT_FROZEN, balance: { $gte: amount }, ...sendSpend.filter },
+    // `spendBudgetGuarded` also folds in the expired-window reset race guard, so
+    // two concurrent first-spends in a freshly-rolled window cannot both reset
+    // the send counter and slip past the cap (#1025).
+    const sender = await spendBudgetGuarded(
         {
-            $inc: { balance: -amount, ...sendSpend.inc },
-            ...(Object.keys(sendSpend.set).length ? { $set: sendSpend.set } : {}),
+            ...BUDGETS.coinSend, cap: limits.coinSend,
+            expired: budgets.send.expired, observedReset: budgets.send.windowStart, amount,
         },
-        { new: true },
+        sendSpend => Model.findOneAndUpdate(
+            { userId: senderId, guildId, ...NOT_FROZEN, balance: { $gte: amount }, ...sendSpend.filter },
+            {
+                $inc: { balance: -amount, ...sendSpend.inc },
+                ...(Object.keys(sendSpend.set).length ? { $set: sendSpend.set } : {}),
+            },
+            { new: true },
+        ),
     );
     if (!sender) return { status: 'debit_failed' };
-
-    const rxSpend = spendBudget({
-        ...BUDGETS.coinReceive, cap: limits.coinReceive, expired: budgets.receive.expired, amount,
-    });
 
     // Two attempts, and only for E11000. The receiver's document is created by
     // an upsert that races every other command they are running, and losing that
@@ -160,29 +161,43 @@ async function commitCoinTransfer({
     // — which means the document now exists, so the second pass finds it and
     // needs no insert. Any other error is a real failure and is not retried:
     // repeating a write whose outcome is unknown is how a credit lands twice.
-    let receiver = null;
     let creditError = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-            // No conditional upsert on the credit itself: an upsert whose filter
-            // misses because of the cap `$expr` would try to *insert* a second
-            // document for this user, which the unique index rejects.
-            await Model.updateOne({ userId: receiverId, guildId }, {}, { upsert: true });
-            receiver = await Model.findOneAndUpdate(
-                { userId: receiverId, guildId, ...NOT_FROZEN, ...rxSpend.filter },
-                {
-                    $inc: { balance: amount, ...rxSpend.inc },
-                    ...(Object.keys(rxSpend.set).length ? { $set: rxSpend.set } : {}),
-                },
-                { new: true },
-            );
-            creditError = null;
-            break;
-        } catch (err) {
-            creditError = err;
-            if (!isDuplicateKeyError(err)) break;
+    const attemptCredit = async rxSpend => {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                // No conditional upsert on the credit itself: an upsert whose
+                // filter misses because of the cap `$expr` would try to *insert*
+                // a second document for this user, which the unique index rejects.
+                await Model.updateOne({ userId: receiverId, guildId }, {}, { upsert: true });
+                const doc = await Model.findOneAndUpdate(
+                    { userId: receiverId, guildId, ...NOT_FROZEN, ...rxSpend.filter },
+                    {
+                        $inc: { balance: amount, ...rxSpend.inc },
+                        ...(Object.keys(rxSpend.set).length ? { $set: rxSpend.set } : {}),
+                    },
+                    { new: true },
+                );
+                creditError = null;
+                return doc;
+            } catch (err) {
+                creditError = err;
+                if (!isDuplicateKeyError(err)) return null;
+            }
         }
-    }
+        return null;
+    };
+    // The receive counter carries the same reset race as the send counter, so it
+    // is guarded the same way — but only a clean filter-miss is reclassified: a
+    // credit that missed because of an unknown-outcome error must not be replayed
+    // (#1025).
+    const receiver = await spendBudgetGuarded(
+        {
+            ...BUDGETS.coinReceive, cap: limits.coinReceive,
+            expired: budgets.receive.expired, observedReset: budgets.receive.windowStart, amount,
+        },
+        attemptCredit,
+        () => !creditError,
+    );
 
     if (receiver) return { status: 'ok', sender, receiver };
 

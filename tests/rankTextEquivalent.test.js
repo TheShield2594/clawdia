@@ -142,7 +142,7 @@ describe('what used to need a branch of its own', () => {
         mockGuilds.seed({ guildId: GUILD_ID, leveling: { noXpChannelIds: ['c1'], noXpRoleIds: [] } });
 
         const payload = await run();
-        expect(payload.embeds[0].data.footer.text).toMatch(/xpinfo/);
+        expect(payload.embeds[0].data.footer.text).toMatch(/rank info/);
         expect(fieldsOf(payload)).toContainEqual(['📊 Level', '7']);
     });
 

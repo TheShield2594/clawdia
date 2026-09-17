@@ -210,7 +210,12 @@ describe('against the real command set', () => {
         ['how do I equip my rifle', '/hunt inv equip'],
         ['how do I go hunting', '/hunt start'],
         ['how do I check my balance', '/balance'],
-        ['how does mining work', '/mine dig']
+        ['how does mining work', '/mine dig'],
+        // #1022 folded three top-level commands into subcommands; the reference
+        // is derived from the tree, so a question resolves to the new path.
+        ['how do I set a trap', '/rob trap set'],
+        ['how do I scout a target before robbing', '/rob status'],
+        ['which channels are excluded from xp', '/rank info'],
     ])('%s → %s', (query, expected) => {
         expect(retrieveCommands(modules, query).map(e => e.usage)).toContain(expected);
     });
