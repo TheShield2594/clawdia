@@ -14,6 +14,33 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.11.0] - 2026-09-17
+
+Migrations through `024_drop_blackjack_toggle`.
+
+An opt-in AI second opinion on filter trips (#1017). The AI layer and the
+moderation layer shared nothing; the one place they obviously help each other is
+the false positive a filter cannot solve by regex (`Dick Grayson is Robin` was a
+decision only because an admin added it to `profanityAllowlist` after the fact).
+A new **Enable AI review** toggle under **Moderation → Auto-Mod**, off by default
+and shown only when an AI provider is configured, sends a filtered message (and
+the two before it, for context) to the guild's provider with one fixed question —
+genuine violation of the named rule, or false positive, and why in one sentence.
+The answer is attached to the `Case` as `aiReview: { verdict, reason, model, at }`
+and shown in the mod-log embed and the dashboard case view. It changes nothing on
+its own: the message stays deleted, the case stays filed, the score stays applied
+— it is a note for the human who looks next. An optional second setting,
+**Skip the behaviour score on a false positive**, holds the score back on a
+false-positive verdict so one wrong filter cannot walk a member up the ladder.
+
+It follows the event-commentary contract exactly: the case is filed first and the
+review is a field on top, so a provider outage or a budget refusal costs the case
+its review and never the case; it is billed to the guild and bound by the same
+monthly token and cost ceilings; and it is off even when AI is on. The message
+content is data inside a fixed prompt and the verdict is coerced out of a
+two-value enum, so prompt-injection text in a message cannot change the shape of
+what is stored — and the review never sees or calls MCP tools (`mcp: false`).
+
 ## [4.10.0] - 2026-09-17
 
 Migrations through `024_drop_blackjack_toggle`.

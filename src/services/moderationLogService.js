@@ -12,6 +12,22 @@ const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
 const { createCase } = require('./caseService');
 
+// The AI second opinion on a filter trip, as an embed field for the mod-log
+// (#1017). Absent when there is no review — a guild with it off, no provider, an
+// outage or a budget refusal — so the embed is unchanged for everyone who has
+// not opted in.
+function aiReviewField(review) {
+    if (!review?.verdict) return null;
+    const head = review.verdict === 'false_positive'
+        ? '⚠️ Likely **false positive**'
+        : '✅ Reads as a **genuine violation**';
+    const reason = review.reason ? ` — ${review.reason}` : '';
+    const model = review.model ? ` _(${review.model})_` : '';
+    // Discord's field-value ceiling is 1,024; the reason is already clamped well
+    // under it, but slice defensively so a long model name cannot push it over.
+    return { name: '🤖 AI Review', value: `${head}${reason}${model}`.slice(0, 1024) };
+}
+
 async function logModeration(guildId, action, target, moderator, reason, options = {}) {
     try {
         const guildSettings = await Guild.findOne({ guildId });
@@ -43,6 +59,9 @@ async function logModeration(guildId, action, target, moderator, reason, options
                     embed.addFields({ name: 'Duration', value: `${options.duration} minutes`, inline: true });
                 }
 
+                const reviewField = aiReviewField(options.aiReview);
+                if (reviewField) embed.addFields(reviewField);
+
                 await channel.send({ embeds: [embed] });
             }
         }
@@ -55,7 +74,8 @@ async function logModeration(guildId, action, target, moderator, reason, options
             moderatorId: moderator.id,
             reason,
             evidence: options.evidence || null,
-            duration: options.duration || null
+            duration: options.duration || null,
+            aiReview: options.aiReview || null
         });
         return newCase;
     } catch (error) {

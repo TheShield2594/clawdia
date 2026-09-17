@@ -287,6 +287,30 @@ off by default even when AI is on: it is the only AI call in the bot that nobody
 asked for, and it spends the guild's own budget (it counts against the monthly
 token and cost ceilings like any other call).
 
+### AI Review of Filter Trips
+
+With **Enable AI review** switched on under **Moderation → Auto-Mod** — a toggle
+that only appears once an AI provider is configured — the bot gives a moderator a
+second opinion on each filter trip it cannot settle by regex. When a filter
+deletes a message and files a case, the message (and the two before it, for
+context) go to the guild's configured provider with one fixed question: does this
+read as a genuine violation of the named rule, or a false positive, and why in
+one sentence. The one-line answer is attached to the case and shown in the
+mod-log embed and the dashboard case view.
+
+It changes nothing on its own — the message stays deleted, the case stays filed,
+the behaviour score stays applied. It is a note for the human who looks next. An
+optional second setting, **Skip the behaviour score on a false positive**, holds
+the score back when the review calls a trip a false positive, so one wrong filter
+does not walk a member up the escalation ladder; it is off by default too.
+
+The case is filed first and the review is a note on top of it, so a provider
+outage or a budget refusal costs the case its review and never the case. Like
+event commentary it is off by default even when AI is on — it is an AI call
+nobody typed — and it spends the guild's own budget against the same monthly
+token and cost ceilings. The message content is data inside a fixed prompt, never
+an instruction to the model, and the review never sees or calls MCP tools.
+
 ### AI-Generated Content
 
 Two other features call the AI provider directly:

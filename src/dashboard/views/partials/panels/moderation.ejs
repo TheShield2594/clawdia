@@ -78,6 +78,25 @@
                     <label class="toggle"><span class="toggle-text"><strong>Filter excessive mentions</strong></span><span class="switch"><input type="checkbox" id="mod-mentions" <%= settings.moderation.excessiveMentionsFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <div class="field"><label class="field-label" for="mod-mention-threshold">Mention threshold</label><input type="number" id="mod-mention-threshold" value="<%= settings.moderation.mentionThreshold || 5 %>" min="1" max="25"></div>
                     <label class="toggle"><span class="toggle-text"><strong>Block @everyone / @here</strong><span>Delete mass pings from members who are not exempt</span></span><span class="switch"><input type="checkbox" id="mod-everyone-mentions" <%= settings.moderation.everyoneMentionFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
+
+                    <!-- AI review of filter trips. Shown only when an AI provider is
+                         configured (settings.ai.enabled); the toggle itself is off by
+                         default even then. The `hidden` attribute keeps the element in
+                         the DOM (so the save payload can read it) while hiding it, which
+                         an inline style could not do under the dashboard's CSP.
+                         See services/aiFilterReviewService. -->
+                    <div id="mod-ai-review-section" class="mod-ai-review-section" <%= (settings.ai && settings.ai.enabled) ? '' : 'hidden' %>>
+                        <div class="panel-head"><h3>AI review of filter trips</h3><p>When a filter deletes a message, ask your configured AI provider whether it was a genuine violation or a false positive, and attach the answer to the case. It changes nothing on its own &mdash; the message stays deleted and the case stays filed. Spends this server's AI budget.</p></div>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable AI review</strong><span>A one-line second opinion on each filter trip, shown in the mod-log and case</span></span>
+                            <span class="switch"><input type="checkbox" id="mod-ai-review" <%= settings.moderation.aiReviewEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Skip the behaviour score on a false positive</strong><span>Do not add to the member's score when the review calls a trip a false positive</span></span>
+                            <span class="switch"><input type="checkbox" id="mod-ai-review-skip-score" <%= settings.moderation.aiReviewSkipScoreOnFalsePositive ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                    </div>
+
                     <div class="actions-row">
                         <button class="btn btn-primary" data-action="save" data-section="moderation">Save changes</button>
                     </div>

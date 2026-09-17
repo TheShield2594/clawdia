@@ -20,6 +20,20 @@ const caseSchema = new Schema({
         attachmentUrls: [{ type: String }]
     },
 
+    // A second opinion from the guild's AI provider on a filter trip, when the
+    // guild has opted in (`moderation.aiReviewEnabled`, #1017). It changes
+    // nothing on its own — the message stays deleted, the case stays filed, and
+    // the behaviour score stays applied unless a separate setting says otherwise
+    // — it is a note for the human who looks at the case next. Null on cases
+    // with no review: AI off, no provider configured, a provider outage, or a
+    // budget refusal, all of which cost the case its review and never the case.
+    aiReview: {
+        verdict: { type: String, enum: ['violation', 'false_positive'], default: null },
+        reason:  { type: String, default: null },
+        model:   { type: String, default: null },
+        at:      { type: Date,   default: null }
+    },
+
     notes: [{
         moderatorId: { type: String, required: true },
         content: { type: String, required: true },

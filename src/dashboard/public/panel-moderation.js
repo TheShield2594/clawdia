@@ -359,10 +359,16 @@ async function loadCaseHistory(page = 1) {
             const modCell = c.moderatorTag
                 ? `<span title="${escHtml(c.moderatorId)}">${escHtml(c.moderatorTag)}</span>`
                 : `<span style="font-size:.8em">${escHtml(c.moderatorId)}</span>`;
+            // The AI second opinion on a filter trip (#1017), when there is one:
+            // a small badge beside the type, its reason and model on hover. FP? =
+            // the review thought the filter over-matched.
+            const aiCell = c.aiReview && c.aiReview.verdict
+                ? ` <span class="case-ai-badge ai-${escHtml(c.aiReview.verdict)}" title="${escHtml((c.aiReview.reason || 'AI review') + (c.aiReview.model ? ` — ${c.aiReview.model}` : ''))}">${c.aiReview.verdict === 'false_positive' ? '🤖 FP?' : '🤖 ✓'}</span>`
+                : '';
             tbody.insertAdjacentHTML('beforeend', `<tr>
                 <td>#${c.caseId}</td>
                 <td>${targetCell}</td>
-                <td><span class="case-type-badge type-${c.type}">${c.type}</span></td>
+                <td><span class="case-type-badge type-${c.type}">${c.type}</span>${aiCell}</td>
                 <td>${modCell}</td>
                 <td>${date}</td>
                 <td><span class="case-status-badge status-${c.status}">${c.status}</span></td>
