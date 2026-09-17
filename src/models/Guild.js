@@ -196,8 +196,10 @@ const guildSchema = new Schema({
         // `coinflipEnabled`/`rollEnabled` were removed in #1019 when the two
         // wagering games folded into the casino as `/casino coinflip` and
         // `/casino dice`; `casinoEnabled` is the switch for both now. Migration
-        // 023 drops the stored fields.
-        blackjackEnabled: { type: Boolean, default: true },
+        // 023 drops the stored fields. `blackjackEnabled` went the same way in
+        // #1020 — blackjack was a standalone command before the casino existed
+        // and kept a toggle no other casino game has; `casinoEnabled` gates it
+        // now and migration 024 drops the stored field.
         jobsEnabled: { type: Boolean, default: true },
         robEnabled: { type: Boolean, default: true },
         robMinWallet: { type: Number, default: 100, min: 0 },

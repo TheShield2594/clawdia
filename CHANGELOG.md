@@ -14,6 +14,23 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.9.0] - 2026-09-17
+
+Migrations through `024_drop_blackjack_toggle`.
+
+`economy.blackjackEnabled` was a second switch for one casino game (#1020).
+Blackjack was a standalone command before the casino existed, and when it moved
+under `/casino` it kept a per-game toggle no other casino game has — so an admin
+who turned the casino on and found blackjack missing had to know about a checkbox
+that exists for one of eight games. The field is gone: the redundant check in
+`games/casino/blackjack.js` (the casino command already gates every game on
+`economy.casinoEnabled`), the schema field in `models/Guild.js`, the dashboard
+checkbox in the economy panel and its entry in `settings-payload.js`. Migration
+`024_drop_blackjack_toggle` `$unset`s the stored field on every guild so a stale
+`false` cannot come back if the read is ever reintroduced. Per-game toggles, if
+they are ever wanted, are a different feature — a `disabledGames` list read
+through one helper, not one Boolean per game — and this does not add them.
+
 ## [4.8.0] - 2026-09-17
 
 Migrations through `023_drop_coinflip_roll_toggles`.
