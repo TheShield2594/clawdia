@@ -832,25 +832,17 @@ several of them are proxies rather than the textbook metric of the same name.
 
 | Insight | What is actually computed | Source |
 |---|---|---|
-| **Net Retention (7/30 d)** | `(joins − leaves) / joins`, clamped at 0, over the last 7 and 30 tracked member-event days. Guild-wide **proxy** — individual members are not followed, so there is no D1 figure and no join-week cohort | `analytics.memberEvents` |
-| **Active Hours** | 24-bucket histogram of command invocations by hour, plus the top 5 hours. **UTC only** — no weekday dimension, no server-timezone rendering | `analytics.commandUsage` |
+| **Net Retention (7/30 d)** | `(joins − leaves) / joins`, clamped at 0, over the last 7 and 30 tracked member-event days. Guild-wide **proxy** — a headline figure that does not follow individual members | `analytics.memberEvents` |
+| **Retention Cohorts (D1/D7/D30)** | Per-member survival by the **week each member joined**, from `joinedAt`/`leftAt`. For each cohort, the share still a member 1 / 7 / 30 days after joining; a window is shown only once the whole cohort has had that long to churn, and is blank (not zero) until then. Populated from joins recorded after this shipped — the panel shows the first tracked join week | `User` |
+| **Active Hours** | 24-bucket histogram of command invocations by hour (UTC) with the top 5 hours, **and** a 7×24 weekday-by-hour heatmap rendered in the guild's configured timezone (the Daily News timezone; UTC if unset). Entries recorded before the weekday was tracked sit on a labelled "unknown" row | `analytics.commandUsage` |
 | **Toxic Channels** | Up to 8 channels from the most recent 1,000 cases, scored `warns + (2 × severe)` where severe is mute/kick/ban. Channel is parsed from the case's evidence jump URL; cases without one fall into `unknown` | `Case` |
-| **Mod Resolution Time** | Median hours from case creation to case **resolution**, plus a 6-month monthly trend. Time-to-close, **not** time-to-first-response | `Case` |
+| **Mod SLA (first response & resolution)** | Two medians side by side: **time to first response** (case creation to the first moderator action — note, label, assignment or status change, from `firstActionAt`) and **time to close** (creation to resolution), each with a 6-month monthly trend. First-response is measured only for cases acted on after this shipped | `Case` |
 | **Newcomer Conversion** | Share of user records at least 7 / 30 days old that have reached 20+ messages or level 2+ | `User` |
-
-### Known gaps
-
-These were previously documented as shipped and are not implemented. They are
-open work items, not wording problems:
-
-- **Retention cohorts** — D1/D7/D30 segmented by join week needs per-member join dates retained over time. Only aggregate daily join/leave counts are stored, so no cohort can be reconstructed from existing data.
-- **Weekday heatmap / server timezone** — `commandUsage` records the UTC hour and nothing else. A weekday dimension needs a schema change; a timezone toggle needs the guild's timezone plumbed through the endpoint.
-- **First-response SLA** — `Case` carries `createdAt` and `resolvedAt` but no first-mod-action timestamp, so response time cannot be distinguished from resolution time.
 
 ### Practical Actions
 
-- Move events and announcements to high-engagement windows (read the histogram as UTC)
-- Rebalance moderator coverage by time block
+- Move events and announcements to high-engagement windows (the heatmap is in the guild's timezone; the top-hours list is UTC)
+- Rebalance moderator coverage by time block, and watch first-response against time-to-close for where the delay actually is
 - Prioritize intervention in channels with rising incident scores
 - Compare newcomer conversion across onboarding changes over time
 

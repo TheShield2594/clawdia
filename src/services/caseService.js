@@ -48,22 +48,37 @@ async function createCase({ guildId, type, targetUserId, moderatorId, reason, ev
 }
 
 async function addNote(guildId, caseId, moderatorId, content) {
+    // A pipeline update so `firstActionAt` is stamped only if it is not already
+    // set (#1015): the first note is the first response, and a later one must
+    // not move the mark. `$ifNull` keeps an existing value and fills a null in
+    // the same atomic write, with no read-back to race.
     return Case.findOneAndUpdate(
         { guildId, caseId },
-        { $push: { notes: { moderatorId, content, createdAt: new Date() } } },
+        [
+            { $set: {
+                notes: { $concatArrays: [{ $ifNull: ['$notes', []] }, [{ moderatorId, content, createdAt: '$$NOW' }]] },
+                firstActionAt: { $ifNull: ['$firstActionAt', '$$NOW'] }
+            } }
+        ],
         { new: true }
     );
 }
 
 async function closeCase(guildId, caseId, moderatorId, resolution) {
+    // Closing is a status change, so it counts as a first response for a case
+    // nobody had touched yet — `$ifNull` sets `firstActionAt` only when it is
+    // still empty (#1015).
     return Case.findOneAndUpdate(
         { guildId, caseId },
-        {
-            status: 'closed',
-            resolvedAt: new Date(),
-            resolvedBy: moderatorId,
-            resolution
-        },
+        [
+            { $set: {
+                status: 'closed',
+                resolvedAt: '$$NOW',
+                resolvedBy: moderatorId,
+                resolution,
+                firstActionAt: { $ifNull: ['$firstActionAt', '$$NOW'] }
+            } }
+        ],
         { new: true }
     );
 }

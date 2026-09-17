@@ -36,6 +36,71 @@ function sumBy(rows, key) {
     return rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
 }
 
+const _HOUR_LABELS = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`);
+
+/**
+ * Weekday × hour activity heatmap (#1015), drawn as a CSS grid rather than a
+ * Chart.js canvas: there is no matrix chart type loaded here, and a grid of
+ * coloured cells is legible and accessible on its own. Colour is the same green
+ * ramp the other charts use, scaled to the busiest cell. A row for entries
+ * whose weekday predates the tracking is shown only when there are any, labelled
+ * so it is not mistaken for a real day. The paired data table is emitted for the
+ * reader who cannot see the grid, exactly as every chart here does.
+ */
+function renderActivityHeatmap(heatmap) {
+    const host = document.getElementById('chart-heatmap-grid');
+    const tz = heatmap?.timezone || 'UTC';
+    const weekdays = heatmap?.weekdays || ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const grid = heatmap?.grid || [];
+    const unknown = heatmap?.unknownWeekday || [];
+    const hasUnknown = !!heatmap?.hasUnknown;
+
+    let max = 0;
+    for (const row of grid) for (const v of row) if (v > max) max = v;
+    if (hasUnknown) for (const v of unknown) if (v > max) max = v;
+
+    const cellColor = v => (v > 0 ? `rgba(93,138,90,${(0.12 + 0.85 * (v / max)).toFixed(3)})` : 'rgba(255,255,255,0.03)');
+
+    if (host) {
+        host.innerHTML = '';
+        if (!max) {
+            host.insertAdjacentHTML('beforeend', '<p class="chart-no-data" style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No command activity yet</p>');
+        } else {
+            const parts = [`<div style="display:grid;grid-template-columns:2.4rem repeat(24,1fr);gap:2px;font-size:.55rem;line-height:1">`];
+            // Hour header row: a blank corner, then a label every six hours so
+            // 24 columns stay readable.
+            parts.push('<div></div>');
+            for (let h = 0; h < 24; h++) {
+                parts.push(`<div style="text-align:center;color:#b8a898">${h % 6 === 0 ? String(h).padStart(2, '0') : ''}</div>`);
+            }
+            const pushRow = (label, counts) => {
+                parts.push(`<div style="color:#b8a898;white-space:nowrap;align-self:center">${escHtml(label)}</div>`);
+                for (let h = 0; h < 24; h++) {
+                    const v = Number(counts[h]) || 0;
+                    parts.push(`<div title="${escHtml(label)} ${_HOUR_LABELS[h]} — ${v} command${v === 1 ? '' : 's'}" style="aspect-ratio:1;border-radius:2px;background:${cellColor(v)}"></div>`);
+                }
+            };
+            weekdays.forEach((label, day) => pushRow(label, grid[day] || []));
+            if (hasUnknown) pushRow('Unknown', unknown);
+            parts.push('</div>');
+            parts.push(`<div style="font-size:.68rem;opacity:.55;margin-top:.4rem">Times shown in ${escHtml(tz)}.${hasUnknown ? ' “Unknown” holds activity recorded before the weekday was tracked.' : ''}</div>`);
+            host.insertAdjacentHTML('beforeend', parts.join(''));
+        }
+    }
+
+    // Accessibility / no-Chart.js table: one row per weekday, columns are hours.
+    const tableRows = weekdays.map((label, day) => [label, ...(grid[day] || Array(24).fill(0)).map(v => Number(v) || 0)]);
+    if (hasUnknown) tableRows.push(['Unknown', ...unknown.map(v => Number(v) || 0)]);
+    describeChart('chart-heatmap', {
+        title:   `Activity by weekday and hour (${tz})`,
+        summary: max
+            ? `Command activity by weekday and hour, shown in ${tz}. Busiest cell: ${max} commands.`
+            : 'Activity by weekday and hour — no data yet',
+        columns: ['Day', ..._HOUR_LABELS],
+        rows:    tableRows,
+    });
+}
+
 async function renderAnalyticsCharts(data, insights) {
     // The summaries and data tables below are built from the same arrays the
     // charts are drawn from, and they have to survive a library that would not
@@ -125,21 +190,28 @@ async function renderAnalyticsCharts(data, insights) {
             rows:    cmdRows.map(([cmd, m]) => [`/${cmd}`, m.total || 0]),
         });
 
-    // Retention cohort chart (D7/D30 by join month)
+    // Retention cohort chart — D1/D7/D30 survival by the week each member
+    // joined (#1015). A window with no bar for a recent cohort is not zero: it
+    // is a cohort too young to have a figure for that window yet (the server
+    // sends null until it is ripe), so it reads as a gap and the table as "—".
     if (_chartRetention) _chartRetention.destroy();
     const ctxR = document.getElementById('chart-retention')?.getContext('2d');
     const cohorts = insights?.retentionCohorts || [];
     const ret7 = insights?.retention?.retained7Pct || 0;
     const ret30 = insights?.retention?.retained30Pct || 0;
+    // `null` is drawn as a gap; only the fallback pair coerces to 0.
+    const pctOrGap = v => (v == null ? null : v);
+    const pctText = v => (v == null ? '—' : `${v}%`);
     if (charts && ctxR) {
         if (cohorts.length) {
             _chartRetention = new Chart(ctxR, {
                 type: 'bar',
                 data: {
-                    labels: cohorts.map(c => c.month),
+                    labels: cohorts.map(c => c.cohort),
                     datasets: [
-                        { label: 'D7 %', data: cohorts.map(c => c.d7Pct || 0), backgroundColor: 'rgba(93,138,90,0.8)', borderRadius: 3 },
-                        { label: 'D30 %', data: cohorts.map(c => c.d30Pct || 0), backgroundColor: 'rgba(93,138,90,0.45)', borderRadius: 3 }
+                        { label: 'D1 %', data: cohorts.map(c => pctOrGap(c.d1Pct)), backgroundColor: 'rgba(93,138,90,0.9)', borderRadius: 3 },
+                        { label: 'D7 %', data: cohorts.map(c => pctOrGap(c.d7Pct)), backgroundColor: 'rgba(93,138,90,0.6)', borderRadius: 3 },
+                        { label: 'D30 %', data: cohorts.map(c => pctOrGap(c.d30Pct)), backgroundColor: 'rgba(93,138,90,0.35)', borderRadius: 3 }
                     ]
                 },
                 options: { ...JSON.parse(JSON.stringify(_chartDefaults)), scales: { ...JSON.parse(JSON.stringify(_chartDefaults.scales)), y: { ticks: { color: '#b8a898' }, max: 100 } } }
@@ -158,18 +230,25 @@ async function renderAnalyticsCharts(data, insights) {
 
     describeChart('chart-retention', cohorts.length
         ? {
-            title:   'Retention by join month',
-            summary: `Retention by join month, ${cohorts.length} cohorts: ` +
-                     `${cohorts.map(c => `${c.month}, D7 ${c.d7Pct || 0}%, D30 ${c.d30Pct || 0}%`).join('; ')}.`,
-            columns: ['Cohort', 'D7 %', 'D30 %'],
-            rows:    cohorts.map(c => [c.month, c.d7Pct || 0, c.d30Pct || 0]),
+            title:   'Retention by join week',
+            summary: `Retention by join week, ${cohorts.length} cohorts (join dates tracked from ${cohorts[0].cohort}): ` +
+                     `${cohorts.map(c => `week of ${c.cohort}, D1 ${pctText(c.d1Pct)}, D7 ${pctText(c.d7Pct)}, D30 ${pctText(c.d30Pct)}`).join('; ')}.`,
+            columns: ['Join week', 'Members', 'D1 %', 'D7 %', 'D30 %'],
+            rows:    cohorts.map(c => [c.cohort, c.size || 0, pctText(c.d1Pct), pctText(c.d7Pct), pctText(c.d30Pct)]),
         }
         : {
             title:   'Retention',
-            summary: `Retention: ${ret7}% of members still active after 7 days, ${ret30}% after 30 days.`,
+            summary: `Retention: ${ret7}% of members still active after 7 days, ${ret30}% after 30 days. Per-week cohorts appear once members join with the new tracking in place.`,
             columns: ['Window', 'Retained %'],
             rows:    [['D7 retention', ret7], ['D30 retention', ret30]],
         });
+
+    // Weekday × hour activity heatmap, in the guild's configured timezone
+    // (#1015). Built as a CSS grid rather than a Chart.js canvas — Chart.js has
+    // no matrix type loaded here, and the grid is legible and accessible on its
+    // own. A paired data table is still emitted for the same reason every other
+    // chart has one.
+    renderActivityHeatmap(insights?.activeHours?.heatmap);
 
     // Helper: remove any stale "no data" placeholder from a chart card container
     function clearChartPlaceholder(container) {
@@ -299,8 +378,8 @@ async function loadAnalytics() {
             { label: 'Total members', value: data.totalUsers ?? '—' },
             { label: '30d joins', value: a.growthFunnel?.joins30 ?? '—' },
             { label: 'Retention 7d', value: `${a.growthFunnel?.retained7 ?? '—'}%` },
-            { label: 'Retention 30d', value: `${a.growthFunnel?.retained30 ?? '—'}%` },
-            { label: 'Mod SLA (median)', value: insights.modSla?.medianResolutionHours != null ? `${insights.modSla.medianResolutionHours}h` : '—' }
+            { label: 'Mod 1st response', value: insights.modSla?.medianFirstResponseHours != null ? `${insights.modSla.medianFirstResponseHours}h` : '—' },
+            { label: 'Mod resolution', value: insights.modSla?.medianResolutionHours != null ? `${insights.modSla.medianResolutionHours}h` : '—' }
         ];
         for (const kpi of kpis) {
             kpiRow.insertAdjacentHTML('beforeend', `<div class="eco-kpi-tile"><div class="eco-kpi-label">${kpi.label}</div><div class="eco-kpi-value">${kpi.value}</div></div>`);
@@ -314,8 +393,14 @@ async function loadAnalytics() {
         // Insights text
         const insightsCont = document.getElementById('analytics-insights-content');
         insightsCont.innerHTML = '';
+        const modSla = insights.modSla || {};
+        const slaText = [
+            modSla.medianFirstResponseHours != null ? `${modSla.medianFirstResponseHours}h to first response` : null,
+            modSla.medianResolutionHours != null ? `${modSla.medianResolutionHours}h to close` : null,
+        ].filter(Boolean).join(' · ') || 'Not enough data';
         const rows = [
             ['Newcomer conversion', `${insights.newcomerConversion?.days7?.pct || 0}% @ 7d · ${insights.newcomerConversion?.days30?.pct || 0}% @ 30d`],
+            ['Mod SLA (median)', slaText],
             ['Top active hours (UTC)', (insights.activeHours?.topHours || []).map(t => `${String(t.hourUtc).padStart(2,'0')}:00 (${t.count})`).join(' · ') || 'Not enough data'],
             ['Toxic channel hotspots', (insights.toxicChannels || []).slice(0,5).map(c=>`<#${c.channelId}> score ${c.score}`).join(' · ') || 'None detected'],
             ['Churn alerts', (a.churnAlerts || ['No active alerts']).join(' · ')],

@@ -126,14 +126,25 @@ describe('createCase', () => {
 });
 
 describe('case lookup and mutation', () => {
-    test('notes are appended, never overwritten', async () => {
+    // Both writers became pipeline updates when firstActionAt landed (#1015):
+    // the note or close is folded into a `$set` alongside a `$ifNull` that
+    // stamps the first-response time only when it is still empty.
+    const setStage = update => {
+        expect(Array.isArray(update)).toBe(true);
+        return update.find(s => s.$set).$set;
+    };
+
+    test('notes are appended, never overwritten, and stamp the first response once', async () => {
         Case.findOneAndUpdate.mockResolvedValue({});
 
         await addNote('g1', 12, 'mod1', 'spoke to them');
 
         const [filter, update] = Case.findOneAndUpdate.mock.calls[0];
         expect(filter).toEqual({ guildId: 'g1', caseId: 12 });
-        expect(update.$push.notes).toMatchObject({ moderatorId: 'mod1', content: 'spoke to them' });
+        const set = setStage(update);
+        expect(set.notes.$concatArrays[0]).toEqual({ $ifNull: ['$notes', []] });
+        expect(set.notes.$concatArrays[1][0]).toMatchObject({ moderatorId: 'mod1', content: 'spoke to them' });
+        expect(set.firstActionAt).toEqual({ $ifNull: ['$firstActionAt', '$$NOW'] });
     });
 
     test('closing a case records who closed it and when', async () => {
@@ -142,8 +153,10 @@ describe('case lookup and mutation', () => {
         await closeCase('g1', 12, 'mod1', 'warned, no further action');
 
         const [, update] = Case.findOneAndUpdate.mock.calls[0];
-        expect(update).toMatchObject({ status: 'closed', resolvedBy: 'mod1', resolution: 'warned, no further action' });
-        expect(update.resolvedAt).toBeInstanceOf(Date);
+        const set = setStage(update);
+        expect(set).toMatchObject({ status: 'closed', resolvedBy: 'mod1', resolution: 'warned, no further action' });
+        expect(set.resolvedAt).toBe('$$NOW');
+        expect(set.firstActionAt).toEqual({ $ifNull: ['$firstActionAt', '$$NOW'] });
     });
 
     test('a case is looked up by guild and id together', async () => {

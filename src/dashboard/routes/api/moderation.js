@@ -70,6 +70,10 @@ router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, check
             }
         }
 
+        // Both actions are a moderator responding to the case; the first one to
+        // land marks the first-response time (#1015). Set once and never moved.
+        if (!c.firstActionAt) c.firstActionAt = new Date();
+
         await c.save();
         await logAuditEvent(req, guildId, 'case_update', { caseId: parsedId, action });
         res.json({ success: true, case: c });

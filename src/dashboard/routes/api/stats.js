@@ -5,7 +5,8 @@ const GuildAnalytics = require('../../../models/GuildAnalytics');
 const User = require('../../../models/User');
 const Case = require('../../../models/Case');
 const { checkAuth, checkGuildAccess } = require('../../lib/middleware');
-const { computeRetention, median, parseChannelIdFromJumpUrl } = require('../../lib/apiHelpers');
+const { computeRetention, median, parseChannelIdFromJumpUrl,
+    finalizeRetentionCohorts, buildActiveHoursHeatmap } = require('../../lib/apiHelpers');
 const { cachedAggregate } = require('../../lib/aggregateCache');
 
 // Telemetry lives in its own GuildAnalytics collection; the Guild document is
@@ -13,10 +14,16 @@ const { cachedAggregate } = require('../../lib/aggregateCache');
 // the shop's image Buffers never enter the response path.
 const STATS_GUILD_FIELDS = 'welcome moderation leveling economy rssFeeds';
 
-// Moderation cases are read for four aggregates over five fields. Hydrating a
-// thousand full case documents to compute them is the expensive half of this
-// route.
-const CASE_FIELDS = 'type createdAt resolvedAt evidence.jumpUrl';
+// Moderation cases are read for four aggregates over a handful of fields.
+// Hydrating a thousand full case documents to compute them is the expensive
+// half of this route. `firstActionAt` joined the list for the first-response
+// SLA (#1015).
+const CASE_FIELDS = 'type createdAt firstActionAt resolvedAt evidence.jumpUrl';
+
+// How many join-weeks of retention cohorts to compute. Bounded so the cohort
+// aggregation touches recent joiners rather than the whole user collection, and
+// so the panel draws a readable number of bars.
+const COHORT_WEEKS = 12;
 
 // The whole payload is memoised, not just the queries inside it. Every panel on
 // the dashboard's overview asks for this route on load, a left-open tab asks for
@@ -195,11 +202,17 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
     const { guildId } = req.params;
 
     try {
-        const [guildExists, analytics] = await Promise.all([
-            Guild.exists({ guildId }),
+        // The Guild document is read only for its configured timezone (the one
+        // the Daily News panel already stores), projected so the shop's image
+        // Buffers never enter this path — the same reason the telemetry lives in
+        // its own collection. A missing document is a guild the bot does not
+        // know, which is a 404 exactly as the existence check was.
+        const [guildDoc, analytics] = await Promise.all([
+            Guild.findOne({ guildId }).select('dailyNews.timezone').lean(),
             GuildAnalytics.findOne({ guildId }).lean()
         ]);
-        if (!guildExists) return res.status(404).json({ error: 'Guild not found' });
+        if (!guildDoc) return res.status(404).json({ error: 'Guild not found' });
+        const timezone = guildDoc.dailyNews?.timezone || 'UTC';
 
         const memberEvents = analytics?.memberEvents || [];
         const commandUsage = analytics?.commandUsage || [];
@@ -207,7 +220,33 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
         // Retention: 7/30 day net-retention proxy from join/leave tracking.
         const { joins7, leaves7, joins30, leaves30, retained7, retained30 } = computeRetention(memberEvents);
 
-        // Active hours: command-driven activity histogram (UTC).
+        // Retention cohorts: per-member D1/D7/D30 survival, grouped by the week
+        // each member joined (#1015). Bounded to recent join-weeks and counted
+        // in the pipeline — a member's tenure is `leftAt − joinedAt`, or
+        // `now − joinedAt` while they are still here, so `tenureMs ≥ N days` is
+        // "still a member N days after joining". Whether each window is ripe is
+        // decided in finalizeRetentionCohorts, which has the maturity rule.
+        const cohortSince = new Date(Date.now() - COHORT_WEEKS * 7 * 864e5);
+        const cohortRows = await cachedAggregate(`${guildId}:insights:retentionCohorts`, () => User.aggregate([
+            { $match: { guildId, joinedAt: { $gte: cohortSince } } },
+            { $set: {
+                weekStart: { $dateTrunc: { date: '$joinedAt', unit: 'week', startOfWeek: 'monday' } },
+                tenureMs: { $subtract: [{ $ifNull: ['$leftAt', '$$NOW'] }, '$joinedAt'] }
+            } },
+            { $group: {
+                _id: '$weekStart',
+                size: { $sum: 1 },
+                r1:  { $sum: { $cond: [{ $gte: ['$tenureMs', 1  * 864e5] }, 1, 0] } },
+                r7:  { $sum: { $cond: [{ $gte: ['$tenureMs', 7  * 864e5] }, 1, 0] } },
+                r30: { $sum: { $cond: [{ $gte: ['$tenureMs', 30 * 864e5] }, 1, 0] } }
+            } },
+            { $sort: { _id: 1 } }
+        ]));
+        const retentionCohorts = finalizeRetentionCohorts(cohortRows);
+
+        // Active hours: command-driven activity histogram, still UTC for the
+        // top-hours summary and the daily best-posting-times, plus a 7×24
+        // weekday heatmap rendered in the guild's configured timezone (#1015).
         const hourMap = Array.from({ length: 24 }, (_, hour) => ({ hourUtc: hour, count: 0 }));
         for (const event of commandUsage) {
             if (typeof event.hour === 'number' && event.hour >= 0 && event.hour <= 23) {
@@ -215,6 +254,7 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
             }
         }
         const topActiveHours = [...hourMap].sort((a, b) => b.count - a.count).slice(0, 5);
+        const heatmap = buildActiveHoursHeatmap(commandUsage, timezone);
 
         // Toxic channel hotspot proxy from moderation case evidence jump URLs.
         const recentCases = await Case.find({ guildId }).select(CASE_FIELDS).sort({ createdAt: -1 }).limit(1000).lean();
@@ -230,20 +270,41 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
         }
         const toxicChannels = [...channelToxicity.values()].sort((a, b) => b.score - a.score).slice(0, 8);
 
-        // Moderator SLA: median time to close case + trend grouped by month.
+        // Moderator SLA: two medians side by side (#1015). Time-to-close is what
+        // this always was — creation to resolution. Time-to-first-response is
+        // creation to the first moderator action on the case (`firstActionAt`),
+        // which is the figure the panel used to label "Mod SLA" while actually
+        // showing the former. Both get the same monthly trend, keyed by the
+        // resolution month so a case contributes to both from one bucket.
         const resolvedCases = recentCases.filter(c => c.createdAt && c.resolvedAt);
         const resolutionHours = resolvedCases.map(c => (new Date(c.resolvedAt) - new Date(c.createdAt)) / 36e5).filter(h => h >= 0);
         const medianResolutionHours = median(resolutionHours);
+
+        const respondedCases = recentCases.filter(c => c.createdAt && c.firstActionAt);
+        const firstResponseHours = respondedCases.map(c => (new Date(c.firstActionAt) - new Date(c.createdAt)) / 36e5).filter(h => h >= 0);
+        const medianFirstResponseHours = median(firstResponseHours);
 
         const monthlyTrend = {};
         for (const c of resolvedCases) {
             const dt = new Date(c.resolvedAt);
             const key = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
-            if (!monthlyTrend[key]) monthlyTrend[key] = [];
-            monthlyTrend[key].push((new Date(c.resolvedAt) - new Date(c.createdAt)) / 36e5);
+            if (!monthlyTrend[key]) monthlyTrend[key] = { resolution: [], response: [] };
+            monthlyTrend[key].resolution.push((new Date(c.resolvedAt) - new Date(c.createdAt)) / 36e5);
+            if (c.firstActionAt) {
+                const fr = (new Date(c.firstActionAt) - new Date(c.createdAt)) / 36e5;
+                if (fr >= 0) monthlyTrend[key].response.push(fr);
+            }
         }
         const modSlaTrends = Object.entries(monthlyTrend)
-            .map(([month, arr]) => ({ month, medianResolutionHours: Number((median(arr) || 0).toFixed(2)), resolvedCases: arr.length }))
+            .map(([month, { resolution, response }]) => {
+                const respMedian = median(response);
+                return {
+                    month,
+                    medianResolutionHours: Number((median(resolution) || 0).toFixed(2)),
+                    medianFirstResponseHours: respMedian == null ? null : Number(respMedian.toFixed(2)),
+                    resolvedCases: resolution.length
+                };
+            })
             .sort((a, b) => a.month.localeCompare(b.month))
             .slice(-6);
 
@@ -289,14 +350,17 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
                 leaves30,
                 retained30Pct: Number((retained30 * 100).toFixed(1))
             },
+            retentionCohorts,
             activeHours: {
                 timezone: 'UTC',
                 histogram: hourMap,
-                topHours: topActiveHours
+                topHours: topActiveHours,
+                heatmap
             },
             toxicChannels,
             modSla: {
                 medianResolutionHours: medianResolutionHours == null ? null : Number(medianResolutionHours.toFixed(2)),
+                medianFirstResponseHours: medianFirstResponseHours == null ? null : Number(medianFirstResponseHours.toFixed(2)),
                 trends: modSlaTrends
             },
             newcomerConversion: {

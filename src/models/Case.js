@@ -36,6 +36,17 @@ const caseSchema = new Schema({
     },
 
     slaDeadline: { type: Date, default: null },
+
+    // When a moderator first acted on the case after it was opened — the first
+    // note, label, assignment or status change (#1015). `createdAt` is when the
+    // case was opened, `resolvedAt` when it was closed; the gap between open and
+    // *first response* is a different figure from the gap between open and
+    // close, and the Insights panel's "Mod SLA" was only ever the latter. Set
+    // once and never moved, so it marks the first response and not the most
+    // recent one. Null on cases opened before this field existed, and on open
+    // cases nobody has touched yet.
+    firstActionAt: { type: Date, default: null },
+
     resolvedAt: { type: Date, default: null },
     resolvedBy: { type: String, default: null },
     resolution: { type: String, default: null },

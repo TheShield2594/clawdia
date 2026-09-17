@@ -1,5 +1,6 @@
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const GuildAnalytics = require('../models/GuildAnalytics');
+const User = require('../models/User');
 const { EmbedBuilder, AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 const { createWelcomeCard } = require('../utils/cardGenerator');
 const { renderQueued } = require('../utils/cardRenderQueue');
@@ -67,6 +68,27 @@ module.exports = {
                 await trackMemberEvent(member.guild.id, dateKey, 'joins');
             } catch (analyticsError) {
                 console.error('Member join analytics error:', analyticsError);
+            }
+
+            // Per-member join date for the retention cohorts (#1015). Upsert
+            // rather than create, because a member who has run a command already
+            // has a record: `joinedAt` moves to this (re)join and `leftAt` is
+            // cleared so the cohort follows their current membership, while
+            // `firstSeenAt` is written only on insert and never moves. An atomic
+            // update, not a read-modify-save, so it does not race the economy
+            // writers that also own this document.
+            try {
+                // Discord's own join timestamp when it is there, so a cohort is
+                // keyed on when the member actually joined rather than when this
+                // handler ran; `new Date()` only as a fallback.
+                const joinedAt = member.joinedAt ?? new Date();
+                await User.updateOne(
+                    { userId: member.id, guildId: member.guild.id },
+                    { $set: { joinedAt, leftAt: null }, $setOnInsert: { firstSeenAt: joinedAt } },
+                    { upsert: true }
+                );
+            } catch (joinDateError) {
+                console.error('Member join-date tracking error:', joinDateError);
             }
 
             if (guildSettings.welcome.enabled) {
