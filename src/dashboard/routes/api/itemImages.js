@@ -2,9 +2,21 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const ItemImage = require('../../../models/ItemImage');
+const { rateLimit } = require('express-rate-limit');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
+const { readRateLimitOptions } = require('../../lib/readRateLimit');
 const { isActivityItemId } = require('../../../data/activityItems');
 const { shopImageId } = require('../../../models/itemImageKeys');
+
+// Recognised read limiter for the item-image reads. They are <img> subresources
+// a single page loads in bulk (the activity-items page renders the whole
+// ~80-item catalogue), so the ceiling sits above a full page's worth while still
+// bounding a client that scrapes ids. Installed with router.use so it guards
+// every route in this router — to CodeQL and at runtime (see lib/readRateLimit.js).
+// The writes it also covers are already the tighter-limited path, so the 300/min
+// read ceiling never binds first for them.
+const imageReadRateLimit = rateLimit(readRateLimitOptions(300));
+router.use(imageReadRateLimit);
 
 // M4: Validate image files by magic bytes rather than trusting the client-supplied
 // MIME type. Prevents disguised file uploads (e.g. PHP named as image/jpeg).

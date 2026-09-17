@@ -22,6 +22,9 @@ jest.mock('../src/dashboard/lib/middleware', () => ({
     checkAuth: (req, _res, next) => { req.user = { id: 'admin-1' }; next(); },
     checkGuildAccess: (_req, _res, next) => next(),
 }));
+// The route builds its read limiter from the real package; a pass-through keeps
+// these query-shape tests from tripping it.
+jest.mock('express-rate-limit', () => ({ rateLimit: () => (_req, _res, next) => next() }));
 
 const Guild = require('../src/models/Guild');
 const GuildAnalytics = require('../src/models/GuildAnalytics');

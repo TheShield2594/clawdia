@@ -66,19 +66,31 @@ a real dashboard write always carries one.
 | --- | --- | --- |
 | Reads (`GET`, `HEAD`) | 120 / minute | session, or IP when unauthenticated |
 | Writes | 60 / minute | session |
+| `/stats`, `/insights` | 60 / minute | session |
+| Item-image reads | 300 / minute | session |
 
-Both answer `429 {"error": "Too many requests. Please slow down."}`. The read
-limit is applied router-wide and the write limit per route, which is why
-`write limit` appears in the table below and a read limit does not: it is on
-everything.
+All answer `429 {"error": "Too many requests. Please slow down."}`. The general
+read limit is applied router-wide and the write limit per route, which is why
+`write limit` appears in the table below and the general read limit does not: it
+is on everything.
 
 The two budgets are counted separately and a route can be in both. `GET` rows
 carrying `write limit` are not a mistake in the table: the member search and
 resolve lookups are reads that each cost a Discord call, so they are charged to
-the write budget as well as the read one. The ceilings are well above what the dashboard itself asks for — a
-page load fires a handful of requests, not a hundred — and exist because several
-reads are expensive: `/stats` and `/insights` each run collection-wide
-aggregations.
+the write budget as well as the read one. The ceilings are well above what the
+dashboard itself asks for — a page load fires a handful of requests, not a
+hundred — and exist because several reads are expensive: `/stats` and
+`/insights` each run collection-wide aggregations.
+
+Two routers carry a second read limiter of their own, on top of the router-wide
+one: `src/dashboard/routes/api/stats.js` (`/stats` and `/insights`, 60/minute) and
+`src/dashboard/routes/api/itemImages.js` (the item-image routes, 300/minute).
+These are the reads CodeQL's `js/missing-rate-limiting` query flags, and it only
+recognises a limiter that comes from a rate-limiting package — not the shared
+`BoundedRateLimiter` above — so each of those files installs an
+`express-rate-limit` limiter with `router.use(...)` ahead of its routes, which
+both enforces the limit and lets the analyser see the guard. They are counted by
+session, or by address for a request that has not authenticated yet.
 
 ## Versioning
 

@@ -4,10 +4,19 @@ const Guild = require('../../../models/Guild');
 const GuildAnalytics = require('../../../models/GuildAnalytics');
 const User = require('../../../models/User');
 const Case = require('../../../models/Case');
+const { rateLimit } = require('express-rate-limit');
 const { checkAuth, checkGuildAccess } = require('../../lib/middleware');
+const { readRateLimitOptions } = require('../../lib/readRateLimit');
 const { computeRetention, median, parseChannelIdFromJumpUrl,
     finalizeRetentionCohorts, startOfIsoWeekUTC, buildActiveHoursHeatmap } = require('../../lib/apiHelpers');
 const { cachedAggregate } = require('../../lib/aggregateCache');
+
+// Recognised read limiter for the two collection-wide aggregations, tighter than
+// the general read ceiling because each call is expensive. Installed with
+// router.use below so it guards every route in this router — to CodeQL and at
+// runtime — rather than being listed on each one (see lib/readRateLimit.js).
+const statsReadRateLimit = rateLimit(readRateLimitOptions(60));
+router.use(statsReadRateLimit);
 
 // Telemetry lives in its own GuildAnalytics collection; the Guild document is
 // read only for the handful of settings the recommendations look at, named so
@@ -181,7 +190,7 @@ async function buildGuildStats(guildId) {
 }
 
 // The dashboard's headline numbers for a guild: members, messages, coins in
-// circulation, top levels and average XP.
+// circulation, top levels and average XP. Rate-limited by the router.use above.
 router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
@@ -198,6 +207,7 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
 });
 
 // Derived analytics: 7 and 30 day retention, activity by hour, and command usage.
+// Rate-limited by the router.use above.
 router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
