@@ -4,7 +4,7 @@ const Guild = require('../../../models/Guild');
 const GuildAnalytics = require('../../../models/GuildAnalytics');
 const User = require('../../../models/User');
 const Case = require('../../../models/Case');
-const { checkAuth, checkGuildAccess } = require('../../lib/middleware');
+const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { computeRetention, median, parseChannelIdFromJumpUrl,
     finalizeRetentionCohorts, startOfIsoWeekUTC, buildActiveHoursHeatmap } = require('../../lib/apiHelpers');
 const { cachedAggregate } = require('../../lib/aggregateCache');
@@ -182,7 +182,15 @@ async function buildGuildStats(guildId) {
 
 // The dashboard's headline numbers for a guild: members, messages, coins in
 // circulation, top levels and average XP.
-router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res) => {
+//
+// Charged to the write budget as well as the read one (checkWriteRateLimit): the
+// router-wide read limiter in routes/api.js guards this GET, but CodeQL's
+// js/missing-rate-limiting does not trace that conditional router.use wrapper to
+// the handler, and this is one of the collection-wide aggregations that limiter
+// was added for. A direct limiter clears the alert and matches the member
+// search/resolve/ledger routes (#1009). The response is cached, so the second
+// hit in the window is cheap — but the limit is on the request, not the miss.
+router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
 
     try {
@@ -198,7 +206,10 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
 });
 
 // Derived analytics: 7 and 30 day retention, activity by hour, and command usage.
-router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, res) => {
+//
+// Charged to the write budget as well as the read one, for the same reason as
+// /stats above: an expensive read CodeQL will not see the router-wide limiter on.
+router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
 
     try {
