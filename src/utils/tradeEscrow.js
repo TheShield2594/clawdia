@@ -95,11 +95,18 @@ async function rollbackCoins(userId, guildId, amount, tradeId, Model = DEFAULT_U
     if (state && (!state.landed || state.reversed)) return { credited: true };
 
     console.error(`[trade] coin reversal for ${userId} in ${guildId} is unconfirmed; the escrow key is the record`);
-    await recordOwedPayout({
-        service: 'trade', jobName: 'tradeCoinReversal', guildId,
-        payload: { kind: 'reversal', userId, guildId, amount, payoutKey: key },
-        error: undo.error,
-    });
+    // File the reconciliation record only for a debit confirmed still standing
+    // (landed and un-reversed). When the state read itself failed — `state` is
+    // null — the debit's fate is unknown, and enqueuing a reversal that may never
+    // have landed would add a spurious owed-record; the escrow key stays the
+    // durable record for a later read to settle (#1023 review).
+    if (state?.landed && !state.reversed) {
+        await recordOwedPayout({
+            service: 'trade', jobName: 'tradeCoinReversal', guildId,
+            payload: { kind: 'reversal', userId, guildId, amount, payoutKey: key },
+            error: undo.error,
+        });
+    }
     return { credited: false };
 }
 

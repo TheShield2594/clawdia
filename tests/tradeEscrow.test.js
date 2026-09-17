@@ -226,6 +226,28 @@ describe('a reversal that cannot be confirmed is written down for replay', () =>
         expect(recordOwedPayout).not.toHaveBeenCalled();
         expect(get(A).balance).toBe(500); // handed straight back
     });
+
+    test('files nothing when the debit’s fate is unknown — only a confirmed-landed debit is recorded', async () => {
+        seed({ userId: A, balance: 500 });
+        await takeCoins(A, GUILD, 200, TID);
+
+        // Both the reversal write and the escrow-key read fail, so rollbackCoins
+        // cannot confirm the debit still stands. Enqueuing a reconciliation then
+        // would name a debit that might never have landed, so it must not (#1023
+        // review) — the escrow key remains the record for a later read.
+        const store = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (f, u, o) => {
+            const isReversal = u?.$set && Object.keys(u.$set).some(k => k.includes('reversed'));
+            if (isReversal) throw new Error('mongo is down');
+            return store(f, u, o);
+        });
+        mockUsers.model.findOne.mockImplementation(() => ({ lean: async () => { throw new Error('still down'); } }));
+
+        const result = await rollbackCoins(A, GUILD, 200, TID);
+
+        expect(result.credited).toBe(false);
+        expect(recordOwedPayout).not.toHaveBeenCalled();
+    });
 });
 
 describe('the anti-funnel budgets', () => {
