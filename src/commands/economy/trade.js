@@ -12,9 +12,7 @@ const { isSoulbound } = require('../../data/soulboundItems');
 const { resolveEffectType } = require('../../services/effectsService');
 const { accountAgeRefusal, frozenRefusal } = require('../../utils/coinTransfer');
 const { giftLimits } = require('../../utils/giftCaps');
-const {
-    settleTrade, checkTradeBudgets, recordTradeBudgets,
-} = require('../../utils/tradeEscrow');
+const { settleTrade, checkTradeBudgets } = require('../../utils/tradeEscrow');
 const COLORS = require('../../utils/embedColors');
 
 const WINDOW_MS = 2 * 60_000;
@@ -103,11 +101,17 @@ async function finalizeTrade({ tradeId, guildId, a, b, aSide, bSide, limits, cur
         b: { userId: b.id, coins: bSide.coins, item: bSide.item },
     };
 
+    // Friendly pre-flight for a clear message; the load-bearing enforcement is
+    // the guarded reservation settleTrade does in the take phase, which also
+    // catches a cap reached by a concurrent trade between this read and the swap.
     const capRefusal = checkTradeBudgets(offer, { aDoc, bDoc, limits, currency });
     if (capRefusal) return { ok: false, message: capRefusal };
 
-    const result = await settleTrade(offer, { Model });
+    const result = await settleTrade(offer, { limits, aDoc, bDoc, Model });
     if (!result.success) {
+        if (result.reason?.startsWith('budget:')) {
+            return { ok: false, reason: result.reason, message: 'That would put one of you over a daily transfer cap — adjust the amounts and try again.' };
+        }
         const short = result.reason?.startsWith('short:') || result.reason?.startsWith('item:');
         return {
             ok: false,
@@ -118,7 +122,6 @@ async function finalizeTrade({ tradeId, guildId, a, b, aSide, bSide, limits, cur
         };
     }
 
-    await recordTradeBudgets(offer, { aDoc, bDoc, limits });
     return { ok: true, delivered: result.delivered, owed: result.owed };
 }
 

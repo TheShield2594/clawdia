@@ -42,7 +42,7 @@ const { creditCoinsOrOwe, grantItemsOrOwe } = require('./creditOrOwe');
 const {
     tradeCoinPayoutKey, tradeItemDeliverPayoutKey, tradeItemReturnPayoutKey,
 } = require('./payoutKey');
-const { BUDGETS, budgetState, spendBudget } = require('./giftCaps');
+const { BUDGETS, budgetState, spendBudget, refundBudget } = require('./giftCaps');
 const { logTransaction } = require('./logTransaction');
 
 /**
@@ -213,56 +213,97 @@ function checkTradeBudgets(offer, { aDoc, bDoc, limits, currency = '💰', now =
 }
 
 /**
- * Records the net value each side moved against their daily caps, once the swap
- * has gone through. Best-effort and after the fact rather than folded into the
- * take: the take is keyed on the coins, which is the guarantee; this is the
- * anti-funnel counter, and a trade is rare enough next to a gift that recording
- * it just behind the swap is a bounded, documented trade-off rather than a race
- * that can move a coin.
+ * Reserves the net value each side moves against their daily caps, in the take
+ * phase, as guarded atomic writes (#1023 review).
+ *
+ * `checkTradeBudgets` is the friendly pre-flight; this is the enforcement. It
+ * uses `spendBudget`'s `$expr` guard (`used + amount ≤ cap`) folded into the
+ * write's own filter, so a cap reached by a concurrent trade in the same window
+ * makes the update match nothing — the read and the spend cannot be separated,
+ * which is what a post-settlement counter increment could not promise. Each
+ * successful reservation pushes a refund onto `undo`, so a take that later fails
+ * hands the allowance back; a swap that completes leaves it spent, which is the
+ * whole point of the cap.
+ *
+ * @returns {Promise<{ok: boolean, reason: ?string}>} `reason` is `budget:coins`
+ *   or `budget:items` when a cap would be exceeded.
  */
-async function recordTradeBudgets(offer, { aDoc, bDoc, limits, now = new Date(), Model = DEFAULT_USER }) {
+async function reserveBudgets(offer, { limits, aDoc, bDoc }, undo, Model) {
     const { coinNet, itemNet } = tradeBudgetFlows(offer);
+    const now = new Date();
 
-    const apply = async (net, sendBudget, recvBudget) => {
-        if (net === 0) return;
+    const reserveOne = async (amount, userId, doc, spec) => {
+        // No flow, or an uncapped budget: nothing to enforce or count.
+        if (amount <= 0 || !spec.cap) return true;
+        const { expired } = budgetState(doc, { ...spec, now });
+        const spend = spendBudget({ ...spec, expired, amount, now });
+        const update = {};
+        if (Object.keys(spend.inc).length) update.$inc = spend.inc;
+        if (Object.keys(spend.set).length) update.$set = spend.set;
+        if (!update.$inc && !update.$set) return true;
+
+        const res = await Model.updateOne({ userId, guildId: offer.guildId, ...spend.filter }, update);
+        // No match means the `$expr` cap guard rejected it (or the document is
+        // gone, in which case the asset take will refuse too). Either way this
+        // trade cannot spend the allowance.
+        if (!res.matchedCount) return false;
+        undo.push(() => Model.updateOne(
+            { userId, guildId: offer.guildId },
+            { $inc: refundBudget({ ...spec, amount }) },
+        ).catch(() => {}));
+        return true;
+    };
+
+    const reserveNet = async (net, sendSpec, recvSpec) => {
+        if (net === 0) return true;
         const amount = Math.abs(net);
         const senderId = net > 0 ? offer.a.userId : offer.b.userId;
         const recvId   = net > 0 ? offer.b.userId : offer.a.userId;
         const senderDoc = net > 0 ? aDoc : bDoc;
         const recvDoc   = net > 0 ? bDoc : aDoc;
-
-        const send = spendBudget({ ...sendBudget, cap: sendBudget.cap, expired: budgetState(senderDoc, { ...sendBudget, cap: sendBudget.cap }).expired, amount, now });
-        const recv = spendBudget({ ...recvBudget, cap: recvBudget.cap, expired: budgetState(recvDoc, { ...recvBudget, cap: recvBudget.cap }).expired, amount, now });
-
-        const write = (userId, frag) => {
-            if (!Object.keys(frag.inc).length && !Object.keys(frag.set).length) return null;
-            const update = {};
-            if (Object.keys(frag.inc).length) update.$inc = frag.inc;
-            if (Object.keys(frag.set).length) update.$set = frag.set;
-            return Model.updateOne({ userId, guildId: offer.guildId }, update).catch(() => null);
-        };
-        await Promise.all([write(senderId, send), write(recvId, recv)].filter(Boolean));
+        if (!await reserveOne(amount, senderId, senderDoc, sendSpec)) return false;
+        if (!await reserveOne(amount, recvId, recvDoc, recvSpec)) return false;
+        return true;
     };
 
-    try {
-        await apply(coinNet, { ...BUDGETS.coinSend, cap: limits.coinSend }, { ...BUDGETS.coinReceive, cap: limits.coinReceive });
-        await apply(itemNet, { ...BUDGETS.itemValueSend, cap: limits.itemValueSend }, { ...BUDGETS.itemValueReceive, cap: limits.itemValueReceive });
-    } catch (err) {
-        console.error('[trade] recording daily budgets failed:', err.message);
+    if (!await reserveNet(coinNet,
+        { ...BUDGETS.coinSend, cap: limits.coinSend },
+        { ...BUDGETS.coinReceive, cap: limits.coinReceive })) {
+        return { ok: false, reason: 'budget:coins' };
     }
+    if (!await reserveNet(itemNet,
+        { ...BUDGETS.itemValueSend, cap: limits.itemValueSend },
+        { ...BUDGETS.itemValueReceive, cap: limits.itemValueReceive })) {
+        return { ok: false, reason: 'budget:items' };
+    }
+    return { ok: true, reason: null };
 }
 
 /**
- * The take phase: debit every committed asset out of its owner, unwinding
- * everything already taken if any step fails. Order is fixed (A's coins, A's
- * item, B's coins, B's item) so the unwind is a well-defined reverse.
+ * The take phase: reserve the daily-cap allowances, then debit every committed
+ * asset out of its owner, unwinding everything already taken if any step fails.
+ * The budget reservation goes first, guarded, so an over-cap trade is refused
+ * before any asset moves; its refunds ride the same unwind stack as the asset
+ * takes. Order is otherwise fixed (A's coins, A's item, B's coins, B's item) so
+ * the unwind is a well-defined reverse.
  *
+ * @param {object} offer
+ * @param {?{limits: object, aDoc: ?object, bDoc: ?object}} budget the daily-cap
+ *   context; null skips reservation (the escrow-only tests do this).
  * @returns {Promise<{success: boolean, reason: ?string}>}
  */
-async function takeAll(offer, Model) {
+async function takeAll(offer, budget, Model) {
     const { tradeId, guildId, a, b } = offer;
     const undo = [];
     const unwind = async () => { for (const fn of undo.reverse()) await fn(); };
+
+    if (budget?.limits) {
+        const reserved = await reserveBudgets(offer, budget, undo, Model);
+        if (!reserved.ok) {
+            await unwind();
+            return { success: false, reason: reserved.reason };
+        }
+    }
 
     const takeSideCoins = async side => {
         if (!side.coins) return null;
@@ -343,26 +384,37 @@ async function deliverAll(offer, Model) {
 }
 
 /**
- * Run a confirmed trade end to end: take, then deliver.
+ * Run a confirmed trade end to end: reserve the caps and take, then deliver.
  *
- * The caller has already resolved and validated both offers and the daily caps.
- * A refused take returns `success: false` and has unwound itself, so nothing
- * moved. A successful take always reaches a completed deliver.
+ * The caller has resolved and validated both offers. When `limits` (and the two
+ * documents the caps are read against) are passed, the take phase reserves the
+ * net value each side moves as a guarded write and refuses if a cap would be
+ * exceeded — so the daily caps are enforced atomically, not by a later
+ * unguarded increment. A refused take returns `success: false` and has unwound
+ * itself, budgets included, so nothing moved. A successful take always reaches a
+ * completed deliver.
  *
  * @param {{tradeId, guildId, a, b}} offer where each side is
  *        `{ userId, coins, item: { itemId, quantity, value } | null }`
+ * @param {object} [opts]
+ * @param {object} [opts.limits] daily caps from `giftLimits`; omit to skip the
+ *        budget reservation (escrow-only callers/tests)
+ * @param {?object} [opts.aDoc] side A's document, for the window state the
+ *        reservation reads
+ * @param {?object} [opts.bDoc] side B's document
  * @returns {Promise<{success: boolean, reason: ?string, delivered: boolean, owed: boolean}>}
  */
-async function settleTrade(offer, { Model = DEFAULT_USER } = {}) {
-    const took = await takeAll(offer, Model);
+async function settleTrade(offer, { limits = null, aDoc = null, bDoc = null, Model = DEFAULT_USER } = {}) {
+    const budget = limits ? { limits, aDoc, bDoc } : null;
+    const took = await takeAll(offer, budget, Model);
     if (!took.success) return { success: false, reason: took.reason, delivered: false, owed: false };
     const out = await deliverAll(offer, Model);
     return { success: true, reason: null, delivered: out.delivered, owed: out.owed };
 }
 
 module.exports = {
-    settleTrade, takeAll, deliverAll,
+    settleTrade, takeAll, deliverAll, reserveBudgets,
     takeCoins, rollbackCoins, takeItem, returnItem, deliverCoins, deliverItem,
-    tradeCoinEscrowKey, tradeBudgetFlows, checkTradeBudgets, recordTradeBudgets,
+    tradeCoinEscrowKey, tradeBudgetFlows, checkTradeBudgets,
     SHORT_STATUSES,
 };

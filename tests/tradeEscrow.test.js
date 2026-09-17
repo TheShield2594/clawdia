@@ -28,7 +28,7 @@ jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 const { recordOwedPayout } = require('../src/utils/owedPayout');
 const { logTransaction } = require('../src/utils/logTransaction');
 const {
-    settleTrade, checkTradeBudgets, recordTradeBudgets, tradeBudgetFlows,
+    settleTrade, checkTradeBudgets, tradeBudgetFlows,
 } = require('../src/utils/tradeEscrow');
 
 const GUILD = 'guild-1';
@@ -199,16 +199,52 @@ describe('the anti-funnel budgets', () => {
         expect(refusal).toBeNull();
     });
 
-    test('records the net sent and received against the daily counters', async () => {
-        seed({ userId: A, balance: 0 });
-        seed({ userId: B, balance: 0 });
+    test('reserves the net value against the daily counters when the swap completes', async () => {
+        seed({ userId: A, balance: 500 });
+        seed({ userId: B, balance: 200 });
 
-        await recordTradeBudgets(offer({ a: { coins: 500 }, b: { coins: 200 } }), {
-            aDoc: get(A), bDoc: get(B), limits: LIMITS,
-        });
+        const result = await settleTrade(
+            offer({ a: { coins: 500 }, b: { coins: 200 } }),
+            { limits: LIMITS, aDoc: get(A), bDoc: get(B) },
+        );
 
-        // Net 300 from A to B.
+        expect(result.success).toBe(true);
+        // Net 300 from A to B — spent on A's send counter and B's receive counter.
         expect(get(A).dailyGiftSent).toBe(300);
         expect(get(B).dailyGiftReceived).toBe(300);
+    });
+
+    test('refuses atomically when a cap would be exceeded, moving nothing', async () => {
+        // A is 500 short of the daily send cap and offering 1000 net.
+        seed({ userId: A, balance: 20_000, dailyGiftSent: 9_500, dailyGiftReset: new Date() });
+        seed({ userId: B, balance: 0 });
+
+        const result = await settleTrade(
+            offer({ a: { coins: 1_000 }, b: { coins: 0 } }),
+            { limits: LIMITS, aDoc: get(A), bDoc: get(B) },
+        );
+
+        expect(result).toMatchObject({ success: false, reason: 'budget:coins' });
+        // The guarded reservation rejected before any coin moved.
+        expect(get(A).balance).toBe(20_000);
+        expect(get(A).dailyGiftSent).toBe(9_500);
+    });
+
+    test('refunds a reserved budget when a later take fails', async () => {
+        // B is the net sender (gives 500, receives 100) but cannot cover its 500.
+        seed({ userId: A, balance: 500 });
+        seed({ userId: B, balance: 0 });
+
+        const result = await settleTrade(
+            offer({ a: { coins: 100 }, b: { coins: 500 } }),
+            { limits: LIMITS, aDoc: get(A), bDoc: get(B) },
+        );
+
+        expect(result).toMatchObject({ success: false, reason: `short:${B}` });
+        // The reservations taken before B's coin take failed are handed back.
+        expect(get(B).dailyGiftSent).toBe(0);
+        expect(get(A).dailyGiftReceived).toBe(0);
+        // And A's committed coins were returned.
+        expect(get(A).balance).toBe(500);
     });
 });
