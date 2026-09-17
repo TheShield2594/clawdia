@@ -400,13 +400,27 @@ describe('per-file floors', () => {
         // interactive collector around them is thin, so its floor is lower than
         // the escrow's but far above the `src/commands/economy` directory floor a
         // file losing its coverage outright would slip under.
+        //
+        // crime.js, daily.js and work.js joined in #873's fifth pass, over the
+        // core currency commands. Each credits from a slow, interactive flow — a
+        // clean getaway paid ~30s after the cooldown was claimed, a challenge
+        // bonus answered after the shift or claim was already paid — and each
+        // used a bare `$inc` that read nothing back, so an uncovered branch is a
+        // payout announced as paid that never landed. They sit inside the
+        // `src/commands/economy` directory floor (35% statements) that a file
+        // losing its coverage outright would not move; daily.js is floored lower
+        // than the other two because its calendar and streak-freeze views are
+        // display, not money, and thinly driven.
         expect(Object.keys(floors.files).sort()).toEqual([
             'src/commands/economy/bank.js',
+            'src/commands/economy/crime.js',
+            'src/commands/economy/daily.js',
             'src/commands/economy/duel.js',
             'src/commands/economy/gift.js',
             'src/commands/economy/invest.js',
             'src/commands/economy/market.js',
             'src/commands/economy/trade.js',
+            'src/commands/economy/work.js',
             'src/games/casino/payout.js',
             'src/services/casinoJackpotService.js',
             'src/services/marketService.js',
