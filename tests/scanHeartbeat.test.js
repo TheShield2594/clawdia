@@ -154,8 +154,6 @@ describe('the heartbeat is wired the way the issue asks', () => {
 
     test('it watches the workflow that actually scans', () => {
         // The name it reads must be a real workflow file, or it watches nothing.
-        const named = /SCAN_WORKFLOW:\s*(\S+)/.exec(yaml.dump(heartbeatStep.env || {}))
-            || [null, heartbeatStep.env.SCAN_WORKFLOW];
         const file = heartbeatStep.env.SCAN_WORKFLOW;
         expect(file).toBeDefined();
         expect(fs.existsSync(path.join(ROOT, '.github', 'workflows', file))).toBe(true);
