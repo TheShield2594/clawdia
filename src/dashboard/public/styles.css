@@ -1815,6 +1815,22 @@ textarea.auto-resize {
 .analytics-rec-link:hover { text-decoration: underline; }
 .analytics-chart-card { background: var(--surface-2, #1a1510); border: 1px solid var(--border); border-radius: 8px; padding: .85rem 1rem; }
 .analytics-chart-title { font-size: .8rem; font-weight: 600; color: var(--text-dim); margin-bottom: .5rem; text-transform: uppercase; letter-spacing: .04em; }
+/* Placeholder shown in a chart card before any data has been recorded. Kept as
+   a class so a renderer needs no inline style to add one (dashboardInlineAttributes). */
+.chart-no-data { text-align: center; opacity: .4; font-size: .82rem; margin-top: .5rem; }
+/* The weekday × hour activity heatmap (#1015). A grid rather than a canvas, so
+   its cells and labels are classed here — the CSP forbids growing the inline
+   style budget, and the intensity is carried by the heat-N class, not a style. */
+.heatmap-card { margin-bottom: 1.25rem; }
+.heatmap-grid { display: grid; grid-template-columns: 2.4rem repeat(24, 1fr); gap: 2px; font-size: .55rem; line-height: 1; }
+.heatmap-hour { text-align: center; color: var(--text-dim); }
+.heatmap-label { color: var(--text-dim); white-space: nowrap; align-self: center; }
+.heatmap-cell { aspect-ratio: 1; border-radius: 2px; background: rgba(255, 255, 255, .03); }
+.heatmap-cell.heat-1 { background: rgba(93, 138, 90, .25); }
+.heatmap-cell.heat-2 { background: rgba(93, 138, 90, .45); }
+.heatmap-cell.heat-3 { background: rgba(93, 138, 90, .7); }
+.heatmap-cell.heat-4 { background: rgba(93, 138, 90, .95); }
+.heatmap-note { font-size: .68rem; opacity: .55; margin-top: .4rem; }
 /* Text for a screen reader and no one else — the numbers behind each chart
    beside the canvas (#669), the compare table's caption (#912).
    Clipped rather than `display: none` — a hidden element is dropped from the

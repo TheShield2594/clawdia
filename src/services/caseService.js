@@ -60,7 +60,7 @@ async function addNote(guildId, caseId, moderatorId, content) {
                 firstActionAt: { $ifNull: ['$firstActionAt', '$$NOW'] }
             } }
         ],
-        { new: true }
+        { updatePipeline: true, new: true }
     );
 }
 
@@ -79,7 +79,7 @@ async function closeCase(guildId, caseId, moderatorId, resolution) {
                 firstActionAt: { $ifNull: ['$firstActionAt', '$$NOW'] }
             } }
         ],
-        { new: true }
+        { updatePipeline: true, new: true }
     );
 }
 

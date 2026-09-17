@@ -59,31 +59,34 @@ function renderActivityHeatmap(heatmap) {
     for (const row of grid) for (const v of row) if (v > max) max = v;
     if (hasUnknown) for (const v of unknown) if (v > max) max = v;
 
-    const cellColor = v => (v > 0 ? `rgba(93,138,90,${(0.12 + 0.85 * (v / max)).toFixed(3)})` : 'rgba(255,255,255,0.03)');
+    // Intensity as one of four classes rather than an inline background — the
+    // dashboard's CSP does not let the inline-style budget grow, so the colour
+    // ramp lives in styles.css (.heat-1…4) and this only picks the bucket.
+    const heatClass = v => (v > 0 ? ` heat-${Math.min(4, Math.ceil((v / max) * 4))}` : '');
 
     if (host) {
         host.innerHTML = '';
         if (!max) {
-            host.insertAdjacentHTML('beforeend', '<p class="chart-no-data" style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No command activity yet</p>');
+            host.insertAdjacentHTML('beforeend', '<p class="chart-no-data">No command activity yet</p>');
         } else {
-            const parts = [`<div style="display:grid;grid-template-columns:2.4rem repeat(24,1fr);gap:2px;font-size:.55rem;line-height:1">`];
+            const parts = ['<div class="heatmap-grid">'];
             // Hour header row: a blank corner, then a label every six hours so
             // 24 columns stay readable.
             parts.push('<div></div>');
             for (let h = 0; h < 24; h++) {
-                parts.push(`<div style="text-align:center;color:#b8a898">${h % 6 === 0 ? String(h).padStart(2, '0') : ''}</div>`);
+                parts.push(`<div class="heatmap-hour">${h % 6 === 0 ? String(h).padStart(2, '0') : ''}</div>`);
             }
             const pushRow = (label, counts) => {
-                parts.push(`<div style="color:#b8a898;white-space:nowrap;align-self:center">${escHtml(label)}</div>`);
+                parts.push(`<div class="heatmap-label">${escHtml(label)}</div>`);
                 for (let h = 0; h < 24; h++) {
                     const v = Number(counts[h]) || 0;
-                    parts.push(`<div title="${escHtml(label)} ${_HOUR_LABELS[h]} — ${v} command${v === 1 ? '' : 's'}" style="aspect-ratio:1;border-radius:2px;background:${cellColor(v)}"></div>`);
+                    parts.push(`<div class="heatmap-cell${heatClass(v)}" title="${escHtml(label)} ${_HOUR_LABELS[h]} — ${v} command${v === 1 ? '' : 's'}"></div>`);
                 }
             };
             weekdays.forEach((label, day) => pushRow(label, grid[day] || []));
             if (hasUnknown) pushRow('Unknown', unknown);
             parts.push('</div>');
-            parts.push(`<div style="font-size:.68rem;opacity:.55;margin-top:.4rem">Times shown in ${escHtml(tz)}.${hasUnknown ? ' “Unknown” holds activity recorded before the weekday was tracked.' : ''}</div>`);
+            parts.push(`<div class="heatmap-note">Times shown in ${escHtml(tz)}.${hasUnknown ? ' “Unknown” holds activity recorded before the weekday was tracked.' : ''}</div>`);
             host.insertAdjacentHTML('beforeend', parts.join(''));
         }
     }
