@@ -9,6 +9,8 @@ const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { clampMultiplier } = require('../../config/economy');
 const { logTransaction } = require('../../utils/logTransaction');
 const { debitUpTo, incExpr } = require('../../utils/balanceDebit');
+const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
+const { crimePayoutKey } = require('../../utils/payoutKey');
 const { getTotalBonus } = require('../../services/petService');
 const { getCrimeFlavorText } = require('../../utils/copyLines');
 const { stackBar } = require('../../utils/rewardReveal');
@@ -337,19 +339,39 @@ module.exports = {
                 let earned = Math.round(baseEarned * streakMult * execMethod.payoutMult * merchantMult);
                 if (isFeaturedCrime) earned = Math.round(earned * (1 + FEATURED_PAYOUT_BONUS));
 
-                const updated = await User.findOneAndUpdate(
+                // Keyed and recorded-if-lost. The cooldown slot was claimed up
+                // front (lastCrime, set before the ~30s button flow), so unlike
+                // /work and /daily — whose payout and cooldown are one guarded
+                // write, retryable when it misses — a payout that failed here
+                // cost the player both the coins and the cooldown, under a bare
+                // `$inc` that read nothing back and an embed that dereferenced its
+                // result unguarded (#873). The crimeRecord counters ride the same
+                // keyed write, so the count and the coins land together.
+                const credit = await creditCoinsOrOwe(
                     userFilter,
+                    earned,
                     {
-                        $inc: { balance: earned, 'crimeRecord.totalCrimes': 1, 'crimeRecord.successfulCrimes': 1 },
-                        $set: { lastCrime: crimeTime },
+                        payoutKey: crimePayoutKey(interaction.id),
+                        service: 'crime', jobName: 'crimePayout',
+                        counters: { 'crimeRecord.totalCrimes': 1, 'crimeRecord.successfulCrimes': 1 },
                     },
-                    { new: true }
                 );
+                // The claim already set lastCrime, so the cooldown holds whether
+                // or not this read comes back; the settled balance is what the
+                // embed shows.
+                const newBalance = credit.doc?.balance
+                    ?? (await User.findOne(userFilter, { balance: 1 }).lean())?.balance
+                    ?? (user.balance ?? 0) + (credit.credited ? earned : 0);
+                const payoutNote = credit.credited
+                    ? ''
+                    : credit.owed
+                        ? '\n> ⚠️ *Your payout couldn\'t be delivered right now — it\'s been recorded and will be restored.*'
+                        : '\n> ⚠️ *Your payout couldn\'t be delivered right now — please contact an admin.*';
 
-                logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: updated.balance, note: `${crime.name} (success, ${execMethod.id})${isFeaturedCrime ? ' [featured]' : ''}` });
+                logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: newBalance, note: `${crime.name} (success, ${execMethod.id})${isFeaturedCrime ? ' [featured]' : ''}${credit.credited ? '' : credit.owed ? ' [owed]' : ' [unpaid]'}` });
 
                 const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-                if (earned >= bigWinThreshold) {
+                if (credit.credited && earned >= bigWinThreshold) {
                     logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: earned, source: 'crime', details: crime.displayName });
                 }
 
@@ -372,7 +394,8 @@ module.exports = {
 
                 desc += `\n\n────────────────────\n  ${currency} Earned: **${earned.toLocaleString()} coins**`;
                 if (crimeBar) desc += `\n  ${crimeBar}`;
-                desc += `\n────────────────────\n  Balance: ${updated.balance.toLocaleString()} coins`;
+                desc += `\n────────────────────\n  Balance: ${newBalance.toLocaleString()} coins`;
+                desc += payoutNote;
 
                 embed = new EmbedBuilder()
                     .setColor(isFeaturedCrime ? '#FFD700' : '#2ecc71')

@@ -38,10 +38,15 @@ jest.mock('../src/services/questService', () => ({
 }));
 jest.mock('../src/services/seasonMissionService', () => ({ recordMissionProgress: jest.fn() }));
 jest.mock('../src/utils/balanceDelta', () => ({ saveWithBalanceDelta: jest.fn(async () => {}) }));
+// The challenge bonus goes through creditCoinsOrOwe now (#873); the base shift
+// does not touch it, so mocking it lets the bonus tests choose whether the
+// credit lands without a database behind the helper.
+jest.mock('../src/utils/creditOrOwe', () => ({ creditCoinsOrOwe: jest.fn() }));
 
 const work = require('../src/commands/economy/work');
 const { logTransaction } = require('../src/utils/logTransaction');
 const { grantInventoryItem } = require('../src/utils/inventoryGrant');
+const { creditCoinsOrOwe } = require('../src/utils/creditOrOwe');
 
 const GUILD_ID = 'guild-1';
 const USER_ID = 'user-1';
@@ -260,6 +265,51 @@ describe('the cooldown refuses', () => {
 
         expect(repliedText(interaction)).toContain('45min cooldown');
         expect(mockUsers.get(USER_ID).balance).toBe(500);
+    });
+});
+
+describe('the challenge bonus', () => {
+    // The correct-answer button id is fixed across every challenge shape, so a
+    // queued press of it drives the win branch without pinning which challenge
+    // was generated.
+    const CORRECT = { customId: 'work_challenge_correct' };
+
+    it('announces the bonus and adds it to the total when the credit lands', async () => {
+        creditCoinsOrOwe.mockResolvedValue({ credited: true, owed: false, doc: { balance: 155 }, error: null });
+        seedUser();
+        seedGuild();
+
+        const interaction = makeInteraction({ components: [CORRECT] });
+        await work.execute(interaction);
+
+        // The base shift is 100; the bonus is 55% of it, credited through the helper.
+        expect(creditCoinsOrOwe).toHaveBeenCalledWith(
+            { userId: USER_ID, guildId: GUILD_ID },
+            55,
+            expect.objectContaining({ payoutKey: 'work:interaction-1:challenge' }),
+        );
+        const text = repliedText(interaction);
+        expect(text).toContain('You earned an extra **+55**');
+        expect(text).toContain('155');
+    });
+
+    it('does not announce the bonus as paid when the credit is only recorded', async () => {
+        // The credit could not land and was filed as owed. The old bare `$inc`
+        // announced "+55" regardless; now the player is told it was recorded, and
+        // the displayed total does not include coins that never arrived.
+        creditCoinsOrOwe.mockResolvedValue({ credited: false, owed: true, doc: null, error: null });
+        seedUser();
+        seedGuild();
+
+        const interaction = makeInteraction({ components: [CORRECT] });
+        await work.execute(interaction);
+
+        const text = repliedText(interaction);
+        expect(text).toContain("couldn't be paid right now");
+        expect(text).not.toContain('You earned an extra');
+        // The base shift paid 100; the balance shown is not inflated by the 55.
+        expect(text).not.toContain('155');
+        expect(logTransaction).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'work_challenge_bonus' }));
     });
 });
 

@@ -17,9 +17,14 @@ const { expectNonNegativeBalance } = require('./helpers/balanceInvariant');
 
 const mockUsers = fakeCollection('User', { balance: 0, bank: 0, inventory: [], activeEffects: [], pets: [] });
 const mockGuilds = fakeCollection('Guild');
+// The success payout goes through creditCoinsOrOwe now (#873); when its credit
+// cannot land it files an owed FailedJob, so the owed-path test needs a place
+// for that to go.
+const mockFailed = fakeCollection('FailedJob');
 
 jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/models/Guild', () => mockGuilds.model);
+jest.mock('../src/models/FailedJob', () => mockFailed.model);
 jest.mock('../src/utils/guildSettingsCache', () =>
     require('./helpers/guildSettingsCacheMock')());
 
@@ -93,9 +98,16 @@ const run = (components = [{ customId: PICKPOCKET }, { customId: FEATHER_TOUCH }
     return crime.execute(interaction).then(() => interaction);
 };
 
+// The owed-path test replaces a model method to force one write to miss; like
+// the invest suite, restore the pristine model afterwards so the stub is not
+// inherited by later tests.
+const pristineUserModel = { ...mockUsers.model };
+afterEach(() => { Object.assign(mockUsers.model, pristineUserModel); });
+
 beforeEach(() => {
     mockUsers.reset();
     mockGuilds.reset();
+    mockFailed.reset();
     jest.clearAllMocks();
     // `clearAllMocks` clears calls, not implementations, so the
     // `mockReturnValue(true)` in the underground-district test below stayed true
@@ -122,16 +134,26 @@ describe('a clean getaway', () => {
         expectNonNegativeBalance(stored, 'crime success');
     });
 
-    it('credits with $inc, never an absolute $set', async () => {
+    it('credits through the keyed, exactly-once helper — a relative $add, never an absolute set', async () => {
         rolls([], 0.1);
         seedUser({ balance: 1000 });
         seedGuild();
 
         await run();
 
-        const credit = mockUsers.writes.find(w => w.update?.$inc?.balance > 0);
+        // The payout goes through creditCoinsOrOwe now (#873): a pipeline update
+        // whose $set moves balance by $add and appends a payout key, guarded so a
+        // replay of a lost-response write cannot pay twice. The old bare `$inc`
+        // read nothing back and, with the cooldown already claimed, lost the
+        // payout outright when the write missed.
+        const credit = mockUsers.writes.find(w =>
+            Array.isArray(w.update) && w.update[0]?.$set?.balance?.$add);
         expect(credit).toBeTruthy();
-        expect(credit.update.$set).not.toHaveProperty('balance');
+        expect(credit.query['paidPayouts.key']).toEqual({ $ne: expect.any(String) });
+        expect(credit.update[0].$set.paidPayouts).toBeDefined();
+        // The counters ride the same write, so the count and the coins land together.
+        expect(credit.update[0].$set['crimeRecord.totalCrimes']).toBeDefined();
+        expect(credit.update[0].$set['crimeRecord.successfulCrimes']).toBeDefined();
     });
 
     it('pays the method multiplier — a bold grab beats a feather touch', async () => {
@@ -180,6 +202,34 @@ describe('a clean getaway', () => {
         const interaction = await run();
 
         expect(repliedText(interaction)).toContain('Clean Getaway');
+    });
+
+    it('records the payout as owed and does not inflate the balance when the credit cannot land', async () => {
+        // The cooldown slot was already claimed up front, so a payout that fails
+        // here cannot be retried — the bare `$inc` this replaced lost it outright
+        // and dereferenced its null result. Now the keyed credit is filed as owed
+        // and the embed says so rather than announcing coins that never arrived.
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        // Make only the keyed pipeline credit miss; the claim and upsert are
+        // operator-syntax updates and go through untouched.
+        const realFindOneAndUpdate = mockUsers.model.findOneAndUpdate;
+        mockUsers.model.findOneAndUpdate = jest.fn(async (query, update, options) => {
+            if (Array.isArray(update)) throw new Error('credit write failed');
+            return realFindOneAndUpdate(query, update, options);
+        });
+
+        const interaction = await run();
+
+        expect(repliedText(interaction)).toContain("couldn't be delivered");
+        // The wallet was not touched — no phantom credit — and an owed record was filed.
+        expect(mockUsers.get(USER_ID).balance).toBe(1000);
+        expect(mockFailed.model.create).toHaveBeenCalledWith(expect.objectContaining({
+            jobName: expect.stringContaining('crimePayout'),
+        }));
+        expect(logBigWin).not.toHaveBeenCalled();
     });
 });
 

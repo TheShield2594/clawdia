@@ -37,10 +37,15 @@ jest.mock('../src/utils/balanceDelta', () => ({
     detachBalanceDelta: jest.fn(() => 0),
     applyBalanceDelta: jest.fn(async user => user.balance ?? 0),
 }));
+// The challenge bonus goes through creditCoinsOrOwe now (#873); the base claim
+// does not touch it, so mocking it lets the bonus tests choose whether the
+// credit lands.
+jest.mock('../src/utils/creditOrOwe', () => ({ creditCoinsOrOwe: jest.fn() }));
 
 const daily = require('../src/commands/economy/daily');
 const { logTransaction } = require('../src/utils/logTransaction');
 const { claimStarterKit } = require('../src/utils/starterKit');
+const { creditCoinsOrOwe } = require('../src/utils/creditOrOwe');
 
 const GUILD_ID = 'guild-1';
 const USER_ID = 'user-1';
@@ -237,5 +242,46 @@ describe('the account-age gate', () => {
         }));
 
         expect(mockUsers.get(USER_ID).balance).toBe(1000);
+    });
+});
+
+describe('the challenge bonus', () => {
+    // The correct-answer button id is fixed across every challenge shape.
+    const CORRECT = { customId: 'daily_challenge_correct' };
+
+    it('announces the bonus and shows the new balance when the credit lands', async () => {
+        creditCoinsOrOwe.mockResolvedValue({ credited: true, owed: false, doc: { balance: 1500 }, error: null });
+        seedUser();
+        seedGuild({ dailyAmount: 1000 });
+
+        const interaction = makeInteraction({ components: [CORRECT] });
+        await daily.execute(interaction);
+
+        // The claim is 1000; the challenge pays 50% of it, credited through the helper.
+        expect(creditCoinsOrOwe).toHaveBeenCalledWith(
+            { userId: USER_ID, guildId: GUILD_ID },
+            500,
+            expect.objectContaining({ payoutKey: 'daily:interaction-1:challenge' }),
+        );
+        const text = repliedText(interaction);
+        expect(text).toContain('You earned an extra **+500 coins**');
+        expect(text).toContain('1,500');
+    });
+
+    it('does not announce the bonus as paid when the credit is only recorded', async () => {
+        // The credit could not land and was filed as owed. The old bare `$inc`
+        // showed "+500" regardless, and a throw aborted the whole claim to a
+        // generic error after it had already been paid (#873).
+        creditCoinsOrOwe.mockResolvedValue({ credited: false, owed: true, doc: null, error: null });
+        seedUser();
+        seedGuild({ dailyAmount: 1000 });
+
+        const interaction = makeInteraction({ components: [CORRECT] });
+        await daily.execute(interaction);
+
+        const text = repliedText(interaction);
+        expect(text).toContain("couldn't be paid right now");
+        expect(text).not.toContain('You earned an extra **+500 coins**');
+        expect(logTransaction).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'daily_challenge_bonus' }));
     });
 });

@@ -14,6 +14,55 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.11.1] - 2026-09-17
+
+Migrations through `024_drop_blackjack_toggle`.
+
+Economy audit, pass 5 — the core currency commands (#873). The fifth pass of the
+economy audit, over `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and
+`invest`. As with every pass, the forward direction was mostly sound; what had
+never been looked at is the credit that follows a slow, interactive flow, and the
+refund when one fails. Every fix is on a credit that was a bare `$inc` reading
+nothing back, announced as paid whether or not the write landed and recorded
+nowhere when it did not.
+
+- **`/invest contribute` had no `try` at all past the debit.** The wallet is
+  debited atomically, and then a rejection from the pool write, the refund, or
+  the `save()` escaped `execute` as an unhandled rejection with the coins already
+  gone. And the concurrent-activation refund was a bare `$inc` that read nothing
+  back and said "Coins refunded" over a wallet that might still be short — the
+  #804/#870 pattern in the one write here nobody had audited. The post-debit flow
+  is now guarded: the refund goes through `creditCoinsOrOwe` (keyed, verified,
+  recorded as owed when it will not land), a throw before the pool takes the coins
+  refunds them, and a failure *after* the coins are in the pool no longer refunds
+  — that would pay the player back for coins the pool is holding.
+- **`/work` and `/daily` announced a challenge bonus that never landed.** The base
+  shift and claim are guarded, cooldown-carrying writes; the challenge bonus that
+  follows, credited minutes later from a collector callback, was a bare `$inc`.
+  An unmatched write still rendered "You earned an extra +N coins" and added it to
+  the total, and in `/work` a *rejection* fell into the timeout `catch` labelled
+  "base payout already secured" — silently dropping a bonus it had already
+  displayed — while in `/daily` it aborted the whole claim to a generic error
+  after the daily had been paid. Both now credit through `creditCoinsOrOwe` keyed
+  to the interaction, announce the bonus only when it lands, and say it was
+  recorded when it did not.
+- **`/crime` credited a clean getaway with an unguarded `$inc` and dereferenced
+  its result.** Unlike `/work` and `/daily`, whose payout and cooldown are one
+  guarded write and so retryable when the write misses, `/crime` claims its
+  cooldown slot up front — so a payout that failed cost the player both the coins
+  and the cooldown, under a write whose `null` result the embed read as
+  `updated.balance` and crashed on. The payout now goes through `creditCoinsOrOwe`
+  keyed to the attempt, with the `crimeRecord` counters riding the same write, and
+  is recorded as owed rather than lost when it cannot land.
+
+Reviewed and found sound, recorded so the next pass does not re-derive it:
+`/balance` (the starter-kit credit is atomic and idempotent, and the local
+balance bump is display-only), `/jobs` (a read-only listing), and all of `/bank`
+(deposit and withdraw are single atomic guarded writes within one account, and
+transfer is the already-audited `commitCoinTransfer`). The `/crime` fine, critical
+failure and lifesaver paths already go through the audited `debitUpTo`. Detail in
+[docs/AUDIT_LOG.md](docs/AUDIT_LOG.md#economy-the-core-currency-commands).
+
 ## [4.11.0] - 2026-09-17
 
 Migrations through `024_drop_blackjack_toggle`.

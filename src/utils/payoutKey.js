@@ -481,12 +481,62 @@ function transferRefundPayoutKey(interactionId) {
     return `transfer:${interactionId}:refund`;
 }
 
+/**
+ * A `/invest contribute` refund when the district activated between the
+ * pre-check and the pool write, so the debited coins belong to nobody (#873).
+ *
+ * Keyed by the interaction rather than the district, like the transfer refund
+ * above: the same member investing the same amount in the same district again a
+ * second later is a different contribution and refunds separately, and a key
+ * built from the district alone would collide across those attempts and drop the
+ * second refund.
+ */
+function investRefundPayoutKey(interactionId) {
+    return `invest:${interactionId}:refund`;
+}
+
+/**
+ * The coins a `/crime` earns on a clean getaway (#873).
+ *
+ * Unlike `/work` and `/daily`, whose payout and cooldown are one guarded write —
+ * a credit that does not land leaves the cooldown unset and the run can be
+ * retried — `/crime` claims its cooldown slot up front, before the ~30s button
+ * flow, so the cooldown is already spent by the time the payout is credited. A
+ * payout that then failed a bare `$inc` cost the player both the coins and the
+ * cooldown with nothing written down. Keyed, the credit is recorded as owed when
+ * it will not land, and a replay cannot pay it twice.
+ *
+ * Keyed by the opening interaction, which names this attempt: a crime resolves
+ * once, so there is no replay within it, and the next `/crime` is a new
+ * interaction after the cooldown clears.
+ */
+function crimePayoutKey(interactionId) {
+    return `crime:${interactionId}:payout`;
+}
+
+/**
+ * The bonus a `/work` shift or a `/daily` claim pays for answering its challenge
+ * (#873).
+ *
+ * The base shift and claim are guarded, cooldown-carrying writes; the challenge
+ * bonus that follows was a bare `$inc` credited minutes later from a collector
+ * callback, announced as earned whether or not the write landed. Keyed by the
+ * opening interaction — the one identifier that survives the collector — so a
+ * credit whose response was lost is recorded once and a retry cannot pay twice.
+ * The phase names which command paid it, so the two cannot collide on the rare
+ * interaction id reuse across a restart.
+ */
+function challengeBonusPayoutKey(command, interactionId) {
+    return `${command}:${interactionId}:challenge`;
+}
+
 module.exports = {
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
     marketSalePayoutKey, listingPurchasePayoutKey, listingCancelPayoutKey,
     listingUnwindPayoutKey,
     listingCreateRefundPayoutKey,
     marketRefundPayoutKey, transferRefundPayoutKey, giftItemRollbackPayoutKey,
+    investRefundPayoutKey, crimePayoutKey, challengeBonusPayoutKey,
     duelPayoutKey, crewSharePayoutKey,
     tradeCoinPayoutKey, tradeItemDeliverPayoutKey, tradeItemReturnPayoutKey,
     tradeBudgetRefundKey,
