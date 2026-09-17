@@ -78,9 +78,12 @@ async function resolveOneWar(client, guildDoc) {
     if (winnerGuildId && !tied) {
         try {
             const discordGuild = await client.guilds.fetch(winnerGuildId).catch(() => null);
+            // Only crown players who actually have something to show for it —
+            // without the `> 0` filters a guild where nobody has dueled (or has
+            // any streak) would still label an arbitrary member MVP / Most Clutch.
             const [mvpUser, clutchUser] = await Promise.all([
-                User.findOne({ guildId: winnerGuildId }).sort({ duelWins: -1 }).select('userId duelWins').lean(),
-                User.findOne({ guildId: winnerGuildId }).sort({ 'streak.current': -1 }).select('userId streak').lean(),
+                User.findOne({ guildId: winnerGuildId, duelWins: { $gt: 0 } }).sort({ duelWins: -1 }).select('userId duelWins').lean(),
+                User.findOne({ guildId: winnerGuildId, 'streak.current': { $gt: 0 } }).sort({ 'streak.current': -1 }).select('userId streak').lean(),
             ]);
             if (mvpUser && discordGuild) {
                 const m = await discordGuild.members.fetch(mvpUser.userId).catch(() => null);

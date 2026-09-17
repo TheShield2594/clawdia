@@ -458,13 +458,21 @@ async function handleLeveling(message, guildSettings, announcements = []) {
         checkRivalry(message.client, message.guild, user).catch(() => {});
         return user;
     } else {
-        const newUser = await User.create({
+        const newUser = new User({
             userId: message.author.id,
             guildId: message.guild.id,
-            xp: xpGain,
             messages: 1,
             lastXpGain: new Date()
         });
+        // Route the first message through the same XP pipeline as every later
+        // one, so a first message can itself cross a level threshold (and fire
+        // the promotion announcement) instead of silently banking the XP.
+        const { leveled } = applyXpGain(newUser, xpGain);
+        if (leveled) {
+            announcements.push(() =>
+                announceLevelUp(newUser, guildSettings, message.member, message.guild, message.channel));
+        }
+        await newUser.save();
         return newUser;
     }
 }

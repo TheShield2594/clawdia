@@ -137,6 +137,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
 
         pages.push({
             id:       `rarity_${rarity.toLowerCase()}`,
+            activity: `shop_${rarity.toLowerCase()}`,
             label:    `${rarity}`,
             emoji,
             subtitle: `${items.length} item${items.length !== 1 ? 's' : ''}`,
@@ -178,6 +179,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
 
         pages.push({
             id:       'prestige',
+            activity: 'shop_mythic',
             label:    'Prestige',
             emoji:    '✨',
             subtitle: `${prestigeItems.length} aspirational item${prestigeItems.length !== 1 ? 's' : ''}`,
@@ -213,6 +215,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
 
         pages.push({
             id:       'black_market',
+            activity: 'shop_epic',
             label:    'Black Market',
             emoji:    '🏴',
             subtitle: `${blackMarketItems.length} contraband item${blackMarketItems.length !== 1 ? 's' : ''}`,
@@ -338,7 +341,9 @@ module.exports = {
             const balanceFooter = `Balance: ${currency}${userBalance.toLocaleString()} · Use /shop buy <item name> [quantity]`;
 
             return runShopBrowse(interaction, {
-                activity: pages[0].id.replace('rarity_', 'shop_'),
+                // Each page carries its own `activity` (per-rarity theme); this
+                // is only the fallback for a page that doesn't set one.
+                activity: pages[0].activity || 'shop_common',
                 title:    `${interaction.guild.name} Shop`,
                 currency,
                 footer:   balanceFooter,

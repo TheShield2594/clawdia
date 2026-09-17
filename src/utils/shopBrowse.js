@@ -67,6 +67,7 @@ async function loadImagesByItemIds(itemIds, guildId = null) {
  * Each page:
  * {
  *   id:       string,
+ *   activity: string,            // optional per-page theme key (defaults to config.activity)
  *   label:    string,            // category label
  *   emoji:    string,            // for select menu
  *   subtitle: string,            // shown on banner under title
@@ -76,7 +77,6 @@ async function loadImagesByItemIds(itemIds, guildId = null) {
  */
 async function runShopBrowse(interaction, config) {
     const { activity, title, currency, pages, footer, guildId } = config;
-    const colorHex = COLOR_HEX[activity] || '#f39c12';
 
     const imageCache = new Map();
     async function hydrate(page) {
@@ -98,14 +98,20 @@ async function runShopBrowse(interaction, config) {
         const page  = pages[idx];
         const items = await hydrate(page);
 
+        // Theme per page: a page may carry its own `activity` (e.g. shop_epic
+        // for a rare-tier page) so each rarity gets its own banner and colour,
+        // rather than the whole browse taking the first page's theme.
+        const pageActivity = page.activity || activity;
+        const colorHex     = COLOR_HEX[pageActivity] || '#f39c12';
+
         const buffer = await renderCategoryBanner({
-            activity,
+            activity: pageActivity,
             title:    `${title} — ${page.label}`,
             subtitle: page.subtitle,
             items,
             currency
         });
-        const filename   = `${activity}-shop-${page.id}.png`;
+        const filename   = `${pageActivity}-shop-${page.id}.png`;
         // Discord caps alt text at 1024 characters and rejects the upload over
         // it, so the item list — the one part of this that grows with the page —
         // is trimmed rather than allowed to fail the whole message.
