@@ -138,9 +138,11 @@ describe('exploration competes in the weekly champion race', () => {
     test('the scheduler can name an explore champion', () => {
         // A category with no label entry is skipped at announcement time — the
         // champion is paid and never mentioned, which reads as the reward being
-        // broken. Every category something records must have a label.
-        const scheduler = read('services', 'weeklyChampionService.js');
-        const labels = scheduler.slice(scheduler.indexOf('WEEKLY_CATEGORY_LABELS'));
+        // broken. Every category something records must have a label. The map
+        // moved to utils/weeklyChampion (#1016) so the live /leaderboard boards
+        // read the same names the Monday sweep announces.
+        const source = read('utils', 'weeklyChampion.js');
+        const labels = source.slice(source.indexOf('WEEKLY_CATEGORY_LABELS'));
         const declared = new Set(
             [...labels.slice(0, labels.indexOf('};')).matchAll(/^\s+(\w+):\s*\{/gm)].map(m => m[1])
         );

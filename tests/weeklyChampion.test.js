@@ -12,6 +12,7 @@
  */
 
 jest.mock('../src/models/WeeklyChampion', () => ({
+    find: jest.fn(),
     findOne: jest.fn(),
     findOneAndUpdate: jest.fn(),
 }));
@@ -23,6 +24,8 @@ const {
     getPreviousWeekKey,
     addWeeklyChampionProgress,
     getWeeklyChampionLeader,
+    getWeeklyChampionStandings,
+    WEEKLY_STANDINGS_SORT,
 } = require('../src/utils/weeklyChampion');
 
 let errorLog;
@@ -182,17 +185,58 @@ describe('addWeeklyChampionProgress', () => {
     });
 });
 
-describe('getWeeklyChampionLeader', () => {
-    test('reads the running week, ranked by total', async () => {
+// find(...).sort(...).limit(...).lean() — records the args the standings query
+// was built with.
+function mockStandingsChain(rows) {
+    const seen = {};
+    const chain = {
+        sort(s) { seen.sort = s; return chain; },
+        limit(n) { seen.limit = n; return chain; },
+        lean: async () => rows,
+    };
+    WeeklyChampion.find.mockReturnValue(chain);
+    return seen;
+}
+
+describe('getWeeklyChampionStandings', () => {
+    test('reads a week ranked by the shared standings sort', async () => {
         jest.useFakeTimers().setSystemTime(new Date('2026-08-27T12:00:00Z'));
-        const sort = jest.fn().mockReturnValue({ lean: async () => ({ userId: 'u1', total: 400 }) });
-        WeeklyChampion.findOne.mockReturnValue({ sort });
+        const seen = mockStandingsChain([{ userId: 'u1', total: 400 }, { userId: 'u2', total: 100 }]);
+        try {
+            const rows = await getWeeklyChampionStandings('g1', 'fish', { limit: 5 });
+
+            expect(WeeklyChampion.find).toHaveBeenCalledWith({ guildId: 'g1', week: '2026-W35', category: 'fish' });
+            expect(seen.sort).toBe(WEEKLY_STANDINGS_SORT);
+            expect(seen.sort).toEqual({ total: -1, runs: -1, createdAt: 1 });
+            expect(seen.limit).toBe(5);
+            expect(rows).toHaveLength(2);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+});
+
+describe('getWeeklyChampionLeader', () => {
+    test('is the first row of the standings, so board and footer never disagree', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-08-27T12:00:00Z'));
+        const seen = mockStandingsChain([{ userId: 'u1', total: 400 }]);
         try {
             const leader = await getWeeklyChampionLeader('g1', 'fish');
 
-            expect(WeeklyChampion.findOne).toHaveBeenCalledWith({ guildId: 'g1', week: '2026-W35', category: 'fish' });
-            expect(sort).toHaveBeenCalledWith({ total: -1, runs: -1 });
+            expect(WeeklyChampion.find).toHaveBeenCalledWith({ guildId: 'g1', week: '2026-W35', category: 'fish' });
+            expect(seen.sort).toBe(WEEKLY_STANDINGS_SORT);
+            expect(seen.limit).toBe(1);
             expect(leader).toEqual({ userId: 'u1', total: 400 });
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('is null when nobody has run yet', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-08-27T12:00:00Z'));
+        mockStandingsChain([]);
+        try {
+            expect(await getWeeklyChampionLeader('g1', 'hunt')).toBeNull();
         } finally {
             jest.useRealTimers();
         }

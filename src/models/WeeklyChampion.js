@@ -38,6 +38,14 @@ weeklyChampionSchema.index({ guildId: 1, week: 1, category: 1, userId: 1 }, { un
 // same thing: the highest total in a guild's category for a given week.
 weeklyChampionSchema.index({ guildId: 1, week: 1, category: 1, total: -1 });
 weeklyChampionSchema.index({ week: 1 });
+// Hall of Champions (#1016). Past winners are the `rewarded: true` rows — one
+// per category per week — so a partial index over just those keeps
+// `/leaderboard champions` a bounded scan of a handful of documents rather than
+// the whole accumulator collection.
+weeklyChampionSchema.index(
+    { guildId: 1, week: -1 },
+    { partialFilterExpression: { rewarded: true } }
+);
 // Long enough that a week is still whole when the Monday sweep reads it, and
 // that a sweep delayed by an outage has something left to read.
 weeklyChampionSchema.index({ createdAt: 1 }, { expireAfterSeconds: 21 * 24 * 3600 });

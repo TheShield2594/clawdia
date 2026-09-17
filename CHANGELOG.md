@@ -14,6 +14,30 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.10.0] - 2026-09-17
+
+Migrations through `024_drop_blackjack_toggle`.
+
+Grind-track leaderboards (#1016). Hunting, fishing, mining and exploration are
+the largest part of the bot and had no board at all: the only competitive
+surface was the Monday champion announcement, so between Mondays a player could
+not see where they stood, and after Monday the winner was gone. `/leaderboard`
+gains four track choices — `hunting`, `fishing`, `mining`, `exploring` — each
+with a `period` of `all-time` (track level, then lifetime coins as the tiebreak)
+or `week` (this week's live race). The week board shows the caller's own rank and
+how far they are from first, and reads the same `getWeeklyChampionStandings`
+function — with the same `WEEKLY_STANDINGS_SORT` order — that Monday's sweep
+crowns from, so the board and the announcement agree by construction. A new
+`/leaderboard champions` view is a **Hall of Champions**: past weekly winners per
+track, read from the `rewarded` rows the sweep already stamps (a rolling window,
+since those rows carry WeeklyChampion's 21-day retention). Every board is a
+bounded, indexed query, not a full collection sort (#922 on cases): a new
+`{ guildId, system, data.level: -1, data.totalEarned: -1 }` index on
+`GrindProfile` serves the all-time boards and a partial index over just the
+`rewarded` rows of `WeeklyChampion` serves the hall. The category label/unit map
+moved from `weeklyChampionService` down to `utils/weeklyChampion` so the live
+boards and the Monday announcement name each track the same way.
+
 ## [4.9.0] - 2026-09-17
 
 Migrations through `024_drop_blackjack_toggle`.
