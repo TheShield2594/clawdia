@@ -258,6 +258,18 @@
             "functions": 97,
             "lines": 97
         },
+        "src/commands/economy/crime.js": {
+            "statements": 88,
+            "branches": 63,
+            "functions": 80,
+            "lines": 93
+        },
+        "src/commands/economy/daily.js": {
+            "statements": 61,
+            "branches": 52,
+            "functions": 27,
+            "lines": 64
+        },
         "src/commands/economy/duel.js": {
             "statements": 47,
             "branches": 36,
@@ -287,6 +299,12 @@
             "branches": 24,
             "functions": 16,
             "lines": 26
+        },
+        "src/commands/economy/work.js": {
+            "statements": 83,
+            "branches": 64,
+            "functions": 49,
+            "lines": 88
         },
         "src/games/casino/payout.js": {
             "statements": 97,
