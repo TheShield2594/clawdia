@@ -121,11 +121,12 @@ function payoutKeyForPayload(payload) {
  * on a payout that has been paid. `classifyUnmatchedPayout` is what tells them
  * apart; the silent-skip #804 closed does not come back under a new name.
  *
- * Three kinds:
+ * Four kinds:
  *
- *   coins    { kind: 'coins',    userId, guildId, amount,           payoutKey?, counters? }
- *   items    { kind: 'items',    userId, guildId, itemId, quantity, payoutKey?, budgetRefund? }
- *   reversal { kind: 'reversal', userId, guildId, amount,           payoutKey }
+ *   coins        { kind: 'coins',        userId, guildId, amount,           payoutKey?, counters? }
+ *   items        { kind: 'items',        userId, guildId, itemId, quantity, payoutKey?, budgetRefund? }
+ *   reversal     { kind: 'reversal',     userId, guildId, amount,           payoutKey }
+ *   budgetRefund { kind: 'budgetRefund', userId, guildId, usedField, resetField, cap, amount, window, payoutKey }
  *
  * `reversal` is not a credit — it is a debit that could not be given back (#1023
  * review). A trade escrow debit that landed but whose keyed reversal could not be
@@ -223,6 +224,38 @@ async function replayOwedPayout(payload) {
         throw new Error(`return for ${userId} in ${guildId} matched nothing (${status}) — retry`);
     }
 
+    if (kind === 'budgetRefund') {
+        // A daily-cap allowance a trade reserved and then had to hand back, whose
+        // decrement could not be confirmed on the unwind (#1025). Not a credit —
+        // it moves a rolling counter, not coins — so it replays on its own path:
+        // window-gated by `windowedRefundExpr` so a replay after the 24h reset is
+        // a no-op, and keyed on `paidPayouts` so a replay inside the window cannot
+        // subtract the allowance twice.
+        const { userId, guildId, usedField, resetField, cap, amount, window = null } = payload;
+        if (!userId || !guildId || !usedField || !resetField || !(amount > 0) || !key) {
+            throw new Error(`owed budgetRefund payload is incomplete: ${JSON.stringify(payload)}`);
+        }
+        const User = require('../models/User');
+        const { windowedRefundExpr } = require('./giftCaps');
+        const { payoutKeyGuard, payoutKeyAppendExpr } = require('./payoutKey');
+        try {
+            await User.updateOne(
+                { userId, guildId, ...payoutKeyGuard(key) },
+                [{ $set: {
+                    ...windowedRefundExpr({ usedField, resetField, cap, amount, window }),
+                    paidPayouts: payoutKeyAppendExpr(key),
+                } }],
+                { updatePipeline: true },
+            );
+        } catch (err) {
+            throw new Error(`budget refund for ${userId} in ${guildId} could not be written (${err.message}) — retry`, { cause: err });
+        }
+        // A match applied it; a non-match means the key is already recorded (done)
+        // or there is no document to refund (nothing owed). Both are settled — the
+        // key on the document is the ground truth and it cannot subtract twice.
+        return;
+    }
+
     if (kind === 'reversal') {
         const { userId, guildId, amount } = payload;
         // The escrow key is load-bearing here — see the docstring. A reversal
@@ -258,6 +291,9 @@ function describeOwedPayout(payload) {
     }
     if (payload?.kind === 'reversal') {
         return `reverse ${payload.amount} coins held from ${payload.userId} in ${payload.guildId}`;
+    }
+    if (payload?.kind === 'budgetRefund') {
+        return `refund ${payload.amount} of ${payload.userId}'s ${payload.usedField} allowance in ${payload.guildId}`;
     }
     return JSON.stringify(payload);
 }

@@ -10,7 +10,7 @@ const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { describeItem } = require('../../utils/itemDisplay');
 const { ownedBy } = require('../../utils/collectorOwner');
 const {
-    BUDGETS, giftLimits, budgetState, spendBudget, spendBudgetPipeline,
+    BUDGETS, giftLimits, budgetState, spendBudgetGuarded, spendBudgetPipelineGuarded,
 } = require('../../utils/giftCaps');
 const {
     accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
@@ -449,23 +449,32 @@ module.exports = {
         // the debit back if the credit fails — the same shape as the coin path
         // above. Saving both documents in parallel would duplicate the item
         // whenever the sender's write lost and the recipient's won.
-        const sendSpend = spendBudget({ ...BUDGETS.itemValueSend, cap: limits.itemValueSend, expired: sendState.expired, amount: giftValue });
-        const debited = await User.findOneAndUpdate(
+        // `spendBudgetGuarded` folds in the item-value send cap and the
+        // expired-window reset race guard, so two of the sender's own item gifts
+        // in a freshly-rolled window cannot both reset the counter past the cap
+        // (#1025).
+        const debited = await spendBudgetGuarded(
             {
-                userId: interaction.user.id,
-                guildId,
-                ...NOT_FROZEN,
-                inventory: { $elemMatch: { itemId, quantity: { $gte: qty } } },
-                ...sendSpend.filter,
+                ...BUDGETS.itemValueSend, cap: limits.itemValueSend,
+                expired: sendState.expired, observedReset: sendState.windowStart, amount: giftValue,
             },
-            // Positional `$`, not an arrayFilter: `$[slot]` would decrement
-            // every slot carrying this itemId, and duplicate slots are
-            // reachable — several writers $push without checking for one.
-            {
-                $inc: { 'inventory.$.quantity': -qty, ...sendSpend.inc },
-                ...(Object.keys(sendSpend.set).length ? { $set: sendSpend.set } : {}),
-            },
-            { new: true }
+            sendSpend => User.findOneAndUpdate(
+                {
+                    userId: interaction.user.id,
+                    guildId,
+                    ...NOT_FROZEN,
+                    inventory: { $elemMatch: { itemId, quantity: { $gte: qty } } },
+                    ...sendSpend.filter,
+                },
+                // Positional `$`, not an arrayFilter: `$[slot]` would decrement
+                // every slot carrying this itemId, and duplicate slots are
+                // reachable — several writers $push without checking for one.
+                {
+                    $inc: { 'inventory.$.quantity': -qty, ...sendSpend.inc },
+                    ...(Object.keys(sendSpend.set).length ? { $set: sendSpend.set } : {}),
+                },
+                { new: true }
+            ),
         );
         if (!debited) {
             return deny(`You don't have ${qty}× ${label} in your inventory, or your daily item-gift value would be exceeded.`);
@@ -477,22 +486,34 @@ module.exports = {
             { $pull: { inventory: { itemId, quantity: { $lte: 0 } } } }
         ).catch(() => null);
 
-        const rxSpend = spendBudgetPipeline({ ...BUDGETS.itemValueReceive, cap: limits.itemValueReceive, expired: rxValueState.expired, amount: giftValue });
-
-        let credited = null;
-        try {
-            credited = await addInventoryItem(target.id, guildId, itemId, qty, {
-                // The recipient's freeze rides in the credit's own guard, so a
-                // freeze landing mid-gift sends the item back rather than
-                // through. The rollback below is deliberately left unguarded:
-                // it returns the sender's own item, and a sanction that ate a
-                // refund would destroy it.
-                guard:    { ...rxSpend.filter, ...NOT_FROZEN },
-                extraSet: rxSpend.set,
-            });
-        } catch (creditErr) {
-            console.error(`[gift] item credit failed — recipient=${target.id} guild=${guildId} item=${itemId} qty=${qty}:`, creditErr);
-        }
+        // Same reset race on the recipient's receive counter, guarded the same
+        // way — but only a clean filter-miss is reclassified: a credit that threw
+        // has an unknown outcome and must not be replayed (#1025).
+        let creditError = null;
+        const credited = await spendBudgetPipelineGuarded(
+            {
+                ...BUDGETS.itemValueReceive, cap: limits.itemValueReceive,
+                expired: rxValueState.expired, observedReset: rxValueState.windowStart, amount: giftValue,
+            },
+            async rxSpend => {
+                try {
+                    return await addInventoryItem(target.id, guildId, itemId, qty, {
+                        // The recipient's freeze rides in the credit's own guard, so a
+                        // freeze landing mid-gift sends the item back rather than
+                        // through. The rollback below is deliberately left unguarded:
+                        // it returns the sender's own item, and a sanction that ate a
+                        // refund would destroy it.
+                        guard:    { ...rxSpend.filter, ...NOT_FROZEN },
+                        extraSet: rxSpend.set,
+                    });
+                } catch (err) {
+                    creditError = err;
+                    console.error(`[gift] item credit failed — recipient=${target.id} guild=${guildId} item=${itemId} qty=${qty}:`, err);
+                    return null;
+                }
+            },
+            () => !creditError,
+        );
         if (!credited) {
             // The sender's item coming back, and the one write in this command
             // that had none of the care the coin path beside it has (#873).

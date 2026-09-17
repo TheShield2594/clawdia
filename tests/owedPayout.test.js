@@ -8,7 +8,7 @@
  */
 
 jest.mock('../src/models/FailedJob', () => ({ create: jest.fn() }));
-jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn(), findOne: jest.fn() }));
+jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn(), findOne: jest.fn(), updateOne: jest.fn() }));
 jest.mock('../src/utils/inventoryGrant', () => ({ grantInventoryItem: jest.fn() }));
 jest.mock('../src/utils/debitKey', () => ({ reverseKeyedDebit: jest.fn() }));
 
@@ -28,6 +28,7 @@ beforeEach(() => {
     jest.clearAllMocks();
     FailedJob.create.mockResolvedValue({});
     User.findOneAndUpdate.mockResolvedValue({});
+    User.updateOne.mockResolvedValue({ matchedCount: 1 });
     grantInventoryItem.mockResolvedValue({});
     reverseKeyedDebit.mockResolvedValue({ reversed: true, resolved: true, doc: {}, error: null });
     errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -401,6 +402,49 @@ describe('replayOwedPayout with a reversal', () => {
     });
 });
 
+// #1025. A daily-cap allowance a trade reserved and then had to hand back, whose
+// decrement could not be confirmed on the unwind. Not a credit — it moves a
+// rolling counter, not coins — so it replays window-gated and keyed on
+// paidPayouts, and a non-match is settled (the key is already recorded or there
+// is no document to refund).
+describe('replayOwedPayout with a budgetRefund', () => {
+    const refund = {
+        kind: 'budgetRefund', userId: 'u1', guildId: 'g1',
+        usedField: 'dailyGiftSent', resetField: 'dailyGiftReset', cap: 10_000,
+        amount: 400, window: new Date('2026-09-17T00:00:00Z'),
+        payoutKey: 'trade:t1:budget:u1:dailyGiftSent',
+    };
+
+    test('applies the windowed, keyed refund against the user document', async () => {
+        await expect(replayOwedPayout(refund)).resolves.toBeUndefined();
+
+        expect(User.updateOne).toHaveBeenCalledTimes(1);
+        const [filter, update, options] = User.updateOne.mock.calls[0];
+        // Guarded on the payout key so a replay cannot subtract the allowance twice.
+        expect(filter).toMatchObject({ userId: 'u1', guildId: 'g1', 'paidPayouts.key': { $ne: refund.payoutKey } });
+        // A pipeline update: the windowed refund and the key append in one write.
+        expect(Array.isArray(update)).toBe(true);
+        expect(JSON.stringify(update)).toContain('paidPayouts');
+        expect(options).toMatchObject({ updatePipeline: true });
+    });
+
+    test('a write that could not be made stays owed', async () => {
+        User.updateOne.mockRejectedValue(new Error('mongo down'));
+        await expect(replayOwedPayout(refund)).rejects.toThrow('could not be written');
+    });
+
+    test.each([
+        ['no user',       { ...refund, userId: undefined }],
+        ['no usedField',  { ...refund, usedField: undefined }],
+        ['no resetField', { ...refund, resetField: undefined }],
+        ['a zero amount', { ...refund, amount: 0 }],
+        ['no payout key', { ...refund, payoutKey: undefined }],
+    ])('refuses to replay an incomplete budgetRefund payload: %s', async (_label, payload) => {
+        await expect(replayOwedPayout(payload)).rejects.toThrow('incomplete');
+        expect(User.updateOne).not.toHaveBeenCalled();
+    });
+});
+
 describe('describeOwedPayout', () => {
     test('names who is owed what', () => {
         expect(describeOwedPayout({ kind: 'coins', userId: 'u1', guildId: 'g1', amount: 500 }))
@@ -409,6 +453,8 @@ describe('describeOwedPayout', () => {
             .toBe('2x sword to u1 in g1');
         expect(describeOwedPayout({ kind: 'reversal', userId: 'u1', guildId: 'g1', amount: 300 }))
             .toBe('reverse 300 coins held from u1 in g1');
+        expect(describeOwedPayout({ kind: 'budgetRefund', userId: 'u1', guildId: 'g1', usedField: 'dailyGiftSent', amount: 400 }))
+            .toBe("refund 400 of u1's dailyGiftSent allowance in g1");
     });
 
     test('falls back to the raw payload rather than saying nothing', () => {

@@ -315,11 +315,59 @@ describe('the anti-funnel budgets', () => {
             { limits: LIMITS, aDoc: get(A), bDoc: get(B) },
         );
 
-        expect(result).toMatchObject({ success: false, reason: `short:${B}` });
+        expect(result).toMatchObject({ success: false, reason: `short:${B}`, rollbackComplete: true });
         // The reservations taken before B's coin take failed are handed back.
         expect(get(B).dailyGiftSent).toBe(0);
         expect(get(A).dailyGiftReceived).toBe(0);
         // And A's committed coins were returned.
         expect(get(A).balance).toBe(500);
+    });
+
+    test('a budget refund that cannot be written is recorded as owed, not swallowed (#1025)', async () => {
+        seed({ userId: A, balance: 500 });
+        seed({ userId: B, balance: 0 });
+
+        // The reservations land, but every budget-refund write (a pipeline
+        // updateOne carrying paidPayouts) fails. The old unwind swallowed this and
+        // reported a clean rollback while the allowance stayed consumed; now it is
+        // filed for `payouts:replay` and the take reports the rollback incomplete.
+        const store = mockUsers.model.updateOne.getMockImplementation();
+        mockUsers.model.updateOne.mockImplementation(async (f, u, o) => {
+            if (Array.isArray(u) && JSON.stringify(u).includes('paidPayouts')) throw new Error('mongo is down');
+            return store(f, u, o);
+        });
+
+        const result = await settleTrade(
+            offer({ a: { coins: 100 }, b: { coins: 500 } }),   // B net-sends 400, cannot cover 500
+            { limits: LIMITS, aDoc: get(A), bDoc: get(B) },
+        );
+
+        expect(result).toMatchObject({ success: false, reason: `short:${B}`, rollbackComplete: false });
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'trade', jobName: 'tradeBudgetRefund', guildId: GUILD,
+            payload: expect.objectContaining({ kind: 'budgetRefund', usedField: 'dailyGiftSent', amount: 400 }),
+        }));
+        // A's committed coins still came back — the coin reversal is a separate,
+        // already-durable path.
+        expect(get(A).balance).toBe(500);
+    });
+
+    test('the budget refund is idempotent: a replay after a lost response does not double-refund (#1025)', async () => {
+        const { refundReservedBudget } = require('../src/utils/tradeEscrow');
+        const { BUDGETS } = require('../src/utils/giftCaps');
+        const window = new Date();
+        // The reservation stands: 400 spent in the current window.
+        seed({ userId: A, dailyGiftSent: 400, dailyGiftReset: window });
+
+        const spec = { ...BUDGETS.coinSend, cap: LIMITS.coinSend, amount: 400 };
+        const first = await refundReservedBudget(A, GUILD, spec, { window, tradeId: TID, Model: mockUsers.model });
+        expect(first).toBe(true);
+        expect(get(A).dailyGiftSent).toBe(0);          // handed back once
+
+        // A second application — as `payouts:replay` would run — is a no-op: the
+        // paidPayouts key is already recorded, so the counter is not touched again.
+        const second = await refundReservedBudget(A, GUILD, spec, { window, tradeId: TID, Model: mockUsers.model });
+        expect(second).toBe(true);
+        expect(get(A).dailyGiftSent).toBe(0);          // not driven negative
     });
 });

@@ -42,8 +42,11 @@ const { creditCoinsOrOwe, grantItemsOrOwe } = require('./creditOrOwe');
 const { recordOwedPayout } = require('./owedPayout');
 const {
     tradeCoinPayoutKey, tradeItemDeliverPayoutKey, tradeItemReturnPayoutKey,
+    tradeBudgetRefundKey, payoutKeyGuard, payoutKeyAppendExpr,
 } = require('./payoutKey');
-const { BUDGETS, budgetState, spendBudget, refundBudget } = require('./giftCaps');
+const {
+    BUDGETS, budgetState, spendBudgetGuarded, windowedRefundExpr,
+} = require('./giftCaps');
 const { logTransaction } = require('./logTransaction');
 
 /**
@@ -235,6 +238,54 @@ function checkTradeBudgets(offer, { aDoc, bDoc, limits, currency = '💰', now =
 }
 
 /**
+ * Hands one reserved daily-cap allowance back on the unwind, durably (#1025).
+ *
+ * The reservation is a counter increment; the refund is its decrement, gated on
+ * the window it was spent in (`windowedRefundExpr`) so a replay after the 24h
+ * reset does not take it out of a window the trade never charged, and keyed on
+ * `paidPayouts` so a replay inside the window cannot subtract it twice. That
+ * makes the refund idempotent, which is what lets a failure be written down and
+ * retried rather than swallowed: the old unwind `.catch(() => {})` reported a
+ * clean rollback while the allowance stayed consumed.
+ *
+ * A write that throws is recorded as an owed `budgetRefund` and reported
+ * unresolved, so the unwind can say it did not fully complete. A write that
+ * matches nothing is already settled — the key is present (a prior attempt
+ * applied it) or there is no document to refund — and is reported resolved.
+ *
+ * @returns {Promise<boolean>} whether the allowance is known to be back.
+ */
+async function refundReservedBudget(userId, guildId, spec, { window, tradeId, Model }) {
+    const key = tradeBudgetRefundKey(tradeId, userId, spec.usedField);
+    try {
+        await Model.updateOne(
+            { userId, guildId, ...payoutKeyGuard(key) },
+            [{ $set: {
+                ...windowedRefundExpr({ ...spec, window }),
+                paidPayouts: payoutKeyAppendExpr(key),
+            } }],
+            { updatePipeline: true },
+        );
+        return true;
+    } catch (err) {
+        const recorded = await recordOwedPayout({
+            service: 'trade', jobName: 'tradeBudgetRefund', guildId,
+            payload: {
+                kind: 'budgetRefund', userId, guildId,
+                usedField: spec.usedField, resetField: spec.resetField, cap: spec.cap,
+                amount: spec.amount, window: window ?? null, payoutKey: key,
+            },
+            error: err,
+        });
+        console.error(
+            `[trade] budget refund of ${spec.amount} ${spec.usedField} for ${userId} in ${guildId} ` +
+            `could not be written — ${recorded ? 'recorded as owed' : 'NOT RECORDED'}:`, err.message,
+        );
+        return false;
+    }
+}
+
+/**
  * Reserves the net value each side moves against their daily caps, in the take
  * phase, as guarded atomic writes (#1023 review).
  *
@@ -257,22 +308,39 @@ async function reserveBudgets(offer, { limits, aDoc, bDoc }, undo, Model) {
     const reserveOne = async (amount, userId, doc, spec) => {
         // No flow, or an uncapped budget: nothing to enforce or count.
         if (amount <= 0 || !spec.cap) return true;
-        const { expired } = budgetState(doc, { ...spec, now });
-        const spend = spendBudget({ ...spec, expired, amount, now });
-        const update = {};
-        if (Object.keys(spend.inc).length) update.$inc = spend.inc;
-        if (Object.keys(spend.set).length) update.$set = spend.set;
-        if (!update.$inc && !update.$set) return true;
+        const { expired, windowStart } = budgetState(doc, { ...spec, now });
 
-        const res = await Model.updateOne({ userId, guildId: offer.guildId, ...spend.filter }, update);
-        // No match means the `$expr` cap guard rejected it (or the document is
-        // gone, in which case the asset take will refuse too). Either way this
-        // trade cannot spend the allowance.
-        if (!res.matchedCount) return false;
-        undo.push(() => Model.updateOne(
-            { userId, guildId: offer.guildId },
-            { $inc: refundBudget({ ...spec, amount }) },
-        ).catch(() => {}));
+        // The write is read back so the refund knows the exact window it landed
+        // in — the reset branch opens the window at `now`, the active branch and
+        // the reclassified reset loser leave it at whichever value already stood,
+        // and the refund's window gate has to match whichever it was.
+        let writtenReset = null;
+        const runWrite = async spend => {
+            const update = {};
+            if (Object.keys(spend.inc).length) update.$inc = spend.inc;
+            if (Object.keys(spend.set).length) update.$set = spend.set;
+            const written = await Model.findOneAndUpdate(
+                { userId, guildId: offer.guildId, ...spend.filter },
+                update,
+                { new: true, projection: { [spec.resetField]: 1 } },
+            );
+            if (written) writtenReset = written[spec.resetField] ?? null;
+            return written ? 1 : 0;
+        };
+
+        // `spendBudgetGuarded` folds in the reset-race guard: of two concurrent
+        // first-spends in a freshly-rolled window only one reset wins, and the
+        // loser is retried as an active-window guarded increment (#1025). A miss
+        // that survives both passes is a real cap breach (or a vanished document,
+        // in which case the asset take refuses too) — this trade cannot spend.
+        const matched = await spendBudgetGuarded(
+            { ...spec, expired, amount, now, observedReset: windowStart }, runWrite,
+        );
+        if (!matched) return false;
+
+        undo.push(() => refundReservedBudget(userId, offer.guildId, { ...spec, amount }, {
+            window: writtenReset, tradeId: offer.tradeId, Model,
+        }));
         return true;
     };
 
@@ -312,18 +380,30 @@ async function reserveBudgets(offer, { limits, aDoc, bDoc }, undo, Model) {
  * @param {object} offer
  * @param {?{limits: object, aDoc: ?object, bDoc: ?object}} budget the daily-cap
  *   context; null skips reservation (the escrow-only tests do this).
- * @returns {Promise<{success: boolean, reason: ?string}>}
+ * @returns {Promise<{success: boolean, reason: ?string, rollbackComplete: boolean}>}
+ *   `rollbackComplete` is false when a budget refund could not be confirmed on
+ *   the unwind (it is recorded as owed for `payouts:replay`) — so a refused take
+ *   does not claim a clean rollback while a reserved allowance stays consumed
+ *   (#1025).
  */
 async function takeAll(offer, budget, Model) {
     const { tradeId, guildId, a, b } = offer;
     const undo = [];
-    const unwind = async () => { for (const fn of undo.reverse()) await fn(); };
+    // A budget-refund undo returns false when it could not confirm the refund;
+    // the asset undos are already durable (keyed reversals / owed grants) and
+    // return their own result objects, which are never `=== false`.
+    let rollbackComplete = true;
+    const unwind = async () => {
+        for (const fn of undo.reverse()) {
+            if (await fn() === false) rollbackComplete = false;
+        }
+    };
 
     if (budget?.limits) {
         const reserved = await reserveBudgets(offer, budget, undo, Model);
         if (!reserved.ok) {
             await unwind();
-            return { success: false, reason: reserved.reason };
+            return { success: false, reason: reserved.reason, rollbackComplete };
         }
     }
 
@@ -360,10 +440,10 @@ async function takeAll(offer, budget, Model) {
         const reason = await step();
         if (reason) {
             await unwind();
-            return { success: false, reason };
+            return { success: false, reason, rollbackComplete };
         }
     }
-    return { success: true, reason: null };
+    return { success: true, reason: null, rollbackComplete: true };
 }
 
 /**
@@ -424,18 +504,25 @@ async function deliverAll(offer, Model) {
  * @param {?object} [opts.aDoc] side A's document, for the window state the
  *        reservation reads
  * @param {?object} [opts.bDoc] side B's document
- * @returns {Promise<{success: boolean, reason: ?string, delivered: boolean, owed: boolean}>}
+ * @returns {Promise<{success: boolean, reason: ?string, delivered: boolean, owed: boolean, rollbackComplete: boolean}>}
+ *   `rollbackComplete` is meaningful on a refused take: false means a reserved
+ *   allowance could not be confirmed handed back and is recorded as owed (#1025).
  */
 async function settleTrade(offer, { limits = null, aDoc = null, bDoc = null, Model = DEFAULT_USER } = {}) {
     const budget = limits ? { limits, aDoc, bDoc } : null;
     const took = await takeAll(offer, budget, Model);
-    if (!took.success) return { success: false, reason: took.reason, delivered: false, owed: false };
+    if (!took.success) {
+        return {
+            success: false, reason: took.reason, delivered: false, owed: false,
+            rollbackComplete: took.rollbackComplete,
+        };
+    }
     const out = await deliverAll(offer, Model);
-    return { success: true, reason: null, delivered: out.delivered, owed: out.owed };
+    return { success: true, reason: null, delivered: out.delivered, owed: out.owed, rollbackComplete: true };
 }
 
 module.exports = {
-    settleTrade, takeAll, deliverAll, reserveBudgets,
+    settleTrade, takeAll, deliverAll, reserveBudgets, refundReservedBudget,
     takeCoins, rollbackCoins, takeItem, returnItem, deliverCoins, deliverItem,
     tradeCoinEscrowKey, tradeBudgetFlows, checkTradeBudgets,
     SHORT_STATUSES,

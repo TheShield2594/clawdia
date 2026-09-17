@@ -117,26 +117,45 @@ function budgetState(doc, { usedField, resetField, cap, now = Date.now() }) {
         cap,
         unlimited,
         remaining: unlimited ? Infinity : Math.max(0, cap - used),
+        // The raw window-start value exactly as stored (a Date, or null when the
+        // window has never been opened). `spendBudget`'s reset branch pins the
+        // write to this value so only one concurrent first-spend can reset the
+        // window; callers pass it back as `observedReset` (#1025).
+        windowStart: doc?.[resetField] ?? null,
     };
 }
 
 /**
  * The write fragments that spend `amount` from a budget.
  *
+ * @param {*} [observedReset] the window-start value read in the pre-flight
+ *          (`budgetState(...).windowStart`), a Date or null. The reset branch
+ *          pins its write to this value.
  * @returns {{ filter, inc, set }} to be merged into the caller's own query and
- *          update. `filter` is empty when the window is being opened fresh or
- *          the cap is off; otherwise it is the `$expr` that makes the update
- *          match nothing once the cap would be exceeded — which is what stops
- *          two concurrent gifts from each passing a check the other invalidated.
+ *          update. On the active-window branch `filter` is the `$expr` that
+ *          makes the update match nothing once the cap would be exceeded — which
+ *          is what stops two concurrent gifts from each passing a check the other
+ *          invalidated. On the reset branch `filter` pins `resetField` to the
+ *          observed value, so of two concurrent first-spends in a freshly-rolled
+ *          window only one reset wins; the loser matches nothing and is retried
+ *          by `spendBudgetGuarded` as an active-window increment (#1025).
  */
-function spendBudget({ usedField, resetField, cap, expired, amount, now = new Date() }) {
+function spendBudget({ usedField, resetField, cap, expired, amount, now = new Date(), observedReset = null }) {
     // Cap off: nothing to enforce and nothing worth counting. The stale counter
     // left behind is harmless — its window start is old, so re-enabling the cap
     // finds an expired window and starts from zero.
     if (!cap) return { filter: {}, inc: {}, set: {} };
 
     if (expired) {
-        return { filter: {}, inc: {}, set: { [usedField]: amount, [resetField]: now } };
+        // The reset is conditioned on the window still being the one we observed.
+        // A concurrent first-spend that resets first changes `resetField`, so this
+        // write matches nothing rather than overwriting the earlier amount — which
+        // is the race that let a fresh window's combined net exceed the cap.
+        return {
+            filter: { [resetField]: observedReset },
+            inc: {},
+            set: { [usedField]: amount, [resetField]: now },
+        };
     }
 
     return {
@@ -159,11 +178,13 @@ function spendBudget({ usedField, resetField, cap, expired, amount, now = new Da
  *
  * @returns {{ filter, set }} `set` holds aggregation expressions, not operators.
  */
-function spendBudgetPipeline({ usedField, resetField, cap, expired, amount, now = new Date() }) {
+function spendBudgetPipeline({ usedField, resetField, cap, expired, amount, now = new Date(), observedReset = null }) {
     if (!cap) return { filter: {}, set: {} };
 
     if (expired) {
-        return { filter: {}, set: { [usedField]: amount, [resetField]: now } };
+        // Same reset-race guard as `spendBudget`, in filter form for the pipeline
+        // caller's `guard` (#1025).
+        return { filter: { [resetField]: observedReset }, set: { [usedField]: amount, [resetField]: now } };
     }
 
     return {
@@ -174,6 +195,57 @@ function spendBudgetPipeline({ usedField, resetField, cap, expired, amount, now 
             [usedField]: { $add: [{ $ifNull: [`$${usedField}`, 0] }, amount] },
         },
     };
+}
+
+/**
+ * Run a budgeted write with the reset race handled once, for every call site
+ * (#1025).
+ *
+ * `spendBudget`'s reset branch pins its write to the observed window start, so a
+ * concurrent first-spend that resets the window first makes this one match
+ * nothing. That is correct but incomplete: the loser of the race must still
+ * spend — the window is now open, so its spend belongs in the active-window
+ * guarded increment. This helper is where that reclassification lives, so `/gift`,
+ * `/bank transfer` and `/trade` inherit it rather than each re-deriving it.
+ *
+ * `runWrite(spend)` issues the caller's own atomic write with the `{ filter, inc,
+ * set }` fragments folded in, and resolves to the write's truthy outcome (the
+ * updated document, or a positive matched count) on a match and a falsy value on
+ * a miss. When the reset branch misses, this retries once with the active-window
+ * fragments; the active branch's own `$expr` cap guard is untouched, so a spend
+ * that genuinely breaches the cap still matches nothing on both passes. A miss
+ * for any other reason the caller folded into its filter (a balance guard, a
+ * freeze, a vanished document) simply misses again on the retry and is reported
+ * as the caller already reports it.
+ *
+ * `retryOnMiss` gates the second pass. A caller whose write can miss for a reason
+ * that must not be re-attempted — a credit that raised an error whose outcome is
+ * unknown, where a blind retry is how a payout lands twice — passes a predicate
+ * that returns false in that case, so only a clean filter-miss is reclassified.
+ *
+ * @param {object} spec  `{ usedField, resetField, cap, expired, amount, now?,
+ *                        observedReset }` — the same shape passed to `spendBudget`.
+ * @param {(spend: object) => Promise<*>} runWrite
+ * @param {() => boolean} [retryOnMiss] whether the first miss should be retried
+ *   as an active-window increment; defaults to always.
+ * @returns {Promise<*>} whatever `runWrite` returned for the pass that settled it.
+ */
+async function spendBudgetGuarded(spec, runWrite, retryOnMiss = () => true) {
+    const first = await runWrite(spendBudget(spec));
+    if (first || !spec.cap || !spec.expired || !retryOnMiss()) return first;
+    // Lost the reset race (or missed for an unrelated reason): re-attempt as an
+    // active-window guarded increment. `observedReset` no longer applies.
+    return runWrite(spendBudget({ ...spec, expired: false, observedReset: null }));
+}
+
+/**
+ * `spendBudgetGuarded` for a pipeline caller (`runWrite` folds `{ filter, set }`
+ * into a `grantInventoryItem` `guard`/`extraSet`). Same race, same retry (#1025).
+ */
+async function spendBudgetPipelineGuarded(spec, runWrite, retryOnMiss = () => true) {
+    const first = await runWrite(spendBudgetPipeline(spec));
+    if (first || !spec.cap || !spec.expired || !retryOnMiss()) return first;
+    return runWrite(spendBudgetPipeline({ ...spec, expired: false, observedReset: null }));
 }
 
 /**
@@ -250,6 +322,8 @@ module.exports = {
     budgetState,
     spendBudget,
     spendBudgetPipeline,
+    spendBudgetGuarded,
+    spendBudgetPipelineGuarded,
     refundBudget,
     refundBudgetPipeline,
     windowedRefundExpr,
