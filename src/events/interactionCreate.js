@@ -377,21 +377,44 @@ module.exports = {
         // recorded so the refusal and success helpers can honour it. Everything
         // past this point reports through those helpers rather than a second
         // initial reply, which Discord rejects once an interaction is acked.
-        const deferral = resolveDeferral(command.deferral, interaction);
-        if (deferral) {
-            try {
+        // The resolver runs inside the try alongside deferReply: a command's
+        // `deferral` hook may be a function (documented in EXTENDING.md), and a
+        // throw from it must not skip both the acknowledgement and the error
+        // handler below, which would leave the interaction with no response at all.
+        try {
+            const deferral = resolveDeferral(command.deferral, interaction);
+            if (deferral) {
                 await interaction.deferReply(deferral.ephemeral ? { flags: MessageFlags.Ephemeral } : {});
                 markDeferred(interaction, deferral.ephemeral);
-            } catch (error) {
-                console.error(`Failed to acknowledge ${interaction.commandName}:`, error.message);
-                logCommandMetric(interaction, false, 'ack_failed');
-                return;
             }
+        } catch (error) {
+            console.error(`Failed to acknowledge ${interaction.commandName}:`, error.message);
+            logCommandMetric(interaction, false, 'ack_failed');
+            // Best-effort: if the hook threw the token is still live and this
+            // reaches the caller; if deferReply threw the token is likely dead
+            // and this quietly fails, which is why it is caught.
+            await sendEphemeralResponse(interaction, {
+                content: 'There was an error while starting this command.',
+            }).catch(() => {});
+            return;
         }
 
         // Cached read: fires on every slash command, and nothing below mutates
-        // or persists the settings object. See utils/guildSettingsCache.
-        const guildSettings = await getGuildSettings(interaction.guild.id);
+        // or persists the settings object. See utils/guildSettingsCache. Wrapped
+        // because a rejection here after a deferral would otherwise leave the
+        // placeholder standing with nothing to fill it (the try/catch around
+        // execute below does not cover this read).
+        let guildSettings;
+        try {
+            guildSettings = await getGuildSettings(interaction.guild.id);
+        } catch (error) {
+            console.error(`Guild settings lookup failed for ${interaction.commandName}:`, error.message);
+            logCommandMetric(interaction, false, 'settings_unavailable');
+            await sendEphemeralResponse(interaction, {
+                content: 'Could not load server settings. Try again in a moment.',
+            }).catch(() => {});
+            return;
+        }
 
         const policy = getPolicyDecision(interaction, guildSettings);
         if (!policy.allowed) {

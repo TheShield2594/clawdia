@@ -91,7 +91,7 @@ module.exports = {
 ```
 
 That is the smallest working command, not the whole contract — see
-[The full module contract](#the-full-module-contract) below for the five
+[The full module contract](#the-full-module-contract) below for the six
 optional keys the interaction handler also looks for.
 
 ### The full module contract

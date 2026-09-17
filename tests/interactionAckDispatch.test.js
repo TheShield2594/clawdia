@@ -180,6 +180,44 @@ describe('the permission gate stays ahead of the acknowledgement', () => {
     });
 });
 
+describe('failures around the acknowledgement itself', () => {
+    // A `deferral` hook may be a function; if it throws it must not skip both the
+    // ack and the error handler, leaving the interaction with no response at all.
+    test('a throwing deferral hook is caught and reported, not swallowed', async () => {
+        const command = moderationCommand({
+            deferral: () => { throw new Error('bad hook'); },
+        });
+        const interaction = makeInteraction();
+        await interactionCreate.execute(interaction, makeClient(command));
+
+        expect(interaction.deferReply).not.toHaveBeenCalled();
+        expect(command.execute).not.toHaveBeenCalled();
+        // Not deferred, so the refusal is a plain ephemeral reply.
+        expect(interaction.reply).toHaveBeenCalledTimes(1);
+        const [payload] = interaction.reply.mock.calls[0];
+        expect(payload.flags).toBe(MessageFlags.Ephemeral);
+    });
+
+    // After a public deferral, a rejected settings read would otherwise leave the
+    // placeholder standing forever with nothing to fill it.
+    test('a settings-read rejection clears the placeholder and reports ephemerally', async () => {
+        getGuildSettings.mockRejectedValueOnce(new Error('mongo down'));
+
+        const command = moderationCommand();
+        const interaction = makeInteraction();
+        await interactionCreate.execute(interaction, makeClient(command));
+
+        expect(interaction.deferReply).toHaveBeenCalled();
+        expect(command.execute).not.toHaveBeenCalled();
+        expect(interaction.reply).not.toHaveBeenCalled();
+        expect(interaction.deleteReply).toHaveBeenCalledTimes(1);
+        expect(interaction.followUp).toHaveBeenCalledTimes(1);
+        const [payload] = interaction.followUp.mock.calls[0];
+        expect(payload.flags).toBe(MessageFlags.Ephemeral);
+        expect(payload.content).toMatch(/server settings/i);
+    });
+});
+
 describe('a command that throws after acknowledgement', () => {
     test('reports the error as an ephemeral follow-up, not a second reply', async () => {
         const command = moderationCommand({
