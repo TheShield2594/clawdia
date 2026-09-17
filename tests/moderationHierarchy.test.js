@@ -267,8 +267,11 @@ describe('the commands that take a target call the guard', () => {
         expect(ban).toBeGreaterThan(-1);
         expect(check).toBeLessThan(ban);
 
-        // And it stops there rather than falling through to the ban.
-        expect(source).toMatch(/indeterminate[\s\S]{0,400}?(return interaction\.reply|continue;)/);
+        // And it stops there rather than falling through to the ban — either a
+        // direct reply, the sendEphemeralResponse refusal helper the single-target
+        // commands use after the dispatcher pre-acknowledges them (#995), or the
+        // per-id `continue` massban uses inside its loop.
+        expect(source).toMatch(/indeterminate[\s\S]{0,400}?(return (interaction\.reply|sendEphemeralResponse)|continue;)/);
     });
 
     // The ban-shaped commands proceed when no member is found, so a cache-only
