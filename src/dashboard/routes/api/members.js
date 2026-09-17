@@ -57,7 +57,7 @@ router.get('/guild/:guildId/members/resolve', checkAuth, checkGuildAccess, check
 // coins vanished (#1009). Owed payouts are the debits whose credit half failed
 // and are sitting in the dead-letter queue for `npm run payouts:replay`, keyed
 // so the row can be matched to the transaction it belongs to.
-router.get('/guild/:guildId/members/:userId/ledger', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/members/:userId/ledger', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid user ID' });
     const { page, limit, skip } = readPage(req, { defaultLimit: 20, maxLimit: 50 });
