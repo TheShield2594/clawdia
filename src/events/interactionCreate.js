@@ -20,6 +20,7 @@ const {
     commandIsFreezeGated, isEconomyFrozen, NOT_FROZEN, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
 } = require('../utils/economyFreeze');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
+const { resolveDeferral, markDeferred, sendEphemeralResponse } = require('../utils/interactionAck');
 const cooldownStore = require('../utils/commandCooldowns');
 const { recordCommandMetric } = require('../utils/commandMetricsBuffer');
 // Giveaway entry/withdrawal.
@@ -347,10 +348,6 @@ module.exports = {
             });
         }
 
-        // Cached read: fires on every slash command, and nothing below mutates
-        // or persists the settings object. See utils/guildSettingsCache.
-        const guildSettings = await getGuildSettings(interaction.guild.id);
-
         const command = client.commands.get(interaction.commandName);
 
         if (!command) {
@@ -359,6 +356,10 @@ module.exports = {
             return;
         }
 
+        // The permission gate is synchronous and instant, so it runs before any
+        // acknowledgement — a member the gate refuses is told so with a plain
+        // ephemeral reply, exactly as before, and never sees a "thinking"
+        // placeholder for a command they cannot run.
         const missingPerms = missingRequiredPermissions(interaction, command);
         if (missingPerms) {
             logCommandMetric(interaction, false, 'missing_permissions');
@@ -368,10 +369,34 @@ module.exports = {
             });
         }
 
+        // Acknowledge up front for commands whose downstream work can exceed
+        // Discord's three-second deadline (#995): the settings read and cooldown
+        // claim below, then — for the moderation commands — a member-cache miss
+        // that fetches from the gateway inside execute(). A command opts in with
+        // a `deferral` hook (docs/EXTENDING.md); the visibility it chooses is
+        // recorded so the refusal and success helpers can honour it. Everything
+        // past this point reports through those helpers rather than a second
+        // initial reply, which Discord rejects once an interaction is acked.
+        const deferral = resolveDeferral(command.deferral, interaction);
+        if (deferral) {
+            try {
+                await interaction.deferReply(deferral.ephemeral ? { flags: MessageFlags.Ephemeral } : {});
+                markDeferred(interaction, deferral.ephemeral);
+            } catch (error) {
+                console.error(`Failed to acknowledge ${interaction.commandName}:`, error.message);
+                logCommandMetric(interaction, false, 'ack_failed');
+                return;
+            }
+        }
+
+        // Cached read: fires on every slash command, and nothing below mutates
+        // or persists the settings object. See utils/guildSettingsCache.
+        const guildSettings = await getGuildSettings(interaction.guild.id);
+
         const policy = getPolicyDecision(interaction, guildSettings);
         if (!policy.allowed) {
             logCommandMetric(interaction, false, 'policy_denied');
-            return interaction.reply({ content: policy.reason, flags: MessageFlags.Ephemeral });
+            return sendEphemeralResponse(interaction, { content: policy.reason });
         }
 
         // The economy freeze a server admin sets from the dashboard (#870).
@@ -397,11 +422,11 @@ module.exports = {
             } catch (error) {
                 console.error(`Economy freeze check failed for ${interaction.user.id}:`, error.message);
                 logCommandMetric(interaction, false, 'economy_freeze_unknown');
-                return interaction.reply({ content: FREEZE_UNKNOWN_NOTICE, flags: MessageFlags.Ephemeral });
+                return sendEphemeralResponse(interaction, { content: FREEZE_UNKNOWN_NOTICE });
             }
             if (frozen) {
                 logCommandMetric(interaction, false, 'economy_frozen');
-                return interaction.reply({ content: FROZEN_NOTICE, flags: MessageFlags.Ephemeral });
+                return sendEphemeralResponse(interaction, { content: FROZEN_NOTICE });
             }
         }
 
@@ -426,9 +451,8 @@ module.exports = {
             const longCooldown = (expirationTime - Date.now()) > 12 * 60 * 60 * 1000;
             const exactTime = longCooldown ? ` (<t:${expiredTimestamp}:F>)` : '';
 
-            return interaction.reply({
+            return sendEphemeralResponse(interaction, {
                 content: `Please wait, you are on cooldown. You can use \`/${command.data.name}\` again <t:${expiredTimestamp}:R>${exactTime}.`,
-                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -441,17 +465,17 @@ module.exports = {
         } catch (error) {
             console.error(`Error executing ${interaction.commandName}:`, error);
             logCommandMetric(interaction, false, error.name || 'execution_error');
-            const errorMessage = { content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral };
 
             // The apology itself can fail (expired token, already-acked interaction).
             // Swallow that — the original error is already logged, and letting this
             // throw would turn a handled command failure into an unhandled rejection.
+            // sendEphemeralResponse picks reply/followUp/editReply from the
+            // interaction's state, so a deferred command is never given a second
+            // initial reply.
             try {
-                if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp(errorMessage);
-                } else {
-                    await interaction.reply(errorMessage);
-                }
+                await sendEphemeralResponse(interaction, {
+                    content: 'There was an error while executing this command!',
+                });
             } catch (replyError) {
                 console.error(`Failed to report command error to user for ${interaction.commandName}:`, replyError.message);
             }

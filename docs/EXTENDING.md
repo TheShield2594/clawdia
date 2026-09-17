@@ -109,6 +109,7 @@ refuses to start without them; the rest are optional hooks
 | `cooldownKey` | no | `(interaction) => string` — defaults to the command name | which bucket the cooldown is charged to |
 | `autocomplete` | no | `async (interaction, client) => void` | autocomplete interactions for this command |
 | `requiredPermissions` | no | an array of `PermissionFlagsBits` | checked before `execute`, and before the cooldown is claimed |
+| `deferral` | no | `{ ephemeral: boolean }`, `'public'`/`'ephemeral'`, `true`, or `(interaction) => one of those \| null` | the dispatcher acknowledges the interaction up front, before the settings read, cooldown claim and `execute` |
 | `category` | never set this | string | stamped by the loader from the directory the file is in |
 
 #### The two required keys
@@ -236,6 +237,51 @@ satisfy any bit, because Discord folds that into the permissions it sends.
 A member missing a bit gets an ephemeral list of what they need and the
 interaction is recorded as `missing_permissions`. Keep the builder line too:
 it keeps the command out of the picker for people who cannot run it.
+
+#### Deferral
+
+Discord invalidates an interaction token three seconds after it arrives unless
+the bot has acknowledged it. Most commands answer well inside that window, so
+they say nothing here and reply themselves. A command that cannot — because its
+own work, stacked on the dispatcher's settings read and cooldown claim, can run
+long — declares `deferral`, and the dispatcher acknowledges the interaction up
+front, before any of that awaited work:
+
+```javascript
+module.exports = {
+    data: /* … */,
+    requiredPermissions: [PermissionFlagsBits.BanMembers],
+
+    // The dispatcher defers this interaction before the settings read, the
+    // cooldown claim and execute(). `resolveMember` inside execute() can miss
+    // the 200-entry member cache and fetch from the gateway, which is what
+    // outruns the window (#995).
+    deferral: { ephemeral: false },
+    async execute(interaction) { /* … */ },
+};
+```
+
+Deferring commits the first response's visibility, and that is the whole of the
+decision. A **public** deferral (`{ ephemeral: false }`, `'public'`, or `true`)
+shows a channel-visible "thinking" placeholder and is right for a command whose
+success belongs in the channel — the moderation embeds. An **ephemeral**
+deferral (`{ ephemeral: true }` or `'ephemeral'`) shows a placeholder only the
+caller sees, for a command whose answer is private. The value may also be a
+function `(interaction) => …` returning one of those or `null`, so a command can
+defer only the subcommands that need it.
+
+Because the visibility is fixed at the defer, a command that deferred publicly
+but then has to *refuse* cannot make that refusal ephemeral on the same message.
+The moderation commands want a public success embed and an ephemeral refusal, so
+they defer publicly and route through the two helpers in
+`utils/interactionAck.js`: `sendPublicResponse` fills the placeholder with the
+success embed (`editReply`), and `sendEphemeralResponse` drops the public
+placeholder and delivers the refusal as an ephemeral follow-up. Both helpers
+also work when the dispatcher did *not* defer — they fall back to a plain
+`reply` — so the same command code is correct whether or not it opted in, which
+is what the command tests exercise. Never reach for a bare `interaction.reply`
+in a deferred command: Discord rejects a second initial reply once an
+interaction is acknowledged.
 
 ### Command with Options
 

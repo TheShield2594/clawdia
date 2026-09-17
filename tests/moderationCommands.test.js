@@ -14,7 +14,7 @@
 // guards, keeps that suite green. These tests drive the commands instead: a
 // trial moderator aims at the head moderator and the ban has to not happen.
 
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, MessageFlags } = require('discord.js');
 
 jest.mock('../src/services/moderationLogService', () => ({
     logModeration: jest.fn().mockResolvedValue({ caseId: 1 }),
@@ -144,6 +144,98 @@ describe('a moderator cannot act on someone who outranks them', () => {
     test.each(CASES)('$name allows an ordinary member below them', async ({ run }) => {
         const { done } = await run(target());
         expect(done).toBe(true);
+    });
+});
+
+// ── acknowledgement before slow work (#995) ─────────────────────────────────
+//
+// The dispatcher defers these four commands up front, because resolveMember can
+// miss the member cache and fetch from the gateway inside execute() — long
+// enough, stacked on the dispatcher's own reads, to outrun Discord's three-second
+// window. Once deferred, a bare reply is a second initial reply Discord rejects,
+// so success has to edit the placeholder and a refusal has to follow up. These
+// drive execute() with the interaction already deferred (as the dispatcher would
+// leave it) and prove both halves land through the right API.
+describe('the moderation commands acknowledge before slow work', () => {
+    test.each(['ban', 'kick', 'mute', 'softban'])(
+        '/%s asks the dispatcher to defer publicly', name => {
+            expect(command(name).deferral).toEqual({ ephemeral: false });
+        });
+
+    const RUN = {
+        ban: async interaction => command('ban').execute(interaction),
+        kick: async interaction => command('kick').execute(interaction),
+        mute: async interaction => command('mute').execute(interaction),
+        softban: async interaction => command('softban').execute(interaction),
+    };
+    const options = (name, id) => (name === 'mute'
+        ? { user: makeUser(id), duration: 10 }
+        : { user: makeUser(id) });
+
+    describe.each(['ban', 'kick', 'mute', 'softban'])('%s, when deferred', name => {
+        test('edits the public placeholder with the success embed', async () => {
+            const member = target();
+            const guild = makeGuild({ cached: [member] });
+            const interaction = makeInteraction({
+                guild, invoker: modMember(), deferredAs: 'public',
+                options: options(name, member.id),
+            });
+            await RUN[name](interaction);
+
+            expect(interaction.editReply).toHaveBeenCalledTimes(1);
+            expect(interaction.reply).not.toHaveBeenCalled();
+            // The success embed is public: it fills the deferred placeholder
+            // rather than being dropped for an ephemeral follow-up.
+            expect(interaction.deleteReply).not.toHaveBeenCalled();
+            const [payload] = interaction.editReply.mock.calls[0];
+            expect(payload.embeds).toHaveLength(1);
+        });
+
+        test('drops the placeholder and refuses the moderator ephemerally', async () => {
+            // A target who outranks the moderator is refused after the (deferred)
+            // slow path — the refusal must stay private.
+            const boss = headMod();
+            const guild = makeGuild({ cached: [boss] });
+            const interaction = makeInteraction({
+                guild, invoker: modMember(), deferredAs: 'public',
+                options: options(name, boss.id),
+            });
+            await RUN[name](interaction);
+
+            expect(interaction.reply).not.toHaveBeenCalled();
+            expect(interaction.deleteReply).toHaveBeenCalledTimes(1);
+            expect(interaction.followUp).toHaveBeenCalledTimes(1);
+            const [payload] = interaction.followUp.mock.calls[0];
+            expect(payload.flags).toBe(MessageFlags.Ephemeral);
+            expect(lastReply(interaction)).toMatch(/above or equal to yours/i);
+        });
+
+        test('still resolves a cache miss by fetching, while deferred', async () => {
+            const member = target();
+            const guild = makeGuild({ cached: [], fetchable: [member] });
+            const interaction = makeInteraction({
+                guild, invoker: modMember(), deferredAs: 'public',
+                options: options(name, member.id),
+            });
+            await RUN[name](interaction);
+
+            expect(guild.members.fetch).toHaveBeenCalledWith(member.id);
+            expect(interaction.editReply).toHaveBeenCalledTimes(1);
+        });
+
+        test('reports an unsettled lookup ephemerally rather than acting', async () => {
+            const guild = makeGuild({ cached: [], fetchError: new Error('rate limited') });
+            const interaction = makeInteraction({
+                guild, invoker: modMember(), deferredAs: 'public',
+                options: options(name, 'unknown'),
+            });
+            await RUN[name](interaction);
+
+            expect(guild.actions.banned).toHaveLength(0);
+            expect(interaction.deleteReply).toHaveBeenCalledTimes(1);
+            const [payload] = interaction.followUp.mock.calls[0];
+            expect(payload.flags).toBe(MessageFlags.Ephemeral);
+        });
     });
 });
 
