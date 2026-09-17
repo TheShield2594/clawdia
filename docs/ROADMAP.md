@@ -22,13 +22,14 @@ coverage, which is [#873](https://github.com/TheShield2594/clawdia/issues/873):
 audit coverage is widest exactly where the risk is not.
 
 So net-new game features wait, and every currency-mutation path gets the
-treatment the nine long-stable subsystems got. Four passes have landed under that
+treatment the nine long-stable subsystems got. Five passes have landed under that
 decision already — `/duel` escrow and the `/heist` and `/syndicate` crew splits
 in v4.5.2, the casino's progressive jackpot in v4.6.0, `/gift` and `/market` in
-v4.6.1, the casino's hand payouts in v4.7.0 — and between them they found
-twenty-four critical defects in code that was live, every one of them on a path
-that moves coins. That is the argument for the order, and it is worth re-reading
-before anybody proposes suspending it.
+v4.6.1, the casino's hand payouts in v4.7.0, the core currency commands
+(`balance`, `bank`, `daily`, `work`, `jobs`, `crime`, `invest`) in v4.11.1 — and
+between them they found twenty-nine critical defects in code that was live, every
+one of them on a path that moves coins. That is the argument for the order, and it
+is worth re-reading before anybody proposes suspending it.
 
 What this does *not* mean: bug fixes, security work, operational work and
 documentation are not features and are not blocked. Nothing below is sequenced
@@ -50,11 +51,13 @@ so that there is only ever one copy to correct.
    a public deferral makes refusals public, an ephemeral one hides successful
    moderation embeds from the channel. **Settle that first** — it is the whole
    of the work that cannot be started without a decision.
-2. **Economy audit, pass 5 — the core currency commands.**
-   ([#873](https://github.com/TheShield2594/clawdia/issues/873)) `balance`,
-   `bank`, `daily`, `work`, `jobs`, `crime`, `invest`. Next in the money-moving
-   order below, now that every path where value passes between two players has
-   been through a pass.
+2. **Economy audit, pass 6 — the gathering loops.**
+   ([#873](https://github.com/TheShield2594/clawdia/issues/873)) `hunt`, `fish`,
+   `mine`, `explore`, and items/effects/`use`. Next in the money-moving order
+   below, now that the core currency commands have been through pass 5 (v4.11.1):
+   `/invest`'s unguarded refund, the `/work` and `/daily` challenge bonuses and
+   the `/crime` payout all credited without reading the write back, and now go
+   through `creditCoinsOrOwe` like every other economy credit.
 3. **What is left of the casino.**
    ([#873](https://github.com/TheShield2594/clawdia/issues/873)) Pass 4 took the
    payouts. `confirmBet`, the bet guards and the games' leaderboard writes were
@@ -89,15 +92,13 @@ each pass found; its
 [Not yet reviewed](AUDIT_LOG.md#not-yet-reviewed) section is the queue. That list
 is long and mostly unordered, deliberately — it is a survey, not a plan. The
 order this roadmap commits to, within the economy, is money-moving first.
-Four passes have landed against it — `/duel` escrow and the crew splits, the
-progressive jackpot, `/gift` and `/market`, and the casino's hand payouts and
-crash refunds — which leaves:
+Five passes have landed against it — `/duel` escrow and the crew splits, the
+progressive jackpot, `/gift` and `/market`, the casino's hand payouts and crash
+refunds, and the core currency commands — which leaves:
 
-1. the core currency commands — `balance`, `bank`, `daily`, `work`, `jobs`,
-   `crime`, `invest`
-2. the gathering loops — `hunt`, `fish`, `mine`, `explore` — and items, effects
+1. the gathering loops — `hunt`, `fish`, `mine`, `explore` — and items, effects
    and `use`
-3. progression, the group and PvP systems, seasonal events
+2. progression, the group and PvP systems, seasonal events
 
 Plus the remainder of the casino — `confirmBet`, the bet guards, the leaderboard
 writes — which pass 4 named as out of its scope rather than dropping.

@@ -14,6 +14,8 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { claimStarterKit } = require('../../utils/starterKit');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
+const { challengeBonusPayoutKey } = require('../../utils/payoutKey');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
@@ -565,21 +567,35 @@ module.exports = {
 
                 if (response.customId === challenge.correctId) {
                     const bonusAmount = Math.round(actualAmount * 0.5);
-                    const bonusUpdated = await User.findOneAndUpdate(
-                        { userId: interaction.user.id, guildId: interaction.guild.id },
-                        { $inc: { balance: bonusAmount } },
-                        { new: true }
-                    );
-                    logTransaction({
-                        userId: interaction.user.id,
-                        guildId: interaction.guild.id,
-                        type: 'daily_challenge_bonus',
-                        amount: bonusAmount,
-                        balance: bonusUpdated?.balance ?? updated.balance + bonusAmount,
-                        note: `daily challenge bonus (${challenge.type})`,
-                    });
 
-                    if (bonusUpdated && bonusAmount > 0) {
+                    // Keyed and recorded-if-lost, like every other economy
+                    // credit. The bare `$inc` this replaced read nothing back, so
+                    // an unmatched write still showed "You earned an extra +X",
+                    // and a throw aborted to the generic outer catch — telling the
+                    // player their claim failed after it had already been paid,
+                    // with the bonus neither credited nor written down (#873).
+                    const credit = await creditCoinsOrOwe(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        bonusAmount,
+                        {
+                            payoutKey: challengeBonusPayoutKey('daily', interaction.id),
+                            service: 'daily', jobName: 'dailyChallengeBonus',
+                        },
+                    );
+                    const bonusUpdated = credit.doc;
+
+                    if (credit.credited) {
+                        logTransaction({
+                            userId: interaction.user.id,
+                            guildId: interaction.guild.id,
+                            type: 'daily_challenge_bonus',
+                            amount: bonusAmount,
+                            balance: bonusUpdated?.balance ?? updated.balance + bonusAmount,
+                            note: `daily challenge bonus (${challenge.type})`,
+                        });
+                    }
+
+                    if (bonusUpdated && credit.credited && bonusAmount > 0) {
                         const balanceAfterBonus = bonusUpdated.balance ?? 0;
                         await ensureQuests(bonusUpdated, guildSettings);
                         const bonusEarn = await onEconomyEarn(bonusUpdated, guildSettings, bonusAmount);
@@ -598,7 +614,9 @@ module.exports = {
                         }
                     }
 
-                    const finalBalance = bonusUpdated?.balance ?? updated.balance + bonusAmount;
+                    const finalBalance = credit.credited
+                        ? (bonusUpdated?.balance ?? updated.balance + bonusAmount)
+                        : updated.balance;
                     rewardEmbed.setDescription(
                         getStreakDescription(streakCurrent, isMilestone) + '\n\n' +
                         buildRewardBlock(actualAmount, streakCurrent, streakMult, coinMult, serverMult, combined, finalBalance, capActive, droppedItem, isMilestone, streakCurrent, currency)
@@ -606,7 +624,9 @@ module.exports = {
                     const winChallengeEmbed = new EmbedBuilder()
                         .setColor(COLORS.PRIZE)
                         .setTitle('⚡ Quick Challenge — Earned!')
-                        .setDescription(`✅ Correct! You earned an extra **+${bonusAmount.toLocaleString()} coins**!`);
+                        .setDescription(credit.credited
+                            ? `✅ Correct! You earned an extra **+${bonusAmount.toLocaleString()} coins**!`
+                            : `✅ Correct! Your **+${bonusAmount.toLocaleString()} coin** bonus couldn't be paid right now — it's been recorded and will be restored.`);
                     await response.update({ embeds: [rewardEmbed, winChallengeEmbed], components: [calendarRow] });
                 } else {
                     const loseChallengeEmbed = new EmbedBuilder()

@@ -1,11 +1,12 @@
 # Feature Audit Log
 
 A record of the subsystems that have been through a line-by-line audit, and what
-was found and fixed in each. **It is not a survey of the whole bot.** Twelve
-subsystems have been audited: nine long-stable, low-churn ones, and three passes
-over the economy — the escrow and payout paths of `/duel`, `/heist` and
-`/syndicate`, the casino's progressive jackpot, and the unwind paths of `/gift`
-and `/market` (#873). The majority of the
+was found and fixed in each. **It is not a survey of the whole bot.** Nine
+long-stable, low-churn subsystems have been audited, and five passes over the
+economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
+casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
+casino's hand payouts, and the core currency commands (`balance`, `bank`,
+`daily`, `work`, `jobs`, `crime`, `invest`) (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -780,6 +781,96 @@ rest of the economy. Both are still listed under
 
 ---
 
+## Economy — The Core Currency Commands
+
+**Status: Audited — all findings resolved** ✓
+
+The fifth pass of the economy audit #873 asks for, over the core currency
+commands its checklist and [ROADMAP.md](ROADMAP.md) sequence next: `balance`,
+`bank`, `daily`, `work`, `jobs`, `crime` and `invest`. These are the commands a
+player runs most, and between them the everyday ways coins enter and leave a
+wallet outside of a trade with another player — which the earlier passes covered.
+
+The shape of the pass is the same as the four before it. The forward direction
+was mostly sound: `/daily` and `/work` credit their base reward through a guarded,
+cooldown-carrying write, `/bank` moves coins between a player's own wallet and
+bank in one atomic write, and `/crime`'s fines all go through the audited
+`debitUpTo`. What no pass had looked at is the credit that follows a slow,
+interactive flow — a challenge answered thirty seconds after the shift was paid,
+a district that filled while a contribution was in flight — and the refund when
+one of those fails. Every finding below is a **credit that read nothing back**:
+a bare `$inc` announced as paid whether or not the write matched a document, with
+nothing written down when it did not. That is the #804/#868/#870 shape the whole
+audit is about, in the four commands that had never had it applied.
+
+The rest of the economy remains unaudited and is still listed under
+[Not yet reviewed](#not-yet-reviewed).
+
+**Files reviewed/fixed:**
+- `src/commands/economy/invest.js`
+- `src/commands/economy/work.js`
+- `src/commands/economy/daily.js`
+- `src/commands/economy/crime.js`
+- `src/commands/economy/balance.js` (reviewed, sound)
+- `src/commands/economy/bank.js` (reviewed, sound)
+- `src/commands/economy/jobs.js` (reviewed, sound)
+- `src/utils/payoutKey.js`
+- `tests/economyInvestCommand.test.js`
+- `tests/economyWorkCommand.test.js`
+- `tests/economyDailyCommand.test.js`
+- `tests/economyCrimeCommand.test.js`
+- `coverage-floors.json`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | `/invest contribute` had no `try` past the debit. The wallet is debited atomically, and then the pool `$inc`, the refund and `freshGuild.save()` all ran unguarded — a rejection from any of them left `execute` as an unhandled rejection with the coins gone from the wallet and nowhere else, and nothing written down | The whole post-debit flow is guarded. A throw before the pool takes the coins refunds them; a throw *after* they are in the pool does not, because the pool `$inc` is the durable record and refunding would pay the player back for coins the pool is holding — it acknowledges the contribution instead | `invest.js` |
+| 2 | `/invest`'s concurrent-activation refund was a bare `$inc` that read nothing back and replied "Coins refunded" whether or not the write matched a document, filing an `invest_refund` ledger row against a balance it never observed — the #804/#870 pattern, in the one write here that had never been audited | The refund goes through `creditCoinsOrOwe` under `investRefundPayoutKey(interaction.id)`: keyed so a replay cannot pay twice, verified, and recorded as owed when it will not land. The reply is worded from what the helper reports — refunded, recorded, or neither | `invest.js`, `payoutKey.js` |
+| 3 | `/work`'s challenge bonus was a bare `$inc` credited from a collector callback minutes after the guarded shift. An unmatched write still rendered "You earned an extra +N coins" and added it to the shift total; a *rejection* fell into the timeout `catch` labelled "base payout already secured", silently dropping a bonus it had already displayed | The bonus credits through `creditCoinsOrOwe` under `challengeBonusPayoutKey('work', interaction.id)`. It is announced only when the credit lands, worded as recorded-and-will-be-restored when it is owed, and the displayed total no longer includes coins that never arrived | `work.js`, `payoutKey.js` |
+| 4 | `/daily`'s challenge bonus had the same bare `$inc`, and worse: a rejection there aborted to the command's generic outer `catch`, telling the player their **claim** failed after the daily had already been paid, with the bonus neither credited nor recorded | Same helper, same key constructor, phase `daily`. The claim's own result stands regardless of the bonus, and the bonus is announced from what the credit actually did | `daily.js`, `payoutKey.js` |
+| 5 | `/crime`'s clean-getaway payout was a bare `$inc` whose result the embed dereferenced as `updated.balance`. Unlike `/work` and `/daily` — whose payout and cooldown are one guarded write, retryable when it misses — `/crime` claims its cooldown up front, so a payout that failed cost the player both the coins and the cooldown, and a `null` result (a pruned document) crashed the embed into a catch that told them to try a job they were now on cooldown for | The payout goes through `creditCoinsOrOwe` under `crimePayoutKey(interaction.id)`, with the `crimeRecord.totalCrimes`/`successfulCrimes` counters riding the same keyed write so the count and the coins land together. It is recorded as owed rather than lost when it cannot land, and the embed reads the settled balance and says whether the payout arrived | `crime.js`, `payoutKey.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 6 | The `/work` and `/daily` bonuses, `/crime`'s payout and `/invest`'s refund were all unkeyed, so the owed record any of them might file was against a write that may have committed and lost its response — a replay could pay it twice | Three key constructors added — `investRefundPayoutKey`, `crimePayoutKey`, `challengeBonusPayoutKey` — beside the existing family, so every credit this pass touched is exactly-once as the earlier passes' are | `payoutKey.js` |
+| 7 | No tests over any of the failure paths. `/invest`'s only refund test asserted the happy path; the challenge bonuses and the crime payout were driven only far enough to pay | Failure-path tests across all four suites: `/invest`'s throw-refund and the no-refund-once-in-the-pool guard, both challenge bonuses paid and recorded-when-owed, and `/crime`'s payout filed as owed with the balance not inflated and no big-win logged. `daily.js`, `work.js` and `crime.js` join the per-file coverage floors | `tests/`, `coverage-floors.json` |
+
+**Reviewed and found sound** — no change needed, recorded so the next pass does
+not re-derive it:
+
+- `/balance` (`balance.js`). The starter-kit credit goes through
+  `claimStarterKit`, which is one atomic pipeline update guarded by
+  `onboarding.starterKitClaimed`, so it cannot mint twice; the local
+  `user.balance` bump after it is display-only and the command never calls
+  `save()`, so there is no stale absolute write to erase a concurrent change.
+- `/jobs` (`jobs.js`). A read-only listing — it reads the user and the guild
+  settings and renders a table, and moves no coins.
+- `/bank` (`bank.js`). `deposit` and `withdraw` are each a single atomic
+  `findOneAndUpdate` moving coins between the caller's own wallet and bank under a
+  `$gte` guard, so there is nothing to lose and no second write to lose it to;
+  `transfer` is `commitCoinTransfer`, audited end-to-end in pass 3; `statement` is
+  read-only. It defers before the transfer and statement flows for the
+  three-second window, which the deposit and withdraw paths (two writes, no
+  interactive wait) do not need.
+- The `/crime` fine, critical-failure and lifesaver paths. All three debits go
+  through `debitUpTo`, which clamps inside the update against the balance being
+  written and carries the freeze in its filter — the audited-sound helper from
+  pass 1. Only the success payout was the gap.
+- `/invest`'s pool credit itself. The `$inc: { 'districts.$.pool': amount }` is
+  atomic and, once it lands, durable; the `topContributors` bookkeeping the
+  `save()` after it writes is cosmetic and already commented as such, and a
+  failure there now leaves the contribution in the pool rather than escaping the
+  command.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -800,7 +891,7 @@ wide, and it is widest exactly where the risk is.
   hand payout paths (including the crash lobby's `pendingCrashRefund` escrow) have
   been audited above; the stakes those hands are played for go through
   `placeWager`, which #785 covered
-- core currency (`balance.js`, `bank.js`, `daily.js`, `work.js`, `jobs.js`, `crime.js`, `rob.js`, `invest.js`) — `market.js` and `gift.js` have had their unwind paths audited above; the rest of both commands has not
+- core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market.js` and `gift.js` have had their unwind paths audited (pass 3), the rest of both commands has not
 - group and PvP systems (`war.js`, `rivalryService.js`, `tournamentService.js`, and everything in `heistService.js`, `syndicateService.js` and `duel.js` other than the escrow and payout paths audited above)
 - progression (`prestige.js`, `season.js`, `synergyService.js`, `dailychallenge.js`)
 - seasonal events (`seasonalEventService.js`, `eventshop.js`, and the seasonal commands)
@@ -823,5 +914,5 @@ wide, and it is widest exactly where the risk is.
 *The nine non-economy subsystems above were last reviewed on 2026-05-28; the
 economy escrow and payout paths on 2026-09-01; the progressive jackpot on
 2026-09-04; the gift and market unwind paths on 2026-09-05; the casino hand
-payouts on 2026-09-08. "Not yet reviewed" carries no review date, because nothing
-in it has been reviewed.*
+payouts on 2026-09-08; the core currency commands on 2026-09-17. "Not yet
+reviewed" carries no review date, because nothing in it has been reviewed.*

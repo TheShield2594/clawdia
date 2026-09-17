@@ -17,6 +17,8 @@ const { stackBar } = require('../../utils/rewardReveal');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
+const { challengeBonusPayoutKey } = require('../../utils/payoutKey');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { ownedBy } = require('../../utils/collectorOwner');
 
@@ -337,7 +339,9 @@ module.exports = {
                     ).catch(() => {});
                 }
 
-                let bonusEarned = 0;
+                let bonusEarned = 0;   // credited and safe to announce
+                let bonusPending = 0;   // answered correctly but the credit is owed, not paid
+                let answeredCorrectly = false;
                 let responseRef = null;
                 let exceptionalChallenge = false;
 
@@ -350,23 +354,42 @@ module.exports = {
                     await responseRef.deferUpdate();
 
                     if (response.customId === challenge.correctId) {
+                        answeredCorrectly = true;
                         const elapsed = Date.now() - challenge.startedAt;
                         exceptionalChallenge = elapsed <= 5000;
                         const bonusRate = exceptionalChallenge ? 0.55 : 0.40;
-                        bonusEarned = Math.round(earned * bonusRate);
-                        const bonusUpdated = await User.findOneAndUpdate(
+                        const bonusAmount = Math.round(earned * bonusRate);
+
+                        // Keyed and recorded-if-lost, like every other economy
+                        // credit. The bare `$inc` this replaced read nothing back,
+                        // so an unmatched write still announced the bonus; and a
+                        // throw here fell into the timeout `catch` below labelled
+                        // "base payout already secured", silently dropping a bonus
+                        // it had already added to the total. Now the bonus is only
+                        // announced when the credit landed, and filed as owed when
+                        // it did not (#873).
+                        const credit = await creditCoinsOrOwe(
                             { userId: interaction.user.id, guildId: interaction.guild.id },
-                            { $inc: { balance: bonusEarned } },
-                            { new: true }
+                            bonusAmount,
+                            {
+                                payoutKey: challengeBonusPayoutKey('work', interaction.id),
+                                service: 'work', jobName: 'workChallengeBonus',
+                            },
                         );
-                        logTransaction({
-                            userId: interaction.user.id,
-                            guildId: interaction.guild.id,
-                            type: 'work_challenge_bonus',
-                            amount: bonusEarned,
-                            balance: updated.balance + bonusEarned,
-                            note: `work challenge bonus (${challenge.type}${exceptionalChallenge ? ', fast' : ''}) for ${job.name}`,
-                        });
+                        bonusEarned  = credit.credited ? bonusAmount : 0;
+                        bonusPending = credit.credited ? 0 : bonusAmount;
+                        const bonusUpdated = credit.doc;
+
+                        if (credit.credited) {
+                            logTransaction({
+                                userId: interaction.user.id,
+                                guildId: interaction.guild.id,
+                                type: 'work_challenge_bonus',
+                                amount: bonusAmount,
+                                balance: bonusUpdated?.balance ?? updated.balance + bonusAmount,
+                                note: `work challenge bonus (${challenge.type}${exceptionalChallenge ? ', fast' : ''}) for ${job.name}`,
+                            });
+                        }
 
                         if (bonusUpdated && bonusEarned > 0) {
                             try {
@@ -417,8 +440,12 @@ module.exports = {
                         ? `⚡ Lightning fast! You earned an extra **+${bonusEarned.toLocaleString()}** coins! (+55%)`
                         : `✅ Correct! You earned an extra **+${bonusEarned.toLocaleString()}** coins! (+40%)`;
                     workEmbed.addFields({ name: exceptionalChallenge ? '🎯 Exceptional Challenge!' : '🎯 Challenge Bonus!', value: bonusLabel });
+                } else if (bonusPending > 0) {
+                    // Correct answer, but the credit could not be applied and was
+                    // recorded as owed — never announced as paid.
+                    workEmbed.addFields({ name: '🎯 Challenge Bonus!', value: `✅ Correct! Your **+${bonusPending.toLocaleString()}** coin bonus couldn't be paid right now — it's been recorded and will be restored.` });
                 } else {
-                    workEmbed.addFields({ name: '🎯 Challenge Result', value: responseRef ? '❌ Wrong answer — no bonus this time.' : '⏱️ Time\'s up — no bonus this time.' });
+                    workEmbed.addFields({ name: '🎯 Challenge Result', value: answeredCorrectly ? '❌ Wrong answer — no bonus this time.' : (responseRef ? '❌ Wrong answer — no bonus this time.' : '⏱️ Time\'s up — no bonus this time.') });
                 }
 
                 if (specialEvent) {

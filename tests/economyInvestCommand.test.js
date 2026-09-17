@@ -20,9 +20,14 @@ const { useFixedClock, DEFAULT_CLOCK } = require('./helpers/fixedClock');
 
 const mockUsers = fakeCollection('User', { balance: 0 });
 const mockGuilds = fakeCollection('Guild', {}, { unique: ['guildId'] });
+// When a refund itself cannot land, creditCoinsOrOwe files an owed FailedJob;
+// the owed-path test needs somewhere for that to go, and fast retries.
+const mockFailed = fakeCollection('FailedJob');
 
 jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/models/Guild', () => mockGuilds.model);
+jest.mock('../src/models/FailedJob', () => mockFailed.model);
+jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 
 const invest = require('../src/commands/economy/invest');
@@ -64,8 +69,14 @@ const contribute = (amount, districtId = 'marketplace') =>
 beforeEach(() => {
     mockUsers.reset();
     mockGuilds.reset();
+    mockFailed.reset();
     jest.clearAllMocks();
 });
+
+// The owed-path test replaces a User model method, so restore the pristine
+// model afterwards or the stub is inherited by later tests.
+const pristineUserModel = { ...mockUsers.model };
+afterEach(() => { Object.assign(mockUsers.model, pristineUserModel); });
 
 // The refund test below replaces a model method outright, which is the only way
 // to make one specific write miss. `reset()` and `clearAllMocks()` clear call
@@ -191,6 +202,108 @@ describe('/invest contribute — the refund path', () => {
         expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({
             type: 'invest_refund', amount: 1000, balance: 5000,
         }));
+    });
+
+    it('refunds through the keyed, exactly-once helper — never a bare $inc', async () => {
+        seedGuild();
+        seedUser(5000);
+
+        const realFindOneAndUpdate = mockGuilds.model.findOneAndUpdate;
+        mockGuilds.model.findOneAndUpdate = jest.fn(async (query, update, options) => {
+            if (update?.$inc?.['districts.$.pool'] === undefined) {
+                return realFindOneAndUpdate(query, update, options);
+            }
+            return null;
+        });
+
+        await contribute(1000);
+
+        // The refund is a guarded pipeline credit that appends a payout key, so a
+        // replay of a lost-response refund cannot pay twice. The bare `$inc` it
+        // replaced read nothing back and said "refunded" regardless (#873).
+        const refund = mockUsers.writes.find(w =>
+            Array.isArray(w.update) && w.update[0]?.$set?.balance?.$add);
+        expect(refund).toBeTruthy();
+        expect(refund.query['paidPayouts.key']).toEqual({ $ne: expect.any(String) });
+    });
+
+    it('records the refund as owed, and says so, when the coins cannot be returned', async () => {
+        // The district activated concurrently, so the coins must come back — but
+        // the refund credit itself will not land. It is filed as owed rather than
+        // announced as refunded, which the bare `$inc` this replaced could not do.
+        seedGuild();
+        seedUser(5000);
+
+        const realGuildFOU = mockGuilds.model.findOneAndUpdate;
+        mockGuilds.model.findOneAndUpdate = jest.fn(async (query, update, options) => {
+            if (update?.$inc?.['districts.$.pool'] !== undefined) return null;   // concurrent activation
+            return realGuildFOU(query, update, options);
+        });
+        const realUserFOU = mockUsers.model.findOneAndUpdate;
+        mockUsers.model.findOneAndUpdate = jest.fn(async (query, update, options) => {
+            if (Array.isArray(update)) throw new Error('refund write failed');   // the keyed credit
+            return realUserFOU(query, update, options);
+        });
+
+        const interaction = await contribute(1000);
+
+        const text = repliedText(interaction);
+        expect(text).toContain('recorded');
+        expect(text).not.toContain('Coins refunded');
+        expect(mockFailed.model.create).toHaveBeenCalledWith(expect.objectContaining({
+            jobName: expect.stringContaining('investRefund'),
+        }));
+        expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'invest_refund', note: expect.stringContaining('owed'),
+        }));
+    });
+
+    it('hands the coins back when the pool write throws before it can take them', async () => {
+        // The debit commits, then the pool `$inc` itself rejects — a transient
+        // failure, not a concurrent activation. The coins are out of the wallet
+        // and never reached the pool, so the guard has to put them back. The
+        // command used to have no `try` at all, so this threw straight out.
+        seedGuild();
+        seedUser(5000);
+
+        const realFindOneAndUpdate = mockGuilds.model.findOneAndUpdate;
+        mockGuilds.model.findOneAndUpdate = jest.fn(async (query, update, options) => {
+            if (update?.$inc?.['districts.$.pool'] !== undefined) {
+                throw new Error('pool write failed');
+            }
+            return realFindOneAndUpdate(query, update, options);
+        });
+
+        const interaction = await contribute(1000);
+
+        expect(me().balance).toBe(5000);
+        expect(district('marketplace').pool).toBe(0);
+        expect(repliedText(interaction)).toContain('Coins refunded');
+    });
+
+    it('does not refund once the coins are in the pool, even if the bookkeeping save fails', async () => {
+        // The pool `$inc` commits — the contribution has landed — and only the
+        // save that records the top contributors and the activation reset then
+        // fails. Refunding here would pay the player back for coins the pool is
+        // holding, so the guard must not.
+        seedGuild();
+        seedUser(5000);
+
+        const realFindOneAndUpdate = mockGuilds.model.findOneAndUpdate;
+        mockGuilds.model.findOneAndUpdate = jest.fn(async (query, update, options) => {
+            const doc = await realFindOneAndUpdate(query, update, options);
+            if (doc && update?.$inc?.['districts.$.pool'] !== undefined) {
+                doc.save = jest.fn(() => Promise.reject(new Error('save failed')));
+            }
+            return doc;
+        });
+
+        const interaction = await contribute(1000);
+
+        expect(me().balance).toBe(4000);          // debited, not refunded
+        expect(district('marketplace').pool).toBe(1000);  // the $inc landed
+        expect(repliedText(interaction)).toContain('was received');
+        expect(repliedText(interaction)).not.toContain('refunded');
     });
 });
 
