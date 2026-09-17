@@ -104,6 +104,14 @@ function renderActivityHeatmap(heatmap) {
     });
 }
 
+/**
+ * Draw every analytics chart and its accessible fallback from one payload:
+ * command-usage trend, the retention cohorts, the weekday×hour activity
+ * heatmap, and the moderation-SLA figures (#1015).
+ *
+ * @param {object} data     the stats payload the API returned
+ * @param {object} insights the derived insights (cohorts, heatmap, SLA) for it
+ */
 async function renderAnalyticsCharts(data, insights) {
     // The summaries and data tables below are built from the same arrays the
     // charts are drawn from, and they have to survive a library that would not
@@ -352,6 +360,10 @@ async function renderAnalyticsCharts(data, insights) {
     });
 }
 
+/**
+ * Fetch the guild's analytics payload and hand it to `renderAnalyticsCharts`,
+ * toggling the skeleton, error, and content states around the request.
+ */
 async function loadAnalytics() {
     const guildId = BOOT.guildId;
     document.getElementById('analytics-skeleton').style.display = '';

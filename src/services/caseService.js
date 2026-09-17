@@ -47,11 +47,18 @@ async function createCase({ guildId, type, targetUserId, moderatorId, reason, ev
     }
 }
 
+/**
+ * Append a moderator note to a case, stamping the first-response time on the
+ * first touch (#1015).
+ *
+ * A pipeline update so `firstActionAt` is set only if it is not already set:
+ * the first note is the first response, and a later one must not move the mark.
+ * `$ifNull` keeps an existing value and fills a null in the same atomic write,
+ * with no read-back to race.
+ *
+ * @returns {Promise<object|null>} the updated case document, or null if none matched
+ */
 async function addNote(guildId, caseId, moderatorId, content) {
-    // A pipeline update so `firstActionAt` is stamped only if it is not already
-    // set (#1015): the first note is the first response, and a later one must
-    // not move the mark. `$ifNull` keeps an existing value and fills a null in
-    // the same atomic write, with no read-back to race.
     return Case.findOneAndUpdate(
         { guildId, caseId },
         [
@@ -64,10 +71,17 @@ async function addNote(guildId, caseId, moderatorId, content) {
     );
 }
 
+/**
+ * Close a case with a resolution, recording it as the first response when the
+ * case had none yet (#1015).
+ *
+ * Closing is a status change, so it counts as a first response for a case
+ * nobody had touched yet — `$ifNull` sets `firstActionAt` only when it is still
+ * empty, in the same atomic write.
+ *
+ * @returns {Promise<object|null>} the updated case document, or null if none matched
+ */
 async function closeCase(guildId, caseId, moderatorId, resolution) {
-    // Closing is a status change, so it counts as a first response for a case
-    // nobody had touched yet — `$ifNull` sets `firstActionAt` only when it is
-    // still empty (#1015).
     return Case.findOneAndUpdate(
         { guildId, caseId },
         [
