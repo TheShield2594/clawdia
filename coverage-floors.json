@@ -422,7 +422,6 @@
         "src/dashboard/routes/api/ai.js",
         "src/dashboard/routes/api/autorole.js",
         "src/dashboard/routes/api/dailyDigest.js",
-        "src/dashboard/routes/api/members.js",
         "src/migrations/001_add_indexes.js",
         "src/migrations/002_hunt_indexes.js",
         "src/migrations/003_fishing_indexes.js",

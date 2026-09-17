@@ -237,6 +237,25 @@
                         </div>
                         <div id="eco-admin-msg" style="min-height:1.4em;font-size:.85em"></div>
 
+                        <!-- Member Ledger -->
+                        <div class="panel-head eco-ledger-head"><h3>Member Ledger</h3><p>Read the transaction history for the member in the User ID box above — every coin movement, newest first, and any owed payout still waiting on <code>npm run payouts:replay</code>. Read-only: nothing here changes a balance.</p></div>
+                        <div class="eco-ledger-controls">
+                            <button class="btn btn-sm" data-action="eco-ledger">View ledger</button>
+                        </div>
+                        <div id="eco-ledger-msg" class="eco-ledger-msg"></div>
+                        <div id="eco-ledger-owed" class="eco-ledger-owed eco-ledger-hidden"></div>
+                        <div id="eco-ledger-wrap" class="table-scroll eco-ledger-hidden" role="region" tabindex="0" aria-label="Member transaction ledger">
+                            <table id="eco-ledger-table" class="cases-table">
+                                <thead><tr><th>When</th><th>Type</th><th>Amount</th><th>Balance</th><th>Counterparty</th><th>Note</th></tr></thead>
+                                <tbody id="eco-ledger-tbody"></tbody>
+                            </table>
+                        </div>
+                        <div id="eco-ledger-pager" class="eco-ledger-pager">
+                            <button class="btn btn-sm" data-action="eco-ledger-prev">◀ Newer</button>
+                            <span id="eco-ledger-page" class="eco-ledger-key"></span>
+                            <button class="btn btn-sm" data-action="eco-ledger-next">Older ▶</button>
+                        </div>
+
                         <!-- Top earners -->
                         <div class="panel-head" style="margin-top:1.5rem"><h3>Top 10 Richest Users</h3></div>
                         <div id="eco-top-earners-loading">

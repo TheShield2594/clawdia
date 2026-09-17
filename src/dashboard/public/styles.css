@@ -1858,6 +1858,24 @@ textarea.auto-resize {
 .eco-kpi-label { font-size: .75rem; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .eco-kpi-value { font-size: 1.4rem; font-weight: 700; color: var(--cream-50, #faf5f0); margin-top: .2rem; }
 
+/* ── Member ledger (#1009) ────────────────────────────────────────
+   Classes rather than inline styles so the read-only ledger view does not
+   spend against the inline-style ratchet (tests/dashboardInlineAttributes). */
+.eco-ledger-head { margin-top: 1.5rem; }
+.eco-ledger-controls { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem; }
+.eco-ledger-msg { min-height: 1.4em; font-size: .85em; }
+.eco-ledger-owed { margin-bottom: .75rem; }
+.eco-ledger-nowrap { white-space: nowrap; }
+.eco-ledger-key { font-size: .85em; }
+.eco-ledger-sub { color: var(--text-mute); font-size: .85em; }
+.eco-ledger-mute { color: var(--text-mute); }
+.eco-ledger-credit { color: var(--green); }
+.eco-ledger-debit { color: var(--red); }
+.eco-ledger-owed-list { margin: .5rem 0 0; padding-left: 1.25rem; }
+.eco-ledger-pager { display: none; gap: .5rem; align-items: center; margin-top: .5rem; }
+.eco-ledger-pager.is-shown { display: flex; }
+.eco-ledger-hidden { display: none; }
+
 /* ── User search widget ───────────────────────────────────────── */
 .user-search-widget { position: relative; }
 .user-tag-list { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .4rem; min-height: 0; }

@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
+const { isValidDiscordId } = require('../../lib/apiHelpers');
+const { readPage, pageEnvelope } = require('../../lib/apiPage');
+const { fetchTransactions, fetchOwedPayouts } = require('../../../utils/ledger');
 
 // Up to 10 members matching `?q=` (2 characters or more), for the dashboard's member pickers.
 //
@@ -45,6 +48,52 @@ router.get('/guild/:guildId/members/resolve', checkAuth, checkGuildAccess, check
     } catch (err) {
         console.error('Member resolve error:', err);
         res.status(500).json({ error: 'Resolve failed' });
+    }
+});
+
+// One page of a member's transaction ledger, newest first, plus every owed
+// payout still outstanding for them. Read-only — it moves no coins and writes no
+// Transaction; it is the receipt a moderator needs when a member says their
+// coins vanished (#1009). Owed payouts are the debits whose credit half failed
+// and are sitting in the dead-letter queue for `npm run payouts:replay`, keyed
+// so the row can be matched to the transaction it belongs to.
+router.get('/guild/:guildId/members/:userId/ledger', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId, userId } = req.params;
+    if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid user ID' });
+    const { limit, skip } = readPage(req, { defaultLimit: 20, maxLimit: 50 });
+
+    try {
+        // `readPage` gives a skip; the ledger util pages by number, so hand it a
+        // page derived from the same skip and limit and the two stay in step.
+        const [{ items, total, page: currentPage }, owed] = await Promise.all([
+            fetchTransactions({ userId, guildId, page: Math.floor(skip / limit) + 1, pageSize: limit }),
+            fetchOwedPayouts({ userId, guildId }),
+        ]);
+
+        // The counterparty on gifts, transfers, market sales and duels, resolved
+        // to a name the same way the cases list resolves its moderators.
+        const counterpartyIds = [...new Set(items.map(t => t.relatedUserId).filter(Boolean))];
+        const userMap = counterpartyIds.length ? await req.bot.resolveUsers(counterpartyIds) : {};
+
+        const body = pageEnvelope({
+            items: items.map(t => ({
+                id:              String(t._id),
+                type:            t.type,
+                amount:          t.amount,
+                balance:         t.balance,
+                bank:            t.bank ?? null,
+                note:            t.note ?? null,
+                relatedUserId:   t.relatedUserId ?? null,
+                relatedUserTag:  t.relatedUserId ? (userMap[t.relatedUserId]?.tag || null) : null,
+                createdAt:       t.createdAt,
+            })),
+            total, page: currentPage, limit,
+        });
+        body.owed = owed;
+        res.json(body);
+    } catch (error) {
+        console.error('Member ledger error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 

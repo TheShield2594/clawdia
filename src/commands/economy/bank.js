@@ -1,9 +1,14 @@
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const {
+    SlashCommandBuilder, EmbedBuilder, MessageFlags,
+    ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType,
+} = require('discord.js');
 const User = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { logTransaction } = require('../../utils/logTransaction');
 const { giftLimits } = require('../../utils/giftCaps');
 const { accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal } = require('../../utils/coinTransfer');
+const { fetchTransactions, prettyType, signedAmount, DEFAULT_PAGE_SIZE } = require('../../utils/ledger');
+const { ownedBy } = require('../../utils/collectorOwner');
 const COLORS = require('../../utils/embedColors');
 
 async function getCurrency(guildId) {
@@ -234,6 +239,132 @@ async function handleTransfer(interaction) {
     return interaction.followUp({ embeds: [embed] });
 }
 
+const STATEMENT_WINDOW_MS = 2 * 60_000;
+
+/**
+ * One transaction rendered as a line for the statement embed.
+ *
+ * The signed amount is what a receipt is for, so it leads and is fenced to stay
+ * monospaced-aligned. The `type` becomes a friendly label and the `note` sits
+ * under it as the detail the writer left; the counterparty — set on gifts,
+ * market sales, transfers and duels — renders as a mention so the reader sees a
+ * name, and `<t:…:R>` lets Discord localise the time. The running wallet balance
+ * the record carries closes the line, which is what turns a list of deltas into
+ * a statement.
+ */
+function statementLine(txn, currency) {
+    const amount = `\`${signedAmount(txn.amount)}\``;
+    const ts = txn.createdAt ? Math.floor(new Date(txn.createdAt).getTime() / 1000) : null;
+    const when = ts ? ` · <t:${ts}:R>` : '';
+    const balance = typeof txn.balance === 'number' ? ` · bal ${currency}${txn.balance.toLocaleString()}` : '';
+    const head = `${amount} ${currency} · **${prettyType(txn.type)}**${when}${balance}`;
+
+    const detailBits = [];
+    if (txn.relatedUserId) detailBits.push(`with <@${txn.relatedUserId}>`);
+    if (txn.note) detailBits.push(txn.note);
+    const detail = detailBits.length ? `\n╰ ${detailBits.join(' · ')}` : '';
+    return `${head}${detail}`;
+}
+
+/** The embed for one page of the caller's statement. */
+function buildStatementEmbed({ items, page, pages, total }, { currency, user }) {
+    const embed = new EmbedBuilder()
+        .setColor(COLORS.PRIZE)
+        .setAuthor({ name: `${user.username}'s statement`, iconURL: user.displayAvatarURL({ dynamic: true }) })
+        .setFooter({ text: `Page ${page} / ${pages} · ${total.toLocaleString()} transaction${total === 1 ? '' : 's'}` })
+        .setTimestamp();
+
+    if (!total) {
+        embed.setDescription('No transactions yet. Earn or spend coins and they show up here.');
+        return embed;
+    }
+    embed.setDescription(items.map(t => statementLine(t, currency)).join('\n'));
+    return embed;
+}
+
+/** Prev/Next controls, disabled at the ends and once the window has closed. */
+function statementButtons(id, { page, pages }, expired = false) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`stmt_prev_${id}`)
+            .setLabel('◀ Newer')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(expired || page <= 1),
+        new ButtonBuilder()
+            .setCustomId(`stmt_next_${id}`)
+            .setLabel('Older ▶')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(expired || page >= pages),
+    );
+}
+
+/**
+ * `/bank statement [page]` — the caller's own transactions, newest first,
+ * ephemeral and paged with buttons (#1009).
+ *
+ * Read-only: it never writes a `Transaction` or moves a coin. The window and the
+ * owner filter mirror the other paged economy embeds; a single page (or none)
+ * skips the buttons entirely.
+ */
+async function handleStatement(interaction) {
+    const guildId = interaction.guild.id;
+    const userId = interaction.user.id;
+
+    // Defer first: the currency read plus the count and the page query are three
+    // awaits before the first response, and a slow database would otherwise blow
+    // Discord's three-second initial-response deadline and void the token.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const currency = await getCurrency(guildId);
+
+    let page = interaction.options.getInteger('page') || 1;
+    let data = await fetchTransactions({ userId, guildId, page, pageSize: DEFAULT_PAGE_SIZE });
+    page = data.page;
+
+    const single = data.pages <= 1;
+    const message = await interaction.editReply({
+        embeds: [buildStatementEmbed(data, { currency, user: interaction.user })],
+        components: single ? [] : [statementButtons(interaction.id, data)],
+    });
+    if (single) return;
+
+    const collector = message.createMessageComponentCollector({
+        componentType: ComponentType.Button,
+        filter: ownedBy(
+            userId,
+            btn => btn.customId === `stmt_prev_${interaction.id}` || btn.customId === `stmt_next_${interaction.id}`,
+        ),
+        time: STATEMENT_WINDOW_MS,
+    });
+
+    // The collector runs after handleStatement returns, so the command's own
+    // error handler cannot catch a rejection here. An unhandled one counts
+    // against the process-level rejection budget, so a slow page read or a lost
+    // interaction must be caught locally rather than allowed to escape.
+    collector.on('collect', async btn => {
+        try {
+            const next = btn.customId.startsWith('stmt_prev_') ? page - 1 : page + 1;
+            data = await fetchTransactions({ userId, guildId, page: next, pageSize: DEFAULT_PAGE_SIZE });
+            page = data.page;
+            await btn.update({
+                embeds: [buildStatementEmbed(data, { currency, user: interaction.user })],
+                components: [statementButtons(interaction.id, data)],
+            });
+        } catch (err) {
+            console.error('[bank statement] pagination failed:', err.message);
+            if (!btn.replied && !btn.deferred) {
+                // The interaction may already be gone; a failed acknowledgement
+                // must not throw out of the collector.
+                try { await btn.reply({ content: "Couldn't load that page — please try again.", flags: MessageFlags.Ephemeral }); }
+                catch { /* interaction expired */ }
+            }
+        }
+    });
+
+    collector.on('end', async () => {
+        await interaction.editReply({ components: [statementButtons(interaction.id, data, true)] }).catch(() => {});
+    });
+}
+
 module.exports = {
     cooldown: 5,
     data: new SlashCommandBuilder()
@@ -255,12 +386,20 @@ module.exports = {
                 .addUserOption(o =>
                     o.setName('user').setDescription('The user to transfer coins to').setRequired(true))
                 .addIntegerOption(o =>
-                    o.setName('amount').setDescription('Coins to send (min: 1). Must not exceed your wallet.').setRequired(true).setMinValue(1))),
+                    o.setName('amount').setDescription('Coins to send (min: 1). Must not exceed your wallet.').setRequired(true).setMinValue(1)))
+        .addSubcommand(sub =>
+            sub.setName('statement')
+                .setDescription('See your own transaction history — every coin movement, newest first')
+                .addIntegerOption(o =>
+                    o.setName('page').setDescription('Which page to open (defaults to the first)').setMinValue(1))),
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
-        if (sub === 'deposit')  return handleDeposit(interaction);
-        if (sub === 'withdraw') return handleWithdraw(interaction);
-        if (sub === 'transfer') return handleTransfer(interaction);
+        if (sub === 'deposit')   return handleDeposit(interaction);
+        if (sub === 'withdraw')  return handleWithdraw(interaction);
+        if (sub === 'transfer')  return handleTransfer(interaction);
+        if (sub === 'statement') return handleStatement(interaction);
     },
+
+    __test__: { statementLine, buildStatementEmbed, statementButtons },
 };
