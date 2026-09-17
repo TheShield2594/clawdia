@@ -21,6 +21,7 @@ jest.mock('../src/models/Case',  () => ({ find: jest.fn() }));
 jest.mock('../src/dashboard/lib/middleware', () => ({
     checkAuth: (req, _res, next) => { req.user = { id: 'admin-1' }; next(); },
     checkGuildAccess: (_req, _res, next) => next(),
+    statsReadRateLimit: (_req, _res, next) => next(),
 }));
 
 const Guild = require('../src/models/Guild');

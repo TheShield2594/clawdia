@@ -1,5 +1,6 @@
 // Shared Express middleware for the dashboard API routes.
 
+const { rateLimit } = require('express-rate-limit');
 const { hasManagePermission, verifyLiveGuildAccess } = require('./permissions');
 const { BoundedRateLimiter } = require('../../utils/boundedRateLimiter');
 
@@ -19,6 +20,42 @@ const READ_RL_WINDOW_MS = 60 * 1000;
 const READ_RL_LIMIT = 120;
 const readRateLimiter = new BoundedRateLimiter(10_000);
 setInterval(() => readRateLimiter.cleanup(READ_RL_WINDOW_MS), 60 * 1000).unref();
+
+// The limiters above are the real per-user ceilings, but they are invisible to
+// CodeQL: its js/missing-rate-limiting query recognises a rate limiter only when
+// it comes from a known package (express-rate-limit, express-brute and a handful
+// of others — its RateLimitingMiddleware class has no heuristic for a custom
+// one), so BoundedRateLimiter is not counted and every checkGuildAccess route is
+// flagged as performing authorization without a rate limit.
+//
+// These express-rate-limit limiters are the recognised guard for the reads that
+// query flags. Placed before checkGuildAccess on those routes, they make the
+// authorization demonstrably rate-limited — to the analyser and at runtime. They
+// sit after checkAuth, so every request that reaches one is authenticated and
+// keyed by user id: the key set is the admins currently online, which is why
+// these do not need the bounded store the shared IP-keyed limiters above use.
+function rateLimitedReads(limit) {
+    return rateLimit({
+        windowMs: 60 * 1000,
+        limit,
+        keyGenerator: req => `u:${req.user.id}`,
+        standardHeaders: true,
+        legacyHeaders: false,
+        // Keyed by session, never by IP, so the package's proxy/IP startup checks
+        // do not apply; disabling them keeps CI logs clean without hiding a real
+        // misconfiguration.
+        validate: false,
+        handler: (_req, res) => res.status(429).json({ error: 'Too many requests. Please slow down.' }),
+    });
+}
+
+// Collection-wide aggregations (/stats, /insights): tighter than the general
+// read ceiling because each call is expensive, not because a page fires many.
+const statsReadRateLimit = rateLimitedReads(60);
+// Item-image reads are <img> subresources a single page loads in bulk (the
+// activity-items page renders the whole ~80-item catalogue), so the ceiling sits
+// well above a full page's worth while still bounding a client that scrapes ids.
+const imageReadRateLimit = rateLimitedReads(300);
 
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
@@ -118,4 +155,4 @@ function checkCsrfOrigin(req, res, next) {
 // correct authorization is "administers something, somewhere", and leaving the
 // helper in place is an invitation for the next route to reach for it.
 
-module.exports = { checkAuth, checkGuildAccess, checkWriteRateLimit, checkReadRateLimit, checkCsrfOrigin };
+module.exports = { checkAuth, checkGuildAccess, checkWriteRateLimit, checkReadRateLimit, statsReadRateLimit, imageReadRateLimit, checkCsrfOrigin };

@@ -4,7 +4,7 @@ const Guild = require('../../../models/Guild');
 const GuildAnalytics = require('../../../models/GuildAnalytics');
 const User = require('../../../models/User');
 const Case = require('../../../models/Case');
-const { checkAuth, checkGuildAccess } = require('../../lib/middleware');
+const { checkAuth, checkGuildAccess, statsReadRateLimit } = require('../../lib/middleware');
 const { computeRetention, median, parseChannelIdFromJumpUrl,
     finalizeRetentionCohorts, startOfIsoWeekUTC, buildActiveHoursHeatmap } = require('../../lib/apiHelpers');
 const { cachedAggregate } = require('../../lib/aggregateCache');
@@ -182,7 +182,11 @@ async function buildGuildStats(guildId) {
 
 // The dashboard's headline numbers for a guild: members, messages, coins in
 // circulation, top levels and average XP.
-router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res) => {
+//
+// statsReadRateLimit sits before checkGuildAccess so the collection-wide
+// aggregation is rate-limited by a limiter CodeQL recognises; see the note in
+// lib/middleware.js.
+router.get('/guild/:guildId/stats', checkAuth, statsReadRateLimit, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
     try {
@@ -198,7 +202,8 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
 });
 
 // Derived analytics: 7 and 30 day retention, activity by hour, and command usage.
-router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, res) => {
+// Rate-limited before checkGuildAccess for the same reason as /stats above.
+router.get('/guild/:guildId/insights', checkAuth, statsReadRateLimit, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
     try {
