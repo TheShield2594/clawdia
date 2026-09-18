@@ -144,3 +144,68 @@ describe('runShopBrowse buy select', () => {
         expect(btn.reply).toHaveBeenCalledTimes(1);
     });
 });
+
+const sectionsConfig = () => ({
+    title:    'My Server Shop',
+    currency: '💰',
+    guildId:  'g1',
+    sections: [
+        {
+            id: 'shop', label: 'Server Shop', emoji: '🛒', activity: 'shop_common', title: 'My Server Shop',
+            pages: [{ id: 'common', label: 'Common', emoji: '⚪', items: [{ name: 'Pet Food', imageId: 'pet_food' }], listText: 'server' }],
+        },
+        {
+            id: 'hunt', label: 'Hunt', emoji: '🏹', activity: 'hunt', title: 'Hunt Shop',
+            pages: [
+                { id: 'weapons', label: 'Weapons', emoji: '🔫', items: [{ name: 'Rifle', imageId: 'hunt:rifle' }], listText: 'weapons' },
+                { id: 'ammo', label: 'Ammo', emoji: '🔶', items: [{ name: 'Rounds', buyId: 'ammo_std', price: 100, imageId: 'hunt:ammo' }], listText: 'ammo', onBuy: jest.fn() },
+            ],
+        },
+    ],
+});
+
+describe('runShopBrowse sections', () => {
+    test('renders a section select listing every section', async () => {
+        const { interaction, state } = buildInteraction();
+
+        await runShopBrowse(interaction, sectionsConfig());
+
+        const rows = componentsJson(state.editReplies[0]);
+        const sectionRow = rows.find(r => r.components?.[0]?.custom_id === 'shop_section');
+        expect(sectionRow).toBeTruthy();
+        expect(sectionRow.components[0].options.map(o => o.label)).toEqual(['Server Shop', 'Hunt']);
+        // Category select shows the active section's pages (server → one 'Common').
+        const catRow = rows.find(r => r.components?.[0]?.custom_id === 'shop_cat');
+        expect(catRow.components[0].options.map(o => o.label)).toEqual(['Common']);
+    });
+
+    test('switching section resets to its first page and shows its categories', async () => {
+        const { interaction, state } = buildInteraction();
+
+        await runShopBrowse(interaction, sectionsConfig());
+
+        const btn = {
+            user: { id: 'u1' },
+            customId: 'shop_section',
+            values: ['1'], // Hunt
+            deferUpdate: jest.fn().mockResolvedValue(),
+        };
+        await state.collect(btn);
+
+        expect(btn.deferUpdate).toHaveBeenCalledTimes(1);
+        const rows = componentsJson(state.editReplies.at(-1));
+        const catRow = rows.find(r => r.components?.[0]?.custom_id === 'shop_cat');
+        // Hunt's categories, first page (Weapons) selected by default.
+        expect(catRow.components[0].options.map(o => o.label)).toEqual(['Weapons', 'Ammo']);
+        expect(catRow.components[0].options.find(o => o.default).label).toBe('Weapons');
+    });
+
+    test('single-section (flat pages) shows no section select', async () => {
+        const { interaction, state } = buildInteraction();
+
+        await runShopBrowse(interaction, baseConfig([buyPage({ onBuy: jest.fn() })]));
+
+        const rows = componentsJson(state.editReplies[0]);
+        expect(rows.some(r => r.components?.[0]?.custom_id === 'shop_section')).toBe(false);
+    });
+});

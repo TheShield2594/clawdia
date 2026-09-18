@@ -13,7 +13,10 @@ const { runShopBrowse } = require('../../../../utils/shopBrowse');
 const { handleBuy } = require('./buy');
 const { isCrossEconomyWeapon, huntingDaysLabel } = require('./pricing');
 
-async function showShopList(interaction, user, currency) {
+// The five browse pages, as data. Split from showShopList so the unified
+// storefront (/shop view) can drop them in as a section alongside the server
+// shop and the other grinds, sharing this one definition and its buy wiring.
+function buildHuntShopPages(user, currency) {
     const h = user.hunt;
 
     const weaponItems = WEAPON_TIERS.map(w => ({
@@ -95,6 +98,20 @@ async function showShopList(interaction, user, currency) {
     // one-off, gated or confirm-heavy flows that don't fit a click-to-buy list.
     const onBuy = (btn, buyId) => handleBuy(btn, user, currency, { itemId: buyId });
 
+    return [
+        { id: 'weapons',     label: 'Weapons',     emoji: '🔫',  subtitle: 'Pick your tier — better gear, better trophies.', items: weaponItems,     listText: weaponList     },
+        { id: 'upgrades',    label: 'Upgrades',    emoji: '🔧',  subtitle: 'One module per weapon, permanent.',                items: upgradeItems,    listText: upgradeList    },
+        { id: 'ammo',        label: 'Ammunition',  emoji: '🔶',  subtitle: 'Keep your rifle fed.',                              items: ammoItems,       listText: ammoList,       onBuy },
+        { id: 'consumables', label: 'Consumables', emoji: '🧪',  subtitle: 'Bait, charms, repairs and more.',                   items: consumableItems, listText: consumableList, onBuy },
+        { id: 'zones',       label: 'Zones',       emoji: '🗺️', subtitle: 'New regions, new prey.',                            items: zoneItems,       listText: zoneList       }
+    ];
+}
+
+async function showShopList(interaction, user, currency) {
+    // Ammo and consumables are flat, quantity-1-per-click buys, so they get a
+    // buy select wired straight to the existing purchase handler. Weapons,
+    // upgrades and zones stay on their structured subcommands — they carry
+    // one-off, gated or confirm-heavy flows that don't fit a click-to-buy list.
     return runShopBrowse(interaction, {
         activity: 'hunt',
         title:    'Hunt Shop',
@@ -103,14 +120,8 @@ async function showShopList(interaction, user, currency) {
         // only ever finds the shared pre-#561 rows.
         guildId:  interaction.guild.id,
         footer:   'weapon • upgrade • buy • use • repair • unlock',
-        pages: [
-            { id: 'weapons',     label: 'Weapons',     emoji: '🔫',  subtitle: 'Pick your tier — better gear, better trophies.', items: weaponItems,     listText: weaponList     },
-            { id: 'upgrades',    label: 'Upgrades',    emoji: '🔧',  subtitle: 'One module per weapon, permanent.',                items: upgradeItems,    listText: upgradeList    },
-            { id: 'ammo',        label: 'Ammunition',  emoji: '🔶',  subtitle: 'Keep your rifle fed.',                              items: ammoItems,       listText: ammoList,       onBuy },
-            { id: 'consumables', label: 'Consumables', emoji: '🧪',  subtitle: 'Bait, charms, repairs and more.',                   items: consumableItems, listText: consumableList, onBuy },
-            { id: 'zones',       label: 'Zones',       emoji: '🗺️', subtitle: 'New regions, new prey.',                            items: zoneItems,       listText: zoneList       }
-        ]
+        pages: buildHuntShopPages(user, currency),
     });
 }
 
-module.exports = { showShopList };
+module.exports = { showShopList, buildHuntShopPages };

@@ -20,6 +20,15 @@ const { ensurePricingFields, trendBucket } = require('../../utils/dynamicPricing
 const { hasUnlock } = require('../../utils/prestige');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+// The grind shops expose their browse pages so /shop can host them as sections
+// of one storefront (the game commands keep their own /X shop list shortcut).
+const { attachGrind } = require('../../utils/grindProfile');
+const { ensureHuntData } = require('../../services/huntService');
+const { ensureFishingData } = require('../../services/fishService');
+const { ensureMineData } = require('../../services/mineService');
+const { buildHuntShopPages } = require('./hunt/shop/list');
+const { buildFishShopPages } = require('./fish/shop/list');
+const { buildMineShopPages } = require('./mine/shop/list');
 
 const CONFIRM_THRESHOLD = 500;
 const NEW_ITEM_TTL_MS   = 48 * 3_600_000; // 48 hours
@@ -140,6 +149,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             id:       `rarity_${rarity.toLowerCase()}`,
             label:    `${rarity}`,
             emoji,
+            activity: `shop_${rarity.toLowerCase()}`,
             subtitle: `${items.length} item${items.length !== 1 ? 's' : ''}`,
             items:    pageItems,
             listText,
@@ -182,6 +192,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             id:       'prestige',
             label:    'Prestige',
             emoji:    '✨',
+            activity: 'shop_mythic',
             subtitle: `${prestigeItems.length} aspirational item${prestigeItems.length !== 1 ? 's' : ''}`,
             items:    pageItems,
             listText,
@@ -218,6 +229,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             id:       'black_market',
             label:    'Black Market',
             emoji:    '🏴',
+            activity: 'shop_common',
             subtitle: `${blackMarketItems.length} contraband item${blackMarketItems.length !== 1 ? 's' : ''}`,
             items:    pageItems,
             listText,
@@ -230,10 +242,10 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('shop')
-        .setDescription('Browse and buy items from the server shop')
+        .setDescription('Browse and buy items from the server, hunt, fish and mine shops')
         .addSubcommand(sub =>
             sub.setName('view')
-                .setDescription('Browse available items'))
+                .setDescription('Browse the server shop plus hunt, fish and mine gear'))
         .addSubcommand(sub =>
             sub.setName('buy')
                 .setDescription('Purchase an item from the shop')
@@ -327,44 +339,78 @@ module.exports = {
 
         // ── VIEW ──────────────────────────────────────────────────────────────
         if (sub === 'view') {
-            if (!guildSettings.shop.length) {
+            // One storefront, four shops behind a section select: the server shop
+            // plus Hunt / Fish / Mine, each still reachable from its own
+            // /X shop list. The event shop stays separate — it spends a different
+            // currency and isn't always running.
+            const sections = [];
+
+            const serverPages = guildSettings.shop.length
+                ? await buildShopPages(guildSettings, currency, viewerPrestigeRank)
+                : [];
+            if (serverPages.length) {
+                // Buy straight from the view. Re-read settings at click time so
+                // stock and dynamic prices are current — the message can sit open
+                // for minutes — and keep the purchase ephemeral so a public
+                // storefront doesn't fill with each viewer's receipts.
+                for (const page of serverPages) {
+                    page.onBuy = async (btn, buyId) => {
+                        const fresh = await getGuildSettings(interaction.guild.id).catch(() => null);
+                        return buyShopItem(btn, {
+                            guildSettings: fresh ?? guildSettings,
+                            currency,
+                            viewerPrestigeRank,
+                            rawName:       buyId,
+                            quantity:      1,
+                            privateReply:  true,
+                        });
+                    };
+                }
+                sections.push({
+                    id: 'shop', label: 'Server Shop', emoji: '🛒', activity: 'shop_common',
+                    title: `${interaction.guild.name} Shop`, pages: serverPages,
+                });
+            }
+
+            // Grind gear is worth browsing only where it can be funded, so skip
+            // the game sections when the economy is off (their own commands
+            // already refuse there too).
+            const economyOn = guildSettings.economy?.enabled !== false;
+            let userData = null;
+            if (economyOn) {
+                const grindUser = await User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
+                    { upsert: true, new: true }
+                );
+                await attachGrind(grindUser);
+                ensureHuntData(grindUser);
+                ensureFishingData(grindUser);
+                ensureMineData(grindUser);
+                userData = grindUser;
+
+                sections.push({ id: 'hunt', label: 'Hunt',    emoji: '🏹', activity: 'hunt', title: 'Hunt Shop',    pages: buildHuntShopPages(grindUser, currency) });
+                sections.push({ id: 'fish', label: 'Fishing', emoji: '🎣', activity: 'fish', title: 'Fishing Shop', pages: buildFishShopPages(grindUser, currency) });
+                sections.push({ id: 'mine', label: 'Mining',  emoji: '⛏️', activity: 'mine', title: 'Mining Shop',  pages: buildMineShopPages(grindUser, currency) });
+            }
+
+            const usable = sections.filter(s => s.pages && s.pages.length);
+            if (!usable.length) {
                 return interaction.reply({ content: 'The shop is empty. Admins can add items via the dashboard.', flags: MessageFlags.Ephemeral });
             }
 
-            const pages = await buildShopPages(guildSettings, currency, viewerPrestigeRank);
-            if (!pages.length) {
-                return interaction.reply({ content: 'The shop is empty.', flags: MessageFlags.Ephemeral });
+            if (!userData) {
+                userData = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             }
-
-            const userData = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             const userBalance = userData?.balance ?? 0;
             const balanceFooter = `Balance: ${currency}${userBalance.toLocaleString()} · Buy from the menu or /shop buy <item> [qty]`;
 
-            // Let shoppers buy straight from the browse view. Re-read the settings
-            // at click time so stock and dynamic prices are current — the browse
-            // message can sit open for minutes — and keep the purchase ephemeral
-            // so a public storefront doesn't fill with each viewer's receipts.
-            for (const page of pages) {
-                page.onBuy = async (btn, buyId) => {
-                    const fresh = await getGuildSettings(interaction.guild.id).catch(() => null);
-                    return buyShopItem(btn, {
-                        guildSettings:      fresh ?? guildSettings,
-                        currency,
-                        viewerPrestigeRank,
-                        rawName:            buyId,
-                        quantity:           1,
-                        privateReply:       true,
-                    });
-                };
-            }
-
             return runShopBrowse(interaction, {
-                activity: pages[0].id.replace('rarity_', 'shop_'),
                 title:    `${interaction.guild.name} Shop`,
                 currency,
                 footer:   balanceFooter,
                 guildId:  interaction.guild.id,
-                pages,
+                sections: usable,
             });
         }
 

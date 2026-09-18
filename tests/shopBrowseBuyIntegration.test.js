@@ -77,7 +77,9 @@ function buildWorld() {
             guildId: 'g1',
             name: 'Test Guild',
             shopDefaultsSeeded: true,
-            economy: { currency: '💰' },
+            // Economy off so /shop view skips the Hunt/Fish/Mine sections (which
+            // would load grind profiles) — this suite covers the server section.
+            economy: { currency: '💰', enabled: false },
             dynamicPricing: { enabled: false },
             shop: [
                 { _id: 'oid_kit', name: 'Repair Kit', itemId: 'repair_kit', description: '🔧 Fixes locks.', price: 100, stock: -1, roleId: null, demandScore: 0 },
@@ -124,13 +126,15 @@ beforeEach(() => {
     jest.clearAllMocks();
 });
 
-test('/shop view attaches an onBuy to every page', async () => {
+test('/shop view builds a Server Shop section with an onBuy on every page', async () => {
     await shopCommand.execute(buildViewInteraction());
 
     expect(mockRunShopBrowse).toHaveBeenCalledTimes(1);
     const config = mockRunShopBrowse.mock.calls[0][1];
-    expect(config.pages.length).toBeGreaterThan(0);
-    for (const page of config.pages) {
+    const server = config.sections.find(s => s.id === 'shop');
+    expect(server).toBeTruthy();
+    expect(server.pages.length).toBeGreaterThan(0);
+    for (const page of server.pages) {
         expect(typeof page.onBuy).toBe('function');
         // Buyable items carry the display name as their buy id.
         for (const item of page.items) expect(item.buyId).toBe(item.name);
@@ -139,8 +143,8 @@ test('/shop view attaches an onBuy to every page', async () => {
 
 test('invoking a page onBuy buys the item privately (ephemeral) and charges once', async () => {
     await shopCommand.execute(buildViewInteraction());
-    const { pages } = mockRunShopBrowse.mock.calls[0][1];
-    const onBuy = pages[0].onBuy;
+    const server = mockRunShopBrowse.mock.calls[0][1].sections.find(s => s.id === 'shop');
+    const onBuy = server.pages[0].onBuy;
 
     const { interaction, state } = buildBuyInteraction();
     await onBuy(interaction, 'Repair Kit');

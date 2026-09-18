@@ -58,11 +58,24 @@ async function loadImagesByItemIds(itemIds, guildId = null) {
  *
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  * @param {object}   config
- * @param {string}   config.activity   'hunt' | 'fish' | 'mine'
- * @param {string}   config.title      e.g. 'Hunt Shop'
- * @param {string}   config.currency   currency symbol/emoji
- * @param {string}   [config.footer]   footer help text
- * @param {Array}    config.pages      ordered page descriptors
+ * @param {string}   [config.activity]  banner theme when a page/section sets none
+ * @param {string}   config.title       e.g. 'Hunt Shop'
+ * @param {string}   config.currency    currency symbol/emoji
+ * @param {string}   [config.footer]    footer help text
+ * @param {Array}    [config.pages]     ordered page descriptors (single-section shop)
+ * @param {Array}    [config.sections]  ordered sections (a multi-shop storefront);
+ *                                       when given, a section select is shown and
+ *                                       `config.pages`/`config.activity` are ignored
+ *
+ * Each section:
+ * {
+ *   id:       string,            // stable id (used in image filenames)
+ *   label:    string,            // shown in the section select
+ *   title?:   string,            // banner title (defaults to label)
+ *   emoji?:   string,            // for the section select
+ *   activity?:string,            // banner theme for this section's pages
+ *   pages:    [page]
+ * }
  *
  * Each page:
  * {
@@ -70,6 +83,7 @@ async function loadImagesByItemIds(itemIds, guildId = null) {
  *   label:    string,            // category label
  *   emoji:    string,            // for select menu
  *   subtitle: string,            // shown on banner under title
+ *   activity?:string,            // banner theme override for this page
  *   items:    [{ id?: string, imageId?: string, name, price?, emoji, subline?, badge?, buyId? }],
  *   listText: string,            // text block shown below banner (buy commands etc.)
  *   onBuy?:   (interaction, buyId) => Promise<void>
@@ -81,8 +95,17 @@ async function loadImagesByItemIds(itemIds, guildId = null) {
  * }
  */
 async function runShopBrowse(interaction, config) {
-    const { activity, title, currency, pages, footer, guildId } = config;
-    const colorHex = COLOR_HEX[activity] || '#f39c12';
+    const { title, currency, footer, guildId } = config;
+
+    // A flat `pages` config is just a one-section storefront with no section
+    // select — that keeps every single-shop caller (hunt/fish/mine list, the
+    // old /shop view) working unchanged.
+    const sections = Array.isArray(config.sections) && config.sections.length
+        ? config.sections
+        : [{ id: '_', label: title, title, activity: config.activity, pages: config.pages || [] }];
+    const multiSection = sections.length > 1;
+
+    const activityOf = (section, page) => page?.activity ?? section?.activity ?? config.activity;
 
     const imageCache = new Map();
     async function hydrate(page) {
@@ -98,6 +121,7 @@ async function runShopBrowse(interaction, config) {
         }));
     }
 
+    let sectionIdx = 0;
     let pageIdx = 0;
 
     // The control rows. Split out from buildMessage so a purchase can reset the
@@ -105,38 +129,52 @@ async function runShopBrowse(interaction, config) {
     // when the choice is unchanged, so a resent select with no default lets the
     // same item be bought again. Uses the raw page items (name/buyId/price), so
     // it needs no image hydration.
-    function buildComponents(idx) {
-        const page = pages[idx];
+    function buildComponents(sIdx, pIdx) {
+        const section  = sections[sIdx];
+        const secPages = section.pages;
+        const page     = secPages[pIdx];
 
         const prev = new ButtonBuilder()
             .setCustomId('shop_prev')
             .setEmoji('◀️')
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(idx === 0);
+            .setDisabled(pIdx === 0);
         const next = new ButtonBuilder()
             .setCustomId('shop_next')
             .setEmoji('▶️')
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(idx === pages.length - 1);
+            .setDisabled(pIdx === secPages.length - 1);
         const close = new ButtonBuilder()
             .setCustomId('shop_close')
             .setLabel('Close')
             .setStyle(ButtonStyle.Danger);
 
+        const components = [new ActionRowBuilder().addComponents(prev, next, close)];
+
+        // The section select switches shops (Server / Hunt / Fish / Mine). Only
+        // shown for a real storefront — a single shop has nothing to switch to.
+        if (multiSection) {
+            const sectionSelect = new StringSelectMenuBuilder()
+                .setCustomId('shop_section')
+                .setPlaceholder('Switch shop…')
+                .addOptions(sections.map((s, i) => {
+                    const opt = { label: s.label.slice(0, 100), value: String(i), default: i === sIdx };
+                    if (s.emoji) opt.emoji = s.emoji;
+                    return opt;
+                }));
+            components.push(new ActionRowBuilder().addComponents(sectionSelect));
+        }
+
         const select = new StringSelectMenuBuilder()
             .setCustomId('shop_cat')
             .setPlaceholder('Jump to category…')
-            .addOptions(pages.map((p, i) => ({
+            .addOptions(secPages.map((p, i) => ({
                 label:   p.label.slice(0, 100),
                 value:   String(i),
                 emoji:   p.emoji,
-                default: i === idx
+                default: i === pIdx
             })));
-
-        const components = [
-            new ActionRowBuilder().addComponents(prev, next, close),
-            new ActionRowBuilder().addComponents(select)
-        ];
+        components.push(new ActionRowBuilder().addComponents(select));
 
         // When a page opts into buying, offer its buyable items in a select so a
         // shopper can purchase from the view they're already looking at instead
@@ -166,23 +204,27 @@ async function runShopBrowse(interaction, config) {
         return components;
     }
 
-    async function buildMessage(idx) {
-        const page  = pages[idx];
+    async function buildMessage(sIdx, pIdx) {
+        const section  = sections[sIdx];
+        const page     = section.pages[pIdx];
+        const activity = activityOf(section, page);
+        const colorHex = COLOR_HEX[activity] || '#f39c12';
+        const bannerTitle = section.title || section.label || title;
         const items = await hydrate(page);
 
         const buffer = await renderCategoryBanner({
             activity,
-            title:    `${title} — ${page.label}`,
+            title:    `${bannerTitle} — ${page.label}`,
             subtitle: page.subtitle,
             items,
             currency
         });
-        const filename   = `${activity}-shop-${page.id}.png`;
+        const filename   = `${activity}-${section.id}-${page.id}.png`;
         // Discord caps alt text at 1024 characters and rejects the upload over
         // it, so the item list — the one part of this that grows with the page —
         // is trimmed rather than allowed to fail the whole message.
         const shown = items.map(i => i.name).filter(Boolean).join(', ');
-        const altText = `${title} — ${page.label}: a banner showing `
+        const altText = `${bannerTitle} — ${page.label}: a banner showing `
             + (shown ? `${shown}.` : 'no items.');
         const attachment = new AttachmentBuilder(buffer, {
             name: filename,
@@ -197,14 +239,15 @@ async function runShopBrowse(interaction, config) {
             embed.setDescription(page.listText.slice(0, 4000));
         }
 
+        const sectionTag = multiSection ? `${section.label} • ` : '';
         embed.setFooter({
-            text: `Page ${idx + 1}/${pages.length} • ${footer || 'Use the menu to switch categories'}`
+            text: `${sectionTag}Page ${pIdx + 1}/${section.pages.length} • ${footer || 'Use the menu to switch categories'}`
         });
 
         return {
             embeds:     [embed],
             files:      [attachment],
-            components: buildComponents(idx)
+            components: buildComponents(sIdx, pIdx)
         };
     }
 
@@ -213,7 +256,7 @@ async function runShopBrowse(interaction, config) {
     }
     let reply;
     try {
-        const initial = await buildMessage(pageIdx);
+        const initial = await buildMessage(sectionIdx, pageIdx);
         reply = await interaction.editReply(initial);
     } catch (err) {
         console.error('[shopBrowse] initial render error:', err);
@@ -236,7 +279,7 @@ async function runShopBrowse(interaction, config) {
         // browse message is left untouched — we must not defer or edit it here,
         // or the handoff would double-acknowledge the same interaction.
         if (btn.customId === 'shop_buy') {
-            const page  = pages[pageIdx];
+            const page  = sections[sectionIdx].pages[pageIdx];
             const buyId = btn.values?.[0];
             if (page?.onBuy && buyId != null) {
                 try {
@@ -253,16 +296,29 @@ async function runShopBrowse(interaction, config) {
                 // Reset the buy select (via the original interaction — btn owns its
                 // own reply) so the same item can be picked again; components only,
                 // so the banner isn't re-rendered on every purchase.
-                interaction.editReply({ components: buildComponents(pageIdx) }).catch(() => {});
+                interaction.editReply({ components: buildComponents(sectionIdx, pageIdx) }).catch(() => {});
             }
             return;
         }
-        if (btn.customId === 'shop_prev') pageIdx = Math.max(0, pageIdx - 1);
-        else if (btn.customId === 'shop_next') pageIdx = Math.min(pages.length - 1, pageIdx + 1);
-        else if (btn.customId === 'shop_cat')  pageIdx = Number(btn.values?.[0] ?? pageIdx);
+        if (btn.customId === 'shop_section') {
+            // Switching shops resets to the new section's first page.
+            const next = Number(btn.values?.[0]);
+            if (Number.isInteger(next) && next >= 0 && next < sections.length) {
+                sectionIdx = next;
+                pageIdx = 0;
+            }
+        } else {
+            const secPages = sections[sectionIdx].pages;
+            if (btn.customId === 'shop_prev') pageIdx = Math.max(0, pageIdx - 1);
+            else if (btn.customId === 'shop_next') pageIdx = Math.min(secPages.length - 1, pageIdx + 1);
+            else if (btn.customId === 'shop_cat') {
+                const next = Number(btn.values?.[0]);
+                if (Number.isInteger(next) && next >= 0 && next < secPages.length) pageIdx = next;
+            }
+        }
         try {
             await btn.deferUpdate();
-            const updated = await buildMessage(pageIdx);
+            const updated = await buildMessage(sectionIdx, pageIdx);
             await interaction.editReply(updated);
         } catch (err) {
             console.error('[shopBrowse] update error:', err);

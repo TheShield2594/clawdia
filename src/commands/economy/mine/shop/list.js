@@ -12,7 +12,10 @@ const {
 const { runShopBrowse } = require('../../../../utils/shopBrowse');
 const { handleBuy } = require('./buy');
 
-async function showShopList(interaction, user, currency) {
+// The five browse pages, as data. Split from showShopList so the unified
+// storefront (/shop view) can drop them in as a section alongside the server
+// shop and the other grinds, sharing this one definition and its buy wiring.
+function buildMineShopPages(user, currency) {
     const m = user.mining;
 
     const pickaxeItems = PICKAXE_TIERS.map(p => ({
@@ -85,6 +88,16 @@ async function showShopList(interaction, user, currency) {
     // one-off, gated or confirm-heavy flows that don't fit a click-to-buy list.
     const onBuy = (btn, buyId) => handleBuy(btn, user, currency, { itemId: buyId });
 
+    return [
+        { id: 'pickaxes',    label: 'Pickaxes',    emoji: '🪓',  subtitle: 'Stronger picks bite deeper veins.',     items: pickaxeItems,    listText: pickaxeList    },
+        { id: 'upgrades',    label: 'Upgrades',    emoji: '🔩',  subtitle: 'One module per pickaxe, permanent.',     items: upgradeItems,    listText: upgradeList    },
+        { id: 'blasts',      label: 'Blast Charges', emoji: '💥', subtitle: 'Crack through stubborn rock.',          items: blastItems,      listText: blastList,      onBuy },
+        { id: 'consumables', label: 'Consumables', emoji: '🎒',  subtitle: 'Repairs, charms and quick boosts.',      items: consumableItems, listText: consumableList, onBuy },
+        { id: 'depths',      label: 'Depths',      emoji: '🗺️', subtitle: 'New depths, new ores.',                  items: depthItems,      listText: depthList      }
+    ];
+}
+
+async function showShopList(interaction, user, currency) {
     return runShopBrowse(interaction, {
         activity: 'mine',
         title:    'Mining Shop',
@@ -93,14 +106,8 @@ async function showShopList(interaction, user, currency) {
         // view only ever finds the shared pre-#561 rows.
         guildId:  interaction.guild.id,
         footer:   'pickaxe • upgrade • buy • use • repair • unlock',
-        pages: [
-            { id: 'pickaxes',    label: 'Pickaxes',    emoji: '🪓',  subtitle: 'Stronger picks bite deeper veins.',     items: pickaxeItems,    listText: pickaxeList    },
-            { id: 'upgrades',    label: 'Upgrades',    emoji: '🔩',  subtitle: 'One module per pickaxe, permanent.',     items: upgradeItems,    listText: upgradeList    },
-            { id: 'blasts',      label: 'Blast Charges', emoji: '💥', subtitle: 'Crack through stubborn rock.',          items: blastItems,      listText: blastList,      onBuy },
-            { id: 'consumables', label: 'Consumables', emoji: '🎒',  subtitle: 'Repairs, charms and quick boosts.',      items: consumableItems, listText: consumableList, onBuy },
-            { id: 'depths',      label: 'Depths',      emoji: '🗺️', subtitle: 'New depths, new ores.',                  items: depthItems,      listText: depthList      }
-        ]
+        pages: buildMineShopPages(user, currency),
     });
 }
 
-module.exports = { showShopList };
+module.exports = { showShopList, buildMineShopPages };

@@ -12,7 +12,10 @@ const {
 const { runShopBrowse } = require('../../../../utils/shopBrowse');
 const { handleBuy } = require('./buy');
 
-async function showShopList(interaction, user, currency) {
+// The five browse pages, as data. Split from showShopList so the unified
+// storefront (/shop view) can drop them in as a section alongside the server
+// shop and the other grinds, sharing this one definition and its buy wiring.
+function buildFishShopPages(user, currency) {
     const f = user.fishing;
 
     const rodItems = ROD_TIERS.map(r => ({
@@ -84,6 +87,16 @@ async function showShopList(interaction, user, currency) {
     // gated or confirm-heavy flows that don't fit a click-to-buy list.
     const onBuy = (btn, buyId) => handleBuy(btn, user, currency, { itemId: buyId });
 
+    return [
+        { id: 'rods',        label: 'Rods',        emoji: '🎣',  subtitle: 'Better rods, better catches.',           items: rodItems,        listText: rodList        },
+        { id: 'upgrades',    label: 'Upgrades',    emoji: '🔧',  subtitle: 'One module per rod, permanent.',         items: upgradeItems,    listText: upgradeList    },
+        { id: 'bait',        label: 'Bait',        emoji: '🪱',  subtitle: 'The right bait pulls the right fish.',   items: baitItems,       listText: baitList,       onBuy },
+        { id: 'consumables', label: 'Consumables', emoji: '🧪',  subtitle: 'Luck, XP and quick boosts.',             items: consumableItems, listText: consumableList, onBuy },
+        { id: 'locations',   label: 'Locations',   emoji: '🗺️', subtitle: 'New waters, new species.',                items: locationItems,   listText: locationList   }
+    ];
+}
+
+async function showShopList(interaction, user, currency) {
     return runShopBrowse(interaction, {
         activity: 'fish',
         title:    'Fishing Shop',
@@ -92,14 +105,8 @@ async function showShopList(interaction, user, currency) {
         // only ever finds the shared pre-#561 rows.
         guildId:  interaction.guild.id,
         footer:   'rod • upgrade • buy • use • repair • unlock',
-        pages: [
-            { id: 'rods',        label: 'Rods',        emoji: '🎣',  subtitle: 'Better rods, better catches.',           items: rodItems,        listText: rodList        },
-            { id: 'upgrades',    label: 'Upgrades',    emoji: '🔧',  subtitle: 'One module per rod, permanent.',         items: upgradeItems,    listText: upgradeList    },
-            { id: 'bait',        label: 'Bait',        emoji: '🪱',  subtitle: 'The right bait pulls the right fish.',   items: baitItems,       listText: baitList,       onBuy },
-            { id: 'consumables', label: 'Consumables', emoji: '🧪',  subtitle: 'Luck, XP and quick boosts.',             items: consumableItems, listText: consumableList, onBuy },
-            { id: 'locations',   label: 'Locations',   emoji: '🗺️', subtitle: 'New waters, new species.',                items: locationItems,   listText: locationList   }
-        ]
+        pages: buildFishShopPages(user, currency),
     });
 }
 
-module.exports = { showShopList };
+module.exports = { showShopList, buildFishShopPages };
