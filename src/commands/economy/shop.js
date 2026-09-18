@@ -273,14 +273,15 @@ module.exports = {
                 : items;
 
             // Prefix matches first, then substring matches, so typing "pet" surfaces
-            // "Pet Food" ahead of "Carpet".
+            // "Pet Food" ahead of "Carpet". With no input, fall back to a plain
+            // alphabetical list so the shop always reads in A→Z order.
             const ranked = focused
                 ? [...matches].sort((a, b) => {
                     const aPre = a.name.toLowerCase().startsWith(focused) ? 0 : 1;
                     const bPre = b.name.toLowerCase().startsWith(focused) ? 0 : 1;
                     return aPre - bPre || a.name.localeCompare(b.name);
                 })
-                : matches;
+                : [...matches].sort((a, b) => a.name.localeCompare(b.name));
 
             await interaction.respond(
                 ranked.slice(0, 25).map(i => {
