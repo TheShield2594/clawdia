@@ -568,6 +568,14 @@ function formatCost(n, costKnown) {
     if (n < 0.01 && n > 0) return prefix + '< $0.01';
     return prefix + '$' + n.toFixed(2);
 }
+// The share of input tokens a provider served from its prompt cache (#1046).
+// A dash when there was no input to measure against, so an idle month reads as
+// "no data" rather than a misleading 0%.
+function formatHitRate(cached, input) {
+    if (!input) return '—';
+    const pct = Math.max(0, Math.min(100, (cached / input) * 100));
+    return (pct < 10 ? pct.toFixed(1) : Math.round(pct)) + '%';
+}
 function renderSparkline(daily) {
     const svg = document.getElementById('ai-usage-sparkline');
     if (!svg) return;
@@ -606,6 +614,7 @@ function renderUsageBreakdown(byModel) {
                 '<td>' + escHtml(m.model) + '</td>' +
                 '<td class="num">' + m.requestCount + '</td>' +
                 '<td class="num">' + formatTokens(total) + '</td>' +
+                '<td class="num">' + formatHitRate(m.cachedInputTokens || 0, m.inputTokens || 0) + '</td>' +
                 '<td class="num">' + costStr + '</td>' +
             '</tr>';
         }).join('');
@@ -615,6 +624,7 @@ function renderUsageBreakdown(byModel) {
             '<th>Provider</th><th>Model</th>' +
             '<th style="text-align:right;">Reqs</th>' +
             '<th style="text-align:right;">Tokens</th>' +
+            '<th class="num" title="Share of input tokens served from the provider\'s prompt cache">Cache</th>' +
             '<th style="text-align:right;">Est. cost</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table>';
 }
@@ -671,6 +681,10 @@ async function loadAiUsage() {
         document.getElementById('ai-usage-today-cost').textContent = formatCost(data.today.cost, data.costKnown);
         document.getElementById('ai-usage-week-cost').textContent  = formatCost(data.week.cost, data.costKnown);
         document.getElementById('ai-usage-month-cost').textContent = formatCost(data.month.cost, data.costKnown);
+        const cache = data.cache || { inputTokens: 0, cachedInputTokens: 0 };
+        document.getElementById('ai-usage-month-cache').textContent = formatHitRate(cache.cachedInputTokens, cache.inputTokens);
+        document.getElementById('ai-usage-month-cache-sub').textContent =
+            cache.inputTokens ? formatTokens(cache.cachedInputTokens) + ' cached' : 'this month';
         renderSparkline(data.daily || []);
         renderUsageBreakdown(data.byModel || []);
         renderUsageBudget(data.budget);

@@ -91,6 +91,21 @@ describe('an endpoint that accepts stream_options', () => {
         expect(usageOut.usage).toMatchObject({ inputTokens: 3, outputTokens: 4 });
     });
 
+    // #1046: the cached slice of prompt_tokens is recorded for the hit-rate view.
+    test('records the cached prefix tokens OpenAI served from its cache', async () => {
+        mockCreate.mockResolvedValue({
+            async *[Symbol.asyncIterator]() {
+                yield { choices: [{ delta: { content: 'ok' } }] };
+                yield { usage: { prompt_tokens: 900, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 768 } } };
+            }
+        });
+        const usageOut = {};
+
+        await collect(loadProvider().stream({ ...REQ, usageOut }));
+
+        expect(usageOut.usage).toMatchObject({ inputTokens: 900, outputTokens: 4, cachedInputTokens: 768 });
+    });
+
     test('is asked once per round, not retried', async () => {
         mockCreate.mockResolvedValue(okStream());
 

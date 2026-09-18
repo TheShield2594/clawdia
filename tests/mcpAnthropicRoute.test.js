@@ -258,7 +258,7 @@ describe('the client-side tool loop', () => {
 
         const usageOut = {};
         await collect(anthropic.stream({ ...CLIENT, usageOut }));
-        expect(usageOut.usage).toEqual({ inputTokens: 400, outputTokens: 30 });
+        expect(usageOut.usage).toEqual({ inputTokens: 400, outputTokens: 30, cachedInputTokens: 0 });
     });
 
     test('sends a tool that arrived with no input as an empty object', async () => {
@@ -356,7 +356,7 @@ describe('the client-side tool loop, unstreamed', () => {
         // streaming off gets the same reply rather than a run-on one.
         expect(result).toEqual({
             text: 'Let me look.\n\nThree open PRs.',
-            usage: { inputTokens: 400, outputTokens: 30 }
+            usage: { inputTokens: 400, outputTokens: 30, cachedInputTokens: 0 }
         });
     });
 

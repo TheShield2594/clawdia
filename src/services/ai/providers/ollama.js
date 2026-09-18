@@ -110,7 +110,11 @@ function usageOf(payload) {
     if (payload.prompt_eval_count == null && payload.eval_count == null) return null;
     return {
         inputTokens: payload.prompt_eval_count || 0,
-        outputTokens: payload.eval_count || 0
+        outputTokens: payload.eval_count || 0,
+        // Ollama serves the whole prompt fresh — it has no prompt cache — so
+        // this is always zero. Reported anyway to keep one usage shape across
+        // every provider for the ledger (#1046).
+        cachedInputTokens: 0
     };
 }
 
@@ -118,6 +122,7 @@ function addUsage(totals, round) {
     if (!round) return;
     totals.inputTokens += round.inputTokens;
     totals.outputTokens += round.outputTokens;
+    totals.cachedInputTokens += round.cachedInputTokens || 0;
 }
 
 // Ollama sends arguments as an object, but some builds send the JSON text
@@ -241,7 +246,7 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, images, 
     const { url, dispatcher } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt, images, model });
 
-    const totals = { inputTokens: 0, outputTokens: 0 };
+    const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     // A round that calls tools often says something first, and the answer
     // arrives in the round after it — two pieces of prose, not one sentence.
@@ -280,7 +285,7 @@ async function complete({ baseUrl, model, systemPrompt, history, prompt, images,
     const { url, dispatcher } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt, images, model });
 
-    const totals = { inputTokens: 0, outputTokens: 0 };
+    const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     const parts = [];
 

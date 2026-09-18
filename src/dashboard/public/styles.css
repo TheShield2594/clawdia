@@ -1131,6 +1131,7 @@ textarea.auto-resize {
 }
 .ai-usage-breakdown th { font-weight: 600; color: var(--text); }
 .ai-usage-breakdown td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.ai-usage-breakdown th.num { text-align: right; }
 
 /* ================================================================
    NEW HOME PAGE — cream/ink palette

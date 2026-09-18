@@ -221,10 +221,19 @@ async function runToolCalls(toolkit, uses) {
     }));
 }
 
+// Anthropic reports the tokens it served from the prompt cache apart from the
+// fresh input_tokens (this bot marks the system block cache_control ephemeral),
+// so the cached read is its own field rather than a subset of the input above.
+// Recorded for the cache-hit-rate view (#1046).
+function cachedOf(usage) {
+    return usage?.cache_read_input_tokens || 0;
+}
+
 function addUsage(totals, usage) {
     if (!usage) return false;
     totals.inputTokens += usage.input_tokens || 0;
     totals.outputTokens += usage.output_tokens || 0;
+    totals.cachedInputTokens += cachedOf(usage);
     return true;
 }
 
@@ -241,7 +250,7 @@ async function* streamWithTools(client, req, toolkit) {
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
     const messages = buildMessages(history, prompt, images, model);
 
-    const totals = { inputTokens: 0, outputTokens: 0 };
+    const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     let wroteText = false;
     const rounds = roundsFor(toolkit);
@@ -285,7 +294,7 @@ async function completeWithTools(client, req, toolkit) {
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
     const messages = buildMessages(history, prompt, images, model);
 
-    const totals = { inputTokens: 0, outputTokens: 0 };
+    const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     const parts = [];
     const rounds = roundsFor(toolkit);
@@ -332,6 +341,7 @@ async function* stream(req) {
 
     let inputTokens = 0;
     let outputTokens = 0;
+    let cachedInputTokens = 0;
 
     for (let turn = 0; ; turn++) {
         const response = await api.stream({ ...base, ...params, messages });
@@ -341,6 +351,7 @@ async function* stream(req) {
                 yield event.delta.text;
             } else if (event.type === 'message_start' && event.message?.usage) {
                 inputTokens += event.message.usage.input_tokens || 0;
+                cachedInputTokens += cachedOf(event.message.usage);
                 turnOutput = event.message.usage.output_tokens || 0;
             } else if (event.type === 'message_delta' && event.usage) {
                 // Final cumulative output_tokens arrive in message_delta
@@ -358,7 +369,7 @@ async function* stream(req) {
         messages = [...messages, { role: 'assistant', content: final.content }];
     }
 
-    if (usageOut) usageOut.usage = { inputTokens, outputTokens };
+    if (usageOut) usageOut.usage = { inputTokens, outputTokens, cachedInputTokens };
 }
 
 async function complete(req) {
@@ -376,6 +387,7 @@ async function complete(req) {
     const parts = [];
     let inputTokens = 0;
     let outputTokens = 0;
+    let cachedInputTokens = 0;
     let sawUsage = false;
 
     for (let turn = 0; ; turn++) {
@@ -385,6 +397,7 @@ async function complete(req) {
             sawUsage = true;
             inputTokens += response.usage.input_tokens || 0;
             outputTokens += response.usage.output_tokens || 0;
+            cachedInputTokens += cachedOf(response.usage);
         }
 
         if (response.stop_reason !== 'pause_turn') break;
@@ -397,7 +410,7 @@ async function complete(req) {
 
     return {
         text: parts.join(''),
-        usage: sawUsage ? { inputTokens, outputTokens } : null
+        usage: sawUsage ? { inputTokens, outputTokens, cachedInputTokens } : null
     };
 }
 

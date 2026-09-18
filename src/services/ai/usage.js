@@ -186,10 +186,14 @@ async function recordUsage(guildId, provider, model, usage) {
     const inputTokens = Math.max(0, Math.floor(usage.inputTokens || 0));
     const outputTokens = Math.max(0, Math.floor(usage.outputTokens || 0));
     if (inputTokens === 0 && outputTokens === 0) return;
+    // The share of the input that came from the provider's prompt cache
+    // (#1046). Never more than the input it is a part of — a provider that
+    // reported it inconsistently must not make the hit rate exceed 100%.
+    const cachedInputTokens = Math.min(inputTokens, Math.max(0, Math.floor(usage.cachedInputTokens || 0)));
     const day = utcDayString();
     const filter = { guildId, day, provider, model: model || 'unknown' };
     const update = {
-        $inc: { inputTokens, outputTokens, requestCount: 1 },
+        $inc: { inputTokens, outputTokens, cachedInputTokens, requestCount: 1 },
         $set: { updatedAt: new Date() }
     };
     // Charged against the cached monthly total first, so the ceiling sees this
@@ -236,22 +240,27 @@ async function getUsageStats(guildId, days = 14) {
         const d = new Date();
         d.setUTCDate(d.getUTCDate() - (days - 1 - i));
         const key = utcDayString(d);
-        byDay.set(key, { day: key, inputTokens: 0, outputTokens: 0, requestCount: 0, cost: 0 });
+        byDay.set(key, { day: key, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, requestCount: 0, cost: 0 });
     }
 
     let todayTokens = 0, weekTokens = 0, monthTokens = 0;
     let todayCost = 0, weekCost = 0, monthCost = 0;
+    // Of the input, how much each window was served from cache, and the input
+    // it is a share of — the two the cache-hit-rate view divides (#1046).
+    let monthInput = 0, monthCached = 0;
     let costKnown = true;
 
     for (const row of rows) {
         const cost = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens);
         if (cost == null) costKnown = false;
         const totalTokens = row.inputTokens + row.outputTokens;
+        const cachedInput = row.cachedInputTokens || 0;
 
         const bucket = byDay.get(row.day);
         if (bucket) {
             bucket.inputTokens += row.inputTokens;
             bucket.outputTokens += row.outputTokens;
+            bucket.cachedInputTokens += cachedInput;
             bucket.requestCount += row.requestCount;
             bucket.cost += cost || 0;
         }
@@ -267,6 +276,8 @@ async function getUsageStats(guildId, days = 14) {
         if (row.day >= monthStart) {
             monthTokens += totalTokens;
             monthCost += cost || 0;
+            monthInput += row.inputTokens;
+            monthCached += cachedInput;
         }
     }
 
@@ -277,12 +288,13 @@ async function getUsageStats(guildId, days = 14) {
         if (!byModel[key]) {
             byModel[key] = {
                 provider: row.provider, model: row.model,
-                inputTokens: 0, outputTokens: 0, requestCount: 0, cost: 0, costKnown: true
+                inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, requestCount: 0, cost: 0, costKnown: true
             };
         }
         const m = byModel[key];
         m.inputTokens += row.inputTokens;
         m.outputTokens += row.outputTokens;
+        m.cachedInputTokens += row.cachedInputTokens || 0;
         m.requestCount += row.requestCount;
         const c = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens);
         if (c == null) m.costKnown = false;
@@ -293,6 +305,10 @@ async function getUsageStats(guildId, days = 14) {
         today:  { tokens: todayTokens, cost: round4(todayCost) },
         week:   { tokens: weekTokens,  cost: round4(weekCost) },
         month:  { tokens: monthTokens, cost: round4(monthCost) },
+        // The month's prompt-cache hit rate: the cached share of the input, and
+        // the input it is measured against, so the panel can show both the
+        // percentage and how much of a base it stands on (#1046).
+        cache:  { inputTokens: monthInput, cachedInputTokens: monthCached },
         costKnown,
         daily: Array.from(byDay.values()).map(d => ({ ...d, cost: round4(d.cost) })),
         byModel: Object.values(byModel).map(m => ({ ...m, cost: round4(m.cost) }))
