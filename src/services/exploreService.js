@@ -997,7 +997,33 @@ function renderMap(user, guildSettings) {
 
 const formatMs = grind.formatMs;
 
+/**
+ * Grant the relic an expedition turned up, or record it as owed (#873).
+ *
+ * The relic is the one thing an expedition grants that does not ride the run's
+ * own `save()`: it is detached and re-applied as an atomic upsert because
+ * `save()` would flatten a concurrent inventory write (see explore.js and
+ * src/utils/inventoryGrant.js). That grant used to be a bare `grantInventoryItem`
+ * that read nothing back and swallowed a throw into a log line which *said*
+ * "owed" while recording nothing — so a relic that never landed was still
+ * announced as recovered. grantItemsOrOwe is keyed (a replay cannot grant it
+ * twice), never throws, and files an owed payload for `payouts:replay` when the
+ * grant will not land.
+ *
+ * Returns `{ granted }`; a false `granted` is the caller's cue to say the relic
+ * is owed rather than in the bag.
+ */
+async function commitExpeditionRelic(user, relic, interactionId) {
+    const { grantItemsOrOwe } = require('../utils/creditOrOwe');
+    const { exploreRelicPayoutKey } = require('../utils/payoutKey');
+    return grantItemsOrOwe(
+        { userId: user.userId, guildId: user.guildId }, relic.itemId, 1,
+        { payoutKey: exploreRelicPayoutKey(interactionId), service: 'explore', jobName: 'relicGrant' },
+    );
+}
+
 module.exports = {
+    commitExpeditionRelic,
     ensureExploreData,
     getRegionProgress,
     getMaxStamina,

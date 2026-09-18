@@ -14,6 +14,8 @@ const { attachGrind } = require('../../../../utils/grindProfile');
 const { ensureFishingData } = require('../../../../services/fishService');
 const { ROD_UPGRADES, ROD_BY_TIER } = require('../../../../data/fishData');
 const COLORS = require('../../../../utils/embedColors');
+const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
+const { shopRefundPayoutKey } = require('../../../../utils/payoutKey');
 
 async function handleBuyUpgrade(interaction, user, currency) {
     const f = user.fishing;
@@ -110,12 +112,21 @@ async function handleBuyUpgrade(interaction, user, currency) {
         } catch (err) {
             console.error('[fishshop upgrade] save error:', err);
             // The coins are already gone; hand them back rather than charging for
-            // an upgrade that was never installed.
-            await User.updateOne(
+            // an upgrade that was never installed. Through creditCoinsOrOwe
+            // (keyed to the interaction) so a refund that will not land is
+            // recorded for replay rather than lost under a message that says it
+            // worked (#873).
+            const refund = await creditCoinsOrOwe(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: cost } },
-            ).catch(refundErr => console.error('[fishshop upgrade] refund after failed save:', refundErr));
-            return btn.update({ content: 'Something went wrong and your coins were refunded. Please try again.', embeds: [], components: [] });
+                cost,
+                { payoutKey: shopRefundPayoutKey(interaction.id), service: 'fish', jobName: 'upgradeRefund' },
+            );
+            return btn.update({
+                content: refund.credited
+                    ? 'Something went wrong and your coins were refunded. Please try again.'
+                    : `Something went wrong, and the ${currency}${cost.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`,
+                embeds: [], components: [],
+            });
         }
 
         return btn.update({

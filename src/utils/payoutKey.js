@@ -530,7 +530,91 @@ function challengeBonusPayoutKey(command, interactionId) {
     return `${command}:${interactionId}:challenge`;
 }
 
+/**
+ * The coins a gathering run pays out — a `/hunt`, `/fish`, `/mine` or `/explore`
+ * (#873).
+ *
+ * These are the highest-volume credits in the economy, and they were the last
+ * to go unkeyed. Each run reads the user, mutates `balance` in memory across an
+ * interactive window, and credits the net change through `commitBalanceDelta`
+ * (src/utils/balanceDelta.js) after the save lands. Without a key that credit is
+ * at-least-once: `commitBalanceDelta` retries the bare `$inc` up to three times,
+ * so a write that committed and merely lost its response is credited again on
+ * the retry, and a run against a pruned document is reported as paid while no
+ * coins move — the #804 failure the keyed path exists to tell apart. Keyed, the
+ * retry is a no-op, a missing document is recorded as owed, and the record
+ * replays under the same key.
+ *
+ * Keyed by the opening interaction, which is the one identifier that survives
+ * the run's own awaits — the approach, reel-in and encounter prompts all resolve
+ * on collector callbacks minutes later. The `phase` is in the key because one
+ * interaction can credit twice: a hunt pays its base haul and then its apex
+ * bonus, a cast its catch and then its boss bonus, an expedition its find and
+ * then its encounter. Naming the service too keeps the two commands that share
+ * an interaction id across a restart from colliding, the same reason
+ * `challengeBonusPayoutKey` carries its command.
+ */
+function gatherPayoutKey(service, interactionId, phase) {
+    return `gather:${service}:${interactionId}:${phase}`;
+}
+
+/**
+ * A relic recovered on an expedition (#873).
+ *
+ * The relic is the one thing an expedition grants that does not ride the run's
+ * own `save()`: a legendary treasure's relic is re-applied as an atomic upsert
+ * right after the save, because `save()` would flatten a concurrent inventory
+ * write (src/utils/inventoryGrant.js). That grant was a bare `grantInventoryItem`
+ * that read nothing back and swallowed a throw into a log line, so a relic that
+ * did not land was still announced as in the player's case — the item-side #873
+ * pattern. Keyed, the grant is recorded as owed when it will not land, and a
+ * replay cannot grant it twice.
+ *
+ * Keyed by the interaction: one expedition turns up at most one relic, and the
+ * next `/explore go` is a new interaction.
+ */
+function exploreRelicPayoutKey(interactionId) {
+    return `explore:${interactionId}:relic`;
+}
+
+/**
+ * The item won from a seasonal loot box opened with `/use` (#873).
+ *
+ * `/use` consumes the box atomically and then granted the won item with a bare
+ * `grantInventoryItem` — no result read, no record when it missed — over an
+ * embed that announced the win regardless. The box is spent by the time the
+ * grant runs, so a grant that failed lost the item with nothing to replay.
+ * Keyed, it is recorded as owed and settles under the same key.
+ *
+ * Keyed by the interaction, which names this open: the same player opening
+ * another box a moment later is a new interaction and grants separately.
+ */
+function lootBoxItemPayoutKey(interactionId) {
+    return `lootbox:${interactionId}:item`;
+}
+
+/**
+ * A shop purchase's coins coming back when the item could not be granted (#873).
+ *
+ * The gathering shops debit atomically against the balance, then grant the bait,
+ * consumable, tool or upgrade under a stack-cap guard that a concurrent purchase
+ * can make fail. The refund that followed was a bare `$inc` with `.catch(() =>
+ * {})`, read nothing back, and told the player "your coins were refunded"
+ * whether or not the write landed — the same unwind shape pass 3 found in
+ * `/market`. Keyed, the refund is recorded as owed when it will not land and the
+ * message is told only once it does.
+ *
+ * Keyed by the interaction, like the other refunds beside it: the same player
+ * retrying the same purchase a second later is a different attempt and refunds
+ * separately, so a key built from the item alone would collide and drop the
+ * second refund.
+ */
+function shopRefundPayoutKey(interactionId) {
+    return `shop:${interactionId}:refund`;
+}
+
 module.exports = {
+    gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey,
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
     marketSalePayoutKey, listingPurchasePayoutKey, listingCancelPayoutKey,
     listingUnwindPayoutKey,

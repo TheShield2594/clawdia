@@ -22,14 +22,16 @@ coverage, which is [#873](https://github.com/TheShield2594/clawdia/issues/873):
 audit coverage is widest exactly where the risk is not.
 
 So net-new game features wait, and every currency-mutation path gets the
-treatment the nine long-stable subsystems got. Five passes have landed under that
+treatment the nine long-stable subsystems got. Six passes have landed under that
 decision already — `/duel` escrow and the `/heist` and `/syndicate` crew splits
 in v4.5.2, the casino's progressive jackpot in v4.6.0, `/gift` and `/market` in
 v4.6.1, the casino's hand payouts in v4.7.0, the core currency commands
-(`balance`, `bank`, `daily`, `work`, `jobs`, `crime`, `invest`) in v4.11.1 — and
-between them they found twenty-nine critical defects in code that was live, every
-one of them on a path that moves coins. That is the argument for the order, and it
-is worth re-reading before anybody proposes suspending it.
+(`balance`, `bank`, `daily`, `work`, `jobs`, `crime`, `invest`) in v4.11.1, and
+the gathering-loop payouts (`hunt`, `fish`, `mine`, `explore`) in v4.11.2 — and
+between them they found the same defect on path after path: a credit or grant
+written without reading the write back and without a key to replay it. That is
+the argument for the order, and it is worth re-reading before anybody proposes
+suspending it.
 
 What this does *not* mean: bug fixes, security work, operational work and
 documentation are not features and are not blocked. Nothing below is sequenced
@@ -51,13 +53,16 @@ so that there is only ever one copy to correct.
    a public deferral makes refusals public, an ephemeral one hides successful
    moderation embeds from the channel. **Settle that first** — it is the whole
    of the work that cannot be started without a decision.
-2. **Economy audit, pass 6 — the gathering loops.**
-   ([#873](https://github.com/TheShield2594/clawdia/issues/873)) `hunt`, `fish`,
-   `mine`, `explore`, and items/effects/`use`. Next in the money-moving order
-   below, now that the core currency commands have been through pass 5 (v4.11.1):
-   `/invest`'s unguarded refund, the `/work` and `/daily` challenge bonuses and
-   the `/crime` payout all credited without reading the write back, and now go
-   through `creditCoinsOrOwe` like every other economy credit.
+2. **Economy audit, pass 7 — progression, group and PvP, seasonal events.**
+   ([#873](https://github.com/TheShield2594/clawdia/issues/873)) Next in the
+   money-moving order below, now that the gathering-loop payouts have been
+   through pass 6 (v4.11.2) — the `/hunt`, `/fish`, `/mine` and `/explore` run
+   and bonus credits were unkeyed, so the retry double-paid and a failure filed a
+   `FailedJob` `payouts:replay` could not settle; they now key through
+   `gatherPayoutKey` like every other economy credit, and the `/explore` relic
+   and `/use` loot-box grants through `grantItemsOrOwe`. What the gathering pass
+   did *not* cover stays on the queue: the shops' repair/upgrade pricing, quest
+   crediting, prestige and pet drops.
 3. **What is left of the casino.**
    ([#873](https://github.com/TheShield2594/clawdia/issues/873)) Pass 4 took the
    payouts. `confirmBet`, the bet guards and the games' leaderboard writes were
@@ -92,13 +97,17 @@ each pass found; its
 [Not yet reviewed](AUDIT_LOG.md#not-yet-reviewed) section is the queue. That list
 is long and mostly unordered, deliberately — it is a survey, not a plan. The
 order this roadmap commits to, within the economy, is money-moving first.
-Five passes have landed against it — `/duel` escrow and the crew splits, the
+Six passes have landed against it — `/duel` escrow and the crew splits, the
 progressive jackpot, `/gift` and `/market`, the casino's hand payouts and crash
-refunds, and the core currency commands — which leaves:
+refunds, the core currency commands, and the gathering-loop payouts (`hunt`,
+`fish`, `mine`, `explore`, plus the `/explore` relic and `/use` loot-box item
+grants) — which leaves:
 
-1. the gathering loops — `hunt`, `fish`, `mine`, `explore` — and items, effects
-   and `use`
-2. progression, the group and PvP systems, seasonal events
+1. progression, the group and PvP systems, seasonal events
+2. the rest of the gathering commands the payout pass left — the shops'
+   repair/upgrade/unlock pricing, quest and mission crediting, prestige, pet
+   drops, and the tournament/map/raid flows — and `pet`, `effects` and the rest
+   of `use`/`inventory`/`shop`
 
 Plus the remainder of the casino — `confirmBet`, the bet guards, the leaderboard
 writes — which pass 4 named as out of its scope rather than dropping.

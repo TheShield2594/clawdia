@@ -15,6 +15,26 @@ const { AMMO_PACKS, CONSUMABLES } = require('../../../../data/huntData');
 const GrindProfile = require('../../../../models/GrindProfile');
 const { ACTIVATABLE } = require('../shared');
 const COLORS = require('../../../../utils/embedColors');
+const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
+const { shopRefundPayoutKey } = require('../../../../utils/payoutKey');
+
+// The coins come back through creditCoinsOrOwe, not a bare `$inc`: a refund that
+// itself fails is recorded for `payouts:replay` and the player is told it is
+// owed, rather than sent away with "refunded" over coins that never returned
+// (#873). Keyed to the interaction so a replay cannot pay it twice.
+async function refundPurchase(interaction, amount) {
+    return creditCoinsOrOwe(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        amount,
+        { payoutKey: shopRefundPayoutKey(interaction.id), service: 'hunt', jobName: 'shopRefund' },
+    );
+}
+
+function refundMessage(refund, currency, amount) {
+    return refund.credited
+        ? 'Purchase failed — your coins were refunded. Please try again.'
+        : `Purchase failed, and the ${currency}${amount.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`;
+}
 
 // `override` lets the browse view drive a purchase from its buy select: it
 // passes the itemId directly instead of reading it off a slash option, and the
@@ -119,8 +139,8 @@ async function handleBuy(interaction, user, currency, override = {}) {
                 ).catch(() => null);
 
                 if (!profUpdated) {
-                    await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(() => {});
-                    return interaction.editReply({ content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] });
+                    const refund = await refundPurchase(interaction, totalCost);
+                    return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
                 }
                 h.consumables[itemId] = profUpdated.data?.consumables?.[itemId] ?? quantity;
                 newStock = `${h.consumables[itemId]}× ${consumableDef.name}`;
@@ -133,8 +153,8 @@ async function handleBuy(interaction, user, currency, override = {}) {
                 ).catch(() => null);
 
                 if (!profUpdated) {
-                    await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(() => {});
-                    return interaction.editReply({ content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] });
+                    const refund = await refundPurchase(interaction, totalCost);
+                    return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
                 }
                 h.ammo[ammoDef.ammoType] = profUpdated.data?.ammo?.[ammoDef.ammoType] ?? (ammoDef.quantity * quantity);
                 newStock = `${h.ammo[ammoDef.ammoType]} ${ammoDef.ammoType.replace(/_/g, ' ')}`;

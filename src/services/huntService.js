@@ -1597,8 +1597,14 @@ function applyHuntBonuses(user, result, zoneId, { petYieldPct = 0, petXpPct = 0,
  * Persist the hunt and credit its coin movement as an atomic `$inc` after the
  * save has landed — same contract as fishService.commitCast. A credit that
  * will not land is returned as `payoutOwed`.
+ *
+ * `payoutKey` makes the credit exactly-once: without one the retry inside
+ * `commitBalanceDelta` re-credits a write whose response was lost, and a run
+ * against a pruned document is reported as paid though no coins moved. The
+ * caller builds it from the interaction (`gatherPayoutKey`), so it survives the
+ * whole run and a replay guards itself with the same string.
  */
-async function commitHunt(user, balanceAtLoad) {
+async function commitHunt(user, balanceAtLoad, { payoutKey } = {}) {
     const User = require('../models/User');
     const { detachBalanceDelta, commitBalanceDelta } = require('../utils/balanceDelta');
     const balanceFilter = { userId: user.userId, guildId: user.guildId };
@@ -1609,6 +1615,7 @@ async function commitHunt(user, balanceAtLoad) {
         service: 'hunt',
         jobName: 'huntPayout',
         guildId: user.guildId,
+        payoutKey,
     });
     return { payoutOwed: payout.credited ? 0 : balanceDelta };
 }

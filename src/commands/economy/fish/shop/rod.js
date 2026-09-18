@@ -15,6 +15,8 @@ const { ensureFishingData } = require('../../../../services/fishService');
 const { ROD_BY_SLUG } = require('../../../../data/fishData');
 const { getItemImageAttachment } = require('../../../../utils/itemImageHelper');
 const COLORS = require('../../../../utils/embedColors');
+const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
+const { shopRefundPayoutKey } = require('../../../../utils/payoutKey');
 
 async function handleBuyRod(interaction, user, currency) {
     const slug    = interaction.options.getString('type');
@@ -107,12 +109,20 @@ async function handleBuyRod(interaction, user, currency) {
         } catch (err) {
             console.error('[fishshop rod] save error:', err);
             // The coins are already gone; hand them back rather than charging for
-            // a rod that was never added.
-            await User.updateOne(
+            // a rod that was never added. Through creditCoinsOrOwe (keyed to the
+            // interaction) so a refund that will not land is recorded for replay
+            // rather than lost under a message that says it worked (#873).
+            const refund = await creditCoinsOrOwe(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: rodData.cost } },
-            ).catch(refundErr => console.error('[fishshop rod] refund after failed save:', refundErr));
-            return btn.update({ content: 'Something went wrong and your coins were refunded. Please try again.', embeds: [], components: [] });
+                rodData.cost,
+                { payoutKey: shopRefundPayoutKey(interaction.id), service: 'fish', jobName: 'rodRefund' },
+            );
+            return btn.update({
+                content: refund.credited
+                    ? 'Something went wrong and your coins were refunded. Please try again.'
+                    : `Something went wrong, and the ${currency}${rodData.cost.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`,
+                embeds: [], components: [],
+            });
         }
 
         const rodIndex = freshUser.fishing.rods.length;

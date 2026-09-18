@@ -11,9 +11,12 @@
 //
 // The contract is "every caller must spell this correctly", the branches are
 // hard to drive (most of these are seasonal commands, boss drops and market
-// flows), and there are 18 of them across 15 files — so this is a static sweep
+// flows), and there are 13 of them across 13 files — so this is a static sweep
 // rather than a behavioural test, the same shape as
-// tests/balanceDebitGuard.test.js.
+// tests/balanceDebitGuard.test.js. The count keeps falling as callers move to
+// grantItemsOrOwe (the keyed, owe-recording wrapper): the explore relic and the
+// /use loot box left this sweep for that reason in pass 6 (#873), since a grant
+// routed through grantItemsOrOwe is spelled once, in one audited place.
 //
 // What a call-site bug costs, in order of how quietly it does it:
 //
@@ -285,7 +288,7 @@ describe('the sweep is actually sweeping', () => {
     it('finds the call sites it claims to check', () => {
         // A refactor that renames the helper, or a parse that silently returns
         // nothing, must fail here rather than pass by finding zero problems.
-        expect(GRANTS.length).toBeGreaterThanOrEqual(15);
+        expect(GRANTS.length).toBeGreaterThanOrEqual(13);
         expect(new Set(GRANTS.map(c => c.file)).size).toBeGreaterThanOrEqual(12);
     });
 

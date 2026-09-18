@@ -9,7 +9,8 @@ const {
     timeRemaining,
 } = require('../../services/effectsService');
 const { getItemLore } = require('../../data/defaultShopItems');
-const { grantInventoryItem } = require('../../utils/inventoryGrant');
+const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
+const { lootBoxItemPayoutKey } = require('../../utils/payoutKey');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
 const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../services/petService');
 const { MAX_STAMINA_UPGRADES } = require('../../data/crossSystemData');
@@ -416,7 +417,22 @@ module.exports = {
             // Credit the won item in one atomic update, then clean up zeros. The
             // match-then-push it replaced could leave two slots for the same item
             // when two boxes opened at once, stranding the second slot's quantity.
-            await grantInventoryItem(userFilter.userId, userFilter.guildId, won.itemId, 1);
+            //
+            // The box is already consumed above, so a grant that fails loses the
+            // prize outright — the item-side #804 failure. A bare grant read
+            // nothing back and announced the win regardless; grantItemsOrOwe
+            // (keyed, never throwing) records it for `payouts:replay` when it
+            // will not land, and the embed says so instead of promising an item
+            // that isn't in the bag.
+            const wonGrant = await grantItemsOrOwe(
+                { userId: userFilter.userId, guildId: userFilter.guildId },
+                won.itemId, 1,
+                {
+                    payoutKey: lootBoxItemPayoutKey(interaction.id),
+                    service: 'use',
+                    jobName: 'lootBoxItem',
+                },
+            );
 
             await dropEmptyInventorySlots();
 
@@ -428,6 +444,13 @@ module.exports = {
                 .setDescription(`You found a **${won.rarity}** item:\n\n${won.emoji} **${won.name}**`)
                 .addFields({ name: 'Remaining in inventory', value: `${boxRemaining}x ${lootBoxEvent.lootBox.name}`, inline: true })
                 .setTimestamp();
+
+            if (!wonGrant.granted) {
+                embed.addFields({
+                    name: '⚠️ Not Yet in Your Inventory',
+                    value: `**${won.name}** couldn't be added just now and has been recorded as owed — it'll appear once the problem clears. Tell an admin if it doesn't.`,
+                });
+            }
 
             return interaction.reply({ embeds: [embed] });
         }

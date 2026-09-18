@@ -14,6 +14,57 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.11.2] - 2026-09-18
+
+Migrations through `024_drop_blackjack_toggle`.
+
+Economy audit, pass 6 — the gathering loops (#873). The sixth pass, over the
+highest-volume coin credits in the game: the `/hunt`, `/fish`, `/mine` and
+`/explore` run payouts, their apex/boss bonuses, the detached item grants in the
+same surface, and the gathering shops' purchase refunds. As with every pass the
+forward direction was sound — each run keeps `balance` out of its `save()` and
+re-applies the net change as an atomic `$inc` (`balanceDelta.js`), so a bet
+placed in another channel mid-run is never flattened. What no pass had looked at
+is that every one of those credits was **unkeyed**.
+
+- **The gathering payouts credited without a key.** Unkeyed, `commitBalanceDelta`
+  is three failures at once: its own retry re-credits a write whose response was
+  lost (a double payment); a run against a pruned document is reported as paid
+  though no coins moved (the #804 failure the keyed path exists to tell apart);
+  and a payout that ultimately fails is filed as a keyless `FailedJob` that
+  carries no `kind`, so `npm run payouts:replay` cannot settle it and the coins
+  are lost rather than owed. Each run payout, and the `/hunt` apex and `/fish`
+  boss bonuses paid from a collector callback minutes later, now credit under a
+  `gatherPayoutKey(service, interaction.id, phase)` — exactly-once, and recorded
+  as a replayable owed `coins` payload when it will not land. `/explore`, which
+  credits twice around its encounter prompt, keys `find` and `encounter`
+  separately.
+- **Two detached item grants announced a prize that could be lost.** `/explore`'s
+  recovered relic — the one grant that does not ride the run's `save()` — was a
+  bare `grantInventoryItem` that read nothing back and swallowed a throw into a
+  log line that *said* "owed" while recording nothing, so a relic that never
+  landed was announced as in the player's case. `/use` on a seasonal loot box
+  consumed the box atomically and then granted the won item with the same bare
+  call, announcing "You found a … item" over a prize that a failed grant lost
+  outright. Both now go through `grantItemsOrOwe` (keyed, never throwing), and
+  both surfaces say "recorded as owed" instead of promising an item that is not
+  in the bag.
+- **The gathering shops refunded a failed purchase with a bare `$inc`.** When a
+  purchase's stack-cap guard loses a race the debit is refunded, and every one of
+  the seven shop handlers did it with a bare `$inc` and `.catch(() => {})` that
+  read nothing back and replied "your coins were refunded" regardless — the
+  pass-3 `/market` unwind shape. Each refund now goes through `creditCoinsOrOwe`
+  under `shopRefundPayoutKey(interaction.id)`, and the reply is worded from what
+  the helper reports.
+
+Reviewed and found sound, recorded so the next pass does not re-derive it: the
+`detach → save → commit` transaction itself (this pass added the key, not the
+transaction), the shop **debits** (each a guarded `$gte` charge that reads its
+result back), `/explore travel`'s unlock toll (already refunds only what it can
+confirm), and the material/trophy/ore/catch grants that ride the run's single
+atomic `save()`. Detail in
+[docs/AUDIT_LOG.md](docs/AUDIT_LOG.md#economy-the-gathering-loops).
+
 ## [4.11.1] - 2026-09-17
 
 Migrations through `024_drop_blackjack_toggle`.

@@ -22,6 +22,7 @@ const { grantInventoryItem } = require('../src/utils/inventoryGrant');
 const {
     payoutKeyAppendExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
+    gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey,
     RETENTION_MS, KEY_CAP,
 } = require('../src/utils/payoutKey');
 
@@ -286,5 +287,31 @@ describe('key construction', () => {
     test('an ObjectId is stringified rather than serialised as an object', () => {
         const oid = { toString: () => 'abc123' };
         expect(listingPayoutKey(oid)).toBe('listing:abc123');
+    });
+
+    // #873, pass 6. The gathering payouts key by interaction and phase, because
+    // one interaction can credit twice (a hunt's haul and then its apex bonus).
+    test('a gathering payout is keyed by service, interaction and phase', () => {
+        expect(gatherPayoutKey('hunt', 'i1', 'run')).toBe('gather:hunt:i1:run');
+        expect(gatherPayoutKey('hunt', 'i1', 'apex')).toBe('gather:hunt:i1:apex');
+        expect(gatherPayoutKey('explore', 'i1', 'find')).toBe('gather:explore:i1:find');
+    });
+
+    // The two payouts one hunt interaction can make must not collide, or the
+    // second would be dropped as a replay of the first.
+    test('the same interaction credits under a distinct key per phase', () => {
+        expect(gatherPayoutKey('fish', 'i9', 'run')).not.toBe(gatherPayoutKey('fish', 'i9', 'boss'));
+    });
+
+    test('a recovered relic is keyed by the expedition interaction', () => {
+        expect(exploreRelicPayoutKey('i2')).toBe('explore:i2:relic');
+    });
+
+    test('a loot-box prize is keyed by the open', () => {
+        expect(lootBoxItemPayoutKey('i3')).toBe('lootbox:i3:item');
+    });
+
+    test('a shop refund is keyed by the purchase interaction', () => {
+        expect(shopRefundPayoutKey('i4')).toBe('shop:i4:refund');
     });
 });
