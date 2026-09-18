@@ -89,7 +89,14 @@ function setupPassport() {
                 discriminator: profile.discriminator || '0',
                 avatar: profile.avatar || null,
                 guilds: Array.isArray(profile.guilds)
-                    ? profile.guilds.map(g => ({ id: g.id, name: g.name, icon: g.icon, permissions: g.permissions }))
+                    // `owner` is carried through as well as `permissions`: it is
+                    // what lets hasManagePermission() short-circuit on ownership
+                    // without parsing the bitfield, and what the guild picker
+                    // reads to label a card "Owner". Dropping it here left both
+                    // silently depending on Discord always setting the
+                    // ADMINISTRATOR bit for an owner — a working fallback, but
+                    // not the invariant the permission check documents.
+                    ? profile.guilds.map(g => ({ id: g.id, name: g.name, icon: g.icon, owner: g.owner, permissions: g.permissions }))
                     : []
             };
             done(null, safeProfile);
