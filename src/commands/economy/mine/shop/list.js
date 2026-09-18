@@ -10,8 +10,12 @@ const {
     DEPTH_LIST,
 } = require('../../../../data/mineData');
 const { runShopBrowse } = require('../../../../utils/shopBrowse');
+const { handleBuy } = require('./buy');
 
-async function showShopList(interaction, user, currency) {
+// The five browse pages, as data. Split from showShopList so the unified
+// storefront (/shop view) can drop them in as a section alongside the server
+// shop and the other grinds, sharing this one definition and its buy wiring.
+function buildMineShopPages(user, currency) {
     const m = user.mining;
 
     const pickaxeItems = PICKAXE_TIERS.map(p => ({
@@ -39,6 +43,7 @@ async function showShopList(interaction, user, currency) {
     const blastItems = BLAST_PACKS.map(b => ({
         imageId: `mine:${b.id}`,
         name:    b.name,
+        buyId:   b.id,
         price:   b.cost,
         emoji:   b.emoji
     }));
@@ -49,6 +54,7 @@ async function showShopList(interaction, user, currency) {
     const consumableItems = Object.values(CONSUMABLES).map(c => ({
         imageId: `mine:${c.id}`,
         name:    c.name,
+        buyId:   c.id,
         price:   c.cost,
         emoji:   c.emoji
     }));
@@ -76,6 +82,22 @@ async function showShopList(interaction, user, currency) {
         return `${d.emoji} **${d.name}** — ${status}`;
     }).join('\n');
 
+    // Blast charges and consumables are flat, quantity-1-per-click buys, so they
+    // get a buy select wired straight to the existing purchase handler. Pickaxes,
+    // upgrades and depths stay on their structured subcommands — they carry
+    // one-off, gated or confirm-heavy flows that don't fit a click-to-buy list.
+    const onBuy = (btn, buyId) => handleBuy(btn, user, currency, { itemId: buyId });
+
+    return [
+        { id: 'pickaxes',    label: 'Pickaxes',    emoji: '🪓',  subtitle: 'Stronger picks bite deeper veins.',     items: pickaxeItems,    listText: pickaxeList    },
+        { id: 'upgrades',    label: 'Upgrades',    emoji: '🔩',  subtitle: 'One module per pickaxe, permanent.',     items: upgradeItems,    listText: upgradeList    },
+        { id: 'blasts',      label: 'Blast Charges', emoji: '💥', subtitle: 'Crack through stubborn rock.',          items: blastItems,      listText: blastList,      onBuy },
+        { id: 'consumables', label: 'Consumables', emoji: '🎒',  subtitle: 'Repairs, charms and quick boosts.',      items: consumableItems, listText: consumableList, onBuy },
+        { id: 'depths',      label: 'Depths',      emoji: '🗺️', subtitle: 'New depths, new ores.',                  items: depthItems,      listText: depthList      }
+    ];
+}
+
+async function showShopList(interaction, user, currency) {
     return runShopBrowse(interaction, {
         activity: 'mine',
         title:    'Mining Shop',
@@ -84,14 +106,8 @@ async function showShopList(interaction, user, currency) {
         // view only ever finds the shared pre-#561 rows.
         guildId:  interaction.guild.id,
         footer:   'pickaxe • upgrade • buy • use • repair • unlock',
-        pages: [
-            { id: 'pickaxes',    label: 'Pickaxes',    emoji: '🪓',  subtitle: 'Stronger picks bite deeper veins.',     items: pickaxeItems,    listText: pickaxeList    },
-            { id: 'upgrades',    label: 'Upgrades',    emoji: '🔩',  subtitle: 'One module per pickaxe, permanent.',     items: upgradeItems,    listText: upgradeList    },
-            { id: 'blasts',      label: 'Blast Charges', emoji: '💥', subtitle: 'Crack through stubborn rock.',          items: blastItems,      listText: blastList      },
-            { id: 'consumables', label: 'Consumables', emoji: '🎒',  subtitle: 'Repairs, charms and quick boosts.',      items: consumableItems, listText: consumableList },
-            { id: 'depths',      label: 'Depths',      emoji: '🗺️', subtitle: 'New depths, new ores.',                  items: depthItems,      listText: depthList      }
-        ]
+        pages: buildMineShopPages(user, currency),
     });
 }
 
-module.exports = { showShopList };
+module.exports = { showShopList, buildMineShopPages };

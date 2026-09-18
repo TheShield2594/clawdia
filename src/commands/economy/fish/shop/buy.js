@@ -15,9 +15,12 @@ const { BAIT_PACKS, CONSUMABLES } = require('../../../../data/fishData');
 const GrindProfile = require('../../../../models/GrindProfile');
 const COLORS = require('../../../../utils/embedColors');
 
-async function handleBuy(interaction, user, currency) {
-    const itemId   = interaction.options.getString('item');
-    const quantity = interaction.options.getInteger('quantity') ?? 1;
+// `override` lets the browse view drive a purchase from its buy select: it
+// passes the itemId directly instead of reading it off a slash option, and the
+// component interaction it hands in answers with its own ephemeral confirm.
+async function handleBuy(interaction, user, currency, override = {}) {
+    const itemId   = override.itemId ?? interaction.options.getString('item');
+    const quantity = override.quantity ?? interaction.options.getInteger('quantity') ?? 1;
     const f        = user.fishing;
 
     const baitPack   = BAIT_PACKS.find(p => p.id === itemId);
