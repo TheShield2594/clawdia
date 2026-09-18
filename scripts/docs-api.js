@@ -256,7 +256,10 @@ function renderPublicEndpoints(routes = parsePublicRouter()) {
 }
 
 function escapeCell(text) {
-    return text.replace(/\|/g, '\\|');
+    // The escape character is escaped first so a literal backslash in the text
+    // cannot pair with the one added in front of a pipe (CodeQL
+    // js/incomplete-sanitization).
+    return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 }
 
 /** The markdown between the two markers, marker lines excluded. */

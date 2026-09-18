@@ -20,6 +20,9 @@ const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featured
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { isDistrictActive } = require('../../services/districtService');
+// Crime payouts feed the big-win log, so every roll below draws from the shared
+// CSPRNG rather than Math.random (CodeQL js/insecure-randomness).
+const { secureRandom } = require('../../utils/secureRandom');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 
@@ -196,10 +199,10 @@ module.exports = {
         const featured = getDailyFeatured(interaction.guild.id);
         const timeBand = getTimeBand();
 
-        const shuffled = [...CRIMES].sort(() => Math.random() - 0.5);
+        const shuffled = [...CRIMES].sort(() => secureRandom() - 0.5);
         const choices = shuffled.slice(0, 3);
         if (!choices.some(c => c.name === featured.crime.name)) {
-            choices[Math.floor(Math.random() * 3)] = CRIMES.find(c => c.name === featured.crime.name) ?? choices[0];
+            choices[Math.floor(secureRandom() * 3)] = CRIMES.find(c => c.name === featured.crime.name) ?? choices[0];
         }
 
         const row = new ActionRowBuilder().addComponents(
@@ -242,7 +245,7 @@ module.exports = {
             crime = CRIMES.find(c => c.name === crimeButtonInteraction.customId);
             await crimeButtonInteraction.deferUpdate();
         } catch {
-            crime = choices[Math.floor(Math.random() * choices.length)];
+            crime = choices[Math.floor(secureRandom() * choices.length)];
         }
 
         // ── Step 2: Choose the execution method ────────────────────────────────
@@ -303,12 +306,12 @@ module.exports = {
             execMethod = execData.methods.find(m => `exec_${m.id}` === execButtonInteraction.customId);
             await execButtonInteraction.deferUpdate();
         } catch {
-            execMethod = execData.methods[Math.floor(Math.random() * execData.methods.length)];
+            execMethod = execData.methods[Math.floor(secureRandom() * execData.methods.length)];
         }
 
         // ── Resolve the crime ───────────────────────────────────────────────────
         let successChance = execMethod.wildcard
-            ? Math.min(0.95, 0.15 + Math.random() * 0.60 + masteryBonus)
+            ? Math.min(0.95, 0.15 + secureRandom() * 0.60 + masteryBonus)
             : execMethod.successRate + masteryBonus;
 
         // Black Market Contract: +5% per permanent stack (max 3 stacks = +15%)
@@ -322,7 +325,7 @@ module.exports = {
         if (petCrimeBonus > 0) successChance = Math.min(0.95, successChance + petCrimeBonus);
         successChance = Math.min(0.95, successChance);
 
-        const success = Math.random() < successChance;
+        const success = secureRandom() < successChance;
         const crimeTime = new Date();
 
         const streakMult = clampMultiplier(getStreakMultiplier(user.streak?.current ?? 0));
@@ -333,7 +336,7 @@ module.exports = {
 
             if (success) {
                 const isFeaturedCrime = crime.name === featured.crime.name;
-                const baseEarned = Math.floor(crime.minPayout + Math.random() * (crime.maxPayout - crime.minPayout));
+                const baseEarned = Math.floor(crime.minPayout + secureRandom() * (crime.maxPayout - crime.minPayout));
                 // Merchant synergy: +5% while carrying anything at all.
                 const merchantMult = 1 + getMerchantCoinBonus(user);
                 let earned = Math.round(baseEarned * streakMult * execMethod.payoutMult * merchantMult);
@@ -404,8 +407,8 @@ module.exports = {
                     .setFooter({ text: `${execMethod.label} · Cooldown: 1.5h` })
                     .setTimestamp();
             } else {
-                const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
-                const isCriticalFailure = Math.random() < DEATH_RATE;
+                const flavorText = FINES[Math.floor(secureRandom() * FINES.length)];
+                const isCriticalFailure = secureRandom() < DEATH_RATE;
 
                 // Compute heat penalty once so all failure branches apply it consistently.
                 const wantedUntil = execMethod.wantedMs > 0
@@ -420,8 +423,8 @@ module.exports = {
                 if (lifesaverActive) {
                     consumeEffect(user, 'lifesaver');
                     const wouldHaveLost = isCriticalFailure
-                        ? Math.floor(user.balance * (DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN)))
-                        : Math.floor((crime.minFine + Math.random() * (crime.maxFine - crime.minFine)) * execMethod.fineMult);
+                        ? Math.floor(user.balance * (DEATH_LOSS_MIN + secureRandom() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN)))
+                        : Math.floor((crime.minFine + secureRandom() * (crime.maxFine - crime.minFine)) * execMethod.fineMult);
                     const lifesaverSet = { lastCrime: crimeTime, activeEffects: user.activeEffects };
                     if (wantedUntil) lifesaverSet.wantedUntil = wantedUntil;
                     await User.findOneAndUpdate(
@@ -445,7 +448,7 @@ module.exports = {
                         .setFooter({ text: `${execMethod.label} · Cooldown: 1.5h` })
                         .setTimestamp();
                 } else if (isCriticalFailure) {
-                    const lossRate = DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
+                    const lossRate = DEATH_LOSS_MIN + secureRandom() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
                     const critSet = { lastCrime: crimeTime, 'crimeRecord.totalCrimes': incExpr('crimeRecord.totalCrimes', 1) };
                     if (wantedUntil) critSet.wantedUntil = wantedUntil;
                     // The share is computed from a balance that may already have
@@ -476,7 +479,7 @@ module.exports = {
                         .setTimestamp();
                 } else {
                     const undergroundActive = isDistrictActive(guildSettings, 'underground');
-                    const rawFine = Math.floor(crime.minFine + Math.random() * (crime.maxFine - crime.minFine));
+                    const rawFine = Math.floor(crime.minFine + secureRandom() * (crime.maxFine - crime.minFine));
                     const maxFine = Math.max(crime.minFine, Math.floor(user.balance * 0.20));
                     let fine = Math.min(rawFine, maxFine);
                     fine = Math.round(fine * execMethod.fineMult);

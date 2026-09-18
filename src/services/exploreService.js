@@ -16,6 +16,10 @@ const {
 } = require('../data/exploreData');
 const grind = require('./grindEngine');
 const { MATERIAL_RARITY } = require('../data/materialRarity');
+// Explore payouts feed the weekly-champion leaderboard and the big-win log, so
+// every roll below draws from the shared CSPRNG rather than Math.random
+// (CodeQL js/insecure-randomness). See src/utils/secureRandom.js.
+const { secureRandom } = require('../utils/secureRandom');
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
@@ -181,7 +185,7 @@ function clamp(n, min, max) {
 
 function weightedRoll(items) {
     const total = items.reduce((s, i) => s + i.weight, 0);
-    let r = Math.random() * total;
+    let r = secureRandom() * total;
     for (const item of items) {
         r -= item.weight;
         if (r <= 0) return item;
@@ -190,11 +194,11 @@ function weightedRoll(items) {
 }
 
 function randInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+    return Math.floor(secureRandom() * (max - min + 1)) + min;
 }
 
 function randomFrom(arr) {
-    return arr[Math.floor(Math.random() * arr.length)];
+    return arr[Math.floor(secureRandom() * arr.length)];
 }
 
 // ─── REGION AVAILABILITY ─────────────────────────────────────────────────────
@@ -521,7 +525,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             result.trap = trap;
             result.penalty = penalty;
             result.xp = grantXp(user, EVENT_XP.trap, result);
-            if (Math.random() < trap.injuryChance) {
+            if (secureRandom() < trap.injuryChance) {
                 e.injuryUntil = new Date(Date.now() + LIMITS.INJURY_PENALTY_MS);
                 result.injured = true;
             }
@@ -616,7 +620,7 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
     result.choice = choice === 'approach' ? 'approach' : 'observe';
 
     if (result.choice === 'approach') {
-        if (Math.random() < enc.winChance) {
+        if (secureRandom() < enc.winChance) {
             result.outcome = 'win';
             e.encountersWon += 1;
             result.payout = applyPayout(user, result, Math.round(randInt(enc.reward.min, enc.reward.max) * coinMult));
@@ -633,7 +637,7 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
             user.balance -= penalty;
             result.penalty = penalty;
             result.xp = grantXp(user, EVENT_XP.encounter_loss, result);
-            if (Math.random() < 0.15) {
+            if (secureRandom() < 0.15) {
                 e.injuryUntil = new Date(Date.now() + LIMITS.INJURY_PENALTY_MS);
                 result.injured = true;
             }
@@ -672,7 +676,7 @@ function finishAsTreasure(user, region, progress, result, coinMult, { fallback =
     e.treasuresFound += 1;
 
     // Rare+ treasures may carry a relic into the player's inventory
-    if (Math.random() < tier.relicChance) {
+    if (secureRandom() < tier.relicChance) {
         // Every region in the table defines relics today; the fallback is here so
         // a future one added without them degrades to a plain treasure instead of
         // throwing mid-expedition.
@@ -827,7 +831,7 @@ const EXPLORE_MATERIALS_BY_TIER = Object.entries(MATERIAL_RARITY)
  * rates. TREASURE_MATERIALS is meant to be the only balance lever here, and
  * this is what keeps it the only one.
  */
-function rollTreasureMaterial(treasureTier, rng = Math.random) {
+function rollTreasureMaterial(treasureTier, rng = secureRandom) {
     const table = TREASURE_MATERIALS[treasureTier];
     if (!table) return null;
     if (rng() >= table.chance) return null;
@@ -844,7 +848,7 @@ function rollTreasureMaterial(treasureTier, rng = Math.random) {
  * Roll a material for this treasure and add it to the explorer's pile.
  * Returns the granted material's id and catalog entry, or null.
  */
-function grantTreasureMaterial(user, treasureTier, rng = Math.random) {
+function grantTreasureMaterial(user, treasureTier, rng = secureRandom) {
     const id = rollTreasureMaterial(treasureTier, rng);
     if (!id) return null;
 

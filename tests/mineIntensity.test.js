@@ -1,6 +1,9 @@
 'use strict';
 
 const { promoteIntensity, executeMine, ensureMineData } = require('../src/services/mineService');
+// Mine rolls draw from src/utils/secureRandom.js, not Math.random (CodeQL
+// js/insecure-randomness); mockRandom drives that seam and Math.random together.
+const { mockRandom, restoreRandom } = require('./helpers/secureRandom');
 const {
     INTENSITY_LEVELS, CHOOSABLE_INTENSITY, DEFAULT_INTENSITY_LEVEL,
 } = require('../src/data/mineData');
@@ -73,16 +76,16 @@ describe('the chosen intensity is what the dig actually uses', () => {
         return user;
     }
 
-    afterEach(() => { if (jest.isMockFunction(Math.random)) Math.random.mockRestore(); });
+    afterEach(() => { restoreRandom(); });
 
     test('a safe dig can never cave in, however unlucky the roll', () => {
-        jest.spyOn(Math, 'random').mockReturnValue(0);   // worst case for every roll
+        mockRandom(0);   // worst case for every roll
         const result = executeMine(miner(), 'surface_quarry', { intensity: byLevel(1) });
         expect(result.caveIn).toBeUndefined();
     });
 
     test('a promoted dig pays the higher multiplier at the risk that was chosen', () => {
-        jest.spyOn(Math, 'random').mockReturnValue(0);
+        mockRandom(0);
         const deep     = byLevel(4);
         const promoted = promoteIntensity(deep);
 
