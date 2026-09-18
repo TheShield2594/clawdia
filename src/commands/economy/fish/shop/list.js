@@ -10,6 +10,7 @@ const {
     LOCATION_LIST,
 } = require('../../../../data/fishData');
 const { runShopBrowse } = require('../../../../utils/shopBrowse');
+const { handleBuy } = require('./buy');
 
 async function showShopList(interaction, user, currency) {
     const f = user.fishing;
@@ -38,6 +39,7 @@ async function showShopList(interaction, user, currency) {
     const baitItems = BAIT_PACKS.map(p => ({
         imageId: `fish:${p.id}`,
         name:    p.name,
+        buyId:   p.id,
         price:   p.cost,
         emoji:   p.emoji
     }));
@@ -48,6 +50,7 @@ async function showShopList(interaction, user, currency) {
     const consumableItems = Object.values(CONSUMABLES).map(c => ({
         imageId: `fish:${c.id}`,
         name:    c.name,
+        buyId:   c.id,
         price:   c.cost,
         emoji:   c.emoji
     }));
@@ -75,6 +78,12 @@ async function showShopList(interaction, user, currency) {
         return `${loc.emoji} **${loc.name}** — ${status}`;
     }).join('\n');
 
+    // Bait and consumables are flat, quantity-1-per-click buys, so they get a
+    // buy select wired straight to the existing purchase handler. Rods, upgrades
+    // and locations stay on their structured subcommands — they carry one-off,
+    // gated or confirm-heavy flows that don't fit a click-to-buy list.
+    const onBuy = (btn, buyId) => handleBuy(btn, user, currency, { itemId: buyId });
+
     return runShopBrowse(interaction, {
         activity: 'fish',
         title:    'Fishing Shop',
@@ -86,8 +95,8 @@ async function showShopList(interaction, user, currency) {
         pages: [
             { id: 'rods',        label: 'Rods',        emoji: '🎣',  subtitle: 'Better rods, better catches.',           items: rodItems,        listText: rodList        },
             { id: 'upgrades',    label: 'Upgrades',    emoji: '🔧',  subtitle: 'One module per rod, permanent.',         items: upgradeItems,    listText: upgradeList    },
-            { id: 'bait',        label: 'Bait',        emoji: '🪱',  subtitle: 'The right bait pulls the right fish.',   items: baitItems,       listText: baitList       },
-            { id: 'consumables', label: 'Consumables', emoji: '🧪',  subtitle: 'Luck, XP and quick boosts.',             items: consumableItems, listText: consumableList },
+            { id: 'bait',        label: 'Bait',        emoji: '🪱',  subtitle: 'The right bait pulls the right fish.',   items: baitItems,       listText: baitList,       onBuy },
+            { id: 'consumables', label: 'Consumables', emoji: '🧪',  subtitle: 'Luck, XP and quick boosts.',             items: consumableItems, listText: consumableList, onBuy },
             { id: 'locations',   label: 'Locations',   emoji: '🗺️', subtitle: 'New waters, new species.',                items: locationItems,   listText: locationList   }
         ]
     });

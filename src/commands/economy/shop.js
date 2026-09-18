@@ -120,6 +120,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             const trendStr = dynamicEnabled ? ` ${trendBucket(item).arrow}` : '';
             return {
                 name:    item.name,
+                buyId:   item.name,
                 imageId: item.itemId,
                 emoji:   extractEmoji(item.description),
                 price:   ep,
@@ -159,6 +160,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             const ep = effectivePrice(item, dynamicEnabled);
             return {
                 name:    item.name,
+                buyId:   item.name,
                 imageId: item.itemId,
                 emoji:   extractEmoji(item.description),
                 price:   ep,
@@ -194,6 +196,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             const reqLabel = isP8BlackMarketItem(item.itemId) ? 'Prestige VIII+ only' : 'Prestige I+ only';
             return {
                 name:    item.name,
+                buyId:   item.name,
                 imageId: item.itemId,
                 emoji:   extractEmoji(item.description),
                 price:   ep,
@@ -335,7 +338,25 @@ module.exports = {
 
             const userData = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             const userBalance = userData?.balance ?? 0;
-            const balanceFooter = `Balance: ${currency}${userBalance.toLocaleString()} · Use /shop buy <item name> [quantity]`;
+            const balanceFooter = `Balance: ${currency}${userBalance.toLocaleString()} · Buy from the menu or /shop buy <item> [qty]`;
+
+            // Let shoppers buy straight from the browse view. Re-read the settings
+            // at click time so stock and dynamic prices are current — the browse
+            // message can sit open for minutes — and keep the purchase ephemeral
+            // so a public storefront doesn't fill with each viewer's receipts.
+            for (const page of pages) {
+                page.onBuy = async (btn, buyId) => {
+                    const fresh = await getGuildSettings(interaction.guild.id).catch(() => null);
+                    return buyShopItem(btn, {
+                        guildSettings:      fresh ?? guildSettings,
+                        currency,
+                        viewerPrestigeRank,
+                        rawName:            buyId,
+                        quantity:           1,
+                        privateReply:       true,
+                    });
+                };
+            }
 
             return runShopBrowse(interaction, {
                 activity: pages[0].id.replace('rarity_', 'shop_'),
@@ -387,8 +408,23 @@ module.exports = {
         // ── BUY ───────────────────────────────────────────────────────────────
         if (sub === 'buy') {
             const rawName  = interaction.options.getString('item');
-            const itemName = rawName.toLowerCase();
             const quantity = interaction.options.getInteger('quantity') ?? 1;
+            return buyShopItem(interaction, { guildSettings, currency, viewerPrestigeRank, rawName, quantity });
+        }
+
+    }
+};
+
+// Purchase a single shop item, from either the `/shop buy` subcommand or the
+// browse view's buy select. Everything the two share — the item lookup, the
+// prestige/stock/role/balance guards, the confirm-over-threshold step and the
+// race-safe charge/stock/inventory writes — lives here so the two entry points
+// can never drift apart. `privateReply` keeps the browse-view purchase private
+// to the shopper; the slash command stays public as before.
+async function buyShopItem(interaction, { guildSettings, currency, viewerPrestigeRank, rawName, quantity = 1, privateReply = false }) {
+    const privacy = privateReply ? { flags: MessageFlags.Ephemeral } : {};
+    {
+            const itemName = rawName.toLowerCase();
 
             // Exact matches win — display name first (what autocomplete sends), then
             // canonical itemId. Only then fall back to a partial name match, so a
@@ -671,7 +707,7 @@ module.exports = {
 
                 const confirmImg = await getItemImageAttachment(item.itemId, interaction.guildId, { label: item.name }).catch(() => null);
                 if (confirmImg) confirmEmbed.setThumbnail(confirmImg.url);
-                const confirmPayload = { embeds: [confirmEmbed], components: [row], fetchReply: true };
+                const confirmPayload = { embeds: [confirmEmbed], components: [row], fetchReply: true, ...privacy };
                 if (confirmImg) confirmPayload.files = [confirmImg.attachment];
                 const msg = await interaction.reply(confirmPayload);
 
@@ -704,7 +740,7 @@ module.exports = {
                 return;
             }
 
-            await interaction.deferReply();
+            await interaction.deferReply(privacy);
             try {
                 await doPurchase(opts => interaction.editReply(opts));
             } catch (err) {
@@ -712,7 +748,5 @@ module.exports = {
                 interaction.editReply({ content: 'Something went wrong processing your purchase. Please try again.', embeds: [], components: [] }).catch(() => {});
             }
             return;
-        }
-
     }
-};
+}

@@ -70,8 +70,14 @@ async function loadImagesByItemIds(itemIds, guildId = null) {
  *   label:    string,            // category label
  *   emoji:    string,            // for select menu
  *   subtitle: string,            // shown on banner under title
- *   items:    [{ id?: string, imageId?: string, name, price?, emoji, subline?, badge? }],
- *   listText: string             // text block shown below banner (buy commands etc.)
+ *   items:    [{ id?: string, imageId?: string, name, price?, emoji, subline?, badge?, buyId? }],
+ *   listText: string,            // text block shown below banner (buy commands etc.)
+ *   onBuy?:   (interaction, buyId) => Promise<void>
+ *                                // when set, a "Buy an item…" select is rendered for
+ *                                // the page's items that carry a `buyId`; picking one
+ *                                // calls onBuy with the component interaction and that
+ *                                // buyId. onBuy owns its own reply (it should answer the
+ *                                // passed interaction) — the browse message is left as-is.
  * }
  */
 async function runShopBrowse(interaction, config) {
@@ -93,6 +99,72 @@ async function runShopBrowse(interaction, config) {
     }
 
     let pageIdx = 0;
+
+    // The control rows. Split out from buildMessage so a purchase can reset the
+    // buy select without re-rendering the banner: a string select emits nothing
+    // when the choice is unchanged, so a resent select with no default lets the
+    // same item be bought again. Uses the raw page items (name/buyId/price), so
+    // it needs no image hydration.
+    function buildComponents(idx) {
+        const page = pages[idx];
+
+        const prev = new ButtonBuilder()
+            .setCustomId('shop_prev')
+            .setEmoji('◀️')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(idx === 0);
+        const next = new ButtonBuilder()
+            .setCustomId('shop_next')
+            .setEmoji('▶️')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(idx === pages.length - 1);
+        const close = new ButtonBuilder()
+            .setCustomId('shop_close')
+            .setLabel('Close')
+            .setStyle(ButtonStyle.Danger);
+
+        const select = new StringSelectMenuBuilder()
+            .setCustomId('shop_cat')
+            .setPlaceholder('Jump to category…')
+            .addOptions(pages.map((p, i) => ({
+                label:   p.label.slice(0, 100),
+                value:   String(i),
+                emoji:   p.emoji,
+                default: i === idx
+            })));
+
+        const components = [
+            new ActionRowBuilder().addComponents(prev, next, close),
+            new ActionRowBuilder().addComponents(select)
+        ];
+
+        // When a page opts into buying, offer its buyable items in a select so a
+        // shopper can purchase from the view they're already looking at instead
+        // of retyping a slash command. Discord caps a select at 25 options; the
+        // listText still advertises the slash command for anything past that.
+        // Item emojis are deliberately left off these options — they come from
+        // free-form item data, and one unresolvable emoji would reject the whole
+        // message.
+        const buyable = page.onBuy ? (page.items || []).filter(it => it.buyId != null) : [];
+        if (buyable.length) {
+            const buySelect = new StringSelectMenuBuilder()
+                .setCustomId('shop_buy')
+                .setPlaceholder('🛒 Buy an item…')
+                .addOptions(buyable.slice(0, 25).map(it => {
+                    const opt = {
+                        label: String(it.name).slice(0, 100),
+                        value: String(it.buyId).slice(0, 100),
+                    };
+                    if (it.price != null) {
+                        opt.description = `${currency}${Number(it.price).toLocaleString()}`.slice(0, 100);
+                    }
+                    return opt;
+                }));
+            components.push(new ActionRowBuilder().addComponents(buySelect));
+        }
+
+        return components;
+    }
 
     async function buildMessage(idx) {
         const page  = pages[idx];
@@ -129,38 +201,10 @@ async function runShopBrowse(interaction, config) {
             text: `Page ${idx + 1}/${pages.length} • ${footer || 'Use the menu to switch categories'}`
         });
 
-        const prev = new ButtonBuilder()
-            .setCustomId('shop_prev')
-            .setEmoji('◀️')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(idx === 0);
-        const next = new ButtonBuilder()
-            .setCustomId('shop_next')
-            .setEmoji('▶️')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(idx === pages.length - 1);
-        const close = new ButtonBuilder()
-            .setCustomId('shop_close')
-            .setLabel('Close')
-            .setStyle(ButtonStyle.Danger);
-
-        const select = new StringSelectMenuBuilder()
-            .setCustomId('shop_cat')
-            .setPlaceholder('Jump to category…')
-            .addOptions(pages.map((p, i) => ({
-                label:   p.label.slice(0, 100),
-                value:   String(i),
-                emoji:   p.emoji,
-                default: i === idx
-            })));
-
         return {
             embeds:     [embed],
             files:      [attachment],
-            components: [
-                new ActionRowBuilder().addComponents(prev, next, close),
-                new ActionRowBuilder().addComponents(select)
-            ]
+            components: buildComponents(idx)
         };
     }
 
@@ -186,6 +230,32 @@ async function runShopBrowse(interaction, config) {
         if (btn.customId === 'shop_close') {
             collector.stop('closed');
             return btn.update({ components: [] }).catch(() => {});
+        }
+        // A buy select hands off to the page's own purchase flow, which answers
+        // the component interaction itself (typically an ephemeral confirm). The
+        // browse message is left untouched — we must not defer or edit it here,
+        // or the handoff would double-acknowledge the same interaction.
+        if (btn.customId === 'shop_buy') {
+            const page  = pages[pageIdx];
+            const buyId = btn.values?.[0];
+            if (page?.onBuy && buyId != null) {
+                try {
+                    await page.onBuy(btn, buyId);
+                } catch (err) {
+                    console.error('[shopBrowse] buy handler error:', err);
+                    if (!btn.replied && !btn.deferred) {
+                        btn.reply({
+                            content: 'Something went wrong starting that purchase. Please try again.',
+                            flags: MessageFlags.Ephemeral,
+                        }).catch(() => {});
+                    }
+                }
+                // Reset the buy select (via the original interaction — btn owns its
+                // own reply) so the same item can be picked again; components only,
+                // so the banner isn't re-rendered on every purchase.
+                interaction.editReply({ components: buildComponents(pageIdx) }).catch(() => {});
+            }
+            return;
         }
         if (btn.customId === 'shop_prev') pageIdx = Math.max(0, pageIdx - 1);
         else if (btn.customId === 'shop_next') pageIdx = Math.min(pages.length - 1, pageIdx + 1);
