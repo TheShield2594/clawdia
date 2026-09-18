@@ -1180,7 +1180,7 @@ textarea.auto-resize {
 .cw-nav-toggle-close { display: none; }
 .cw-nav:not(.nav-collapsed) .cw-nav-toggle-open { display: none; }
 .cw-nav:not(.nav-collapsed) .cw-nav-toggle-close { display: inline; }
-.cw-nav-username { font-size: 14px; color: var(--ink-700); font-weight: 500; }
+.cw-nav-username { font-size: 14px; color: var(--ink-700); font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cw-nav-logout-btn { padding: 9px 16px; font-size: 13.5px; }
 .cw-link-quiet { font-size: 14.5px; color: var(--ink-700); cursor: pointer; text-decoration: none; }
 .cw-link-quiet:hover { color: var(--ink-950); }
