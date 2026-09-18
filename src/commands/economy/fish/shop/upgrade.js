@@ -124,7 +124,9 @@ async function handleBuyUpgrade(interaction, user, currency) {
             return btn.update({
                 content: refund.credited
                     ? 'Something went wrong and your coins were refunded. Please try again.'
-                    : `Something went wrong, and the ${currency}${cost.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`,
+                    : refund.owed
+                        ? `Something went wrong, and the ${currency}${cost.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`
+                        : `Something went wrong, and the ${currency}${cost.toLocaleString()} charged could not be returned or recorded — please contact a server admin.`,
                 embeds: [], components: [],
             });
         }

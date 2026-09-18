@@ -157,7 +157,9 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
         const reply = {
             content: refund.credited
                 ? 'Purchase failed — your coins were refunded. Please try again.'
-                : `Purchase failed, and the ${currency}${weaponData.cost.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`,
+                : refund.owed
+                    ? `Purchase failed, and the ${currency}${weaponData.cost.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`
+                    : `Purchase failed, and the ${currency}${weaponData.cost.toLocaleString()} charged could not be returned or recorded — please contact a server admin.`,
             embeds: [], components: [],
         };
         return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);

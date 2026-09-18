@@ -448,7 +448,9 @@ module.exports = {
             if (!wonGrant.granted) {
                 embed.addFields({
                     name: '⚠️ Not Yet in Your Inventory',
-                    value: `**${won.name}** couldn't be added just now and has been recorded as owed — it'll appear once the problem clears. Tell an admin if it doesn't.`,
+                    value: wonGrant.owed
+                        ? `**${won.name}** couldn't be added just now and has been recorded as owed — it'll appear once the problem clears. Tell an admin if it doesn't.`
+                        : `**${won.name}** couldn't be added and could not be recorded — please contact a server admin.`,
                 });
             }
 

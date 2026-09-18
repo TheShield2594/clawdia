@@ -30,9 +30,9 @@ async function refundPurchase(interaction, amount) {
 }
 
 function refundMessage(refund, currency, amount) {
-    return refund.credited
-        ? 'Purchase failed — your coins were refunded. Please try again.'
-        : `Purchase failed, and the ${currency}${amount.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`;
+    if (refund.credited) return 'Purchase failed — your coins were refunded. Please try again.';
+    if (refund.owed) return `Purchase failed, and the ${currency}${amount.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`;
+    return `Purchase failed, and the ${currency}${amount.toLocaleString()} charged could not be returned or recorded — please contact a server admin.`;
 }
 
 // `override` lets the browse view drive a purchase from its buy select: it

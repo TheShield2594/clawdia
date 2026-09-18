@@ -2,11 +2,12 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and five passes over the
+long-stable, low-churn subsystems have been audited, and six passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
-casino's hand payouts, and the core currency commands (`balance`, `bank`,
-`daily`, `work`, `jobs`, `crime`, `invest`) (#873). The majority of the
+casino's hand payouts, the core currency commands (`balance`, `bank`,
+`daily`, `work`, `jobs`, `crime`, `invest`), and the gathering-loop payouts
+(`hunt`, `fish`, `mine`, `explore`) (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -999,5 +1000,6 @@ wide, and it is widest exactly where the risk is.
 *The nine non-economy subsystems above were last reviewed on 2026-05-28; the
 economy escrow and payout paths on 2026-09-01; the progressive jackpot on
 2026-09-04; the gift and market unwind paths on 2026-09-05; the casino hand
-payouts on 2026-09-08; the core currency commands on 2026-09-17. "Not yet
-reviewed" carries no review date, because nothing in it has been reviewed.*
+payouts on 2026-09-08; the core currency commands on 2026-09-17; the
+gathering-loop payouts on 2026-09-18. "Not yet reviewed" carries no review date,
+because nothing in it has been reviewed.*

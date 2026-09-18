@@ -406,7 +406,7 @@ async function handleGo(interaction) {
             exploreCommitted = true;
             if (relicDetached) {
                 const relicGrant = await commitExpeditionRelic(user, result.relic, interaction.id);
-                if (!relicGrant.granted) result.relicOwed = true;  // owed, not in the bag — see commitExpeditionRelic (#873)
+                if (!relicGrant.granted) result.relicOwed = relicGrant.owed ? 'owed' : 'lost';  // not in the bag — see commitExpeditionRelic (#873)
             }
             const paid = await commitBalanceDelta(User, balanceFilter, user, findDelta, {
                 service: 'explore',
@@ -750,9 +750,9 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
                 .setTitle(`🪙 Treasure — ${tier.tier.charAt(0).toUpperCase() + tier.tier.slice(1)} ${tier.stars}`);
             lines.push(`*${result.treasureLine}*`);
             if (result.relic) {
-                const relicHome = result.relicOwed  // only claim it's in the bag once the grant landed (#873)
-                    ? `> ⚠️ It couldn't be added to your \`/inventory\` just now and has been recorded as owed — it'll appear once the problem clears. Tell an admin if it doesn't.`
-                    : `> It's in your \`/inventory\` now, and in \`/explore relics\`, where it earns its keep.`;
+                const relicHome = !result.relicOwed  // only claim it's in the bag once the grant landed (#873)
+                    ? `> It's in your \`/inventory\` now, and in \`/explore relics\`, where it earns its keep.`
+                    : `> ⚠️ It couldn't be added to your \`/inventory\` just now${result.relicOwed === 'owed' ? " and has been recorded as owed — it'll appear once the problem clears. Tell an admin if it doesn't." : ' or recorded — please contact a server admin.'}`;
                 lines.push('', `🏺 **Relic recovered: ${result.relic.itemId}**${result.relicIsNew ? ' — *new to your case*' : ''}`, `> *${result.relic.lore}*`, relicHome);
             }
             if (result.material) {

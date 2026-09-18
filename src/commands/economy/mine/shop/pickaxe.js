@@ -117,7 +117,9 @@ async function handleBuyPickaxe(interaction, user, currency) {
                 return interaction.editReply({
                     content: refund.credited
                         ? 'Purchase failed — your coins were refunded. Please try again.'
-                        : `Purchase failed, and the ${currency}${pickaxeData.cost.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`,
+                        : refund.owed
+                            ? `Purchase failed, and the ${currency}${pickaxeData.cost.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`
+                            : `Purchase failed, and the ${currency}${pickaxeData.cost.toLocaleString()} charged could not be returned or recorded — please contact a server admin.`,
                     embeds: [], components: [],
                 });
             }

@@ -147,6 +147,7 @@ describe('an expedition relic is granted or recorded as owed', () => {
         const result = await commitExpeditionRelic({ ...WHO }, { itemId: 'ancient_coin' }, 'i5');
 
         expect(result.granted).toBe(false);
+        expect(result.owed).toBe(true);
         expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
             service: 'explore',
             jobName: 'relicGrant',
@@ -154,6 +155,17 @@ describe('an expedition relic is granted or recorded as owed', () => {
                 kind: 'items', itemId: 'ancient_coin', quantity: 1, payoutKey: KEY,
             }),
         }));
+    });
+
+    // The double failure the three-way message exists for: the grant misses AND
+    // the owed record cannot be written, so there is nothing to replay. The
+    // caller must not tell the player it was recorded.
+    test('reports neither granted nor owed when the owed record cannot be written', async () => {
+        recordOwedPayout.mockResolvedValue(false);
+
+        const result = await commitExpeditionRelic({ ...WHO }, { itemId: 'ancient_coin' }, 'i5');
+
+        expect(result).toMatchObject({ granted: false, owed: false });
     });
 });
 
@@ -195,6 +207,16 @@ describe('the gathering shops refund through the owe path', () => {
         const src = read(f);
         expect(src).not.toMatch(/\$inc:\s*\{\s*balance:\s*(totalCost|cost|rodData\.cost|weaponData\.cost|pickaxeData\.cost)\s*\}/);
     });
+
+    // The three-way the rest of the economy uses (market/invest/crime): a refund
+    // that is neither returned nor recorded (`recordOwedPayout` failed too) must
+    // not be reported as owed. Each handler branches on `owed` and falls through
+    // to a terminal "contact an admin" line.
+    test.each(SHOP_FILES)('%s distinguishes an owed refund from one that could not be recorded', f => {
+        const src = read(f);
+        expect(src).toMatch(/\.owed/);
+        expect(src).toMatch(/could not be returned or recorded/);
+    });
 });
 
 describe('the detached item grants say when a prize is only owed', () => {
@@ -204,6 +226,8 @@ describe('the detached item grants say when a prize is only owed', () => {
         const src = read('explore.js');
         expect(src).toMatch(/commitExpeditionRelic/);
         expect(src).toMatch(/relicOwed/);
+        // Three-way: owed and unrecorded read differently.
+        expect(src).toMatch(/please contact a server admin/);
     });
 
     test('a loot-box prize that could not be granted is shown as owed', () => {
@@ -211,5 +235,7 @@ describe('the detached item grants say when a prize is only owed', () => {
         expect(src).toMatch(/grantItemsOrOwe/);
         expect(src).toMatch(/lootBoxItemPayoutKey/);
         expect(src).toMatch(/Not Yet in Your Inventory/);
+        expect(src).toMatch(/wonGrant\.owed/);
+        expect(src).toMatch(/could not be recorded/);
     });
 });
