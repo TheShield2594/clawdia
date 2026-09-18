@@ -121,7 +121,7 @@ async function handleBuyRod(interaction, user, currency) {
                 new EmbedBuilder()
                     .setColor(COLORS.SUCCESS)
                     .setTitle(`${rodData.emoji} ${rodData.name} Purchased!`)
-                    .setDescription(`You now own a **${rodData.name}**. Equip it with \`/fish inv equip ${rodIndex}\`.`)
+                    .setDescription(`You now own a **${rodData.name}**. Equip it with \`/fish equip ${rodIndex}\`.`)
                     .addFields(
                         { name: 'Spent',   value: `${currency}${rodData.cost.toLocaleString()}`,      inline: true },
                         { name: 'Balance', value: `${currency}${freshUser.balance.toLocaleString()}`, inline: true }

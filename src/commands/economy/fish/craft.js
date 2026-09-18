@@ -57,7 +57,7 @@ async function handleCraft(interaction, sub) {
             .setColor(COLORS.INFO)
             .setTitle('🎣 Fishing Crafting Recipes')
             .setDescription(lines.join('\n\n'))
-            .setFooter({ text: '✅ = you can craft now  •  Use /fish craft make <recipe> to craft  •  /fish inv materials to check stock' });
+            .setFooter({ text: '✅ = you can craft now  •  Use /fish craft make <recipe> to craft  •  /fish inv category:materials to check stock' });
 
         return interaction.reply({ embeds: [embed] });
     }
@@ -152,7 +152,7 @@ async function handleCraft(interaction, sub) {
             .setTitle(`${recipe.emoji} Crafted: ${recipe.name}`)
             .setDescription(`You crafted ${outputDesc}!`)
             .addFields({ name: 'Materials Consumed', value: usedLines, inline: false })
-            .setFooter({ text: 'Use /fish inv materials to check your remaining stock' })
+            .setFooter({ text: 'Use /fish inv category:materials to check your remaining stock' })
             .setTimestamp();
 
         return interaction.reply({ embeds: [embed] });

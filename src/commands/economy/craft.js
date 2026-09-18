@@ -323,8 +323,8 @@ module.exports = {
             const isMine  = Object.hasOwn(MINE_RECIPES, recipeId);
             const footer  = isCross ? 'Cross-system item — check /fish inv or /mine inv to use it'
                           : isFish  ? 'Use /fish inv to view your fishing stock'
-                          : isMine  ? 'Use /mine inv view to check mining stock'
-                          : 'Use /hunt inv materials to check your remaining stock';
+                          : isMine  ? 'Use /mine inv to check mining stock'
+                          : 'Use /hunt inv category:materials to check your remaining stock';
 
             const embed = new EmbedBuilder()
                 .setColor(COLORS.SUCCESS)

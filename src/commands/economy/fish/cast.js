@@ -683,7 +683,7 @@ function replyCastPreflightFailure(interaction, preflight) {
         }
         case 'no_rod':
             return interaction.reply({
-                content: `You don't have a rod equipped! Buy one with \`/fish shop rod\` and equip it with \`/fish inv equip 1\`.`,
+                content: `You don't have a rod equipped! Buy one with \`/fish shop rod\` and equip it with \`/fish equip 1\`.`,
                 ...ephemeral
             });
         case 'rod_broken':

@@ -17,7 +17,7 @@ async function handleBuyUpgrade(interaction, user, currency) {
 
     const h = user.hunt;
     if (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex]) {
-        return interaction.reply({ content: 'No weapon equipped. Equip a weapon first with `/hunt inv equip`.', flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: 'No weapon equipped. Equip a weapon first with `/hunt equip`.', flags: MessageFlags.Ephemeral });
     }
 
     const weapon     = h.weapons[h.equippedWeaponIndex];

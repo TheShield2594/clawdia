@@ -306,7 +306,7 @@ describe('weapon inventory pages', () => {
     }
 
     /**
-     * The worst inventory the game can produce. `/hunt inv discard` only accepts
+     * The worst inventory the game can produce. `/hunt discard` only accepts
      * broken or condemned weapons and `/hunt shop weapon` caps nothing, so a
      * player who replaces working weapons accumulates them permanently — there
      * is no upper bound to test against, only "far past where it used to break".
@@ -337,7 +337,7 @@ describe('weapon inventory pages', () => {
     });
 
     it('numbers each weapon by its index in the inventory, not its position on the page', () => {
-        // /hunt inv equip and /hunt inv discard address weapons by that index,
+        // /hunt equip and /hunt discard address weapons by that index,
         // so a display order that renumbered them would equip the wrong rifle.
         const h = hoarder(30);
         const equipped = buildWeaponPages(h)[0][0];

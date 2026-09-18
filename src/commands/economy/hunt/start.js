@@ -665,13 +665,13 @@ function replyHuntPreflightFailure(interaction, preflight) {
             });
         case 'no_weapon':
             return interaction.reply({
-                content: `You don't have a weapon equipped! Buy one with \`/hunt shop weapon\` and equip it with \`/hunt inv equip 1\`.`,
+                content: `You don't have a weapon equipped! Buy one with \`/hunt shop weapon\` and equip it with \`/hunt equip 1\`.`,
                 ...ephemeral
             });
         case 'weapon_broken':
             return interaction.reply({
                 content: preflight.condemned
-                    ? `Your **${preflight.weapon.name}** is broken beyond repair — too many shop repairs have worn it out. Buy a replacement with \`/hunt shop weapon\` and discard this one with \`/hunt inv discard\`.`
+                    ? `Your **${preflight.weapon.name}** is broken beyond repair — too many shop repairs have worn it out. Buy a replacement with \`/hunt shop weapon\` and discard this one with \`/hunt discard\`.`
                     : `Your **${preflight.weapon.name}** is broken! Repair it with \`/hunt shop repair\` or buy a new one with \`/hunt shop weapon\`.`,
                 ...ephemeral
             });

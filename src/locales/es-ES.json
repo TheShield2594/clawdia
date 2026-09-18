@@ -527,17 +527,15 @@
       "prestige": { "description": "Reinicia tu nivel de pescador por bonus de prestigio permanentes (requiere Nivel 50)" },
       "records": { "description": "Consulta los récords históricos de pesca del servidor" },
       "inv": {
-        "description": "Consulta y gestiona tu inventario de pesca",
+        "description": "Consulta tu inventario de pesca completo, o una categoría en detalle",
         "options": {
-          "rods": { "description": "Consulta tus cañas de pescar" },
-          "equip": {
-            "description": "Equipa una caña por su número de inventario",
-            "options": {
-              "number": { "description": "Número de caña de /pescar inv rods" }
-            }
-          },
-          "bait": { "description": "Consulta tu cebo y consumibles" },
-          "materials": { "description": "Consulta tus materiales de fabricación" }
+          "category": { "description": "Abre una categoría en detalle (por defecto: un resumen de todo)" }
+        }
+      },
+      "equip": {
+        "description": "Equipa una caña por su número de inventario",
+        "options": {
+          "number": { "description": "Número de caña de /pescar inv category:rods" }
         }
       },
       "quests": {
@@ -703,7 +701,7 @@
     "description": "Caza animales, gestiona equipo, misiones, zonas y prestigio, todo en un solo sitio",
     "options": {
       "start": {
-        "description": "Sal de caza. Usa 1 de energía. Enfriamiento 45s. Equipa un arma con /cazar inv equip.",
+        "description": "Sal de caza. Usa 1 de energía. Enfriamiento 45s. Equipa un arma con /cazar equip.",
         "options": {
           "zone": { "description": "Zona donde cazar (por defecto, tu zona activa)" },
           "quick": { "description": "Omite las fases de sigilo y puntería (sin bonus). Se recuerda para futuras cazas." }
@@ -718,24 +716,21 @@
       "prestige": { "description": "Reinicia tu nivel de cazador por bonus de prestigio permanentes (requiere Nivel 50)" },
       "records": { "description": "Consulta los récords históricos de caza del servidor" },
       "inv": {
-        "description": "Consulta y gestiona tu inventario de caza",
+        "description": "Consulta tu inventario de caza completo, o una categoría en detalle",
         "options": {
-          "weapons": { "description": "Consulta tu colección de armas" },
-          "equip": {
-            "description": "Equipa un arma por su número de inventario",
-            "options": {
-              "number": { "description": "Número de arma de /cazar inv weapons" }
-            }
-          },
-          "ammo": { "description": "Consulta tus reservas de munición" },
-          "consumables": { "description": "Consulta tus consumibles y mejoras activas" },
-          "materials": { "description": "Consulta tus materiales de fabricación" },
-          "discard": {
-            "description": "Descarta un arma rota o inservible",
-            "options": {
-              "number": { "description": "Número de arma a descartar" }
-            }
-          }
+          "category": { "description": "Abre una categoría en detalle (por defecto: un resumen de todo)" }
+        }
+      },
+      "equip": {
+        "description": "Equipa un arma por su número de inventario",
+        "options": {
+          "number": { "description": "Número de arma de /cazar inv category:weapons" }
+        }
+      },
+      "discard": {
+        "description": "Descarta un arma rota o inservible",
+        "options": {
+          "number": { "description": "Número de arma a descartar" }
         }
       },
       "quests": {
@@ -932,21 +927,21 @@
         }
       },
       "inv": {
-        "description": "Gestiona tu inventario de minería y tus picos",
+        "description": "Consulta tu inventario de minería completo, o una categoría en detalle",
         "options": {
-          "view": { "description": "Consulta tus picos, cargas, consumibles y materiales" },
-          "equip": {
-            "description": "Equipa un pico de tu inventario",
-            "options": {
-              "slot": { "description": "Número de ranura del pico (usa /minar inv view para verlas)" }
-            }
-          },
-          "discard": {
-            "description": "Descarta un pico roto o inservible",
-            "options": {
-              "slot": { "description": "Número de ranura del pico (usa /minar inv view para verlas)" }
-            }
-          }
+          "category": { "description": "Abre una categoría en detalle (por defecto: un resumen de todo)" }
+        }
+      },
+      "equip": {
+        "description": "Equipa un pico de tu inventario",
+        "options": {
+          "slot": { "description": "Número de ranura del pico (usa /minar inv para verlas)" }
+        }
+      },
+      "discard": {
+        "description": "Descarta un pico roto o inservible",
+        "options": {
+          "slot": { "description": "Número de ranura del pico (usa /minar inv para verlas)" }
         }
       },
       "quests": {

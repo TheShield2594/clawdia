@@ -21,7 +21,7 @@ const {
 } = require('../../../data/mineData');
 const { handleDig } = require('./dig');
 const { handleProfile, handlePrestige } = require('./profile');
-const { handleInv } = require('./inventory');
+const { handleInv, handleEquip, handleDiscard } = require('./inventory');
 const { handleQuests } = require('./quests');
 const { handleShop } = require('./shop');
 const { handleMap } = require('./map');
@@ -66,28 +66,35 @@ module.exports = {
                     o.setName('user')
                         .setDescription('Player to inspect')
                         .setRequired(false)))
-        .addSubcommandGroup(group =>
-            group.setName('inv')
-                .setDescription('Manage your mining inventory and pickaxes')
-                .addSubcommand(sub =>
-                    sub.setName('view')
-                        .setDescription('View your pickaxes, charges, consumables, and materials'))
-                .addSubcommand(sub =>
-                    sub.setName('equip')
-                        .setDescription('Equip a pickaxe from your inventory')
-                        .addIntegerOption(o =>
-                            o.setName('slot')
-                                .setDescription('Pickaxe slot number (use /mine inv view to see slots)')
-                                .setRequired(true)
-                                .setMinValue(1)))
-                .addSubcommand(sub =>
-                    sub.setName('discard')
-                        .setDescription('Discard a broken or condemned pickaxe')
-                        .addIntegerOption(o =>
-                            o.setName('slot')
-                                .setDescription('Pickaxe slot number (use /mine inv view to see slots)')
-                                .setRequired(true)
-                                .setMinValue(1))))
+        .addSubcommand(sub =>
+            sub.setName('inv')
+                .setDescription('View your whole mining inventory, or one category in full')
+                .addStringOption(o =>
+                    o.setName('category')
+                        .setDescription('Open one category in full (default: an overview of everything)')
+                        .setRequired(false)
+                        .addChoices(
+                            { name: '🪓 Pickaxes',    value: 'pickaxes' },
+                            { name: '💥 Charges',     value: 'charges' },
+                            { name: '🎒 Consumables', value: 'consumables' },
+                            { name: '🪨 Materials',   value: 'materials' }
+                        )))
+        .addSubcommand(sub =>
+            sub.setName('equip')
+                .setDescription('Equip a pickaxe from your inventory')
+                .addIntegerOption(o =>
+                    o.setName('slot')
+                        .setDescription('Pickaxe slot number (use /mine inv to see slots)')
+                        .setRequired(true)
+                        .setMinValue(1)))
+        .addSubcommand(sub =>
+            sub.setName('discard')
+                .setDescription('Discard a broken or condemned pickaxe')
+                .addIntegerOption(o =>
+                    o.setName('slot')
+                        .setDescription('Pickaxe slot number (use /mine inv to see slots)')
+                        .setRequired(true)
+                        .setMinValue(1)))
         .addSubcommandGroup(group =>
             group.setName('quests')
                 .setDescription('View and claim your daily mine quests')
@@ -194,8 +201,10 @@ module.exports = {
             if (sub === 'map')     return handleMap(interaction);
             if (sub === 'raid')    return handleRaid(interaction);
             if (sub === 'prestige') return handlePrestige(interaction);
+            if (sub === 'inv')     return handleInv(interaction);
+            if (sub === 'equip')   return handleEquip(interaction);
+            if (sub === 'discard') return handleDiscard(interaction);
         }
-        if (group === 'inv')    return handleInv(interaction, sub);
         if (group === 'quests') return handleQuests(interaction, sub);
         if (group === 'shop')   return handleShop(interaction, sub);
     }
@@ -208,10 +217,11 @@ module.exports = {
 // races the same document and contends for it too — see utils/economyLock.js.
 const { withEconomyLock, exceptReadOnly } = require('../../../utils/economyLock');
 // Reads that persist nothing, so they never wait on a lease — see
-// exceptReadOnly. Everything else, including /mine raid, still locks.
+// exceptReadOnly. Everything else, including /mine raid, /mine equip and
+// /mine discard, still locks.
 const MINE_READ_ONLY = [
     'profile', 'map',
-    'inv view',
+    'inv',
     'shop list',
 ];
 module.exports.execute = withEconomyLock(module.exports.execute, {

@@ -628,7 +628,7 @@ function replyDigPreflightFailure(interaction, preflight) {
         }
         case 'no_pickaxe':
             return interaction.reply({
-                content: `You don't have a pickaxe equipped! Buy one with \`/mine shop pickaxe\` and equip it with \`/mine inv equip 1\`.`,
+                content: `You don't have a pickaxe equipped! Buy one with \`/mine shop pickaxe\` and equip it with \`/mine equip 1\`.`,
                 ...ephemeral
             });
         case 'pickaxe_broken':

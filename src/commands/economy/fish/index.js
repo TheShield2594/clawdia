@@ -20,7 +20,7 @@ const {
     FISH_CRAFT_RECIPES
 } = require('../../../data/fishData');
 const { handleCast } = require('./cast');
-const { handleProfile, handlePrestige, handleInv } = require('./profile');
+const { handleProfile, handlePrestige, handleInv, handleEquip } = require('./profile');
 const { handleQuests } = require('./quests');
 const { handleShop } = require('./shop');
 const { handleCraft } = require('./craft');
@@ -73,26 +73,26 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('records')
                 .setDescription('View the server\'s all-time fishing world records'))
-        .addSubcommandGroup(group =>
-            group.setName('inv')
-                .setDescription('View and manage your fishing inventory')
-                .addSubcommand(sub =>
-                    sub.setName('rods')
-                        .setDescription('View your fishing rods'))
-                .addSubcommand(sub =>
-                    sub.setName('equip')
-                        .setDescription('Equip a rod by its inventory number')
-                        .addIntegerOption(o =>
-                            o.setName('number')
-                                .setDescription('Rod number from /fish inv rods')
-                                .setMinValue(1)
-                                .setRequired(true)))
-                .addSubcommand(sub =>
-                    sub.setName('bait')
-                        .setDescription('View your bait and consumable stock'))
-                .addSubcommand(sub =>
-                    sub.setName('materials')
-                        .setDescription('View your crafting materials')))
+        .addSubcommand(sub =>
+            sub.setName('inv')
+                .setDescription('View your whole fishing inventory, or one category in full')
+                .addStringOption(o =>
+                    o.setName('category')
+                        .setDescription('Open one category in full (default: an overview of everything)')
+                        .setRequired(false)
+                        .addChoices(
+                            { name: '🎣 Rods',      value: 'rods' },
+                            { name: '🪱 Bait',      value: 'bait' },
+                            { name: '🪨 Materials', value: 'materials' }
+                        )))
+        .addSubcommand(sub =>
+            sub.setName('equip')
+                .setDescription('Equip a rod by its inventory number')
+                .addIntegerOption(o =>
+                    o.setName('number')
+                        .setDescription('Rod number from /fish inv category:rods')
+                        .setMinValue(1)
+                        .setRequired(true)))
         .addSubcommandGroup(group =>
             group.setName('quests')
                 .setDescription('View and claim your daily fishing quests')
@@ -246,10 +246,11 @@ module.exports = {
             if (sub === 'profile')  return handleProfile(interaction);
             if (sub === 'prestige') return handlePrestige(interaction);
             if (sub === 'records')  return handleRecords(interaction);
+            if (sub === 'inv')      return handleInv(interaction);
+            if (sub === 'equip')    return handleEquip(interaction);
             return;
         }
 
-        if (group === 'inv')         return handleInv(interaction, sub);
         if (group === 'quests')      return handleQuests(interaction, sub);
         if (group === 'shop')        return handleShop(interaction, sub);
         if (group === 'craft')       return handleCraft(interaction, sub);
@@ -265,10 +266,10 @@ module.exports = {
 // races the same document and contends for it too — see utils/economyLock.js.
 const { withEconomyLock, exceptReadOnly } = require('../../../utils/economyLock');
 // Reads that persist nothing, so they never wait on a lease — see
-// exceptReadOnly. Everything else, including /fish inv equip, still locks.
+// exceptReadOnly. Everything else, including /fish equip, still locks.
 const FISH_READ_ONLY = [
     'profile', 'records',
-    'inv rods', 'inv bait', 'inv materials',
+    'inv',
     'shop list',
     'craft list',
     'location list',
