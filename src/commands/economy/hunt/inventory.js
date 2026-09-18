@@ -355,4 +355,14 @@ module.exports = {
     executeInv,
     executeEquip,
     executeDiscard,
+    // Exposed for tests: the pure per-category and overview builders, which take
+    // a plain hunt-data object and return embeds without touching the database.
+    __test__: {
+        orderedWeapons,
+        weaponsPages,
+        ammoEmbed,
+        consumablesEmbed,
+        materialsPages,
+        overviewEmbed,
+    },
 };

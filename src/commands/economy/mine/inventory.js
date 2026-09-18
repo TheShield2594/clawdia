@@ -313,4 +313,13 @@ module.exports = {
     handleInv,
     handleEquip,
     handleDiscard,
+    // Exposed for tests: the pure per-category and overview builders, which take
+    // a plain mining-data object and return embeds without touching the database.
+    __test__: {
+        overviewEmbed,
+        pickaxePages,
+        chargesEmbed,
+        consumablesEmbed,
+        materialsPages,
+    },
 };
