@@ -196,7 +196,7 @@ describe('the prompt section', () => {
 
 // The index is derived from the commands this process loads, so the assertion
 // worth having is against the ones it actually ships. This is the question in
-// the feature request, asked of the real tree: if `/hunt inv equip` is ever
+// the feature request, asked of the real tree: if `/hunt equip` is ever
 // renamed, the rename is what this catches.
 describe('against the real command set', () => {
     const { loadCommandModules } = require('../src/utils/commandLoader');
@@ -207,7 +207,7 @@ describe('against the real command set', () => {
     });
 
     test.each([
-        ['how do I equip my rifle', '/hunt inv equip'],
+        ['how do I equip my rifle', '/hunt equip'],
         ['how do I go hunting', '/hunt start'],
         ['how do I check my balance', '/balance'],
         ['how does mining work', '/mine dig'],

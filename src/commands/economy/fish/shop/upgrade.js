@@ -19,7 +19,7 @@ async function handleBuyUpgrade(interaction, user, currency) {
     const f = user.fishing;
 
     if (f.equippedRodIndex < 0 || !f.rods[f.equippedRodIndex]) {
-        return interaction.reply({ content: `You don't have a rod equipped. Use \`/fish inv equip\` first.`, flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: `You don't have a rod equipped. Use \`/fish equip\` first.`, flags: MessageFlags.Ephemeral });
     }
 
     const upgradeId  = interaction.options.getString('type');

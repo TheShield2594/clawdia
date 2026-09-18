@@ -13,7 +13,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { ZONE_LIST, CONSUMABLES, AMMO_PACKS, WEAPON_TIERS, WEAPON_UPGRADES, HUNT_QUEST_TEMPLATES } = require('../../../data/huntData');
 const { executeStart } = require('./start');
 const { executeProfile, executePrestige, executeRecords } = require('./profile');
-const { executeInv } = require('./inventory');
+const { executeInv, executeEquip, executeDiscard } = require('./inventory');
 const { executeQuests } = require('./quests');
 const { executeShop } = require('./shop');
 const { executeZone } = require('./zone');
@@ -49,7 +49,7 @@ module.exports = {
         .setDescription('Hunt animals, manage gear, quests, zones, and prestige — all in one place')
         .addSubcommand(sub =>
             sub.setName('start')
-                .setDescription('Go on a hunt. Uses 1 stamina. 45s cooldown. Equip a weapon with /hunt inv equip.')
+                .setDescription('Go on a hunt. Uses 1 stamina. 45s cooldown. Equip a weapon with /hunt equip.')
                 .addStringOption(o =>
                     o.setName('zone')
                         .setDescription('Zone to hunt in (defaults to your active zone)')
@@ -72,37 +72,35 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('records')
                 .setDescription("View the server's all-time hunting records"))
-        .addSubcommandGroup(group =>
-            group.setName('inv')
-                .setDescription('View and manage your hunt inventory')
-                .addSubcommand(sub =>
-                    sub.setName('weapons')
-                        .setDescription('View your weapon collection'))
-                .addSubcommand(sub =>
-                    sub.setName('equip')
-                        .setDescription('Equip a weapon by its inventory number')
-                        .addIntegerOption(o =>
-                            o.setName('number')
-                                .setDescription('Weapon number from /hunt inv weapons')
-                                .setRequired(true)
-                                .setMinValue(1)))
-                .addSubcommand(sub =>
-                    sub.setName('ammo')
-                        .setDescription('View your ammo stocks'))
-                .addSubcommand(sub =>
-                    sub.setName('consumables')
-                        .setDescription('View your consumables and active buffs'))
-                .addSubcommand(sub =>
-                    sub.setName('materials')
-                        .setDescription('View your crafting materials'))
-                .addSubcommand(sub =>
-                    sub.setName('discard')
-                        .setDescription('Discard a broken or condemned weapon')
-                        .addIntegerOption(o =>
-                            o.setName('number')
-                                .setDescription('Weapon number to discard')
-                                .setRequired(true)
-                                .setMinValue(1))))
+        .addSubcommand(sub =>
+            sub.setName('inv')
+                .setDescription('View your whole hunt inventory, or one category in full')
+                .addStringOption(o =>
+                    o.setName('category')
+                        .setDescription('Open one category in full (default: an overview of everything)')
+                        .setRequired(false)
+                        .addChoices(
+                            { name: '🔫 Weapons',     value: 'weapons' },
+                            { name: '🔶 Ammo',        value: 'ammo' },
+                            { name: '🧪 Consumables', value: 'consumables' },
+                            { name: '🪨 Materials',   value: 'materials' }
+                        )))
+        .addSubcommand(sub =>
+            sub.setName('equip')
+                .setDescription('Equip a weapon by its inventory number')
+                .addIntegerOption(o =>
+                    o.setName('number')
+                        .setDescription('Weapon number from /hunt inv category:weapons')
+                        .setRequired(true)
+                        .setMinValue(1)))
+        .addSubcommand(sub =>
+            sub.setName('discard')
+                .setDescription('Discard a broken or condemned weapon')
+                .addIntegerOption(o =>
+                    o.setName('number')
+                        .setDescription('Weapon number to discard')
+                        .setRequired(true)
+                        .setMinValue(1)))
         .addSubcommandGroup(group =>
             group.setName('quests')
                 .setDescription('View and claim your daily hunt quests')
@@ -221,8 +219,10 @@ module.exports = {
             if (sub === 'profile')  return executeProfile(interaction);
             if (sub === 'prestige') return executePrestige(interaction);
             if (sub === 'records')  return executeRecords(interaction);
+            if (sub === 'inv')      return executeInv(interaction);
+            if (sub === 'equip')    return executeEquip(interaction);
+            if (sub === 'discard')  return executeDiscard(interaction);
         }
-        if (group === 'inv')    return executeInv(interaction, sub);
         if (group === 'quests') return executeQuests(interaction, sub);
         if (group === 'shop')   return executeShop(interaction, sub);
         if (group === 'zone')   return executeZone(interaction, sub);
@@ -249,11 +249,11 @@ module.exports.__test__ = {
 // races the same document and contends for it too — see utils/economyLock.js.
 const { withEconomyLock, exceptReadOnly } = require('../../../utils/economyLock');
 // Reads that persist nothing, so they never wait on a lease — see
-// exceptReadOnly. Everything else, including /hunt inv equip and discard,
+// exceptReadOnly. Everything else, including /hunt equip and /hunt discard,
 // still locks.
 const HUNT_READ_ONLY = [
     'profile', 'records',
-    'inv weapons', 'inv ammo', 'inv consumables', 'inv materials',
+    'inv',
     'shop list',
     'zone list',
 ];

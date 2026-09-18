@@ -179,10 +179,10 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
             { name: 'Rarity Boost', value: `+${Math.round(weaponData.rarityBoost * 100)}%`,                                                                          inline: true },
             { name: 'Ammo',         value: weaponData.requiresAmmo ? `${weaponData.ammoType.replace(/_/g, ' ')} (${currency}${weaponData.ammoCost}/hunt)` : 'None required', inline: true },
             { name: 'Weapon #',     value: `#${newIndex + 1} in inventory`,                                                                                           inline: true },
-            { name: 'Status',       value: equipped ? '✅ Equipped' : `Use \`/hunt inv equip ${newIndex + 1}\``,                                                       inline: true }
+            { name: 'Status',       value: equipped ? '✅ Equipped' : `Use \`/hunt equip ${newIndex + 1}\``,                                                       inline: true }
         )
         .addFields({ name: 'New Balance', value: `${currency}${updated.balance.toLocaleString()}` })
-        .setFooter({ text: equipped ? 'Ready to hunt! Use /hunt start' : `Equip with /hunt inv equip ${newIndex + 1}` });
+        .setFooter({ text: equipped ? 'Ready to hunt! Use /hunt start' : `Equip with /hunt equip ${newIndex + 1}` });
 
     const reply = { embeds: [embed], components: [] };
     if (interactionOrBtn.editReply) return interactionOrBtn.editReply(reply);

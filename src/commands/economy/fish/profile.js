@@ -1,6 +1,6 @@
 'use strict';
 
-// /fish profile, /fish prestige and the /fish inv group: what the player has
+// /fish profile, /fish prestige, /fish inv and /fish equip: what the player has
 // and what they have become.
 
 const User = require('../../../models/User');
@@ -334,12 +334,21 @@ async function handlePrestige(interaction) {
 // INV
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async function handleInv(interaction, sub) {
+// The /fish inventory surface — one read-only /fish inv that shows rods, bait
+// and materials at a glance, with a `category` option that opens one of them in
+// full, plus /fish equip as its own top-level subcommand. It was a subcommand
+// group (/fish inv rods / equip / bait / materials); the group collapsed because
+// Discord will not run a subcommand *group* on its own, so /fish inv had to
+// become a plain subcommand to be runnable.
+
+// Loads the user's fishing data, or replies and returns null when the economy is
+// off. Every /fish inv and /fish equip invocation starts here.
+async function loadFishing(interaction) {
     const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
+        return null;
     }
-    const currency = guildSettings?.economy?.currency ?? '💰';
 
     const user = await User.findOneAndUpdate(
         { userId: interaction.user.id, guildId: interaction.guild.id },
@@ -349,37 +358,51 @@ async function handleInv(interaction, sub) {
     await attachGrind(user);
     ensureFishingData(user);
     applyStaminaRegen(user);
-
-    switch (sub) {
-        case 'rods':      return showRods(interaction, user);
-        case 'equip':     return equipRod(interaction, user);
-        case 'bait':      return showBait(interaction, user, currency);
-        case 'materials': return showMaterials(interaction, user);
-    }
+    return user;
 }
 
-async function showRods(interaction, user) {
-    const f = user.fishing;
-
-    if (!f.rods.length) {
-        return interaction.reply({ content: `You don't own any rods yet. Buy one with \`/fish shop rod\`.`, flags: MessageFlags.Ephemeral });
-    }
-
-    // Paged for the same reason /hunt inv weapons is: rods accumulate without
-    // limit — nothing forces a working spare out of the inventory — and one
-    // joined description overflows the 4096-character embed cap somewhere past
-    // thirty rods, which fails the whole command rather than truncating it.
-    // The number in each heading is what /fish inv equip takes, so trimming the
-    // tail would put those rods permanently out of reach.
-    const ordered = f.rods
+// Rods sorted equipped-first, then by tier, carrying the original index so the
+// number a player reads is the one /fish equip takes.
+function orderedRods(f) {
+    return f.rods
         .map((rod, index) => ({ rod, index }))
         .sort((a, b) => {
             if (a.index === f.equippedRodIndex) return -1;
             if (b.index === f.equippedRodIndex) return 1;
             return (b.rod.tier ?? 0) - (a.rod.tier ?? 0);
         });
+}
 
-    const lines = ordered.map(({ rod, index }) => {
+async function handleInv(interaction) {
+    const user = await loadFishing(interaction);
+    if (!user) return;
+
+    const category = interaction.options.getString('category');
+    switch (category) {
+        case 'rods':      return paginate(interaction, rodPages(interaction, user));
+        case 'bait':      return interaction.reply({ embeds: [baitEmbed(interaction, user)] });
+        case 'materials': return interaction.reply({ embeds: [materialsEmbed(interaction, user)] });
+        default:          return interaction.reply({ embeds: [overviewEmbed(interaction, user)] });
+    }
+}
+
+function rodPages(interaction, user) {
+    const f = user.fishing;
+
+    if (!f.rods.length) {
+        return [new EmbedBuilder()
+            .setColor(COLORS.INFO)
+            .setTitle(`🎣 ${interaction.user.username}'s Rods`)
+            .setDescription("You don't own any rods yet. Buy one with `/fish shop rod`.")];
+    }
+
+    // Paged for the same reason /hunt inv is: rods accumulate without limit —
+    // nothing forces a working spare out of the inventory — and one joined
+    // description overflows the 4096-character embed cap somewhere past thirty
+    // rods, which fails the whole command rather than truncating it. The number
+    // in each heading is what /fish equip takes, so trimming the tail would put
+    // those rods permanently out of reach.
+    const lines = orderedRods(f).map(({ rod, index }) => {
         const equipped    = index === f.equippedRodIndex ? ' **[EQUIPPED]**' : '';
         const statusEmoji = rodStatusEmoji(rod.status);
         const bar         = durabilityBar(rod.currentDurability, rod.maxDurability, 8);
@@ -387,17 +410,18 @@ async function showRods(interaction, user) {
         return `**${index + 1}.** ${rod.name}${equipped}\n   ${statusEmoji} ${bar} ${rod.currentDurability}/${rod.maxDurability}${upgradeStr}`;
     });
 
-    const pages = chunkByLength(lines, { separator: '\n\n', maxPerChunk: 8 }).map((chunk, _i, all) => new EmbedBuilder()
+    return chunkByLength(lines, { separator: '\n\n', maxPerChunk: 8 }).map((chunk, _i, all) => new EmbedBuilder()
         .setColor(COLORS.INFO)
         .setTitle(all.length > 1 ? `🎣 ${interaction.user.username}'s Rods (${f.rods.length})` : `🎣 ${interaction.user.username}'s Rods`)
         .setDescription(chunk.join('\n\n'))
-        .setFooter({ text: 'Use /fish inv equip <number> to equip a rod • /fish shop repair to repair' })
+        .setFooter({ text: 'Use /fish equip <number> to equip a rod • /fish shop repair to repair' })
         .setTimestamp());
-
-    return paginate(interaction, pages);
 }
 
-async function equipRod(interaction, user) {
+async function handleEquip(interaction) {
+    const user = await loadFishing(interaction);
+    if (!user) return;
+
     const f      = user.fishing;
     const number = interaction.options.getInteger('number');
     const index  = number - 1;
@@ -417,7 +441,7 @@ async function equipRod(interaction, user) {
     try {
         await user.save();
     } catch (err) {
-        console.error('[fishinv equip] save error:', err);
+        console.error('[fish equip] save error:', err);
         return interaction.reply({ content: 'Something went wrong. Please try again.', flags: MessageFlags.Ephemeral });
     }
 
@@ -433,33 +457,43 @@ async function equipRod(interaction, user) {
     });
 }
 
-async function showBait(interaction, user, _currency) {
-    const f = user.fishing;
-
-    const baitLines = Object.entries(f.bait ?? {})
+function baitStockLines(f) {
+    return Object.entries(f.bait ?? {})
         .filter(([, qty]) => qty > 0)
         .map(([type, qty]) => {
             const pack = BAIT_PACKS.find(b => b.baitType === type);
             return `${pack?.emoji ?? '🪱'} **${type.replace(/_/g, ' ')}**: ${qty}`;
         });
+}
 
-    const consumableLines = Object.entries(f.consumables ?? {})
+function consumableStockLines(f) {
+    return Object.entries(f.consumables ?? {})
         .filter(([, qty]) => qty > 0)
         .map(([id, qty]) => {
             const def = CONSUMABLES[id];
             return `${def?.emoji ?? '📦'} **${def?.name ?? id}**: ${qty}`;
         });
+}
 
+function activeBuffLines(f) {
     const activeLines = [];
     if (f.activeBait) {
         const activeDef = CONSUMABLES[f.activeBait];
         const activeName = activeDef?.name ?? f.activeBait.replace(/_/g, ' ');
         activeLines.push(`${activeDef?.emoji ?? '🐟'} ${activeName} active (${f.activeBaitCastsLeft} casts left)`);
     }
-    if (f.activeLuck)    activeLines.push(`🍀 Angler's Luck queued`);
+    if (f.activeLuck)     activeLines.push(`🍀 Angler's Luck queued`);
     if (f.activeXpScroll) activeLines.push(`📜 XP Scroll queued`);
+    return activeLines;
+}
 
-    const embed = new EmbedBuilder()
+function baitEmbed(interaction, user) {
+    const f = user.fishing;
+    const baitLines = baitStockLines(f);
+    const consumableLines = consumableStockLines(f);
+    const activeLines = activeBuffLines(f);
+
+    return new EmbedBuilder()
         .setColor(COLORS.WARN)
         .setTitle(`🎒 ${interaction.user.username}'s Fishing Supplies`)
         .addFields(
@@ -469,11 +503,9 @@ async function showBait(interaction, user, _currency) {
         )
         .setFooter({ text: 'Use /fish shop to buy supplies • /use <item> to activate consumables' })
         .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
 }
 
-async function showMaterials(interaction, user) {
+function fishingMaterialLines(user) {
     const f = user.fishing;
     const matLines = Object.entries(f.materials ?? {})
         .filter(([, qty]) => qty > 0)
@@ -485,6 +517,12 @@ async function showMaterials(interaction, user) {
         if (!qty) return null;
         return `• **${id.replace(/_/g, ' ')}** (hunt): ${qty}`;
     }).filter(Boolean);
+
+    return { matLines, huntMatLines };
+}
+
+function materialsEmbed(interaction, user) {
+    const { matLines, huntMatLines } = fishingMaterialLines(user);
 
     const embed = new EmbedBuilder()
         .setColor(COLORS.NEUTRAL)
@@ -499,8 +537,47 @@ async function showMaterials(interaction, user) {
 
     embed.setFooter({ text: 'Materials are used in crafting recipes. Use /fish craft list to see what you can make.' });
     embed.setTimestamp();
+    return embed;
+}
 
-    return interaction.reply({ embeds: [embed] });
+const OVERVIEW_ROD_PREVIEW = 5;
+
+function overviewEmbed(interaction, user) {
+    const f = user.fishing;
+    const embed = new EmbedBuilder()
+        .setColor(COLORS.INFO)
+        .setTitle(`🎒 ${interaction.user.username}'s Fishing Inventory`)
+        .setTimestamp();
+
+    // Rods — a short preview, equipped first, pointing at the full list.
+    if (!f.rods.length) {
+        embed.addFields({ name: '🎣 Rods', value: 'None — buy one with `/fish shop rod`', inline: false });
+    } else {
+        const ordered = orderedRods(f);
+        const preview = ordered.slice(0, OVERVIEW_ROD_PREVIEW).map(({ rod, index }) => {
+            const equipped = index === f.equippedRodIndex ? ' **[E]**' : '';
+            return `**${index + 1}.** ${rod.name}${equipped} — ${rodStatusEmoji(rod.status)} ${rod.currentDurability}/${rod.maxDurability}`;
+        });
+        const extra = ordered.length - preview.length;
+        if (extra > 0) preview.push(`…and ${extra} more — \`/fish inv category:rods\` for the full list`);
+        embed.addFields({ name: `🎣 Rods (${f.rods.length})`, value: preview.join('\n'), inline: false });
+    }
+
+    const baitLines = baitStockLines(f);
+    embed.addFields({ name: '🪱 Bait', value: baitLines.length ? baitLines.join('\n') : 'None', inline: true });
+
+    const consumableLines = consumableStockLines(f);
+    embed.addFields({ name: '🧪 Consumables', value: consumableLines.length ? consumableLines.join('\n') : 'None', inline: true });
+
+    const activeLines = activeBuffLines(f);
+    if (activeLines.length) embed.addFields({ name: '⚡ Active Buffs', value: activeLines.join('\n'), inline: false });
+
+    const { matLines, huntMatLines } = fishingMaterialLines(user);
+    const allMats = [...matLines, ...huntMatLines];
+    embed.addFields({ name: '🪨 Materials', value: allMats.length ? allMats.join('\n') : 'None yet — catch fish for drops', inline: false });
+
+    embed.setFooter({ text: 'Open a section with /fish inv category:<name> • Equip a rod with /fish equip <number>' });
+    return embed;
 }
 
 // ─── Grand Prestige Check ─────────────────────────────────────────────────────
@@ -550,11 +627,8 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 module.exports = {
     GRAND_PRESTIGE_DIAMOND,
     checkGrandPrestige,
-    equipRod,
+    handleEquip,
     handleInv,
     handlePrestige,
     handleProfile,
-    showBait,
-    showMaterials,
-    showRods,
 };

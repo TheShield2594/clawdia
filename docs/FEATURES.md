@@ -39,7 +39,7 @@ downloaded for a model that cannot use it.
 
 **Knowing its own commands**:
 
-Ask the chat "how do I equip my rifle" and it answers `/hunt inv equip`, because
+Ask the chat "how do I equip my rifle" and it answers `/hunt equip`, because
 the commands it matched against the question are in front of it when it replies.
 Nobody has to write them down first: the reference is derived from the command
 tree this process loaded — the same `SlashCommandBuilder` definitions Discord

@@ -72,7 +72,7 @@ async function handleRaid(interaction) {
     const rm = raider.mining;
     if (rm.equippedPickaxeIndex < 0 || !rm.pickaxes[rm.equippedPickaxeIndex]) {
         return interaction.reply({
-            content: "You need a pickaxe equipped to raid! Use `/mine inv equip`.",
+            content: "You need a pickaxe equipped to raid! Use `/mine equip`.",
             flags: MessageFlags.Ephemeral
         });
     }

@@ -286,7 +286,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // The other reference, and the one nobody had to write: what the bot can
     // actually do, derived from the commands this process loaded and matched
     // against the question. "How do I equip my rifle" is answerable from
-    // `/hunt inv equip`'s own definition, and without it the model either says
+    // `/hunt equip`'s own definition, and without it the model either says
     // it does not know or — worse, and what it used to do — invents a command
     // that sounds right. Below the guild's own knowledge in the budget: an
     // admin who wrote an entry about hunting knows something the command tree

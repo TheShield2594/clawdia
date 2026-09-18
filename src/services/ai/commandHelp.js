@@ -60,7 +60,7 @@ const MAX_CHOICES_SHOWN = 6;
 const PER_COMMAND_LIMIT = 2;
 
 // Where a query word hit, and what that is worth. A word in the command path
-// itself is the strongest signal there is — "hunt" in `/hunt inv equip` is the
+// itself is the strongest signal there is — "hunt" in `/hunt equip` is the
 // user naming the feature — and the surrounding descriptions of the parent
 // command and group are the weakest, because every subcommand of /hunt shares
 // them and they cannot tell two of them apart.
@@ -136,7 +136,7 @@ function indexEntry({ path, description, options, category, root, group }) {
 /**
  * One command module as the leaves a user can actually type.
  *
- * `/hunt` is not a thing anybody runs — `/hunt inv equip` is — so a command with
+ * `/hunt` is not a thing anybody runs — `/hunt equip` is — so a command with
  * subcommands contributes one entry per leaf and none for the root, and a
  * command without them contributes itself. A module whose builder throws is
  * skipped rather than allowed to take the whole index down: this runs on the

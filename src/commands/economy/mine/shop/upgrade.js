@@ -15,7 +15,7 @@ async function handleBuyUpgrade(interaction, user, currency) {
     if (!upgradeDef) return interaction.reply({ content: 'Unknown upgrade module.', flags: MessageFlags.Ephemeral });
 
     if (m.equippedPickaxeIndex < 0 || !m.pickaxes[m.equippedPickaxeIndex]) {
-        return interaction.reply({ content: `You don't have a pickaxe equipped. Equip one with \`/mine inv equip\`.`, flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: `You don't have a pickaxe equipped. Equip one with \`/mine equip\`.`, flags: MessageFlags.Ephemeral });
     }
 
     const pickaxe = m.pickaxes[m.equippedPickaxeIndex];

@@ -177,7 +177,7 @@ function queryTerms(query) {
  * Whether `form` appears in `text`.
  *
  * Substring for anything long enough that a substring means something, and a
- * whole word for the short ones: `inv` has to match "/hunt inv equip" without
+ * whole word for the short ones: `inv` has to match "/hunt equip" without
  * also matching "invest" and "inventory" on every question that says "inv".
  */
 function fieldHas(text, form) {

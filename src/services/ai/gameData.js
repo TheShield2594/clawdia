@@ -6,7 +6,7 @@ const { queryTerms, scoreFields, rankMatches, normalize } = require('./retrieval
 // The game's own content, retrieved per question and put in front of the model.
 //
 // commandHelp.js answers "how do I equip my rifle" — the command tree knows
-// that `/hunt inv equip` exists. It does not know what a Cobalt Rifle costs,
+// that `/hunt equip` exists. It does not know what a Cobalt Rifle costs,
 // which zone opossums live in, what a Luck Charm does, or what the Whisperwood
 // Charm is, because none of that is in a SlashCommandBuilder. It is in
 // src/data/, in tables the commands read at runtime, and a model that cannot

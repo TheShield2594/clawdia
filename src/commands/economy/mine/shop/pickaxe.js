@@ -128,7 +128,7 @@ async function handleBuyPickaxe(interaction, user, currency) {
             const embed = new EmbedBuilder()
                 .setColor('#b5651d')
                 .setTitle(`${pickaxeData.emoji} Pickaxe Purchased!`)
-                .setDescription(`You bought a **${pickaxeData.name}**!${equipped ? ' It has been equipped.' : ' Use `/mine inv equip` to equip it.'}`)
+                .setDescription(`You bought a **${pickaxeData.name}**!${equipped ? ' It has been equipped.' : ' Use `/mine equip` to equip it.'}`)
                 .addFields(
                     { name: 'Success Rate',  value: `${Math.round(pickaxeData.successRate * 100)}%`, inline: true },
                     { name: 'Rarity Boost',  value: `+${Math.round(pickaxeData.rarityBoost * 100)}%`, inline: true },
