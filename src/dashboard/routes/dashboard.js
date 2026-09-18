@@ -50,6 +50,18 @@ function buildInviteUrl(guildId) {
     return `https://discord.com/oauth2/authorize?${query}`;
 }
 
+// Every page below runs checkGuildAccess or a batched bot.hasGuilds lookup and
+// then renders a settings view out of the database, so each is real work behind
+// an authorization check. The router-wide BoundedRateLimiter the API uses is
+// invisible to CodeQL's js/missing-rate-limiting (it only recognises a
+// rate-limiting package), so mount the recognised express-rate-limit limiter
+// with router.use ahead of the routes — the form its routing model connects to
+// the handlers it guards (see lib/readRateLimit.js). It runs before checkAuth,
+// so it keys by session where there is one and by address otherwise.
+const { rateLimit } = require('express-rate-limit');
+const { readRateLimitOptions } = require('../lib/readRateLimit');
+router.use(rateLimit(readRateLimitOptions(120)));
+
 router.get('/', checkAuth, async (req, res, next) => {
     try {
         const guilds = (await getManageableGuilds(req)).map(g => ({

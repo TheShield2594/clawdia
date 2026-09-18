@@ -22,6 +22,23 @@ const { instanceStats } = require('./lib/instanceStats');
 // by a test, and because a rule enforced only at the edge is a rule that quietly
 // stops being enforced when a second caller appears.
 const { resolveDashboardUrl, checkDashboardUrl, checkSessionSecret } = require('../config/validateEnv');
+const { rateLimit } = require('express-rate-limit');
+
+// The /health handler runs a cross-process bot.hasGuilds() lookup for an
+// authenticated admin, so it is authorization-gated work an unbounded caller
+// could hammer. The recognised express-rate-limit limiter bounds it (CodeQL
+// js/missing-rate-limiting); it is keyed by address because the endpoint is
+// mostly anonymous, and the ceiling sits far above the compose healthcheck and
+// any external uptime monitor so a real probe never trips it.
+const healthRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 300,
+    keyGenerator: req => `ip:${req.ip}`,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: false,
+    handler: (_req, res) => res.status(429).json({ status: 'rate_limited' }),
+});
 
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
@@ -377,7 +394,7 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
     //
     // Merely being logged in is not enough: Discord OAuth is open to any account,
     // so authentication alone conveys no privilege here.
-    app.get('/health', async (req, res) => {
+    app.get('/health', healthRateLimit, async (req, res) => {
         const manageable = req.isAuthenticated?.() === true && Array.isArray(req.user?.guilds)
             ? req.user.guilds.filter(hasManagePermission)
             : [];

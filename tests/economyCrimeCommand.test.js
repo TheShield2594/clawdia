@@ -57,6 +57,7 @@ jest.mock('../src/data/featuredRotation', () => {
 });
 
 const crime = require('../src/commands/economy/crime');
+const { __setRandomSourceForTests } = require('../src/utils/secureRandom');
 const { logTransaction } = require('../src/utils/logTransaction');
 const { logBigWin } = require('../src/utils/bigWinLogger');
 const { isDistrictActive } = require('../src/services/districtService');
@@ -71,16 +72,25 @@ const PICKPOCKET = 'pickpocketing';
 const FEATHER_TOUCH = 'exec_feather_touch';   // 72% success, ×0.80 payout, no heat
 const BOLD_GRAB = 'exec_bold_grab';           // 40% success, ×1.60 payout, 2h heat
 
+// Crime's payout-steering rolls draw from src/utils/secureRandom.js, not
+// Math.random (CodeQL js/insecure-randomness). Both are pointed at one shared
+// impl so a run that mixes a secureRandom roll with a Math.random one (in a copy
+// helper, say) still consumes a single sequence in call order.
+function setRandom(impl) {
+    jest.spyOn(Math, 'random').mockImplementation(impl);
+    __setRandomSourceForTests(impl);
+}
+
 /** Math.random values in order, then `tail` for every roll after them. */
 function rolls(sequence, tail = 0.5) {
     const queue = [...sequence];
-    jest.spyOn(Math, 'random').mockImplementation(() => (queue.length ? queue.shift() : tail));
+    setRandom(() => (queue.length ? queue.shift() : tail));
 }
 
 /** `head` for the first `count` rolls of the run, `tail` for the rest. */
 function rollsUntil(count, head, tail) {
     let seen = 0;
-    jest.spyOn(Math, 'random').mockImplementation(() => (++seen <= count ? head : tail));
+    setRandom(() => (++seen <= count ? head : tail));
 }
 
 const seedUser = (fields = {}) => mockUsers.seed({
@@ -113,10 +123,10 @@ beforeEach(() => {
     // `mockReturnValue(true)` in the underground-district test below stayed true
     // for every test that ran after it.
     isDistrictActive.mockReturnValue(false);
-    jest.spyOn(Math, 'random').mockReturnValue(0.5);
+    setRandom(() => 0.5);
 });
 
-afterEach(() => { Math.random.mockRestore(); });
+afterEach(() => { Math.random.mockRestore(); __setRandomSourceForTests(null); });
 
 describe('a clean getaway', () => {
     it('credits the payout and counts the crime', async () => {

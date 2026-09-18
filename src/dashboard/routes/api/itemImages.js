@@ -114,6 +114,15 @@ router.post('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, ch
     const detectedType = detectImageType(req.file.buffer);
     if (!detectedType) return res.status(400).json({ error: 'Invalid image file: unrecognized format' });
     const { guildId, itemId } = req.params;
+    // Both ids flow into the ItemImage filter below, so require each to be a
+    // plain string first — an operator object can never reach the filter (CodeQL
+    // js/sql-injection / NoSQL operator injection). A shop itemId is whatever an
+    // admin typed, so only its type and a sane length are checked here and
+    // shopHasItem then confirms it actually names an item in this guild's shop.
+    if (typeof guildId !== 'string') return res.status(400).json({ error: 'Invalid guild id' });
+    if (typeof itemId !== 'string' || itemId.length > 256) {
+        return res.status(400).json({ error: 'Invalid itemId' });
+    }
     try {
         if (!await shopHasItem(guildId, itemId)) {
             return res.status(404).json({ error: 'Shop item not found' });
@@ -195,6 +204,11 @@ router.get('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess,
 router.post('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, uploadImage, async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image file provided' });
     const { guildId, itemId } = req.params;
+    // guildId flows into the ItemImage filter below; require it to be a plain
+    // string first so an operator object can never reach the filter (CodeQL
+    // js/sql-injection / NoSQL operator injection). itemId is already
+    // shape-checked and catalog-checked by invalidItemId.
+    if (typeof guildId !== 'string') return res.status(400).json({ error: 'Invalid guild id' });
     const idError = invalidItemId(itemId);
     if (idError) return res.status(400).json({ error: idError });
     // M4: Verify file contents match a known image signature.

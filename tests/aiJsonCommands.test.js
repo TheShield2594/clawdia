@@ -31,10 +31,24 @@ jest.mock('../src/utils/commandCooldowns', () => ({
 }));
 
 const mockGetCompletion = jest.fn();
-jest.mock('../src/services/aiService', () => ({
-    resolveProviderConfig: () => ({ provider: 'mock', model: 'mock-1', apiKey: 'k' }),
-    getCompletion: (...args) => mockGetCompletion(...args),
-}));
+// The `mock` provider is not in the registry, so getStructuredCompletion falls
+// back to prompt-and-parse — the same route these commands took directly before
+// #1044. The mock mirrors exactly that fallback (the real requestModelJson over
+// the mocked getCompletion), so every truncation-retry, refund and rate-limit
+// assertion below still drives `mockGetCompletion` as it always did. What the
+// native structured path does instead is covered in aiStructuredOutput.test.js.
+jest.mock('../src/services/aiService', () => {
+    const { requestModelJson, DEFAULT_TOKEN_BUDGETS } = require('../src/utils/modelJson');
+    return {
+        resolveProviderConfig: () => ({ provider: 'mock', model: 'mock-1', apiKey: 'k' }),
+        getCompletion: (...args) => mockGetCompletion(...args),
+        getStructuredCompletion: ({ schema, schemaName, maxTokens, budgets = DEFAULT_TOKEN_BUDGETS, ...req }) =>
+            requestModelJson(
+                runMaxTokens => mockGetCompletion({ ...req, maxTokens: runMaxTokens, mcp: false }),
+                { budgets }
+            ),
+    };
+});
 
 const User = require('../src/models/User');
 const Guild = require('../src/models/Guild');

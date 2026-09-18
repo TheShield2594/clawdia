@@ -15,6 +15,10 @@ const {
     APEX_PHASES_PER_DUEL,
 } = require('../src/services/huntService');
 const { APEX_TYPES, ANIMALS_BY_TIER } = require('../src/data/huntData');
+// Hunt's payout-steering rolls draw from src/utils/secureRandom.js, not
+// Math.random (CodeQL js/insecure-randomness), so pinning the RNG means driving
+// that seam alongside Math.random.
+const { __setRandomSourceForTests } = require('../src/utils/secureRandom');
 
 // A real legendary from the tables — the apex slot only opens on rare or better.
 // Snow Leopard carries no 'armored' trait, so a pinned-low random still crits.
@@ -136,6 +140,7 @@ describe('the hunt hands the duel its kill payout', () => {
         // Force a success, and force the apex roll, by pinning Math.random low.
         const realRandom = Math.random;
         Math.random = () => 0.001;
+        __setRandomSourceForTests(() => 0.001);
         try {
             // Pin the encounter to a legendary so the apex slot is even in play;
             // its 12% roll then always trips against a pinned-low random.
@@ -151,6 +156,7 @@ describe('the hunt hands the duel its kill payout', () => {
             expect(found.apexEncounter.killPayout).toBeGreaterThan(0);
         } finally {
             Math.random = realRandom;
+            __setRandomSourceForTests(null);
         }
     });
 
@@ -159,6 +165,7 @@ describe('the hunt hands the duel its kill payout', () => {
         user.streak.current = 30; // a streak multiplier the apex used to ignore
         const realRandom = Math.random;
         Math.random = () => 0.001; // success, and a crit
+        __setRandomSourceForTests(() => 0.001);
         try {
             const result = executeHunt(user, 'beginner_forest', {
                 encounter: { tier: 'legendary', animal: LEGENDARY_ANIMAL },
@@ -167,6 +174,7 @@ describe('the hunt hands the duel its kill payout', () => {
             expect(result.payoutBeforeMods).toBeGreaterThan(result.rawPayout);
         } finally {
             Math.random = realRandom;
+            __setRandomSourceForTests(null);
         }
     });
 });

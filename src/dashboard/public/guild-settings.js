@@ -904,8 +904,15 @@ document.addEventListener('click', async event => {
     const link = event.target.closest && event.target.closest('a[href]');
     if (!link || link.target === '_blank' || link.hasAttribute('download')) return;
     const href = link.getAttribute('href');
-    // In-page anchors (the skip link) and javascript: handlers go nowhere.
-    if (!href || href.startsWith('#') || href.toLowerCase().startsWith('javascript:')) return;
+    // In-page anchors (the skip link) and script-bearing pseudo-schemes go
+    // nowhere we would navigate to, so they are never intercepted for the
+    // unsaved-changes prompt. The scheme test covers every pseudo-scheme a
+    // browser can execute, not just javascript:, and trims the surrounding
+    // whitespace a browser strips before resolving one
+    // (CodeQL js/incomplete-url-scheme-check).
+    const scheme = (href || '').trim().toLowerCase();
+    if (!href || href.startsWith('#') ||
+        scheme.startsWith('javascript:') || scheme.startsWith('data:') || scheme.startsWith('vbscript:')) return;
     if (!unsavedScopes().length) return;
 
     event.preventDefault();

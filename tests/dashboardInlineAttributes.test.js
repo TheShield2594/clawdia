@@ -158,8 +158,15 @@ function withoutComments(source, file) {
         .filter(line => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
         .join('\n');
     if (file.endsWith('.ejs')) {
-        // EJS comment tags and HTML comments, which do span lines.
-        text = text.replace(/<%#[\s\S]*?%>/g, '').replace(/<!--[\s\S]*?-->/g, '');
+        // EJS comment tags and HTML comments, which do span lines. Re-run the
+        // pass until it stops changing so a comment reconstructed by removing an
+        // inner one (`<!--<!---->-->`) cannot survive a single sweep
+        // (CodeQL js/incomplete-multi-character-sanitization).
+        let prev;
+        do {
+            prev = text;
+            text = text.replace(/<%#[\s\S]*?%>/g, '').replace(/<!--[\s\S]*?-->/g, '');
+        } while (text !== prev);
     }
     return text;
 }

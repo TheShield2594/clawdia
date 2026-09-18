@@ -11,7 +11,7 @@
 //   ai/actions.js    — AI in-channel actions (addendum, parser, executor)
 //   ai/discordChat.js — the Discord transport (handleAIChat)
 
-const { resolveProviderConfig, streamCompletion, getCompletion, DEFAULT_MODELS } = require('./ai');
+const { resolveProviderConfig, streamCompletion, getCompletion, getStructuredCompletion, DEFAULT_MODELS } = require('./ai');
 const { handleAIChat } = require('./ai/discordChat');
 const { clearHistory } = require('./ai/history');
 const { retrieveKnowledge } = require('./ai/knowledge');
@@ -24,6 +24,7 @@ module.exports = {
     handleAIChat,
     clearHistory,
     getCompletion,
+    getStructuredCompletion,
     streamCompletion,
     resolveProviderConfig,
     retrieveKnowledge,

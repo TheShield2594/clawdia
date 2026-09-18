@@ -321,9 +321,12 @@ describe('call sites', () => {
 
     it('keeps the enforcement in the dispatch layer, not the transports', () => {
         const dispatch = fs.readFileSync(path.join(SRC, 'services/ai/index.js'), 'utf8');
-        // Both paths, and each one naming the guild that scopes the user window.
+        // Every path — streamCompletion, getCompletion, and the native branch of
+        // getStructuredCompletion (#1044) — and each one naming the guild that
+        // scopes the user window. (The structured fallback spends its slot through
+        // getCompletion, so it is not a separate call here.)
         const enforced = dispatch.match(/enforceRateLimit\(\{[^}]*\}\)/g) || [];
-        expect(enforced).toHaveLength(2);
+        expect(enforced).toHaveLength(3);
         for (const call of enforced) {
             expect(call).toMatch(/guildId/);
             expect(call).toMatch(/userId/);

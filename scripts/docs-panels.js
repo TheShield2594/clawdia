@@ -63,15 +63,34 @@ const NAV_GROUP_RE = /<div class="dash-nav-label"[^>]*>\/\/\s*([^<]+)<\/div>/;
 // gone blind to a real panel, which is the drift a generated list exists to stop.
 const SUSPECT_RE = /\bdata-tab="/;
 
+/**
+ * Strips HTML tags, re-running the pass until the string stops changing so a
+ * tag reconstructed by removing an inner one (`<<b>i>` -> `<i>`) cannot survive
+ * a single sweep (CodeQL js/incomplete-multi-character-sanitization).
+ */
+function stripTags(text) {
+    let prev;
+    let out = text;
+    do {
+        prev = out;
+        out = out.replace(/<[^>]+>/g, '');
+    } while (out !== prev);
+    return out;
+}
+
 /** Decodes the handful of entities the sidebar and panel copy actually use. */
 function decodeEntities(text) {
+    // `&amp;` is decoded last, not first: decoding it first would turn an input
+    // like `&amp;lt;` into `&lt;` and then `<`, decoding one entity too many
+    // (CodeQL js/double-unescaping). Decoding it last leaves `&amp;lt;` as the
+    // literal `&lt;` the source intended.
     return text
-        .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'")
-        .replace(/&nbsp;/g, ' ');
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&');
 }
 
 /**
@@ -134,10 +153,10 @@ function summaryOf(panel, panelDir = PANEL_DIR) {
     if (raw === null) return '';
 
     const text = decodeEntities(
-        raw
+        stripTags(
             // <code>/explore</code> reads as `/explore` in a markdown table.
-            .replace(/<code>([\s\S]*?)<\/code>/g, '`$1`')
-            .replace(/<[^>]+>/g, '')
+            raw.replace(/<code>([\s\S]*?)<\/code>/g, '`$1`')
+        )
     ).replace(/\s+/g, ' ').trim();
 
     const sentence = /^(.*?[.!?])(\s|$)/.exec(text);
@@ -228,7 +247,10 @@ function parseAll(panelDir = PANEL_DIR) {
 }
 
 function escapeCell(text) {
-    return text.replace(/\|/g, '\\|');
+    // The escape character is escaped first so a literal backslash in the text
+    // cannot pair with the one added in front of a pipe (CodeQL
+    // js/incomplete-sanitization).
+    return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 }
 
 /** The markdown between the two markers, marker lines excluded. */

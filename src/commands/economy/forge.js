@@ -3,11 +3,29 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User    = require('../../models/User');
 const AiItem  = require('../../models/AiItem');
-const { resolveProviderConfig, getCompletion } = require('../../services/aiService');
+const { resolveProviderConfig, getStructuredCompletion } = require('../../services/aiService');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
-const { requestModelJson } = require('../../utils/modelJson');
 const cooldownStore = require('../../utils/commandCooldowns');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
+
+// The shape /forge asks the model to fill. Where the provider supports it this
+// is a native output constraint (OpenAI Structured Outputs, Gemini
+// responseSchema, Anthropic tool-forcing); where it does not, the prompt below
+// names the same fields and utils/modelJson.js parses the answer (#1044). Kept
+// strict-mode-friendly for OpenAI — every property required, no additional ones
+// — and the sanitising in `execute` is what the item is actually built from, so
+// the schema guards the format and the code guards the values.
+const ITEM_SCHEMA = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+        name:        { type: 'string', description: 'creative item name, 2–5 words, thematic and memorable' },
+        emoji:       { type: 'string', description: 'a single emoji that fits the item' },
+        description: { type: 'string', description: 'one sentence on what the item does or represents, 15–25 words' },
+        lore:        { type: 'string', description: 'one sentence of atmospheric flavour text, 15–30 words' }
+    },
+    required: ['name', 'emoji', 'description', 'lore']
+};
 
 const RARITY_CONFIG = {
     common:    { label: 'Common',    emoji: '⚪', color: 0xAAAAAA, cost: 500,   xpReward: 25  },
@@ -202,10 +220,12 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
         let parsed;
         try {
             const config = resolveProviderConfig(guildSettings.ai);
-            // The fence-stripping, brace-isolating, budget-growing retry lives in
-            // utils/modelJson — /questgen asks for a JSON object the same way, and
-            // the two copies of it were the least tested code in the tree (#830).
-            parsed = await requestModelJson(maxTokens => getCompletion({
+            // Provider-native structured output where the provider supports it,
+            // and the fence-stripping, budget-growing retry in utils/modelJson as
+            // the fallback where it does not (#1044). Tools are off on both paths
+            // — a JSON item has no use for them — and the sanitising below runs on
+            // the result either way.
+            parsed = await getStructuredCompletion({
                 ...config,
                 guildId: interaction.guild.id,
                 // Attribution for the guild's AI limits, which `config`
@@ -217,10 +237,9 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
                 history: [],
                 prompt,
                 temperature: 0.95,
-                maxTokens,
-                // Pure JSON out — no MCP tools, whose output would only muddy it.
-                mcp: false,
-            }));
+                schema: ITEM_SCHEMA,
+                schemaName: 'forged_item',
+            });
         } catch (err) {
             console.error('[FORGE] AI generation failed:', err?.message || err);
             // The refund is what the message below promises, so its outcome

@@ -133,6 +133,26 @@ editing this file.
   alternative considered was a growing array on the guild document, which is the
   shape [#888](https://github.com/TheShield2594/clawdia/issues/888) had just
   finished removing. Worth its own issue if that trade should be reopened.
+- **Recurring or condition-triggered agent runs
+  ([#1045](https://github.com/TheShield2594/clawdia/issues/1045)).** Not planned.
+  The one-shot pieces already exist — `deepTask.js` runs a detached, budgeted
+  turn (#835), `schedule_task` fires one on a cadence behind ManageGuild (#834),
+  and both are bounded by the scheduled tool budget (#831) and the monthly
+  ceilings — but a task that *stands up on its own* to diff feeds weekly, digest
+  mod activity nightly, or watch an MCP result for a change is a net-new system,
+  and it is the one the issue itself names as most in tension with this file and
+  with the bot's safety posture. The tension is standing, not incidental: a
+  recurring task is durable state that fires with nobody watching, so the
+  write-approval flow (**Run it** / **Cancel**, which an interactive turn can
+  wait on because a human is there) and the DM's per-task tool firewall stop
+  being conveniences and become the load-bearing safety boundary — and getting
+  that boundary right is the work, not the scheduler. So the decision is to
+  *not* build it yet, and to record that here rather than relitigate it one pull
+  request at a time, which is what #1045 asked for. The exit is cheap when it is
+  reopened: the runner, the budget and the attribution are already in place, so
+  what a green light buys is a persisted recurrence and the firewall decisions —
+  reopen by editing this entry, not by stacking a scheduler onto a turn nobody
+  approved.
 
 ## Keeping this honest
 

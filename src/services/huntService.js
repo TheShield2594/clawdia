@@ -19,6 +19,10 @@ const { getPityBonus } = require('../utils/pityBonus');
 const { getBonusMultipliers } = require('../utils/prestige');
 const grind = require('./grindEngine');
 const { WILDERNESS_YIELD_BONUS } = require('../data/crossSystemData');
+// Hunt payouts feed the weekly-champion leaderboard and the big-win log, so
+// every roll below draws from the shared CSPRNG rather than Math.random
+// (CodeQL js/insecure-randomness). See src/utils/secureRandom.js.
+const { secureRandom } = require('../utils/secureRandom');
 
 // Zones where a critical failure can destroy your weapon (death event)
 const DANGEROUS_ZONE_IDS = new Set(['desert_wastes', 'arctic_tundra', 'murky_swamp', 'legendary_peaks']);
@@ -256,7 +260,7 @@ function rollTrophyQuality(user, weapon, isCrit) {
     }
 
     const total = w.reduce((s, v) => s + v, 0);
-    let r = Math.random() * total;
+    let r = secureRandom() * total;
     for (let i = 0; i < TROPHY_QUALITIES.length; i++) {
         r -= w[i];
         if (r <= 0) return TROPHY_QUALITIES[i];
@@ -268,7 +272,7 @@ function rollTrophyQuality(user, weapon, isCrit) {
 
 function weightedRoll(items) {
     const total = items.reduce((s, i) => s + i.weight, 0);
-    let r = Math.random() * total;
+    let r = secureRandom() * total;
     for (const item of items) {
         r -= item.weight;
         if (r <= 0) return item;
@@ -277,7 +281,7 @@ function weightedRoll(items) {
 }
 
 function randInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+    return Math.floor(secureRandom() * (max - min + 1)) + min;
 }
 
 // ─── TIER ROLL ───────────────────────────────────────────────────────────────
@@ -410,9 +414,9 @@ function rollAnimal(tier, zoneId) {
         // Fallback to any animal of this tier
         const fallback = ANIMALS_BY_TIER[tier];
         if (!fallback?.length) return ANIMALS_BY_TIER['common'][0];
-        return fallback[Math.floor(Math.random() * fallback.length)];
+        return fallback[Math.floor(secureRandom() * fallback.length)];
     }
-    return pool[Math.floor(Math.random() * pool.length)];
+    return pool[Math.floor(secureRandom() * pool.length)];
 }
 
 // ─── FAILURE SEVERITY ────────────────────────────────────────────────────────
@@ -427,7 +431,7 @@ const FAILURE_SEVERITIES = [
 ];
 
 function rollFailureSeverity() {
-    return FAILURE_SEVERITIES[Math.floor(Math.random() * FAILURE_SEVERITIES.length)];
+    return FAILURE_SEVERITIES[Math.floor(secureRandom() * FAILURE_SEVERITIES.length)];
 }
 
 // ─── PAYOUT CALCULATION ───────────────────────────────────────────────────────
@@ -897,7 +901,7 @@ function executeHunt(user, zoneId, options = {}) {
         // Stealth bonus: patient approach upgrades common prey to uncommon ~30% of
         // the time. Pre-rolled encounters apply this upgrade caller-side, after the
         // stealth outcome is known.
-        if (options.stealthBonus > 0 && tier === 'common' && Math.random() < 0.30) tier = 'uncommon';
+        if (options.stealthBonus > 0 && tier === 'common' && secureRandom() < 0.30) tier = 'uncommon';
         animal = rollAnimal(tier, zoneId ?? h.activeZone);
     }
     const traits = animal.traits ?? [];
@@ -909,7 +913,7 @@ function executeHunt(user, zoneId, options = {}) {
     if (options.stealthBonus)        successChance += options.stealthBonus;
     successChance = Math.min(0.95, Math.max(0.10, successChance));
 
-    const success = Math.random() < successChance;
+    const success = secureRandom() < successChance;
 
     // Track which consumables were active BEFORE ticking
     const baitBefore  = h.activeBait;
@@ -934,8 +938,8 @@ function executeHunt(user, zoneId, options = {}) {
 
         // Crit — armored trait negates crits; the aim phase moves crit chance.
         const critChance = applyAimBonus(calculateCritChance(user, traits), options.aimBonus);
-        const isCrit         = traits.includes('armored') ? false : Math.random() < critChance;
-        const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
+        const isCrit         = traits.includes('armored') ? false : secureRandom() < critChance;
+        const critMultiplier = isCrit ? (1.5 + secureRandom() * 1.0) : 1.0;
 
         if (traits.includes('armored')) {
             result.traitEffects.push({ trait: 'armored', msg: 'Its thick hide prevented a critical strike.' });
@@ -958,7 +962,7 @@ function executeHunt(user, zoneId, options = {}) {
         // Special drop
         let specialDrop = null;
         const huntDropChance = (isCrit ? animal.specialDrop?.chance * 2 : animal.specialDrop?.chance ?? 0) * (options.marketplaceActive ? 1.10 : 1.0);
-        if (animal.specialDrop && Math.random() < huntDropChance) {
+        if (animal.specialDrop && secureRandom() < huntDropChance) {
             specialDrop = animal.specialDrop;
             const matKey = animal.specialDrop.itemId;
             if (h.materials[matKey] != null) {
@@ -996,7 +1000,7 @@ function executeHunt(user, zoneId, options = {}) {
         // Trait: aggressive — 30% chance to injure even on success, halved by the
         // Swampwalker's Charm
         const injuryChance = h.swampwalkersCharm ? 0.15 : 0.30;
-        if (traits.includes('aggressive') && Math.random() < injuryChance) {
+        if (traits.includes('aggressive') && secureRandom() < injuryChance) {
             h.injuryUntil = new Date(Date.now() + LIMITS.INJURY_PENALTY_MS);
             result.traitEffects.push({ trait: 'aggressive', msg: 'It lashed out while falling, injuring you (+15 min cooldown).' });
         }
@@ -1043,7 +1047,7 @@ function executeHunt(user, zoneId, options = {}) {
         // ── Apex encounter check ────────────────────────────────────────
         // 12% chance for legendary, 8% for epic, 3% for rare, skipped for others
         const apexTierChance = tier === 'legendary' ? 0.12 : tier === 'epic' ? 0.08 : tier === 'rare' ? 0.03 : 0;
-        if (apexTierChance > 0 && Math.random() < apexTierChance) {
+        if (apexTierChance > 0 && secureRandom() < apexTierChance) {
             // The kill's own earned payout rides along so the duel can price
             // itself off the kill rather than re-rolling the base range (#744).
             result.apexEncounter = { animal, tier, killPayout: payoutBeforeMods };
@@ -1083,7 +1087,7 @@ function executeHunt(user, zoneId, options = {}) {
         if (weapon.currentDurability <= 0) result.weaponBroke = true;
 
         // ── Death event (dangerous zones, 8% of failures, weapon still intact) ──
-        if (DANGEROUS_ZONE_IDS.has(zone.id) && !result.weaponBroke && Math.random() < HUNT_DEATH_RATE) {
+        if (DANGEROUS_ZONE_IDS.has(zone.id) && !result.weaponBroke && secureRandom() < HUNT_DEATH_RATE) {
             if (hasEffect(user, 'lifesaver')) {
                 consumeEffect(user, 'lifesaver');
                 result.deathEvent = { saved: true, weaponName: weapon.name };
@@ -1154,7 +1158,7 @@ function assignDailyHuntQuests(user) {
     );
 
     // Shuffle and take up to DAILY_QUEST_COUNT
-    const shuffled  = eligible.slice().sort(() => Math.random() - 0.5);
+    const shuffled  = eligible.slice().sort(() => secureRandom() - 0.5);
     const toAssign  = shuffled.slice(0, DAILY_QUEST_COUNT);
     const expiresAt = new Date(now + LIMITS.DAILY_WINDOW_MS);
 
@@ -1254,7 +1258,7 @@ const APEX_PHASES_PER_DUEL = 3;
 function buildApexEncounter(base) {
     const pool = [...base.phasePool];
     for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = Math.floor(secureRandom() * (i + 1));
         [pool[i], pool[j]] = [pool[j], pool[i]];
     }
     return { ...base, phases: pool.slice(0, APEX_PHASES_PER_DUEL) };
@@ -1262,7 +1266,7 @@ function buildApexEncounter(base) {
 
 function rollApexType() {
     const keys = Object.keys(APEX_TYPES);
-    return buildApexEncounter(APEX_TYPES[keys[Math.floor(Math.random() * keys.length)]]);
+    return buildApexEncounter(APEX_TYPES[keys[Math.floor(secureRandom() * keys.length)]]);
 }
 
 // Nerve: the duel's second axis. A wrong aggressive read costs two, so two bad

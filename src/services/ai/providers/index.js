@@ -80,4 +80,22 @@ function supportsVision(providerName, model) {
         : false;
 }
 
-module.exports = { providers, getProvider, DEFAULT_MODELS, mcpMode, usesClientTools, supportsVision };
+/**
+ * Whether this provider and model can answer under a JSON schema natively —
+ * OpenAI Structured Outputs, Gemini `responseSchema`, Anthropic tool-forcing
+ * (#1044).
+ *
+ * Asked by the structured-completion dispatch so nothing else has to know which
+ * providers can constrain their output. A provider with no answer — Ollama, and
+ * OpenRouter's arbitrary routed models, where the guarantee cannot be made for
+ * every model an id might resolve to — reports false and falls back to
+ * prompt-and-parse in utils/modelJson.js.
+ */
+function supportsStructured(providerName, model) {
+    const provider = providers.get(providerName);
+    return typeof provider?.supportsStructured === 'function'
+        ? Boolean(provider.supportsStructured(model))
+        : false;
+}
+
+module.exports = { providers, getProvider, DEFAULT_MODELS, mcpMode, usesClientTools, supportsVision, supportsStructured };
