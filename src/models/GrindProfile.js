@@ -14,11 +14,26 @@ const { Schema, model } = require('mongoose');
  * the data lived on User. Callers must markModified('data') before save —
  * src/utils/grindProfile.js handles this.
  */
+// Marker for a shop purchase's item grant (#1058). A gathering-shop purchase is
+// a debit on User and a grant on this document with no shared key, so a grant
+// that committed server-side but lost its response looked identical to one that
+// never happened — and the refund ran on both, handing back the coins for an
+// item the player kept. The grant now stamps the purchase's key here in the same
+// write, so after a lost response the grant's own outcome can be read back
+// (utils/shopGrant.js) and the refund gated on a grant that is confirmed absent.
+// Bounded per document — a purchase records one, and only the last few need to
+// survive to answer the read that follows immediately.
+const grantKeySchema = new Schema({
+    key: { type: String, required: true },
+    at:  { type: Date, default: Date.now },
+}, { _id: false });
+
 const grindProfileSchema = new Schema({
-    userId:  { type: String, required: true },
-    guildId: { type: String, required: true },
-    system:  { type: String, required: true, enum: ['fishing', 'hunt', 'mining', 'exploration'] },
-    data:    { type: Schema.Types.Mixed, default: undefined },
+    userId:    { type: String, required: true },
+    guildId:   { type: String, required: true },
+    system:    { type: String, required: true, enum: ['fishing', 'hunt', 'mining', 'exploration'] },
+    data:      { type: Schema.Types.Mixed, default: undefined },
+    grantKeys: { type: [grantKeySchema], default: undefined },
 }, { timestamps: true, minimize: false });
 
 grindProfileSchema.index({ guildId: 1, userId: 1, system: 1 }, { unique: true });

@@ -14,13 +14,20 @@ const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require
 //   result.stream                         → the awaited return value itself
 //   usage after the stream, via .response → usageMetadata on the chunks
 
+// USD per 1M tokens. `cachedIn` is the cache-*read* rate for cached content, so
+// the ledger prices the cached share of the input at it rather than at the full
+// `in` rate (#1046, #1049). The 1.5 and 2.0 lines discount a cache read to 0.25x
+// of input; that read rate is all this ledger models — explicit context caching
+// also carries a separate per-hour storage charge, which it does not. `flash-lite`
+// (Gemini 2.0 Flash-Lite) supports no context caching at all, so it reports no
+// cached tokens and carries no `cachedIn`: the fallback to `in` is never reached.
 const PRICING = [
     { match: /flash-lite/i, in: 0.075, out: 0.30 },
-    { match: /2\.0-flash/i, in: 0.10,  out: 0.40 },
-    { match: /1\.5-flash/i, in: 0.075, out: 0.30 },
-    { match: /1\.5-pro/i,   in: 1.25,  out: 5.00 },
-    { match: /pro/i,        in: 1.25,  out: 5.00 },
-    { match: /flash/i,      in: 0.10,  out: 0.40 }
+    { match: /2\.0-flash/i, in: 0.10,  out: 0.40, cachedIn: 0.025 },
+    { match: /1\.5-flash/i, in: 0.075, out: 0.30, cachedIn: 0.01875 },
+    { match: /1\.5-pro/i,   in: 1.25,  out: 5.00, cachedIn: 0.3125 },
+    { match: /pro/i,        in: 1.25,  out: 5.00, cachedIn: 0.3125 },
+    { match: /flash/i,      in: 0.10,  out: 0.40, cachedIn: 0.025 }
 ];
 
 // Gemini takes an OpenAPI subset, not JSON Schema: it has its own key list and

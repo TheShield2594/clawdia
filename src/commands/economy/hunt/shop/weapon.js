@@ -18,7 +18,8 @@ const { getItemImageAttachment } = require('../../../../utils/itemImageHelper');
 const GrindProfile = require('../../../../models/GrindProfile');
 const COLORS = require('../../../../utils/embedColors');
 const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
-const { shopRefundPayoutKey } = require('../../../../utils/payoutKey');
+const { shopRefundPayoutKey, shopGrantPayoutKey } = require('../../../../utils/payoutKey');
+const { grantKeyPush, resolveShopGrant } = require('../../../../utils/shopGrant');
 const { isCrossEconomyWeapon, huntingDaysLabel } = require('./pricing');
 
 async function handleBuyWeapon(interaction, user, currency) {
@@ -138,13 +139,38 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
     }
 
     await persistGrindIfNew(user, 'hunt');
-    const profUpdated = await GrindProfile.findOneAndUpdate(
-        { userId: user.userId, guildId: user.guildId, system: 'hunt' },
-        { $push: { 'data.weapons': newWeapon } },
-        { new: true }
-    ).catch(err => { console.error('[huntshop weapon] profile push error:', err); return null; });
+    // The grant stamps the purchase's key alongside the weapon (#1058): a `$push`
+    // that committed but lost its response threw here and was read as "never
+    // granted", so the debit was refunded over a weapon the player kept. The key
+    // rides the same write, so a thrown grant's outcome can be read back and the
+    // refund gated on a grant confirmed absent.
+    const grantKey = shopGrantPayoutKey(interactionOrBtn.id);
+    const identity = { userId: user.userId, guildId: user.guildId, system: 'hunt' };
+    let profUpdated = null, threw = false;
+    try {
+        profUpdated = await GrindProfile.findOneAndUpdate(
+            { ...identity },
+            { $push: { 'data.weapons': newWeapon, ...grantKeyPush(grantKey) } },
+            { new: true }
+        );
+    } catch (err) {
+        console.error('[huntshop weapon] profile push error:', err);
+        threw = true;
+    }
 
-    if (!profUpdated) {
+    const state = await resolveShopGrant({ result: profUpdated, threw, identity, key: grantKey });
+    if (state === 'unresolved') {
+        // The grant threw and its outcome could not be read back either. The
+        // weapon may have been granted, so refunding risks handing back the coins
+        // over a kept weapon — the over-credit this guards against. Left for an
+        // admin rather than auto-refunded.
+        const reply = {
+            content: `Purchase failed and its outcome could not be confirmed. You have **not** been refunded automatically: if the ${currency}${weaponData.cost.toLocaleString()} was charged without the ${weaponData.name} arriving, contact a server admin to sort it out.`,
+            embeds: [], components: [],
+        };
+        return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);
+    }
+    if (state === 'absent') {
         // Refund the debit — the weapon was never granted — through
         // creditCoinsOrOwe (keyed to this attempt) so a refund that will not
         // land is recorded for replay rather than lost under a message that says
@@ -165,8 +191,10 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
         return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);
     }
 
-    // Sync the in-memory profile so any later save doesn't clobber the purchase
-    user.hunt.weapons = profUpdated.data.weapons;
+    // Grant applied. Sync the in-memory profile so any later save doesn't clobber
+    // the purchase; on a recovered lost-response grant `profUpdated` is null, so
+    // fall back to appending in memory.
+    user.hunt.weapons = profUpdated?.data.weapons ?? [...(user.hunt.weapons ?? []), newWeapon];
     const h = user.hunt;
     const newIndex = h.weapons.length - 1;
 
