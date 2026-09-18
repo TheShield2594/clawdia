@@ -18,6 +18,7 @@
        and the fallbacks themselves disagreed (bluish #1e1e2e vs warm #1a1510). */
     --surface-1: var(--ink-800);
     --surface-2: var(--ink-850);
+    --surface-3: var(--ink-900);
     --border: rgba(255, 215, 180, 0.09);
     --border-strong: rgba(255, 215, 180, 0.16);
     --text: #faf5f0;
@@ -1892,8 +1893,8 @@ textarea.auto-resize {
 .eco-ledger-key { font-size: .85em; }
 .eco-ledger-sub { color: var(--text-mute); font-size: .85em; }
 .eco-ledger-mute { color: var(--text-mute); }
-.eco-ledger-credit { color: var(--green); }
-.eco-ledger-debit { color: var(--red); }
+.eco-ledger-credit { color: var(--success); }
+.eco-ledger-debit { color: var(--danger); }
 .eco-ledger-owed-list { margin: .5rem 0 0; padding-left: 1.25rem; }
 .eco-ledger-pager { display: none; gap: .5rem; align-items: center; margin-top: .5rem; }
 .eco-ledger-pager.is-shown { display: flex; }

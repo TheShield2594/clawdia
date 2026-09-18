@@ -504,8 +504,8 @@ async function ecoAdminAction(action) {
     const userId = document.getElementById('eco-admin-user-id').value.trim();
     const amount = parseInt(document.getElementById('eco-admin-amount').value, 10);
     const msgEl = document.getElementById('eco-admin-msg');
-    if (!userId) { msgEl.textContent = 'Enter a user ID.'; msgEl.style.color = 'var(--red)'; return; }
-    if (['give', 'take'].includes(action) && (!amount || amount <= 0)) { msgEl.textContent = 'Enter a valid amount > 0.'; msgEl.style.color = 'var(--red)'; return; }
+    if (!userId) { msgEl.textContent = 'Enter a user ID.'; msgEl.style.color = 'var(--danger)'; return; }
+    if (['give', 'take'].includes(action) && (!amount || amount <= 0)) { msgEl.textContent = 'Enter a valid amount > 0.'; msgEl.style.color = 'var(--danger)'; return; }
     if (action === 'reset') {
         const ok = await showConfirm({ title: 'Reset balance', body: `This will permanently wipe the wallet and bank balance for user ${userId}. This cannot be undone.`, okText: 'Reset balance', typeRequired: 'RESET' });
         if (!ok) return;
@@ -526,9 +526,9 @@ async function ecoAdminAction(action) {
             body: JSON.stringify(body)
         });
         const data = await resp.json();
-        if (!resp.ok) { msgEl.textContent = data.error || 'Failed'; msgEl.style.color = 'var(--red)'; }
+        if (!resp.ok) { msgEl.textContent = data.error || 'Failed'; msgEl.style.color = 'var(--danger)'; }
         else {
-            msgEl.style.color = 'var(--green)';
+            msgEl.style.color = 'var(--success)';
             if (action === 'freeze') msgEl.textContent = 'Account frozen.';
             else if (action === 'unfreeze') msgEl.textContent = 'Account unfrozen.';
             else if (action === 'reset') msgEl.textContent = 'Balance reset. Wallet: 0, Bank: 0.';
@@ -537,7 +537,7 @@ async function ecoAdminAction(action) {
         }
     } catch {
         msgEl.textContent = 'Request failed';
-        msgEl.style.color = 'var(--red)';
+        msgEl.style.color = 'var(--danger)';
     } finally {
         _ecoActionInFlight = false;
         controls.forEach(id => { const el = document.getElementById(id); if (el) el.disabled = false; });
@@ -556,7 +556,7 @@ async function ecoEraseMemberData() {
     const guildId = BOOT.guildId;
     const userId = document.getElementById('eco-admin-user-id').value.trim();
     const msgEl = document.getElementById('eco-erase-msg');
-    if (!userId) { msgEl.textContent = 'Enter a user ID above first.'; msgEl.style.color = 'var(--red)'; return; }
+    if (!userId) { msgEl.textContent = 'Enter a user ID above first.'; msgEl.style.color = 'var(--danger)'; return; }
 
     const ok = await showConfirm({
         title: 'Delete member data',
@@ -570,19 +570,19 @@ async function ecoEraseMemberData() {
 
     _ecoEraseInFlight = true;
     msgEl.textContent = 'Erasing…';
-    msgEl.style.color = 'var(--text-muted)';
+    msgEl.style.color = 'var(--text-mute)';
     try {
         const resp = await apiFetch(`/api/v1/guild/${guildId}/members/${userId}/data`, { method: 'DELETE' });
         const data = await resp.json();
-        if (!resp.ok) { msgEl.textContent = data.error || 'Failed'; msgEl.style.color = 'var(--red)'; }
+        if (!resp.ok) { msgEl.textContent = data.error || 'Failed'; msgEl.style.color = 'var(--danger)'; }
         else {
             const removed = (data.results || []).filter(r => r.behavior === 'delete').reduce((n, r) => n + r.changed, 0);
-            msgEl.style.color = 'var(--green)';
+            msgEl.style.color = 'var(--success)';
             msgEl.textContent = `Erased. ${removed} record group(s) deleted; ${(data.coinsRemoved||0).toLocaleString()} coins recorded in the ledger.`;
         }
     } catch {
         msgEl.textContent = 'Request failed';
-        msgEl.style.color = 'var(--red)';
+        msgEl.style.color = 'var(--danger)';
     } finally {
         _ecoEraseInFlight = false;
     }
@@ -626,7 +626,7 @@ async function loadLedger(page) {
     const guildId = BOOT.guildId;
     const userId = document.getElementById('eco-admin-user-id').value.trim();
     const msgEl = document.getElementById('eco-ledger-msg');
-    if (!userId) { msgEl.textContent = 'Enter a user ID above first.'; msgEl.style.color = 'var(--red)'; return; }
+    if (!userId) { msgEl.textContent = 'Enter a user ID above first.'; msgEl.style.color = 'var(--danger)'; return; }
 
     _ledgerUserId = userId;
     const reqId = ++_ledgerReq;
@@ -642,7 +642,7 @@ async function loadLedger(page) {
         const resp = await apiFetch(`/api/v1/guild/${guildId}/members/${userId}/ledger?page=${page}&limit=20`);
         const data = await resp.json();
         if (reqId !== _ledgerReq) return; // a newer request superseded this one
-        if (!resp.ok) { msgEl.textContent = data.error || 'Failed to load ledger.'; msgEl.style.color = 'var(--red)'; return; }
+        if (!resp.ok) { msgEl.textContent = data.error || 'Failed to load ledger.'; msgEl.style.color = 'var(--danger)'; return; }
 
         _ledgerPage = data.page || 1;
         renderLedgerOwed(data.owed);
@@ -675,7 +675,7 @@ async function loadLedger(page) {
     } catch {
         if (reqId !== _ledgerReq) return; // a newer request owns the view now
         msgEl.textContent = 'Request failed.';
-        msgEl.style.color = 'var(--red)';
+        msgEl.style.color = 'var(--danger)';
     }
 }
 

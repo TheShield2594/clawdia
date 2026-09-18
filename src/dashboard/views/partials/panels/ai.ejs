@@ -63,7 +63,7 @@
                             <small>Point this at the host running <code>ollama serve</code>. Set the model field above to a tag you've pulled (e.g. <code>llama3.2</code>).</small>
                         </div>
                         <div class="field">
-                            <label class="field-label" for="ai-channel">Restrict to channel <span style="font-weight:400;color:var(--muted,#888)">(optional — leave blank to respond in all channels)</span></label>
+                            <label class="field-label" for="ai-channel">Restrict to channel <span style="font-weight:400;color:var(--text-mute)">(optional — leave blank to respond in all channels)</span></label>
                             <%- include('../channel-select', { id: 'ai-channel', placeholder: 'All channels', selected: settings.ai.channelId }) %>
                         </div>
                         <div class="field">
@@ -387,14 +387,14 @@
                         </div>
                         <form class="ai-keys-form" autocomplete="off" data-no-submit>
                         <div class="field">
-                            <label class="field-label" for="mcp-token">Authorization token <span style="font-weight:400;color:var(--muted,#888)">(optional)</span></label>
+                            <label class="field-label" for="mcp-token">Authorization token <span style="font-weight:400;color:var(--text-mute)">(optional)</span></label>
                             <input type="password" id="mcp-token" value="" autocomplete="new-password" placeholder="Bearer token, if the server needs one">
                             <small id="mcp-token-hint">Stored on the bot and sent to the MCP server when a tool is called — by Anthropic when Claude is your provider, by the bot itself otherwise. It is never shown again once saved.</small>
                         </div>
                         </form>
                         <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
                             <div>
-                                <label class="field-label" for="mcp-allowed">Only these tools <span style="font-weight:400;color:var(--muted,#888)">(optional)</span></label>
+                                <label class="field-label" for="mcp-allowed">Only these tools <span style="font-weight:400;color:var(--text-mute)">(optional)</span></label>
                                 <input type="text" id="mcp-allowed" placeholder="search_repositories, get_file_contents">
                                 <small>Comma-separated. Leave empty to allow every tool the server offers.</small>
                             </div>
