@@ -4,11 +4,22 @@ const { providers } = require('./providers');
 // Pricing tables live on each provider (provider.pricing); this module owns
 // cost estimation and the per-guild usage ledger.
 
-function estimateCost(provider, model, inputTokens, outputTokens) {
+// The cached share of the input is priced apart from the rest (#1046): a
+// provider that serves a prompt token from its cache bills it far below the
+// fresh rate — Anthropic ~0.1x, and OpenAI/Gemini discount their own — so
+// charging every input token at `row.in` overstates the cost of cache-heavy
+// traffic, and it is `bumpMonthlyUsage` that this cost then feeds, which the
+// monthly ceiling enforces. Where a pricing row carries no `cachedIn`, the
+// cached tokens fall back to the full input rate: unchanged from before this,
+// and an over- rather than under-estimate, the direction the ceiling prefers.
+function estimateCost(provider, model, inputTokens, outputTokens, cachedInputTokens = 0) {
     const table = providers.get(provider)?.pricing || [];
     const row = table.find(r => r.match.test(model || ''));
     if (!row) return null;
-    return (inputTokens * row.in + outputTokens * row.out) / 1_000_000;
+    const cached = Math.min(Math.max(0, cachedInputTokens || 0), Math.max(0, inputTokens || 0));
+    const uncached = Math.max(0, (inputTokens || 0) - cached);
+    const cachedRate = row.cachedIn ?? row.in;
+    return (uncached * row.in + cached * cachedRate + outputTokens * row.out) / 1_000_000;
 }
 
 function utcDayString(date = new Date()) {
@@ -74,7 +85,7 @@ async function loadMonthlyUsage(guildId, month = utcMonthString()) {
     let costKnown = true;
     for (const row of rows) {
         tokens += (row.inputTokens || 0) + (row.outputTokens || 0);
-        const rowCost = estimateCost(row.provider, row.model, row.inputTokens || 0, row.outputTokens || 0);
+        const rowCost = estimateCost(row.provider, row.model, row.inputTokens || 0, row.outputTokens || 0, row.cachedInputTokens || 0);
         if (rowCost == null) costKnown = false;
         else cost += rowCost;
     }
@@ -200,7 +211,7 @@ async function recordUsage(guildId, provider, model, usage) {
     // call even though the write below is what the next refresh will read. A
     // failed write leaves the cache a little pessimistic until that refresh,
     // which is the right way round for a spend limit.
-    bumpMonthlyUsage(guildId, inputTokens + outputTokens, estimateCost(provider, model, inputTokens, outputTokens));
+    bumpMonthlyUsage(guildId, inputTokens + outputTokens, estimateCost(provider, model, inputTokens, outputTokens, cachedInputTokens));
 
     try {
         await AIUsage.updateOne(filter, update, { upsert: true });
@@ -251,7 +262,7 @@ async function getUsageStats(guildId, days = 14) {
     let costKnown = true;
 
     for (const row of rows) {
-        const cost = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens);
+        const cost = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens, row.cachedInputTokens || 0);
         if (cost == null) costKnown = false;
         const totalTokens = row.inputTokens + row.outputTokens;
         const cachedInput = row.cachedInputTokens || 0;
@@ -296,7 +307,7 @@ async function getUsageStats(guildId, days = 14) {
         m.outputTokens += row.outputTokens;
         m.cachedInputTokens += row.cachedInputTokens || 0;
         m.requestCount += row.requestCount;
-        const c = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens);
+        const c = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens, row.cachedInputTokens || 0);
         if (c == null) m.costKnown = false;
         else m.cost += c;
     }

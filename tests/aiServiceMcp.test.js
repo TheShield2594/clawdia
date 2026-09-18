@@ -354,7 +354,11 @@ describe('streamCompletion — anthropic', () => {
         expect(streamFn).not.toHaveBeenCalled();
     });
 
-    test('records the tokens Anthropic served from the prompt cache (#1046)', async () => {
+    // Anthropic's input_tokens is the *uncached* part only; the total prompt
+    // input is input_tokens + cache_read + cache_creation, so inputTokens must
+    // be the sum (912 = 12 fresh + 900 read) — otherwise the ledger's clamp
+    // truncates the 900 cache reads down to 12 (#1046).
+    test('records the full prompt input and cache reads Anthropic reports (#1046)', async () => {
         configureServers([{ name: 'one', url: 'https://one.example.com/sse' }]);
         betaStream.mockReturnValue(fakeStream(
             [
@@ -368,7 +372,7 @@ describe('streamCompletion — anthropic', () => {
         const usageOut = {};
         await collect(streamCompletion({ ...BASE, usageOut }));
 
-        expect(usageOut.usage).toEqual({ inputTokens: 12, outputTokens: 3, cachedInputTokens: 900 });
+        expect(usageOut.usage).toEqual({ inputTokens: 912, outputTokens: 3, cachedInputTokens: 900 });
     });
 
     test('resumes a paused stream so the reply is not cut short', async () => {
