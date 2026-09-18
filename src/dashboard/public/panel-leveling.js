@@ -76,6 +76,17 @@ async function levelAdminAction(action) {
     if (['give','take','set_level'].includes(action) && (!Number.isFinite(amount) || amount < 0)) {
         msgEl.style.color = 'var(--bad)'; msgEl.textContent = 'Enter a valid amount / level.'; return;
     }
+    // Reset wipes the member's XP and level with no undo, so gate it behind the
+    // same type-to-confirm modal the economy panel uses for "Reset balance".
+    if (action === 'reset') {
+        const ok = await showConfirm({
+            title: 'Reset XP',
+            body: `This will permanently wipe all XP and levels for user ${userId}. This cannot be undone.`,
+            okText: 'Reset XP',
+            typeRequired: 'RESET',
+        });
+        if (!ok) return;
+    }
     msgEl.style.color = ''; msgEl.textContent = 'Working…';
     try {
         const resp = await apiFetch('/api/v1/guild/' + guildId + '/leveling/adjust', {

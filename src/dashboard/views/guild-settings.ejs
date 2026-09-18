@@ -71,10 +71,10 @@
                 <div class="dash-server-avatar"><%= guild.name.charAt(0).toUpperCase() %></div>
             <% } %>
             <div class="dash-server-name">
-                <b><%= guild.name %></b>
+                <b title="<%= guild.name %>"><%= guild.name %></b>
                 <span>Switch server</span>
             </div>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l4-4 4 4M8 15l4 4 4-4"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 9l4-4 4 4M8 15l4 4 4-4"/></svg>
         </a>
 
         <%# A landmark, so a screen reader can jump to the section list — and
@@ -84,7 +84,7 @@
 
         <!-- Sidebar search -->
         <div class="dash-nav-search-wrap">
-            <svg class="dash-nav-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <svg class="dash-nav-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="search" id="sidebar-search" class="dash-nav-search" placeholder="Search sections… (/ or Ctrl+K)" autocomplete="off" aria-label="Filter dashboard sections">
         </div>
         <div id="sidebar-no-results" role="status" aria-live="polite" aria-atomic="true" aria-hidden="true" style="display:none;font-size:.8rem;color:var(--ink-400);padding:6px 8px;">No sections match</div>

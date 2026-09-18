@@ -169,10 +169,16 @@ async function loadOverviewStats() {
         const botFoot2 = document.getElementById('kpi-bot-foot');
         if (memberVal) memberVal.textContent = '—';
         if (modVal) modVal.textContent = '—';
+        // Clear the initial "loading…" foots too, or a failed KPI reads as one
+        // still loading forever rather than one that could not load.
+        const memberFoot = document.getElementById('kpi-members-foot');
+        const modFoot = document.getElementById('kpi-mod-foot');
+        if (memberFoot) memberFoot.textContent = 'unavailable';
+        if (modFoot) modFoot.textContent = 'unavailable';
         if (botVal2) { botVal2.textContent = 'Online'; botVal2.style.fontSize = '34px'; }
         if (botFoot2) { botFoot2.textContent = '● Active'; botFoot2.style.color = 'var(--good)'; }
         const feed = document.getElementById('overview-activity-feed');
-        if (feed) feed.innerHTML = '<span style="opacity:.4;font-size:.85em">Could not load activity data.</span>';
+        if (feed) feed.innerHTML = '<span style="opacity:.4;font-size:.85em">Could not load activity data.</span> <button class="btn btn-sm" type="button" data-action="reload-overview">Retry</button>';
     }
 }
 onPanel('overview', loadOverviewStats);
@@ -181,5 +187,6 @@ registerPanelActions({
     click: {
         'toggle-getting-started':  () => toggleGettingStarted(),
         'dismiss-getting-started': () => dismissGettingStarted(),
+        'reload-overview':         () => loadOverviewStats(),
     },
 });
