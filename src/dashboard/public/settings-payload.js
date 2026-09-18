@@ -90,6 +90,7 @@ function buildSettingsPayload(section, ctx = {}) {
             'moderation.everyoneMentionFilter': document.getElementById('mod-everyone-mentions').checked,
             'moderation.aiReviewEnabled': document.getElementById('mod-ai-review').checked,
             'moderation.aiReviewSkipScoreOnFalsePositive': document.getElementById('mod-ai-review-skip-score').checked,
+            'moderation.aiOutputModeration': document.getElementById('mod-ai-output-moderation').checked,
             'moderation.warnThreshold': parseInt(document.getElementById('mod-warn-threshold').value, 10) || 3,
             'moderation.kickThreshold': parseInt(document.getElementById('mod-kick-threshold').value, 10) || 0,
             'moderation.banThreshold': parseInt(document.getElementById('mod-ban-threshold').value, 10) || 0,

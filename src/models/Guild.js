@@ -146,6 +146,18 @@ const guildSchema = new Schema({
         // up the escalation ladder. Off by default: the review is advisory, and a
         // guild opts in to letting it hold the score back.
         aiReviewSkipScoreOnFalsePositive: { type: Boolean, default: false },
+        // Screen the bot's own outbound AI replies before they are posted
+        // (#1043). The mention-neutralisation on every send stops model text from
+        // pinging @everyone, but it is not content moderation, and the automod
+        // word list reads members' messages, not the bot's output. With this on,
+        // each reply is passed to OpenAI's free omni-moderation endpoint (when any
+        // OpenAI key is present) or to the guild's own provider with one fixed
+        // "does this violate the policy" prompt; a flagged reply is replaced with
+        // a short "withheld" notice. Off by default even when AI is on — the same
+        // "off even when AI is on" reasoning as event commentary and AI review —
+        // and fail-open: a moderation outage or budget refusal posts the reply
+        // rather than losing it. See services/aiOutputModerationService.
+        aiOutputModeration: { type: Boolean, default: false },
         escalation: {
             enabled: { type: Boolean, default: true },
             ladder: {

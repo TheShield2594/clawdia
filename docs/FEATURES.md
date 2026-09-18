@@ -311,6 +311,35 @@ nobody typed — and it spends the guild's own budget against the same monthly
 token and cost ceilings. The message content is data inside a fixed prompt, never
 an instruction to the model, and the review never sees or calls MCP tools.
 
+### AI Moderation of the Bot's Own Replies
+
+With **Moderate the bot's own AI replies** switched on under **Moderation →
+Auto-Mod** — the same AI-only section as filter-trip review — each AI reply is
+screened before it is posted. The automod word list reads members' messages, not
+the bot's output, and the only safety on outbound text otherwise is that no send
+can ping `@everyone`; on a server the operator does not control, a
+prompt-injected or badly-behaved model can post exactly what that server would
+want blocked. This is the check that looks first.
+
+The reply goes to OpenAI's free `omni-moderation-latest` endpoint whenever any
+OpenAI key is present (the dashboard key or the bot-wide one), and otherwise to
+the guild's own provider with one fixed "does this violate the policy" question.
+A flagged reply is replaced with a short *the response was withheld* notice, and
+nothing flagged is kept — no tool footer, no attachments, and it is not written
+to the conversation history. The model call that produced it still counts against
+the budget, because it was made.
+
+There is a single toggle and no separate matrix of category switches: an operator
+configures the server's moderation once and the outbound check rides on it, using
+the provider's own default set of flagged categories rather than a second policy
+to keep in sync. Like event commentary and filter-trip review it is off by
+default even when AI is on, and it spends the guild's own budget against the same
+monthly token and cost ceilings (OpenAI's moderation endpoint is free and spends
+nothing). It is **fail-open**: a moderation-endpoint outage or a budget refusal
+logs a warning and posts the reply rather than losing it. The reply text is data
+inside a fixed prompt, never an instruction, and the check never sees or calls MCP
+tools.
+
 ### AI-Generated Content
 
 Two other features call the AI provider directly:

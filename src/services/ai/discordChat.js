@@ -27,6 +27,7 @@ const { createToolConfirmer } = require('./mcp/approval');
 const { createElicitationHandler } = require('./mcp/elicitation');
 const { createSamplingHandler } = require('./mcp/sampling');
 const { recordToolCalls } = require('./mcp/usage');
+const { moderateOutput, WITHHELD_MESSAGE } = require('../aiOutputModerationService');
 
 // Discord transport for the AI chat loop: rate limiting, prompt assembly,
 // message streaming/chunking, and post-processing. Everything provider-shaped
@@ -129,6 +130,32 @@ async function attachToolFooter(msg, text, footer, channel) {
     await send(channel, footer).catch(() => {});
 }
 
+/**
+ * Replace an already-streamed reply with the withheld notice (#1043).
+ *
+ * The streaming path posts as it generates, so by the time the outbound
+ * moderation check has a verdict the text is already on screen. When it flags,
+ * the first message becomes the notice and every later split message is removed,
+ * so the channel is left with one short line and none of the flagged text.
+ *
+ * Best-effort throughout: a failed edit or delete is swallowed, because a
+ * partly-redacted reply is a smaller failure than an exception thrown after the
+ * user has already been billed for the turn. A message that will not delete is
+ * blanked to a marker instead, so it cannot keep displaying the withheld text.
+ */
+async function redactStreamedReply(sentMessages, channel) {
+    const [first, ...rest] = sentMessages.filter(Boolean);
+    if (first) {
+        await edit(first, WITHHELD_MESSAGE).catch(() => {});
+    } else {
+        await send(channel, WITHHELD_MESSAGE).catch(() => {});
+    }
+    for (const extra of rest) {
+        const gone = await extra.delete().then(() => true).catch(() => false);
+        if (!gone) await edit(extra, '⚠️').catch(() => {});
+    }
+}
+
 // Where to cut `text` for a piece of at most `size`: the last newline in
 // range, else the last space, else a hard cut. One preference order for every
 // split — the streamed overflow below goes through chunkText too, so it no
@@ -163,7 +190,7 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
  * (#820). Callers that have no stripped form to hand fall back to the raw
  * content, which is the right answer for the reply-to-bot trigger.
  */
-async function handleAIChat(message, aiSettings, promptContent) {
+async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     const { provider, model, temperature, maxTokens, contextTokens, apiKey, baseUrl, mcpServers, mcpConfirm, mcpRoute, rateLimit } = resolveProviderConfig(aiSettings);
     const providerDef = providers.get(provider);
     const providerLabel = providerDef?.label || provider;
@@ -470,6 +497,11 @@ async function handleAIChat(message, aiSettings, promptContent) {
         };
 
         let fullResponse = '';
+        // Set when the outbound moderation check flags the reply (#1043): the
+        // posted text is replaced with the withheld notice and the tail work
+        // below (tool footer, tool attachments, history, citations) is skipped,
+        // so none of the flagged content is kept or built upon.
+        let withheld = false;
 
         if (useStreaming) {
             placeholder = await reply(message, '…');
@@ -668,7 +700,18 @@ async function handleAIChat(message, aiSettings, promptContent) {
                 }
             }
 
-            await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
+            // The reply is fully generated now. Screen it before it settles: on
+            // a flag the streamed text is redacted to the withheld notice, and
+            // nothing below is appended to it (#1043). Fail-open — a null verdict
+            // (off, no checker, or the check failed) leaves the reply as it is.
+            const verdict = fullResponse.trim() ? await moderateOutput(guildSettings, fullResponse) : null;
+            if (verdict?.flagged) {
+                withheld = true;
+                await redactStreamedReply(sentMessages, message.channel);
+                fullResponse = WITHHELD_MESSAGE;
+            } else {
+                await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
+            }
         } else {
             let response = await withRetry(() => {
                 activity.reset();
@@ -685,6 +728,16 @@ async function handleAIChat(message, aiSettings, promptContent) {
             }
 
             fullResponse = response;
+
+            // Screen the reply before it is posted (#1043). On a flag it becomes
+            // the withheld notice — a single short message with no tool footer.
+            // Fail-open: a null verdict posts the reply unchanged.
+            const verdict = fullResponse.trim() ? await moderateOutput(guildSettings, fullResponse) : null;
+            if (verdict?.flagged) {
+                withheld = true;
+                fullResponse = WITHHELD_MESSAGE;
+            }
+
             let tailMsg = null;
             let tailText = '';
             if (fullResponse.trim()) {
@@ -696,13 +749,15 @@ async function handleAIChat(message, aiSettings, promptContent) {
                     tailText = chunks[i];
                 }
             }
-            await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
+            if (!withheld) await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
         }
 
         // Anything a tool produced that the channel can show and the model
         // could not use — a chart, a screenshot. Its own message, after the
         // text, so a failed send costs the pictures and not the answer.
-        if (activity.attachments.length) {
+        // Skipped on a withheld reply: an attachment produced alongside flagged
+        // text is not something to post once the text itself has been pulled.
+        if (!withheld && activity.attachments.length) {
             await send(message.channel, { files: activity.attachments }).catch(err =>
                 console.error('[MCP] tool attachments send failed:', err?.message || err)
             );
@@ -722,7 +777,11 @@ async function handleAIChat(message, aiSettings, promptContent) {
             }
         }
 
-        if (fullResponse.trim()) {
+        // A withheld reply leaves no assistant turn in history: storing the
+        // flagged text would poison the next turn's context with exactly what the
+        // check pulled, and re-inject it into the model. The citations footer is
+        // skipped for the same reason there is nothing to cite (#1043).
+        if (!withheld && fullResponse.trim()) {
             // The turns this trim drops are summarised rather than lost (#833).
             // One cheap request per trim, attributed to the same user so it is
             // bounded by the guild's own limits, and best-effort: the reply is

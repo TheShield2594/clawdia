@@ -95,6 +95,10 @@
                             <span class="toggle-text"><strong>Skip the behaviour score on a false positive</strong><span>Do not add to the member's score when the review calls a trip a false positive</span></span>
                             <span class="switch"><input type="checkbox" id="mod-ai-review-skip-score" <%= settings.moderation.aiReviewSkipScoreOnFalsePositive ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Moderate the bot's own AI replies</strong><span>Screen each AI reply before it is posted (OpenAI's free moderation endpoint, or your provider) and withhold it if it violates the policy. Spends this server's AI budget; fails open on an outage.</span></span>
+                            <span class="switch"><input type="checkbox" id="mod-ai-output-moderation" <%= settings.moderation.aiOutputModeration ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
                     </div>
 
                     <div class="actions-row">
