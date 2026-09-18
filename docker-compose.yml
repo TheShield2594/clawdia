@@ -798,6 +798,50 @@ services:
       # of the container coming up. An hour is for the dump, not the wait.
       start_period: 1h
 
+  # Optional social-notifications bridge, off by default:
+  #
+  #   docker compose --profile social up -d
+  #
+  # YouTube and Reddit notifications need nothing here — they read the public
+  # feeds those platforms publish. X/Twitter, Instagram and TikTok publish no
+  # feed, so following them needs an RSSHub-compatible bridge. This runs one on
+  # the internal network; set SOCIAL_BRIDGE_BASE_URL=http://rsshub:1200 in .env
+  # and restart the bot to turn those platforms on in the dashboard's Social
+  # panel. Left disabled, the feature still offers YouTube and Reddit.
+  #
+  # Those three routes are the fragile part: the platforms actively block
+  # scraping, so a route can need extra RSSHub config (login cookies or tokens)
+  # and can break when a platform changes — see https://docs.rsshub.app for
+  # per-route requirements. The published port is bound to loopback so you can
+  # sanity-check a route in a browser (http://127.0.0.1:1200/twitter/user/jack);
+  # the bot reaches the container over the internal network and needs no
+  # published port at all.
+  rsshub:
+    profiles: [social]
+    image: diygod/rsshub:latest
+    container_name: clawdia-rsshub
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      CACHE_TYPE: memory
+    ports:
+      - "127.0.0.1:${RSSHUB_HOST_PORT:-1200}:1200"
+    networks:
+      - clawdia-network # the bot reaches it here by service name
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512m
+        reservations:
+          memory: 64m
+    stop_grace_period: 15s
+
 # Host files mounted read-only at /run/secrets/<name> inside the container.
 # Keep ./secrets/ out of git (it already is, via .gitignore) and chmod 0400 the
 # files. Uncomment alongside the service block above.

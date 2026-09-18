@@ -41,6 +41,10 @@ loop the RSS sweep does, five minutes apart, styling each post per platform.
   regardless of what was stored.
 - New sparse index `idx_guilds_socialfeeds` (schema + migration 025), mirroring
   the RSS feed index, so the sweep reads only the guilds that have a subscription.
+- The compose and Portainer stacks ship an optional `rsshub` service on a
+  `social` profile (off by default), so enabling the bridged platforms is
+  `docker compose --profile social up -d` plus `SOCIAL_BRIDGE_BASE_URL=http://rsshub:1200`
+  rather than standing a bridge up by hand.
 
 ## [4.11.2] - 2026-09-18
 
