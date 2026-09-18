@@ -420,7 +420,6 @@
         "src/commands/economy/hunt/shop/upgrade.js",
         "src/commands/economy/hunt/shop/use.js",
         "src/commands/economy/jobs.js",
-        "src/commands/economy/mine/inventory.js",
         "src/commands/economy/mine/profile.js",
         "src/commands/economy/mine/quests.js",
         "src/commands/economy/mine/raid.js",
