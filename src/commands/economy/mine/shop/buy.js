@@ -15,11 +15,14 @@ const { BLAST_PACKS, CONSUMABLES } = require('../../../../data/mineData');
 const GrindProfile = require('../../../../models/GrindProfile');
 const COLORS = require('../../../../utils/embedColors');
 
-async function handleBuy(interaction, user, currency) {
+// `override` lets the browse view drive a purchase from its buy select: it
+// passes the itemId directly instead of reading it off a slash option, and the
+// component interaction it hands in answers with its own ephemeral confirm.
+async function handleBuy(interaction, user, currency, override = {}) {
     const m = user.mining;
 
-    const itemId  = interaction.options.getString('item');
-    const qty     = interaction.options.getInteger('quantity') ?? 1;
+    const itemId  = override.itemId ?? interaction.options.getString('item');
+    const qty     = override.quantity ?? interaction.options.getInteger('quantity') ?? 1;
 
     const consumableDef = CONSUMABLES[itemId];
     const blastDef      = BLAST_PACKS.find(b => b.id === itemId);
