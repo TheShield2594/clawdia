@@ -1,0 +1,1627 @@
+{
+  "8ball": {
+    "name": "bola8",
+    "description": "Hazle una pregunta de sí o no a la bola mágica 8",
+    "options": {
+      "question": { "description": "Tu pregunta de sí o no" }
+    }
+  },
+  "achievements": {
+    "name": "logros",
+    "description": "Consulta tus logros y reclama recompensas",
+    "options": {
+      "view": {
+        "description": "Explora los logros conseguidos y disponibles",
+        "options": {
+          "user": { "description": "Ver los logros de otro miembro" }
+        }
+      },
+      "claim": { "description": "Reclama recompensas por los logros conseguidos" },
+      "top": { "description": "Muestra los logros más raros de este servidor" },
+      "leaderboard": { "description": "Muestra quién tiene más logros en este servidor" },
+      "pin": {
+        "description": "Fija un logro destacado para mostrarlo en tu perfil",
+        "options": {
+          "achievement_id": { "description": "ID del logro a fijar (desde /logros view)" }
+        }
+      }
+    }
+  },
+  "ai": {
+    "name": "ia",
+    "description": "Utilidades del asistente de IA",
+    "options": {
+      "memories": {
+        "description": "Consulta y gestiona tus memorias fijadas de IA",
+        "options": {
+          "delete": { "description": "Elimina una memoria por su número (según la lista)" }
+        }
+      },
+      "task": {
+        "description": "Encarga a la IA una tarea de varios pasos; trabaja en segundo plano y publica el resultado.",
+        "options": {
+          "prompt": { "description": "Qué quieres que se haga, p. ej. «revisa estos tres feeds y dime qué cambió»" }
+        }
+      },
+      "mcp": {
+        "description": "Ejecuta prompts de un servidor MCP o inspecciona las conexiones (Gestionar servidor)",
+        "options": {
+          "servers": { "description": "Lista las conexiones MCP y para qué están configuradas" },
+          "tools": {
+            "description": "Lista las herramientas de una conexión y cuáles requieren aprobación",
+            "options": {
+              "server": { "description": "Qué conexión" }
+            }
+          },
+          "test": {
+            "description": "Conéctate a un servidor MCP e informa de lo que respondió",
+            "options": {
+              "server": { "description": "Qué conexión" }
+            }
+          },
+          "activity": { "description": "Qué han estado haciendo las conexiones últimamente" },
+          "prompts": { "description": "Lista las plantillas de prompt que publican las conexiones" },
+          "prompt": {
+            "description": "Ejecuta una de las plantillas de prompt de una conexión",
+            "options": {
+              "name": { "description": "Qué prompt" },
+              "arguments": { "description": "Pares nombre=valor, o solo el texto si el prompt toma un argumento" }
+            }
+          }
+        }
+      },
+      "schedule": {
+        "description": "Tareas de IA recurrentes que este servidor ejecuta según una cadencia (Gestionar servidor)",
+        "options": {
+          "add": {
+            "description": "Programa una instrucción para que la IA la ejecute según una cadencia",
+            "options": {
+              "instruction": { "description": "Qué debe hacer la IA cada vez, p. ej. «publica un resumen de #anuncios»" },
+              "at": { "description": "Cuándo se ejecuta por primera vez, p. ej. «09:00», «5pm», «2026-07-20 09:00»" },
+              "in_minutes": { "description": "Minutos a partir de ahora en lugar de una hora absoluta" },
+              "every": { "description": "Repetir con esta cadencia. Déjalo vacío para ejecutarla una vez." },
+              "channel": { "description": "Dónde se publica el resultado. Por defecto, este canal." }
+            }
+          },
+          "list": { "description": "Lista las tareas de IA programadas de este servidor" },
+          "remove": {
+            "description": "Elimina una tarea de IA programada",
+            "options": {
+              "id": { "description": "El id corto que se muestra en /ia schedule list" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "appeal": {
+    "name": "apelar",
+    "description": "Apela un caso de moderación en tu contra",
+    "options": {
+      "case_id": { "description": "ID del caso a apelar" },
+      "reason": { "description": "¿Por qué debería revertirse esta acción?" }
+    }
+  },
+  "avatar": {
+    "name": "avatar",
+    "description": "Obtén y muestra el avatar de un usuario a tamaño completo.",
+    "options": {
+      "user": { "description": "Usuario cuyo avatar mostrar (por defecto, el tuyo)." }
+    }
+  },
+  "balance": {
+    "name": "saldo",
+    "description": "Consulta tu saldo de cartera y banco, o el de otro miembro.",
+    "options": {
+      "user": { "description": "Usuario cuyo saldo consultar (por defecto, el tuyo)." }
+    }
+  },
+  "ban": {
+    "name": "banear",
+    "description": "Banea a un miembro del servidor",
+    "options": {
+      "user": { "description": "El usuario a banear" },
+      "reason": { "description": "Motivo del baneo" },
+      "duration": { "description": "Duración de baneo temporal, p. ej. 30m, 12h, 7d (omite para permanente)" },
+      "delete_days": { "description": "Borra los mensajes de los últimos X días (0–7)" }
+    }
+  },
+  "bank": {
+    "name": "banco",
+    "description": "Gestiona tu banco: deposita, retira o transfiere monedas",
+    "options": {
+      "deposit": {
+        "description": "Deposita monedas de tu cartera en tu banco",
+        "options": {
+          "amount": { "description": "Cantidad a depositar (o «all»)" }
+        }
+      },
+      "withdraw": {
+        "description": "Retira monedas de tu banco a tu cartera",
+        "options": {
+          "amount": { "description": "Cantidad a retirar (o «all»)" }
+        }
+      },
+      "transfer": {
+        "description": "Transfiere monedas de tu cartera a otro usuario",
+        "options": {
+          "user": { "description": "El usuario al que transferir monedas" },
+          "amount": { "description": "Monedas a enviar (mín.: 1). No debe superar tu cartera." }
+        }
+      },
+      "statement": {
+        "description": "Consulta tu historial de transacciones: cada movimiento de monedas, del más reciente",
+        "options": {
+          "page": { "description": "Qué página abrir (por defecto, la primera)" }
+        }
+      }
+    }
+  },
+  "bible": {
+    "name": "biblia",
+    "description": "Busca un versículo de la Biblia o recibe el versículo diario",
+    "options": {
+      "verse": {
+        "description": "Busca un versículo concreto de la Biblia",
+        "options": {
+          "reference": { "description": "Referencia del versículo, p. ej. Juan 3:16 o Romanos 8:28" },
+          "translation": { "description": "Traducción de la Biblia (por defecto: KJV)" }
+        }
+      },
+      "daily": { "description": "Recibe el versículo bíblico de hoy" }
+    }
+  },
+  "birthday": {
+    "name": "cumpleanos",
+    "description": "Gestiona los cumpleaños",
+    "options": {
+      "add": {
+        "description": "Añade tu cumpleaños",
+        "options": {
+          "month": { "description": "Mes (1-12)" },
+          "day": { "description": "Día" },
+          "year": { "description": "Año de nacimiento (opcional)" }
+        }
+      },
+      "set": {
+        "description": "Establece el cumpleaños de otro miembro",
+        "options": {
+          "user": { "description": "Miembro" },
+          "month": { "description": "Mes (1-12)" },
+          "day": { "description": "Día" },
+          "year": { "description": "Año de nacimiento (opcional)" }
+        }
+      },
+      "remove": { "description": "Elimina tu cumpleaños" },
+      "removeuser": {
+        "description": "Elimina el cumpleaños de otro miembro",
+        "options": {
+          "user": { "description": "Miembro" }
+        }
+      },
+      "show": {
+        "description": "Muestra el cumpleaños tuyo o de otro miembro",
+        "options": {
+          "user": { "description": "Miembro" }
+        }
+      },
+      "next": { "description": "Muestra los próximos 5 cumpleaños" }
+    }
+  },
+  "boost": {
+    "name": "impulso",
+    "description": "Gestiona los impulsos de economía de todo el servidor (solo administradores)",
+    "options": {
+      "server": {
+        "description": "Activa un impulso para todo el servidor",
+        "options": {
+          "type": { "description": "Tipo de impulso a activar" },
+          "duration": { "description": "Duración en minutos (1–1440, es decir, hasta 24 horas)" },
+          "multiplier": { "description": "Intensidad del impulso (p. ej. 1.5 para 1.5x, 2 para 2x). Por defecto: 1.5" }
+        }
+      },
+      "end": { "description": "Finaliza el impulso de servidor activo" },
+      "status": { "description": "Consulta el estado actual del impulso de servidor" }
+    }
+  },
+  "caption": {
+    "name": "subtitular",
+    "description": "Añade un subtítulo a cualquier URL de imagen",
+    "options": {
+      "image_url": { "description": "URL de la imagen a subtitular" },
+      "text": { "description": "Texto del subtítulo" }
+    }
+  },
+  "case": {
+    "name": "caso",
+    "description": "Consulta un caso de moderación",
+    "options": {
+      "id": { "description": "Número de ID del caso" }
+    }
+  },
+  "cases": {
+    "name": "casos",
+    "description": "Lista los casos de moderación de un usuario",
+    "options": {
+      "user": { "description": "Usuario a consultar" },
+      "limit": { "description": "Número de casos a mostrar (por defecto 10, máx. 25)" }
+    }
+  },
+  "casino": {
+    "name": "casino",
+    "description": "Juega en el casino: blackjack, cara o cruz, crash, dados, keno, póker, ruleta, tragaperras y más",
+    "options": {
+      "jackpot": { "description": "Consulta el bote progresivo actual." },
+      "setlimit": {
+        "description": "(Admin) Establece o quita la apuesta máxima permitida en el casino.",
+        "options": {
+          "limit": { "description": "Apuesta máx. en monedas. Ponlo a 0 para sin límite." }
+        }
+      },
+      "blackjack": {
+        "description": "Juega al blackjack contra la banca",
+        "options": {
+          "bet": { "description": "Cantidad a apostar (mín. 10)" }
+        }
+      },
+      "coinflip": {
+        "description": "Pide cara o cruz contra la casa.",
+        "options": {
+          "bet": { "description": "Monedas a apostar en la tirada." },
+          "side": { "description": "Elige lado. Omítelo y la moneda elige por ti." }
+        }
+      },
+      "crash": {
+        "description": "Crash multijugador: apuesta y retírate antes de que la curva se estrelle.",
+        "options": {
+          "bet": { "description": "Monedas a apostar (mín. 10)" },
+          "auto_cashout": { "description": "Retirada automática en este multiplicador, p. ej. 2.00 (opcional)" }
+        }
+      },
+      "cupgame": {
+        "description": "El trile: encuentra la reina y sigue apostando a doble o nada.",
+        "options": {
+          "bet": { "description": "Cantidad a apostar (mín. 10)" }
+        }
+      },
+      "dice": {
+        "description": "Lanza un dado y apuesta alto/bajo o a un número exacto.",
+        "options": {
+          "bet": { "description": "Monedas a apostar en la tirada." },
+          "guess": { "description": "Elección alto/bajo para tu apuesta (se ignora si fijas «number»)." },
+          "number": { "description": "Apuesta a un número exacto en vez de alto/bajo: paga mucho más." },
+          "sides": { "description": "Número de caras (por defecto: 6, máx.: 100)." }
+        }
+      },
+      "higherlower": {
+        "description": "Apuesta si la siguiente carta es mayor o menor; encadena y retírate para multiplicar",
+        "options": {
+          "bet": { "description": "Monedas a apostar (mín. 10)" }
+        }
+      },
+      "keno": {
+        "description": "Elige 5 números del 1 al 40 y acierta el sorteo para ganar mucho",
+        "options": {
+          "bet": { "description": "Cantidad a apostar (mín. 10)" },
+          "numbers": { "description": "Tus 5 números del 1 al 40, separados por espacios (p. ej. 3 12 21 33 39)" }
+        }
+      },
+      "poker": {
+        "description": "Texas Hold'em: vence a la IA con rangos preflop y decisiones por probabilidad del bote",
+        "options": {
+          "bet": { "description": "Cantidad a apostar (mín. 10)" }
+        }
+      },
+      "roulette": {
+        "description": "Apuesta a rojo/negro, par/impar, docenas, columnas o a un número concreto.",
+        "options": {
+          "bet": { "description": "A qué apostar" },
+          "amount": { "description": "Monedas a apostar (mín. 10)" },
+          "number": { "description": "Obligatorio al apostar a «número pleno»: elige 0–36." }
+        }
+      },
+      "slots": {
+        "description": "Gira la tragaperras y prueba tu suerte.",
+        "options": {
+          "bet": { "description": "Cantidad de monedas a apostar (mín. 10)" }
+        }
+      }
+    }
+  },
+  "clear": {
+    "name": "limpiar",
+    "description": "Elimina varios mensajes",
+    "options": {
+      "amount": { "description": "Número de mensajes a eliminar (1-100)" }
+    }
+  },
+  "closecase": {
+    "name": "cerrarcaso",
+    "description": "Cierra un caso de moderación",
+    "options": {
+      "case_id": { "description": "ID del caso a cerrar" },
+      "resolution": { "description": "Resolución / nota de cierre" }
+    }
+  },
+  "craft": {
+    "name": "fabricar",
+    "description": "Fabrica objetos con materiales de caza, pesca o minería",
+    "options": {
+      "list": { "description": "Explora todas las recetas de fabricación disponibles" },
+      "make": {
+        "description": "Fabrica un objeto con tus materiales",
+        "options": {
+          "recipe": { "description": "Receta a fabricar" }
+        }
+      }
+    }
+  },
+  "crime": {
+    "name": "crimen",
+    "description": "Elige un delito e inténtalo por monedas. A más riesgo, más recompensa. Enfriamiento: 1,5 h."
+  },
+  "daily": {
+    "name": "diario",
+    "description": "Reclama tu recompensa diaria de monedas (fijada por admins, por defecto 100). Cada 24 horas."
+  },
+  "dailychallenge": {
+    "name": "retodiario",
+    "description": "Consulta y reclama el bonus del panel de Reto Diario de Prestigio VI+."
+  },
+  "dm": {
+    "name": "narrador",
+    "description": "IA Maestro de Mazmorras: dirige un RPG de texto colaborativo",
+    "options": {
+      "start": { "description": "Inicia una nueva partida en este canal" },
+      "join": {
+        "description": "Únete a la partida activa con un personaje",
+        "options": {
+          "name": { "description": "El nombre de tu personaje" },
+          "class": { "description": "La clase de tu personaje" }
+        }
+      },
+      "begin": { "description": "Comienza la aventura (solo el anfitrión)" },
+      "action": {
+        "description": "Realiza una acción en la historia actual",
+        "options": {
+          "action": { "description": "Describe lo que hace tu personaje" }
+        }
+      },
+      "status": { "description": "Muestra el estado actual del grupo" },
+      "stop": { "description": "Finaliza la partida actual (anfitrión o admin)" }
+    }
+  },
+  "duel": {
+    "name": "duelo",
+    "description": "Reta a otro usuario a un duelo apostando monedas",
+    "options": {
+      "casual": {
+        "description": "Duelo sin clasificar: apuesta monedas sin afectar a tu ELO.",
+        "options": {
+          "user": { "description": "El usuario a retar" },
+          "amount": { "description": "Cantidad a apostar de tu cartera" },
+          "game": { "description": "Minijuego a jugar (por defecto: aleatorio)" }
+        }
+      },
+      "ranked": {
+        "description": "Duelo clasificatorio: actualiza tu ELO y tu registro de temporada.",
+        "options": {
+          "user": { "description": "El usuario a retar" },
+          "amount": { "description": "Cantidad a apostar (mínimo fijado por el servidor)" },
+          "game": { "description": "Minijuego a jugar (por defecto: aleatorio)" }
+        }
+      },
+      "rank": {
+        "description": "Muestra tu clasificación y rango de duelos (o los de otro usuario).",
+        "options": {
+          "user": { "description": "Usuario a consultar (por defecto, tú)." }
+        }
+      },
+      "leaderboard": { "description": "Muestra los 10 mejores duelistas clasificados de este servidor." }
+    }
+  },
+  "event": {
+    "name": "evento",
+    "description": "Eventos por tiempo limitado: juega el actual o gestiónalo.",
+    "options": {
+      "status": { "description": "Muestra el evento activo actualmente" },
+      "snowball": {
+        "description": "¡Lanza una bola de nieve a otro usuario! Solo en Maravilla Invernal.",
+        "options": {
+          "target": { "description": "A quién lanzarle una bola de nieve" }
+        }
+      },
+      "sandcastle": { "description": "¡Construye un castillo de arena en la orilla! Solo en el Festival de Verano." },
+      "trickortreat": { "description": "¡Llama a una puerta tenebrosa por dulces o sustos! Solo en Temporada Espeluznante." },
+      "lovenote": { "description": "¡Envía una nota de amor al Arcade y mira qué vuelve! Solo en San Valentín." },
+      "trackhunt": { "description": "¡Rastrea presas por la Tundra Ártica! Solo en la Cacería Invernal." },
+      "start": {
+        "description": "Inicia un evento por tiempo limitado (Gestionar servidor)",
+        "options": {
+          "type": { "description": "Tipo de evento" },
+          "duration_hours": { "description": "Duración en horas (por defecto: 24)" },
+          "name": { "description": "Nombre personalizado del evento (para tipo «custom» o para sustituir)" },
+          "coin_multiplier": { "description": "Multiplicador de monedas (por defecto: 2x en el evento de monedas dobles)" },
+          "xp_multiplier": { "description": "Multiplicador de XP (por defecto: 1.5x en el evento de impulso de XP)" },
+          "announcement_channel": { "description": "Canal donde anunciar este evento" }
+        }
+      },
+      "end": { "description": "Finaliza el evento actual antes de tiempo (Gestionar servidor)" }
+    }
+  },
+  "eventshop": {
+    "name": "tiendaevento",
+    "description": "Explora y compra objetos con tu moneda de evento",
+    "options": {
+      "browse": { "description": "Consulta los objetos disponibles en la tienda de eventos" },
+      "buy": {
+        "description": "Compra un objeto en la tienda de eventos",
+        "options": {
+          "item": { "description": "ID o nombre del objeto a comprar" },
+          "quantity": { "description": "Cuántos comprar (por defecto: 1)" }
+        }
+      },
+      "balance": { "description": "Consulta tu saldo de moneda de evento" }
+    }
+  },
+  "explore": {
+    "name": "explorar",
+    "description": "Exploración del mundo: adéntrate en la naturaleza, traza tu mapa y descubre lo que oculta.",
+    "options": {
+      "go": {
+        "description": "Parte en una expedición. Usa 1 de energía. Enfriamiento: 60s.",
+        "options": {
+          "region": { "description": "Región a explorar (por defecto, tu región activa)" }
+        }
+      },
+      "map": { "description": "Consulta tu Mapa de Explorador: cada región, hito y secreto que has trazado." },
+      "travel": {
+        "description": "Viaja a una región (desbloqueándola si hace falta) y hazla tu región activa.",
+        "options": {
+          "region": { "description": "Región de destino" }
+        }
+      },
+      "regions": { "description": "Explora cada región conocida: requisitos, temporadas y tu progreso." },
+      "journal": {
+        "description": "Relee tu diario de expedición: tus hallazgos más recientes, en orden.",
+        "options": {
+          "region": { "description": "Mostrar solo las entradas escritas en esta región" },
+          "type": { "description": "Mostrar solo un tipo de hallazgo" }
+        }
+      },
+      "relics": {
+        "description": "Abre tu vitrina de reliquias: todo lo que la naturaleza te dejó y lo que te renta.",
+        "options": {
+          "user": { "description": "Coleccionista a consultar" }
+        }
+      },
+      "profile": {
+        "description": "Consulta tu perfil de explorador o el de otro errante",
+        "options": {
+          "user": { "description": "Explorador a consultar" }
+        }
+      },
+      "prestige": { "description": "Sal por el borde de tu propio mapa: reinicia tu Nivel de Explorador por un bonus." }
+    }
+  },
+  "featured": {
+    "name": "destacados",
+    "description": "Rotación destacada de hoy: +25% de pago y +10% de rareza en cada opción destacada."
+  },
+  "fish": {
+    "name": "pescar",
+    "description": "Pesca: lanza el sedal, gestiona equipo, tienda, fabricación, misiones, lugares y prestigio.",
+    "options": {
+      "cast": {
+        "description": "Lanza el sedal y pesca. 1 de energía por lanzamiento. Enfriamiento: 45s.",
+        "options": {
+          "location": { "description": "Lugar donde pescar (por defecto, tu lugar activo)." }
+        }
+      },
+      "profile": {
+        "description": "Consulta tu perfil de pesca o el de otro jugador",
+        "options": {
+          "user": { "description": "Jugador a consultar" }
+        }
+      },
+      "prestige": { "description": "Reinicia tu nivel de pescador por bonus de prestigio permanentes (requiere Nivel 50)" },
+      "records": { "description": "Consulta los récords históricos de pesca del servidor" },
+      "inv": {
+        "description": "Consulta y gestiona tu inventario de pesca",
+        "options": {
+          "rods": { "description": "Consulta tus cañas de pescar" },
+          "equip": {
+            "description": "Equipa una caña por su número de inventario",
+            "options": {
+              "number": { "description": "Número de caña de /pescar inv rods" }
+            }
+          },
+          "bait": { "description": "Consulta tu cebo y consumibles" },
+          "materials": { "description": "Consulta tus materiales de fabricación" }
+        }
+      },
+      "quests": {
+        "description": "Consulta y reclama tus misiones diarias de pesca",
+        "options": {
+          "view": { "description": "Consulta tus misiones diarias de pesca activas" },
+          "claim": {
+            "description": "Reclama la recompensa de una misión completada",
+            "options": {
+              "number": { "description": "Número de misión a reclamar" }
+            }
+          }
+        }
+      },
+      "shop": {
+        "description": "Explora y compra equipo de pesca, cebo y suministros",
+        "options": {
+          "list": { "description": "Explora todo lo disponible en la tienda de pesca" },
+          "rod": {
+            "description": "Compra una nueva caña de pescar",
+            "options": {
+              "type": { "description": "Qué caña comprar" }
+            }
+          },
+          "upgrade": {
+            "description": "Instala una mejora en tu caña equipada (una por caña, permanente)",
+            "options": {
+              "type": { "description": "Qué mejora instalar" }
+            }
+          },
+          "buy": {
+            "description": "Compra packs de cebo o consumibles",
+            "options": {
+              "item": { "description": "Objeto a comprar" },
+              "quantity": { "description": "Cuántos comprar (por defecto 1; el cebo va por pack)" }
+            }
+          },
+          "use": {
+            "description": "Activa un consumible (cebo / suerte / pergamino de XP / bebida energética)",
+            "options": {
+              "item": { "description": "Qué consumible activar" }
+            }
+          },
+          "repair": {
+            "description": "Repara tu caña equipada en la tienda o usa un kit de reparación",
+            "options": {
+              "method": { "description": "Método de reparación" },
+              "kit": { "description": "Tamaño de kit a usar (solo método kit)" },
+              "amount": { "description": "Durabilidad a restaurar en la tienda (por defecto: reparación total)" }
+            }
+          },
+          "unlock": {
+            "description": "Desbloquea un nuevo lugar de pesca",
+            "options": {
+              "location": { "description": "Lugar a desbloquear" }
+            }
+          }
+        }
+      },
+      "craft": {
+        "description": "Fabrica objetos con materiales de pesca (y de caza)",
+        "options": {
+          "list": { "description": "Explora todas las recetas de fabricación de pesca" },
+          "make": {
+            "description": "Fabrica un objeto con tus materiales",
+            "options": {
+              "recipe": { "description": "Receta a fabricar" }
+            }
+          }
+        }
+      },
+      "location": {
+        "description": "Consulta y cambia tu lugar de pesca activo",
+        "options": {
+          "list": { "description": "Consulta todos los lugares de pesca y sus requisitos" },
+          "set": {
+            "description": "Cambia a un lugar desbloqueado",
+            "options": {
+              "location": { "description": "Lugar donde pescar" }
+            }
+          }
+        }
+      },
+      "tournament": {
+        "description": "Comandos del torneo de pesca",
+        "options": {
+          "status": { "description": "Consulta la clasificación del torneo actual" },
+          "start": {
+            "description": "Inicia un torneo de pesca (solo admin)",
+            "options": {
+              "duration": { "description": "Duración del torneo en minutos (por defecto 60)" },
+              "prize_pool": { "description": "Bote de premios inicial (monedas de arranque)" },
+              "entry_fee": { "description": "Cuota de inscripción por participante (0 = gratis)" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "forge": {
+    "name": "forjar",
+    "description": "Gasta monedas para que la IA forje un objeto único e irrepetible solo para ti",
+    "options": {
+      "rarity": { "description": "Nivel de rareza: más caro pero da objetos más impresionantes" }
+    }
+  },
+  "gift": {
+    "name": "regalar",
+    "description": "Envía monedas o un objeto de tu inventario a otro usuario.",
+    "options": {
+      "user": { "description": "El destinatario." },
+      "type": { "description": "Qué regalar: monedas o un objeto." },
+      "amount": { "description": "Cantidad de monedas (si regalas monedas)." },
+      "item": { "description": "Objeto a regalar: empieza a escribir para elegir de tu inventario." },
+      "quantity": { "description": "Cuántas unidades del objeto regalar (por defecto 1)." }
+    }
+  },
+  "giveaway": {
+    "name": "sorteo",
+    "description": "Gestiona los sorteos",
+    "options": {
+      "start": {
+        "description": "Inicia un sorteo",
+        "options": {
+          "prize": { "description": "¿Qué vas a sortear?" },
+          "duration": { "description": "Duración, p. ej. 1h, 30m, 2d" },
+          "winners": { "description": "Número de ganadores (por defecto 1)" }
+        }
+      },
+      "end": {
+        "description": "Finaliza un sorteo antes de tiempo",
+        "options": {
+          "message_id": { "description": "ID del mensaje del sorteo" }
+        }
+      },
+      "reroll": {
+        "description": "Vuelve a sortear ganadores de un sorteo finalizado",
+        "options": {
+          "message_id": { "description": "ID del mensaje del sorteo" }
+        }
+      }
+    }
+  },
+  "heist": {
+    "name": "atraco",
+    "description": "Planifica y ejecuta un atraco estratégico en grupo.",
+    "options": {
+      "start": {
+        "description": "Inicia una sala de atraco (60s para unirse).",
+        "options": {
+          "target": { "description": "Qué robar." }
+        }
+      },
+      "status": { "description": "Consulta el estado del atraco actual." }
+    }
+  },
+  "help": {
+    "name": "ayuda",
+    "description": "Explora todos los comandos del bot por categoría"
+  },
+  "hunt": {
+    "name": "cazar",
+    "description": "Caza animales, gestiona equipo, misiones, zonas y prestigio, todo en un solo sitio",
+    "options": {
+      "start": {
+        "description": "Sal de caza. Usa 1 de energía. Enfriamiento 45s. Equipa un arma con /cazar inv equip.",
+        "options": {
+          "zone": { "description": "Zona donde cazar (por defecto, tu zona activa)" },
+          "quick": { "description": "Omite las fases de sigilo y puntería (sin bonus). Se recuerda para futuras cazas." }
+        }
+      },
+      "profile": {
+        "description": "Consulta tu perfil de cazador o el de otro jugador",
+        "options": {
+          "user": { "description": "Jugador a consultar" }
+        }
+      },
+      "prestige": { "description": "Reinicia tu nivel de cazador por bonus de prestigio permanentes (requiere Nivel 50)" },
+      "records": { "description": "Consulta los récords históricos de caza del servidor" },
+      "inv": {
+        "description": "Consulta y gestiona tu inventario de caza",
+        "options": {
+          "weapons": { "description": "Consulta tu colección de armas" },
+          "equip": {
+            "description": "Equipa un arma por su número de inventario",
+            "options": {
+              "number": { "description": "Número de arma de /cazar inv weapons" }
+            }
+          },
+          "ammo": { "description": "Consulta tus reservas de munición" },
+          "consumables": { "description": "Consulta tus consumibles y mejoras activas" },
+          "materials": { "description": "Consulta tus materiales de fabricación" },
+          "discard": {
+            "description": "Descarta un arma rota o inservible",
+            "options": {
+              "number": { "description": "Número de arma a descartar" }
+            }
+          }
+        }
+      },
+      "quests": {
+        "description": "Consulta y reclama tus misiones diarias de caza",
+        "options": {
+          "view": { "description": "Consulta tus misiones diarias de caza activas" },
+          "claim": {
+            "description": "Reclama la recompensa de una misión completada",
+            "options": {
+              "quest": { "description": "Misión a reclamar" }
+            }
+          }
+        }
+      },
+      "shop": {
+        "description": "Explora y compra equipo de caza, munición y suministros",
+        "options": {
+          "list": { "description": "Explora todo lo disponible en la tienda de caza" },
+          "weapon": {
+            "description": "Compra una nueva arma de caza",
+            "options": {
+              "type": { "description": "Qué arma comprar" },
+              "equip": { "description": "Equipar automáticamente tras la compra (por defecto: sí)" }
+            }
+          },
+          "upgrade": {
+            "description": "Instala un módulo de mejora en tu arma equipada (uno por arma, permanente)",
+            "options": {
+              "module": { "description": "Módulo de mejora a instalar" }
+            }
+          },
+          "buy": {
+            "description": "Compra packs de munición o consumibles",
+            "options": {
+              "item": { "description": "Objeto a comprar" },
+              "quantity": { "description": "Cuántos comprar (por defecto: 1)" }
+            }
+          },
+          "use": {
+            "description": "Activa una mejora consumible",
+            "options": {
+              "item": { "description": "Consumible a activar" }
+            }
+          },
+          "repair": {
+            "description": "Repara tu arma equipada en la tienda o usa un kit de reparación",
+            "options": {
+              "method": { "description": "Método de reparación" },
+              "kit": { "description": "Tamaño de kit a usar (solo método kit)" },
+              "amount": { "description": "Durabilidad a restaurar en la tienda (por defecto: reparación total)" }
+            }
+          },
+          "unlock": {
+            "description": "Desbloquea una nueva zona de caza",
+            "options": {
+              "zone": { "description": "Zona a desbloquear" }
+            }
+          }
+        }
+      },
+      "zone": {
+        "description": "Consulta y cambia tu zona de caza activa",
+        "options": {
+          "list": { "description": "Consulta todas las zonas y su estado de desbloqueo" },
+          "set": {
+            "description": "Cambia tu zona de caza activa",
+            "options": {
+              "zone": { "description": "Zona a la que cambiar" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "inventory": {
+    "name": "inventario",
+    "description": "Consulta tu inventario o el de otro usuario",
+    "options": {
+      "user": { "description": "Usuario a consultar" }
+    }
+  },
+  "invest": {
+    "name": "invertir",
+    "description": "Aporta monedas a los distritos del servidor y desbloquea beneficios para todos.",
+    "options": {
+      "contribute": {
+        "description": "Invierte monedas en un distrito del servidor.",
+        "options": {
+          "district": { "description": "En qué distrito invertir" },
+          "amount": { "description": "Cantidad a invertir (mínimo 100 monedas)" }
+        }
+      },
+      "status": { "description": "Consulta el progreso de financiación de los distritos y los beneficios activos." }
+    }
+  },
+  "jobs": {
+    "name": "empleos",
+    "description": "Explora todos los empleos disponibles, sus niveles y rangos de pago"
+  },
+  "kick": {
+    "name": "expulsar",
+    "description": "Expulsa a un miembro del servidor",
+    "options": {
+      "user": { "description": "El usuario a expulsar" },
+      "reason": { "description": "Motivo de la expulsión" }
+    }
+  },
+  "leaderboard": {
+    "name": "clasificacion",
+    "description": "Consulta los 10 mejores miembros de la clasificación del servidor.",
+    "options": {
+      "type": { "description": "Qué clasificación mostrar (por defecto: Niveles)." },
+      "period": { "description": "En los paneles de progreso: la carrera de esta semana o el total (por defecto: Total)." }
+    }
+  },
+  "lockdown": {
+    "name": "confinamiento",
+    "description": "Bloquea o desbloquea todos los canales de texto de todo el servidor",
+    "options": {
+      "start": {
+        "description": "Bloquea todos los canales de texto (deniega Enviar mensajes a @everyone)",
+        "options": {
+          "reason": { "description": "Motivo" }
+        }
+      },
+      "end": { "description": "Levanta el confinamiento activo" }
+    }
+  },
+  "market": {
+    "name": "mercado",
+    "description": "Mercado de objetos entre jugadores del servidor.",
+    "options": {
+      "list": {
+        "description": "Pon un objeto a la venta.",
+        "options": {
+          "item": { "description": "Objeto a vender: empieza a escribir para elegir de tu inventario." },
+          "quantity": { "description": "Cuántos vender." },
+          "price": { "description": "Precio por unidad (monedas)." }
+        }
+      },
+      "browse": {
+        "description": "Explora las publicaciones activas.",
+        "options": {
+          "item": { "description": "Filtra por objeto: escribe para elegir uno que esté publicado." }
+        }
+      },
+      "buy": {
+        "description": "Compra una publicación por su ID.",
+        "options": {
+          "listing_id": { "description": "Publicación a comprar: empieza a escribir para elegir una." }
+        }
+      },
+      "cancel": {
+        "description": "Cancela una de tus publicaciones activas y recupera tu objeto.",
+        "options": {
+          "listing_id": { "description": "Cuál de tus publicaciones cancelar: escribe para elegir una." }
+        }
+      }
+    }
+  },
+  "massban": {
+    "name": "baneomasivo",
+    "description": "Banea a varios usuarios por ID; útil para limpiar tras una incursión",
+    "options": {
+      "user_ids": { "description": "Lista de IDs de usuario separadas por espacios o comas" },
+      "reason": { "description": "Motivo aplicado a todos los baneos" },
+      "delete_days": { "description": "Días de mensajes a borrar por usuario (0–7)" }
+    }
+  },
+  "meme": {
+    "name": "meme",
+    "description": "Genera un meme clásico usando una plantilla popular",
+    "options": {
+      "template": { "description": "La plantilla de meme a usar" },
+      "top_text": { "description": "Texto del subtítulo superior" },
+      "bottom_text": { "description": "Texto del subtítulo inferior" }
+    }
+  },
+  "mine": {
+    "name": "minar",
+    "description": "Minería: excava, perfil, inventario, misiones y tienda.",
+    "options": {
+      "dig": {
+        "description": "Extrae mineral a tu profundidad actual. Usa 1 de energía. Enfriamiento: 30s.",
+        "options": {
+          "depth": { "description": "Profundidad donde minar (por defecto, tu profundidad activa)." },
+          "intensity": { "description": "Cuánto forzar. Más paga más y arriesga un derrumbe. Omite el aviso." }
+        }
+      },
+      "profile": {
+        "description": "Consulta tu perfil de minero o el de otro jugador",
+        "options": {
+          "user": { "description": "Jugador a consultar" }
+        }
+      },
+      "inv": {
+        "description": "Gestiona tu inventario de minería y tus picos",
+        "options": {
+          "view": { "description": "Consulta tus picos, cargas, consumibles y materiales" },
+          "equip": {
+            "description": "Equipa un pico de tu inventario",
+            "options": {
+              "slot": { "description": "Número de ranura del pico (usa /minar inv view para verlas)" }
+            }
+          },
+          "discard": {
+            "description": "Descarta un pico roto o inservible",
+            "options": {
+              "slot": { "description": "Número de ranura del pico (usa /minar inv view para verlas)" }
+            }
+          }
+        }
+      },
+      "quests": {
+        "description": "Consulta y reclama tus misiones diarias de minería",
+        "options": {
+          "view": { "description": "Consulta tus misiones diarias de minería activas" },
+          "claim": {
+            "description": "Reclama la recompensa de una misión completada",
+            "options": {
+              "quest": { "description": "Misión a reclamar" }
+            }
+          }
+        }
+      },
+      "prestige": { "description": "Reinicia tu Nivel de Minero por bonus permanentes (requiere Nivel de Minero 50)" },
+      "map": { "description": "Consulta tu mapa de mina persistente: cada celda que has excavado." },
+      "raid": {
+        "description": "Asalta a otro minero y roba parte de sus materiales (requiere pico equipado)",
+        "options": {
+          "target": { "description": "El minero a asaltar" }
+        }
+      },
+      "shop": {
+        "description": "Explora y compra equipo de minería, cargas y suministros",
+        "options": {
+          "list": { "description": "Explora todo lo disponible en la tienda de minería" },
+          "pickaxe": {
+            "description": "Compra un nuevo pico",
+            "options": {
+              "type": { "description": "Qué pico comprar" },
+              "equip": { "description": "Equipar automáticamente tras la compra (por defecto: sí)" }
+            }
+          },
+          "upgrade": {
+            "description": "Instala un módulo de mejora en tu pico equipado (uno por pico, permanente)",
+            "options": {
+              "module": { "description": "Módulo de mejora a instalar" }
+            }
+          },
+          "buy": {
+            "description": "Compra packs de cargas explosivas o consumibles",
+            "options": {
+              "item": { "description": "Objeto a comprar" },
+              "quantity": { "description": "Cuántos comprar (por defecto: 1)" }
+            }
+          },
+          "use": {
+            "description": "Activa una mejora consumible",
+            "options": {
+              "item": { "description": "Consumible a activar" }
+            }
+          },
+          "repair": {
+            "description": "Repara tu pico equipado en la tienda o usa un kit de reparación",
+            "options": {
+              "method": { "description": "Método de reparación" }
+            }
+          },
+          "unlock": {
+            "description": "Desbloquea una nueva profundidad de mina",
+            "options": {
+              "depth": { "description": "Profundidad a desbloquear" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "mute": {
+    "name": "silenciar",
+    "description": "Aísla temporalmente a un miembro",
+    "options": {
+      "user": { "description": "El usuario a silenciar" },
+      "duration": { "description": "Duración del aislamiento en minutos (mín.: 1, máx.: 40 320 = 28 días)" },
+      "reason": { "description": "Motivo del aislamiento" }
+    }
+  },
+  "mydata": {
+    "name": "misdatos",
+    "description": "Exporta o elimina los datos que Clawdia guarda sobre ti",
+    "options": {
+      "export": { "description": "Recibe por DM una copia de todo lo que Clawdia guarda de ti aquí (una vez al día)" },
+      "delete": { "description": "Elimina permanentemente tus datos en este servidor, con confirmación" }
+    }
+  },
+  "newspaper": {
+    "name": "periodico",
+    "description": "Comandos del periódico del servidor.",
+    "options": {
+      "preview": { "description": "Genera una vista previa del periódico de esta semana (solo admin)." }
+    }
+  },
+  "note": {
+    "name": "nota",
+    "description": "Añade una nota a un caso, o asígnalo/etiquétalo",
+    "options": {
+      "case_id": { "description": "ID del caso" },
+      "text": { "description": "Texto de la nota" },
+      "label": { "description": "Añade una etiqueta al caso" },
+      "assign": { "description": "Asigna este caso a un moderador" }
+    }
+  },
+  "notifications": {
+    "name": "notificaciones",
+    "description": "Gestiona tus preferencias personales de notificación.",
+    "options": {
+      "leaderboard": {
+        "description": "Activa o desactiva los DM de rivalidad de clasificación.",
+        "options": {
+          "type": { "description": "Qué notificación cambiar" },
+          "value": { "description": "Activar o desactivar la notificación" }
+        }
+      }
+    }
+  },
+  "pet": {
+    "name": "mascota",
+    "description": "Gestiona tus mascotas.",
+    "options": {
+      "adopt": {
+        "description": "Adopta una mascota de la tienda.",
+        "options": {
+          "type": { "description": "Tipo de mascota a adoptar" },
+          "name": { "description": "Ponle nombre a tu mascota ya (opcional, máx. 32 caracteres)" }
+        }
+      },
+      "status": { "description": "Consulta tus mascotas y su ánimo." },
+      "feed": {
+        "description": "Alimenta a una mascota; su comida favorita restaura más y da XP extra.",
+        "options": {
+          "material": { "description": "Qué comida usar: empieza a escribir para ver lo que tienes" },
+          "slot": { "description": "A qué mascota alimentar (por defecto, la primera)" }
+        }
+      },
+      "release": {
+        "description": "Libera a una mascota de forma permanente.",
+        "options": {
+          "slot": { "description": "A qué mascota liberar" }
+        }
+      },
+      "rename": {
+        "description": "Ponle un nombre personalizado a tu mascota.",
+        "options": {
+          "slot": { "description": "A qué mascota renombrar" },
+          "name": { "description": "Nuevo nombre (máx. 32 caracteres)" }
+        }
+      },
+      "list": { "description": "Consulta todas las mascotas disponibles en la tienda." },
+      "leaderboard": {
+        "description": "Consulta las mejores mascotas de este servidor.",
+        "options": {
+          "type": { "description": "Orden (por defecto: días de vínculo)" }
+        }
+      },
+      "battle": {
+        "description": "Combate contra una mascota salvaje por XP, o reta a otro miembro (opcionalmente por monedas).",
+        "options": {
+          "opponent": { "description": "Miembro a retar (déjalo vacío para luchar contra una mascota salvaje)" },
+          "slot": { "description": "Cuál de tus mascotas combate (por defecto, la primera)" },
+          "bet": { "description": "Monedas a apostar (requiere un oponente)" }
+        }
+      }
+    }
+  },
+  "ping": {
+    "name": "ping",
+    "description": "Consulta la latencia del bot"
+  },
+  "poll": {
+    "name": "encuesta",
+    "description": "Crea una encuesta con botones",
+    "options": {
+      "question": { "description": "Pregunta de la encuesta" },
+      "option1": { "description": "Primera opción" },
+      "option2": { "description": "Segunda opción" },
+      "option3": { "description": "Tercera opción" },
+      "option4": { "description": "Cuarta opción" },
+      "option5": { "description": "Quinta opción" },
+      "duration": { "description": "Duración, p. ej. 10m, 1h, 1d (por defecto: sin caducidad)" }
+    }
+  },
+  "prestige": {
+    "name": "prestigio",
+    "description": "Prestigio de cuenta: reinicia tu nivel por recompensas y desbloqueos permanentes.",
+    "options": {
+      "status": {
+        "description": "Muestra tu rango de prestigio, bonus y desbloqueos (o los de otro).",
+        "options": {
+          "user": { "description": "Usuario a consultar (por defecto, tú)." }
+        }
+      },
+      "info": { "description": "Muestra cada nivel de prestigio y qué desbloquea cada uno." },
+      "up": { "description": "Asciende de prestigio tu cuenta (requiere el nivel configurado por el servidor)." }
+    }
+  },
+  "profile": {
+    "name": "perfil",
+    "description": "Consulta una tarjeta de perfil unificada con todas tus estadísticas clave.",
+    "options": {
+      "view": {
+        "description": "Consulta una tarjeta de perfil unificada con todas tus estadísticas clave.",
+        "options": {
+          "user": { "description": "Usuario cuyo perfil mostrar (por defecto, el tuyo)." },
+          "private": { "description": "Mostrar el perfil solo para ti. Por defecto: no (público)." }
+        }
+      },
+      "public": {
+        "description": "Elige si tu perfil se muestra en la página web pública del servidor.",
+        "options": {
+          "setting": { "description": "Activa o desactiva tu página de perfil pública." }
+        }
+      }
+    }
+  },
+  "questgen": {
+    "name": "generarmision",
+    "description": "Gasta 200 monedas para que la IA te forje una Misión Legendaria única"
+  },
+  "quests": {
+    "name": "misiones",
+    "description": "Consulta tus misiones diarias y semanales activas"
+  },
+  "quiz": {
+    "name": "trivia",
+    "description": "Responde una pregunta de trivia para ganar monedas, ¡o pierde si fallas!",
+    "options": {
+      "difficulty": { "description": "Dificultad de la pregunta (por defecto: aleatoria)" }
+    }
+  },
+  "raidmode": {
+    "name": "modoincursion",
+    "description": "Configura la detección de incursiones y la gestión de casos",
+    "options": {
+      "raid": {
+        "description": "Configura la detección de incursiones",
+        "options": {
+          "enabled": { "description": "Activa la detección de incursiones" },
+          "threshold": { "description": "Entradas que activan una incursión (por defecto 10)" },
+          "window": { "description": "Ventana de tiempo en segundos (por defecto 60)" },
+          "min_account_age": { "description": "Marca cuentas más nuevas de N días (por defecto 7)" },
+          "action": { "description": "Acción al detectar una incursión (por defecto: alerta)" },
+          "alert_channel": { "description": "Canal para las alertas de incursión (por defecto: registro de mods)" },
+          "quarantine_role": { "description": "Rol aplicado cuando la acción es cuarentena" },
+          "auto_disable": { "description": "Desactiva automáticamente el modo incursión cuando el servidor se calma (defecto: sí)" },
+          "calm_window": { "description": "Segundos de poca actividad de entradas antes de auto-desactivar (por defecto 300)" },
+          "require_manual_disable": { "description": "Exige que un mod apague el modo incursión a mano (por defecto: no)" }
+        }
+      },
+      "toggle": {
+        "description": "Activa o desactiva el modo incursión a mano; siempre anula la detección automática",
+        "options": {
+          "status": { "description": "Activa o desactiva el modo incursión" }
+        }
+      },
+      "status": { "description": "Muestra el estado actual del modo incursión y su configuración de detección" },
+      "cases": {
+        "description": "Configura el SLA de casos y las apelaciones",
+        "options": {
+          "sla_hours": { "description": "Horas antes de que un caso abierto active un aviso de SLA (por defecto 48)" },
+          "sla_channel": { "description": "Canal para los avisos de SLA vencido" },
+          "appeals_enabled": { "description": "Permite a los usuarios apelar casos con /apelar" },
+          "appeal_channel": { "description": "Canal donde se publican las notificaciones de apelación" }
+        }
+      },
+      "tracks": {
+        "description": "Configura las vías de progresión",
+        "options": {
+          "enabled": { "description": "Activa las vías de progresión" },
+          "creator_bonus": { "description": "% de bonus de XP de la vía Creador (por defecto 20)" },
+          "helper_bonus": { "description": "% de bonus de XP de la vía Ayudante (por defecto 20)" },
+          "raider_bonus": { "description": "% de bonus de XP de la vía Incursor (por defecto 20)" },
+          "helper_channels": { "description": "IDs de canal separadas por comas para la vía Ayudante" }
+        }
+      },
+      "quests": {
+        "description": "Configura el sistema de misiones",
+        "options": {
+          "enabled": { "description": "Activa las misiones" },
+          "daily_xp": { "description": "Recompensa de XP por misión diaria (por defecto 50)" },
+          "daily_coins": { "description": "Recompensa de monedas por misión diaria (por defecto 25)" },
+          "weekly_xp": { "description": "Recompensa de XP por misión semanal (por defecto 300)" },
+          "weekly_coins": { "description": "Recompensa de monedas por misión semanal (por defecto 150)" }
+        }
+      }
+    }
+  },
+  "rank": {
+    "name": "nivel",
+    "description": "Consulta una tarjeta de nivel o la configuración de XP del servidor.",
+    "options": {
+      "card": {
+        "description": "Consulta tu tarjeta de nivel con nivel, XP y posición en el servidor.",
+        "options": {
+          "user": { "description": "Usuario cuyo nivel mostrar (por defecto, el tuyo)." }
+        }
+      },
+      "info": { "description": "Consulta qué canales y roles quedan excluidos de la ganancia de XP en este servidor." }
+    }
+  },
+  "remind": {
+    "name": "recordar",
+    "description": "Crea un recordatorio, publicado en este canal al saltar. Combina minutos, horas y/o días.",
+    "options": {
+      "message": { "description": "De qué recordarte. Máx. 500 caracteres." },
+      "minutes": { "description": "Minutos a partir de ahora (mín.: 1). Combínalo con horas/días para más tiempo." },
+      "hours": { "description": "Horas a partir de ahora (mín.: 1). Combínalo con minutos/días." },
+      "days": { "description": "Días a partir de ahora (mín.: 1). Combínalo con horas/minutos." },
+      "at": { "description": "Hora absoluta en vez de minutos/horas/días, p. ej. «17:00», «5pm», «2026-07-20 09:00»" },
+      "every": { "description": "Repite este recordatorio con una cadencia" }
+    }
+  },
+  "reminders": {
+    "name": "recordatorios",
+    "description": "Consulta o cancela tus recordatorios abiertos",
+    "options": {
+      "list": { "description": "Lista tus recordatorios abiertos" },
+      "cancel": {
+        "description": "Cancela uno de tus recordatorios",
+        "options": {
+          "id": { "description": "El id corto que se muestra en /recordatorios list" }
+        }
+      }
+    }
+  },
+  "rob": {
+    "name": "robar",
+    "description": "Roba a un miembro, explora sus defensas o arma una trampa en tu propia cartera.",
+    "options": {
+      "attempt": {
+        "description": "Intenta robar la cartera de otro miembro. El éxito depende de herramientas y protección.",
+        "options": {
+          "target": { "description": "El miembro a robar." }
+        }
+      },
+      "status": {
+        "description": "Espía las protecciones activas de un objetivo antes de lanzarte a robar.",
+        "options": {
+          "target": { "description": "El usuario a consultar." }
+        }
+      },
+      "trap": {
+        "description": "Coloca o comprueba una trampa oculta en tu cartera.",
+        "options": {
+          "set": { "description": "Coloca una trampa en tu cartera por 6000 monedas. Dura 12 horas." },
+          "status": { "description": "Comprueba si tu trampa está armada ahora mismo." }
+        }
+      }
+    }
+  },
+  "role": {
+    "name": "rol",
+    "description": "Asígnate o quítate un rol de los paneles de roles por reacción del servidor",
+    "options": {
+      "add": {
+        "description": "Asígnate un rol autoasignable",
+        "options": {
+          "role": { "description": "Rol a asignar" }
+        }
+      },
+      "remove": {
+        "description": "Quítate un rol autoasignable",
+        "options": {
+          "role": { "description": "Rol a quitar" }
+        }
+      },
+      "list": { "description": "Lista todos los roles autoasignables" }
+    }
+  },
+  "season": {
+    "name": "temporada",
+    "description": "Comandos del pase de temporada y de la temporada de economía.",
+    "options": {
+      "view": { "description": "Consulta el progreso de tu pase de temporada y las recompensas por nivel." },
+      "claim": {
+        "description": "Reclama la recompensa de un nivel del pase de temporada.",
+        "options": {
+          "tier": { "description": "Número de nivel a reclamar (1–50)" },
+          "premium": { "description": "Reclama la recompensa premium de este nivel (requiere /temporada unlock)" }
+        }
+      },
+      "unlock": { "description": "Desbloquea la vía premium del pase de temporada con un pago único de monedas." },
+      "claim-all": {
+        "description": "Reclama de una vez todas las recompensas de nivel disponibles del pase.",
+        "options": {
+          "premium": { "description": "Reclama las recompensas premium (requiere /temporada unlock)" }
+        }
+      },
+      "missions": { "description": "Consulta las misiones diarias de hoy." },
+      "claim-mission": {
+        "description": "Reclama la recompensa de una misión diaria completada.",
+        "options": {
+          "mission": { "description": "Número de misión (1, 2 o 3)" }
+        }
+      },
+      "leaderboard": { "description": "Consulta la clasificación de la temporada de economía actual (top 10)." },
+      "me": { "description": "Consulta tu rango de temporada de economía y las monedas ganadas." },
+      "history": { "description": "Consulta los ganadores de temporadas de economía pasadas." },
+      "start": {
+        "description": "[Admin] Inicia una nueva temporada de economía de 90 días.",
+        "options": {
+          "name": { "description": "Nombre de la temporada (p. ej. «Temporada 1»)" },
+          "duration": { "description": "Duración en días (por defecto 90)" }
+        }
+      },
+      "end": { "description": "[Admin] Finaliza la temporada de economía actual y congela la clasificación." },
+      "event": { "description": "Consulta tu progreso en el evento de temporada activo con recompensas por hitos." },
+      "tier-skip": { "description": "Usa una Ficha de Salto de Nivel de tu inventario para avanzar un nivel del pase." }
+    }
+  },
+  "serverinfo": {
+    "name": "infoservidor",
+    "description": "Muestra estadísticas del servidor: miembros, canales, roles, nivel de boost y fecha de creación."
+  },
+  "setlevel": {
+    "name": "asignarnivel",
+    "description": "Asigna directamente un nivel a un miembro (uso admin / migración de MEE6)",
+    "options": {
+      "user": { "description": "Miembro al que asignar el nivel" },
+      "level": { "description": "Nivel a asignar" }
+    }
+  },
+  "shop": {
+    "name": "tienda",
+    "description": "Explora y compra objetos de la tienda del servidor",
+    "options": {
+      "view": { "description": "Explora los objetos disponibles" },
+      "buy": {
+        "description": "Compra un objeto de la tienda",
+        "options": {
+          "item": { "description": "Objeto a comprar" },
+          "quantity": { "description": "Cuántos comprar (por defecto: 1, máx.: 20)" }
+        }
+      },
+      "trends": { "description": "Muestra el movimiento de precios de la tienda (requiere precios dinámicos activados)." }
+    }
+  },
+  "showcase": {
+    "name": "vitrina",
+    "description": "Muestra la tarjeta de trofeos de un jugador: sus objetos más raros y mejores logros.",
+    "options": {
+      "user": { "description": "El jugador a consultar (por defecto, tú)" }
+    }
+  },
+  "slowmode": {
+    "name": "modolento",
+    "description": "Establece o quita el modo lento de un canal",
+    "options": {
+      "seconds": { "description": "Enfriamiento en segundos (0 para desactivar, máx. 21600)" },
+      "channel": { "description": "Canal al que aplicar el modo lento (por defecto, el canal actual)" }
+    }
+  },
+  "softban": {
+    "name": "baneosuave",
+    "description": "Banea y desbanea al instante a un miembro para purgar sus mensajes recientes",
+    "options": {
+      "user": { "description": "El miembro al que aplicar el baneo suave" },
+      "reason": { "description": "Motivo del baneo suave" },
+      "delete_days": { "description": "Días de mensajes a borrar (1–7, por defecto 1)" }
+    }
+  },
+  "streak": {
+    "name": "racha",
+    "description": "Consulta la clasificación de rachas del servidor o la racha de un usuario",
+    "options": {
+      "user": { "description": "Usuario a consultar (por defecto: ver la clasificación)" }
+    }
+  },
+  "suggest": {
+    "name": "sugerir",
+    "description": "Envía una sugerencia al servidor",
+    "options": {
+      "suggestion": { "description": "Tu sugerencia" }
+    }
+  },
+  "syndicate": {
+    "name": "sindicato",
+    "description": "Sistema de sindicatos del crimen: atracos cooperativos, territorio y rivalidad.",
+    "options": {
+      "create": {
+        "description": "Funda un nuevo sindicato (cuesta 50 000 monedas).",
+        "options": {
+          "name": { "description": "Nombre del sindicato (2–32 caracteres)" },
+          "tag": { "description": "Etiqueta corta mostrada en la clasificación (2–5 caracteres)" },
+          "open": { "description": "Permite unirse a cualquiera sin invitación (por defecto: no)" }
+        }
+      },
+      "join": {
+        "description": "Únete a un sindicato abierto o acepta una invitación.",
+        "options": {
+          "name": { "description": "Nombre del sindicato" }
+        }
+      },
+      "leave": { "description": "Abandona tu sindicato actual (los líderes deben expulsar antes a todos los miembros)." },
+      "invite": {
+        "description": "Invita a un jugador a tu sindicato (solo líder).",
+        "options": {
+          "user": { "description": "Usuario a invitar" }
+        }
+      },
+      "kick": {
+        "description": "Expulsa a un miembro de tu sindicato (solo líder).",
+        "options": {
+          "user": { "description": "Miembro a expulsar" }
+        }
+      },
+      "open": { "description": "Alterna entre membresía abierta y solo por invitación (solo líder)." },
+      "info": {
+        "description": "Consulta los detalles del sindicato.",
+        "options": {
+          "name": { "description": "Nombre del sindicato (por defecto, el tuyo)" }
+        }
+      },
+      "leaderboard": { "description": "Mejores sindicatos del servidor por ganancias de atracos de por vida." },
+      "heist": {
+        "description": "Planifica e inicia un atraco cooperativo de sindicato (solo líder, mín. 3 miembros).",
+        "options": {
+          "target": { "description": "El objetivo a golpear." }
+        }
+      },
+      "sabotage": { "description": "Sabotea un atraco rival activo (cuesta 20 de calor de tu sindicato)." },
+      "upgrade": {
+        "description": "Compra una mejora de sindicato usando ganancias de por vida (solo líder).",
+        "options": {
+          "id": { "description": "Mejora a comprar" }
+        }
+      }
+    }
+  },
+  "synergies": {
+    "name": "sinergias",
+    "description": "Consulta todos los bonus de sinergia entre sistemas y tu progreso para desbloquearlos"
+  },
+  "timezone": {
+    "name": "zonahoraria",
+    "description": "Configura tu zona horaria para que recordatorios y horas se calculen bien para ti",
+    "options": {
+      "set": {
+        "description": "Configura tu zona horaria IANA (p. ej. America/New_York, Europe/Madrid)",
+        "options": {
+          "timezone": { "description": "Nombre de zona horaria IANA" }
+        }
+      },
+      "show": { "description": "Muestra tu zona horaria configurada actualmente" },
+      "clear": { "description": "Borra tu zona horaria" }
+    }
+  },
+  "track": {
+    "name": "especialidad",
+    "description": "Consulta o establece tu vía de progresión",
+    "options": {
+      "choose": { "description": "Elige una vía en la que especializarte" }
+    }
+  },
+  "trade": {
+    "name": "intercambio",
+    "description": "Intercambia monedas y/o un objeto con otro miembro; ambos confirman antes de mover nada.",
+    "options": {
+      "user": { "description": "Con quién intercambiar." }
+    }
+  },
+  "unban": {
+    "name": "desbanear",
+    "description": "Retira el baneo de un usuario del servidor",
+    "options": {
+      "user_id": { "description": "El ID de usuario a desbanear" },
+      "reason": { "description": "Motivo del desbaneo" }
+    }
+  },
+  "unmute": {
+    "name": "quitarsilencio",
+    "description": "Retira el aislamiento de un miembro",
+    "options": {
+      "user": { "description": "El usuario al que quitar el silencio" }
+    }
+  },
+  "use": {
+    "name": "usar",
+    "description": "Usa un objeto de tu inventario",
+    "options": {
+      "item": { "description": "Nombre del objeto a usar (consulta /inventario para ver los tuyos)." }
+    }
+  },
+  "userinfo": {
+    "name": "infousuario",
+    "description": "Muestra el nombre, ID, antigüedad, fecha de entrada, apodo y número de roles de un usuario.",
+    "options": {
+      "user": { "description": "Usuario a consultar (por defecto, tú)." }
+    }
+  },
+  "vc": {
+    "name": "canalvoz",
+    "description": "Gestiona tu canal de voz temporal",
+    "options": {
+      "rename": {
+        "description": "Renombra tu canal de voz temporal",
+        "options": {
+          "name": { "description": "Nuevo nombre de canal" }
+        }
+      },
+      "limit": {
+        "description": "Establece el límite de usuarios de tu canal de voz temporal (0 = sin límite)",
+        "options": {
+          "limit": { "description": "Máx. de usuarios (0–99)" }
+        }
+      },
+      "lock": { "description": "Bloquea tu canal de voz temporal: solo tú puedes invitar a otros" },
+      "unlock": { "description": "Desbloquea tu canal de voz temporal para que cualquiera pueda unirse" }
+    }
+  },
+  "wanted": {
+    "name": "sebusca",
+    "description": "Genera un cartel de «Se busca» del Salvaje Oeste con el avatar de un usuario",
+    "options": {
+      "user": { "description": "El criminal buscado (por defecto, tú)" }
+    }
+  },
+  "war": {
+    "name": "guerra",
+    "description": "Eventos de guerra entre servidores.",
+    "options": {
+      "challenge": {
+        "description": "[Admin] Reta a otro servidor a una guerra de 7 días.",
+        "options": {
+          "invite_code": { "description": "El código de invitación de tu servidor para compartir con el rival" }
+        }
+      },
+      "accept": {
+        "description": "[Admin] Acepta el reto de guerra de otro servidor.",
+        "options": {
+          "challenger_invite": { "description": "El código de invitación del servidor que te retó" }
+        }
+      },
+      "status": { "description": "Consulta el marcador de la guerra actual." },
+      "cancel": { "description": "[Admin] Cancela la guerra actual." }
+    }
+  },
+  "warn": {
+    "name": "advertir",
+    "description": "Gestiona las advertencias de los miembros",
+    "options": {
+      "add": {
+        "description": "Emite una advertencia a un miembro",
+        "options": {
+          "user": { "description": "El usuario a advertir" },
+          "reason": { "description": "Motivo de la advertencia" },
+          "bypass_escalation": { "description": "Suprime la auto-escalada para esta advertencia (requiere Gestionar mensajes)" }
+        }
+      },
+      "list": {
+        "description": "Lista todas las advertencias de un miembro",
+        "options": {
+          "user": { "description": "El usuario a consultar" }
+        }
+      },
+      "remove": {
+        "description": "Elimina una advertencia por su ID de caso",
+        "options": {
+          "case_id": { "description": "El ID de caso de la advertencia a eliminar" }
+        }
+      }
+    }
+  },
+  "wasted": {
+    "name": "eliminado",
+    "description": "Superpone la pantalla «Wasted» de GTA sobre el avatar de un usuario",
+    "options": {
+      "user": { "description": "El usuario a «eliminar» (por defecto, tú)" }
+    }
+  },
+  "winfeed": {
+    "name": "grandesvictorias",
+    "description": "Consulta las últimas 20 grandes victorias del servidor (50k+ monedas o botines legendarios)."
+  },
+  "work": {
+    "name": "trabajar",
+    "description": "Gana monedas trabajando un turno (25–400/nivel). Enfriamiento: 1h. Más turnos, mejores empleos."
+  }
+}

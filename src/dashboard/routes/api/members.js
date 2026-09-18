@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
-const { isValidDiscordId } = require('../../lib/apiHelpers');
+const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
 const { readPage, pageEnvelope } = require('../../lib/apiPage');
 const { fetchTransactions, fetchOwedPayouts } = require('../../../utils/ledger');
+const { deleteUserData } = require('../../../utils/userDataRegistry');
 
 // Up to 10 members matching `?q=` (2 characters or more), for the dashboard's member pickers.
 //
@@ -93,6 +94,34 @@ router.get('/guild/:guildId/members/:userId/ledger', checkAuth, checkGuildAccess
         res.json(body);
     } catch (error) {
         console.error('Member ledger error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Erase a member's data on request (#1013). The dashboard twin of `/mydata
+// delete` and scripts/delete-user-data.js, for the erasure requests that reach
+// the operator by email rather than in Discord. All three call the same
+// registry code, so what is removed, what is kept, and how removed balances are
+// written back to the guild ledger are defined in one place. The audit log
+// keeps a record that an operator ran the erasure — the who and when the server
+// is entitled to keep even after the member is gone.
+router.delete('/guild/:guildId/members/:userId/data', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId, userId } = req.params;
+    if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid user ID' });
+
+    try {
+        const report = await deleteUserData(userId, guildId);
+        await logAuditEvent(req, guildId, 'member_data_delete', {
+            targetUserId: userId,
+            coinsRemoved: report.coinsRemoved,
+        });
+        res.json({
+            success: true,
+            coinsRemoved: report.coinsRemoved,
+            results: report.results.map(r => ({ key: r.key, label: r.label, behavior: r.behavior, changed: r.changed })),
+        });
+    } catch (error) {
+        console.error('Member data delete error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

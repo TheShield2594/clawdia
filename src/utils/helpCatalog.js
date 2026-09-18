@@ -38,6 +38,8 @@ const EXTRA_ENTRIES = new Map([
     ['ai', [{ name: '@Clawdia', description: 'Mention or ping the bot to start an AI conversation', mention: true }]],
 ]);
 
+const { localizedName, localizedDescription } = require('./commandLocalizations');
+
 // Commands named in the category preview line before it is elided.
 const PREVIEW_COMMANDS = 4;
 
@@ -58,13 +60,17 @@ function truncate(text, limit) {
  * @param {Iterable<object>} commands loaded command modules — `client.commands.values()`
  *   at runtime. Each needs a `data.name`; `data.description` and `category` are
  *   used when present.
+ * @param {string} [locale] the viewer's client locale (`interaction.locale`).
+ *   When a command carries a localization for it, the localized name and
+ *   description are used; otherwise the base (English) text is, exactly as
+ *   Discord itself falls back (#1014).
  * @returns {Array<{id: string, emoji: string, label: string, preview: string,
  *   summary: string, commands: Array<{name: string, description: string, mention?: boolean}>}>}
  *   Categories in CATEGORY_META order, then any unrecognised folder alphabetically.
  *   Empty when nothing was loaded — callers have to cope, because a select menu
  *   with no options is a Discord error rather than an empty menu.
  */
-function buildCategories(commands) {
+function buildCategories(commands, locale = null) {
     const byCategory = new Map();
 
     for (const command of commands || []) {
@@ -73,8 +79,8 @@ function buildCategories(commands) {
         const id = command.category || 'other';
         if (!byCategory.has(id)) byCategory.set(id, []);
         byCategory.get(id).push({
-            name,
-            description: command.data.description || 'No description provided',
+            name: localizedName(command.data, locale),
+            description: localizedDescription(command.data, locale) || 'No description provided',
         });
     }
 
