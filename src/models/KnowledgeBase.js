@@ -8,6 +8,17 @@ const knowledgeBaseSchema = new Schema({
     addedBy:   { type: String, required: true },
     // Stable key for pin-synced entries (`${guildId}:${messageId}`); absent for manual entries
     sourceKey: { type: String },
+    // The semantic-retrieval vector for this entry, and the embedder that made
+    // it (#1042). Both absent unless a guild has the semantic tier switched on:
+    // the vector is computed from title+content+tags when the entry is written,
+    // and read back at query time to find paraphrases the keyword scorer misses.
+    // `embeddingModel` is the embedder's identity (e.g. `local:Xenova/all-MiniLM-L6-v2`)
+    // so a guild that later switches provider or model does not compare vectors
+    // from two different spaces — retrieval only reads vectors tagged with the
+    // embedder it is asking with, and a stale one falls back to keyword scoring
+    // until the entry is re-saved.
+    embedding:      { type: [Number], default: undefined },
+    embeddingModel: { type: String },
     createdAt: { type: Date, default: Date.now }
 });
 

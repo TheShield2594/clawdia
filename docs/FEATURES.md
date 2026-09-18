@@ -70,6 +70,13 @@ data file is in the bot's answers on the next restart; nothing is transcribed.
 The same five-match cap applies, and the model is told these numbers are exact
 and not to round them.
 
+This corpus and the command reference above stay **keyword-scored** — no
+embeddings, no semantic tier. That is deliberate: they are small, fixed, and
+authored, so they want exact numbers and a synonym map an author controls, and
+"being roughly right and cheap beats being precise" on the critical path of a
+reply. The semantic tier described under the knowledge base is only for the one
+corpus that grows in users' words; the game tables and command tree are neither.
+
 Two things are deliberately left out. `/quiz`'s question bank is not indexed —
 a bot that hands out the answer to the question it just asked you is not a quiz
 — and neither is the automod word list. Nor is anything `/explore` hides until
@@ -90,6 +97,30 @@ are never dropped.
 The knowledge base has no size cliff any more: retrieval always runs, and the
 few newest entries ride along as background whatever the size of the base. Only
 what the question actually matched is cited in the channel.
+
+**Two retrieval tiers, for the corpus that grows in users' words**:
+
+Everything above is keyword retrieval — a stemmer and a text index — which is
+the right call for a fixed corpus (see the command and game sections below, and
+their author-curated synonym map). The knowledge base is the exception: it grows
+*and* is phrased by whoever is asking, so a question that shares no stem with an
+entry misses it entirely. "I'm skint, what now" never reaches a `daily` entry
+unless someone hand-added the word, and the model then answers blind even though
+the fact was on file.
+
+So the knowledge base has an optional second tier: **semantic retrieval**, off
+by default under **AI → Chat**. With it on, each entry is turned into a vector
+when it is written and the question into one when it is asked, and the nearest
+few by meaning are unioned with the keyword hits before the prompt is assembled
+— so the paraphrase reaches the entry, and nothing about the keyword tier or the
+citation rules changes. It defaults to a local on-device model
+(`@xenova/transformers`, `all-MiniLM-L6-v2`, an optional dependency that
+downloads on first use) so no new API key is required; a server that already has
+an OpenAI or Gemini key can point it at that provider's embeddings instead. An
+operator who never switches it on downloads nothing and pays nothing. Only the
+knowledge base and its own vectors are involved — a vector is read back only by
+the same model that wrote it, so switching provider or model does not compare
+across two vector spaces.
 
 ### MCP Servers
 

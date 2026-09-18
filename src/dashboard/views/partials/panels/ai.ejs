@@ -89,6 +89,19 @@
                             <span class="toggle-text"><strong>Stream responses</strong><span>Edit messages in real-time as the model generates</span></span>
                             <span class="switch"><input type="checkbox" id="ai-streaming" <%= settings.ai.streaming !== false ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Semantic knowledge search</strong><span>Also find knowledge-base entries by meaning, so a question that shares no words with an entry still reaches it. The local option downloads an on-device model on first use; OpenAI or Gemini uses that provider's embeddings and key.</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-semantic-enabled" <%= settings.ai.semanticRetrieval?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <div class="field">
+                            <label class="field-label" for="ai-semantic-provider">Embedding provider</label>
+                            <select id="ai-semantic-provider">
+                                <option value="local" <%= (settings.ai.semanticRetrieval?.provider || 'local') === 'local' ? 'selected' : '' %>>Local (on-device, no key)</option>
+                                <option value="openai" <%= settings.ai.semanticRetrieval?.provider === 'openai' ? 'selected' : '' %>>OpenAI</option>
+                                <option value="gemini" <%= settings.ai.semanticRetrieval?.provider === 'gemini' ? 'selected' : '' %>>Gemini</option>
+                            </select>
+                            <small>Only used when semantic knowledge search is on</small>
+                        </div>
                         <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
                             <div><label class="field-label" for="ai-rate-limit">Rate limit (requests / user)</label><input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>"><small>0 disables. MCP tool calls share a per-window budget of 8 &times; this limit</small></div>
                             <div><label class="field-label" for="ai-rate-channel">Rate limit (requests / channel)</label><input type="number" id="ai-rate-channel" min="0" value="<%= settings.ai.rateLimitPerChannel ?? 0 %>"><small>0 disables</small></div>

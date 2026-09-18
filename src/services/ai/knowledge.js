@@ -1,4 +1,5 @@
 const KnowledgeBase = require('../../models/KnowledgeBase');
+const { cosineSimilarity } = require('./embeddings');
 
 // Knowledge Base RAG: retrieve guild-curated entries relevant to a query and
 // render them as reference-only context for the system prompt.
@@ -22,12 +23,35 @@ const KB_CANDIDATE_LIMIT = 50;
 // somebody wrote down is the thing they most recently needed the bot to know.
 const KB_BACKGROUND_LIMIT = 3;
 
+// How many vector-carrying entries the semantic tier scores per query. Cosine
+// over a few-hundred vectors in process is enough at this size — the same
+// argument the keyword scorer makes for staying cheap — so this is the ceiling
+// on how large "a few hundred" is allowed to be before the newest are taken.
+const SEMANTIC_CANDIDATE_LIMIT = 500;
+
+// The cosine below which a nearest neighbour is not a match. A re-ranker unions
+// what it finds with the keyword hits and the budget trims the tail, so this is
+// deliberately permissive: it exists to keep a query from dragging in every
+// entry in the base when nothing is actually close, not to be a precision knob.
+const SEMANTIC_MIN_SCORE = 0.3;
+
 function textOfEntry(entry) {
     return `${entry.title} ${entry.content} ${(entry.tags || []).join(' ')}`.toLowerCase();
 }
 
-/** The entries this question matched, best first, or [] when it matched none. */
-async function matchEntries(guildId, query, limit) {
+/**
+ * The text an entry is embedded from — title, body and tags, in natural case.
+ *
+ * Separate from `textOfEntry`, which lowercases for the keyword scorer: the
+ * embedders are trained on ordinary prose, so the write path and the query are
+ * fed the same shape of text they were.
+ */
+function embeddingTextOfEntry(entry) {
+    return `${entry.title} ${entry.content} ${(entry.tags || []).join(' ')}`.trim();
+}
+
+/** The keyword-scored entries for this question, best first, or []. */
+async function keywordMatches(guildId, query, limit) {
     const queryWords = String(query || '').toLowerCase().split(/\s+/).filter(w => w.length > 2);
     if (!queryWords.length) return [];
 
@@ -63,6 +87,73 @@ async function matchEntries(guildId, query, limit) {
 }
 
 /**
+ * The nearest entries by embedding that the keyword tier did not already find.
+ *
+ * This is the tier that catches a paraphrase: it embeds the question and scores
+ * it against the stored vectors, so "I'm skint, what now" reaches a `daily`
+ * entry that shares no word with it. It reads only vectors tagged with the
+ * embedder it is asking with (`embeddingModel`), so a guild that switched
+ * provider or model does not compare across two vector spaces.
+ *
+ * @param {string} guildId
+ * @param {string} query the question
+ * @param {number} limit how many neighbours to return
+ * @param {{id: string, embed: Function}} embedder from services/ai/embeddings
+ * @param {Set<string>} excludeIds ids the keyword tier already returned
+ * @returns {Promise<object[]>} entries, nearest first; [] on any failure
+ */
+async function semanticMatches(guildId, query, limit, embedder, excludeIds) {
+    let queryVector;
+    try {
+        [queryVector] = await embedder.embed([String(query || '')]);
+    } catch (err) {
+        // The semantic tier is an addition, never a gate: if embedding the
+        // query fails, the keyword hits still stand.
+        console.warn(`[AI:knowledge] could not embed the query for semantic retrieval: ${err.message}`);
+        return [];
+    }
+    if (!Array.isArray(queryVector) || !queryVector.length) return [];
+
+    const withVectors = await KnowledgeBase.find(
+        { guildId, embeddingModel: embedder.id, embedding: { $exists: true, $ne: [] } },
+        { title: 1, content: 1, tags: 1, embedding: 1, createdAt: 1 }
+    ).sort({ createdAt: -1 }).limit(SEMANTIC_CANDIDATE_LIMIT).lean();
+    if (!withVectors?.length) return [];
+
+    return withVectors
+        .map(entry => ({ entry, score: cosineSimilarity(queryVector, entry.embedding) }))
+        .filter(s => s.score >= SEMANTIC_MIN_SCORE && !excludeIds.has(String(s.entry._id)))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .map(s => s.entry);
+}
+
+/**
+ * The entries this question matched, best first, or [] when it matched none.
+ *
+ * The keyword hits come first — they are the precise ones, an exact word the
+ * author wrote — and the semantic neighbours fill what is left of `limit`. That
+ * is the union the issue asks for (#1042): the keyword tier and the top-k
+ * nearest, deduped, handed on in one list for the existing budget ordering to
+ * trim. With no embedder it is exactly the keyword tier, so a guild that has not
+ * switched the semantic tier on sees no change at all.
+ */
+async function matchEntries(guildId, query, limit, embedder) {
+    const keyword = await keywordMatches(guildId, query, limit);
+    if (!embedder) return keyword;
+
+    const seen = new Set(keyword.map(entry => String(entry._id)));
+    const semantic = await semanticMatches(guildId, query, limit, embedder, seen);
+
+    const union = [...keyword];
+    for (const entry of semantic) {
+        if (union.length >= limit) break;
+        union.push(entry);
+    }
+    return union;
+}
+
+/**
  * What the guild's knowledge base has to say about this message.
  *
  * `matched` is what the question actually retrieved — the entries the reply may
@@ -74,8 +165,8 @@ async function matchEntries(guildId, query, limit) {
  * `isBackground` is kept for callers that only ask "was any of this actually
  * retrieved": it is true exactly when nothing matched.
  */
-async function retrieveKnowledge(guildId, query, limit = 5) {
-    const matched = await matchEntries(guildId, query, limit);
+async function retrieveKnowledge(guildId, query, { limit = 5, embedder = null } = {}) {
+    const matched = await matchEntries(guildId, query, limit, embedder);
     const seen = new Set(matched.map(entry => String(entry._id)));
 
     const recent = await KnowledgeBase.find({ guildId })
@@ -132,5 +223,7 @@ module.exports = {
     retrieveKnowledge,
     buildKnowledgeContext,
     knowledgeSection,
-    KB_BACKGROUND_LIMIT
+    embeddingTextOfEntry,
+    KB_BACKGROUND_LIMIT,
+    SEMANTIC_MIN_SCORE
 };
