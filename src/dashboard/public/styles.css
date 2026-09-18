@@ -21,6 +21,12 @@
     --success: #22c55e;
     --danger: #ef4444;
     --warn: #f59e0b;
+    /* Caution-banner surface for the dark dashboard (mcp note, AI persona
+       warning). Translucent amber composites over any dark panel; --warn-text
+       is a light amber that clears 9:1 on the result. */
+    --warn-bg: rgba(245, 158, 11, 0.12);
+    --warn-border: rgba(245, 158, 11, 0.30);
+    --warn-text: #f5cf94;
     --radius-sm: 10px;
     --radius: 16px;
     --radius-lg: 24px;
@@ -615,12 +621,12 @@ body {
    when the provider is Anthropic and hides them otherwise. */
 .mcp-hidden { display: none; }
 .mcp-note-warn {
-    background: var(--warn-bg, #fffbe6);
-    border-color: var(--warn-border, #ffe58f);
-    color: var(--warn-text, #7a5f00);
+    background: var(--warn-bg);
+    border-color: var(--warn-border);
+    color: var(--warn-text);
 }
 .mcp-test-result { font-size: 0.78rem; margin-top: 0.35rem; color: var(--text-mute); overflow-wrap: anywhere; }
-.mcp-test-result.ok { color: var(--ok, #16a34a); }
+.mcp-test-result.ok { color: var(--success); }
 .mcp-test-result.bad { color: var(--danger, #dc2626); }
 /* The tool names a successful test reports, so an admin can copy them into the
    allow and block lists instead of guessing. */
@@ -1101,7 +1107,7 @@ textarea.auto-resize {
     background: rgba(127, 127, 127, .25);
 }
 .ai-usage-budget-fill { height: 100%; background: var(--accent, #7aa7ff); }
-.ai-usage-budget-fill.near { background: var(--warning, #e0a052); }
+.ai-usage-budget-fill.near { background: var(--warn); }
 .ai-usage-budget-fill.spent { background: var(--danger, #e05260); }
 .ai-usage-stats {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem;
@@ -1760,7 +1766,7 @@ textarea.auto-resize {
 .game-item-img { max-width: 100%; max-height: 96px; object-fit: contain; border-radius: 6px; display: block; }
 .game-item-emoji { font-size: 3rem; line-height: 1; display: flex; align-items: center; justify-content: center; position: absolute; inset: 0; }
 .game-item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .25rem; }
-.game-item-name { font-size: .95rem; font-weight: 700; color: var(--text-primary, #cdd6f4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.game-item-name { font-size: .95rem; font-weight: 700; color: var(--cream-50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .game-item-id { font-size: .75rem; color: var(--text-mute, #6c7086); font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .game-item-actions { display: flex; gap: .4rem; flex-shrink: 0; }
 /* #880. Both of these labels wrap the file input that does the work. The input
@@ -1894,7 +1900,7 @@ textarea.auto-resize {
 .user-id-tag button { background: none; border: none; color: inherit; opacity: .55; cursor: pointer; padding: 0 .1rem; font-size: 1.1em; line-height: 1; }
 .user-id-tag button:hover { opacity: 1; }
 .user-search-input { width: 100%; }
-.user-search-dropdown { position: absolute; left: 0; right: 0; top: calc(100% + 2px); background: var(--bg-card, #1e1a15); border: 1px solid var(--border); border-radius: 6px; z-index: 200; max-height: 200px; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+.user-search-dropdown { position: absolute; left: 0; right: 0; top: calc(100% + 2px); background: var(--ink-850); border: 1px solid var(--border); border-radius: 6px; z-index: 200; max-height: 200px; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
 .user-search-item { display: flex; align-items: center; padding: .4rem .65rem; cursor: pointer; font-size: .875rem; gap: .5rem; }
 .user-search-item:hover { background: rgba(255,255,255,.06); }
 
