@@ -1,0 +1,56 @@
+                <section id="social" class="panel">
+                    <div class="panel-head">
+                        <h2>Social Notifications</h2>
+                        <p>Post to a channel whenever a creator uploads or an account posts — YouTube, Reddit, X, Instagram, and TikTok.</p>
+                    </div>
+
+                    <p class="ai-inner-desc">
+                        YouTube and Reddit work out of the box. X&nbsp;(Twitter), Instagram, and TikTok publish no public feed,
+                        so following them needs an RSSHub-compatible bridge — set <code>SOCIAL_BRIDGE_BASE_URL</code> on the bot.
+                    </p>
+
+                    <%# The list is re-rendered from the API response after every add or
+                        remove rather than reloading the page for one row (#689). Keep this
+                        markup and renderSocialFeeds() in step. -%>
+                    <div id="social-feeds" style="margin-bottom:1.5rem;">
+                        <% if ((settings.socialFeeds || []).length === 0) { %>
+                            <div class="empty-state" style="padding:2rem 1.5rem;">
+                                <h3>No subscriptions yet</h3>
+                                <p>Follow your first account below.</p>
+                            </div>
+                        <% } %>
+                        <% (settings.socialFeeds || []).forEach((feed, index) => { %>
+                            <div class="list-item">
+                                <div class="rss-feed-main">
+                                    <div class="url"><%= feed.platform %> · <%= feed.ref %></div>
+                                    <small class="rss-feed-target">→ #<%= channels.find(c => c.id === feed.channelId)?.name || 'unknown' %></small>
+                                </div>
+                                <button class="btn btn-danger btn-sm" data-action="social-remove" data-index="<%= index %>">Remove</button>
+                            </div>
+                        <% }); %>
+                    </div>
+
+                    <div class="field">
+                        <label class="field-label" for="social-platform">Platform</label>
+                        <select id="social-platform">
+                            <option value="youtube">▶️ YouTube</option>
+                            <option value="reddit">👽 Reddit</option>
+                            <option value="twitter">𝕏 X (Twitter) — needs bridge</option>
+                            <option value="instagram">📸 Instagram — needs bridge</option>
+                            <option value="tiktok">🎵 TikTok — needs bridge</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="social-input">Account, channel, or URL</label>
+                        <input type="text" id="social-input" placeholder="youtube.com/@handle, channel URL, or channel ID (UC…)">
+                        <div id="social-status" style="font-size:.8rem;margin-top:.35rem;"></div>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="social-channel">Post to channel</label>
+                        <%- include('../channel-select', { id: 'social-channel', placeholder: 'Select a channel' }) %>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn" type="button" data-action="validate-social">Test</button>
+                        <button class="btn btn-primary" data-action="add-social">Follow account</button>
+                    </div>
+                </section>

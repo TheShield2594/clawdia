@@ -43,6 +43,7 @@ router.use(require('./api/stats'));
 router.use(require('./api/autorole'));
 router.use(require('./api/reactionRoles'));
 router.use(require('./api/rss'));
+router.use(require('./api/social'));
 router.use(require('./api/knowledgeBase'));
 router.use(require('./api/summaryJobs'));
 router.use(require('./api/dailyDigest'));

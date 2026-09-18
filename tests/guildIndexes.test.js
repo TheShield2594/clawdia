@@ -71,6 +71,7 @@ describe('the Guild schema is the single home for guilds indexes', () => {
     test.each([
         'idx_guilds_giveaways',
         'idx_guilds_rssfeeds',
+        'idx_guilds_socialfeeds',
         'idx_guilds_tempvoice_active',
         'idx_guilds_dynamic_pricing',
         'idx_guilds_district_active',
@@ -81,6 +82,7 @@ describe('the Guild schema is the single home for guilds indexes', () => {
     test.each([
         ['idx_guilds_giveaways', 'sparse'],
         ['idx_guilds_rssfeeds', 'sparse'],
+        ['idx_guilds_socialfeeds', 'sparse'],
         ['idx_guilds_tempvoice_active', 'partial'],
         ['idx_guilds_dynamic_pricing', 'partial'],
     ])('%s is %s rather than covering every guild', (name, kind) => {
@@ -108,6 +110,13 @@ describe('each scheduled Guild sweep has an index matching its filter', () => {
             filter: "Guild.find({ 'rssFeeds.0': { $exists: true } }",
             index: 'idx_guilds_rssfeeds',
             keys: { 'rssFeeds.0': 1 },
+        },
+        {
+            what: 'socialService.checkSocialFeeds',
+            source: 'services/socialService.js',
+            filter: "Guild.find({ 'socialFeeds.0': { $exists: true } }",
+            index: 'idx_guilds_socialfeeds',
+            keys: { 'socialFeeds.0': 1 },
         },
         {
             what: 'tempVoiceService.checkTempVoice',

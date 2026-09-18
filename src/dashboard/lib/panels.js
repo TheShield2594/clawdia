@@ -25,6 +25,7 @@ const PANELS = [
     'reactionroles',
     'publicpage',
     'rss',
+    'social',
     'tempvoice',
     'commandpolicies',
     'ai',

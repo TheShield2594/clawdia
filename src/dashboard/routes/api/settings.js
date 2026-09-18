@@ -23,7 +23,7 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'starboard', 'eventLog', 'quests',
     'season', 'progressionTracks', 'commandPolicies',
     'suggestions', 'ai', 'tempVoice', 'bibleVerse',
-    'dailyNews', 'dailyNewsProfiles', 'rssFeeds',
+    'dailyNews', 'dailyNewsProfiles', 'rssFeeds', 'socialFeeds',
     'autoRoles', 'reactionRoles',
     'giveaways', 'notifications',
     'newspaper', 'heist', 'exploration',
