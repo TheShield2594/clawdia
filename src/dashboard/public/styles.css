@@ -12,6 +12,12 @@
     --bg-2: #1c1916;
     --surface: rgba(255, 215, 180, 0.04);
     --surface-strong: rgba(255, 215, 180, 0.07);
+    /* Opaque elevated surfaces for cards, tiles and dropdowns on the dark
+       dashboard. Previously referenced only via var(--surface-1/-2, <hex>) with
+       no :root definition, so usages without a fallback rendered transparent
+       and the fallbacks themselves disagreed (bluish #1e1e2e vs warm #1a1510). */
+    --surface-1: var(--ink-800);
+    --surface-2: var(--ink-850);
     --border: rgba(255, 215, 180, 0.09);
     --border-strong: rgba(255, 215, 180, 0.16);
     --text: #faf5f0;
