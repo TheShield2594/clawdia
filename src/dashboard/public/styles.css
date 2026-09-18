@@ -1394,9 +1394,9 @@ textarea.auto-resize {
 
 /* Header */
 .cw-dash-lp-header { max-width: 1320px; margin: 0 auto; padding: 72px 48px 40px; }
-.cw-dash-lp-title { font-size: clamp(44px, 6vw, 72px); line-height: 1.02; margin: 12px 0 16px; color: var(--ink-950); }
+.cw-dash-lp-title { font-size: clamp(44px, 6vw, 72px); line-height: 1.02; margin: 12px 0 16px; color: var(--ink-950); text-wrap: balance; }
 .cw-dash-lp-title em { font-style: italic; color: var(--claw-500); }
-.cw-dash-lp-sub { font-size: 17px; color: var(--ink-600); max-width: 520px; margin: 0; line-height: 1.55; }
+.cw-dash-lp-sub { font-size: 17px; color: var(--ink-600); max-width: 520px; margin: 0; line-height: 1.55; text-wrap: pretty; }
 
 /* Server list section */
 .cw-dash-lp-section { max-width: 1320px; margin: 0 auto; padding: 0 48px 80px; }
@@ -1448,8 +1448,8 @@ textarea.auto-resize {
     max-width: 540px;
 }
 .cw-dash-lp-empty-icon { width: 52px; height: 52px; border-radius: 16px; background: var(--cream-100); display: flex; align-items: center; justify-content: center; color: var(--ink-500); margin: 0 auto 20px; }
-.cw-dash-lp-empty h2 { font-family: 'Instrument Serif', serif; font-size: 30px; color: var(--ink-950); margin: 0 0 10px; }
-.cw-dash-lp-empty p { font-size: 15px; color: var(--ink-600); max-width: 380px; margin: 0 auto 28px; line-height: 1.6; }
+.cw-dash-lp-empty h2 { font-family: 'Instrument Serif', serif; font-size: 30px; color: var(--ink-950); margin: 0 0 10px; text-wrap: balance; }
+.cw-dash-lp-empty p { font-size: 15px; color: var(--ink-600); max-width: 380px; margin: 0 auto 28px; line-height: 1.6; text-wrap: pretty; }
 
 /* Dashboard server-picker footer */
 .cw-dash-lp-footer { border-top: 1px solid rgba(20,17,13,.08); padding: 28px 48px; max-width: 1320px; margin: 60px auto 0; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--ink-500); font-family: 'JetBrains Mono', monospace; }
