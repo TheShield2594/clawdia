@@ -47,6 +47,19 @@ function supportsVision(model) {
     return VISION_MODELS.test(name) && !TEXT_ONLY_MODELS.test(name);
 }
 
+// Which models support Structured Outputs — `response_format: json_schema`
+// (#1044). It landed with gpt-4o-2024-08-06 and covers the 4o, 4.1 and 5 lines
+// and the o-series reasoning models; the one exception is `o1-mini`, which takes
+// no `response_format` at all. Anything older (gpt-4, gpt-3.5) is asked for JSON
+// in the prompt and parsed by the fallback in utils/modelJson.js instead.
+const STRUCTURED_MODELS = /^(gpt-4o|chatgpt-4o|gpt-4\.1|gpt-5|o1|o3|o4)/i;
+const NO_STRUCTURED_MODELS = /^o1-mini/i;
+
+function supportsStructured(model) {
+    const name = String(model || '');
+    return STRUCTURED_MODELS.test(name) && !NO_STRUCTURED_MODELS.test(name);
+}
+
 /**
  * The user turn: a plain string, or the content array a message with images
  * takes.
@@ -341,6 +354,40 @@ async function complete({ apiKey, model, systemPrompt, history, prompt, images, 
     }
 }
 
+/**
+ * One JSON object, schema-constrained by Structured Outputs (#1044).
+ *
+ * `response_format: json_schema` with `strict: true` makes the reply a value
+ * that satisfies `schema` or an explicit refusal — there is no third outcome, so
+ * the fence-stripping, brace-isolating recovery in utils/modelJson.js cannot be
+ * reached on this path. A refusal comes back with no content and its own
+ * `refusal` field, which is thrown rather than parsed: it is a provider outcome
+ * the caller compensates for (the two commands refund on it), not a format to
+ * retry with more tokens.
+ *
+ * One request, no tools and no MCP: a structured turn must answer in the schema,
+ * and a tool call is neither.
+ */
+async function structured({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, schema, schemaName, baseURL, defaultHeaders }) {
+    const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
+    const messages = buildMessages({ systemPrompt, history, prompt, images: null, model });
+
+    const completion = await client.chat.completions.create({
+        model,
+        messages,
+        ...tuningParams(model, temperature, maxTokens),
+        response_format: {
+            type: 'json_schema',
+            json_schema: { name: schemaName || 'result', strict: true, schema }
+        }
+    });
+
+    const message = completion.choices?.[0]?.message;
+    if (message?.refusal) throw new Error(`the model refused the request: ${message.refusal}`);
+    const data = JSON.parse(message?.content || '');
+    return { data, usage: completion.usage ? usageOf(completion.usage) : null };
+}
+
 module.exports = {
     name: 'openai',
     label: 'OpenAI',
@@ -352,7 +399,11 @@ module.exports = {
     // Which models can be shown an image attachment. Asked by the registry so
     // the transport does not have to keep its own list.
     supportsVision,
+    // Which models can answer under a JSON schema natively (#1044). Asked by the
+    // registry so a caller does not have to know what OpenAI's names mean.
+    supportsStructured,
     resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.openaiKey) || process.env.OPENAI_API_KEY }),
     stream,
-    complete
+    complete,
+    structured
 };

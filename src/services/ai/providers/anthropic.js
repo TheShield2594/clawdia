@@ -111,6 +111,20 @@ function supportsVision(model) {
 }
 
 /**
+ * Which Claude models can be forced into a schema by a single tool call (#1044).
+ *
+ * Anthropic has no response-format flag, so structured output here is a tool
+ * whose `input_schema` is the caller's schema plus a `tool_choice` that forces
+ * it. That works on every model with tool use — which is every Claude from 3
+ * onwards, the whole of what this bot's dashboard offers. The two that predate
+ * it are the retired Claude 2 line and `instant`; so, like `supportsVision`,
+ * this is a deny list, and an unknown (newer) model is assumed to support it.
+ */
+function supportsStructured(model) {
+    return !/claude-(2|instant)/i.test(String(model || ''));
+}
+
+/**
  * The user turn: the text, or the text followed by the images.
  *
  * Base64 rather than a URL source, even though Anthropic would fetch the URL
@@ -434,6 +448,44 @@ async function complete(req) {
     };
 }
 
+/**
+ * One JSON object, by forcing a single tool call (#1044).
+ *
+ * The equivalent of a response-format flag on a provider that has none: a tool
+ * whose `input_schema` is the caller's schema, and a `tool_choice` that leaves
+ * the model no move but to emit a `tool_use` whose `input` already satisfies it.
+ * utils/modelJson.js's text recovery is never reached — the structured value is
+ * the tool input, not something parsed back out of prose.
+ *
+ * One request, and the only tool offered is the schema itself: no MCP servers,
+ * so nothing the guild connected can be reached from a structured turn.
+ */
+async function structured({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, schema, schemaName }) {
+    const client = new Anthropic({ apiKey });
+    const name = schemaName || 'result';
+
+    const response = await client.messages.create({
+        ...baseRequest({ model, systemPrompt, temperature, maxTokens }),
+        messages: buildMessages(history, prompt, null, model),
+        tools: [{ name, description: 'Record the result as structured data.', input_schema: schema }],
+        tool_choice: { type: 'tool', name }
+    });
+
+    const use = (response.content || []).find(block => block.type === 'tool_use' && block.name === name);
+    if (!use) throw new Error('the model did not return the structured result');
+
+    return {
+        data: use.input,
+        usage: response.usage
+            ? {
+                inputTokens: inputOf(response.usage),
+                outputTokens: response.usage.output_tokens || 0,
+                cachedInputTokens: cachedOf(response.usage)
+            }
+            : null
+    };
+}
+
 module.exports = {
     name: 'anthropic',
     label: 'Claude',
@@ -448,7 +500,11 @@ module.exports = {
     // that Anthropic is the provider with a choice to make.
     usesClientRoute,
     supportsVision,
+    // Which models can answer under a JSON schema natively — here, via a forced
+    // tool call (#1044).
+    supportsStructured,
     resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.anthropicKey) || process.env.ANTHROPIC_API_KEY }),
     stream,
-    complete
+    complete,
+    structured
 };

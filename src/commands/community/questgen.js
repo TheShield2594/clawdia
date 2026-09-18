@@ -3,14 +3,38 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User     = require('../../models/User');
 const AiQuest  = require('../../models/AiQuest');
-const { resolveProviderConfig, getCompletion } = require('../../services/aiService');
+const { resolveProviderConfig, getStructuredCompletion } = require('../../services/aiService');
 const COLORS = require('../../utils/embedColors');
-const { requestModelJson } = require('../../utils/modelJson');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 
 const COST         = 200;       // coins to generate
 const COOLDOWN_MS  = 23 * 60 * 60 * 1000; // 23h — allow slight drift
 const MAX_AI_QUESTS = 1;        // only one legendary quest active at a time
+
+// The mechanics the quest engine can actually track. One list, used both to
+// constrain the model's answer (the schema enum) and to whitelist it after the
+// fact (`validMechanics` below): a `mechanic` nothing tracks is a quest that can
+// never be completed, and the user has already paid for it.
+const MECHANICS = ['hunt', 'fishing', 'mining', 'social', 'economy', 'explore'];
+
+// The shape /questgen asks the model to fill. A native output constraint where
+// the provider supports it, named in the prompt where it does not (#1044). Kept
+// strict-mode-friendly for OpenAI; the enum matches the tracked mechanics, and
+// `target` is clamped to the mechanic's range in `execute` regardless — the
+// schema guards the format, the code guards the values.
+const QUEST_SCHEMA = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+        name:        { type: 'string', description: 'dramatic quest title, 2–5 words, fantasy/adventure style' },
+        lore:        { type: 'string', description: 'one sentence of narrative backstory, immersive, 10–20 words' },
+        description: { type: 'string', description: 'the plain objective, e.g. "Complete 12 hunts" or "Send 50 messages"' },
+        mechanic:    { type: 'string', enum: MECHANICS },
+        target:      { type: 'integer', description: 'how many to do; clamped to the mechanic range afterwards' },
+        emoji:       { type: 'string', description: 'a single relevant emoji character' }
+    },
+    required: ['name', 'lore', 'description', 'mechanic', 'target', 'emoji']
+};
 
 const MECHANIC_EMOJIS = {
     hunt:    '🏹',
@@ -145,10 +169,11 @@ Create a legendary quest that feels fitting for their journey so far.`;
         let parsed;
         try {
             const config = resolveProviderConfig(guildSettings.ai);
-            // Fence-stripping, brace-isolating and the budget-growing retry are
-            // utils/modelJson's — /forge asks for its item the same way, and both
-            // copies of this were untested when they were two (#830).
-            parsed = await requestModelJson(maxTokens => getCompletion({
+            // Provider-native structured output where the provider supports it,
+            // with utils/modelJson's fence-stripping, budget-growing retry as the
+            // fallback where it does not (#1044). Tools stay off on both paths;
+            // the validation and clamping below run on the result either way.
+            parsed = await getStructuredCompletion({
                 ...config,
                 guildId: interaction.guild.id,
                 // Attribution for the guild's AI limits, which `config`
@@ -160,10 +185,9 @@ Create a legendary quest that feels fitting for their journey so far.`;
                 history: [],
                 prompt,
                 temperature: 0.9,
-                maxTokens,
-                // Pure JSON out — no MCP tools, whose output would only muddy it.
-                mcp: false,
-            }));
+                schema: QUEST_SCHEMA,
+                schemaName: 'legendary_quest',
+            });
         } catch (err) {
             console.error('[QUESTGEN] AI generation failed:', err?.message || err);
             const refunded = await User.findOneAndUpdate(
@@ -183,8 +207,7 @@ Create a legendary quest that feels fitting for their journey so far.`;
         }
 
         // Validate and sanitize
-        const validMechanics = ['hunt', 'fishing', 'mining', 'social', 'economy', 'explore'];
-        const mechanic = validMechanics.includes(parsed.mechanic) ? parsed.mechanic : 'hunt';
+        const mechanic = MECHANICS.includes(parsed.mechanic) ? parsed.mechanic : 'hunt';
         const target   = clampTarget(mechanic, Number(parsed.target) || 10);
         const name     = String(parsed.name     || 'Legendary Quest').slice(0, 60);
         const lore     = String(parsed.lore     || '').slice(0, 200);
