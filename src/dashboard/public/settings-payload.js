@@ -325,6 +325,8 @@ function buildSettingsPayload(section, ctx = {}) {
                 ? parseInt(document.getElementById('ai-context-tokens').value, 10)
                 : null,
             'ai.streaming': document.getElementById('ai-streaming').checked,
+            'ai.semanticRetrieval.enabled': document.getElementById('ai-semantic-enabled').checked,
+            'ai.semanticRetrieval.provider': document.getElementById('ai-semantic-provider').value,
             'ai.rateLimitPerUser': parseInt(document.getElementById('ai-rate-limit').value, 10),
             'ai.rateLimitPerChannel': parseInt(document.getElementById('ai-rate-channel').value, 10),
             'ai.rateLimitWindowMin': parseInt(document.getElementById('ai-rate-window').value, 10),

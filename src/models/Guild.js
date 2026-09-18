@@ -408,6 +408,30 @@ const guildSchema = new Schema({
         // has to assume the server's small default. Null means "use the table";
         // the bounds are what a token budget can sensibly mean.
         contextTokens: { type: Number, default: null, min: 1024, max: 2000000 },
+        // A second, meaning-based retrieval tier over the guild's knowledge base
+        // (#1042). The keyword scorer misses a question that shares no word with
+        // an entry — "I'm skint, what now" never reaches a `daily` entry unless
+        // someone hand-added the synonym — so with this on, entries are embedded
+        // when written and the nearest few by cosine are unioned with the keyword
+        // hits before the prompt is assembled. Off by default: the local model is
+        // a few hundred MB to download on first use, so an operator who does not
+        // want it pays nothing. `provider` defaults to a local on-device model
+        // so no new key is required — it needs the `@xenova/transformers`
+        // package, which is not bundled, so the operator installs it to switch
+        // the local option on; a guild that already has an OpenAI or Gemini key
+        // can point it at that provider's embeddings instead. Only the KB uses
+        // this — the game tables and command reference stay keyword-scored, since
+        // they are fixed, small, and want exact numbers behind an author-curated
+        // synonym map.
+        semanticRetrieval: {
+            enabled: { type: Boolean, default: false },
+            provider: {
+                type: String,
+                enum: ['local', 'openai', 'gemini'],
+                default: 'local'
+            },
+            localModel: { type: String, default: 'Xenova/all-MiniLM-L6-v2' }
+        },
         streaming: { type: Boolean, default: true },
         rateLimitPerUser: { type: Number, default: 20 },
         rateLimitPerChannel: { type: Number, default: 0 },

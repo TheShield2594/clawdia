@@ -190,7 +190,7 @@ describe('the chat transport', () => {
         await handleAIChat(message, SETTINGS, 'who are you?');
 
         expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'who are you?' }));
-        expect(retrieveKnowledge).toHaveBeenCalledWith('g1', 'who are you?');
+        expect(retrieveKnowledge).toHaveBeenCalledWith('g1', 'who are you?', expect.anything());
         expect(appendHistory).toHaveBeenCalledWith(
             'g1', 'c1', 'u1', 'who are you?', expect.any(String), 20, expect.anything(),
         );

@@ -1,8 +1,28 @@
 const express = require('express');
 const router = express.Router();
 const KnowledgeBase = require('../../../models/KnowledgeBase');
+const Guild = require('../../../models/Guild');
+const { embedForStorage } = require('../../../services/ai/embeddings');
+const { embeddingTextOfEntry } = require('../../../services/ai/knowledge');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { readPage, pageEnvelope } = require('../../lib/apiPage');
+
+// The entry's semantic vector, when the guild has the tier on (#1042), or null.
+//
+// Best-effort on the write path: the tier being off, an embedder that cannot be
+// stood up, or an embedding call that fails all resolve to "store no vector,
+// fall back to keyword retrieval" — never to a failed save. The guild's `ai`
+// settings decide provider and model; they are read lean, and the embedder
+// decrypts the provider key itself.
+async function embedEntry(guildId, entry) {
+    try {
+        const guild = await Guild.findOne({ guildId }, { ai: 1 }).lean();
+        return await embedForStorage(guild?.ai || {}, embeddingTextOfEntry(entry));
+    } catch (error) {
+        console.warn(`[KB] could not embed entry for guild ${guildId}: ${error.message}`);
+        return null;
+    }
+}
 
 // One page of the guild's knowledge base entries, newest first.
 //
@@ -40,13 +60,19 @@ router.post('/guild/:guildId/knowledge-base', checkAuth, checkGuildAccess, check
     const sanitizedTags = Array.isArray(tags) ? tags.map(t => String(t).trim()).filter(Boolean).slice(0, 10) : [];
 
     try {
-        const entry = await KnowledgeBase.create({
+        const fields = {
             guildId,
             title: title.trim().slice(0, 200),
             content: content.trim().slice(0, 4000),
             tags: sanitizedTags,
             addedBy: req.user.id
-        });
+        };
+        const vector = await embedEntry(guildId, fields);
+        if (vector) {
+            fields.embedding = vector.embedding;
+            fields.embeddingModel = vector.embeddingModel;
+        }
+        const entry = await KnowledgeBase.create(fields);
         res.json({ success: true, entry });
     } catch (error) {
         console.error('Knowledge base add error:', error);
@@ -92,13 +118,23 @@ router.put('/guild/:guildId/knowledge-base/:entryId', checkAuth, checkGuildAcces
     const sanitizedTags = Array.isArray(tags) ? tags.map(t => String(t).trim()).filter(Boolean).slice(0, 10) : [];
 
     try {
+        const fields = {
+            title: title.trim().slice(0, 200),
+            content: content.trim().slice(0, 4000),
+            tags: sanitizedTags
+        };
+        // The content changed, so any existing vector is now stale. Re-embed if
+        // the tier is on; otherwise clear the old vector rather than leave one
+        // that describes the previous text — a stale vector would rank this
+        // entry against the wrong meaning until it was next edited.
+        const vector = await embedEntry(guildId, fields);
+        const update = vector
+            ? { $set: { ...fields, embedding: vector.embedding, embeddingModel: vector.embeddingModel } }
+            : { $set: fields, $unset: { embedding: '', embeddingModel: '' } };
+
         const entry = await KnowledgeBase.findOneAndUpdate(
             { _id: entryId, guildId },
-            {
-                title: title.trim().slice(0, 200),
-                content: content.trim().slice(0, 4000),
-                tags: sanitizedTags
-            },
+            update,
             { new: true }
         );
         if (!entry) {

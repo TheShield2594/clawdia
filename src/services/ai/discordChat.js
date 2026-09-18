@@ -3,6 +3,7 @@ const { resolveMcpServers } = require('../../config/mcpServers');
 const { providers, mcpMode, usesClientTools, supportsVision } = require('./providers');
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
 const { retrieveKnowledge, knowledgeSection } = require('./knowledge');
+const { getEmbedder } = require('./embeddings');
 const { retrieveCommands, commandSection } = require('./commandHelp');
 const { retrieveGameData, gameDataSection } = require('./gameData');
 const { collectImages, loadImages, visionNotice } = require('./vision');
@@ -267,7 +268,17 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // not. They are separate sections because they are worth different amounts
     // — background is the first thing dropped when the prompt does not fit, and
     // a matched entry is nearly the last.
-    const kb = await retrieveKnowledge(message.guild.id, content);
+    // The knowledge base's semantic tier, when the guild switched it on (#1042):
+    // a paraphrase that shares no word with an entry still reaches it. Null when
+    // the tier is off or the embedder cannot be stood up, in which case
+    // retrieval is exactly the keyword scorer it has always been. Best-effort —
+    // a first-message model load or a provider hiccup falls back to keyword
+    // rather than failing the reply.
+    const embedder = await getEmbedder(aiSettings).catch(err => {
+        console.warn(`[AI:knowledge] semantic embedder unavailable: ${err.message}`);
+        return null;
+    });
+    const kb = await retrieveKnowledge(message.guild.id, content, { embedder });
     const kbMatched = kb.matched ?? (kb.isBackground ? [] : kb.entries || []);
     const kbBackground = kb.background ?? (kb.isBackground ? kb.entries || [] : []);
     if (kbMatched.length) {
