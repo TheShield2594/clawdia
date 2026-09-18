@@ -17,6 +17,10 @@ const { hasIronWill, getArtificerMineYieldBonus } = require('./synergyService');
 const { getBonusMultipliers } = require('../utils/prestige');
 const grind = require('./grindEngine');
 const { WILDERNESS_YIELD_BONUS } = require('../data/crossSystemData');
+// Mine payouts feed the weekly-champion leaderboard and the big-win log, so
+// every roll below draws from the shared CSPRNG rather than Math.random
+// (CodeQL js/insecure-randomness). See src/utils/secureRandom.js.
+const { secureRandom } = require('../utils/secureRandom');
 
 const DANGEROUS_DEPTH_IDS = new Set(['crystal_caves', 'the_abyss']);
 const MINE_DEATH_RATE = 0.08;
@@ -150,7 +154,7 @@ function calculateCritChance(user) {
 
 function weightedRoll(items) {
     const total = items.reduce((s, i) => s + i.weight, 0);
-    let r = Math.random() * total;
+    let r = secureRandom() * total;
     for (const item of items) {
         r -= item.weight;
         if (r <= 0) return item;
@@ -159,7 +163,7 @@ function weightedRoll(items) {
 }
 
 function randInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+    return Math.floor(secureRandom() * (max - min + 1)) + min;
 }
 
 // ─── TIER ROLL ───────────────────────────────────────────────────────────────
@@ -252,7 +256,7 @@ function rollOre(tier, depthId) {
     const start = TIER_ORDER.indexOf(tier);
     for (let i = start < 0 ? 0 : start; i >= 0; i--) {
         const pool = oresAtDepth(TIER_ORDER[i], depthId);
-        if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
+        if (pool.length) return pool[Math.floor(secureRandom() * pool.length)];
     }
     return ORES_BY_TIER['common'][0];
 }
@@ -269,7 +273,7 @@ const FAILURE_SEVERITIES = [
 ];
 
 function rollFailureSeverity() {
-    return FAILURE_SEVERITIES[Math.floor(Math.random() * FAILURE_SEVERITIES.length)];
+    return FAILURE_SEVERITIES[Math.floor(secureRandom() * FAILURE_SEVERITIES.length)];
 }
 
 // ─── PAYOUT CALCULATION ───────────────────────────────────────────────────────
@@ -551,7 +555,7 @@ function executeMine(user, depthId, options = {}) {
     }
 
     const successChance = calculateSuccessChance(user, pickaxe, depth);
-    const success = Math.random() < successChance;
+    const success = secureRandom() < successChance;
 
     const magnetBefore = m.activeMagnet;
     const lampBefore   = m.activeLamp;
@@ -568,8 +572,8 @@ function executeMine(user, depthId, options = {}) {
         const rawPayout  = randInt(ore.payoutMin, ore.payoutMax);
 
         const critChance     = calculateCritChance(user);
-        const isCrit         = Math.random() < critChance;
-        const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
+        const isCrit         = secureRandom() < critChance;
+        const critMultiplier = isCrit ? (1.5 + secureRandom() * 1.0) : 1.0;
 
         const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
         const payoutBeforeMods = Math.round(rawPayout * critMultiplier * streakMult);
@@ -580,7 +584,7 @@ function executeMine(user, depthId, options = {}) {
 
         let specialDrop = null;
         const mineDropChance = (isCrit ? ore.specialDrop?.chance * 2 : ore.specialDrop?.chance ?? 0) * (options.marketplaceActive ? 1.10 : 1.0);
-        if (ore.specialDrop && Math.random() < mineDropChance) {
+        if (ore.specialDrop && secureRandom() < mineDropChance) {
             specialDrop = ore.specialDrop;
             const matKey = ore.specialDrop.itemId;
             if (m.materials[matKey] != null) {
@@ -650,7 +654,7 @@ function executeMine(user, depthId, options = {}) {
         if (pickaxe.currentDurability <= 0) result.pickaxeBroke = true;
 
         // Cave collapse event (dangerous depths only)
-        if (DANGEROUS_DEPTH_IDS.has(depth.id) && !result.pickaxeBroke && Math.random() < MINE_DEATH_RATE) {
+        if (DANGEROUS_DEPTH_IDS.has(depth.id) && !result.pickaxeBroke && secureRandom() < MINE_DEATH_RATE) {
             pickaxe.currentDurability = 0;
             pickaxe.status = 'broken';
             result.pickaxeBroke = true;
@@ -669,7 +673,7 @@ function executeMine(user, depthId, options = {}) {
             pickaxe.currentDurability / pickaxe.maxDurability < 0.50;
         const caveInBlocked = trapActive || ironWillBlocks;
 
-        if (caveInRisk > 0 && Math.random() < caveInRisk && !caveInBlocked) {
+        if (caveInRisk > 0 && secureRandom() < caveInRisk && !caveInBlocked) {
             // Cave-in: flag it and store at-risk payout; mine/dig.js resolves interactively.
             result.caveIn        = true;
             result.caveInDur     = intensityDurLoss;
@@ -765,7 +769,7 @@ function assignDailyMineQuests(user) {
         return !required || canReachTier(required);
     });
 
-    const shuffled  = eligible.slice().sort(() => Math.random() - 0.5);
+    const shuffled  = eligible.slice().sort(() => secureRandom() - 0.5);
     const toAssign  = shuffled.slice(0, DAILY_QUEST_COUNT);
     const expiresAt = new Date(now + LIMITS.DAILY_WINDOW_MS);
 
@@ -879,7 +883,7 @@ function updateMineMap(user, result) {
 
     const unexplored = adjacent.filter(({ r, c }) => m.mineMap[r * MAP_SIZE + c] === CELL.ROCK);
     const candidates = unexplored.length ? unexplored : adjacent;
-    const next = candidates[Math.floor(Math.random() * candidates.length)];
+    const next = candidates[Math.floor(secureRandom() * candidates.length)];
     m.mineMapRow = next.r;
     m.mineMapCol = next.c;
 

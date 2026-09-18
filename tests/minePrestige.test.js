@@ -11,6 +11,9 @@ const {
 const {
     MINER_LEVELS, PRESTIGE_BONUSES, DEPTHS, LIMITS,
 } = require('../src/data/mineData');
+// rollTier draws from src/utils/secureRandom.js, not Math.random (CodeQL
+// js/insecure-randomness), so probe that seam to find the tier boundary.
+const { __setRandomSourceForTests } = require('../src/utils/secureRandom');
 
 const MAX_MINER_LEVEL   = MINER_LEVELS.length;
 const MAX_MINE_PRESTIGE = PRESTIGE_BONUSES.length - 1;
@@ -81,16 +84,15 @@ describe('prestige bonuses actually apply', () => {
         // is that tier's share of the roll.
         const commonShare = prestige => {
             const user = miner({ prestige });
-            const spy = jest.spyOn(Math, 'random');
             let lo = 0;
             let hi = 1;
             for (let i = 0; i < 50; i++) {
                 const mid = (lo + hi) / 2;
-                spy.mockReturnValue(mid);
+                __setRandomSourceForTests(() => mid);
                 if (rollTier(user, DEPTHS.surface_quarry) === 'common') lo = mid;
                 else hi = mid;
             }
-            spy.mockRestore();
+            __setRandomSourceForTests(null);
             return lo;
         };
 

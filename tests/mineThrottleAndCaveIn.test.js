@@ -7,6 +7,9 @@ const {
     executeMine,
 } = require('../src/services/mineService');
 const { DEPTHS, LIMITS } = require('../src/data/mineData');
+// Mine rolls draw from src/utils/secureRandom.js, not Math.random (CodeQL
+// js/insecure-randomness); mockRandom drives that seam and Math.random together.
+const { mockRandom, restoreRandom } = require('./helpers/secureRandom');
 
 function miner({ dailyCoins = 0, dailyMines = 0, windowAgeMs = 0, level = 20 } = {}) {
     const user = { balance: 0, mining: {}, quests: [], markModified() {} };
@@ -77,8 +80,8 @@ describe('daily throttles are reported, not just applied', () => {
 describe('a cave-in holds the earned multiplier in escrow', () => {
     // Math.random() === 0 makes the dig succeed, the tier roll land on the first
     // eligible tier, and the cave-in roll fire whenever its risk is above zero.
-    const always = value => jest.spyOn(Math, 'random').mockReturnValue(value);
-    afterEach(() => { if (jest.isMockFunction(Math.random)) Math.random.mockRestore(); });
+    const always = value => mockRandom(value);
+    afterEach(() => { restoreRandom(); });
 
     const deep = { level: 4, name: 'Deep', emoji: '💎', multiplier: 2.0, caveInRisk: 1.0, durLoss: 3 };
     const safe = { ...deep, caveInRisk: 0.0 };

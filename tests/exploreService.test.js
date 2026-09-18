@@ -72,6 +72,12 @@ function chartRegion(user, region, { landmarks = true, lore = true, secrets = tr
     return rec;
 }
 
+// Explore's payout-steering rolls draw from src/utils/secureRandom.js, not
+// Math.random (CodeQL js/insecure-randomness), so the scripted RNG below has to
+// drive that seam. Both are pointed at the same impl so a mixed code path
+// consumes one shared sequence in call order.
+const { __setRandomSourceForTests } = require('../src/utils/secureRandom');
+
 // Math.random replacement that plays a fixed script, then holds the last value.
 function scriptRandom(values) {
     let i = 0;
@@ -81,7 +87,8 @@ function scriptRandom(values) {
 function withRandom(fn, impl) {
     const original = Math.random;
     Math.random = impl;
-    try { return fn(); } finally { Math.random = original; }
+    __setRandomSourceForTests(impl);
+    try { return fn(); } finally { Math.random = original; __setRandomSourceForTests(null); }
 }
 
 describe('exploreData integrity', () => {
@@ -610,11 +617,13 @@ describe('secret pity tells the truth', () => {
         // for this — delete the reset and it still passes whenever those
         // twenty happen to turn up no secret at all.
         const roll = jest.spyOn(Math, 'random').mockReturnValue(0.92);
+        __setRandomSourceForTests(() => 0.92);
         try {
             const result = executeExplore(user, region, settings, {});
             expect(result.type).toBe('secret');
         } finally {
             roll.mockRestore();
+            __setRandomSourceForTests(null);
         }
 
         expect(user.exploration.sinceSecret).toBe(0);
