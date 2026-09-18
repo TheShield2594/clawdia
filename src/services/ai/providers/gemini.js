@@ -105,6 +105,20 @@ function supportsVision(model) {
     return !/(embedding|aqa|imagen)/i.test(name);
 }
 
+/**
+ * Which Gemini models support `responseSchema` (#1044).
+ *
+ * Every 1.5-and-later chat model does. What does not: the retired text-only 1.0
+ * `pro`, and the embedding, retrieval and image-generation endpoints, which are
+ * not chat models at all — the same set that cannot take an image, for the same
+ * reason.
+ */
+function supportsStructured(model) {
+    const name = String(model || '');
+    if (/^gemini-(1\.0-)?pro/i.test(name)) return false;
+    return !/(embedding|aqa|imagen)/i.test(name);
+}
+
 // What Gemini takes inline. It is the only provider here that does not accept
 // GIF, so a GIF is dropped for this provider rather than refused for all of
 // them — the rest of the message still goes.
@@ -318,6 +332,43 @@ async function complete(req) {
     return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
 }
 
+/**
+ * One JSON object, schema-constrained by `responseSchema` (#1044).
+ *
+ * `responseMimeType: 'application/json'` plus a `responseSchema` makes the reply
+ * a JSON value shaped by the schema, so utils/modelJson.js's fence-and-brace
+ * recovery is never reached here. The schema goes through `toGeminiSchema` — the
+ * same OpenAPI-subset conversion the MCP tool declarations use — because Gemini
+ * rejects the JSON Schema keywords it does not know (`additionalProperties`,
+ * `$schema`, and the rest).
+ *
+ * One request, no tools: a structured turn answers in the schema and nothing
+ * else.
+ */
+async function structured({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, schema }) {
+    const client = new GoogleGenAI({ apiKey });
+    const response = await client.models.generateContent({
+        model,
+        contents: [
+            ...history.map(h => ({
+                role: h.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: h.content }]
+            })),
+            { role: 'user', parts: [{ text: prompt }] }
+        ],
+        config: {
+            systemInstruction: systemPrompt,
+            temperature,
+            maxOutputTokens: maxTokens,
+            responseMimeType: 'application/json',
+            responseSchema: toGeminiSchema(schema)
+        }
+    });
+
+    const data = JSON.parse(response.text);
+    return { data, usage: response.usageMetadata ? usageOf(response.usageMetadata) : null };
+}
+
 module.exports = {
     name: 'gemini',
     label: 'Gemini',
@@ -326,9 +377,12 @@ module.exports = {
     // MCP tools are declared as Gemini functions and called from the loop here.
     mcp: 'client',
     supportsVision,
+    // Which models can answer under a JSON schema natively (#1044).
+    supportsStructured,
     resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.geminiKey) || process.env.GEMINI_API_KEY }),
     stream,
     complete,
+    structured,
     // Exported for the tests that pin what an MCP schema turns into.
     toGeminiSchema
 };
