@@ -17,8 +17,11 @@
 // One interface, three backends, chosen per guild:
 //   local  — @xenova/transformers, all-MiniLM-L6-v2, on-device, no key. The
 //            default, so switching the tier on costs no new credential. The
-//            package is an optional dependency and the model downloads on first
-//            use, so an operator who never enables this pays nothing.
+//            package is not bundled (it pulls a large native dependency tree),
+//            so an operator who wants the on-device option installs it and the
+//            model downloads on first use; until then the tier logs a note and
+//            falls back to keyword scoring, so an operator who never enables
+//            this installs nothing and pays nothing.
 //   openai — text-embedding-3-small, using the guild's existing OpenAI key.
 //   gemini — text-embedding-004, using the guild's existing Gemini key.
 //

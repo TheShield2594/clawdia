@@ -416,9 +416,10 @@ const guildSchema = new Schema({
         // hits before the prompt is assembled. Off by default: the local model is
         // a few hundred MB to download on first use, so an operator who does not
         // want it pays nothing. `provider` defaults to a local on-device model
-        // (`@xenova/transformers`, an optional dependency) so no new key is
-        // required; a guild that already has an OpenAI or Gemini key can point it
-        // at that provider's embeddings instead. Only the knowledge base uses
+        // so no new key is required — it needs the `@xenova/transformers`
+        // package, which is not bundled, so the operator installs it to switch
+        // the local option on; a guild that already has an OpenAI or Gemini key
+        // can point it at that provider's embeddings instead. Only the KB uses
         // this — the game tables and command reference stay keyword-scored, since
         // they are fixed, small, and want exact numbers behind an author-curated
         // synonym map.

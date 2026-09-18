@@ -114,10 +114,13 @@ when it is written and the question into one when it is asked, and the nearest
 few by meaning are unioned with the keyword hits before the prompt is assembled
 — so the paraphrase reaches the entry, and nothing about the keyword tier or the
 citation rules changes. It defaults to a local on-device model
-(`@xenova/transformers`, `all-MiniLM-L6-v2`, an optional dependency that
-downloads on first use) so no new API key is required; a server that already has
-an OpenAI or Gemini key can point it at that provider's embeddings instead. An
-operator who never switches it on downloads nothing and pays nothing. Only the
+(`all-MiniLM-L6-v2`) so no new API key is required; a server that already has an
+OpenAI or Gemini key can point it at that provider's embeddings instead. The
+local model needs the `@xenova/transformers` package, which is **not** bundled —
+an operator who wants the on-device option installs it (`npm install
+@xenova/transformers`), and until then the tier logs a one-line note and falls
+back to keyword scoring. An operator who never switches it on installs nothing
+and pays nothing. Only the
 knowledge base and its own vectors are involved — a vector is read back only by
 the same model that wrote it, so switching provider or model does not compare
 across two vector spaces.
