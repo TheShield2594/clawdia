@@ -54,18 +54,22 @@ afterEach(() => {
 /**
  * Runs archive.sh's `open_archive` against an archive.
  *
- * The library path, the archive path and the work directory are handed to bash
- * as positional arguments ($1/$2/$3), never interpolated into the `-c` script.
- * All three derive from `__dirname`/`os.tmpdir()`, so a checkout or a TMPDIR
- * holding a shell metacharacter would otherwise break out of the command
- * (CodeQL js/shell-command-injection-from-environment); as arguments they are
- * passed verbatim and never re-parsed.
+ * The library path, the archive path and the work directory reach bash through
+ * the environment and are read back with `"$VAR"`, never placed in the command
+ * bash executes. The `-c` script is a constant, so nothing that derives from
+ * `__dirname`/`os.tmpdir()` is part of the command the shell parses — a checkout
+ * or a TMPDIR holding a shell metacharacter cannot break out of it
+ * (CodeQL js/shell-command-injection-from-environment). A double-quoted
+ * expansion is a value, not code, so `. "$ARCHIVE_LIB"` sources the real path.
  */
 function openArchive(archivePath, workDir, env = {}) {
     return spawnSync(
         'bash',
-        ['-c', 'set -euo pipefail\n. "$1"\nopen_archive "$2" "$3"', 'bash', ARCHIVE_LIB, archivePath, workDir],
-        { encoding: 'utf8', env: { ...process.env, ...env } },
+        ['-c', 'set -euo pipefail\n. "$ARCHIVE_LIB"\nopen_archive "$ARCHIVE_PATH" "$WORK_DIR"'],
+        {
+            encoding: 'utf8',
+            env: { ...process.env, ...env, ARCHIVE_LIB, ARCHIVE_PATH: archivePath, WORK_DIR: workDir },
+        },
     );
 }
 
