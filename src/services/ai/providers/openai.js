@@ -5,16 +5,24 @@ const { dataUrl } = require('../vision');
 
 // USD per 1M tokens (input, output). Prefix-matched; unknown models report
 // null cost via ai/usage.js.
+//
+// `cachedIn` is the cache-read rate for a prompt token OpenAI served from its
+// automatic prefix cache, so the ledger prices the cached share of the input at
+// it rather than at the full `in` rate (#1046, #1049). The discount is not the
+// single multiplier Anthropic uses — the 4o and o-series (o1, o1-mini, o3-mini)
+// lines halve cached input (0.5x `in`), while the 4.1 line and o3 quarter it
+// (0.25x) — so each row carries its own published cached price rather than a
+// derived one.
 const PRICING = [
-    { match: /^gpt-4o-mini/i,   in: 0.15,  out: 0.60 },
-    { match: /^gpt-4o/i,        in: 2.50,  out: 10.00 },
-    { match: /^gpt-4\.1-mini/i, in: 0.40,  out: 1.60 },
-    { match: /^gpt-4\.1-nano/i, in: 0.10,  out: 0.40 },
-    { match: /^gpt-4\.1/i,      in: 2.00,  out: 8.00 },
-    { match: /^o3-mini/i,       in: 1.10,  out: 4.40 },
-    { match: /^o3/i,            in: 2.00,  out: 8.00 },
-    { match: /^o1-mini/i,       in: 1.10,  out: 4.40 },
-    { match: /^o1/i,            in: 15.00, out: 60.00 }
+    { match: /^gpt-4o-mini/i,   in: 0.15,  out: 0.60,  cachedIn: 0.075 },
+    { match: /^gpt-4o/i,        in: 2.50,  out: 10.00, cachedIn: 1.25 },
+    { match: /^gpt-4\.1-mini/i, in: 0.40,  out: 1.60,  cachedIn: 0.10 },
+    { match: /^gpt-4\.1-nano/i, in: 0.10,  out: 0.40,  cachedIn: 0.025 },
+    { match: /^gpt-4\.1/i,      in: 2.00,  out: 8.00,  cachedIn: 0.50 },
+    { match: /^o3-mini/i,       in: 1.10,  out: 4.40,  cachedIn: 0.55 },
+    { match: /^o3/i,            in: 2.00,  out: 8.00,  cachedIn: 0.50 },
+    { match: /^o1-mini/i,       in: 1.10,  out: 4.40,  cachedIn: 0.55 },
+    { match: /^o1/i,            in: 15.00, out: 60.00, cachedIn: 7.50 }
 ];
 
 // o-series reasoning models (o1, o3, o3-mini, …), bare or behind an
