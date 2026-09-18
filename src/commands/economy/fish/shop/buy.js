@@ -15,7 +15,8 @@ const { BAIT_PACKS, CONSUMABLES } = require('../../../../data/fishData');
 const GrindProfile = require('../../../../models/GrindProfile');
 const COLORS = require('../../../../utils/embedColors');
 const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
-const { shopRefundPayoutKey } = require('../../../../utils/payoutKey');
+const { shopRefundPayoutKey, shopGrantPayoutKey } = require('../../../../utils/payoutKey');
+const { grantKeyPush, resolveShopGrant } = require('../../../../utils/shopGrant');
 
 // The coins come back through creditCoinsOrOwe, not a bare `$inc`: a refund that
 // itself fails is recorded for `payouts:replay` and the player is told it is
@@ -35,6 +36,14 @@ function refundMessage(refund, currency, amount) {
     if (refund.credited) return 'Purchase failed — your coins were refunded. Please try again.';
     if (refund.owed) return `Purchase failed, and the ${currency}${amount.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`;
     return `Purchase failed, and the ${currency}${amount.toLocaleString()} charged could not be returned or recorded — please contact a server admin.`;
+}
+
+// What the player is told when the grant threw and its outcome could not be read
+// back either (#1058). The coins are deliberately *not* refunded — the item may
+// have been granted, and refunding a committed grant is the over-credit this
+// guards against — so the line points at an admin instead of promising coins.
+function unresolvedMessage(currency, amount) {
+    return `Purchase failed and its outcome could not be confirmed. You have **not** been refunded automatically: if the ${currency}${amount.toLocaleString()} was charged without the item arriving, contact a server admin to sort it out.`;
 }
 
 // `override` lets the browse view drive a purchase from its buy select: it
@@ -128,23 +137,34 @@ async function handleBuy(interaction, user, currency, override = {}) {
                     return interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
                 }
 
-                const profUpdated = await GrindProfile.findOneAndUpdate(
-                    {
-                        userId:  interaction.user.id,
-                        guildId: interaction.guild.id,
-                        system:  'fishing',
-                        $expr: { $lte: [{ $add: [{ $ifNull: [`$${baitField}`, 0] }, addedQty] }, 200] }
-                    },
-                    { $inc: { [baitField]: addedQty } },
-                    { new: true }
-                ).catch(() => null);
+                const grantKey = shopGrantPayoutKey(interaction.id);
+                const identity = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' };
+                let profUpdated = null, threw = false;
+                try {
+                    profUpdated = await GrindProfile.findOneAndUpdate(
+                        {
+                            ...identity,
+                            $expr: { $lte: [{ $add: [{ $ifNull: [`$${baitField}`, 0] }, addedQty] }, 200] }
+                        },
+                        { $inc: { [baitField]: addedQty }, $push: grantKeyPush(grantKey) },
+                        { new: true }
+                    );
+                } catch (err) {
+                    console.error('[fishshop buy] bait grant error:', err);
+                    threw = true;
+                }
 
-                if (!profUpdated) {
+                const state = await resolveShopGrant({ result: profUpdated, threw, identity, key: grantKey });
+                if (state === 'unresolved') {
+                    return interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
+                }
+                if (state === 'absent') {
                     const refund = await refundPurchase(interaction, totalCost);
                     return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
                 }
 
-                f.bait[baitPack.baitType] = profUpdated.data?.bait?.[baitPack.baitType] ?? addedQty;
+                f.bait[baitPack.baitType] = profUpdated?.data?.bait?.[baitPack.baitType]
+                    ?? (f.bait[baitPack.baitType] ?? 0) + addedQty;
                 return interaction.editReply({
                     embeds: [
                         new EmbedBuilder()
@@ -176,23 +196,34 @@ async function handleBuy(interaction, user, currency, override = {}) {
                 return interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
             }
 
-            const profUpdated = await GrindProfile.findOneAndUpdate(
-                {
-                    userId:  interaction.user.id,
-                    guildId: interaction.guild.id,
-                    system:  'fishing',
-                    $expr: { $lte: [{ $add: [{ $ifNull: [`$${consumableField}`, 0] }, quantity] }, stackCap] }
-                },
-                { $inc: { [consumableField]: quantity } },
-                { new: true }
-            ).catch(() => null);
+            const grantKey = shopGrantPayoutKey(interaction.id);
+            const identity = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' };
+            let profUpdated = null, threw = false;
+            try {
+                profUpdated = await GrindProfile.findOneAndUpdate(
+                    {
+                        ...identity,
+                        $expr: { $lte: [{ $add: [{ $ifNull: [`$${consumableField}`, 0] }, quantity] }, stackCap] }
+                    },
+                    { $inc: { [consumableField]: quantity }, $push: grantKeyPush(grantKey) },
+                    { new: true }
+                );
+            } catch (err) {
+                console.error('[fishshop buy] consumable grant error:', err);
+                threw = true;
+            }
 
-            if (!profUpdated) {
+            const state = await resolveShopGrant({ result: profUpdated, threw, identity, key: grantKey });
+            if (state === 'unresolved') {
+                return interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
+            }
+            if (state === 'absent') {
                 const refund = await refundPurchase(interaction, totalCost);
                 return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
             }
 
-            f.consumables[itemId] = profUpdated.data?.consumables?.[itemId] ?? quantity;
+            f.consumables[itemId] = profUpdated?.data?.consumables?.[itemId]
+                ?? (f.consumables[itemId] ?? 0) + quantity;
 
             return interaction.editReply({
                 embeds: [

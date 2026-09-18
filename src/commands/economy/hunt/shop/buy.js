@@ -16,7 +16,8 @@ const GrindProfile = require('../../../../models/GrindProfile');
 const { ACTIVATABLE } = require('../shared');
 const COLORS = require('../../../../utils/embedColors');
 const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
-const { shopRefundPayoutKey } = require('../../../../utils/payoutKey');
+const { shopRefundPayoutKey, shopGrantPayoutKey } = require('../../../../utils/payoutKey');
+const { grantKeyPush, resolveShopGrant } = require('../../../../utils/shopGrant');
 
 // The coins come back through creditCoinsOrOwe, not a bare `$inc`: a refund that
 // itself fails is recorded for `payouts:replay` and the player is told it is
@@ -34,6 +35,13 @@ function refundMessage(refund, currency, amount) {
     if (refund.credited) return 'Purchase failed — your coins were refunded. Please try again.';
     if (refund.owed) return `Purchase failed, and the ${currency}${amount.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`;
     return `Purchase failed, and the ${currency}${amount.toLocaleString()} charged could not be returned or recorded — please contact a server admin.`;
+}
+
+// Told when the grant threw and its outcome could not be read back either
+// (#1058): no automatic refund, because the item may have been granted and
+// refunding a committed grant is the over-credit this guards against.
+function unresolvedMessage(currency, amount) {
+    return `Purchase failed and its outcome could not be confirmed. You have **not** been refunded automatically: if the ${currency}${amount.toLocaleString()} was charged without the item arriving, contact a server admin to sort it out.`;
 }
 
 // `override` lets the browse view drive a purchase from its buy select: it
@@ -124,39 +132,60 @@ async function handleBuy(interaction, user, currency, override = {}) {
                 return interaction.editReply({ content: 'Insufficient funds. Please try again.', embeds: [], components: [] });
             }
 
+            const grantKey = shopGrantPayoutKey(interaction.id);
+            const identity = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'hunt' };
             let newStock;
             if (consumableDef) {
                 const consumableField = `data.consumables.${itemId}`;
-                const profUpdated = await GrindProfile.findOneAndUpdate(
-                    {
-                        userId:  interaction.user.id,
-                        guildId: interaction.guild.id,
-                        system:  'hunt',
-                        $expr: { $lte: [{ $add: [{ $ifNull: [`$${consumableField}`, 0] }, quantity] }, consumableDef.maxStack] }
-                    },
-                    { $inc: { [consumableField]: quantity } },
-                    { new: true }
-                ).catch(() => null);
+                let profUpdated = null, threw = false;
+                try {
+                    profUpdated = await GrindProfile.findOneAndUpdate(
+                        {
+                            ...identity,
+                            $expr: { $lte: [{ $add: [{ $ifNull: [`$${consumableField}`, 0] }, quantity] }, consumableDef.maxStack] }
+                        },
+                        { $inc: { [consumableField]: quantity }, $push: grantKeyPush(grantKey) },
+                        { new: true }
+                    );
+                } catch (err) {
+                    console.error('[huntshop buy] consumable grant error:', err);
+                    threw = true;
+                }
 
-                if (!profUpdated) {
+                const state = await resolveShopGrant({ result: profUpdated, threw, identity, key: grantKey });
+                if (state === 'unresolved') {
+                    return interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
+                }
+                if (state === 'absent') {
                     const refund = await refundPurchase(interaction, totalCost);
                     return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
                 }
-                h.consumables[itemId] = profUpdated.data?.consumables?.[itemId] ?? quantity;
+                h.consumables[itemId] = profUpdated?.data?.consumables?.[itemId] ?? (h.consumables[itemId] ?? 0) + quantity;
                 newStock = `${h.consumables[itemId]}× ${consumableDef.name}`;
             } else {
                 const ammoField = `data.ammo.${ammoDef.ammoType}`;
-                const profUpdated = await GrindProfile.findOneAndUpdate(
-                    { userId: interaction.user.id, guildId: interaction.guild.id, system: 'hunt' },
-                    { $inc: { [ammoField]: ammoDef.quantity * quantity } },
-                    { new: true }
-                ).catch(() => null);
+                const added = ammoDef.quantity * quantity;
+                let profUpdated = null, threw = false;
+                try {
+                    profUpdated = await GrindProfile.findOneAndUpdate(
+                        { ...identity },
+                        { $inc: { [ammoField]: added }, $push: grantKeyPush(grantKey) },
+                        { new: true }
+                    );
+                } catch (err) {
+                    console.error('[huntshop buy] ammo grant error:', err);
+                    threw = true;
+                }
 
-                if (!profUpdated) {
+                const state = await resolveShopGrant({ result: profUpdated, threw, identity, key: grantKey });
+                if (state === 'unresolved') {
+                    return interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
+                }
+                if (state === 'absent') {
                     const refund = await refundPurchase(interaction, totalCost);
                     return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
                 }
-                h.ammo[ammoDef.ammoType] = profUpdated.data?.ammo?.[ammoDef.ammoType] ?? (ammoDef.quantity * quantity);
+                h.ammo[ammoDef.ammoType] = profUpdated?.data?.ammo?.[ammoDef.ammoType] ?? (h.ammo[ammoDef.ammoType] ?? 0) + added;
                 newStock = `${h.ammo[ammoDef.ammoType]} ${ammoDef.ammoType.replace(/_/g, ' ')}`;
             }
 

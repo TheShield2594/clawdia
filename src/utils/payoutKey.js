@@ -72,9 +72,15 @@ const RETENTION_MS   = RETENTION_DAYS * 24 * 60 * 60 * 1000;
  */
 const KEY_CAP = 200;
 
-/** Filter clause that makes an already-applied payout match nothing. */
-function payoutKeyGuard(key) {
-    return { 'paidPayouts.key': { $ne: key } };
+/**
+ * Filter clause that makes an already-applied payout match nothing.
+ *
+ * `field` is the document's key array, defaulting to the User document's
+ * `paidPayouts`. The gathering-shop grant guard keys a `grantKeys` array on the
+ * GrindProfile instead (#1058), so the same guard shape serves both.
+ */
+function payoutKeyGuard(key, field = 'paidPayouts') {
+    return { [`${field}.key`]: { $ne: key } };
 }
 
 /**
@@ -130,10 +136,10 @@ function payoutKeyAppendExpr(key) {
  *                 by callers, which is safe now: a replay carries the same key
  *                 and will guard itself.
  */
-async function classifyUnmatchedPayout(Model, filter, key) {
-    const doc = await Model.findOne(filter, { paidPayouts: 1 }).lean();
+async function classifyUnmatchedPayout(Model, filter, key, field = 'paidPayouts') {
+    const doc = await Model.findOne(filter, { [field]: 1 }).lean();
     if (!doc) return 'missing';
-    return (doc.paidPayouts ?? []).some(entry => entry?.key === key) ? 'duplicate' : 'unknown';
+    return (doc[field] ?? []).some(entry => entry?.key === key) ? 'duplicate' : 'unknown';
 }
 
 /** True for the unique-index violation an upsert raises when the document exists. */
@@ -613,8 +619,28 @@ function shopRefundPayoutKey(interactionId) {
     return `shop:${interactionId}:refund`;
 }
 
+/**
+ * A gathering-shop purchase's *item grant* (#1058), as opposed to the refund
+ * that unwinds it.
+ *
+ * Stamped into `grantKeys` on the buyer's GrindProfile in the same write as the
+ * grant, so a grant that committed but lost its response can be told from one
+ * that never ran (utils/shopGrant.js) — the same commit-but-lost-response window
+ * `listingPurchasePayoutKey` guards on the market's buyer credit, here on the
+ * gathering shops' grant/debit side.
+ *
+ * Keyed by the interaction, like the refund beside it: the same player retrying
+ * the same purchase a second later is a different attempt whose grant records
+ * separately, so a key built from the item alone would collide across attempts.
+ * A namespace apart from the refund key because the two live in different arrays
+ * on different documents and record two different events.
+ */
+function shopGrantPayoutKey(interactionId) {
+    return `shop:${interactionId}:grant`;
+}
+
 module.exports = {
-    gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey,
+    gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
     marketSalePayoutKey, listingPurchasePayoutKey, listingCancelPayoutKey,
     listingUnwindPayoutKey,

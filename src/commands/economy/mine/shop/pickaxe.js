@@ -16,7 +16,8 @@ const { getItemImageAttachment } = require('../../../../utils/itemImageHelper');
 const GrindProfile = require('../../../../models/GrindProfile');
 const COLORS = require('../../../../utils/embedColors');
 const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
-const { shopRefundPayoutKey } = require('../../../../utils/payoutKey');
+const { shopRefundPayoutKey, shopGrantPayoutKey } = require('../../../../utils/payoutKey');
+const { grantKeyPush, resolveShopGrant } = require('../../../../utils/shopGrant');
 
 async function handleBuyPickaxe(interaction, user, currency) {
     const m = user.mining;
@@ -98,13 +99,38 @@ async function handleBuyPickaxe(interaction, user, currency) {
             }
 
             await persistGrindIfNew(user, 'mining');
-            const profUpdated = await GrindProfile.findOneAndUpdate(
-                { userId: user.userId, guildId: user.guildId, system: 'mining' },
-                { $push: { 'data.pickaxes': newPickaxe } },
-                { new: true }
-            ).catch(err => { console.error('[mineshop pickaxe] profile push error:', err); return null; });
+            // The grant stamps the purchase's key alongside the pickaxe (#1058):
+            // a `$push` that committed but lost its response threw here and was
+            // read as "never granted", so the debit was refunded over a pickaxe
+            // the player kept. The key rides the same write, so a thrown grant's
+            // outcome can be read back and the refund gated on a grant confirmed
+            // absent.
+            const grantKey = shopGrantPayoutKey(interaction.id);
+            const identity = { userId: user.userId, guildId: user.guildId, system: 'mining' };
+            let profUpdated = null, threw = false;
+            try {
+                profUpdated = await GrindProfile.findOneAndUpdate(
+                    { ...identity },
+                    { $push: { 'data.pickaxes': newPickaxe, ...grantKeyPush(grantKey) } },
+                    { new: true }
+                );
+            } catch (err) {
+                console.error('[mineshop pickaxe] profile push error:', err);
+                threw = true;
+            }
 
-            if (!profUpdated) {
+            const state = await resolveShopGrant({ result: profUpdated, threw, identity, key: grantKey });
+            if (state === 'unresolved') {
+                // The grant threw and its outcome could not be read back either.
+                // The pickaxe may have been granted, so refunding risks handing
+                // back the coins over a kept pickaxe — the over-credit this guards
+                // against. Left for an admin rather than auto-refunded.
+                return interaction.editReply({
+                    content: `Purchase failed and its outcome could not be confirmed. You have **not** been refunded automatically: if the ${currency}${pickaxeData.cost.toLocaleString()} was charged without the ${pickaxeData.name} arriving, contact a server admin to sort it out.`,
+                    embeds: [], components: [],
+                });
+            }
+            if (state === 'absent') {
                 // Refund the debit — the pickaxe was never granted — through
                 // creditCoinsOrOwe (keyed) so a refund that will not land is
                 // recorded for replay rather than lost under a message that says
@@ -124,7 +150,9 @@ async function handleBuyPickaxe(interaction, user, currency) {
                 });
             }
 
-            m.pickaxes = profUpdated.data.pickaxes;
+            // Grant applied; on a recovered lost-response grant `profUpdated` is
+            // null, so fall back to appending in memory.
+            m.pickaxes = profUpdated?.data.pickaxes ?? [...(m.pickaxes ?? []), newPickaxe];
             const newIndex = m.pickaxes.length - 1;
 
             if (autoEquip) {

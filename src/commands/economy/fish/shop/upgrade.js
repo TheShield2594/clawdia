@@ -15,7 +15,8 @@ const { ensureFishingData } = require('../../../../services/fishService');
 const { ROD_UPGRADES, ROD_BY_TIER } = require('../../../../data/fishData');
 const COLORS = require('../../../../utils/embedColors');
 const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
-const { shopRefundPayoutKey } = require('../../../../utils/payoutKey');
+const { shopRefundPayoutKey, shopGrantPayoutKey } = require('../../../../utils/payoutKey');
+const { stampGrantKey, resolveShopGrant } = require('../../../../utils/shopGrant');
 
 async function handleBuyUpgrade(interaction, user, currency) {
     const f = user.fishing;
@@ -107,10 +108,36 @@ async function handleBuyUpgrade(interaction, user, currency) {
         freshRod.upgrade   = upgradeId;
         freshUser.markModified('fishing');
 
+        // The upgrade persists through the wrapped save that co-saves the fishing
+        // profile, so a grant that committed but lost its response threw here and
+        // was refunded over an upgrade the player kept (#1058). Stamp the
+        // purchase's key onto that same profile so the one save writes the marker,
+        // then read it back on a throw to tell a committed grant from one that
+        // never ran.
+        const grantKey = shopGrantPayoutKey(interaction.id);
+        const identity = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' };
+        stampGrantKey(freshUser._grindProfiles?.fishing, grantKey);
+
+        let threw = false;
         try {
             await freshUser.save();
         } catch (err) {
             console.error('[fishshop upgrade] save error:', err);
+            threw = true;
+        }
+
+        const state = await resolveShopGrant({ result: !threw, threw, identity, key: grantKey });
+        if (state === 'unresolved') {
+            // The save threw and the grant's outcome could not be read back
+            // either. The upgrade may have been installed, so refunding risks
+            // handing the coins back over a kept upgrade — the over-credit this
+            // guards against. Left for an admin rather than auto-refunded.
+            return btn.update({
+                content: `Something went wrong and the purchase could not be confirmed. You have **not** been refunded automatically: if the ${currency}${cost.toLocaleString()} was charged without the ${upgradeDef.name} installing, contact a server admin to sort it out.`,
+                embeds: [], components: [],
+            });
+        }
+        if (state === 'absent') {
             // The coins are already gone; hand them back rather than charging for
             // an upgrade that was never installed. Through creditCoinsOrOwe
             // (keyed to the interaction) so a refund that will not land is
