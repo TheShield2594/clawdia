@@ -12,7 +12,7 @@
 
     <!-- HEADER -->
     <header class="cw-dash-lp-header">
-        <div class="cw-eyebrow">Your Dashboard</div>
+        <div class="cw-eyebrow">Dashboard</div>
         <h1 class="font-display cw-dash-lp-title">Good to see you, <em><%= user.username %>.</em></h1>
         <p class="cw-dash-lp-sub">Pick a server to configure Clawdia. You’ll see every server where you have <strong style="color:var(--ink-950);">Manage Server</strong> permission.</p>
     </header>
@@ -80,7 +80,7 @@
                         <% } else if (guild.inviteUrl) { %>
                             <a href="<%= guild.inviteUrl %>" target="_blank" rel="noopener" class="cw-btn cw-btn-ghost cw-dash-lp-action">Invite bot</a>
                         <% } else { %>
-                            <span class="cw-dash-lp-unavailable">Not configured</span>
+                            <span class="cw-dash-lp-unavailable">Unavailable</span>
                         <% } %>
                     </div>
                 <% }); %>
