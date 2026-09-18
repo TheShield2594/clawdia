@@ -26,9 +26,11 @@ const { decryptSecret } = require('../config/secretBox');
  *     connected a key for chat has not thereby asked for its bot's replies
  *     screened.
  *   - **One policy, not two.** There is a single toggle and no separate matrix
- *     of category switches: an operator configures the server's moderation once
- *     and the outbound check rides on it, using the provider's own default set
- *     of flagged categories rather than a second policy to keep in sync.
+ *     of category switches for an operator to keep in sync: the outbound check
+ *     rides on the one moderation policy the server already has. What that policy
+ *     concretely is depends on the backend below — OpenAI's default set of
+ *     flagged categories, or the fixed harmful-content policy in this module's
+ *     `SYSTEM_PROMPT` — but either way it is one switch, not a second config.
  *   - **Attributed and budgeted.** The provider-prompt path bills `guildId`, so
  *     the tokens land on that guild's ledger and its monthly ceilings apply —
  *     this is a call nobody typed, and those ceilings are the only limits that
@@ -61,9 +63,20 @@ const WITHHELD_MESSAGE =
 // OpenAI's free, purpose-built moderation model.
 const OPENAI_MODERATION_MODEL = 'omni-moderation-latest';
 
-// How much of the reply to submit. A moderation verdict does not need the whole
-// of a long answer, and this bounds what a single check costs and ships.
-const MAX_INPUT_CHARS = 4000;
+// The whole reply is checked — never a truncated prefix, or content past the cut
+// would reach the channel unscreened. This is only the size of each piece the
+// reply is split into for the check: the OpenAI endpoint takes an array and
+// scores every element, and the guild-provider prompt is bounded to one piece so
+// a very long reply cannot blow past the model's context. A reply longer than one
+// piece is flagged if any of its pieces is.
+const CHUNK_CHARS = 4000;
+
+/** `text` cut into pieces of at most `size` characters, in order. */
+function chunkInput(text, size) {
+    const parts = [];
+    for (let i = 0; i < text.length; i += size) parts.push(text.slice(i, i + size));
+    return parts;
+}
 
 // The only verdicts that mean anything on the provider-prompt path. Anything
 // else the model says — a refusal, a hallucinated third option, an injected
@@ -105,25 +118,43 @@ function outputModerationEnabled(guildDoc) {
     return provider === 'ollama' || Boolean(apiKey);
 }
 
-/** The OpenAI moderation-endpoint path. Returns a verdict, or null on failure. */
+/**
+ * The OpenAI moderation-endpoint path. Returns a verdict, or null on failure.
+ *
+ * The whole reply is submitted, split into chunks — the endpoint takes an array
+ * and returns one result per element — so a long answer is checked end to end
+ * rather than by its opening. The reply is flagged if any chunk is, and the
+ * categories are the union of what each flagged chunk tripped.
+ */
 async function moderateWithOpenAI(apiKey, content) {
     const client = new OpenAI({ apiKey });
     const res = await client.moderations.create({
         model: OPENAI_MODERATION_MODEL,
-        input: content,
+        input: chunkInput(content, CHUNK_CHARS),
     });
-    const result = res?.results?.[0];
-    if (!result) return null;
-    const flagged = Boolean(result.flagged);
+    const results = res?.results;
+    if (!results?.length) return null;
+    const flaggedResults = results.filter(result => result?.flagged);
+    const flagged = flaggedResults.length > 0;
     const categories = flagged
-        ? Object.entries(result.categories || {})
-            .filter(([, on]) => on)
-            .map(([name]) => name)
+        ? [...new Set(flaggedResults.flatMap(result =>
+            Object.entries(result.categories || {})
+                .filter(([, on]) => on)
+                .map(([name]) => name)))]
         : [];
     return { flagged, categories, model: OPENAI_MODERATION_MODEL };
 }
 
-/** The guild's-own-provider path. Returns a verdict, or null on failure. */
+/**
+ * The guild's-own-provider path. Returns a verdict, or null on failure.
+ *
+ * The whole reply is checked against the fixed policy in `SYSTEM_PROMPT` — this
+ * path has no notion of "provider categories"; it is one model answering one
+ * question about the complete text. The reply length is already bounded by the
+ * guild's generation `maxTokens`, so the prompt stays in range; a reply that
+ * somehow overflows the model's context errors here and fails open, like any
+ * other failure.
+ */
 async function moderateWithProvider(guildDoc, content) {
     const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(guildDoc.ai);
 
@@ -168,7 +199,9 @@ async function moderateWithProvider(guildDoc, content) {
 async function moderateOutput(guildDoc, text) {
     if (!outputModerationEnabled(guildDoc)) return null;
 
-    const content = String(text ?? '').trim().slice(0, MAX_INPUT_CHARS);
+    // The complete reply — never a prefix. What is checked here is exactly what
+    // the caller posts, so nothing reaches the channel unscreened.
+    const content = String(text ?? '').trim();
     if (!content) return null;
 
     const openaiKey = openaiKeyFor(guildDoc.ai);

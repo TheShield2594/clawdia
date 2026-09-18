@@ -27,7 +27,7 @@ const { createToolConfirmer } = require('./mcp/approval');
 const { createElicitationHandler } = require('./mcp/elicitation');
 const { createSamplingHandler } = require('./mcp/sampling');
 const { recordToolCalls } = require('./mcp/usage');
-const { moderateOutput, WITHHELD_MESSAGE } = require('../aiOutputModerationService');
+const { moderateOutput, outputModerationEnabled, WITHHELD_MESSAGE } = require('../aiOutputModerationService');
 
 // Discord transport for the AI chat loop: rate limiting, prompt assembly,
 // message streaming/chunking, and post-processing. Everything provider-shaped
@@ -130,32 +130,6 @@ async function attachToolFooter(msg, text, footer, channel) {
     await send(channel, footer).catch(() => {});
 }
 
-/**
- * Replace an already-streamed reply with the withheld notice (#1043).
- *
- * The streaming path posts as it generates, so by the time the outbound
- * moderation check has a verdict the text is already on screen. When it flags,
- * the first message becomes the notice and every later split message is removed,
- * so the channel is left with one short line and none of the flagged text.
- *
- * Best-effort throughout: a failed edit or delete is swallowed, because a
- * partly-redacted reply is a smaller failure than an exception thrown after the
- * user has already been billed for the turn. A message that will not delete is
- * blanked to a marker instead, so it cannot keep displaying the withheld text.
- */
-async function redactStreamedReply(sentMessages, channel) {
-    const [first, ...rest] = sentMessages.filter(Boolean);
-    if (first) {
-        await edit(first, WITHHELD_MESSAGE).catch(() => {});
-    } else {
-        await send(channel, WITHHELD_MESSAGE).catch(() => {});
-    }
-    for (const extra of rest) {
-        const gone = await extra.delete().then(() => true).catch(() => false);
-        if (!gone) await edit(extra, '⚠️').catch(() => {});
-    }
-}
-
 // Where to cut `text` for a piece of at most `size`: the last newline in
 // range, else the last space, else a hard cut. One preference order for every
 // split — the streamed overflow below goes through chunkText too, so it no
@@ -247,7 +221,15 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     }
 
     const maxHistory = aiSettings.maxHistory ?? 20;
-    const useStreaming = aiSettings.streaming !== false;
+
+    // Whether this guild screens the bot's own replies before they post (#1043).
+    // When it does, streaming is turned off for this turn regardless of the
+    // guild's streaming preference: a streamed reply is on screen chunk by chunk
+    // before there is any text to moderate, so the only way to screen it *before*
+    // it is posted is to generate it whole, check it, then post the approved text
+    // or the withheld notice. The non-streaming path below does exactly that.
+    const moderateOutbound = outputModerationEnabled(guildSettings);
+    const useStreaming = aiSettings.streaming !== false && !moderateOutbound;
 
     // The streaming path posts this "…" before the first chunk arrives, so an
     // error after that point has to land *in* it. Left alone it stays in the
@@ -700,18 +682,10 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
                 }
             }
 
-            // The reply is fully generated now. Screen it before it settles: on
-            // a flag the streamed text is redacted to the withheld notice, and
-            // nothing below is appended to it (#1043). Fail-open — a null verdict
-            // (off, no checker, or the check failed) leaves the reply as it is.
-            const verdict = fullResponse.trim() ? await moderateOutput(guildSettings, fullResponse) : null;
-            if (verdict?.flagged) {
-                withheld = true;
-                await redactStreamedReply(sentMessages, message.channel);
-                fullResponse = WITHHELD_MESSAGE;
-            } else {
-                await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
-            }
+            // No outbound moderation on this path: a guild that screens its
+            // replies took the non-streaming branch below (see `useStreaming`),
+            // because a streamed reply cannot be screened before it is posted.
+            await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
         } else {
             let response = await withRetry(() => {
                 activity.reset();

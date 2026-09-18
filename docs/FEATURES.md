@@ -321,24 +321,34 @@ can ping `@everyone`; on a server the operator does not control, a
 prompt-injected or badly-behaved model can post exactly what that server would
 want blocked. This is the check that looks first.
 
-The reply goes to OpenAI's free `omni-moderation-latest` endpoint whenever any
-OpenAI key is present (the dashboard key or the bot-wide one), and otherwise to
-the guild's own provider with one fixed "does this violate the policy" question.
-A flagged reply is replaced with a short *the response was withheld* notice, and
-nothing flagged is kept — no tool footer, no attachments, and it is not written
-to the conversation history. The model call that produced it still counts against
-the budget, because it was made.
+The whole reply goes to one of two checkers, picked by what the server has
+connected:
 
-There is a single toggle and no separate matrix of category switches: an operator
-configures the server's moderation once and the outbound check rides on it, using
-the provider's own default set of flagged categories rather than a second policy
-to keep in sync. Like event commentary and filter-trip review it is off by
-default even when AI is on, and it spends the guild's own budget against the same
-monthly token and cost ceilings (OpenAI's moderation endpoint is free and spends
-nothing). It is **fail-open**: a moderation-endpoint outage or a budget refusal
-logs a warning and posts the reply rather than losing it. The reply text is data
-inside a fixed prompt, never an instruction, and the check never sees or calls MCP
-tools.
+- **OpenAI's free `omni-moderation-latest` endpoint** whenever any OpenAI key is
+  present (the dashboard key or the bot-wide one). The policy here is OpenAI's own
+  default set of flagged categories — hate, harassment, sexual, violence,
+  self-harm and the rest — and the reply is flagged if any of them trips.
+- **Otherwise the guild's own provider**, asked one fixed *"does this violate the
+  policy"* question. The policy on this path is a fixed harmful-content
+  description in the prompt, not a category list — it is one model returning a
+  plain allow/block verdict.
+
+Either way it is one switch to configure, not a second policy to keep in sync
+alongside auto-mod. A flagged reply is replaced with a short *the response was
+withheld* notice, and nothing flagged is kept — no tool footer, no attachments,
+and it is not written to the conversation history. The model call that produced it
+still counts against the budget, because it was made.
+
+Because a reply has to be screened *before* it is posted, turning this on makes
+the bot's replies arrive complete rather than streaming in live for that server —
+there is nothing to check until the whole reply exists. The complete reply is
+checked, never just its opening, so nothing past a length cut-off can slip
+through. Like event commentary and filter-trip review it is off by default even
+when AI is on, and it spends the guild's own budget against the same monthly token
+and cost ceilings (OpenAI's moderation endpoint is free and spends nothing). It is
+**fail-open**: a moderation-endpoint outage or a budget refusal logs a warning and
+posts the reply rather than losing it. The reply text is data inside a fixed
+prompt, never an instruction, and the check never sees or calls MCP tools.
 
 ### AI-Generated Content
 

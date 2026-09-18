@@ -1,10 +1,10 @@
 'use strict';
 
-// #1043: when outbound moderation flags the bot's own reply, the transport
-// replaces it with a short withheld notice before it settles, keeps none of the
-// flagged text (no tool footer, no attachments), and does not write it to the
-// conversation history. A null verdict (off, no checker, or the check failed) is
-// fail-open: the reply is posted exactly as it would be without the feature.
+// #1043: a guild that screens the bot's own replies runs the reply through the
+// non-streaming path (so nothing reaches Discord before the verdict), and a
+// flagged reply is replaced with a short withheld notice — no model text, no
+// tool footer, and nothing written to history. A null/allow verdict is
+// fail-open: the reply posts exactly as it would without the feature.
 
 jest.mock('../src/models/User', () => ({
     findOne: jest.fn(() => ({ lean: async () => null }))
@@ -52,14 +52,17 @@ jest.mock('../src/services/ai', () => ({
 
 const WITHHELD = '⚠️ withheld for test';
 const mockModerateOutput = jest.fn();
+const mockOutputModerationEnabled = jest.fn();
 jest.mock('../src/services/aiOutputModerationService', () => ({
     moderateOutput: (...args) => mockModerateOutput(...args),
-    outputModerationEnabled: jest.fn(() => true),
+    outputModerationEnabled: (...args) => mockOutputModerationEnabled(...args),
     WITHHELD_MESSAGE: WITHHELD,
 }));
 
 const { handleAIChat } = require('../src/services/ai/discordChat');
 
+// A guild that has streaming on but also screens its output — the two conflict,
+// and moderation wins by forcing the buffered (non-streaming) path.
 const SETTINGS = { provider: 'mock', streaming: true, actionsEnabled: false, maxHistory: 20 };
 const GUILD = { guildId: 'g1', ai: { enabled: true }, moderation: { aiOutputModeration: true } };
 
@@ -96,7 +99,7 @@ function everyPayload(message, sent) {
         ...message.channel.send.mock.calls
     ].map(call => call[0]);
     const edits = sent.flatMap(msg => msg.edit.mock.calls).map(call => call[0]);
-    return [...posts, ...edits];
+    return [...posts, ...edits].map(p => (typeof p === 'string' ? p : p?.content ?? ''));
 }
 
 beforeEach(() => {
@@ -104,60 +107,53 @@ beforeEach(() => {
     mockStream.mockImplementation(async function* () { yield 'a normal answer'; });
     mockComplete.mockResolvedValue('a normal answer');
     mockModerateOutput.mockResolvedValue(null); // fail-open default
+    mockOutputModerationEnabled.mockReturnValue(true); // guild screens its output
 });
 
-describe('a flagged streaming reply is withheld', () => {
-    test('the streamed text is redacted to the withheld notice', async () => {
-        mockStream.mockImplementation(async function* () { yield 'here is how to do something awful'; });
-        mockModerateOutput.mockResolvedValue({ flagged: true, categories: ['violence'], model: 'omni' });
-
-        const { message, sent } = fakeMessage();
-        await handleAIChat(message, SETTINGS, 'hello', GUILD);
-
-        // Streaming posts as it generates, so the flagged text is briefly on
-        // screen; what matters is the *final* state of every message — the notice
-        // is shown and none of the flagged text is left behind.
-        const finalContents = sent.map(m => (m.content ?? ''));
-        expect(finalContents.some(c => c.includes(WITHHELD))).toBe(true);
-        for (const text of finalContents) expect(text).not.toContain('awful');
-    });
-
-    test('the flagged reply is not written to history', async () => {
-        mockModerateOutput.mockResolvedValue({ flagged: true, categories: [], model: 'omni' });
+describe('moderation forces the buffered (non-streaming) path', () => {
+    test('the reply is generated whole, not streamed, even with streaming on', async () => {
         const { message } = fakeMessage();
         await handleAIChat(message, SETTINGS, 'hello', GUILD);
-        expect(mockAppendHistory).not.toHaveBeenCalled();
+        expect(mockComplete).toHaveBeenCalled();
+        expect(mockStream).not.toHaveBeenCalled();
     });
 
     test('the moderation check is given the full generated reply and the guild', async () => {
-        mockStream.mockImplementation(async function* () { yield 'the whole answer'; });
+        mockComplete.mockResolvedValue('the whole answer');
         const { message } = fakeMessage();
         await handleAIChat(message, SETTINGS, 'hello', GUILD);
         expect(mockModerateOutput).toHaveBeenCalledWith(GUILD, 'the whole answer');
     });
 });
 
-describe('a flagged non-streaming reply is withheld', () => {
+describe('a flagged reply is withheld', () => {
     test('the posted reply is the withheld notice, not the model text', async () => {
         mockComplete.mockResolvedValue('an unacceptable answer');
-        mockModerateOutput.mockResolvedValue({ flagged: true, categories: [], model: 'omni' });
+        mockModerateOutput.mockResolvedValue({ flagged: true, categories: ['hate'], model: 'omni' });
 
         const { message, sent } = fakeMessage();
-        await handleAIChat(message, { ...SETTINGS, streaming: false }, 'hello', GUILD);
+        await handleAIChat(message, SETTINGS, 'hello', GUILD);
 
-        const contents = everyPayload(message, sent).map(p => (typeof p === 'string' ? p : p?.content ?? ''));
+        const contents = everyPayload(message, sent);
         expect(contents.some(c => c.includes(WITHHELD))).toBe(true);
         expect(contents.some(c => c.includes('unacceptable'))).toBe(false);
+    });
+
+    test('the flagged reply is not written to history', async () => {
+        mockComplete.mockResolvedValue('an unacceptable answer');
+        mockModerateOutput.mockResolvedValue({ flagged: true, categories: [], model: 'omni' });
+        const { message } = fakeMessage();
+        await handleAIChat(message, SETTINGS, 'hello', GUILD);
         expect(mockAppendHistory).not.toHaveBeenCalled();
     });
 });
 
 describe('an unflagged reply is posted normally (fail-open)', () => {
-    test('streaming: a null verdict leaves the answer as it is and stores it', async () => {
+    test('a null verdict leaves the answer as it is and stores it', async () => {
         const { message, sent } = fakeMessage();
         await handleAIChat(message, SETTINGS, 'hello', GUILD);
 
-        const contents = everyPayload(message, sent).map(p => (typeof p === 'string' ? p : p?.content ?? ''));
+        const contents = everyPayload(message, sent);
         expect(contents.some(c => c.includes('a normal answer'))).toBe(true);
         expect(contents.some(c => c.includes(WITHHELD))).toBe(false);
         expect(mockAppendHistory).toHaveBeenCalled();
@@ -167,7 +163,18 @@ describe('an unflagged reply is posted normally (fail-open)', () => {
         mockModerateOutput.mockResolvedValue({ flagged: false, categories: [], model: 'omni' });
         const { message, sent } = fakeMessage();
         await handleAIChat(message, SETTINGS, 'hello', GUILD);
-        const contents = everyPayload(message, sent).map(p => (typeof p === 'string' ? p : p?.content ?? ''));
-        expect(contents.some(c => c.includes('a normal answer'))).toBe(true);
+        expect(everyPayload(message, sent).some(c => c.includes('a normal answer'))).toBe(true);
+    });
+});
+
+describe('a guild that does not screen its output streams as before', () => {
+    test('with moderation disabled the streaming path runs and nothing is withheld', async () => {
+        mockOutputModerationEnabled.mockReturnValue(false);
+        const { message, sent } = fakeMessage();
+        await handleAIChat(message, SETTINGS, 'hello', GUILD);
+
+        expect(mockStream).toHaveBeenCalled();
+        expect(mockComplete).not.toHaveBeenCalled();
+        expect(everyPayload(message, sent).some(c => c.includes(WITHHELD))).toBe(false);
     });
 });

@@ -100,7 +100,8 @@ describe('moderateOutput — OpenAI omni endpoint', () => {
         expect(mockGetCompletion).not.toHaveBeenCalled();
         const call = mockModerationsCreate.mock.calls[0][0];
         expect(call.model).toBe('omni-moderation-latest');
-        expect(call.input).toBe('something nasty');
+        // The whole reply is submitted as an array of chunks.
+        expect(call.input).toEqual(['something nasty']);
     });
 
     it('passes when OpenAI does not flag', async () => {
@@ -120,10 +121,28 @@ describe('moderateOutput — OpenAI omni endpoint', () => {
         expect(await moderateOutput(guild(), 'text')).toBeNull();
     });
 
-    it('truncates a very long reply before submitting it', async () => {
-        mockModerationsCreate.mockResolvedValue(okResult(false));
+    it('checks the whole reply in chunks, never just a prefix', async () => {
+        mockModerationsCreate.mockResolvedValue({
+            results: [{ flagged: false, categories: {} }, { flagged: false, categories: {} }, { flagged: false, categories: {} }],
+        });
         await moderateOutput(guild(), 'x'.repeat(10000));
-        expect(mockModerationsCreate.mock.calls[0][0].input.length).toBe(4000);
+        const input = mockModerationsCreate.mock.calls[0][0].input;
+        expect(Array.isArray(input)).toBe(true);
+        // No chunk exceeds the limit, and together they cover the entire reply.
+        expect(input.every(chunk => chunk.length <= 4000)).toBe(true);
+        expect(input.join('').length).toBe(10000);
+    });
+
+    it('flags the reply when a later chunk trips, not only the first', async () => {
+        mockModerationsCreate.mockResolvedValue({
+            results: [
+                { flagged: false, categories: { hate: false } },
+                { flagged: true, categories: { violence: true, hate: false } },
+            ],
+        });
+        const verdict = await moderateOutput(guild(), 'y'.repeat(5000));
+        expect(verdict.flagged).toBe(true);
+        expect(verdict.categories).toEqual(['violence']);
     });
 });
 
