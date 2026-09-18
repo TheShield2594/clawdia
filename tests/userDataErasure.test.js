@@ -11,6 +11,7 @@ const { useMongo } = require('./helpers/mongo');
 const {
     exportUserData,
     deleteUserData,
+    guildIdsForUser,
     pseudonymize,
     ERASURE_TX_TYPE,
 } = require('../src/utils/userDataRegistry');
@@ -22,11 +23,14 @@ const Reminder = require('../src/models/Reminder');
 const Case = require('../src/models/Case');
 const TempBan = require('../src/models/TempBan');
 const Syndicate = require('../src/models/Syndicate');
+const DmSession = require('../src/models/DmSession');
 
 useMongo();
 
 const GUILD = 'guild-1';
 const OTHER_GUILD = 'guild-2';
+// A guild where the member has a moderation case but never an economy profile.
+const CASE_ONLY_GUILD = 'guild-3';
 const USER = '111111111111111111';
 const OTHER_USER = '222222222222222222';
 
@@ -43,12 +47,23 @@ async function seed() {
         caseId: 1, guildId: GUILD, targetUserId: USER, moderatorId: OTHER_USER,
         type: 'warn', reason: 'test',
     });
+    await Case.create({
+        caseId: 2, guildId: CASE_ONLY_GUILD, targetUserId: USER, moderatorId: OTHER_USER,
+        type: 'note', reason: 'seen only via case',
+    });
     await TempBan.create({
         guildId: GUILD, userId: USER, moderatorId: OTHER_USER, expiresAt: new Date(Date.now() + 1e6),
     });
     await Syndicate.create({
         syndicateId: 's1', guildId: GUILD, name: 'Crew', nameLower: 'crew',
         leaderId: OTHER_USER, memberIds: [OTHER_USER, USER],
+    });
+    await DmSession.create({
+        sessionId: 'dm1', guildId: GUILD, channelId: 'c9', hostId: OTHER_USER,
+        players: [
+            { userId: USER, name: 'Aria', characterClass: 'mage' },
+            { userId: OTHER_USER, name: 'Bran', characterClass: 'rogue' },
+        ],
     });
 }
 
@@ -72,6 +87,41 @@ describe('exportUserData', () => {
         expect(dump.collections.cases.retained).toBe(true);
         expect(dump.collections.tempBans.retained).toBe(true);
         expect(dump.collections.tempBans.reason).toMatch(/ban evasion/i);
+    });
+
+    test('does not leak third parties from shared records', async () => {
+        const dump = await exportUserData(USER, GUILD);
+        const serialized = JSON.stringify(dump);
+
+        // The other member's id appears nowhere in the requester's archive.
+        expect(serialized).not.toContain(OTHER_USER);
+
+        // Case: the requester's own role is shown, the counterparty redacted.
+        const kase = dump.collections.cases.records[0];
+        expect(kase.role).toBe('subject');
+        expect(kase.moderatorId).toBe('[redacted]');
+        expect(kase.notes).toBeUndefined();
+
+        // Syndicate: relationship only, no full roster.
+        const crew = dump.collections.syndicates.records[0];
+        expect(crew.isMember).toBe(true);
+        expect(crew.memberIds).toBeUndefined();
+
+        // DM session: only the requester's own character.
+        const dm = dump.collections.dmSessions.records[0];
+        expect(dm.character.name).toBe('Aria');
+        expect(dm.players).toBeUndefined();
+    });
+});
+
+describe('guildIdsForUser', () => {
+    beforeEach(seed);
+
+    test('finds guilds from every collection, not just the economy profile', async () => {
+        const guilds = (await guildIdsForUser(USER)).sort();
+        // GUILD + OTHER_GUILD have profiles; CASE_ONLY_GUILD is reachable only
+        // through a moderation case.
+        expect(guilds).toEqual([GUILD, OTHER_GUILD, CASE_ONLY_GUILD].sort());
     });
 });
 

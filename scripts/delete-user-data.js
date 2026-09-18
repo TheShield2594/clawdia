@@ -16,16 +16,15 @@
 // wheel for the operations no other path can put back. The run prints what it
 // would touch and refuses to touch it until `--yes` says so.
 //
-// With no `--guild`, it acts across every guild the member has an economy
-// profile in. A request to be forgotten is rarely scoped to one server, and the
-// member id is the same everywhere.
+// With no `--guild`, it acts across every guild the member has any registered
+// data in — economy profile or not. A request to be forgotten is rarely scoped
+// to one server, and the member id is the same everywhere.
 
 require('dotenv').config();
 require('../src/config/fileSecrets').loadFileSecrets();
 
 const mongoose = require('mongoose');
-const User = require('../src/models/User');
-const { exportUserData, deleteUserData } = require('../src/utils/userDataRegistry');
+const { exportUserData, deleteUserData, guildIdsForUser } = require('../src/utils/userDataRegistry');
 
 function parseArgs(argv) {
     const args = { userId: null, guildId: null, apply: false };
@@ -38,11 +37,13 @@ function parseArgs(argv) {
     return args;
 }
 
-/** Every guild the member has an economy profile in, or just the one asked for. */
+/** Every guild the member has any registered data in, or just the one asked for. */
 async function guildsFor(userId, guildId) {
     if (guildId) return [guildId];
-    const ids = await User.distinct('guildId', { userId });
-    return ids;
+    // Discovered across every registered collection, not just the economy
+    // profile: a member can have a reminder, a case, or a syndicate membership
+    // in a guild they never earned a coin in (#1013 review).
+    return guildIdsForUser(userId);
 }
 
 /** A one-line count of what the member has in a guild, for the preview. */
@@ -74,9 +75,7 @@ async function main() {
     try {
         const guilds = await guildsFor(userId, guildId);
         if (guilds.length === 0) {
-            console.log(`No economy profile found for ${userId}${guildId ? ` in guild ${guildId}` : ''}.`);
-            console.log('Note: a member with data only in collections other than the economy profile');
-            console.log('is found by --guild <id>; run with the guild id if you know it.');
+            console.log(`No stored data found for ${userId}${guildId ? ` in guild ${guildId}` : ''}.`);
             return;
         }
 

@@ -79,8 +79,12 @@ function loadLocales() {
     let files;
     try {
         files = fs.readdirSync(LOCALES_DIR).filter(f => f.endsWith('.json'));
-    } catch {
-        // No locales directory is a valid state — the bot runs in English only.
+    } catch (error) {
+        // A missing directory is a valid state — the bot runs in English only.
+        // Any other read failure (a permissions problem, an I/O error) is not
+        // "no locales", it is a broken deployment, and swallowing it here would
+        // silently ship every server the English surface (#1013 review).
+        if (error.code !== 'ENOENT') throw error;
         cache = { locales: {}, langs: [] };
         return cache;
     }

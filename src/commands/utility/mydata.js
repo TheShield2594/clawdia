@@ -86,7 +86,15 @@ async function handleExport(interaction) {
         });
     }
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    // If the acknowledgement itself fails (Discord timed out the interaction),
+    // give the day's window back — the export never happened, and the member
+    // should not be locked out of retrying for 24h over a failure that was ours.
+    try {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    } catch (error) {
+        await release(interaction.client, { bucket: 'mydata-export', userId, guildId, cooldownMs: EXPORT_COOLDOWN_MS });
+        throw error;
+    }
 
     let file;
     try {

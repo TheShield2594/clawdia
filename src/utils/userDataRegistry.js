@@ -41,8 +41,8 @@
 // the field still holding the real id, which the first pass cleared. There are
 // no multi-document transactions — this codebase removed them (#520) and the
 // test harness runs a standalone mongod — so each collection stands on its own,
-// and the accountability the money needs is a record written *after* the ledger
-// is cleared rather than a rollback around it (see deleteUserData).
+// and the accountability the money needs is a record written the moment the
+// profile is claimed rather than a rollback around it (see deleteUserData).
 
 const crypto = require('crypto');
 
@@ -68,14 +68,33 @@ const SeasonRecord = require('../models/SeasonRecord');
 // same string.
 const ERASURE_TX_TYPE = 'data_erasure';
 
-// A member's id, replaced by something stable, non-reversible and — because it
-// is not a Discord snowflake — impossible to collide with a real member. Stable
-// so a pseudonymised case still ties its own rows together; one-way so the token
-// cannot be turned back into the id it stands for.
+// A member's id, replaced by something non-reversible and — because it is not a
+// Discord snowflake — impossible to collide with a real member.
+//
+// It is an HMAC, not a bare hash, on purpose (#1013 review): a Discord id is a
+// public, enumerable value, so a plain `sha256(userId)` can be reversed by
+// hashing every member id an attacker already knows (CWE-760). Keying the hash
+// with something the reader of the database does not have closes that — the
+// token is one-way and no longer a dictionary away from the id it stands for.
+//
+// The key is randomised per process, not configured. Erasure never needs the
+// token to mean anything after the fact — only to not be the id and not be
+// guessable — so a key that lives for the life of the process is enough, and it
+// means there is no extra secret to store or leak. Every call within a run
+// shares this key, so a member's redacted rows still tie together.
+const PSEUDONYM_KEY = crypto.randomBytes(32);
 const REDACTED_PREFIX = 'erased:';
 function pseudonymize(userId) {
-    return REDACTED_PREFIX + crypto.createHash('sha256').update(String(userId)).digest('hex').slice(0, 16);
+    return REDACTED_PREFIX
+        + crypto.createHmac('sha256', PSEUDONYM_KEY).update(String(userId)).digest('hex').slice(0, 16);
 }
+
+// Third-party identities in a shared record are replaced by this in an export —
+// a plain marker rather than a pseudonym, because the person reading their own
+// archive has no use for a stable token, only for not being handed someone
+// else's id.
+const REDACTED_THIRD_PARTY = '[redacted]';
+const redactOther = (id, userId) => (!id || id === userId ? id : REDACTED_THIRD_PARTY);
 
 // `lean()` everywhere: the export serialises to JSON and the counts only need
 // numbers, so nothing here wants a hydrated Mongoose document.
@@ -97,6 +116,11 @@ const lean = query => query.lean();
  *                             for those two so the choice is never silent
  * @property {(userId: string, guildId: string) => Promise<object[]>} collect
  * @property {(userId: string, guildId: string) => Promise<number>} remove
+ * @property {(userId: string) => Promise<string[]>} [guilds] distinct guild ids
+ *           the member appears in for this collection. Defaults to a `userId`
+ *           match; overridden where the member is keyed by another field so that
+ *           guild discovery (scripts/delete-user-data.js) finds a member who has,
+ *           say, a case but no economy profile in a guild.
  */
 
 /** @type {RegistryEntry[]} */
@@ -184,17 +208,32 @@ const USER_DATA_ENTRIES = [
         collect: (userId, guildId) => lean(MarketListing.find({ sellerId: userId, guildId })),
         remove: async (userId, guildId) =>
             (await MarketListing.deleteMany({ sellerId: userId, guildId })).deletedCount || 0,
+        guilds: userId => MarketListing.distinct('guildId', { sellerId: userId }),
     },
     {
         key: 'dmSessions',
         label: 'Dungeon-master campaign characters',
         model: DmSession,
         behavior: 'delete',
-        // A campaign is shared, so this collects and removes the member's own
-        // character rather than the whole session — except a session the member
-        // hosts, which is theirs to take with them.
-        collect: (userId, guildId) =>
-            lean(DmSession.find({ guildId, $or: [{ hostId: userId }, { 'players.userId': userId }] })),
+        // A campaign is shared, so the export returns only the member's own
+        // character and their relationship to the session — never the other
+        // players' characters or the shared story log, which are someone else's
+        // data in the same document (#1013 review).
+        collect: async (userId, guildId) => {
+            const docs = await lean(DmSession.find(
+                { guildId, $or: [{ hostId: userId }, { 'players.userId': userId }] }));
+            return docs.map(doc => ({
+                _id: doc._id,
+                sessionId: doc.sessionId,
+                channelId: doc.channelId,
+                isHost: doc.hostId === userId,
+                character: (doc.players || []).find(p => p.userId === userId) || null,
+            }));
+        },
+        guilds: userId =>
+            DmSession.distinct('guildId', { $or: [{ hostId: userId }, { 'players.userId': userId }] }),
+        // Erasure removes the member's own character, and a session the member
+        // hosts is theirs to take with them.
         remove: async (userId, guildId) => {
             const hosted = await DmSession.deleteMany({ guildId, hostId: userId });
             const left = await DmSession.updateMany(
@@ -225,6 +264,7 @@ const USER_DATA_ENTRIES = [
             );
             return pulled.modifiedCount || 0;
         },
+        guilds: userId => FishingTournament.distinct('guildId', { 'entries.userId': userId }),
     },
     {
         key: 'seasonRecords',
@@ -247,6 +287,7 @@ const USER_DATA_ENTRIES = [
             );
             return pulled.modifiedCount || 0;
         },
+        guilds: userId => SeasonRecord.distinct('guildId', { 'top10.userId': userId }),
     },
     {
         key: 'syndicates',
@@ -256,8 +297,24 @@ const USER_DATA_ENTRIES = [
         reason: 'a syndicate is the server\'s shared entity; the member is removed '
             + 'from its rosters, and a syndicate they lead keeps its history under a '
             + 'redacted leader rather than being deleted out from under the others.',
-        collect: (userId, guildId) =>
-            lean(Syndicate.find({ guildId, $or: [{ leaderId: userId }, { memberIds: userId }, { pendingInvites: userId }] })),
+        // The export returns the member's relationship to the syndicate, not its
+        // full roster or pending-invite list — those are other members' ids
+        // (#1013 review).
+        collect: async (userId, guildId) => {
+            const docs = await lean(Syndicate.find(
+                { guildId, $or: [{ leaderId: userId }, { memberIds: userId }, { pendingInvites: userId }] }));
+            return docs.map(doc => ({
+                _id: doc._id,
+                syndicateId: doc.syndicateId,
+                name: doc.name,
+                tag: doc.tag,
+                isLeader: doc.leaderId === userId,
+                isMember: (doc.memberIds || []).includes(userId),
+                invitePending: (doc.pendingInvites || []).includes(userId),
+            }));
+        },
+        guilds: userId => Syndicate.distinct('guildId',
+            { $or: [{ leaderId: userId }, { memberIds: userId }, { pendingInvites: userId }] }),
         remove: async (userId, guildId) => {
             const pulled = await Syndicate.updateMany(
                 { guildId, $or: [{ memberIds: userId }, { pendingInvites: userId }] },
@@ -278,8 +335,30 @@ const USER_DATA_ENTRIES = [
         reason: 'a case is the server\'s moderation record; the identities inside it '
             + 'are redacted so the account can be forgotten without the server losing '
             + 'the history it is entitled to keep.',
-        collect: (userId, guildId) =>
-            lean(Case.find({ guildId, $or: [{ targetUserId: userId }, { moderatorId: userId }, { assignedModId: userId }] })),
+        // The export returns the case as it concerns the member, with the other
+        // parties' ids redacted and the moderator notes and evidence — which can
+        // name or quote other people — left out entirely (#1013 review). What
+        // remains is what the subject of a case is entitled to see: that it
+        // exists, its type, reason and outcome.
+        collect: async (userId, guildId) => {
+            const docs = await lean(Case.find(
+                { guildId, $or: [{ targetUserId: userId }, { moderatorId: userId }, { assignedModId: userId }] }));
+            return docs.map(doc => ({
+                _id: doc._id,
+                caseId: doc.caseId,
+                type: doc.type,
+                reason: doc.reason,
+                duration: doc.duration,
+                status: doc.status,
+                createdAt: doc.createdAt,
+                role: doc.targetUserId === userId ? 'subject' : 'moderator',
+                targetUserId: redactOther(doc.targetUserId, userId),
+                moderatorId: redactOther(doc.moderatorId, userId),
+                assignedModId: redactOther(doc.assignedModId, userId),
+            }));
+        },
+        guilds: userId => Case.distinct('guildId',
+            { $or: [{ targetUserId: userId }, { moderatorId: userId }, { assignedModId: userId }] }),
         remove: async (userId, guildId) => {
             const token = pseudonymize(userId);
             let changed = 0;
@@ -318,7 +397,20 @@ const USER_DATA_ENTRIES = [
         reason: 'a temporary ban is active enforcement; deleting it on request would '
             + 'turn erasure into ban evasion, so the row is kept until it expires on '
             + 'its own.',
-        collect: (userId, guildId) => lean(TempBan.find({ userId, guildId })),
+        // The ban is the member's own record, but the moderator who set it is a
+        // third party, redacted like the moderator on a case (#1013 review).
+        collect: async (userId, guildId) => {
+            const bans = await lean(TempBan.find({ userId, guildId }));
+            return bans.map(ban => ({
+                _id: ban._id,
+                userId: ban.userId,
+                guildId: ban.guildId,
+                reason: ban.reason,
+                expiresAt: ban.expiresAt,
+                createdAt: ban.createdAt,
+                moderatorId: redactOther(ban.moderatorId, userId),
+            }));
+        },
         remove: async () => 0,
     },
 ];
@@ -354,16 +446,32 @@ async function exportUserData(userId, guildId) {
     };
 }
 
+/** Every guild a member has any registered data in, across all collections. */
+async function guildIdsForUser(userId) {
+    const perEntry = await Promise.all(USER_DATA_ENTRIES.map(entry =>
+        entry.guilds ? entry.guilds(userId) : entry.model.distinct('guildId', { userId })));
+    // Distinct across collections, and never a null/undefined guild id.
+    return [...new Set(perEntry.flat().filter(Boolean))];
+}
+
 /**
  * Erase a member's data in one guild, keeping the records the bot must keep and
  * recording the coins removed so the guild's supply stays reconcilable.
  *
- * The order is deliberate: every collection is processed first — the ledger
- * among them — and only then is the accountability Transaction written, under
- * the member's pseudonym. Writing it last means the ledger wipe cannot sweep it,
- * and keying it to the pseudonym means a second run (which finds no profile, so
- * no coins, so writes nothing) cannot sweep it either. That is what makes the
- * whole operation idempotent without a transaction to wrap it.
+ * The profile is claimed with an atomic `findOneAndDelete`, which does the read
+ * and the delete in one operation. That is what makes the coin accounting both
+ * exactly-once and recoverable (#1013 review):
+ *
+ *   - Two erasures racing on the same member cannot both see the balance —
+ *     only the one whose delete actually removed the document gets it back, so
+ *     only that one writes the accountability record.
+ *   - The record is written the moment the profile is claimed, before the other
+ *     collections are cleared. If a later deletion fails, the coins are already
+ *     accounted for and a retry — which finds no profile, so writes no second
+ *     record — simply finishes the remaining (idempotent) deletions.
+ *
+ * The record is keyed by the member's pseudonym, so the ledger wipe below never
+ * matches it, on this run or a re-run.
  *
  * @param {string} userId
  * @param {string} guildId
@@ -373,22 +481,14 @@ async function exportUserData(userId, guildId) {
  *   results: Array<{key: string, label: string, behavior: string, changed: number}>}>}
  */
 async function deleteUserData(userId, guildId, { Transaction: TxModel = Transaction } = {}) {
-    // Read the balances before anything is deleted, so the accountability record
-    // can name what left the guild's supply. A member with no profile has no
-    // coins and gets no record — which is the branch that keeps a re-run silent.
-    const profile = await User.findOne({ userId, guildId }, { balance: 1, bank: 1 }).lean();
+    const profile = await User.findOneAndDelete(
+        { userId, guildId }, { projection: { balance: 1, bank: 1 } }).lean();
     const coinsRemoved = (profile?.balance || 0) + (profile?.bank || 0);
 
-    const results = [];
-    for (const entry of USER_DATA_ENTRIES) {
-        const changed = await entry.remove(userId, guildId);
-        results.push({ key: entry.key, label: entry.label, behavior: entry.behavior, changed });
-    }
-
     if (coinsRemoved > 0) {
-        // Not fire-and-forget: the accountability of the coin supply is the whole
-        // point of this record, so it is awaited. A failure to write it must not
-        // be swallowed the way logTransaction swallows its own.
+        // Awaited, not fire-and-forget: the accountability of the coin supply is
+        // the whole point of this record. Written before the rest of the
+        // deletions so a partial failure cannot strand the removed coins.
         await TxModel.create({
             userId: pseudonymize(userId),
             guildId,
@@ -398,6 +498,17 @@ async function deleteUserData(userId, guildId, { Transaction: TxModel = Transact
             bank: 0,
             note: 'Balance removed by data-erasure request',
         });
+    }
+
+    const results = [];
+    for (const entry of USER_DATA_ENTRIES) {
+        // The profile row was already removed atomically above; its entry stays
+        // in the list for export and the drift guard, and re-running its
+        // (idempotent) remove here would just delete nothing.
+        const changed = entry.model === User
+            ? (profile ? 1 : 0)
+            : await entry.remove(userId, guildId);
+        results.push({ key: entry.key, label: entry.label, behavior: entry.behavior, changed });
     }
 
     return { userId, guildId, coinsRemoved, results };
@@ -411,6 +522,7 @@ module.exports = {
     REGISTERED_MODELS,
     exportUserData,
     deleteUserData,
+    guildIdsForUser,
     pseudonymize,
     REDACTED_PREFIX,
     ERASURE_TX_TYPE,

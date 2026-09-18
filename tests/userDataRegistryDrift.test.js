@@ -15,8 +15,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
-const { USER_DATA_ENTRIES, REGISTERED_MODELS } = require('../src/utils/userDataRegistry');
+const {
+    USER_DATA_ENTRIES, REGISTERED_MODELS, pseudonymize, REDACTED_PREFIX,
+} = require('../src/utils/userDataRegistry');
 
 const MODELS_DIR = path.join(__dirname, '..', 'src', 'models');
 
@@ -92,5 +95,28 @@ describe('every registry entry is well-formed', () => {
             expect(typeof entry.reason).toBe('string');
             expect(entry.reason.length).toBeGreaterThan(20);
         }
+    });
+});
+
+describe('pseudonymize', () => {
+    test('is a keyed HMAC, not a bare hash of the public id', () => {
+        // A plain sha256 of a Discord id can be reversed by hashing known ids;
+        // the token must not equal that (#1013 review). It is keyed, so it does
+        // not — whether the key is DATA_PSEUDONYM_SECRET or the per-process
+        // random fallback.
+        const bareHash = REDACTED_PREFIX
+            + crypto.createHash('sha256').update('123456789012345678').digest('hex').slice(0, 16);
+        expect(pseudonymize('123456789012345678')).not.toBe(bareHash);
+    });
+
+    test('is stable within a process and distinct per id', () => {
+        expect(pseudonymize('123456789012345678')).toBe(pseudonymize('123456789012345678'));
+        expect(pseudonymize('123456789012345678')).not.toBe(pseudonymize('876543210987654321'));
+    });
+
+    test('is prefixed and never looks like a snowflake', () => {
+        const token = pseudonymize('123456789012345678');
+        expect(token.startsWith(REDACTED_PREFIX)).toBe(true);
+        expect(/^\d{17,20}$/.test(token)).toBe(false);
     });
 });
