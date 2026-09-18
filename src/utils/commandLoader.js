@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { applyLocalizations } = require('./commandLocalizations');
 
 // The one walk of src/commands, shared by startup (src/index.js), the deploy
 // (src/utils/commandDeployer.js) and the cap guard (tests/commandCap.test.js).
@@ -198,6 +199,14 @@ function loadCommandModules(foldersPath = COMMANDS_ROOT) {
         // hand-maintained list that drifts (#665). Modules are singletons in
         // the require cache, so this is idempotent across repeat loads.
         command.category = entry.dir;
+
+        // Localize the command's name and description surface from the locale
+        // files (utils/commandLocalizations.js), in place on the builder. Done
+        // here so it lands in exactly one place: the deployed payload picks it up
+        // through data.toJSON(), and /help reads it back off the same builder.
+        // A localization edit therefore changes commandSetHash and republishes on
+        // the next boot, the same as any other catalogue change.
+        applyLocalizations(command.data);
 
         commands.push({ entry, command });
     }

@@ -101,7 +101,9 @@ module.exports = {
         .setDescription('Browse all bot commands by category'),
     async execute(interaction) {
         const id = interaction.id;
-        const categories = buildCategories(interaction.client?.commands?.values?.() || []);
+        // `interaction.locale` is the viewer's client language; commands carry
+        // localized names/descriptions for the locales under src/locales (#1014).
+        const categories = buildCategories(interaction.client?.commands?.values?.() || [], interaction.locale);
 
         // Only reachable if the collection is empty, which startup refuses to
         // run with — but a select menu with no options is a Discord API error

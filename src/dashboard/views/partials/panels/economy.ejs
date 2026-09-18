@@ -237,6 +237,13 @@
                         </div>
                         <div id="eco-admin-msg" style="min-height:1.4em;font-size:.85em"></div>
 
+                        <!-- Data erasure (GDPR) -->
+                        <div class="eco-ledger-controls">
+                            <button class="btn btn-sm btn-danger" data-action="eco-erase-data">Delete member data (GDPR)</button>
+                            <small class="eco-erase-note">Erases everything Clawdia stores about the member in the User ID box — the same erasure as <code>/mydata delete</code>. Active bans and moderation cases are kept. Cannot be undone.</small>
+                        </div>
+                        <div id="eco-erase-msg" class="eco-ledger-msg"></div>
+
                         <!-- Member Ledger -->
                         <div class="panel-head eco-ledger-head"><h3>Member Ledger</h3><p>Read the transaction history for the member in the User ID box above — every coin movement, newest first, and any owed payout still waiting on <code>npm run payouts:replay</code>. Read-only: nothing here changes a balance.</p></div>
                         <div class="eco-ledger-controls">

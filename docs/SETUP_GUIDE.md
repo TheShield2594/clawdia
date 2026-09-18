@@ -7,10 +7,11 @@
 4. [Dashboard Setup](#dashboard-setup)
 5. [Portainer Deployment](#portainer-deployment)
 6. [Database Management](#database-management)
-7. [Troubleshooting](#troubleshooting)
-8. [Best Practices](#best-practices)
-9. [Getting Help](#getting-help)
-10. [Next Steps](#next-steps)
+7. [Member Data and Privacy](#member-data-and-privacy)
+8. [Troubleshooting](#troubleshooting)
+9. [Best Practices](#best-practices)
+10. [Getting Help](#getting-help)
+11. [Next Steps](#next-steps)
 
 ## Discord Bot Setup
 
@@ -1596,6 +1597,61 @@ exits. It needs `BACKUP_ENCRYPTION_PASSPHRASE`, which it reads from `.env`.
 
 Both forms prompt for confirmation first. Verify the archive with
 `scripts/verify-backup.sh` before running this against a live database.
+
+## Member Data and Privacy
+
+If you run Clawdia for a community in the EU or UK, you are the data controller
+for what the bot stores about its members, and you have a month to answer an
+access ("what do you hold about me?") or erasure ("delete my data") request.
+This section is what you point a member at, and it doubles as the short privacy
+notice most communities are expected to publish.
+
+### What Clawdia stores about a member
+
+Per member, per server, keyed by their Discord user id:
+
+- **Economy profile** — balances, bank, inventory, levels, XP, streaks, timezone
+  and per-command cooldowns (`User`).
+- **AI conversations and pinned memories** — chat history with the bot and the
+  notes it was asked to remember (`Conversation`).
+- **Economy ledger** — a 90-day record of coin movements (`Transaction`).
+- **Reminders**, **fishing/hunting/mining progression** (`GrindProfile`),
+  **AI-generated quests**, **big-win feed entries**, **weekly-champion
+  standings**, **open market listings**, **dungeon-master characters** and
+  **season/tournament placements**.
+- **Crime-syndicate membership** (`Syndicate`).
+- **Moderation cases** naming the member as subject or moderator (`Case`),
+  **active temporary bans** (`TempBan`), and the **dashboard audit log** of
+  actions taken from the admin panel (`AuditLog`).
+
+The one list every tool below walks lives in `src/utils/userDataRegistry.js`; a
+drift test fails the build if a new collection of member data is added without
+being registered there, so this list cannot quietly fall out of date.
+
+### The two member-facing commands
+
+- **`/mydata export`** DMs the member a JSON archive of everything above for the
+  server it is run in, once a day. Each collection in the archive is flagged with
+  whether erasure keeps it and why.
+- **`/mydata delete`** permanently erases the member's data in that server after
+  a confirmation step. It keeps only what the server must keep, and says so:
+  active bans stay in force (deleting one would be ban evasion), and moderation
+  cases are kept with the member's identity redacted rather than dropped, because
+  the case is the server's record. Deleted balances are written back to the guild
+  ledger as a `data_erasure` transaction so the server's coin supply stays
+  reconcilable. Running it twice is a no-op.
+
+### Handling a request that arrives by email
+
+Two operator-side paths do exactly what `/mydata delete` does, for requests that
+do not come through Discord:
+
+- **`node scripts/delete-user-data.js <userId> [--guild <id>]`** — previews what
+  would be erased and deletes nothing until you add `--yes`. With no `--guild` it
+  acts across every server the member has a profile in.
+- **The dashboard** — the economy panel's Admin Actions section has a
+  **Delete member data (GDPR)** button beside the member id box, gated behind a
+  typed confirmation. The erasure is recorded in the audit log.
 
 ## Troubleshooting
 

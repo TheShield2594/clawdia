@@ -545,6 +545,49 @@ async function ecoAdminAction(action) {
     }
 }
 
+// ── Data erasure (GDPR) ─────────────────────────────────────────────────────
+// The dashboard twin of `/mydata delete` and scripts/delete-user-data.js: it
+// calls the same registry code (src/utils/userDataRegistry.js), so what it erases
+// and what it keeps are defined in one place. Gated behind a typed confirmation
+// because it cannot be undone.
+let _ecoEraseInFlight = false;
+async function ecoEraseMemberData() {
+    if (_ecoEraseInFlight) return;
+    const guildId = BOOT.guildId;
+    const userId = document.getElementById('eco-admin-user-id').value.trim();
+    const msgEl = document.getElementById('eco-erase-msg');
+    if (!userId) { msgEl.textContent = 'Enter a user ID above first.'; msgEl.style.color = 'var(--red)'; return; }
+
+    const ok = await showConfirm({
+        title: 'Delete member data',
+        body: `This permanently erases everything Clawdia stores about user ${userId} in this server — `
+            + 'profile, balances, AI conversations, reminders, progression and more. Active bans and '
+            + 'moderation cases are kept (cases with the identity redacted). This cannot be undone.',
+        okText: 'Delete data',
+        typeRequired: 'DELETE',
+    });
+    if (!ok) return;
+
+    _ecoEraseInFlight = true;
+    msgEl.textContent = 'Erasing…';
+    msgEl.style.color = 'var(--text-muted)';
+    try {
+        const resp = await apiFetch(`/api/v1/guild/${guildId}/members/${userId}/data`, { method: 'DELETE' });
+        const data = await resp.json();
+        if (!resp.ok) { msgEl.textContent = data.error || 'Failed'; msgEl.style.color = 'var(--red)'; }
+        else {
+            const removed = (data.results || []).filter(r => r.behavior === 'delete').reduce((n, r) => n + r.changed, 0);
+            msgEl.style.color = 'var(--green)';
+            msgEl.textContent = `Erased. ${removed} record group(s) deleted; ${(data.coinsRemoved||0).toLocaleString()} coins recorded in the ledger.`;
+        }
+    } catch {
+        msgEl.textContent = 'Request failed';
+        msgEl.style.color = 'var(--red)';
+    } finally {
+        _ecoEraseInFlight = false;
+    }
+}
+
 // ── Member Ledger ─────────────────────────────────────────────────────────
 // Read-only view of one member's transactions, plus the owed payouts sitting in
 // the dead-letter queue for them (#1009). Reuses the User ID box the admin
@@ -656,6 +699,7 @@ registerPanelActions({
         'job-edit':         (el, d) => openJobModal(Number(d.idx)),
         'job-delete':       (el, d) => deleteJob(Number(d.idx)),
         'eco-admin':        (el, d) => ecoAdminAction(d.ecoAction),
+        'eco-erase-data':   () => ecoEraseMemberData(),
         'eco-ledger':       () => loadLedger(1),
         'eco-ledger-prev':  () => loadLedger(Math.max(1, _ledgerPage - 1)),
         'eco-ledger-next':  () => loadLedger(_ledgerPage + 1),
