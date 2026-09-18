@@ -150,7 +150,11 @@ function usageOf(meta) {
     if (!meta) return null;
     return {
         inputTokens: meta.promptTokenCount || 0,
-        outputTokens: meta.candidatesTokenCount || 0
+        outputTokens: meta.candidatesTokenCount || 0,
+        // The part of the prompt Gemini served from cached content — a subset
+        // of promptTokenCount, reported when explicit context caching is in
+        // play. Recorded for the cache-hit-rate view (#1046).
+        cachedInputTokens: meta.cachedContentTokenCount || 0
     };
 }
 
@@ -159,6 +163,7 @@ function addUsage(totals, round) {
     if (!round) return;
     totals.inputTokens += round.inputTokens;
     totals.outputTokens += round.outputTokens;
+    totals.cachedInputTokens += round.cachedInputTokens || 0;
 }
 
 /**
@@ -225,7 +230,7 @@ async function* stream(req) {
     let declared = declaredCount(toolkit);
     let message = userMessage(req);
 
-    const totals = { inputTokens: 0, outputTokens: 0 };
+    const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     // A round that calls tools often says something first, and the answer
     // arrives in the round after it — two pieces of prose, not one sentence.
@@ -282,7 +287,7 @@ async function complete(req) {
     let declared = declaredCount(toolkit);
     let message = userMessage(req);
 
-    const totals = { inputTokens: 0, outputTokens: 0 };
+    const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     const parts = [];
 

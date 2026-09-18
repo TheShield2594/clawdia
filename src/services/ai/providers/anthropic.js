@@ -28,15 +28,21 @@ const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require
 // where the answer is "the connector unless the guild has asked for something
 // only the client route can do".
 
+// USD per 1M tokens. `cachedIn` is the cache-*read* rate — Anthropic serves a
+// cached prompt token at ~0.1x the base input price — so the ledger prices the
+// cached share of the input at it rather than at the full rate (#1046). Cache
+// *writes* are billed at ~1.25x, but they ride in the uncached remainder and
+// are priced at `in`, a slight undercharge in the safe (refuse-late) direction
+// the cost ceiling already prefers.
 const PRICING = [
-    { match: /haiku-4/i,    in: 1.00,  out: 5.00 },
-    { match: /sonnet-4/i,   in: 3.00,  out: 15.00 },
-    { match: /opus-4/i,     in: 15.00, out: 75.00 },
-    { match: /haiku-3-5/i,  in: 0.80,  out: 4.00 },
-    { match: /sonnet-3-5/i, in: 3.00,  out: 15.00 },
-    { match: /haiku/i,      in: 0.25,  out: 1.25 },
-    { match: /sonnet/i,     in: 3.00,  out: 15.00 },
-    { match: /opus/i,       in: 15.00, out: 75.00 }
+    { match: /haiku-4/i,    in: 1.00,  out: 5.00,  cachedIn: 0.10 },
+    { match: /sonnet-4/i,   in: 3.00,  out: 15.00, cachedIn: 0.30 },
+    { match: /opus-4/i,     in: 15.00, out: 75.00, cachedIn: 1.50 },
+    { match: /haiku-3-5/i,  in: 0.80,  out: 4.00,  cachedIn: 0.08 },
+    { match: /sonnet-3-5/i, in: 3.00,  out: 15.00, cachedIn: 0.30 },
+    { match: /haiku/i,      in: 0.25,  out: 1.25,  cachedIn: 0.025 },
+    { match: /sonnet/i,     in: 3.00,  out: 15.00, cachedIn: 0.30 },
+    { match: /opus/i,       in: 15.00, out: 75.00, cachedIn: 1.50 }
 ];
 
 // A turn that calls MCP tools can run long enough that the API hands back a
@@ -221,10 +227,33 @@ async function runToolCalls(toolkit, uses) {
     }));
 }
 
+// Anthropic splits the prompt across three usage fields (this bot marks the
+// system block cache_control ephemeral): `input_tokens` is the *uncached* part
+// only, `cache_read_input_tokens` was served from cache, and
+// `cache_creation_input_tokens` was written to it. The total prompt input is
+// the sum of all three, so recording only `input_tokens` — as this did — loses
+// the cache reads entirely and lets the ledger's clamp truncate them (#1046).
+// Every other provider already reports `inputTokens` inclusive of its cached
+// share, so summing here is also what makes the field mean the same thing
+// across providers.
+function inputOf(usage) {
+    return (usage?.input_tokens || 0)
+        + (usage?.cache_read_input_tokens || 0)
+        + (usage?.cache_creation_input_tokens || 0);
+}
+
+// Of that total, the part that was a cache *hit* — the reads, not the writes.
+// A write is a miss that populates the cache, so it does not count toward the
+// hit rate; it stays in the total input above and is priced as ordinary input.
+function cachedOf(usage) {
+    return usage?.cache_read_input_tokens || 0;
+}
+
 function addUsage(totals, usage) {
     if (!usage) return false;
-    totals.inputTokens += usage.input_tokens || 0;
+    totals.inputTokens += inputOf(usage);
     totals.outputTokens += usage.output_tokens || 0;
+    totals.cachedInputTokens += cachedOf(usage);
     return true;
 }
 
@@ -241,7 +270,7 @@ async function* streamWithTools(client, req, toolkit) {
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
     const messages = buildMessages(history, prompt, images, model);
 
-    const totals = { inputTokens: 0, outputTokens: 0 };
+    const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     let wroteText = false;
     const rounds = roundsFor(toolkit);
@@ -285,7 +314,7 @@ async function completeWithTools(client, req, toolkit) {
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
     const messages = buildMessages(history, prompt, images, model);
 
-    const totals = { inputTokens: 0, outputTokens: 0 };
+    const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     const parts = [];
     const rounds = roundsFor(toolkit);
@@ -332,6 +361,7 @@ async function* stream(req) {
 
     let inputTokens = 0;
     let outputTokens = 0;
+    let cachedInputTokens = 0;
 
     for (let turn = 0; ; turn++) {
         const response = await api.stream({ ...base, ...params, messages });
@@ -340,7 +370,8 @@ async function* stream(req) {
             if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
                 yield event.delta.text;
             } else if (event.type === 'message_start' && event.message?.usage) {
-                inputTokens += event.message.usage.input_tokens || 0;
+                inputTokens += inputOf(event.message.usage);
+                cachedInputTokens += cachedOf(event.message.usage);
                 turnOutput = event.message.usage.output_tokens || 0;
             } else if (event.type === 'message_delta' && event.usage) {
                 // Final cumulative output_tokens arrive in message_delta
@@ -358,7 +389,7 @@ async function* stream(req) {
         messages = [...messages, { role: 'assistant', content: final.content }];
     }
 
-    if (usageOut) usageOut.usage = { inputTokens, outputTokens };
+    if (usageOut) usageOut.usage = { inputTokens, outputTokens, cachedInputTokens };
 }
 
 async function complete(req) {
@@ -376,6 +407,7 @@ async function complete(req) {
     const parts = [];
     let inputTokens = 0;
     let outputTokens = 0;
+    let cachedInputTokens = 0;
     let sawUsage = false;
 
     for (let turn = 0; ; turn++) {
@@ -383,8 +415,9 @@ async function complete(req) {
         parts.push(textOf(response.content));
         if (response.usage) {
             sawUsage = true;
-            inputTokens += response.usage.input_tokens || 0;
+            inputTokens += inputOf(response.usage);
             outputTokens += response.usage.output_tokens || 0;
+            cachedInputTokens += cachedOf(response.usage);
         }
 
         if (response.stop_reason !== 'pause_turn') break;
@@ -397,7 +430,7 @@ async function complete(req) {
 
     return {
         text: parts.join(''),
-        usage: sawUsage ? { inputTokens, outputTokens } : null
+        usage: sawUsage ? { inputTokens, outputTokens, cachedInputTokens } : null
     };
 }
 

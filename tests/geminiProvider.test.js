@@ -97,7 +97,7 @@ describe('complete', () => {
         mockSendMessage.mockResolvedValue({ text: 'sunny', usageMetadata: USAGE });
         const result = await gemini.complete(REQ);
         expect(result.text).toBe('sunny');
-        expect(result.usage).toEqual({ inputTokens: 40, outputTokens: 12 });
+        expect(result.usage).toEqual({ inputTokens: 40, outputTokens: 12, cachedInputTokens: 0 });
     });
 
     it('returns an empty string when the model produced no text part', async () => {
@@ -130,7 +130,17 @@ describe('stream', () => {
         ));
 
         await collect(gemini.stream({ ...REQ, usageOut }));
-        expect(usageOut.usage).toEqual({ inputTokens: 40, outputTokens: 2 });
+        expect(usageOut.usage).toEqual({ inputTokens: 40, outputTokens: 2, cachedInputTokens: 0 });
+    });
+
+    it('records the cached share of the prompt when the SDK reports it (#1046)', async () => {
+        const usageOut = {};
+        mockSendMessageStream.mockResolvedValue(chunks(
+            { text: 'hi', usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 3, cachedContentTokenCount: 25 } },
+        ));
+
+        await collect(gemini.stream({ ...REQ, usageOut }));
+        expect(usageOut.usage).toEqual({ inputTokens: 40, outputTokens: 3, cachedInputTokens: 25 });
     });
 
     it('keeps the last running total when several chunks carry usage', async () => {
@@ -141,7 +151,7 @@ describe('stream', () => {
         ));
 
         await collect(gemini.stream({ ...REQ, usageOut }));
-        expect(usageOut.usage).toEqual({ inputTokens: 40, outputTokens: 9 });
+        expect(usageOut.usage).toEqual({ inputTokens: 40, outputTokens: 9, cachedInputTokens: 0 });
     });
 
     it('leaves usage unset when no chunk carried any, so nothing bogus is billed', async () => {

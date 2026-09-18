@@ -208,7 +208,7 @@ describe('openai', () => {
 
         const usageOut = {};
         await collect(openai.stream({ ...REQ, usageOut }));
-        expect(usageOut.usage).toEqual({ inputTokens: 400, outputTokens: 30 });
+        expect(usageOut.usage).toEqual({ inputTokens: 400, outputTokens: 30, cachedInputTokens: 0 });
     });
 
     test('withholds the tools on the last round so a turn cannot end mid-call', async () => {
@@ -251,7 +251,7 @@ describe('openai', () => {
         const result = await openai.complete(REQ);
 
         expect(mockCall).toHaveBeenCalledWith('github__search_repositories', { q: 'clawdia' });
-        expect(result).toEqual({ text: 'Three open PRs.', usage: { inputTokens: 400, outputTokens: 30 } });
+        expect(result).toEqual({ text: 'Three open PRs.', usage: { inputTokens: 400, outputTokens: 30, cachedInputTokens: 0 } });
     });
 
     test('passes the caller\'s mcp switch through to the toolkit', async () => {
@@ -363,7 +363,7 @@ describe('ollama', () => {
 
         const usageOut = {};
         await collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434', usageOut }));
-        expect(usageOut.usage).toEqual({ inputTokens: 400, outputTokens: 30 });
+        expect(usageOut.usage).toEqual({ inputTokens: 400, outputTokens: 30, cachedInputTokens: 0 });
     });
 
     test('sends no tools field when there is nothing to offer', async () => {
@@ -380,7 +380,7 @@ describe('ollama', () => {
             .mockResolvedValueOnce(jsonResponse({ message: { content: 'Three open PRs.' }, prompt_eval_count: 300, eval_count: 10 }));
 
         const result = await ollama.complete({ ...REQ, baseUrl: 'http://localhost:11434' });
-        expect(result).toEqual({ text: 'Three open PRs.', usage: { inputTokens: 400, outputTokens: 30 } });
+        expect(result).toEqual({ text: 'Three open PRs.', usage: { inputTokens: 400, outputTokens: 30, cachedInputTokens: 0 } });
     });
 });
 
@@ -422,7 +422,7 @@ describe('gemini', () => {
         expect(mockSendMessage.mock.calls[1][0]).toEqual({
             message: [{ functionResponse: { name: 'github__search_repositories', response: { result: 'clawdia, 3 open PRs' } } }]
         });
-        expect(result).toEqual({ text: 'Three open PRs.', usage: { inputTokens: 400, outputTokens: 30 } });
+        expect(result).toEqual({ text: 'Three open PRs.', usage: { inputTokens: 400, outputTokens: 30, cachedInputTokens: 0 } });
     });
 
     test('runs a round\'s calls at the same time, in the order Gemini asked', async () => {

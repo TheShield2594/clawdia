@@ -104,7 +104,12 @@ function usageOf(raw) {
     if (!raw) return null;
     return {
         inputTokens: raw.prompt_tokens || 0,
-        outputTokens: raw.completion_tokens || 0
+        outputTokens: raw.completion_tokens || 0,
+        // The part of prompt_tokens OpenAI served from its automatic prefix
+        // cache — a subset of the input, not an addition to it. Recorded for
+        // the cache-hit-rate view (#1046). OpenRouter routes through this same
+        // path, so a routed model that reports it is counted too.
+        cachedInputTokens: raw.prompt_tokens_details?.cached_tokens || 0
     };
 }
 
@@ -115,6 +120,7 @@ function addUsage(totals, round) {
     if (!round) return;
     totals.inputTokens += round.inputTokens;
     totals.outputTokens += round.outputTokens;
+    totals.cachedInputTokens += round.cachedInputTokens || 0;
 }
 
 // Streamed tool calls arrive as fragments keyed by index: the name in one
@@ -241,7 +247,7 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, images, t
     const endpoint = baseURL || 'openai';
     const messages = buildMessages({ systemPrompt, history, prompt, images, model, visionCapable });
 
-    const totals = { inputTokens: 0, outputTokens: 0 };
+    const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     // A round that calls tools often says something first — "let me look that
     // up" — and the answer arrives in the round after it. Two pieces of prose,
@@ -299,7 +305,7 @@ async function complete({ apiKey, model, systemPrompt, history, prompt, images, 
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = buildMessages({ systemPrompt, history, prompt, images, model, visionCapable });
 
-    const totals = { inputTokens: 0, outputTokens: 0 };
+    const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
     let sawUsage = false;
     const parts = [];
 

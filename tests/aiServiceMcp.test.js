@@ -342,13 +342,37 @@ describe('streamCompletion — anthropic', () => {
         const chunks = await collect(streamCompletion({ ...BASE, usageOut }));
 
         expect(chunks.join('')).toBe('Hello');
-        expect(usageOut.usage).toEqual({ inputTokens: 11, outputTokens: 7 });
+        expect(usageOut.usage).toEqual({ inputTokens: 11, outputTokens: 7, cachedInputTokens: 0 });
 
         const [body] = betaStream.mock.calls[0];
         expect(body.mcp_servers).toHaveLength(1);
+        // #1046: the system block is sent cache_control ephemeral, so a hit
+        // reads back as cache_read_input_tokens — see the next test.
+        expect(body.system[0].cache_control).toEqual({ type: 'ephemeral' });
         expect(body.tools).toEqual([{ type: 'mcp_toolset', mcp_server_name: 'one' }]);
         expect(body.betas).toEqual(['mcp-client-2025-11-20']);
         expect(streamFn).not.toHaveBeenCalled();
+    });
+
+    // Anthropic's input_tokens is the *uncached* part only; the total prompt
+    // input is input_tokens + cache_read + cache_creation, so inputTokens must
+    // be the sum (912 = 12 fresh + 900 read) — otherwise the ledger's clamp
+    // truncates the 900 cache reads down to 12 (#1046).
+    test('records the full prompt input and cache reads Anthropic reports (#1046)', async () => {
+        configureServers([{ name: 'one', url: 'https://one.example.com/sse' }]);
+        betaStream.mockReturnValue(fakeStream(
+            [
+                { type: 'message_start', message: { usage: { input_tokens: 12, cache_read_input_tokens: 900, output_tokens: 0 } } },
+                textDelta('Hi'),
+                { type: 'message_delta', usage: { output_tokens: 3 } }
+            ],
+            { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Hi' }] }
+        ));
+
+        const usageOut = {};
+        await collect(streamCompletion({ ...BASE, usageOut }));
+
+        expect(usageOut.usage).toEqual({ inputTokens: 912, outputTokens: 3, cachedInputTokens: 900 });
     });
 
     test('resumes a paused stream so the reply is not cut short', async () => {
@@ -376,7 +400,7 @@ describe('streamCompletion — anthropic', () => {
         const chunks = await collect(streamCompletion({ ...BASE, usageOut }));
 
         expect(chunks.join('')).toBe('searching… found it');
-        expect(usageOut.usage).toEqual({ inputTokens: 25, outputTokens: 7 });
+        expect(usageOut.usage).toEqual({ inputTokens: 25, outputTokens: 7, cachedInputTokens: 0 });
         expect(betaStream.mock.calls[1][0].messages.at(-1)).toEqual({ role: 'assistant', content: pausedContent });
     });
 });

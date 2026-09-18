@@ -244,10 +244,19 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // whatever the far end's tokenizer happens to cut off. `required` is what
     // makes the reply behave — the persona and the tool rules — and is never
     // dropped; see budget.js for the order the rest goes in.
+    // `stable` marks the pieces that do not vary with what the user just asked
+    // — the persona, the always-on background knowledge, the tool rules derived
+    // from this guild's settings. budget.js front-loads all of them so the
+    // prompt opens on a byte-stable prefix every provider's prefix cache can
+    // hit (#1046); the per-question pieces (matched knowledge, the command and
+    // game tables the question retrieved, fetched documents) and anything
+    // carrying the current time (the action rules) are left unflagged so they
+    // fall after it, where the trimming already happens.
     const sections = [{
         id: 'base',
         text: aiSettings.systemPrompt || 'You are a helpful Discord bot assistant.',
-        required: true
+        required: true,
+        stable: true
     }];
 
     const userDoc = await User.findOne({ userId: message.author.id, guildId: message.guild.id }).lean();
@@ -268,6 +277,9 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         sections.push({
             id: 'knowledgeBackground',
             priority: BACKGROUND_PRIORITY,
+            // Injected on every turn regardless of the question, so it belongs
+            // in the cacheable prefix (#1046).
+            stable: true,
             ...knowledgeSection(kbBackground, { background: true })
         });
     }
@@ -320,6 +332,9 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         sections.push({
             id: 'mcpRules',
             required: true,
+            // Derived from the guild's settings, not the question, so it rides
+            // in the stable prefix (#1046).
+            stable: true,
             text: buildMcpAddendum({ actionsEnabled: Boolean(aiSettings.actionsEnabled) && !toolActions })
         });
     }

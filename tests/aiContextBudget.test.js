@@ -112,6 +112,67 @@ describe('fitting a prompt that already fits', () => {
     });
 });
 
+// #1046: the question-independent sections are front-loaded and handed back on
+// their own, so every provider's prompt opens on a byte-stable prefix its cache
+// can hit. The reorder is by a `stable` flag and nothing else — a caller that
+// sets none (every test above) sees no reordering and an empty prefix.
+describe('the cacheable prefix', () => {
+    test('front-loads the stable sections ahead of the per-question ones', () => {
+        const fitted = fitPrompt({
+            sections: [
+                { id: 'base', text: 'PERSONA', required: true, stable: true },
+                { id: 'knowledge', priority: MATCHED_KNOWLEDGE_PRIORITY, header: '\nMATCHED:', joiner: '', items: ['q'] },
+                { id: 'knowledgeBackground', priority: BACKGROUND_PRIORITY, header: '\nBG:', joiner: '', items: ['b'], stable: true }
+            ],
+            prompt: 'hello',
+            budget: 10_000
+        });
+
+        // Persona, then the always-on background, then the matched section —
+        // whatever order the caller pushed them in.
+        expect(fitted.systemPrompt).toBe('PERSONA\nBG:b\nMATCHED:q');
+        // And the prefix is exactly the stable head, on its own.
+        expect(fitted.systemPrefix).toBe('PERSONA\nBG:b');
+    });
+
+    test('is byte-identical across two turns with the same settings and knowledge base', () => {
+        // Same stable sections, a different question each turn: different matched
+        // knowledge, a different command table, a different prompt and history.
+        const turnFor = (matched, ask) => fitPrompt({
+            sections: [
+                { id: 'base', text: 'PERSONA', required: true, stable: true },
+                { id: 'knowledgeBackground', priority: BACKGROUND_PRIORITY, header: '\nBG:', joiner: '', items: ['shared'], stable: true },
+                { id: 'mcpRules', text: '\nRULES', required: true, stable: true },
+                { id: 'knowledge', priority: MATCHED_KNOWLEDGE_PRIORITY, header: '\nK:', joiner: '', items: [matched] },
+                { id: 'commandHelp', priority: COMMAND_PRIORITY, header: '\nCMD:', joiner: '', items: [ask] }
+            ],
+            history: [turn('user', 40)],
+            prompt: ask,
+            budget: 10_000
+        });
+
+        const first = turnFor('alpha', 'how do I fish');
+        const second = turnFor('beta', 'what does the rifle cost');
+
+        expect(first.systemPrefix).toBe('PERSONA\nBG:shared\nRULES');
+        expect(second.systemPrefix).toBe(first.systemPrefix);
+        // The whole prompt still differs — only the prefix is held stable.
+        expect(second.systemPrompt).not.toBe(first.systemPrompt);
+    });
+
+    test('a caller that flags nothing gets no prefix and no reordering', () => {
+        const sections = [
+            { id: 'base', text: 'be helpful', required: true },
+            { id: 'knowledgeBackground', priority: BACKGROUND_PRIORITY, header: 'H:', joiner: '|', items: ['a', 'b'] }
+        ];
+
+        const fitted = fitPrompt({ sections, prompt: 'hello', budget: 10_000 });
+
+        expect(fitted.systemPrefix).toBe('');
+        expect(fitted.systemPrompt).toBe('be helpfulH:a|b');
+    });
+});
+
 describe('what goes first when it does not', () => {
     // One of each droppable thing, all the same size, against a budget that
     // only has room for a couple of them.

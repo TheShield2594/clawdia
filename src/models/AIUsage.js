@@ -8,6 +8,13 @@ const aiUsageSchema = new Schema({
     day:          { type: String, required: true },
     inputTokens:  { type: Number, default: 0 },
     outputTokens: { type: Number, default: 0 },
+    // Of the input tokens above, how many the provider served from its prompt
+    // cache rather than reading afresh (#1046). A subset of inputTokens for the
+    // providers that count it that way (OpenAI, Gemini) and reported separately
+    // by Anthropic; either way it is what the cache-hit-rate view divides by
+    // inputTokens. Zero for providers with no caching (Ollama) and for calls
+    // that predate this field.
+    cachedInputTokens: { type: Number, default: 0 },
     requestCount: { type: Number, default: 0 },
     updatedAt:    { type: Date, default: Date.now }
 });

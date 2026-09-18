@@ -266,6 +266,20 @@ function fitPrompt({
         ...section,
         items: section.items ? [...section.items] : null
     }));
+
+    // Front-load the question-independent sections (#1046). A section flagged
+    // `stable` does not vary with what the user just asked — the persona, the
+    // always-on background knowledge, the settings-derived tool rules — so
+    // putting all of them ahead of the per-question sections (matched
+    // knowledge, the command and game tables the question retrieved, fetched
+    // documents) gives every provider a byte-stable prompt prefix to cache.
+    // OpenAI caches a stable, front-loaded prefix automatically; this is the
+    // precondition it needs to hit. It changes nothing about what gets dropped
+    // under pressure — the trim order below is by priority, not position — and
+    // a caller that sets no `stable` flags sees no reordering at all, because
+    // the sort is stable and every section then sits in one group.
+    live.sort((a, b) => (b.stable ? 1 : 0) - (a.stable ? 1 : 0));
+
     const trimmable = [...history];
 
     const imageCost = Math.max(0, images) * IMAGE_TOKENS;
@@ -319,6 +333,12 @@ function fitPrompt({
 
     return {
         systemPrompt: sectionsText(live),
+        // The question-independent head of the prompt, on its own, as it was
+        // actually assembled and trimmed (#1046). It is what a prefix cache
+        // keys on: identical across two turns with the same guild settings and
+        // knowledge base, whatever the user asked either time. Callers that
+        // flag no sections `stable` get an empty string here.
+        systemPrefix: sectionsText(live.filter(section => section.stable)),
         history: [...historyPrefix, ...trimmable],
         prompt: promptText,
         report: {

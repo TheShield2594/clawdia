@@ -4,11 +4,22 @@ const { providers } = require('./providers');
 // Pricing tables live on each provider (provider.pricing); this module owns
 // cost estimation and the per-guild usage ledger.
 
-function estimateCost(provider, model, inputTokens, outputTokens) {
+// The cached share of the input is priced apart from the rest (#1046): a
+// provider that serves a prompt token from its cache bills it far below the
+// fresh rate — Anthropic ~0.1x, and OpenAI/Gemini discount their own — so
+// charging every input token at `row.in` overstates the cost of cache-heavy
+// traffic, and it is `bumpMonthlyUsage` that this cost then feeds, which the
+// monthly ceiling enforces. Where a pricing row carries no `cachedIn`, the
+// cached tokens fall back to the full input rate: unchanged from before this,
+// and an over- rather than under-estimate, the direction the ceiling prefers.
+function estimateCost(provider, model, inputTokens, outputTokens, cachedInputTokens = 0) {
     const table = providers.get(provider)?.pricing || [];
     const row = table.find(r => r.match.test(model || ''));
     if (!row) return null;
-    return (inputTokens * row.in + outputTokens * row.out) / 1_000_000;
+    const cached = Math.min(Math.max(0, cachedInputTokens || 0), Math.max(0, inputTokens || 0));
+    const uncached = Math.max(0, (inputTokens || 0) - cached);
+    const cachedRate = row.cachedIn ?? row.in;
+    return (uncached * row.in + cached * cachedRate + outputTokens * row.out) / 1_000_000;
 }
 
 function utcDayString(date = new Date()) {
@@ -74,7 +85,7 @@ async function loadMonthlyUsage(guildId, month = utcMonthString()) {
     let costKnown = true;
     for (const row of rows) {
         tokens += (row.inputTokens || 0) + (row.outputTokens || 0);
-        const rowCost = estimateCost(row.provider, row.model, row.inputTokens || 0, row.outputTokens || 0);
+        const rowCost = estimateCost(row.provider, row.model, row.inputTokens || 0, row.outputTokens || 0, row.cachedInputTokens || 0);
         if (rowCost == null) costKnown = false;
         else cost += rowCost;
     }
@@ -186,17 +197,21 @@ async function recordUsage(guildId, provider, model, usage) {
     const inputTokens = Math.max(0, Math.floor(usage.inputTokens || 0));
     const outputTokens = Math.max(0, Math.floor(usage.outputTokens || 0));
     if (inputTokens === 0 && outputTokens === 0) return;
+    // The share of the input that came from the provider's prompt cache
+    // (#1046). Never more than the input it is a part of — a provider that
+    // reported it inconsistently must not make the hit rate exceed 100%.
+    const cachedInputTokens = Math.min(inputTokens, Math.max(0, Math.floor(usage.cachedInputTokens || 0)));
     const day = utcDayString();
     const filter = { guildId, day, provider, model: model || 'unknown' };
     const update = {
-        $inc: { inputTokens, outputTokens, requestCount: 1 },
+        $inc: { inputTokens, outputTokens, cachedInputTokens, requestCount: 1 },
         $set: { updatedAt: new Date() }
     };
     // Charged against the cached monthly total first, so the ceiling sees this
     // call even though the write below is what the next refresh will read. A
     // failed write leaves the cache a little pessimistic until that refresh,
     // which is the right way round for a spend limit.
-    bumpMonthlyUsage(guildId, inputTokens + outputTokens, estimateCost(provider, model, inputTokens, outputTokens));
+    bumpMonthlyUsage(guildId, inputTokens + outputTokens, estimateCost(provider, model, inputTokens, outputTokens, cachedInputTokens));
 
     try {
         await AIUsage.updateOne(filter, update, { upsert: true });
@@ -236,22 +251,27 @@ async function getUsageStats(guildId, days = 14) {
         const d = new Date();
         d.setUTCDate(d.getUTCDate() - (days - 1 - i));
         const key = utcDayString(d);
-        byDay.set(key, { day: key, inputTokens: 0, outputTokens: 0, requestCount: 0, cost: 0 });
+        byDay.set(key, { day: key, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, requestCount: 0, cost: 0 });
     }
 
     let todayTokens = 0, weekTokens = 0, monthTokens = 0;
     let todayCost = 0, weekCost = 0, monthCost = 0;
+    // Of the input, how much each window was served from cache, and the input
+    // it is a share of — the two the cache-hit-rate view divides (#1046).
+    let monthInput = 0, monthCached = 0;
     let costKnown = true;
 
     for (const row of rows) {
-        const cost = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens);
+        const cost = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens, row.cachedInputTokens || 0);
         if (cost == null) costKnown = false;
         const totalTokens = row.inputTokens + row.outputTokens;
+        const cachedInput = row.cachedInputTokens || 0;
 
         const bucket = byDay.get(row.day);
         if (bucket) {
             bucket.inputTokens += row.inputTokens;
             bucket.outputTokens += row.outputTokens;
+            bucket.cachedInputTokens += cachedInput;
             bucket.requestCount += row.requestCount;
             bucket.cost += cost || 0;
         }
@@ -267,6 +287,8 @@ async function getUsageStats(guildId, days = 14) {
         if (row.day >= monthStart) {
             monthTokens += totalTokens;
             monthCost += cost || 0;
+            monthInput += row.inputTokens;
+            monthCached += cachedInput;
         }
     }
 
@@ -277,14 +299,15 @@ async function getUsageStats(guildId, days = 14) {
         if (!byModel[key]) {
             byModel[key] = {
                 provider: row.provider, model: row.model,
-                inputTokens: 0, outputTokens: 0, requestCount: 0, cost: 0, costKnown: true
+                inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, requestCount: 0, cost: 0, costKnown: true
             };
         }
         const m = byModel[key];
         m.inputTokens += row.inputTokens;
         m.outputTokens += row.outputTokens;
+        m.cachedInputTokens += row.cachedInputTokens || 0;
         m.requestCount += row.requestCount;
-        const c = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens);
+        const c = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens, row.cachedInputTokens || 0);
         if (c == null) m.costKnown = false;
         else m.cost += c;
     }
@@ -293,6 +316,10 @@ async function getUsageStats(guildId, days = 14) {
         today:  { tokens: todayTokens, cost: round4(todayCost) },
         week:   { tokens: weekTokens,  cost: round4(weekCost) },
         month:  { tokens: monthTokens, cost: round4(monthCost) },
+        // The month's prompt-cache hit rate: the cached share of the input, and
+        // the input it is measured against, so the panel can show both the
+        // percentage and how much of a base it stands on (#1046).
+        cache:  { inputTokens: monthInput, cachedInputTokens: monthCached },
         costKnown,
         daily: Array.from(byDay.values()).map(d => ({ ...d, cost: round4(d.cost) })),
         byModel: Object.values(byModel).map(m => ({ ...m, cost: round4(m.cost) }))
