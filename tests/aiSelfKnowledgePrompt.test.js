@@ -56,15 +56,10 @@ const HUNT = {
             name: 'hunt',
             description: 'Hunt animals and manage gear',
             options: [{
-                type: 2,
-                name: 'inv',
-                description: 'View and manage your hunt inventory',
-                options: [{
-                    type: 1,
-                    name: 'equip',
-                    description: 'Equip a weapon by its inventory number',
-                    options: [{ type: 4, name: 'number', required: true, description: 'Weapon number' }],
-                }],
+                type: 1,
+                name: 'equip',
+                description: 'Equip a weapon by its inventory number',
+                options: [{ type: 4, name: 'number', required: true, description: 'Weapon number' }],
             }],
         }),
     },
@@ -94,7 +89,7 @@ test('the question this feature exists for reaches the model with its answer att
     await handleAIChat(fakeMessage('how do I equip my rifle'), SETTINGS, 'how do I equip my rifle');
 
     const prompt = systemPromptSent();
-    expect(prompt).toContain('/hunt inv equip');
+    expect(prompt).toContain('/hunt equip');
     expect(prompt).toContain('Equip a weapon by its inventory number');
     // And the rules that stop it being read as the whole command list.
     expect(prompt).toMatch(/never invent a command/i);
@@ -126,5 +121,5 @@ test('a client with no commands loaded still answers', async () => {
     await handleAIChat(fakeMessage('how do I equip my rifle', null), SETTINGS, 'how do I equip my rifle');
 
     expect(mockComplete).toHaveBeenCalled();
-    expect(systemPromptSent()).not.toContain('/hunt inv equip');
+    expect(systemPromptSent()).not.toContain('/hunt equip');
 });

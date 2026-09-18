@@ -3,7 +3,7 @@
 // "How do I equip my rifle" — the question the chat could not answer.
 //
 // The knowledge base only knows what a guild wrote down by hand, so a server
-// that never documented `/hunt inv equip` got a model that invented a command
+// that never documented `/hunt equip` got a model that invented a command
 // instead of saying it did not know. The bot's own command tree is the answer
 // and was already in the process; these cover deriving it, matching a question
 // against it, and what happens to a question that is not about a command at
@@ -24,35 +24,50 @@ function command(json, category = 'economy') {
     return { category, data: { toJSON: () => json } };
 }
 
+// Mirrors the real /hunt shape: top-level subcommands (start, inv, equip) beside
+// a subcommand group (shop → weapon), so this exercises both the flat leaves and
+// the group-flattening path a grouped command still takes.
 const HUNT = command({
     name: 'hunt',
     description: 'Hunt animals, manage gear, quests and zones',
     options: [
         { type: 1, name: 'start', description: 'Go on a hunt. Uses 1 stamina.', options: [] },
         {
-            type: 2,
+            type: 1,
             name: 'inv',
-            description: 'View and manage your hunt inventory',
-            options: [
-                {
-                    type: 1,
-                    name: 'equip',
-                    description: 'Equip a weapon by its inventory number',
-                    options: [{
-                        type: 4, name: 'number', required: true,
-                        description: 'Weapon number from /hunt inv weapons'
-                    }]
-                },
-                { type: 1, name: 'weapons', description: 'View your weapon collection', options: [] }
-            ]
+            description: 'View your whole hunt inventory, or one category in full',
+            options: [{
+                type: 3, name: 'category', required: false,
+                description: 'Open one category in full (default: an overview of everything)',
+                choices: [
+                    { name: 'Weapons', value: 'weapons' },
+                    { name: 'Ammo', value: 'ammo' },
+                    { name: 'Consumables', value: 'consumables' },
+                    { name: 'Materials', value: 'materials' }
+                ]
+            }]
         },
         {
             type: 1,
-            name: 'buy',
-            description: 'Buy a weapon from the hunting shop',
+            name: 'equip',
+            description: 'Equip a weapon by its inventory number',
             options: [{
-                type: 3, name: 'weapon', required: true, description: 'Which weapon to purchase',
-                choices: [{ name: 'Wooden Rifle', value: 'wood' }, { name: 'Iron Rifle', value: 'iron' }]
+                type: 4, name: 'number', required: true,
+                description: 'Weapon number from /hunt inv category:weapons'
+            }]
+        },
+        {
+            type: 2,
+            name: 'shop',
+            description: 'Browse and purchase hunting gear',
+            options: [{
+                type: 1,
+                name: 'weapon',
+                description: 'Buy a new hunting weapon',
+                options: [{
+                    type: 3, name: 'type', required: true, description: 'Which weapon to purchase',
+                    choices: [{ name: 'Wooden Rifle', value: 'wood' }, { name: 'Iron Rifle', value: 'iron' }]
+                }]
             }]
         }
     ]
@@ -69,7 +84,7 @@ describe('the index', () => {
         const usages = buildCommandIndex(SET).map(entry => entry.usage);
 
         expect(usages).toEqual(expect.arrayContaining([
-            '/hunt start', '/hunt inv equip', '/hunt inv weapons', '/hunt buy', '/ping'
+            '/hunt start', '/hunt inv', '/hunt equip', '/hunt shop weapon', '/ping'
         ]));
         // `/hunt` on its own is not a thing anybody runs, so it is not offered
         // as one. `/ping`, which has no subcommands, is.
@@ -77,12 +92,12 @@ describe('the index', () => {
     });
 
     test('carries the description, category and options of the leaf', () => {
-        const equip = buildCommandIndex(SET).find(entry => entry.usage === '/hunt inv equip');
+        const equip = buildCommandIndex(SET).find(entry => entry.usage === '/hunt equip');
 
         expect(equip.description).toBe('Equip a weapon by its inventory number');
         expect(equip.category).toBe('economy');
         expect(equip.options).toEqual([expect.objectContaining({
-            name: 'number', required: true, description: 'Weapon number from /hunt inv weapons'
+            name: 'number', required: true, description: 'Weapon number from /hunt inv category:weapons'
         })]);
     });
 
@@ -117,7 +132,7 @@ describe('the index', () => {
 
 describe('retrieval', () => {
     test('the question this exists for finds the subcommand that answers it', () => {
-        expect(usagesFor('How do I equip my rifle')).toContain('/hunt inv equip');
+        expect(usagesFor('How do I equip my rifle')).toContain('/hunt equip');
     });
 
     test('a word in the command path outranks the same word in a description', () => {
@@ -126,12 +141,12 @@ describe('retrieval', () => {
     });
 
     test('an option choice is searchable, so an item name finds where to buy it', () => {
-        // "Wooden Rifle" appears nowhere but in the choice list of /hunt buy.
-        expect(usagesFor('where do I get a wooden rifle')).toContain('/hunt buy');
+        // "Wooden Rifle" appears nowhere but in the choice list of /hunt shop weapon.
+        expect(usagesFor('where do I get a wooden rifle')).toContain('/hunt shop weapon');
     });
 
     test('a plural or a tense still matches the singular in the tree', () => {
-        expect(usagesFor('equipping rifles')).toContain('/hunt inv equip');
+        expect(usagesFor('equipping rifles')).toContain('/hunt equip');
     });
 
     test('honours the limit, best match first', () => {
@@ -155,13 +170,13 @@ describe('retrieval', () => {
         });
 
         // One word landing in an option description is not enough on its own:
-        // "purchase" is only in /hunt buy's option here, and in a real tree the
-        // equivalents ("number", "amount", "user") are in dozens of them.
+        // "purchase" is only in /hunt shop weapon's option here, and in a real
+        // tree the equivalents ("number", "amount", "user") are in dozens of them.
         test('a single hit outside the command path does not qualify an entry', () => {
             expect(usagesFor('can I get a refund on my purchase')).toEqual([]);
             // Two of them do, which is what makes it a question about that
             // command rather than a word that happens to appear in it.
-            expect(usagesFor('purchase a rifle')).toContain('/hunt buy');
+            expect(usagesFor('purchase a rifle')).toContain('/hunt shop weapon');
         });
     });
 });
@@ -172,9 +187,9 @@ describe('the prompt section', () => {
     test('renders the usage, the category, the description and the options', () => {
         const text = buildCommandContext(retrieveCommands(SET, 'how do I equip my rifle'));
 
-        expect(text).toContain('`/hunt inv equip` (economy) — Equip a weapon by its inventory number');
+        expect(text).toContain('`/hunt equip` (economy) — Equip a weapon by its inventory number');
         expect(text).toContain('`number` (whole number, required)');
-        expect(text).toContain('Weapon number from /hunt inv weapons');
+        expect(text).toContain('Weapon number from /hunt inv category:weapons');
     });
 
     test('tells the model these are exact and that there are more of them', () => {
@@ -186,7 +201,7 @@ describe('the prompt section', () => {
         const { items } = section();
 
         expect(items.length).toBeGreaterThan(1);
-        expect(items[0]).toContain('/hunt inv equip');
+        expect(items[0]).toContain('/hunt equip');
     });
 
     test('nothing retrieved renders nothing at all', () => {
