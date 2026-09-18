@@ -15,6 +15,8 @@ const { PICKAXE_BY_SLUG } = require('../../../../data/mineData');
 const { getItemImageAttachment } = require('../../../../utils/itemImageHelper');
 const GrindProfile = require('../../../../models/GrindProfile');
 const COLORS = require('../../../../utils/embedColors');
+const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
+const { shopRefundPayoutKey } = require('../../../../utils/payoutKey');
 
 async function handleBuyPickaxe(interaction, user, currency) {
     const m = user.mining;
@@ -103,8 +105,23 @@ async function handleBuyPickaxe(interaction, user, currency) {
             ).catch(err => { console.error('[mineshop pickaxe] profile push error:', err); return null; });
 
             if (!profUpdated) {
-                await User.updateOne({ userId: user.userId, guildId: user.guildId }, { $inc: { balance: pickaxeData.cost } }).catch(() => {});
-                return interaction.editReply({ content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] });
+                // Refund the debit — the pickaxe was never granted — through
+                // creditCoinsOrOwe (keyed) so a refund that will not land is
+                // recorded for replay rather than lost under a message that says
+                // it worked (#873).
+                const refund = await creditCoinsOrOwe(
+                    { userId: user.userId, guildId: user.guildId },
+                    pickaxeData.cost,
+                    { payoutKey: shopRefundPayoutKey(interaction.id), service: 'mine', jobName: 'pickaxeRefund' },
+                );
+                return interaction.editReply({
+                    content: refund.credited
+                        ? 'Purchase failed — your coins were refunded. Please try again.'
+                        : refund.owed
+                            ? `Purchase failed, and the ${currency}${pickaxeData.cost.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`
+                            : `Purchase failed, and the ${currency}${pickaxeData.cost.toLocaleString()} charged could not be returned or recorded — please contact a server admin.`,
+                    embeds: [], components: [],
+                });
             }
 
             m.pickaxes = profUpdated.data.pickaxes;

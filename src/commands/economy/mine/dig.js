@@ -35,6 +35,7 @@ const { PITY_COPY } = require('../../../utils/pityBonus');
 const { buildMineEmbed } = require('./embeds');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
+const { gatherPayoutKey } = require('../../../utils/payoutKey');
 
 // Presentation timings for the pre-dig prompt and the vein read. The ladder itself
 // and the promotion rule live with the rest of the mine's rules, in mineData and
@@ -424,7 +425,9 @@ async function handleDig(interaction) {
         // reward nets to zero and issues no coin write.
         let payoutOwed = 0;
         try {
-            ({ payoutOwed } = await commitDig(user, balanceAtLoad));
+            ({ payoutOwed } = await commitDig(user, balanceAtLoad, {
+                payoutKey: gatherPayoutKey('mine', interaction.id, 'run'),
+            }));
             mineCommitted = true;
             if (mineAchievements.length) {
                 announceAchievements(interaction.client, guildSettings, user, interaction.member, mineAchievements).catch(() => null);

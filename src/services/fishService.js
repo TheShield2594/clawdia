@@ -1271,9 +1271,10 @@ function rollWinterHuntMaterial(user, result, crossSystemType, locationId) {
  * landed: a credit applied before a save that then failed would pay for a
  * cast the player could take again. A credit that will not land is returned
  * as `payoutOwed` so the caller says it out loud rather than logging it and
- * forgetting.
+ * forgetting. `payoutKey` makes that credit exactly-once — see
+ * huntService.commitHunt for why the gathering payouts need one.
  */
-async function commitCast(user, balanceAtLoad) {
+async function commitCast(user, balanceAtLoad, { payoutKey } = {}) {
     const User = require('../models/User');
     const { detachBalanceDelta, commitBalanceDelta } = require('../utils/balanceDelta');
     const balanceFilter = { userId: user.userId, guildId: user.guildId };
@@ -1284,6 +1285,7 @@ async function commitCast(user, balanceAtLoad) {
         service: 'fish',
         jobName: 'castPayout',
         guildId: user.guildId,
+        payoutKey,
     });
     return { payoutOwed: payout.credited ? 0 : balanceDelta };
 }

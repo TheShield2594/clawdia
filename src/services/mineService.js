@@ -1162,9 +1162,11 @@ function applyDigBonuses(user, result, { isFeaturedDepth = false, featuredPayout
 /**
  * Persist the dig and credit its coin movement as an atomic `$inc` after the
  * save has landed — same contract as fishService.commitCast. A credit that
- * will not land is returned as `payoutOwed`.
+ * will not land is returned as `payoutOwed`. `payoutKey` makes that credit
+ * exactly-once — see huntService.commitHunt for why the gathering payouts need
+ * one.
  */
-async function commitDig(user, balanceAtLoad) {
+async function commitDig(user, balanceAtLoad, { payoutKey } = {}) {
     const User = require('../models/User');
     const { detachBalanceDelta, commitBalanceDelta } = require('../utils/balanceDelta');
     const balanceFilter = { userId: user.userId, guildId: user.guildId };
@@ -1175,6 +1177,7 @@ async function commitDig(user, balanceAtLoad) {
         service: 'mine',
         jobName: 'minePayout',
         guildId: user.guildId,
+        payoutKey,
     });
     return { payoutOwed: payout.credited ? 0 : balanceDelta };
 }

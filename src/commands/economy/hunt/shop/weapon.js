@@ -17,6 +17,8 @@ const { LIMITS, WEAPON_BY_SLUG } = require('../../../../data/huntData');
 const { getItemImageAttachment } = require('../../../../utils/itemImageHelper');
 const GrindProfile = require('../../../../models/GrindProfile');
 const COLORS = require('../../../../utils/embedColors');
+const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
+const { shopRefundPayoutKey } = require('../../../../utils/payoutKey');
 const { isCrossEconomyWeapon, huntingDaysLabel } = require('./pricing');
 
 async function handleBuyWeapon(interaction, user, currency) {
@@ -143,9 +145,23 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
     ).catch(err => { console.error('[huntshop weapon] profile push error:', err); return null; });
 
     if (!profUpdated) {
-        // Refund the debit — the weapon was never granted
-        await User.updateOne({ userId: user.userId, guildId: user.guildId }, { $inc: { balance: weaponData.cost } }).catch(() => {});
-        const reply = { content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] };
+        // Refund the debit — the weapon was never granted — through
+        // creditCoinsOrOwe (keyed to this attempt) so a refund that will not
+        // land is recorded for replay rather than lost under a message that says
+        // it worked (#873).
+        const refund = await creditCoinsOrOwe(
+            { userId: user.userId, guildId: user.guildId },
+            weaponData.cost,
+            { payoutKey: shopRefundPayoutKey(interactionOrBtn.id), service: 'hunt', jobName: 'weaponRefund' },
+        );
+        const reply = {
+            content: refund.credited
+                ? 'Purchase failed — your coins were refunded. Please try again.'
+                : refund.owed
+                    ? `Purchase failed, and the ${currency}${weaponData.cost.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`
+                    : `Purchase failed, and the ${currency}${weaponData.cost.toLocaleString()} charged could not be returned or recorded — please contact a server admin.`,
+            embeds: [], components: [],
+        };
         return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);
     }
 

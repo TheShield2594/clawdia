@@ -14,6 +14,26 @@ const { persistGrindIfNew } = require('../../../../utils/grindProfile');
 const { BLAST_PACKS, CONSUMABLES } = require('../../../../data/mineData');
 const GrindProfile = require('../../../../models/GrindProfile');
 const COLORS = require('../../../../utils/embedColors');
+const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
+const { shopRefundPayoutKey } = require('../../../../utils/payoutKey');
+
+// The coins come back through creditCoinsOrOwe, not a bare `$inc`: a refund that
+// itself fails is recorded for `payouts:replay` and the player is told it is
+// owed, rather than sent away with "refunded" over coins that never returned
+// (#873). Keyed to the interaction so a replay cannot pay it twice.
+async function refundPurchase(interaction, amount) {
+    return creditCoinsOrOwe(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        amount,
+        { payoutKey: shopRefundPayoutKey(interaction.id), service: 'mine', jobName: 'shopRefund' },
+    );
+}
+
+function refundMessage(refund, currency, amount) {
+    if (refund.credited) return 'Purchase failed — your coins were refunded. Please try again.';
+    if (refund.owed) return `Purchase failed, and the ${currency}${amount.toLocaleString()} charged could not be returned automatically — it has been recorded as owed and will be paid back once the problem clears. Tell an admin if it does not.`;
+    return `Purchase failed, and the ${currency}${amount.toLocaleString()} charged could not be returned or recorded — please contact a server admin.`;
+}
 
 // `override` lets the browse view drive a purchase from its buy select: it
 // passes the itemId directly instead of reading it off a slash option, and the
@@ -110,8 +130,8 @@ async function handleBuy(interaction, user, currency, override = {}) {
                 ).catch(() => null);
 
                 if (!profUpdated) {
-                    await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(() => {});
-                    return interaction.editReply({ content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] });
+                    const refund = await refundPurchase(interaction, totalCost);
+                    return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
                 }
                 m.consumables[itemId] = profUpdated.data?.consumables?.[itemId] ?? qty;
             } else {
@@ -123,8 +143,8 @@ async function handleBuy(interaction, user, currency, override = {}) {
                 ).catch(() => null);
 
                 if (!profUpdated) {
-                    await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(() => {});
-                    return interaction.editReply({ content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] });
+                    const refund = await refundPurchase(interaction, totalCost);
+                    return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
                 }
                 m.charges[blastDef.chargeType] = profUpdated.data?.charges?.[blastDef.chargeType] ?? (blastDef.quantity * qty);
             }

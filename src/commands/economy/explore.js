@@ -5,7 +5,7 @@ const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
 const { detachBalanceDelta, commitBalanceDelta } = require('../../utils/balanceDelta');
-const { grantInventoryItem } = require('../../utils/inventoryGrant');
+const { gatherPayoutKey } = require('../../utils/payoutKey');
 const GrindProfile = require('../../models/GrindProfile');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const {
@@ -18,7 +18,7 @@ const { TIER_STARS } = require('../../data/materialRarity');
 const { fitDescription, chunkByLength, EMBED_LIMITS } = require('../../utils/embedFields');
 const { paginate } = require('../../utils/paginator');
 const {
-    ensureExploreData,
+    ensureExploreData, commitExpeditionRelic,
     getMaxStamina,
     applyStaminaRegen,
     applyDailyReset,
@@ -405,13 +405,14 @@ async function handleGo(interaction) {
             await user.save();
             exploreCommitted = true;
             if (relicDetached) {
-                await grantInventoryItem(user.userId, user.guildId, result.relic.itemId, 1)
-                    .catch(err => console.error(`[explore] relic ${result.relic.itemId} owed to ${user.userId} — grant failed:`, err));
+                const relicGrant = await commitExpeditionRelic(user, result.relic, interaction.id);
+                if (!relicGrant.granted) result.relicOwed = relicGrant.owed ? 'owed' : 'lost';  // not in the bag — see commitExpeditionRelic (#873)
             }
             const paid = await commitBalanceDelta(User, balanceFilter, user, findDelta, {
                 service: 'explore',
                 jobName: 'findPayout',
                 guildId: interaction.guild.id,
+                payoutKey: gatherPayoutKey('explore', interaction.id, 'find'),
             });
             if (!paid.credited) payoutOwed += findDelta;
             // The credit moved the balance; the encounter's delta is measured
@@ -555,6 +556,7 @@ async function handleGo(interaction) {
                 service: 'explore',
                 jobName: 'encounterPayout',
                 guildId: interaction.guild.id,
+                payoutKey: gatherPayoutKey('explore', interaction.id, 'encounter'),
             });
             if (!paid.credited) payoutOwed += encounterDelta;
         } catch (err) {
@@ -748,12 +750,10 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
                 .setTitle(`🪙 Treasure — ${tier.tier.charAt(0).toUpperCase() + tier.tier.slice(1)} ${tier.stars}`);
             lines.push(`*${result.treasureLine}*`);
             if (result.relic) {
-                lines.push(
-                    '',
-                    `🏺 **Relic recovered: ${result.relic.itemId}**${result.relicIsNew ? ' — *new to your case*' : ''}`,
-                    `> *${result.relic.lore}*`,
-                    `> It's in your \`/inventory\` now, and in \`/explore relics\`, where it earns its keep.`,
-                );
+                const relicHome = !result.relicOwed  // only claim it's in the bag once the grant landed (#873)
+                    ? `> It's in your \`/inventory\` now, and in \`/explore relics\`, where it earns its keep.`
+                    : `> ⚠️ It couldn't be added to your \`/inventory\` just now${result.relicOwed === 'owed' ? " and has been recorded as owed — it'll appear once the problem clears. Tell an admin if it doesn't." : ' or recorded — please contact a server admin.'}`;
+                lines.push('', `🏺 **Relic recovered: ${result.relic.itemId}**${result.relicIsNew ? ' — *new to your case*' : ''}`, `> *${result.relic.lore}*`, relicHome);
             }
             if (result.material) {
                 lines.push(

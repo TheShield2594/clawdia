@@ -40,6 +40,7 @@ const { MATERIAL_NAMES: HUNT_MATERIAL_NAMES } = require('../../../data/huntData'
 const { attachGrind } = require('../../../utils/grindProfile');
 const { LOCATIONS } = require('../../../data/fishData');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
+const { gatherPayoutKey } = require('../../../utils/payoutKey');
 const { logBigWin } = require('../../../utils/bigWinLogger');
 const { PITY_COPY } = require('../../../utils/pityBonus');
 const { FISH_TIER_SCORE } = require('./shared');
@@ -271,7 +272,9 @@ async function handleCast(interaction) {
         // no coin write.
         let payoutOwed = 0;
         try {
-            ({ payoutOwed } = await commitCast(user, balanceAtLoad));
+            ({ payoutOwed } = await commitCast(user, balanceAtLoad, {
+                payoutKey: gatherPayoutKey('fish', interaction.id, 'run'),
+            }));
             castCommitted = true;
             if (fishAchievements.length) {
                 announceAchievements(interaction.client, guildSettings, user, interaction.member, fishAchievements).catch(() => null);
@@ -494,6 +497,7 @@ async function handleCast(interaction) {
                     service: 'fish',
                     jobName: 'bossBonusPayout',
                     guildId: interaction.guild.id,
+                    payoutKey: gatherPayoutKey('fish', interaction.id, 'boss'),
                 });
                 if (!bossPaid.credited) bossPayoutOwed = bossResult.bonusPayout;
                 if (bossQuestsDone.length || bossQuestsNear.length) {

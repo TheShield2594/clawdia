@@ -39,6 +39,7 @@ const { getTimeBand } = require('../../../utils/timeBand');
 const { attachGrind } = require('../../../utils/grindProfile');
 const { ZONES } = require('../../../data/huntData');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
+const { gatherPayoutKey } = require('../../../utils/payoutKey');
 const { pickApproachProfile, runAimPhase } = require('./aim');
 const { buildBonusLines, buildHuntEmbed } = require('./embeds');
 const { ownedBy } = require('../../../utils/collectorOwner');
@@ -278,7 +279,9 @@ async function executeStart(interaction) {
         // reward nets to zero and issues no coin write.
         let payoutOwed = 0;
         try {
-            ({ payoutOwed } = await commitHunt(user, balanceAtLoad));
+            ({ payoutOwed } = await commitHunt(user, balanceAtLoad, {
+                payoutKey: gatherPayoutKey('hunt', interaction.id, 'run'),
+            }));
             huntCommitted = true;
             if (huntAchievements.length) {
                 announceAchievements(interaction.client, guildSettings, user, interaction.member, huntAchievements).catch(() => null);
@@ -558,6 +561,7 @@ async function executeStart(interaction) {
                     service: 'hunt',
                     jobName: 'apexBonusPayout',
                     guildId: interaction.guild.id,
+                    payoutKey: gatherPayoutKey('hunt', interaction.id, 'apex'),
                 });
                 if (!apexPaid.credited) apexPayoutOwed = apexResult.bonusPayout;
                 if (apexQuestsDone.length || apexQuestsNear.length) {

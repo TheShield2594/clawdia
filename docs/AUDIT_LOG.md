@@ -2,11 +2,12 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and five passes over the
+long-stable, low-churn subsystems have been audited, and six passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
-casino's hand payouts, and the core currency commands (`balance`, `bank`,
-`daily`, `work`, `jobs`, `crime`, `invest`) (#873). The majority of the
+casino's hand payouts, the core currency commands (`balance`, `bank`,
+`daily`, `work`, `jobs`, `crime`, `invest`), and the gathering-loop payouts
+(`hunt`, `fish`, `mine`, `explore`) (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -871,6 +872,94 @@ not re-derive it:
 
 ---
 
+## Economy — The Gathering Loops
+
+**Status: Audited — all findings resolved** ✓
+
+The sixth pass of the economy audit #873, over the gathering loops its checklist
+and [ROADMAP.md](ROADMAP.md) sequence next: `hunt`, `fish`, `mine`, `explore`,
+and the detached item grants in the same surface (`use` loot boxes). These are
+the highest-volume coin credits in the game — 95 of the commits since July touch
+this code — and they were the last currency-mutation paths still on a bare,
+unkeyed write.
+
+The shape of the pass is the same as the five before it, with a twist the earlier
+passes' commands did not have. The forward direction was sound: every gathering
+run reads the user, mutates `balance` across an interactive window (an approach
+prompt, a reel-in, a 20-second encounter), and credits the *net change* through
+`commitBalanceDelta`/`saveWithBalanceDelta` after the save lands, so a bet placed
+in another channel mid-run is never flattened (`balanceDelta.js`, audited into
+these four commands already). What no pass had looked at is that **every one of
+those credits passed no `payoutKey`** — the one thing that makes the credit
+exactly-once. Unkeyed, `commitBalanceDelta` is three failures at once: its own
+retry re-credits a write whose response was lost (a double payment); a run
+against a pruned document is reported as paid though no coins moved (the #804
+failure the keyed path exists to tell apart); and a payout that ultimately fails
+is filed as a **keyless `FailedJob` that carries no `kind`**, so
+`npm run payouts:replay` cannot settle it and the coins are lost rather than
+owed. The item side had the bare-grant pattern pass 3 named: two detached grants
+read nothing back and announced the prize regardless.
+
+Scope, stated so the next pass does not assume more was covered: this pass
+audited the **currency-mutation paths** of the gathering loops — the run payouts,
+the apex/boss bonus payouts, the two detached item grants, and the shop-purchase
+refunds. The rest of these commands (repair/upgrade/unlock pricing, quest and
+mission crediting through the already-audited `onEconomyEarn`, prestige, pet
+drops that ride the run's own `save()`, the tournament and map flows) was not
+re-derived here and stays under [Not yet reviewed](#not-yet-reviewed).
+
+**Files reviewed/fixed:**
+- `src/services/huntService.js`, `src/services/fishService.js`, `src/services/mineService.js`, `src/services/exploreService.js`
+- `src/commands/economy/hunt/start.js`, `src/commands/economy/fish/cast.js`, `src/commands/economy/mine/dig.js`, `src/commands/economy/explore.js`
+- `src/commands/economy/use.js`
+- `src/commands/economy/{hunt,fish,mine}/shop/*` (the purchase refunds)
+- `src/utils/payoutKey.js`
+- `tests/gatheringPayoutRecovery.test.js`, `tests/payoutKey.test.js`, `tests/inventoryGrantCallSites.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | The `/hunt`, `/fish`, `/mine` and `/explore` run payouts — the highest-volume credits in the game — all went through `commitBalanceDelta` with no `payoutKey`. Unkeyed, the retry inside the helper re-credits a write that committed and lost its response (a double payment), and a run against a pruned document is reported as paid while no coins move (#804) | Each `commit*` now takes a `payoutKey` built from the interaction (`gatherPayoutKey(service, interaction.id, 'run')`) and forwards it to `commitBalanceDelta`, which guards the credit on `paidPayouts.key` — the retry is a no-op and a missing document is classified rather than reported as paid | `huntService.js`, `fishService.js`, `mineService.js`, `explore.js`, `hunt/start.js`, `fish/cast.js`, `mine/dig.js`, `payoutKey.js` |
+| 2 | A gathering payout that ultimately failed was filed as a **keyless `FailedJob`**, which carries no `kind` — so `npm run payouts:replay` cannot settle it. The coins were shown as owed but were, in practice, lost | With a key the same failure files a replayable owed `coins` payload under the key (`balanceDelta.js`'s keyed branch), which `payouts:replay -- --pay` settles exactly once | (as above) |
+| 3 | The second credit each run can make — the `/hunt` apex bonus and the `/fish` boss bonus, paid from a collector callback minutes after the base haul — went through `saveWithBalanceDelta` unkeyed too, with the same two failures | Both credit under `gatherPayoutKey(service, interaction.id, 'apex'\|'boss')`; the phase in the key keeps the bonus from colliding with the base haul of the same interaction | `hunt/start.js`, `fish/cast.js`, `payoutKey.js` |
+| 4 | `/explore` credits twice around its 20-second encounter prompt (the find, then the encounter), both unkeyed | Keyed `find` and `encounter` off the interaction, so each replays on its own and neither stands in for the other | `explore.js`, `payoutKey.js` |
+| 5 | `/explore`'s recovered relic — the one grant that does not ride the run's `save()`, re-applied as an atomic upsert — was a bare `grantInventoryItem` that read nothing back and swallowed a throw into a log line that *said* "owed" while recording nothing. A relic that never landed was announced as in the player's case | Moved into `exploreService.commitExpeditionRelic`, which grants through `grantItemsOrOwe` under `exploreRelicPayoutKey(interaction.id)` — keyed, never throwing, recorded as owed when it will not land — and the result embed says "recorded as owed" instead of "in your inventory" | `exploreService.js`, `explore.js`, `payoutKey.js` |
+| 6 | `/use` on a seasonal loot box consumed the box atomically and then granted the won item with a bare `grantInventoryItem`, announcing "You found a … item" whether or not the grant landed. The box is spent by then, so a failed grant lost the prize outright | The grant goes through `grantItemsOrOwe` under `lootBoxItemPayoutKey(interaction.id)`, and the embed adds a "Not Yet in Your Inventory" note when the prize is only owed | `use.js`, `payoutKey.js` |
+| 7 | The `{hunt,fish,mine}/shop` purchases refund the debit when the item's stack-cap guard loses a race, and every refund was a bare `$inc` with `.catch(() => {})` that read nothing back and replied "your coins were refunded" regardless — the pass-3 `/market` unwind shape, seven handlers over | Each refund goes through `creditCoinsOrOwe` under `shopRefundPayoutKey(interaction.id)`, and the reply is worded from what the helper reports — refunded, or recorded as owed | `hunt/shop/{buy,weapon}.js`, `fish/shop/{buy,rod,upgrade}.js`, `mine/shop/{buy,pickaxe}.js`, `payoutKey.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 8 | Four key constructors were needed and did not exist | `gatherPayoutKey`, `exploreRelicPayoutKey`, `lootBoxItemPayoutKey` and `shopRefundPayoutKey` added beside the existing family, each keyed by the identifier that survives its flow | `payoutKey.js` |
+| 9 | No tests over any of the failure paths, and the `grantInventoryItem` call-site sweep counted the two grants this pass moved behind `grantItemsOrOwe` | `tests/gatheringPayoutRecovery.test.js` drives the service commits against a store that evaluates the payout-key guard for real (exactly-once, replayable-owed, missing-document) plus the relic grant, and holds the eleven call sites to the keyed path; the sweep's count and its comment were updated for the two grants that left it | `tests/` |
+
+**Reviewed and found sound** — no change needed, recorded so the next pass does
+not re-derive it:
+
+- The `detach → save → commit` transaction itself in all four commands. Keeping
+  `balance` out of the `save()` and re-applying the net change as an `$inc` is
+  the audited-sound shape from `balanceDelta.js`; this pass added the key, not
+  the transaction.
+- The shop **debits**. Every purchase charges through a `findOneAndUpdate`
+  guarded by `balance: { $gte: cost }` and reads the result back, so the forward
+  charge cannot overdraw or run on a stale balance — only the refund on the way
+  out was bare.
+- `/explore travel`'s unlock toll. Its debit is a guarded conditional update and
+  its failed-save refund already reads `matchedCount` back and only promises the
+  refund that landed — the pattern this pass applied elsewhere, already in place
+  here.
+- The material, trophy, ore and catch grants inside the run. These mutate the
+  user document in memory and ride the run's single `save()`, which is one atomic
+  write — there is no detached second write to lose, so they need no key.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -880,12 +969,9 @@ wide, and it is widest exactly where the risk is.
 
 **Economy** — the largest uncovered area:
 
-- `hunt` (`huntService.js`, `hunt/`, `event/trackhunt.js`, `craft.js`, `forge.js`)
-- `mine` (`mineService.js`, `mine/`)
-- `fish` (`fishService.js`, `fish/`)
+- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the rest of these commands is not: repair/upgrade/unlock pricing, quest/mission crediting (through the already-audited `onEconomyEarn`), prestige, pet drops that ride the run's `save()`, the tournament/map/raid flows, and `event/trackhunt.js`, `craft.js`, `forge.js`
 - `pet` (`petService.js`, `pet.js`)
-- `use` / items / effects (`use.js`, `effectsService.js`, `inventory.js`, `shop.js`)
-- exploration (`exploreService.js`, `explore.js`, `map.js`)
+- `use` / items / effects — the seasonal loot-box item grant is audited above (pass 6); `effectsService.js`, `inventory.js`, `shop.js` and the rest of `use.js` are not
 - casino (`src/games/casino/*`, `casino.js`) — `confirmBet`, the bet guards, the
   eight games' odds and their leaderboard writes. The progressive jackpot and the
   hand payout paths (including the crash lobby's `pendingCrashRefund` escrow) have
@@ -914,5 +1000,6 @@ wide, and it is widest exactly where the risk is.
 *The nine non-economy subsystems above were last reviewed on 2026-05-28; the
 economy escrow and payout paths on 2026-09-01; the progressive jackpot on
 2026-09-04; the gift and market unwind paths on 2026-09-05; the casino hand
-payouts on 2026-09-08; the core currency commands on 2026-09-17. "Not yet
-reviewed" carries no review date, because nothing in it has been reviewed.*
+payouts on 2026-09-08; the core currency commands on 2026-09-17; the
+gathering-loop payouts on 2026-09-18. "Not yet reviewed" carries no review date,
+because nothing in it has been reviewed.*
