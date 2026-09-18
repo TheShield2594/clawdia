@@ -1190,6 +1190,7 @@ textarea.auto-resize {
 /* Buttons */
 .cw-btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 999px; font-size: 14.5px; font-weight: 500; border: none; cursor: pointer; font-family: inherit; transition: transform .15s ease, background .15s, box-shadow .15s; text-decoration: none; }
 .cw-btn:hover { transform: translateY(-1px); }
+.cw-btn:active { transform: translateY(0) scale(0.96); }
 .cw-btn:focus-visible { outline: 3px solid var(--claw-500); outline-offset: 3px; }
 .cw-btn-dark { background: var(--ink-950); color: var(--cream-50); }
 /* Logging out is a POST (#566), so the control is a form. `display: contents`
@@ -1390,7 +1391,7 @@ textarea.auto-resize {
    ================================================================ */
 
 /* Shared avatar elements (also used in nav) */
-.cw-dash-avatar { width: 34px; height: 34px; border-radius: 10px; object-fit: cover; }
+.cw-dash-avatar { width: 34px; height: 34px; border-radius: 10px; object-fit: cover; border: 1px solid rgba(20,17,13,.06); }
 .cw-dash-avatar-fallback { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; background: var(--ink-700); color: var(--cream-100); }
 
 /* Header */
