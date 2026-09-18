@@ -51,12 +51,22 @@ afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** Runs a snippet with scripts/lib/archive.sh sourced. */
-function sourcing(snippet, env = {}) {
-    return spawnSync('bash', ['-c', `set -euo pipefail\n. "${ARCHIVE_LIB}"\n${snippet}`], {
-        encoding: 'utf8',
-        env: { ...process.env, ...env },
-    });
+/**
+ * Runs archive.sh's `open_archive` against an archive.
+ *
+ * The library path, the archive path and the work directory are handed to bash
+ * as positional arguments ($1/$2/$3), never interpolated into the `-c` script.
+ * All three derive from `__dirname`/`os.tmpdir()`, so a checkout or a TMPDIR
+ * holding a shell metacharacter would otherwise break out of the command
+ * (CodeQL js/shell-command-injection-from-environment); as arguments they are
+ * passed verbatim and never re-parsed.
+ */
+function openArchive(archivePath, workDir, env = {}) {
+    return spawnSync(
+        'bash',
+        ['-c', 'set -euo pipefail\n. "$1"\nopen_archive "$2" "$3"', 'bash', ARCHIVE_LIB, archivePath, workDir],
+        { encoding: 'utf8', env: { ...process.env, ...env } },
+    );
 }
 
 const seal = (input, output, passphrase) => execFileSync('openssl', [
@@ -73,7 +83,7 @@ describe('opening a backup archive', () => {
         const archive = path.join(dir, 'clawdia-1.gz');
         fs.writeFileSync(archive, 'ARCHIVE');
 
-        const run = sourcing(`open_archive "${archive}" "${dir}/work"`);
+        const run = openArchive(archive, path.join(dir, 'work'));
 
         expect(run.status).toBe(0);
         expect(run.stdout).toBe(archive);
@@ -86,7 +96,7 @@ describe('opening a backup archive', () => {
         seal(archive, `${archive}.enc`, 'a passphrase with spaces');
         fs.rmSync(archive);
 
-        const run = sourcing(`open_archive "${archive}.enc" "${dir}/work"`, {
+        const run = openArchive(`${archive}.enc`, path.join(dir, 'work'), {
             BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase with spaces',
         });
 
@@ -103,7 +113,7 @@ describe('opening a backup archive', () => {
         seal(archive, `${archive}.enc`, 'passphrase');
         fs.rmSync(archive);
 
-        const run = sourcing(`open_archive "${archive}.enc" "${dir}/work"`, {
+        const run = openArchive(`${archive}.enc`, path.join(dir, 'work'), {
             BACKUP_ENCRYPTION_PASSPHRASE: 'passphrase',
         });
 
@@ -119,7 +129,7 @@ describe('opening a backup archive', () => {
         seal(archive, `${archive}.enc`, 'right');
         fs.rmSync(archive);
 
-        const run = sourcing(`open_archive "${archive}.enc" "${dir}/work"`, {
+        const run = openArchive(`${archive}.enc`, path.join(dir, 'work'), {
             BACKUP_ENCRYPTION_PASSPHRASE: 'wrong',
         });
 
@@ -133,7 +143,7 @@ describe('opening a backup archive', () => {
         const archive = path.join(dir, 'clawdia-1.gz.enc');
         fs.writeFileSync(archive, 'sealed');
 
-        const run = sourcing(`open_archive "${archive}" "${dir}/work"`, {
+        const run = openArchive(archive, path.join(dir, 'work'), {
             BACKUP_ENCRYPTION_PASSPHRASE: '',
         });
 
@@ -206,10 +216,8 @@ describe('a backup taken by hand', () => {
 
         // And it is the database, sealed — not a file that merely has the name.
         const sealed = path.join(dir, 'out', run.written[0]);
-        const opened = spawnSync('bash', ['-c',
-            `. "${ARCHIVE_LIB}"; open_archive "${sealed}" "${dir}/work"`], {
-            encoding: 'utf8',
-            env: { ...process.env, BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase with spaces' },
+        const opened = openArchive(sealed, path.join(dir, 'work'), {
+            BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase with spaces',
         });
         expect(fs.readFileSync(opened.stdout, 'utf8')).toBe('THE-DATABASE');
     });

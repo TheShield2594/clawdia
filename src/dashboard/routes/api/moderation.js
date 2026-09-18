@@ -8,6 +8,12 @@ const { readPage, pageEnvelope } = require('../../lib/apiPage');
 // One page of moderation cases, filterable by `?type=` and `?status=`.
 router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
+    // Belt-and-suspenders alongside checkGuildAccess: the id flows straight into
+    // the Case query, so require it to be a plain string before it gets there —
+    // an operator object can never reach the filter (CodeQL js/sql-injection /
+    // NoSQL operator injection). A route param is always a string, so this only
+    // ever rejects a value that arrived some other way.
+    if (typeof guildId !== 'string') return res.status(400).json({ error: 'Invalid guild id' });
     const { page, limit, skip } = readPage(req, { defaultLimit: 20, maxLimit: 50 });
     const type = req.query.type || null;
     const status = req.query.status || null;
