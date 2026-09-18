@@ -683,15 +683,6 @@ textarea:focus {
 }
 textarea { resize: vertical; min-height: 80px; }
 
-/* Hold every form control at 16px on phones: iOS Safari zooms the whole page
-   when a focused field renders below 16px, and the dashboard's settings forms
-   are used at the stacked ≤768px layout. Desktop keeps the smaller design size. */
-@media (max-width: 768px) {
-    input[type="text"], input[type="number"], input[type="password"],
-    input[type="search"], input[type="email"], input[type="url"], input[type="tel"],
-    select, textarea, .dash-nav-search { font-size: 16px; }
-}
-
 /* Toggle */
 .toggle {
     display: flex;
@@ -1748,6 +1739,12 @@ textarea.auto-resize {
     .dash-main { padding: 20px 20px 40px; }
     .dash-kpis { grid-template-columns: 1fr 1fr; }
     .dash-module-list { grid-template-columns: 1fr; }
+    /* Hold every form control at 16px on phones: iOS Safari zooms the whole
+       page when a focused field renders below 16px, and the settings forms are
+       used at this stacked layout. Desktop keeps the smaller design size. */
+    input[type="text"], input[type="number"], input[type="password"],
+    input[type="search"], input[type="email"], input[type="url"], input[type="tel"],
+    select, textarea, .dash-nav-search { font-size: 16px; }
 }
 
 /* ── Shop item image upload ───────────────────────────────────── */
