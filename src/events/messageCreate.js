@@ -101,7 +101,7 @@ module.exports = {
                             .trim();
                         const reminderHandled = await handleNLReminder(message, strippedContent);
                         if (!reminderHandled) {
-                            await handleAIChat(message, effectiveSettings, strippedContent);
+                            await handleAIChat(message, effectiveSettings, strippedContent, guildSettings);
                         }
                         return;
                     }
