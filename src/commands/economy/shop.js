@@ -100,6 +100,12 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
         }
     }
 
+    // Present every page's items in A→Z order rather than raw shop-array order.
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    for (const rarity of Object.keys(standardByRarity)) standardByRarity[rarity].sort(byName);
+    prestigeItems.sort(byName);
+    blackMarketItems.sort(byName);
+
     const pages = [];
     for (const rarity of RARITY_ORDER) {
         const items = standardByRarity[rarity];
