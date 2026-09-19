@@ -29,6 +29,7 @@ const CHANNEL_ID = '111222333444555666';
 let app;
 let doc;
 let errors;
+let hasChannel; // req.bot.hasChannel stub — true unless a test overrides it
 
 function makeDoc(socialFeeds = []) {
     return { guildId: 'g1', socialFeeds, save: jest.fn(async () => {}) };
@@ -37,11 +38,15 @@ function makeDoc(socialFeeds = []) {
 beforeEach(() => {
     jest.clearAllMocks();
     mockFeedThrows = null;
+    hasChannel = jest.fn(async () => true);
     errors = jest.spyOn(console, 'error').mockImplementation(() => {});
     doc = makeDoc();
     Guild.findOne.mockResolvedValue(doc);
     app = express();
     app.use(express.json());
+    // The dashboard injects req.bot app-wide; the add route uses it to confirm
+    // the target channel belongs to the guild.
+    app.use((req, _res, next) => { req.bot = { hasChannel }; next(); });
     app.use('/api/v1', social);
 });
 
@@ -94,6 +99,26 @@ describe('POST /social/add', () => {
         Guild.findOne.mockResolvedValue(null);
         const res = await add({ platform: 'reddit', input: 'r/aww', channelId: CHANNEL_ID });
         expect(res.status).toBe(404);
+    });
+
+    it('400s a channel that is not in this guild, without resolving or saving', async () => {
+        hasChannel.mockResolvedValue(false);
+        const res = await add({ platform: 'reddit', input: 'r/aww', channelId: CHANNEL_ID });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/channel in this server/);
+        expect(hasChannel).toHaveBeenCalledWith('g1', CHANNEL_ID);
+        expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('409s a duplicate subscription for the same feed and channel', async () => {
+        doc = makeDoc([{ platform: 'reddit', ref: 'r/aww', feedUrl: 'https://www.reddit.com/r/aww/.rss', channelId: CHANNEL_ID }]);
+        Guild.findOne.mockResolvedValue(doc);
+        const res = await add({ platform: 'reddit', input: 'r/aww', channelId: CHANNEL_ID });
+        expect(res.status).toBe(409);
+        expect(doc.save).not.toHaveBeenCalled();
+        // A different channel for the same account is not a duplicate.
+        const res2 = await add({ platform: 'reddit', input: 'r/aww', channelId: '222333444555666777' });
+        expect(res2.status).toBe(200);
     });
 });
 

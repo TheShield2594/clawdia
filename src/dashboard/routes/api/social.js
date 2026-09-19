@@ -77,6 +77,15 @@ router.post('/guild/:guildId/social/add', checkAuth, checkGuildAccess, checkWrit
         return res.status(400).json({ error: 'channelId must be a valid Discord snowflake' });
     }
 
+    // A valid snowflake is not proof the channel belongs to this guild.
+    // checkGuildAccess authorises the admin for :guildId, but the channel is
+    // caller-supplied, and the poller later fetches it globally and posts to
+    // whatever it resolves — so without this an admin of one guild could aim a
+    // subscription at a channel in any other guild the bot is in.
+    if (!(await req.bot.hasChannel(guildId, channelId))) {
+        return res.status(400).json({ error: 'channelId must be a channel in this server' });
+    }
+
     let target;
     try {
         target = await resolveSocialTarget(platform, input);
@@ -87,6 +96,15 @@ router.post('/guild/:guildId/social/add', checkAuth, checkGuildAccess, checkWrit
     try {
         const guildSettings = await Guild.findOne({ guildId });
         if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
+
+        // The poller delivers once per stored entry, so a repeated add would
+        // double every future post for this account in this channel.
+        const duplicate = (guildSettings.socialFeeds || []).some(
+            feed => feed.feedUrl === target.feedUrl && feed.channelId === channelId
+        );
+        if (duplicate) {
+            return res.status(409).json({ error: 'This account already posts to that channel.' });
+        }
 
         guildSettings.socialFeeds.push({
             platform: target.platform,

@@ -157,11 +157,16 @@ async function resolveYoutubeHandle(handle, fetchText) {
 async function resolveYoutube(input, fetchText) {
     const raw = input.trim();
 
-    // An already-built feed URL, or any youtube.com/feeds link — pass it through
-    // untouched so an admin who found the Atom feed themselves is not second-guessed.
-    if (/youtube\.com\/feeds\/videos\.xml/i.test(raw)) {
-        return { feedUrl: raw, ref: raw };
-    }
+    // An already-built feed URL — pass it through untouched so an admin who found
+    // the Atom feed themselves is not second-guessed. Parsed, not substring-matched:
+    // `https://example.com/youtube.com/feeds/videos.xml` is not a YouTube feed, and
+    // a bare string with no scheme is not a URL at all.
+    try {
+        const u = new URL(raw);
+        if (/^https?:$/.test(u.protocol) && /(^|\.)youtube\.com$/i.test(u.hostname) && u.pathname === '/feeds/videos.xml') {
+            return { feedUrl: raw, ref: raw };
+        }
+    } catch { /* not a URL — fall through to the identifier and handle branches */ }
 
     // Bare identifiers, no URL needed.
     if (YT_CHANNEL_ID.test(raw)) return { feedUrl: youtubeChannelFeed(raw), ref: raw };

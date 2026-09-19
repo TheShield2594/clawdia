@@ -92,6 +92,13 @@ describe('YouTube', () => {
         expect(r.feedUrl).toBe(url);
     });
 
+    test('a feed path on another host is not accepted as a YouTube feed', async () => {
+        // The passthrough is parsed, not substring-matched, so this does not slip
+        // through as `feedUrl: raw`.
+        await expect(resolveSocialTarget('youtube', 'https://example.com/youtube.com/feeds/videos.xml', { fetchText: jest.fn() }))
+            .rejects.toThrow(/not a YouTube link/);
+    });
+
     test('a page with no channel id gives an actionable error', async () => {
         const fetchText = jest.fn(async () => '<html>nothing useful</html>');
         await expect(resolveSocialTarget('youtube', '@ghost', { fetchText }))
