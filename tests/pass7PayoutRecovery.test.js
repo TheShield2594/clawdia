@@ -24,6 +24,7 @@
 const fs   = require('fs');
 const path = require('path');
 const { fakeCollection } = require('./helpers/fakeCollection');
+const { useFixedClock } = require('./helpers/fixedClock');
 const { makeInteraction } = require('./helpers/fakeInteraction');
 
 const mockUsers  = fakeCollection('User', { balance: 0, bank: 0, inventory: [], paidPayouts: [], season: {}, seasonMissions: [] });
@@ -129,10 +130,13 @@ describe('/season claim-all keys the batch coins and each item', () => {
 });
 
 describe('/season claim-mission credits under a per-mission key', () => {
-    // Midnight UTC of the day the missions were dealt — the same value the key
-    // is built from, and recent enough that `ensureMissions` does not re-deal.
-    const today = new Date();
-    const missionDay = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+    // Pin the clock so the fixture's `seasonMissionsDate` and the `new Date()`
+    // `ensureMissions` reads inside `executeClaimMission` are the same instant.
+    // Built from the real clock, a run that crosses UTC midnight between suite
+    // definition and execution would leave the fixture a day stale, and
+    // `ensureMissions` would re-deal a fresh (incomplete) set over it.
+    const pinned = useFixedClock('2026-03-29T12:00:00Z');
+    const missionDay = Date.UTC(pinned.getUTCFullYear(), pinned.getUTCMonth(), pinned.getUTCDate());
 
     test('the mission reward lands under seasonMissionCoinPayoutKey', async () => {
         seedSeasonGuild();
