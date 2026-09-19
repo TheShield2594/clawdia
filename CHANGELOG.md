@@ -14,6 +14,63 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.12.1] - 2026-09-19
+
+Migrations through `025_social_feeds_index`.
+
+Economy audit, pass 7 — progression and group/PvP payouts (#873). The seventh
+pass, over the milestone-and-competition reward payouts the money-moving passes
+had not reached: the season pass, a syndicate's founding, a fishing tournament,
+and the guild-war resolution. As on every path before them, each credited coins
+or granted an item **without a payout key**, so the shared helpers' three
+failures lived on each — a retry or replay could pay twice, a write against a
+pruned document read as success, and a payout that failed was lost rather than
+filed where `payouts:replay` can settle it — while the embed announced the
+reward regardless. The season claims compounded it by marking the tier or
+mission claimed in the `save()` *before* the credit, locking the reward out
+behind a permanent flag with nothing to replay.
+
+- **The season-pass rewards credited unkeyed.** `/season claim`, `claim-all` and
+  `claim-mission` rode `saveWithBalanceDelta` with no `payoutKey` (the degraded
+  branch: a retried `$inc`, a missing document reported as paid, a keyless
+  `FailedJob` `payouts:replay` cannot settle), and the tier item was a bare
+  `grantInventoryItem` whose `null` for a pruned document read as success. Coins
+  now key through `seasonTierCoinPayoutKey` / `seasonMissionCoinPayoutKey` /
+  `seasonClaimAllCoinsPayoutKey` (the claim-all key is the batch's tier
+  signature, so a double-clicked claim-all no longer double-pays), and every
+  item through `grantItemsOrOwe` under a per-tier `seasonTierItemPayoutKey` — the
+  same key a single claim of that tier uses, so a tier claimed alone and one
+  claimed in a batch cannot both land. `/season tier-skip` now prunes its
+  emptied inventory slot with a targeted `$pull` instead of a full-document
+  `save()` that could flatten a concurrent grant.
+- **A syndicate's founding refund and a tournament prize were bare `$inc`s.** A
+  `/syndicate` create that failed refunded the 50k with an `$inc` that read
+  nothing back and recorded nothing; the fishing-tournament prize was an `$inc`
+  per winner that left `paidOut: false` with no owed record and no replay while
+  the embed announced the win. Both go through `creditCoinsOrOwe` now —
+  `syndicateFoundRefundPayoutKey(interaction.id)` and
+  `tournamentPrizePayoutKey(tournamentId, place)` — recorded for replay when they
+  will not land, and the tournament embed says "owed (being settled)" for a prize
+  it could not pay.
+- **The war hot path double-granted the victory booster.** `war.js`'s
+  `grantWarPoints` resolved an expired war inline with an **unguarded**
+  `activeWar.status: active → ended` flip, so two point-earning commands that
+  both saw the war expired each ran the reward `updateMany` and pushed a second
+  24h 2× coin booster onto every member of the guild. The inline resolver — a
+  buggy duplicate of the scheduler's audited `warService.resolveExpiredWars`
+  (#931), which claims atomically and pays the winner by score — is removed; the
+  hot path leaves an expired war for the scheduler.
+
+Reviewed and found sound, recorded so the next pass does not re-derive it:
+prestige (the reset touches level/xp/rank/unlocks, never `balance` or
+`inventory`, in one atomic write — no reward payout to lose), `dailychallenge`
+(atomic payout+cooldown in one guarded write), `synergyService`/`synergies` and
+`rivalryService`/`syndicateService`/`heist.js` (no currency writes), and
+`/season unlock` (a guarded atomic sink). **Seasonal events are not in this
+pass** — the event shop and activities move an event currency with no keyed
+helper and no `save()`-detach, so they are pass 8. Detail in
+[docs/AUDIT_LOG.md](docs/AUDIT_LOG.md#economy-progression-and-grouppvp-payouts).
+
 ## [4.12.0] - 2026-09-18
 
 Migrations through `025_social_feeds_index`.

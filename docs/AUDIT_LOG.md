@@ -2,12 +2,14 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and six passes over the
+long-stable, low-churn subsystems have been audited, and seven passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
-`daily`, `work`, `jobs`, `crime`, `invest`), and the gathering-loop payouts
-(`hunt`, `fish`, `mine`, `explore`) (#873). The majority of the
+`daily`, `work`, `jobs`, `crime`, `invest`), the gathering-loop payouts
+(`hunt`, `fish`, `mine`, `explore`), and the progression and group/PvP reward
+payouts (the season pass, a syndicate's founding, a fishing tournament, the war
+resolution) (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -960,6 +962,114 @@ not re-derive it:
 
 ---
 
+## Economy — Progression and Group/PvP Payouts
+
+**Status: Audited — all findings resolved** ✓
+
+The seventh pass of the economy audit #873, over the reward payouts in
+**progression** (the season pass) and the **group and PvP competitions** (a
+syndicate's founding, a fishing tournament, and the guild-war resolution). These
+are the milestone-and-competition rewards the money-moving passes had not yet
+reached: every one credited coins or granted an item without a payout key, so
+the three failures the shared helpers exist for lived on each — a retry or a
+replay could pay twice, a write against a pruned document read as success, and a
+payout that failed was lost rather than filed where `npm run payouts:replay`
+could settle it, while the embed announced the reward regardless. The season
+claims compounded it by recording the tier or mission as claimed in the `save()`
+*before* the credit, so a failure locked the reward out behind a permanent flag
+with nothing to replay.
+
+Scope, stated so the next pass does not assume more was covered: this pass
+audited the **coin and inventory-item currency-mutation paths** of these two
+areas. **Seasonal events are deliberately not in it** and stay under
+[Not yet reviewed](#not-yet-reviewed): they hinge on the **event currency**
+(candy, hearts, snowflakes) — a separate currency the keyed helpers do not yet
+cover and which is not detached from `save()` the way `balance` is — so keying
+the coins beside it while leaving that untouched would half-fix each handler.
+The event currency wants its own helper and its own pass (pass 8), the same way
+the coverage-floor ratchet became #998 rather than riding an audit pass.
+
+**Files reviewed/fixed:**
+- `src/commands/economy/season.js`
+- `src/commands/economy/syndicate.js`
+- `src/commands/economy/war.js`
+- `src/services/tournamentService.js`
+- `src/utils/payoutKey.js`
+- `tests/pass7PayoutRecovery.test.js` (added)
+- `tests/tournamentPrizePayout.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | `/season claim`'s tier coin reward rode `saveWithBalanceDelta` with **no `payoutKey`**, the degraded branch: the `$inc` is retried and re-credits a write whose response was lost, a missing document is reported as credited, and a hard failure files a keyless `FailedJob` `payouts:replay` cannot pay. The tier was already marked claimed in the same save, so a failed credit locked it out with the coins unrecoverable | The credit carries `seasonTierCoinPayoutKey(seasonId, userId, tier, track)`, which makes the retry a no-op, classifies a missing document, and files a replayable owed `coins` payload keyed the same | `season.js`, `payoutKey.js` |
+| 2 | The tier reward **item** was a bare `grantInventoryItem` in a `try`, and that call answers `null` — not a throw — for a pruned document, so a null read as success: a tier already marked claimed could announce an item it never granted | Through `grantItemsOrOwe` under `seasonTierItemPayoutKey(seasonId, userId, tier, track)` — reads the result back, records a replayable owed payload, never throws — and `itemOwed` is set from what it reports | `season.js`, `payoutKey.js` |
+| 3 | `/season claim-all` credited the whole batch of tier coins as one unkeyed `$inc`, and two concurrent claim-alls (a double-click) each computed the same batch and both credited it — a double payment on top of the unkeyed retry | One keyed credit under `seasonClaimAllCoinsPayoutKey(seasonId, userId, track, signature)`, the signature being the exact set of tiers claimed: a second claim-all of the same batch produces the same key and moves no coins, and the owed record is replayable | `season.js`, `payoutKey.js` |
+| 4 | `/season claim-all`'s items were one bare `inventoryAddStages` pipeline that read nothing back and filed nothing on failure — a whole batch of items lost to a keyless console line | Each item grants through `grantItemsOrOwe` under the **same per-tier** `seasonTierItemPayoutKey` a single claim of that tier would use, so a tier claimed alone and one claimed in a batch cannot both land, and any that miss are recorded as owed | `season.js`, `payoutKey.js` |
+| 5 | `/season claim-mission`'s coin reward had the same unkeyed `saveWithBalanceDelta` as the tier claim, and the mission was marked `claimed` in the same save before it — a failed credit locked the mission with the coins in a non-replayable record | Keyed by `seasonMissionCoinPayoutKey(seasonId, userId, missionDay, missionIndex)` — the mission's slot in the set dealt that UTC day, so today's slot and tomorrow's are distinct credits | `season.js`, `payoutKey.js` |
+| 6 | `/syndicate` founding debits the 50k creation cost and enrolls the founder atomically, then creates the syndicate; a `create` that threw refunded the cost with a bare `$inc` that read nothing back and recorded nothing, so a refund against a pruned document left the founder out 50k with no owed record — the pass-3 `/market` unwind shape | The refund goes through `creditCoinsOrOwe` under `syndicateFoundRefundPayoutKey(interaction.id)` — recorded for replay when it will not land, exactly-once on a retry — and the enrollment is cleared by a separate self-guarded best-effort write, since a stuck founder can escape that state but not coins they cannot get back | `syndicate.js`, `payoutKey.js` |
+| 7 | A fishing tournament's prize payout was a bare `$inc` per winner: a transient failure or a winner who had left the guild left `paidOut: false` on the tournament with **no owed record and no replay**, while the winners embed announced the prize regardless. Unkeyed, any retry would double-pay | The credit goes through `creditCoinsOrOwe` under `tournamentPrizePayoutKey(tournamentId, place)` — a prize it cannot land is recorded as a replayable owed payout, the key stops a replay paying twice, and the embed says "owed (being settled)" for a prize marked owed rather than promising coins | `tournamentService.js`, `payoutKey.js` |
+| 8 | `war.js`'s hot path (`grantWarPoints`) resolved an expired war **inline**, and it was a buggy duplicate of the scheduler's audited resolver (#931): the `activeWar.status: active → ended` flip carried no `'active'` guard, so two point-earning commands that both saw the war expired each ran the reward `updateMany` and pushed a **second** 24h 2× coin booster onto every member of the guild — a silent, guild-wide earnings leak. It also granted only from the calling guild's perspective, rewarding the losing side whenever their own action happened to trigger the check | The inline resolver is removed; the expired war is left for `warService.resolveExpiredWars`, which runs every five minutes and claims the resolution atomically, pays the winner **by score**, and announces to both servers. The hot path simply stops scoring an expired war (its point `$inc`s already guard on `status: 'active'`) | `war.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 9 | `/season tier-skip` consumed the token and granted the tier XP in one atomic `$inc` (sound), then pruned the emptied inventory slot by filtering the array in memory and calling `save()` — which rewrites `inventory` as an absolute `$set` and would flatten a concurrent grant that landed in the gap after the consume (the `save()`-clobber `balanceDelta.js`/`inventoryGrant.js` warn about), an item loss or duplication | The prune is a targeted `$pull` of the empty slots, which touches nothing else; the in-memory copy is still filtered for the embed's "tokens remaining" line, but no document `save()` follows | `season.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 10 | Six key constructors were needed and did not exist | `syndicateFoundRefundPayoutKey`, `tournamentPrizePayoutKey`, `seasonTierCoinPayoutKey`, `seasonTierItemPayoutKey`, `seasonClaimAllCoinsPayoutKey` and `seasonMissionCoinPayoutKey`, each keyed by the identifier that names its payout across a retry and a replay | `payoutKey.js` |
+| 11 | No tests over the keyed paths | `tests/pass7PayoutRecovery.test.js` drives the season claim/claim-all handlers and the syndicate founding refund against a store that evaluates the payout-key guard for real (keys written, duplicate is a no-op), pins the war hot path making no write against an expired war, and holds the mission/tournament/tier-skip call sites to the keyed path; `tests/tournamentPrizePayout.test.js` gains the owed-and-duplicate cases | `tests/` |
+
+**Reviewed and found sound** — no change needed, recorded so the next pass does
+not re-derive it:
+
+- **Prestige** (`prestige.js`, `utils/prestige.js`). Prestige does **not** wipe
+  the coin balance or the inventory: the reset is one guarded atomic
+  `findOneAndUpdate` that sets `level`/`xp` to 0 and increments the rank and
+  lifetime XP, touching neither `balance` nor `inventory`. There is no
+  reset-then-grant window to lose value in, and no coin or item payout for
+  prestiging — the reward is permanent bonus multipliers applied elsewhere.
+- **`dailychallenge.js`**. The board reward is a single guarded
+  `findOneAndUpdate` that credits coins and XP and stamps the cooldown in one
+  write — the sound atomic payout+cooldown shape. A null match is a cooldown
+  miss (no coins moved) and a failed write leaves the cooldown unset for a
+  retry, so there is no separate owed path to key.
+- **`synergyService.js` and `synergies.js`**. The service is pure reads (every
+  function returns a bonus number); the command's only write is a
+  `$setOnInsert` profile upsert. No currency moves here — the synergy bonuses
+  are applied at the gather/work/crime call sites, which earlier passes covered.
+- **`/season unlock`** (the premium-track purchase) is a guarded atomic debit
+  and the economy's primary deliberate sink; **`/season end`**'s `seasonCoins`
+  reset is a leaderboard counter, explicitly separate from the wallet, and the
+  `SeasonRecord` snapshot is written before the reset.
+- **`rivalryService.js`** (only writes notification timestamps),
+  **`syndicateService.js`** (in-memory lobby state and outcome math), and
+  **`heist.js`** (only stamps `lastHeist`) move no coins or items.
+- The war **point increments** in `grantWarPoints` guard on
+  `'activeWar.status': 'active'` in their own filters, so a stale-active read
+  costs a no-op write rather than a wrong one — and the canonical
+  `warService.resolveExpiredWars` this pass defers to was audited under #931.
+
+**The bound this pass leaves open.** Seasonal events are not audited here, and
+that is the deliberate line above rather than an omission: the event shop and
+the seasonal activities move an **event currency** with no keyed helper and no
+`save()`-detach, so their credits, refunds and grants need infrastructure this
+pass did not build. That is pass 8. Within this pass's own scope, the season
+coin credits inherit `saveWithBalanceDelta`'s one residual at-least-once corner
+only when a *keyed* write commits and loses its response between the credit and
+its acknowledgement — the same millisecond window every keyed credit in the
+economy carries, closed by the guard on the replay, not by the live write.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -978,9 +1088,9 @@ wide, and it is widest exactly where the risk is.
   been audited above; the stakes those hands are played for go through
   `placeWager`, which #785 covered
 - core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market.js` and `gift.js` have had their unwind paths audited (pass 3), the rest of both commands has not
-- group and PvP systems (`war.js`, `rivalryService.js`, `tournamentService.js`, and everything in `heistService.js`, `syndicateService.js` and `duel.js` other than the escrow and payout paths audited above)
-- progression (`prestige.js`, `season.js`, `synergyService.js`, `dailychallenge.js`)
-- seasonal events (`seasonalEventService.js`, `eventshop.js`, and the seasonal commands)
+- group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is not reviewed
+- progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (the view/leaderboard/history/admin flows) is not reviewed
+- seasonal events (`seasonalEventService.js`, `eventshop.js`, and the seasonal commands) — **pass 8**. These move an event currency (candy, hearts, snowflakes) with no keyed helper and no `save()`-detach: the event-shop debit-then-grant refund, the activity coin and event-currency credits, and the bonus item grants all need infrastructure pass 7 deliberately did not build (see the pass-7 section's closing bound)
 
 **Everything else uncovered:**
 
@@ -1001,5 +1111,6 @@ wide, and it is widest exactly where the risk is.
 economy escrow and payout paths on 2026-09-01; the progressive jackpot on
 2026-09-04; the gift and market unwind paths on 2026-09-05; the casino hand
 payouts on 2026-09-08; the core currency commands on 2026-09-17; the
-gathering-loop payouts on 2026-09-18. "Not yet reviewed" carries no review date,
-because nothing in it has been reviewed.*
+gathering-loop payouts on 2026-09-18; the progression and group/PvP payouts on
+2026-09-19. "Not yet reviewed" carries no review date, because nothing in it has
+been reviewed.*

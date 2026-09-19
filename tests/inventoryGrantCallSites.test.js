@@ -288,8 +288,10 @@ describe('the sweep is actually sweeping', () => {
     it('finds the call sites it claims to check', () => {
         // A refactor that renames the helper, or a parse that silently returns
         // nothing, must fail here rather than pass by finding zero problems.
-        expect(GRANTS.length).toBeGreaterThanOrEqual(13);
-        expect(new Set(GRANTS.map(c => c.file)).size).toBeGreaterThanOrEqual(12);
+        // (The floor was 13; #873 pass 7 moved `/season`'s tier grant to
+        // `grantItemsOrOwe`, leaving 12 bare `grantInventoryItem` call sites.)
+        expect(GRANTS.length).toBeGreaterThanOrEqual(12);
+        expect(new Set(GRANTS.map(c => c.file)).size).toBeGreaterThanOrEqual(11);
     });
 
     it('covers services and commands alike, not just one folder', () => {
