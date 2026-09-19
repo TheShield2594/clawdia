@@ -48,7 +48,8 @@ router.post('/guild/:guildId/social/validate', checkAuth, checkGuildAccess, chec
 
     try {
         const body = await safeFetchFeed(target.feedUrl);
-        const feed = await new Parser().parseString(body);
+        const feedParser = new Parser();
+        const feed = await feedParser.parseString(body);
         return res.json({
             valid: true,
             ref: target.ref,

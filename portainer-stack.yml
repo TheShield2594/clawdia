@@ -828,7 +828,12 @@ services:
   # proxy only if you want to test routes in a browser.
   rsshub:
     profiles: [social]
-    image: diygod/rsshub:latest
+    # Digest-pinned like every other third-party image (#644, held by
+    # tests/imagePinning.test.js). RSSHub ships no version tags, so the tag stays
+    # `latest` for readability and the digest is what actually deploys; Dependabot
+    # bumps it. Because the scraped routes track fast-moving sites, an operator
+    # relying on X/IG/TikTok may want to bump this digest more often than Dependabot.
+    image: diygod/rsshub:latest@sha256:03cb149232691430a181e6ad4c56b711507332915526387a079ce25407c57eeb
     container_name: clawdia-rsshub
     restart: unless-stopped
     environment:

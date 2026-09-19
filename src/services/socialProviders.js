@@ -46,7 +46,10 @@ const BRIDGE_ENV_VAR = 'SOCIAL_BRIDGE_BASE_URL';
 // Read lazily rather than captured at module load, so a process that sets it
 // after require (and every test that sets it per-case) sees the live value.
 function getBridgeBaseUrl() {
-    const raw = process.env[BRIDGE_ENV_VAR];
+    // Read as a literal `process.env.SOCIAL_BRIDGE_BASE_URL` rather than through
+    // BRIDGE_ENV_VAR, so tests/envExampleDrift.test.js can see the bot consumes
+    // it — a computed `process.env[name]` read is invisible to that grep.
+    const raw = process.env.SOCIAL_BRIDGE_BASE_URL;
     return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
 }
 

@@ -113,13 +113,17 @@ describe('rss-parser stays watched (#954)', () => {
         }
     });
 
-    it('is required in exactly the two places that parse a feed', () => {
-        // Named rather than counted: a third importer is not automatically
-        // wrong, but it is the thing to look at, and adding it here is the
-        // moment to ask whether the vendoring plan still holds.
+    it('is required in exactly the four places that parse a feed', () => {
+        // Named rather than counted: a new importer is not automatically wrong,
+        // but it is the thing to look at, and adding it here is the moment to ask
+        // whether the vendoring plan still holds. The social-notifications feature
+        // reuses the same parser for the feeds its providers resolve, and its two
+        // importers go through safeFetchFeed exactly as the RSS pair do.
         expect(importers.sort()).toEqual([
             'src/dashboard/routes/api/rss.js',
+            'src/dashboard/routes/api/social.js',
             'src/services/rssService.js',
+            'src/services/socialService.js',
         ]);
     });
 
