@@ -23,6 +23,9 @@ const {
     payoutKeyAppendExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
     gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey,
+    syndicateFoundRefundPayoutKey, tournamentPrizePayoutKey,
+    seasonTierCoinPayoutKey, seasonTierItemPayoutKey,
+    seasonClaimAllCoinsPayoutKey, seasonMissionCoinPayoutKey,
     RETENTION_MS, KEY_CAP,
 } = require('../src/utils/payoutKey');
 
@@ -313,5 +316,40 @@ describe('key construction', () => {
 
     test('a shop refund is keyed by the purchase interaction', () => {
         expect(shopRefundPayoutKey('i4')).toBe('shop:i4:refund');
+    });
+
+    // #873, pass 7 — progression and group/PvP.
+    test('a syndicate founding refund is keyed by the interaction', () => {
+        expect(syndicateFoundRefundPayoutKey('i5')).toBe('syndicate:i5:refund');
+    });
+
+    test('a tournament prize is keyed by the tournament and the place', () => {
+        expect(tournamentPrizePayoutKey('t1', 1)).toBe('tournament:t1:place:1');
+        expect(tournamentPrizePayoutKey('t1', 2)).not.toBe(tournamentPrizePayoutKey('t1', 1));
+    });
+
+    test('a season tier keys its coins and its item apart, per season and track', () => {
+        expect(seasonTierCoinPayoutKey('s1', 'u1', 10, 'free')).toBe('season:s1:u1:tier:10:free:coins');
+        expect(seasonTierItemPayoutKey('s1', 'u1', 10, 'free')).toBe('season:s1:u1:tier:10:free:item');
+        // Coins and item on the same tier must not share a key.
+        expect(seasonTierCoinPayoutKey('s1', 'u1', 10, 'free'))
+            .not.toBe(seasonTierItemPayoutKey('s1', 'u1', 10, 'free'));
+        // A new season reclaiming the same tier gets a fresh key.
+        expect(seasonTierCoinPayoutKey('s2', 'u1', 10, 'free'))
+            .not.toBe(seasonTierCoinPayoutKey('s1', 'u1', 10, 'free'));
+    });
+
+    test('a claim-all batch is keyed by its tier signature, apart from a single tier', () => {
+        expect(seasonClaimAllCoinsPayoutKey('s1', 'u1', 'free', '1.2.3')).toBe('season:s1:u1:claimall:free:1.2.3:coins');
+        // A different batch (a tier bumped between clicks) keys separately.
+        expect(seasonClaimAllCoinsPayoutKey('s1', 'u1', 'free', '1.2.3'))
+            .not.toBe(seasonClaimAllCoinsPayoutKey('s1', 'u1', 'free', '1.2.3.4'));
+    });
+
+    test('a mission reward is keyed by the day it was dealt and its slot', () => {
+        expect(seasonMissionCoinPayoutKey('s1', 'u1', 1_700_000_000_000, 0)).toBe('season:s1:u1:mission:1700000000000:0');
+        // Same slot on a different day is a different credit.
+        expect(seasonMissionCoinPayoutKey('s1', 'u1', 1_700_000_000_000, 0))
+            .not.toBe(seasonMissionCoinPayoutKey('s1', 'u1', 1_700_086_400_000, 0));
     });
 });

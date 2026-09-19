@@ -1,7 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
-const User = require('../../models/User');
 
 const WAR_DURATION_DAYS = 7;
 const WAR_DURATION_MS = WAR_DURATION_DAYS * 86400000;
@@ -287,11 +286,24 @@ async function grantWarPoints(guildId, action) {
 
     if (!war || war.status !== 'active') return;
 
-    // Auto-resolve expired wars
-    if (war.endsAt && Date.now() > new Date(war.endsAt).getTime()) {
-        await resolveExpiredWar(guildId, guildSettings);
-        return;
-    }
+    // A war whose window has closed is resolved by the scheduler's
+    // `warService.resolveExpiredWars`, which runs every five minutes and is the
+    // audited path (#931): it claims the resolution with an atomic
+    // `status: active → ended` flip, pays the winner *by score* their booster and
+    // badge, and announces to both servers.
+    //
+    // This hot path used to resolve inline instead, and it was a buggy duplicate
+    // of that (#873, pass 7): the status flip carried no `'activeWar.status':
+    // 'active'` guard, so two point-earning commands that both saw the war
+    // expired each ran the reward `updateMany` and pushed a second 24h 2× coin
+    // booster onto every member of the guild — a silent, guild-wide earnings
+    // leak. It also granted only from this guild's perspective, so the losing
+    // side's members were rewarded whenever their own action happened to trigger
+    // the check. Rather than re-implement the atomic claim a second time, the
+    // expired war is left for the scheduler; the hot path simply stops scoring
+    // it. The point increments below already guard on `status: 'active'`, so a
+    // stale-active read never lands a wrong write.
+    if (war.endsAt && Date.now() > new Date(war.endsAt).getTime()) return;
 
     await Guild.findOneAndUpdate(
         { guildId, 'activeWar.status': 'active' },
@@ -303,35 +315,6 @@ async function grantWarPoints(guildId, action) {
         await Guild.findOneAndUpdate(
             { guildId: war.opponentGuildId, 'activeWar.status': 'active' },
             { $inc: { 'activeWar.opponentScore': pts } }
-        );
-    }
-}
-
-async function resolveExpiredWar(guildId, guildSettings) {
-    const war = guildSettings?.activeWar;
-    if (!war || war.status !== 'active') return;
-
-    const myScore = war.myScore ?? 0;
-    const oppScore = war.opponentScore ?? 0;
-    const iWon = myScore >= oppScore;
-
-    await Guild.findOneAndUpdate(
-        { guildId },
-        { $set: { 'activeWar.status': 'ended' } }
-    );
-    if (war.opponentGuildId) {
-        await Guild.findOneAndUpdate(
-            { guildId: war.opponentGuildId },
-            { $set: { 'activeWar.status': 'ended' } }
-        );
-    }
-
-    // Apply 2x coin booster to all winners
-    if (iWon) {
-        const expiresAt = new Date(Date.now() + 86400000);
-        await User.updateMany(
-            { guildId },
-            { $push: { activeEffects: { type: 'coin_booster_2x', expiresAt, charges: -1 } } }
         );
     }
 }

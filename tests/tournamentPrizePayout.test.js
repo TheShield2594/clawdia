@@ -26,9 +26,15 @@ jest.mock('../src/models/FishingTournament', () => ({
     create: jest.fn(),
 }));
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
+// The prize credit records an owed payout when it cannot land (#873, pass 7).
+// Mock the recorder — the real one writes a FailedJob to a database that is not
+// up in unit tests — and the retry delay so a missing winner does not stall.
+jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
+jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 
 const FishingTournament = require('../src/models/FishingTournament');
 const { logTransaction } = require('../src/utils/logTransaction');
+const { recordOwedPayout } = require('../src/utils/owedPayout');
 const tournamentService = require('../src/services/tournamentService');
 
 const GUILD = 'guild-1';
@@ -65,6 +71,7 @@ const claimYields = doc => FishingTournament.findOneAndUpdate.mockResolvedValue(
 beforeEach(() => {
     jest.clearAllMocks();
     mockUsers.reset();
+    recordOwedPayout.mockResolvedValue(true);
 });
 
 describe('ending a tournament', () => {
@@ -232,9 +239,11 @@ describe('ending a tournament', () => {
 
     // The credit is the thing that can fail on its own: a winner who has left
     // the guild has no member document, so the update matches nothing. That
-    // must not be recorded as paid — `paidOut: false` is what an operator has
-    // to be able to find afterwards.
-    test('a winner with no member document is left unpaid rather than marked paid', async () => {
+    // must not be recorded as paid — and it must be written down as owed so
+    // `payouts:replay` can settle it, rather than announced as won and lost
+    // (#873, pass 7). `paidOut: false` with `owed: true` is what an operator
+    // finds afterwards.
+    test('a winner with no member document is recorded as owed, not marked paid', async () => {
         mockUsers.seed({ userId: 'present', guildId: GUILD, balance: 0 });
         const tournament = makeTournament({
             prizePool: 1000,
@@ -247,12 +256,40 @@ describe('ending a tournament', () => {
 
         const ended = await tournamentService.endTournament(tournament._id);
 
-        expect(ended.prizes[0]).toEqual({ place: 1, userId: 'departed', amount: 600, paidOut: false });
+        expect(ended.prizes[0]).toEqual({ place: 1, userId: 'departed', amount: 600, paidOut: false, owed: true });
         expect(ended.prizes[1].paidOut).toBe(true);
         expect(mockUsers.get('present').balance).toBe(250);
+        // The unpaid winner is written down as an owed coins payout, keyed to
+        // the tournament and the place so a replay cannot pay it twice.
+        expect(recordOwedPayout).toHaveBeenCalledTimes(1);
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            payload: expect.objectContaining({
+                kind: 'coins', userId: 'departed', amount: 600,
+                payoutKey: 'tournament:tourney-1:place:1',
+            }),
+        }));
         // The unpaid winner is not in the ledger either — a ledger row is the
         // record of coins that moved.
         expect(logTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    // A prize that lands exactly once even if `endTournament`'s credit is
+    // retried: the payout key guards the second application (#873, pass 7).
+    test('a prize already keyed onto the winner is not credited a second time', async () => {
+        mockUsers.seed({ userId: 'a', guildId: GUILD, balance: 100, paidPayouts: [{ key: 'tournament:tourney-1:place:1', at: new Date() }] });
+        const tournament = makeTournament({
+            prizePool: 1000,
+            entries: [entry('a', 90, '2026-08-31T10:10:00Z')],
+        });
+        claimYields(tournament);
+
+        const ended = await tournamentService.endTournament(tournament._id);
+
+        // The guard matched the existing key, so no coins moved, but the prize
+        // is a success — an earlier attempt already paid it.
+        expect(mockUsers.get('a').balance).toBe(100);
+        expect(ended.prizes[0].paidOut).toBe(true);
+        expect(recordOwedPayout).not.toHaveBeenCalled();
     });
 
     test('each paid prize is written to the ledger with the balance it produced', async () => {

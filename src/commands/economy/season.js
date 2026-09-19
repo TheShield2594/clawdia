@@ -12,7 +12,8 @@ const { rewardReveal } = require('../../utils/rewardReveal');
 const { logTransaction } = require('../../utils/logTransaction');
 const { awardSeasonXp } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
-const { grantInventoryItem, inventoryAddStages } = require('../../utils/inventoryGrant');
+const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
+const { seasonTierCoinPayoutKey, seasonTierItemPayoutKey, seasonClaimAllCoinsPayoutKey, seasonMissionCoinPayoutKey } = require('../../utils/payoutKey');
 const { packFieldsCapped } = require('../../utils/embedFields');
 
 // Reset a user's season sub-document to the fresh shape when their stored
@@ -204,15 +205,14 @@ async function executeClaim(interaction) {
     (wantsPremium ? user.season.claimedPremiumTiers : user.season.claimedTiers).push(tier);
     user.markModified('season');
 
+    const track = wantsPremium ? 'premium' : 'free';
     let coinsOwed = 0;
     try {
-        // A credit the retries could not land is recorded as owed rather than
-        // paid, so the claim must not be reported as coins in the wallet.
-        const paid = await saveWithBalanceDelta(User, user, balanceAtLoad, {
-            service: 'season',
-            jobName: 'tierRewardCoins',
-            guildId: interaction.guild.id,
-        });
+        // The `payoutKey` makes the owed record replayable and the credit
+        // exactly-once (#873, pass 7): unkeyed, a failed credit left the coins in
+        // a keyless `FailedJob` `payouts:replay` cannot pay, tier already claimed.
+        const paid = await saveWithBalanceDelta(User, user, balanceAtLoad,
+            { service: 'season', jobName: 'tierRewardCoins', guildId: interaction.guild.id, payoutKey: seasonTierCoinPayoutKey(season.seasonId, interaction.user.id, tier, track) });
         if (!paid.credited) coinsOwed = reward.coins ?? 0;
     } catch (err) {
         if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
@@ -227,12 +227,13 @@ async function executeClaim(interaction) {
     // lost silently — same posture as the coins above.
     let itemOwed = false;
     if (reward.itemId) {
-        try {
-            await grantInventoryItem(interaction.user.id, interaction.guild.id, reward.itemId, 1);
-        } catch (err) {
-            console.error(`[season] tier ${tier} item ${reward.itemId} owed to ${interaction.user.id} — grant failed:`, err);
-            itemOwed = true;
-        }
+        // Keyed through the shared helper (#873, pass 7): the bare
+        // `grantInventoryItem` read `null` (a pruned document) as success, so a
+        // claimed tier could report an item it never granted. The helper reads
+        // the result back, records a replayable owed payload, and never throws.
+        const granted = await grantItemsOrOwe({ userId: interaction.user.id, guildId: interaction.guild.id }, reward.itemId, 1,
+            { payoutKey: seasonTierItemPayoutKey(season.seasonId, interaction.user.id, tier, track), service: 'season', jobName: 'tierRewardItem' });
+        if (!granted.granted) itemOwed = true;
     }
 
     // Social proof: how many users in this guild have claimed this tier (this track)
@@ -415,16 +416,15 @@ async function executeClaimMission(interaction) {
     user.markModified('seasonMissions');
     user.markModified('season');
 
+    // Names this mission instance for the key: the slot in a set dealt fresh
+    // each UTC day, so today's slot 2 and tomorrow's are different credits (#873).
+    const missionDay = user.seasonMissionsDate ? new Date(user.seasonMissionsDate).getTime() : 'na';
     let missionCoinsOwed = 0;
     try {
-        // Same reasoning as the tier claim: the coin reward is a delta, not a
-        // snapshot of the balance this command happened to read — and a delta
-        // that would not land is recorded as owed, not paid.
-        const paid = await saveWithBalanceDelta(User, user, balanceAtLoad, {
-            service: 'season',
-            jobName: 'missionRewardCoins',
-            guildId: interaction.guild.id,
-        });
+        // Keyed so the owed record is replayable and the credit exactly-once;
+        // unkeyed, a failed credit locked the mission as claimed with coins lost.
+        const paid = await saveWithBalanceDelta(User, user, balanceAtLoad,
+            { service: 'season', jobName: 'missionRewardCoins', guildId: interaction.guild.id, payoutKey: seasonMissionCoinPayoutKey(season.seasonId, interaction.user.id, missionDay, missionIndex) });
         if (!paid.credited) missionCoinsOwed = mission.coinReward ?? 0;
     } catch (err) {
         if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
@@ -476,6 +476,7 @@ async function executeClaimAll(interaction) {
         });
     }
 
+    const trackId = wantsPremium ? 'premium' : 'free';
     const balanceAtLoad = user.balance ?? 0;
     let totalCoins = 0;
     const itemsClaimed = [];
@@ -491,7 +492,9 @@ async function executeClaimAll(interaction) {
         }
         if (reward.itemId) {
             itemsClaimed.push(reward.label);
-            itemsToGrant.push(reward.itemId);
+            // The tier rides along so each item grants under its own per-tier key
+            // below — the same key a single claim would use (#873, pass 7).
+            itemsToGrant.push({ tier: tierDef.tier, itemId: reward.itemId });
         }
 
         if (wantsPremium) {
@@ -503,41 +506,32 @@ async function executeClaimAll(interaction) {
 
     user.markModified('season');
 
+    // Names this batch for the coin key: the exact set of tiers claimed, so two
+    // concurrent claim-alls compute the same key and the second is a no-op (#873).
+    const tierSignature = claimable.map(t => t.tier).join('.');
     let batchCoinsOwed = 0;
     try {
-        // The whole batch of tier coins goes out as one `$inc`. If that `$inc`
-        // will not land it is recorded as owed, and a batch this size is exactly
-        // the one a player would notice missing — so it is reported, not assumed.
-        const paid = await saveWithBalanceDelta(User, user, balanceAtLoad, {
-            service: 'season',
-            jobName: 'claimAllRewardCoins',
-            guildId: interaction.guild.id,
-        });
+        // The whole batch goes out as one `$inc`; keyed, an owed record is
+        // replayable and the credit exactly-once (a batch is noticed if missing).
+        const paid = await saveWithBalanceDelta(User, user, balanceAtLoad,
+            { service: 'season', jobName: 'claimAllRewardCoins', guildId: interaction.guild.id, payoutKey: seasonClaimAllCoinsPayoutKey(season.seasonId, interaction.user.id, trackId, tierSignature) });
         if (!paid.credited) batchCoinsOwed = totalCoins;
     } catch (err) {
         if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
 
-    // The claims are recorded; the reward items now land in one atomic pipeline
-    // update rather than riding the save — an inventory array written through
-    // `save()` would flatten any credit that landed since the read, and slots
-    // pushed in memory can duplicate ones a concurrent credit is creating
-    // (src/utils/inventoryGrant.js). A grant that fails is owed and logged, not
-    // lost silently — same posture as the coins above.
-    let itemsOwed = false;
-    if (itemsToGrant.length > 0) {
-        try {
-            const granted = await User.findOneAndUpdate(
-                { userId: interaction.user.id, guildId: interaction.guild.id },
-                inventoryAddStages(itemsToGrant.map(itemId => ({ itemId }))),
-            );
-            if (!granted) throw new Error('user document not found');
-        } catch (err) {
-            console.error(`[season] claim-all items [${itemsToGrant.join(', ')}] owed to ${interaction.user.id} — grant failed:`, err);
-            itemsOwed = true;
-        }
+    // Each reward item lands through the shared helper, keyed per tier, rather
+    // than one bare pipeline that read nothing back and filed nothing on failure
+    // (#873, pass 7). The helper grants each exactly once and records a
+    // replayable owed payload for any that miss.
+    let itemsOwedCount = 0;
+    for (const { tier: itemTier, itemId } of itemsToGrant) {
+        const granted = await grantItemsOrOwe({ userId: interaction.user.id, guildId: interaction.guild.id }, itemId, 1,
+            { payoutKey: seasonTierItemPayoutKey(season.seasonId, interaction.user.id, itemTier, trackId), service: 'season', jobName: 'claimAllRewardItem' });
+        if (!granted.granted) itemsOwedCount++;
     }
+    const itemsOwed = itemsOwedCount > 0;
 
     const track = wantsPremium ? '✨ Premium' : '🆓 Free';
     const tierNums = claimable.map(t => t.tier);
@@ -915,8 +909,11 @@ async function executeTierSkip(interaction) {
         return interaction.reply({ content: 'Failed to consume the Tier Skip Token — it may have already been used.', flags: MessageFlags.Ephemeral });
     }
 
+    // Prune the emptied slot with a targeted `$pull`, not a full-document
+    // `save()` (#873, pass 7): the save rewrites `inventory` as an absolute
+    // `$set` and would flatten a grant that landed after the atomic consume.
+    await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $pull: { inventory: { quantity: { $lte: 0 } } } }).catch(() => {});
     updatedUser.inventory = updatedUser.inventory.filter(e => e.quantity > 0);
-    await updatedUser.save();
 
     const newTier = getTierFromXp(updatedUser.season?.xp ?? 0);
     const embed = new EmbedBuilder()

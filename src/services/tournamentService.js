@@ -3,6 +3,8 @@
 const FishingTournament = require('../models/FishingTournament');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
+const { creditCoinsOrOwe } = require('../utils/creditOrOwe');
+const { tournamentPrizePayoutKey } = require('../utils/payoutKey');
 const { EmbedBuilder } = require('discord.js');
 const COLORS = require('../utils/embedColors');
 
@@ -115,23 +117,42 @@ async function endTournament(tournamentId) {
         }
     }
 
-    // Pay out each winner; only mark paidOut when the credit succeeded
+    // Pay out each winner. The claim above makes this loop run once, but the
+    // credit inside it was a bare `$inc` with nothing behind it (#873, pass 7):
+    // a transient failure or a winner who had left the guild left `paidOut:
+    // false` on the tournament with no owed record and no replay, while the
+    // winners embed announced the prize regardless. The keyed helper records a
+    // prize it cannot land as a replayable owed payout, and the key means a
+    // replay — or a second `endTournament` that somehow got past the claim —
+    // cannot pay it twice. `paidOut` is set only on a real credit; `owed` marks
+    // the ones written down so the embed can say so rather than promising coins.
     for (const prize of tournament.prizes) {
-        const updatedUser = await User.findOneAndUpdate(
+        const paid = await creditCoinsOrOwe(
             { userId: prize.userId, guildId: tournament.guildId },
-            { $inc: { balance: prize.amount } },
-            { new: true }
+            prize.amount,
+            {
+                payoutKey: tournamentPrizePayoutKey(tournament._id, prize.place),
+                service: 'tournamentService', jobName: 'tournamentPrize',
+            }
         );
-        if (updatedUser) {
+        if (paid.credited) {
             prize.paidOut = true;
+            // A credit that landed on a retry after a lost response comes back
+            // with no document, so read the settled balance for the ledger row
+            // rather than reporting the pre-credit figure.
+            const balance = paid.doc?.balance
+                ?? (await User.findOne({ userId: prize.userId, guildId: tournament.guildId }, 'balance').lean())?.balance
+                ?? prize.amount;
             logTransaction({
                 userId:  prize.userId,
                 guildId: tournament.guildId,
                 type:    'tournament_prize',
                 amount:  prize.amount,
-                balance: updatedUser.balance,
+                balance,
                 note:    `Tournament place #${prize.place}`,
             });
+        } else {
+            prize.owed = paid.owed;
         }
     }
 
@@ -182,7 +203,14 @@ function buildWinnersEmbed(tournament, currency = '💰') {
     const medals  = ['🥇', '🥈', '🥉'];
     const lines   = sorted.slice(0, 3).map((e, i) => {
         const prize = tournament.prizes.find(p => p.place === i + 1);
-        const pStr  = prize ? ` — wins **${currency}${prize.amount.toLocaleString()}**` : '';
+        // A prize that could not be credited is not announced as won: the payout
+        // records it as owed and `payouts:replay` settles it, so the embed says
+        // that rather than promising coins that are not in the wallet (#873).
+        const pStr  = !prize
+            ? ''
+            : prize.paidOut === false
+                ? ` — **${currency}${prize.amount.toLocaleString()}** owed (being settled)`
+                : ` — wins **${currency}${prize.amount.toLocaleString()}**`;
         return `${medals[i]} <@${e.userId}> — ${e.fishEmoji} ${e.fishName} (${e.score.toLocaleString()} pts)${pStr}`;
     });
 
