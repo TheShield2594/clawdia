@@ -11,7 +11,7 @@ const User = require('../../models/User');
 const Syndicate = require('../../models/Syndicate');
 const { logTransaction } = require('../../utils/logTransaction');
 const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
-const { crewSharePayoutKey } = require('../../utils/payoutKey');
+const { crewSharePayoutKey, syndicateFoundRefundPayoutKey } = require('../../utils/payoutKey');
 const { buildSkillCheck } = require('../../services/heistService');
 const {
     activeSyndicateHeists,
@@ -407,9 +407,7 @@ async function executeCreate(interaction, guildDoc) {
     const tag         = rawTag ? rawTag.toUpperCase() : null;
     const syndicateId = `${interaction.guild.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-    // No multi-document transactions available (standalone MongoDB deployment), so
-    // debit + enroll the user atomically first, then create the syndicate. If
-    // creation fails, compensate by reverting the user's debit/enrollment.
+    // No multi-document transactions (standalone mongod): debit + enroll atomically, then create; a failed create compensates below.
     const debited = await User.findOneAndUpdate(
         { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: CREATION_COST }, syndicateId: null },
         { $inc: { balance: -CREATION_COST }, $set: { syndicateId } },
@@ -434,10 +432,12 @@ async function executeCreate(interaction, guildDoc) {
             openToJoin,
         });
     } catch (err) {
-        await User.updateOne(
-            { userId: interaction.user.id, guildId: interaction.guild.id, syndicateId },
-            { $inc: { balance: CREATION_COST }, $set: { syndicateId: null } },
-        );
+        // Compensate the charge a failed create left on the founder: the bare
+        // `$inc` recorded nothing on a miss (#873, pass 7). The keyed refund files
+        // the debt for `payouts:replay`; the un-enroll is best-effort. Re-thrown.
+        const who = { userId: interaction.user.id, guildId: interaction.guild.id };
+        await creditCoinsOrOwe(who, CREATION_COST, { payoutKey: syndicateFoundRefundPayoutKey(interaction.id), service: 'syndicate', jobName: 'syndicateFoundRefund' });
+        await User.updateOne({ ...who, syndicateId }, { $set: { syndicateId: null } }).catch(() => {});
         throw err;
     }
 
@@ -1056,4 +1056,4 @@ module.exports = {
 
     handleSyndicateButton,
 };
-module.exports.__test__ = { resolveHeist };  // where the crew's shares are paid
+module.exports.__test__ = { resolveHeist, executeCreate };  // crew shares + the found refund

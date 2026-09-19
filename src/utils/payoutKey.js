@@ -433,6 +433,116 @@ function crewSharePayoutKey(jobId, userId) {
 }
 
 /**
+ * The founder's stake coming back when a `/syndicate found` could not create the
+ * syndicate document (#873, pass 7).
+ *
+ * The command debits the 50k creation cost and enrolls the founder in one atomic
+ * write, then creates the syndicate; a creation that throws has to hand the coins
+ * back. That refund was a bare `$inc` that read nothing back and recorded
+ * nothing, so a refund against a pruned or already-changed document moved no
+ * coins and left the founder out the cost with no owed record — the pass-3
+ * `/market` unwind shape. Keyed, it records the debt for `payouts:replay` and a
+ * retry cannot refund twice.
+ *
+ * Keyed by the interaction, like the other refunds: the same founder trying the
+ * same name again is a fresh attempt with a fresh `syndicateId` and refunds
+ * separately.
+ */
+function syndicateFoundRefundPayoutKey(interactionId) {
+    return `syndicate:${interactionId}:refund`;
+}
+
+/**
+ * One place's prize in a fishing tournament (#873, pass 7).
+ *
+ * `endTournament` claims the tournament with an atomic `status: active → ended`
+ * flip and then pays the top three out of the pool. The claim makes the payout
+ * loop run once, but each credit inside it was a bare `$inc` that a transient
+ * failure or a missing member left `paidOut: false` with nothing to settle it —
+ * no owed record, no replay — while the winners embed announced the prize
+ * regardless. Keyed, a prize that will not land is recorded as owed and a replay
+ * cannot pay it twice.
+ *
+ * Keyed by the tournament and the place, which is stable: a tournament has one
+ * winner per place and its `_id` is unique, so the key names this prize and
+ * nothing else — and the same string rebuilds on a replay.
+ */
+function tournamentPrizePayoutKey(tournamentId, place) {
+    return `tournament:${tournamentId}:place:${place}`;
+}
+
+/**
+ * A season-pass tier reward — its coins and its item are keyed apart (#873, pass 7).
+ *
+ * `/season claim` records the tier as claimed in the same `save()` that detaches
+ * the balance credit, then credits the coins and grants the item as their own
+ * writes. Both were unrecoverable if they failed: the coins rode
+ * `saveWithBalanceDelta` with no `payoutKey`, so a failure filed a keyless
+ * `FailedJob` that `payouts:replay` cannot pay and a missing document was
+ * reported as credited; the item was a bare `grantInventoryItem` whose `null`
+ * (no document) read as success. Keyed, each is exactly-once and recorded as a
+ * replayable owed payload — and the tier is already marked claimed, so without a
+ * replayable record the reward is lost behind a permanent claim flag.
+ *
+ * `seasonId` is `user.season.seasonId`, so a reward claimed again in a *new*
+ * season (which resets `claimedTiers`) gets a fresh key rather than colliding
+ * with last season's. `track` is 'free' or 'premium', the two reward tracks a
+ * tier carries. The coin and item keys are separate strings because a tier pays
+ * both and the guard is a string comparison on the user document with nothing on
+ * it to say which write recorded it — a shared key would let a replay of one
+ * satisfy the other. `/season claim-all` grants each tier's item under this same
+ * per-tier key, so claiming a tier alone and claiming it in a batch cannot both
+ * land.
+ */
+function seasonTierCoinPayoutKey(seasonId, userId, tier, track) {
+    return `season:${seasonId}:${userId}:tier:${tier}:${track}:coins`;
+}
+
+function seasonTierItemPayoutKey(seasonId, userId, tier, track) {
+    return `season:${seasonId}:${userId}:tier:${tier}:${track}:item`;
+}
+
+/**
+ * The summed coins of a `/season claim-all` batch (#873, pass 7).
+ *
+ * Claim-all credits the whole batch of tier coins as one `$inc` (the detached
+ * balance delta), so it keys the one credit rather than each tier: the item side
+ * keys per tier through `seasonTierItemPayoutKey` because items are separate
+ * grants, but the coins are one write and one key. `signature` is the sorted
+ * list of tiers the batch claimed, which makes two things true at once — a
+ * failure records a replayable owed payload of the exact sum, and a
+ * double-clicked claim-all that computes the same batch produces the same key,
+ * so the second credit is a no-op rather than a double payment. A different
+ * batch (a mission bumped the tier between clicks) has a different signature and
+ * credits its own coins, as it should.
+ *
+ * Namespaced apart from the per-tier coin key so a batch can never collide with
+ * an individual tier claim; the two claim disjoint tiers anyway, since claim-all
+ * only touches tiers not already in `claimedTiers`.
+ */
+function seasonClaimAllCoinsPayoutKey(seasonId, userId, track, signature) {
+    return `season:${seasonId}:${userId}:claimall:${track}:${signature}:coins`;
+}
+
+/**
+ * The coins a `/season claim-mission` pays (#873, pass 7).
+ *
+ * The mission is marked `claimed` in the same `save()` that detaches the credit,
+ * so a coin credit that then failed left the mission locked as claimed with the
+ * coins in a keyless, unreplayable record. Keyed, the credit is exactly-once and
+ * the failure is replayable.
+ *
+ * `missionDay` is `user.seasonMissionsDate` (midnight UTC of the day the set was
+ * dealt) and `index` the mission's slot in that day's three, which together name
+ * this mission instance: the same slot on a different day is a different mission,
+ * so a key without the day would guard tomorrow's reward against today's replay.
+ * `seasonId` is carried too, so a season rollover mid-day cannot alias the two.
+ */
+function seasonMissionCoinPayoutKey(seasonId, userId, missionDay, index) {
+    return `season:${seasonId}:${userId}:mission:${missionDay}:${index}`;
+}
+
+/**
  * One claim on the progressive casino jackpot pool (#873).
  *
  * `claimId` is minted by the claim itself and written into the guild document
@@ -648,6 +758,9 @@ module.exports = {
     marketRefundPayoutKey, transferRefundPayoutKey, giftItemRollbackPayoutKey,
     investRefundPayoutKey, crimePayoutKey, challengeBonusPayoutKey,
     duelPayoutKey, crewSharePayoutKey,
+    syndicateFoundRefundPayoutKey, tournamentPrizePayoutKey,
+    seasonTierCoinPayoutKey, seasonTierItemPayoutKey,
+    seasonClaimAllCoinsPayoutKey, seasonMissionCoinPayoutKey,
     tradeCoinPayoutKey, tradeItemDeliverPayoutKey, tradeItemReturnPayoutKey,
     tradeBudgetRefundKey,
     jackpotPayoutKey, casinoPayoutKey,
