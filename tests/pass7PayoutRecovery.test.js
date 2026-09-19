@@ -128,6 +128,31 @@ describe('/season claim-all keys the batch coins and each item', () => {
     });
 });
 
+describe('/season claim-mission credits under a per-mission key', () => {
+    // Midnight UTC of the day the missions were dealt — the same value the key
+    // is built from, and recent enough that `ensureMissions` does not re-deal.
+    const today = new Date();
+    const missionDay = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+
+    test('the mission reward lands under seasonMissionCoinPayoutKey', async () => {
+        seedSeasonGuild();
+        seedPlayer({
+            balance: 100,
+            seasonMissionsDate: new Date(missionDay),
+            seasonMissions: [{ event: 'hunt', description: 'Hunt 3 times', target: 3, progress: 3, completed: true, claimed: false, seasonXp: 50, coinReward: 250 }],
+        });
+
+        await season.execute(makeInteraction({ subcommand: 'claim-mission', options: { mission: 1 } }));
+
+        // The credit reached the write under the mission's own key — a stronger
+        // claim than the source containing the constructor, since an unkeyed
+        // credit would leave `paidPayouts` empty here.
+        expect(mockUsers.get(USER).balance).toBe(100 + 250);
+        expect(keys()).toContain(`season:s1:user-1:mission:${missionDay}:0`);
+        expect(mockUsers.get(USER).seasonMissions[0].claimed).toBe(true);
+    });
+});
+
 describe('a syndicate founding refund goes through the keyed helper', () => {
     test('a create that throws refunds the founder under a keyed payout and clears the enrollment', async () => {
         mockUsers.seed({ userId: USER, guildId: GUILD, balance: 50_000, paidPayouts: [], syndicateId: null });
@@ -179,11 +204,6 @@ describe('the war hot path no longer resolves an expired war inline', () => {
 
 describe('the progression and group/PvP call sites key their payouts', () => {
     const read = rel => fs.readFileSync(path.join(__dirname, '..', 'src', rel), 'utf8');
-
-    test('/season claim-mission credits under a per-mission key', () => {
-        const src = read('commands/economy/season.js');
-        expect(src).toMatch(/seasonMissionCoinPayoutKey\(season\.seasonId, interaction\.user\.id, missionDay, missionIndex\)/);
-    });
 
     test('the tier-skip token prunes with a $pull rather than saving the whole document', () => {
         const src = read('commands/economy/season.js');
