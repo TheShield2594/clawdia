@@ -69,6 +69,13 @@ const JOBS = [
         fn: client => require('../rssService').checkRssFeeds(client),
     },
     {
+        name: 'checkSocialFeeds',
+        scope: SCOPE.GUILD,
+        service: 'socialService',
+        schedule: '*/5 * * * *',
+        fn: client => require('../socialService').checkSocialFeeds(client),
+    },
+    {
         name: 'checkReminders',
         scope: SCOPE.GUILD,
         service: 'reminderService',

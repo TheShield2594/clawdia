@@ -31,6 +31,9 @@ const NOT_A_SETTING = {
 // consumes anywhere cannot hide behind a grep that happens to hit a comment.
 const CONSUMED_OUTSIDE_SRC = new Set([
     'DASHBOARD_HOST_PORT',
+    // The loopback host port the bundled rsshub service binds in compose; the
+    // bot process never reads it.
+    'RSSHUB_HOST_PORT',
     'BACKUP_RETENTION_DAYS',
     'MONGODB_ROOT_USERNAME',
     'MONGODB_ROOT_PASSWORD',

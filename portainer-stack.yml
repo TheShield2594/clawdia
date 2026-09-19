@@ -808,6 +808,53 @@ services:
   #   # needs no network at all — including not the default bridge.
   #   network_mode: none
 
+  # Optional social-notifications bridge, off by default:
+  #
+  #   deploy the stack, then start it on demand with the `social` profile.
+  #
+  # YouTube and Reddit notifications need nothing here — they read the public
+  # feeds those platforms publish. X/Twitter, Instagram and TikTok publish no
+  # feed, so following them needs an RSSHub-compatible bridge. This runs one on
+  # the internal network; set SOCIAL_BRIDGE_BASE_URL=http://rsshub:1200 in the
+  # stack environment and redeploy the bot to turn those platforms on in the
+  # dashboard's Social panel. Left disabled, the feature still offers YouTube
+  # and Reddit.
+  #
+  # Those three routes are the fragile part: the platforms actively block
+  # scraping, so a route can need extra RSSHub config (login cookies or tokens)
+  # and can break when a platform changes — see https://docs.rsshub.app for
+  # per-route requirements. No port is published: the bot reaches the container
+  # over the internal network by service name. Publish one behind your reverse
+  # proxy only if you want to test routes in a browser.
+  rsshub:
+    profiles: [social]
+    # Digest-pinned like every other third-party image (#644, held by
+    # tests/imagePinning.test.js). RSSHub ships no version tags, so the tag stays
+    # `latest` for readability and the digest is what actually deploys; Dependabot
+    # bumps it. Because the scraped routes track fast-moving sites, an operator
+    # relying on X/IG/TikTok may want to bump this digest more often than Dependabot.
+    image: diygod/rsshub:latest@sha256:03cb149232691430a181e6ad4c56b711507332915526387a079ce25407c57eeb
+    container_name: clawdia-rsshub
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - CACHE_TYPE=memory
+    networks:
+      - clawdia-network # the bot reaches it here by service name
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512m
+        reservations:
+          memory: 64m
+    stop_grace_period: 15s
+
 # Declare each secret once here, then list it under the service that needs it.
 # `external: true` means Portainer > Secrets (Swarm) already holds the value;
 # on a plain non-Swarm Docker host use the `file:` form instead, pointing at a

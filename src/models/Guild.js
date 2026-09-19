@@ -335,7 +335,20 @@ const guildSchema = new Schema({
         channelId: { type: String, required: true },
         lastPublished: { type: Date, default: null }
     }],
-    
+
+    // Social-media notifications (YouTube, Reddit, X, Instagram, TikTok). Each
+    // entry stores the resolved feed URL that socialProviders derived from what
+    // the admin pasted, so the poller's fetch path is identical to RSS. `ref` is
+    // the human display form (the @handle or r/subreddit) and `platform` selects
+    // the embed styling and the "new video / new post" wording.
+    socialFeeds: [{
+        platform: { type: String, required: true },
+        ref: { type: String, required: true },
+        feedUrl: { type: String, required: true },
+        channelId: { type: String, required: true },
+        lastPublished: { type: Date, default: null }
+    }],
+
     dailyNews: {
         enabled: { type: Boolean, default: false },
         channelId: { type: String, default: null },
@@ -1119,6 +1132,11 @@ guildSchema.index({ 'giveaways.0': 1 }, { name: 'idx_guilds_giveaways', sparse: 
 // rssService.checkFeeds — every guild with at least one feed. Declared here
 // under the name and spec migration 001 created it with.
 guildSchema.index({ 'rssFeeds.0': 1 }, { name: 'idx_guilds_rssfeeds', sparse: true });
+
+// socialService.checkSocialFeeds — every guild with at least one social
+// subscription. Same sparse-on-the-first-element shape as the RSS index above;
+// migration 025 builds it under this name for existing deployments.
+guildSchema.index({ 'socialFeeds.0': 1 }, { name: 'idx_guilds_socialfeeds', sparse: true });
 
 // tempVoiceService.checkTempVoice — guilds with temp voice on and channels open.
 guildSchema.index(

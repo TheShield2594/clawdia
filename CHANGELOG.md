@@ -14,6 +14,38 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.12.0] - 2026-09-18
+
+Migrations through `025_social_feeds_index`.
+
+Social-media notifications — parity with Mee6's creator alerts (#social). RSS
+already owned the hard part (an SSRF-safe fetcher, per-subscription cursors, a
+dead-source circuit breaker, a sharded sweep), so this is a translation layer on
+top of it rather than a second delivery engine. A new **Social** dashboard panel
+lets an admin follow an account by pasting a channel URL, an `@handle`, or a
+bare name; `socialProviders` resolves that to a single pollable feed URL once at
+add-time, and `socialService.checkSocialFeeds` runs the same fetch-dedup-post
+loop the RSS sweep does, five minutes apart, styling each post per platform.
+
+- **YouTube and Reddit work out of the box.** YouTube resolves a channel URL,
+  `@handle` (by reading the channel page for its id), legacy `/user/` name, or
+  playlist to the Atom feed every channel already publishes; Reddit resolves a
+  subreddit or user to its public `.rss`. Neither needs a key or a login.
+- **X/Twitter, Instagram, and TikTok are bridged.** None publishes a public
+  feed, so following them resolves to `<bridge>/<route>` on an RSSHub-compatible
+  instance the operator points `SOCIAL_BRIDGE_BASE_URL` at. With no bridge set
+  they are refused at add-time with a message that says why, rather than being
+  offered and silently never posting.
+- **Every resolved URL is fetched through the same `safeFetchFeed` guard**, so a
+  bridge on a private host — or a platform host that resolves to one — is blocked
+  regardless of what was stored.
+- New sparse index `idx_guilds_socialfeeds` (schema + migration 025), mirroring
+  the RSS feed index, so the sweep reads only the guilds that have a subscription.
+- The compose and Portainer stacks ship an optional `rsshub` service on a
+  `social` profile (off by default), so enabling the bridged platforms is
+  `docker compose --profile social up -d` plus `SOCIAL_BRIDGE_BASE_URL=http://rsshub:1200`
+  rather than standing a bridge up by hand.
+
 ## [4.11.2] - 2026-09-18
 
 Migrations through `024_drop_blackjack_toggle`.

@@ -244,6 +244,7 @@
         "src/dashboard/public/panel-overview.js",
         "src/dashboard/public/panel-roles.js",
         "src/dashboard/public/panel-rss.js",
+        "src/dashboard/public/panel-social.js",
         "src/deploy-commands.js",
         "src/index.js",
         "src/shard.js"
@@ -457,6 +458,7 @@
         "src/migrations/020_narrow_failed_job_ttl.js",
         "src/migrations/023_drop_coinflip_roll_toggles.js",
         "src/migrations/024_drop_blackjack_toggle.js",
+        "src/migrations/025_social_feeds_index.js",
         "src/models/Poll.js",
         "src/services/districtService.js",
         "src/services/syndicateService.js",

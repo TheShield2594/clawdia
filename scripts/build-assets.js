@@ -58,6 +58,7 @@ const SOURCES = [
     'panel-achievements.js',
     'panel-roles.js',
     'panel-rss.js',
+    'panel-social.js',
     'panel-ai.js',
     'panel-mcp.js',
     'guild-settings.js',
