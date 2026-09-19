@@ -243,6 +243,48 @@ describe('safeFetchFeed', () => {
         await expect(safeFetchFeed('http://example.com/feed')).rejects.toThrow(/private or reserved/);
     });
 
+    it('permits a private address only for the one allowed bridge origin', async () => {
+        // The bundled RSSHub bridge resolves to a Docker-network (private)
+        // address; the operator opted into it by configuring SOCIAL_BRIDGE_BASE_URL.
+        jest.spyOn(dns, 'lookup').mockImplementation((host, opts, cb) =>
+            cb(null, [{ address: '172.20.0.5' }]));
+        mockRequest((cb) => respond(cb, { chunks: ['<rss>bridge</rss>'] }));
+
+        await expect(
+            safeFetchFeed('http://rsshub:1200/twitter/user/jack', { allowPrivateOrigin: 'http://rsshub:1200' })
+        ).resolves.toBe('<rss>bridge</rss>');
+    });
+
+    it('does not extend the bridge exception to any other private origin', async () => {
+        // Same private address, different host: an operator-supplied feed URL
+        // must not ride the bridge's allowance.
+        jest.spyOn(dns, 'lookup').mockImplementation((host, opts, cb) =>
+            cb(null, [{ address: '172.20.0.5' }]));
+        const request = jest.spyOn(http, 'request');
+
+        await expect(
+            safeFetchFeed('http://internal.example/secret', { allowPrivateOrigin: 'http://rsshub:1200' })
+        ).rejects.toThrow(/private or reserved/);
+        expect(request).not.toHaveBeenCalled();
+    });
+
+    it('does not carry the bridge exception across a redirect to another origin', async () => {
+        // The exception is re-evaluated per hop against the current origin, so a
+        // bridge that 302s to the cloud metadata endpoint is still blocked.
+        jest.spyOn(dns, 'lookup').mockImplementation((host, opts, cb) => {
+            if (host === 'rsshub') return cb(null, [{ address: '172.20.0.5' }]);
+            return cb(null, [{ address: '169.254.169.254' }]);
+        });
+        mockRequest((cb) => respond(cb, {
+            statusCode: 302,
+            headers: { location: 'http://169.254.169.254/latest/meta-data/' },
+        }));
+
+        await expect(
+            safeFetchFeed('http://rsshub:1200/twitter/user/jack', { allowPrivateOrigin: 'http://rsshub:1200' })
+        ).rejects.toThrow(/private or reserved/);
+    });
+
     it('rejects a redirect to a non-HTTP protocol', async () => {
         allowPublicDns();
         mockRequest((cb) => respond(cb, {

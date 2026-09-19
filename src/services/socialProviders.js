@@ -386,6 +386,20 @@ function isBridgeConfigured() {
     return getBridgeBaseUrl() !== null;
 }
 
+// The origin (protocol//host:port) of the configured bridge, or null. Passed to
+// safeFetchFeed as its one permitted private origin, so the bundled bridge on a
+// Docker-network address can be fetched while every other feed URL keeps full
+// SSRF protection.
+function getBridgeOrigin() {
+    const base = getBridgeBaseUrl();
+    if (!base) return null;
+    try {
+        return new URL(base).origin;
+    } catch {
+        return null;
+    }
+}
+
 module.exports = {
     PLATFORMS,
     BRIDGE_ENV_VAR,
@@ -393,6 +407,7 @@ module.exports = {
     resolveSocialTarget,
     listProviders,
     isBridgeConfigured,
+    getBridgeOrigin,
     __test__: {
         resolveYoutube, resolveReddit, resolveTwitter, resolveInstagram, resolveTiktok,
         extractChannelId, bridgeFeedUrl, getBridgeBaseUrl, bridgeUsername,

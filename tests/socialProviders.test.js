@@ -7,7 +7,7 @@
 // stubbed so nothing here reaches out.
 
 const {
-    PLATFORMS, BRIDGE_ENV_VAR, resolveSocialTarget, listProviders, isBridgeConfigured, __test__,
+    PLATFORMS, BRIDGE_ENV_VAR, resolveSocialTarget, listProviders, isBridgeConfigured, getBridgeOrigin, __test__,
 } = require('../src/services/socialProviders');
 
 const OLD_ENV = process.env[BRIDGE_ENV_VAR];
@@ -161,6 +161,15 @@ describe('bridged platforms', () => {
             .toBe('https://rsshub.example.com/instagram/user/natgeo');
         expect((await resolveSocialTarget('tiktok', '@gordonramsayofficial')).feedUrl)
             .toBe('https://rsshub.example.com/tiktok/user/@gordonramsayofficial');
+    });
+
+    test('getBridgeOrigin returns the origin with any path stripped, or null', async () => {
+        delete process.env[BRIDGE_ENV_VAR];
+        expect(getBridgeOrigin()).toBeNull();
+        process.env[BRIDGE_ENV_VAR] = 'https://rsshub.example.com/rss';
+        expect(getBridgeOrigin()).toBe('https://rsshub.example.com');
+        process.env[BRIDGE_ENV_VAR] = 'http://rsshub:1200';
+        expect(getBridgeOrigin()).toBe('http://rsshub:1200');
     });
 
     test('a trailing slash on the bridge base does not double up', async () => {

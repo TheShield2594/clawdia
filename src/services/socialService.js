@@ -24,13 +24,17 @@ const { EmbedBuilder } = require('discord.js');
 
 const { safeFetchFeed } = require('../utils/safeFeedFetch');
 const { handlesGuild } = require('../utils/sharding');
-const { getProvider } = require('./socialProviders');
+const { getProvider, getBridgeOrigin } = require('./socialProviders');
 
 const Parser = require('rss-parser');
 const parser = new Parser();
 
-async function parseFeedUrl(url) {
-    return parser.parseString(await safeFetchFeed(url));
+// `allowPrivateOrigin` is the configured bridge origin: safeFetchFeed permits a
+// private/reserved address only for a hop on exactly that origin, so the bundled
+// RSSHub bridge (a Docker-network host) is reachable while YouTube, Reddit and
+// any redirect to another origin keep full SSRF protection.
+async function parseFeedUrl(url, allowPrivateOrigin) {
+    return parser.parseString(await safeFetchFeed(url, { allowPrivateOrigin }));
 }
 
 // ── Dead-source circuit breaker (mirrors rssService) ────────────────────────
@@ -214,6 +218,9 @@ async function deliverSocialUpdate(client, guild, feed, parsedFeed, entries) {
  */
 async function checkSocialFeeds(client) {
     try {
+        // The one origin whose private-address resolution safeFetchFeed permits
+        // this sweep — only URLs actually on the configured bridge match it.
+        const bridgeOrigin = getBridgeOrigin();
         const guilds = await Guild.find({ 'socialFeeds.0': { $exists: true } }, 'guildId socialFeeds').lean();
 
         // Fetch each resolved URL once and fan it out — a popular channel may be
@@ -242,7 +249,7 @@ async function checkSocialFeeds(client) {
 
                 let parsedFeed;
                 try {
-                    parsedFeed = await parseFeedUrl(url);
+                    parsedFeed = await parseFeedUrl(url, bridgeOrigin);
                     recordFeedSuccess(url);
                 } catch (error) {
                     recordFeedFailure(url, error);

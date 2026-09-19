@@ -84,7 +84,7 @@ function withDeadline(promise, ms, message) {
 // Resolves a hostname to all its IP addresses, validates none are private, and returns
 // the first address to use as a pinned IP for the actual TCP connection.
 // Pinning prevents DNS rebinding: the IP checked here is the IP we connect to.
-async function resolveAndPin(hostname) {
+async function resolveAndPin(hostname, allowPrivate = false) {
     // dns.lookup has no timeout of its own — it calls getaddrinfo on the libuv
     // threadpool and waits for the system resolver, which against an unreachable
     // nameserver can mean tens of seconds. That happens before the request
@@ -102,16 +102,40 @@ async function resolveAndPin(hostname) {
     }), HOP_DEADLINE_MS, `DNS lookup for "${hostname}" exceeded ${HOP_DEADLINE_MS}ms.`);
 
     if (!addrs.length) throw new Error('Hostname resolved to no addresses.');
+    // `allowPrivate` is only ever true for the one caller-supplied origin the
+    // request has already matched (the configured social bridge); every other
+    // hostname is still refused if any of its addresses is private, so a
+    // rebind that lands on a private address remains blocked.
     for (const { address } of addrs) {
-        if (isPrivateIp(address)) throw new Error('Feed URL resolves to a private or reserved IP address.');
+        if (!allowPrivate && isPrivateIp(address)) throw new Error('Feed URL resolves to a private or reserved IP address.');
     }
     return addrs[0].address; // pinned IP used for the actual connection
 }
 
-// Fetches a feed URL safely: pins DNS on every hop, follows redirects up to maxRedirects.
-// Returns the response body as a string.
-async function safeFetchFeed(urlStr, maxRedirects = 5) {
+// Fetches a feed URL safely: pins DNS on every hop, follows redirects up to
+// maxRedirects. Returns the response body as a string.
+//
+// `options` is `{ maxRedirects = 5, allowPrivateOrigin }`, and for backward
+// compatibility a bare number is still accepted as maxRedirects.
+//
+// `allowPrivateOrigin` names a single origin (the operator-configured social
+// bridge, SOCIAL_BRIDGE_BASE_URL — typically a container on the bot's own Docker
+// network) whose resolution to a private/reserved address is permitted. The
+// relaxation is deliberately narrow: it applies only on a hop whose origin
+// exactly matches it, re-checked each hop, so an operator-supplied feed URL is
+// unaffected and a redirect from the bridge to any other origin — a metadata
+// endpoint, an internal host — is still blocked. DNS pinning and the TLS/cert
+// validation below are untouched.
+async function safeFetchFeed(urlStr, options = {}) {
     const tls = require('tls');
+    const opts = typeof options === 'number' ? { maxRedirects: options } : (options || {});
+    const maxRedirects = Number.isInteger(opts.maxRedirects) ? opts.maxRedirects : 5;
+
+    let allowedOrigin = null;
+    if (opts.allowPrivateOrigin) {
+        try { allowedOrigin = new URL(opts.allowPrivateOrigin).origin; } catch { allowedOrigin = null; }
+    }
+
     let current = new URL(urlStr);
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
@@ -119,8 +143,11 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
             throw new Error('Redirect to non-HTTP protocol rejected.');
         }
 
-        // Resolve DNS once, validate all returned IPs, then pin to avoid rebinding.
-        const pinnedIp = await resolveAndPin(current.hostname);
+        // Resolve DNS once, validate all returned IPs, then pin to avoid
+        // rebinding. The private-address check is relaxed only when this hop's
+        // origin is the permitted bridge origin.
+        const allowPrivate = allowedOrigin !== null && current.origin === allowedOrigin;
+        const pinnedIp = await resolveAndPin(current.hostname, allowPrivate);
         const port = current.port ? Number(current.port) : (current.protocol === 'https:' ? 443 : 80);
         const FEED_MAX_BYTES = 5 * 1024 * 1024; // 5 MB — enough for any real RSS feed
 

@@ -5,7 +5,7 @@ const Parser = require('rss-parser');
 const { safeFetchFeed } = require('../../../utils/safeFeedFetch');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId } = require('../../lib/apiHelpers');
-const { PLATFORMS, resolveSocialTarget } = require('../../../services/socialProviders');
+const { PLATFORMS, resolveSocialTarget, getBridgeOrigin } = require('../../../services/socialProviders');
 
 /**
  * The guild's social subscriptions in the shape the dashboard list renders from.
@@ -47,7 +47,10 @@ router.post('/guild/:guildId/social/validate', checkAuth, checkGuildAccess, chec
     }
 
     try {
-        const body = await safeFetchFeed(target.feedUrl);
+        // Bridge feeds live on the operator-configured bridge origin, which may be
+        // a Docker-network host; permit that one origin through the SSRF guard so
+        // Test works for X/Instagram/TikTok, exactly as the poller does.
+        const body = await safeFetchFeed(target.feedUrl, { allowPrivateOrigin: getBridgeOrigin() });
         const feedParser = new Parser();
         const feed = await feedParser.parseString(body);
         return res.json({
