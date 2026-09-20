@@ -216,16 +216,55 @@ function feedAvatar(parsedFeed) {
     return isHttpUrl(parsedFeed?.image?.url) ? parsedFeed.image.url : null;
 }
 
+// The poster's display name, if the feed names it. An email-shaped <author>
+// (what plain RSS puts there) is not a name, so it is skipped; RSSHub-style
+// feeds carry the real name in <dc:creator>/<author>.
+function posterName(item) {
+    for (const raw of [item.creator, item.author]) {
+        if (typeof raw !== 'string') continue;
+        const name = raw.trim();
+        if (!name || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(name)) continue;
+        return name;
+    }
+    return '';
+}
+
+// The author line for a microblog/photo embed, shaped like Discord's own X and
+// Instagram link unfurls: the poster's name leads with their handle beside it
+// ("IGN (@IGN)"), and the platform lives in the footer rather than the author.
+// Falls back to just the handle when the feed does not name the poster, and to
+// the account label when there is no handle either.
+function postAuthorName(feed, item, account) {
+    const handle = (feed.ref || '').trim();
+    const name = posterName(item);
+    if (name) {
+        if (!handle) return name;
+        // Collapse only when the "name" is literally the handle again ("@IGN"),
+        // not when a real display name happens to match the username — native
+        // still renders that as "IGN (@IGN)".
+        if (name.toLowerCase() === handle.toLowerCase()) return handle;
+        return `${name} (${handle})`;
+    }
+    return handle || account;
+}
+
 function buildSocialEmbed(provider, feed, item, date, parsedFeed) {
     const account = feed.ref || parsedFeed.title || provider.label;
     const avatar = feedAvatar(parsedFeed);
     const media = postMedia(item);
     const body = postText(item);
 
+    // Post kind mirrors a native link unfurl (name + handle, platform in the
+    // footer); article kind keeps the notification framing (platform • account
+    // posted), where knowing the source and that it is new matters more.
+    const authorName = provider.kind === 'post'
+        ? postAuthorName(feed, item, account)
+        : `${provider.emoji} ${provider.label} • ${account} ${provider.verb}`;
+
     const embed = new EmbedBuilder()
         .setColor(provider.color)
         .setAuthor({
-            name: `${provider.emoji} ${provider.label} • ${account} ${provider.verb}`.slice(0, AUTHOR_LIMIT),
+            name: authorName.slice(0, AUTHOR_LIMIT),
             ...(item.link ? { url: item.link } : {}),
             ...(avatar ? { iconURL: avatar } : {}),
         })
@@ -395,6 +434,6 @@ module.exports = {
         pruneFeedFailureState, DEAD_FEED_STATE_TTL_MS,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, SOCIAL_FETCH_CONCURRENCY,
         datedItems, MAX_ITEMS_PER_SWEEP, buildSocialEmbed,
-        postText, postMedia, feedAvatar,
+        postText, postMedia, feedAvatar, postAuthorName,
     },
 };

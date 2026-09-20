@@ -52,11 +52,12 @@ const rssXml = ({ title = 'Feed', itemTitle = 'Post', link = 'https://x/post', p
 
 // An X/Twitter-style feed as the RSSHub bridge emits it: the tweet text and any
 // photo live in an HTML <description>, and <title> is empty or generic.
-function xXml({ title = '', description, link = 'https://x/post', pubDate = 'Wed, 20 Aug 2025 12:00:00 GMT', feedTitle = '@NOTWOKESHOWS', feedImage } = {}) {
+function xXml({ title = '', description, link = 'https://x/post', pubDate = 'Wed, 20 Aug 2025 12:00:00 GMT', feedTitle = '@NOTWOKESHOWS', feedImage, creator } = {}) {
     const image = feedImage ? `<image><url>${feedImage}</url></image>` : '';
+    const author = creator ? `<dc:creator>${creator}</dc:creator>` : '';
     return `<?xml version="1.0"?>
-<rss version="2.0"><channel><title>${feedTitle}</title>${image}
-<item><title>${title}</title><link>${link}</link>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>${feedTitle}</title>${image}
+<item><title>${title}</title><link>${link}</link>${author}
 <description><![CDATA[${description}]]></description>
 <pubDate>${pubDate}</pubDate></item>
 </channel></rss>`;
@@ -166,9 +167,29 @@ test('an X post shows the tweet text and photo instead of a bare "New post"', as
     expect(embed.image.url).toBe('https://pbs.twimg.com/media/photo.jpg');
     expect(embed.author.icon_url).toBe('https://pbs.twimg.com/profile/avatar.jpg');
     expect(embed.author.url).toBe('https://x/post');
-    expect(embed.author.name).toContain('X (Twitter)');
-    expect(embed.author.name).toContain('@NOTWOKESHOWS');
+    // Native-style author line: the handle leads; the platform sits in the footer.
+    expect(embed.author.name).toBe('@NOTWOKESHOWS');
+    expect(embed.footer.text).toBe('X (Twitter)');
     expect(embed.color).toBe(0x1DA1F2);
+});
+
+test('an X post shows the poster name and handle like a native unfurl', async () => {
+    const url = 'https://bridge/twitter/user/IGN';
+    mockFeedBodies.set(url, xXml({
+        feedTitle: 'IGN / @IGN',
+        creator: 'IGN',
+        description: "Zach Cregger's Resident Evil pushed through the backlash to $108.3M globally.",
+    }));
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [
+        { _id: 'f1', platform: 'twitter', ref: '@IGN', feedUrl: url, channelId: 'c1', lastPublished: null },
+    ] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    const embed = client.send.mock.calls[0][0].embeds[0].data;
+    expect(embed.author.name).toBe('IGN (@IGN)');
+    expect(embed.footer.text).toBe('X (Twitter)');
 });
 
 test('a text-only X post still reads as the tweet, with the avatar as thumbnail', async () => {
@@ -209,6 +230,18 @@ test('inline-image extraction skips srcset and reads the real src, single-quoted
     })).toBe('https://cdn/photo.jpg');
 });
 
+test('postAuthorName shapes the microblog author line like a native unfurl', () => {
+    const { postAuthorName } = __test__;
+    // Display name + handle when the feed names the poster.
+    expect(postAuthorName({ ref: '@IGN' }, { creator: 'IGN' }, '@IGN')).toBe('IGN (@IGN)');
+    // No duplicate when the creator is just the handle again.
+    expect(postAuthorName({ ref: '@IGN' }, { creator: '@IGN' }, '@IGN')).toBe('@IGN');
+    // An email-shaped <author> is not a name — fall back to the handle.
+    expect(postAuthorName({ ref: '@IGN' }, { author: 'noreply@x.com' }, '@IGN')).toBe('@IGN');
+    // Nothing to go on but the handle.
+    expect(postAuthorName({ ref: '@someone' }, {}, '@someone')).toBe('@someone');
+});
+
 test('a TikTok post uses the caption from the item title as its body', async () => {
     // RSSHub's TikTok route maps a clip's caption to <title> and fills
     // <description> with the video-player embed, so the caption lives in title.
@@ -229,7 +262,8 @@ test('a TikTok post uses the caption from the item title as its body', async () 
     const embed = client.send.mock.calls[0][0].embeds[0].data;
     expect(embed.description).toBe('Check out my new dance! #fyp');
     expect(embed.title).toBeUndefined();
-    expect(embed.author.name).toContain('TikTok');
+    expect(embed.author.name).toBe('@creator');
+    expect(embed.footer.text).toBe('TikTok');
 });
 
 test('a photo-only X post shows the image with no empty headline', async () => {
