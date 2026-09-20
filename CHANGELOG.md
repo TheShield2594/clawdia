@@ -21,8 +21,8 @@ Migrations through `025_social_feeds_index`.
 Bundled RSSHub bridge: pass social credentials through to the container. The
 `social`-profile `rsshub` service now forwards `TWITTER_AUTH_TOKEN` and the
 Instagram credentials (`IG_COOKIE`, `IG_USERNAME`, `IG_PASSWORD`) from the stack
-environment, empty by default so nothing changes until one is set. X, Instagram
-and TikTok block anonymous access, so RSSHub needs credentials to read them;
+environment, empty by default so nothing changes until one is set. X and
+Instagram need credentials for RSSHub to read them (TikTok's route needs none);
 before this, a stack-level variable never reached the container (Portainer only
 uses stack vars for `${...}` substitution, and the service did not reference
 them), so the Twitter route stayed unconfigured however the token was set.
