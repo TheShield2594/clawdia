@@ -122,31 +122,178 @@ async function fetchSendableChannel(client, channelId) {
     return channel;
 }
 
-// The item's own image, if it carries one, else the feed's — a channel avatar
-// or subreddit icon. Parsed feeds expose enclosures and media in a few shapes.
-function itemThumbnail(item, parsedFeed) {
-    const enclosureUrl = item.enclosure?.url;
-    if (typeof enclosureUrl === 'string' && /^https?:\/\//i.test(enclosureUrl)) return enclosureUrl;
-    const mediaUrl = item['media:thumbnail']?.$?.url || item['media:content']?.$?.url;
-    if (typeof mediaUrl === 'string' && /^https?:\/\//i.test(mediaUrl)) return mediaUrl;
-    const feedImage = parsedFeed.image?.url;
-    if (typeof feedImage === 'string' && /^https?:\/\//i.test(feedImage)) return feedImage;
+// Discord caps a description at 4096, but a social post is short — a fuller slice
+// than a headline needs, without turning a thread or a long caption into a wall.
+const DESCRIPTION_LIMIT = 700;
+const TITLE_LIMIT = 256;
+const AUTHOR_LIMIT = 256;
+
+function isHttpUrl(url) {
+    return typeof url === 'string' && /^https?:\/\//i.test(url);
+}
+
+// The raw content fields a bridge might carry a post's body in, richest first.
+// rss-parser maps <content:encoded> and <description> to both `content` and (once
+// stripped) `contentSnippet`, and Atom's <summary> to `summary`; the X/Instagram
+// bridges also inline a post's photo as an <img> in these fields.
+const CONTENT_FIELDS = ['content:encoded', 'content', 'summary', 'description'];
+
+// The readable text of a post. rss-parser already strips the markup out of a
+// feed's content into `contentSnippet` (the same field rssService renders from),
+// so the body needs no HTML handling of our own; the plain-text content fields
+// are a fallback for the rare feed that leaves contentSnippet empty. Empty string
+// when a post genuinely carries no text (a bare photo tweet).
+function postText(item) {
+    const snippet = typeof item.contentSnippet === 'string' ? item.contentSnippet.trim() : '';
+    if (snippet) return snippet;
+    for (const field of CONTENT_FIELDS) {
+        const raw = item[field];
+        // Only accept a field that is already plain text — deriving readable text
+        // from HTML is rss-parser's job (via contentSnippet), not a regex here.
+        if (typeof raw === 'string' && raw.trim() && !raw.includes('<')) return raw.trim();
+    }
+    return '';
+}
+
+// The value of a quoted attribute inside one tag string, read by plain string
+// scanning. Deliberately not a regex: a tag-matching regex is unreliable HTML
+// filtering (CodeQL js/bad-tag-filter), and this codebase leaves real parsing to
+// rss-parser. Returns null when the attribute is absent or unquoted.
+function readTagAttr(tag, name) {
+    const lower = tag.toLowerCase();
+    for (let at = lower.indexOf(name); at !== -1; at = lower.indexOf(name, at + name.length)) {
+        // The name must start at an attribute boundary, or `data-src`/`x-src`
+        // would satisfy a search for `src` and hand back the wrong URL.
+        const before = at > 0 ? tag[at - 1] : '<';
+        if (before !== '<' && before !== ' ' && before !== '\t' && before !== '\n' && before !== '\r') continue;
+        let i = at + name.length;
+        while (i < tag.length && (tag[i] === ' ' || tag[i] === '\t' || tag[i] === '\n' || tag[i] === '\r')) i++;
+        if (tag[i] !== '=') continue; // e.g. matched "srcset" — keep looking for "src"
+        i++;
+        while (i < tag.length && (tag[i] === ' ' || tag[i] === '\t' || tag[i] === '\n' || tag[i] === '\r')) i++;
+        const quote = tag[i];
+        if (quote !== '"' && quote !== "'") return null;
+        const end = tag.indexOf(quote, i + 1);
+        return end === -1 ? null : tag.slice(i + 1, end);
+    }
     return null;
+}
+
+// The first inline <img> URL in an HTML fragment, located by scanning rather than
+// a tag-matching regex (see readTagAttr). Used only for bridges that embed a
+// post's photo in the body instead of exposing it as an enclosure or media:*.
+function firstInlineImageUrl(html) {
+    const lower = html.toLowerCase();
+    for (let start = lower.indexOf('<img'); start !== -1; start = lower.indexOf('<img', start + 4)) {
+        const close = html.indexOf('>', start);
+        const tag = close === -1 ? html.slice(start) : html.slice(start, close + 1);
+        const src = readTagAttr(tag, 'src');
+        if (isHttpUrl(src)) return src;
+        if (close === -1) break;
+    }
+    return null;
+}
+
+// The post's own media, to show large. A bridge exposes it as an enclosure, a
+// media:* element, or — the shape the X and Instagram bridges use — an inline
+// <img> in the content HTML, which the enclosure/media checks alone miss.
+function postMedia(item) {
+    if (isHttpUrl(item.enclosure?.url)) return item.enclosure.url;
+    const mediaUrl = item['media:thumbnail']?.$?.url || item['media:content']?.$?.url;
+    if (isHttpUrl(mediaUrl)) return mediaUrl;
+    for (const field of CONTENT_FIELDS) {
+        const raw = item[field];
+        if (typeof raw !== 'string' || !raw.includes('<img')) continue;
+        const url = firstInlineImageUrl(raw);
+        if (url) return url;
+    }
+    return null;
+}
+
+// The feed's own image — a channel avatar, subreddit icon or profile picture —
+// used as the small author/thumbnail badge rather than as the post's media.
+function feedAvatar(parsedFeed) {
+    return isHttpUrl(parsedFeed?.image?.url) ? parsedFeed.image.url : null;
+}
+
+// The poster's display name, if the feed names it. An email-shaped <author>
+// (what plain RSS puts there) is not a name, so it is skipped; RSSHub-style
+// feeds carry the real name in <dc:creator>/<author>.
+function posterName(item) {
+    for (const raw of [item.creator, item.author]) {
+        if (typeof raw !== 'string') continue;
+        const name = raw.trim();
+        if (!name || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(name)) continue;
+        return name;
+    }
+    return '';
+}
+
+// The author line for a microblog/photo embed, shaped like Discord's own X and
+// Instagram link unfurls: the poster's name leads with their handle beside it
+// ("IGN (@IGN)"), and the platform lives in the footer rather than the author.
+// Falls back to just the handle when the feed does not name the poster, and to
+// the account label when there is no handle either.
+function postAuthorName(feed, item, account) {
+    const handle = (feed.ref || '').trim();
+    const name = posterName(item);
+    if (name) {
+        if (!handle) return name;
+        // Collapse only when the "name" is literally the handle again ("@IGN"),
+        // not when a real display name happens to match the username — native
+        // still renders that as "IGN (@IGN)".
+        if (name.toLowerCase() === handle.toLowerCase()) return handle;
+        return `${name} (${handle})`;
+    }
+    return handle || account;
 }
 
 function buildSocialEmbed(provider, feed, item, date, parsedFeed) {
     const account = feed.ref || parsedFeed.title || provider.label;
+    const avatar = feedAvatar(parsedFeed);
+    const media = postMedia(item);
+    const body = postText(item);
+
+    // Post kind mirrors a native link unfurl (name + handle, platform in the
+    // footer); article kind keeps the notification framing (platform • account
+    // posted), where knowing the source and that it is new matters more.
+    const authorName = provider.kind === 'post'
+        ? postAuthorName(feed, item, account)
+        : `${provider.emoji} ${provider.label} • ${account} ${provider.verb}`;
+
     const embed = new EmbedBuilder()
         .setColor(provider.color)
-        .setAuthor({ name: `${provider.emoji} ${provider.label} • ${account} ${provider.verb}` })
-        .setTitle((item.title || 'New post').slice(0, 256))
-        .setDescription((item.contentSnippet?.slice(0, 300)) || null)
+        .setAuthor({
+            name: authorName.slice(0, AUTHOR_LIMIT),
+            ...(item.link ? { url: item.link } : {}),
+            ...(avatar ? { iconURL: avatar } : {}),
+        })
         .setFooter({ text: provider.label })
         .setTimestamp(date);
 
     if (item.link) embed.setURL(item.link);
-    const thumb = itemThumbnail(item, parsedFeed);
-    if (thumb) embed.setThumbnail(thumb);
+
+    if (provider.kind === 'post') {
+        // A microblog or photo post has no headline — the text is the post — so
+        // the body leads and the media carries the visual. This is what turns a
+        // bare "New post" line into something that reads like the tweet it is.
+        // Some bridges (RSSHub's TikTok route, which maps a clip's caption to the
+        // item <title> and fills <description> with the player embed) carry the
+        // caption in the title, so fall back to it when there is no body text.
+        const caption = body || (typeof item.title === 'string' ? item.title.trim() : '');
+        if (caption) embed.setDescription(caption.slice(0, DESCRIPTION_LIMIT));
+        else if (!media) embed.setTitle(`${provider.label} post`);
+        if (media) embed.setImage(media);
+        else if (avatar) embed.setThumbnail(avatar);
+    } else {
+        // A video or link post has a real headline: keep the title prominent,
+        // the text beneath it, and the artwork in the corner.
+        embed.setTitle((item.title || body || 'New post').slice(0, TITLE_LIMIT));
+        if (body && body !== item.title) embed.setDescription(body.slice(0, DESCRIPTION_LIMIT));
+        const thumb = media || avatar;
+        if (thumb) embed.setThumbnail(thumb);
+    }
+
     return embed;
 }
 
@@ -286,6 +433,7 @@ module.exports = {
         feedFailCounts, feedLastFailTime, shouldSkipDeadFeed,
         pruneFeedFailureState, DEAD_FEED_STATE_TTL_MS,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, SOCIAL_FETCH_CONCURRENCY,
-        datedItems, MAX_ITEMS_PER_SWEEP, buildSocialEmbed, itemThumbnail,
+        datedItems, MAX_ITEMS_PER_SWEEP, buildSocialEmbed,
+        postText, postMedia, feedAvatar, postAuthorName,
     },
 };

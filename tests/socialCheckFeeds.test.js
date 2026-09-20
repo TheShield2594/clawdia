@@ -50,6 +50,23 @@ ${body}
 const rssXml = ({ title = 'Feed', itemTitle = 'Post', link = 'https://x/post', pubDate = 'Wed, 20 Aug 2025 12:00:00 GMT' } = {}) =>
     rssXmlItems([{ title: itemTitle, link, pubDate }], title);
 
+// An X/Twitter-style feed as the RSSHub bridge emits it: the tweet text and any
+// photo live in an HTML <description>, and <title> is empty or generic.
+function xXml({ title = '', description, link = 'https://x/post', pubDate = 'Wed, 20 Aug 2025 12:00:00 GMT', feedTitle = '@NOTWOKESHOWS', feedImage, creator } = {}) {
+    const image = feedImage ? `<image><url>${feedImage}</url></image>` : '';
+    const author = creator ? `<dc:creator>${creator}</dc:creator>` : '';
+    return `<?xml version="1.0"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>${feedTitle}</title>${image}
+<item><title>${title}</title><link>${link}</link>${author}
+<description><![CDATA[${description}]]></description>
+<pubDate>${pubDate}</pubDate></item>
+</channel></rss>`;
+}
+
+function xFeed(id, url, channelId, lastPublished = null) {
+    return { _id: id, platform: 'twitter', ref: '@NOTWOKESHOWS', feedUrl: url, channelId, lastPublished };
+}
+
 function makeClient() {
     const send = jest.fn(async () => ({}));
     const channel = { send, isTextBased: () => true };
@@ -127,6 +144,142 @@ test('first sight posts one item and styles the embed for its platform', async (
     expect(embed.color).toBe(0xFF0000); // YouTube red
     expect(embed.author.name).toContain('YouTube');
     expect(embed.author.name).toContain('@creator');
+});
+
+test('an X post shows the tweet text and photo instead of a bare "New post"', async () => {
+    const url = 'https://bridge/twitter/user/NOTWOKESHOWS';
+    mockFeedBodies.set(url, xXml({
+        description: '<p>They cancelled the show. Absolute clown world.</p>'
+            + '<img src="https://pbs.twimg.com/media/photo.jpg" />',
+        feedImage: 'https://pbs.twimg.com/profile/avatar.jpg',
+    }));
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [xFeed('f1', url, 'c1')] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    expect(client.send).toHaveBeenCalledTimes(1);
+    const embed = client.send.mock.calls[0][0].embeds[0].data;
+    // The tweet body leads; there is no meaningless "New post" headline.
+    expect(embed.title).toBeUndefined();
+    expect(embed.description).toBe('They cancelled the show. Absolute clown world.');
+    // The photo is shown large, and the profile picture badges the author.
+    expect(embed.image.url).toBe('https://pbs.twimg.com/media/photo.jpg');
+    expect(embed.author.icon_url).toBe('https://pbs.twimg.com/profile/avatar.jpg');
+    expect(embed.author.url).toBe('https://x/post');
+    // Native-style author line: the handle leads; the platform sits in the footer.
+    expect(embed.author.name).toBe('@NOTWOKESHOWS');
+    expect(embed.footer.text).toBe('X (Twitter)');
+    expect(embed.color).toBe(0x1DA1F2);
+});
+
+test('an X post shows the poster name and handle like a native unfurl', async () => {
+    const url = 'https://bridge/twitter/user/IGN';
+    mockFeedBodies.set(url, xXml({
+        feedTitle: 'IGN / @IGN',
+        creator: 'IGN',
+        description: "Zach Cregger's Resident Evil pushed through the backlash to $108.3M globally.",
+    }));
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [
+        { _id: 'f1', platform: 'twitter', ref: '@IGN', feedUrl: url, channelId: 'c1', lastPublished: null },
+    ] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    const embed = client.send.mock.calls[0][0].embeds[0].data;
+    expect(embed.author.name).toBe('IGN (@IGN)');
+    expect(embed.footer.text).toBe('X (Twitter)');
+});
+
+test('a text-only X post still reads as the tweet, with the avatar as thumbnail', async () => {
+    const url = 'https://bridge/twitter/user/someone';
+    mockFeedBodies.set(url, xXml({
+        description: 'just setting up my twttr',
+        feedImage: 'https://pbs.twimg.com/profile/avatar.jpg',
+    }));
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [xFeed('f1', url, 'c1')] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    const embed = client.send.mock.calls[0][0].embeds[0].data;
+    expect(embed.title).toBeUndefined();
+    expect(embed.description).toBe('just setting up my twttr');
+    expect(embed.image).toBeUndefined();
+    expect(embed.thumbnail.url).toBe('https://pbs.twimg.com/profile/avatar.jpg');
+});
+
+test('inline-image extraction skips srcset and reads the real src, single-quoted', async () => {
+    // Guards the string-scanning src reader: "srcset" must not be mistaken for
+    // "src", and single-quoted values must parse.
+    const { postMedia } = __test__;
+    expect(postMedia({
+        content: "<img srcset='https://x/small.jpg 1x' src='https://x/real.jpg' alt='x' />",
+    })).toBe('https://x/real.jpg');
+    // An enclosure still wins over inline content when present.
+    expect(postMedia({
+        enclosure: { url: 'https://x/enclosure.jpg' },
+        content: '<img src="https://x/inline.jpg" />',
+    })).toBe('https://x/enclosure.jpg');
+    // No usable image anywhere.
+    expect(postMedia({ content: '<p>text only, no picture</p>' })).toBeNull();
+    // `data-src` must not be mistaken for `src` — the real src wins.
+    expect(postMedia({
+        content: '<img data-src="https://cdn/placeholder.jpg" src="https://cdn/photo.jpg">',
+    })).toBe('https://cdn/photo.jpg');
+});
+
+test('postAuthorName shapes the microblog author line like a native unfurl', () => {
+    const { postAuthorName } = __test__;
+    // Display name + handle when the feed names the poster.
+    expect(postAuthorName({ ref: '@IGN' }, { creator: 'IGN' }, '@IGN')).toBe('IGN (@IGN)');
+    // No duplicate when the creator is just the handle again.
+    expect(postAuthorName({ ref: '@IGN' }, { creator: '@IGN' }, '@IGN')).toBe('@IGN');
+    // An email-shaped <author> is not a name — fall back to the handle.
+    expect(postAuthorName({ ref: '@IGN' }, { author: 'noreply@x.com' }, '@IGN')).toBe('@IGN');
+    // Nothing to go on but the handle.
+    expect(postAuthorName({ ref: '@someone' }, {}, '@someone')).toBe('@someone');
+});
+
+test('a TikTok post uses the caption from the item title as its body', async () => {
+    // RSSHub's TikTok route maps a clip's caption to <title> and fills
+    // <description> with the video-player embed, so the caption lives in title.
+    const url = 'https://bridge/tiktok/user/@creator';
+    mockFeedBodies.set(url, `<?xml version="1.0"?>
+<rss version="2.0"><channel><title>@creator</title>
+<item><title>Check out my new dance! #fyp</title><link>https://tt/v/1</link>
+<description>&lt;iframe src="https://tiktok/player/1"&gt;&lt;/iframe&gt;</description>
+<pubDate>Wed, 20 Aug 2025 12:00:00 GMT</pubDate></item>
+</channel></rss>`);
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [
+        { _id: 'f1', platform: 'tiktok', ref: '@creator', feedUrl: url, channelId: 'c1', lastPublished: null },
+    ] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    const embed = client.send.mock.calls[0][0].embeds[0].data;
+    expect(embed.description).toBe('Check out my new dance! #fyp');
+    expect(embed.title).toBeUndefined();
+    expect(embed.author.name).toBe('@creator');
+    expect(embed.footer.text).toBe('TikTok');
+});
+
+test('a photo-only X post shows the image with no empty headline', async () => {
+    const url = 'https://bridge/twitter/user/pics';
+    mockFeedBodies.set(url, xXml({
+        description: '<img src="https://pbs.twimg.com/media/only.jpg" />',
+    }));
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [xFeed('f1', url, 'c1')] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    const embed = client.send.mock.calls[0][0].embeds[0].data;
+    expect(embed.title).toBeUndefined();
+    expect(embed.description).toBeUndefined();
+    expect(embed.image.url).toBe('https://pbs.twimg.com/media/only.jpg');
 });
 
 test('an item no newer than the cursor sends and writes nothing', async () => {
