@@ -839,6 +839,19 @@ services:
     environment:
       - NODE_ENV=production
       - CACHE_TYPE=memory
+      # X, Instagram and TikTok block anonymous access, so RSSHub needs
+      # credentials to read them; YouTube and Reddit need none. These pass a
+      # matching variable from the stack environment through to RSSHub — empty by
+      # default, which RSSHub reads as "not configured" (so nothing changes until
+      # you set one). X (Twitter): the auth_token cookie from a logged-in session,
+      # comma-separate several to rotate. Instagram: a session cookie, or a
+      # username+password. TikTok's RSSHub route needs no credential. NEVER use an
+      # account you value — scraping violates these platforms' ToS and can get it
+      # suspended; use a throwaway, or the official X API instead. See .env.example.
+      - TWITTER_AUTH_TOKEN=${TWITTER_AUTH_TOKEN:-}
+      - IG_COOKIE=${IG_COOKIE:-}
+      - IG_USERNAME=${IG_USERNAME:-}
+      - IG_PASSWORD=${IG_PASSWORD:-}
     networks:
       - clawdia-network # the bot reaches it here by service name
     logging:
