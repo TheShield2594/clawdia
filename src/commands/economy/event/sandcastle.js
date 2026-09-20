@@ -3,11 +3,11 @@ const User = require('../../../models/User');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { logTransaction } = require('../../../utils/logTransaction');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
-const { grantInventoryItem } = require('../../../utils/inventoryGrant');
+const { eventActivityPayoutKey } = require('../../../utils/payoutKey');
+const { creditActivityReward } = require('../../../utils/eventActivityReward');
 const {
     hasActiveEvent,
     getEventCurrencyId,
-    addEventCurrency,
 } = require('../../../services/seasonalEventService');
 const { buildCooldownEmbed } = require('../../../utils/cooldownEmbed');
 const COLORS = require('../../../utils/embedColors');
@@ -129,9 +129,8 @@ async function handleSandcastle(interaction) {
         });
         const prize = pool[Math.floor(Math.random() * pool.length)];
 
-        const currencyId = getEventCurrencyId(guildSettings);
-        if (currencyId) addEventCurrency(user, currencyId, SHELL_REWARD);
-
+        // The shells and the seashell are credited on their own keyed writes
+        // after the save (below), not folded into `user` — see there.
         user.balance = (user.balance ?? 0) + prize.coins;
 
         logPayload = {
@@ -156,18 +155,29 @@ async function handleSandcastle(interaction) {
             .setTimestamp();
     }
 
+    // Coins are keyed here (#873, pass 8) so a credit whose response is lost is
+    // not paid twice by the retry and a run against a pruned document is recorded
+    // as owed rather than reported as paid — the pass-6 fix, now on the event
+    // activities. A wave is a negative delta, which commitBalanceDelta leaves
+    // unkeyed. The save also inserts the document for a first-time player, so the
+    // currency and item credits below always have a doc to land on.
     await saveWithBalanceDelta(User, user, balanceAtLoad, {
         service: 'sandcastle',
         jobName: 'buildPayout',
         guildId: interaction.guild.id,
+        payoutKey: eventActivityPayoutKey('sandcastle', interaction.id, 'coins'),
     });
     if (!isWave) {
-        // The seashell lands as its own atomic upsert rather than riding the
-        // save: a slot pushed in memory can duplicate one a concurrent credit
-        // is creating (src/utils/inventoryGrant.js). The save above inserted
-        // the document for a first-time player, so the grant always has a doc
-        // to hit.
-        await grantInventoryItem(interaction.user.id, interaction.guild.id, 'seashell', 1);
+        await creditActivityReward(embed, {
+            filter: { userId: interaction.user.id, guildId: interaction.guild.id },
+            activity: 'sandcastle',
+            interactionId: interaction.id,
+            currencyId: getEventCurrencyId(guildSettings),
+            currencyAmount: SHELL_REWARD,
+            currencyLabel: 'Shells',
+            itemId: 'seashell',
+            itemLabel: 'Seashell',
+        });
     }
     logTransaction(logPayload);
     return interaction.editReply({ embeds: [embed] });

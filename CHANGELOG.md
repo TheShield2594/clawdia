@@ -14,6 +14,59 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.12.3] - 2026-09-20
+
+Migrations through `025_social_feeds_index`.
+
+Economy audit, pass 8 — the seasonal-event currency (#873). The eighth pass, over
+the currency the money-moving passes deliberately stopped short of: candy, hearts,
+snowflakes, shells and frost tokens live in the `eventCurrency` array, not in
+`balance`, so the coin helper `creditCoinsOnce` could not credit them and pass 7
+left them for a pass with a keyed helper of their own. This builds that helper and
+applies it. As on every path before, the forward direction (the atomic
+`/eventshop` debit) was sound; the failure was the same shape — a credit or refund
+written with a bare, unkeyed `$inc`/`$push` (or ridden on a `save()` snapshot),
+announced as delivered whether or not it landed and recorded nowhere when it did
+not, so a retry could credit twice, a write against a pruned document read as
+success, and a failed credit was lost rather than filed for `payouts:replay`.
+
+- **A keyed event-currency helper.** `creditEventCurrencyOnce` (src/utils/payoutKey.js)
+  credits the `eventCurrency` array in one aggregation-pipeline update — bumping
+  the matching entry or appending a fresh one — with the payout-key guard in the
+  write's own filter, the same exactly-once shape `creditCoinsOnce` has for
+  `balance`. `creditEventCurrencyOrOwe` (src/utils/creditOrOwe.js) wraps it with
+  the retry and a replayable owed `eventCurrency` payload, and `replayOwedPayout`
+  (src/utils/owedPayout.js) gains the matching `kind`.
+- **The event activities credit unkeyed.** `/trickortreat`, `/sandcastle`,
+  `/lovenote` and `/trackhunt` credited coins through `saveWithBalanceDelta` with
+  no `payoutKey` (the pass-6 degraded branch), rode their event currency on the
+  same `save()` — a snapshot `$set` a concurrent `/eventshop` spend would flatten —
+  and granted their themed bonus item with a bare `grantInventoryItem`. Coins now
+  key through `eventActivityPayoutKey(activity, interaction.id, 'coins')`; the
+  currency and item go through `creditEventCurrencyOrOwe` and `grantItemsOrOwe`
+  (shared as `creditActivityReward` in src/utils/eventActivityReward.js), and a
+  reward that is only owed is shown as owed rather than announced as delivered.
+- **`/event snowball` credited both coins and snowflakes bare.** The attacker's
+  coin credit was an unkeyed `$inc` and the snowflake credit an
+  increment-then-push dance, both over a spent snowball and cooldown. Both now go
+  through the owe helpers, keyed to the interaction, and the append case is folded
+  into `creditEventCurrencyOnce`.
+- **`/eventshop`'s refund could lose the currency.** A purchase whose item or
+  effect grant failed refunded the currency with a bare `$inc` and `.catch(() =>
+  {})` that read nothing back — the pass-3 `/market` unwind shape — telling the
+  player only that the purchase failed while, if the refund also failed, the
+  currency was simply gone. The refund now goes through `creditEventCurrencyOrOwe`
+  under `eventShopRefundPayoutKey`, and the message is worded from what the refund
+  actually did.
+
+`tests/eventCurrencyPayoutRecovery.test.js` drives the helper, the replay and
+`creditActivityReward` against a store that evaluates the payout-key guard and the
+credit pipeline for real, and holds the six call sites to the keyed path. Left for
+a follow-up, documented in the audit log: the one event-currency credit that lives
+in a gathering command — `/explore`'s while-an-event-runs drop — which stays on
+its `save()` because explore.js is frozen at its command-file-size ceiling and
+belongs to explore's own pass.
+
 ## [4.12.2] - 2026-09-20
 
 Migrations through `025_social_feeds_index`.

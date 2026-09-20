@@ -10,6 +10,8 @@ const {
 } = require('../../services/seasonalEventService');
 const { addEffect, resolveEffectType } = require('../../services/effectsService');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
+const { creditEventCurrencyOrOwe } = require('../../utils/creditOrOwe');
+const { eventShopRefundPayoutKey } = require('../../utils/payoutKey');
 const { paginate, chunkArray } = require('../../utils/paginator');
 const { fitDescription, truncate } = require('../../utils/embedFields');
 const COLORS = require('../../utils/embedColors');
@@ -195,18 +197,27 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
     // Step 3: Grant item or effect (currency already secured above)
     const user = charged;
 
-    // Hand the currency and any stock back when the grant cannot land.
+    // Hand the currency and any stock back when the grant cannot land. The
+    // currency refund is keyed and recoverable (#873, pass 8): the bare `$inc`
+    // with `.catch(() => {})` it replaces read nothing back, so a refund that
+    // failed lost the currency with nothing written down while the player was
+    // told only that the purchase failed — the pass-3 `/market` unwind shape, on
+    // the currency the keyed helpers did not cover. The stock revert stays a
+    // best-effort `$inc`: it is guild inventory, not player value, and mis-counting
+    // one shelf by `qty` is not a coin-integrity failure.
     const revertPurchase = async () => {
-        await User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id, 'eventCurrency.currencyId': currencyId },
-            { $inc: { 'eventCurrency.$.amount': totalCost } }
-        ).catch(() => {});
+        const refund = await creditEventCurrencyOrOwe(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            currencyId, totalCost,
+            { payoutKey: eventShopRefundPayoutKey(interaction.id), service: 'eventshop', jobName: 'purchaseRefund' },
+        );
         if (stockLimited) {
             await Guild.findOneAndUpdate(
                 { guildId: interaction.guild.id, 'activeEvent.eventShop': { $elemMatch: { itemId: shopItem.itemId } } },
                 { $inc: { 'activeEvent.eventShop.$.stock': qty } }
             ).catch(() => {});
         }
+        return refund;
     };
 
     if (EFFECT_ITEMS.has(shopItem.itemId)) {
@@ -216,8 +227,7 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
             await user.save();
         } catch (err) {
             console.error('[eventshop] effect grant save failed:', err.message);
-            await revertPurchase();
-            return interaction.editReply({ content: '❌ Purchase failed due to a server error. Please try again.' });
+            return interaction.editReply({ content: purchaseFailedMessage(await revertPurchase(), currency) });
         }
     } else {
         // One atomic upsert rather than mutate-then-save: the save would write
@@ -229,8 +239,7 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
             if (!granted) throw new Error('user document not found');
         } catch (err) {
             console.error('[eventshop] item grant failed:', err.message);
-            await revertPurchase();
-            return interaction.editReply({ content: '❌ Purchase failed due to a server error. Please try again.' });
+            return interaction.editReply({ content: purchaseFailedMessage(await revertPurchase(), currency) });
         }
     }
 
@@ -246,4 +255,17 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
             .addFields({ name: `${currency.emoji} Remaining Balance`, value: `${newBalance.toLocaleString()} ${currency.name}`, inline: true })
             .setTimestamp()]
     });
+}
+
+// What to tell a buyer whose grant failed, worded from what the refund actually
+// did — the three-way the rest of the economy uses. A refund that could not even
+// be recorded must not read like one the player will get back automatically.
+function purchaseFailedMessage(refund, currency) {
+    if (refund.credited) {
+        return `❌ Purchase failed due to a server error — your **${currency.name}** ${currency.emoji} has been refunded. Please try again.`;
+    }
+    if (refund.owed) {
+        return `❌ Purchase failed. Your **${currency.name}** ${currency.emoji} couldn't be refunded just now and has been recorded as owed — it'll be restored once the problem clears. Tell an admin if it doesn't.`;
+    }
+    return `❌ Purchase failed and your **${currency.name}** ${currency.emoji} could not be refunded — please contact a server admin.`;
 }

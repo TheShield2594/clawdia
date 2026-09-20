@@ -32,7 +32,7 @@
  */
 
 const DEFAULT_USER = require('../models/User');
-const { creditCoinsOnce, grantItemOnce } = require('./payoutKey');
+const { creditCoinsOnce, grantItemOnce, creditEventCurrencyOnce } = require('./payoutKey');
 const { counterSetExpr } = require('./balanceDebit');
 const { windowedRefundExpr } = require('./giftCaps');
 const { recordOwedPayout } = require('./owedPayout');
@@ -271,4 +271,96 @@ async function grantItemsOrOwe(filter, itemId, quantity, {
     return { granted: false, owed, doc: null, error: lastError };
 }
 
-module.exports = { creditCoinsOrOwe, grantItemsOrOwe, DEFAULT_ATTEMPTS };
+/**
+ * Credits `amount` of `currencyId` event currency exactly once, and records the
+ * payout as owed when it will not land — `creditCoinsOrOwe` for the seasonal
+ * event currency (candy, hearts, snowflakes, shells, frost tokens) the coin and
+ * item helpers do not cover (#873, pass 8).
+ *
+ * The event activities and the event shop each moved this currency with a bare
+ * write and no key: a `$inc`/`$push` on the `eventCurrency` array announced as
+ * paid whether or not it matched a document, and recorded nowhere when it did
+ * not — the same three failures the coin side had (a retry double-credits, a
+ * pruned document reads as paid, a failed credit is lost). Pass 7 stopped short
+ * of it precisely because there was no keyed helper for a currency that is not
+ * `balance`; this is that helper.
+ *
+ * Same shape as the coin path for the same reasons: keyed through
+ * `creditEventCurrencyOnce`, so the retry cannot credit twice; retried, because a
+ * transient failure is the common one; and filed as an owed `eventCurrency`
+ * payload `npm run payouts:replay` can settle when it still will not land. Like
+ * `creditCoinsOrOwe`, it never rejects.
+ *
+ * @param {object}  filter          the user's `{ userId, guildId }`
+ * @param {string}  currencyId      the event currency's id, e.g. 'candy'
+ * @param {number}  amount          currency to credit; a non-positive amount is a no-op
+ * @param {object}  opts
+ * @param {string}  opts.payoutKey  names *this* credit, so neither the retry nor
+ *                                  a replayed record can credit it twice
+ * @param {string}  opts.service    for the owed record and the log line
+ * @param {string}  opts.jobName
+ * @param {number}  [opts.attempts]
+ * @param {object}  [opts.Model]
+ * @returns {Promise<{credited: boolean, owed: boolean, doc: ?object, error: ?Error}>}
+ *
+ * `credited: false` with `owed: true` means the currency is neither paid nor lost
+ * but written down for an operator to settle — the caller has to say so rather
+ * than announcing a payout that did not happen.
+ */
+async function creditEventCurrencyOrOwe(filter, currencyId, amount, {
+    payoutKey, service = 'economy', jobName = 'eventCurrency',
+    attempts = DEFAULT_ATTEMPTS, Model = DEFAULT_USER,
+} = {}) {
+    const wanted = Math.floor(amount) || 0;
+    if (!currencyId || wanted <= 0) return { credited: true, owed: false, doc: null, error: null };
+
+    let lastError = null;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+            const { status, doc } = await creditEventCurrencyOnce(filter, currencyId, wanted, payoutKey, { Model });
+
+            // 'duplicate' is a success: an earlier attempt landed and only its
+            // response was lost. That is the case the key exists for.
+            if (status === 'paid')      return { credited: true, owed: false, doc, error: null };
+            if (status === 'duplicate') return { credited: true, owed: false, doc: null, error: null };
+
+            lastError = new Error(
+                status === 'missing'
+                    ? `no user document to credit (${JSON.stringify(filter)})`
+                    : `event-currency credit matched nothing but ${payoutKey} is absent`,
+            );
+            // A missing document will still be missing next time round.
+            if (status === 'missing') break;
+        } catch (err) {
+            lastError = err;
+        }
+        if (attempt < attempts) await delay(attempt * 200);
+    }
+
+    console.error(
+        `[${service}] ${jobName}: ${wanted} ${currencyId} to ${filter.userId} in ${filter.guildId} ` +
+        'could not be credited:', lastError?.message,
+    );
+
+    const owed = await recordOwedPayout({
+        service,
+        jobName,
+        guildId: filter.guildId ?? null,
+        payload: {
+            kind:       'eventCurrency',
+            userId:     filter.userId,
+            guildId:    filter.guildId,
+            currencyId,
+            amount:     wanted,
+            payoutKey,
+        },
+        error: lastError,
+    }).catch(err => {
+        console.error(`[${service}] ${jobName}: recording the owed payout threw:`, err?.message);
+        return false;
+    });
+
+    return { credited: false, owed, doc: null, error: lastError };
+}
+
+module.exports = { creditCoinsOrOwe, grantItemsOrOwe, creditEventCurrencyOrOwe, DEFAULT_ATTEMPTS };

@@ -118,6 +118,51 @@ function payoutKeyAppendExpr(key) {
 }
 
 /**
+ * Pipeline `$set` expression that adds `amount` of `currencyId` to a user's
+ * `eventCurrency` array (#873, pass 8).
+ *
+ * Event currency does not live in `balance` — it is an array of
+ * `{ currencyId, amount }` entries — so a keyed credit cannot reuse the scalar
+ * `$add` `creditCoinsOnce` uses. This bumps the matching entry, or appends a
+ * fresh one when the player holds none of that currency yet, in one expression
+ * so the "does an entry exist?" decision and the write are a single atomic
+ * update — the same shape src/utils/inventoryGrant.js uses for the inventory
+ * array, and the reason this can share `paidPayouts` with the coin and item
+ * credits.
+ *
+ * `$mergeObjects` rather than a rebuilt literal so any other fields on an entry
+ * (a subdocument `_id`, say) survive the bump; `$ifNull` on the amount so a
+ * legacy entry written without one is treated as zero rather than nulling the
+ * whole credit.
+ */
+function eventCurrencyCreditExpr(currencyId, amount) {
+    return {
+        $let: {
+            vars: { arr: { $ifNull: ['$eventCurrency', []] } },
+            in: {
+                $cond: [
+                    { $in: [currencyId, { $map: { input: '$$arr', as: 'e', in: '$$e.currencyId' } }] },
+                    {
+                        $map: {
+                            input: '$$arr',
+                            as: 'e',
+                            in: {
+                                $cond: [
+                                    { $eq: ['$$e.currencyId', currencyId] },
+                                    { $mergeObjects: ['$$e', { amount: { $add: [{ $ifNull: ['$$e.amount', 0] }, amount] } }] },
+                                    '$$e',
+                                ],
+                            },
+                        },
+                    },
+                    { $concatArrays: ['$$arr', [{ currencyId, amount }]] },
+                ],
+            },
+        },
+    };
+}
+
+/**
  * Why a guarded credit matched nothing.
  *
  * This is the whole reason the guard needs care. Before it, a `null` from
@@ -233,6 +278,39 @@ async function grantItemOnce(filter, itemId, quantity, key, options = {}) {
         if (retried) return { status: 'paid', doc: retried };
         return { status: await classifyUnmatchedPayout(Model, filter, key), doc: null };
     }
+}
+
+/**
+ * Adds `amount` of `currencyId` event currency exactly once, keyed by `key`
+ * (#873, pass 8).
+ *
+ * The event-currency counterpart to `creditCoinsOnce`: same guard, same
+ * classification of a miss, same absence of `upsert` (a payout is owed to a
+ * player who has played, so 'missing' keeps meaning "no document to credit").
+ * Only the credited field differs — `eventCurrencyCreditExpr` writes the array
+ * where `$add` on `balance` would go.
+ *
+ * @returns {Promise<{status: 'paid'|'duplicate'|'missing'|'unknown', doc: ?object}>}
+ */
+async function creditEventCurrencyOnce(filter, currencyId, amount, key, options = {}) {
+    const { extraSet = {}, projection, Model = DEFAULT_USER } = options;
+
+    const credited = await Model.findOneAndUpdate(
+        { ...filter, ...payoutKeyGuard(key) },
+        [{
+            $set: {
+                eventCurrency: eventCurrencyCreditExpr(currencyId, amount),
+                paidPayouts:   payoutKeyAppendExpr(key),
+                ...extraSet,
+            },
+        }],
+        projection
+            ? { updatePipeline: true, new: true, projection }
+            : { updatePipeline: true, new: true },
+    );
+
+    if (credited) return { status: 'paid', doc: credited };
+    return { status: await classifyUnmatchedPayout(Model, filter, key), doc: null };
 }
 
 /**
@@ -749,6 +827,53 @@ function shopGrantPayoutKey(interactionId) {
     return `shop:${interactionId}:grant`;
 }
 
+/**
+ * Coins, event currency or a bonus item paid by a seasonal-event activity —
+ * `/event snowball`, `trickortreat`, `sandcastle`, `lovenote`, `trackhunt`, and
+ * the event-currency drop `/explore` pays while an event runs (#873, pass 8).
+ *
+ * Each activity claims its cooldown up front and then, on a win, credits up to
+ * three things that can each happen at most once: coins to `balance`, event
+ * currency to `eventCurrency`, and a themed bonus item to `inventory`. Every one
+ * was a bare write announced as paid regardless — the coin credit rode
+ * `saveWithBalanceDelta` with no key (the pass-6 shape) or was a bare `$inc`, the
+ * currency credit was a bare `$inc`/`$push`, and the item was a bare
+ * `grantInventoryItem`. The `phase` ('coins', 'currency', 'item') splits the
+ * three apart, because the guard is a string comparison on `paidPayouts` with
+ * nothing on it to say which write recorded it, so a shared key would let a
+ * replay of one satisfy another.
+ *
+ * `activity` keeps two events that reuse an interaction id across a restart from
+ * colliding, the same reason `gatherPayoutKey` carries its service; keyed by the
+ * opening interaction, which is the one identifier a flow with no long awaits and
+ * a later replay both rebuild — the same player running the activity again after
+ * the cooldown is a new interaction and credits separately.
+ */
+function eventActivityPayoutKey(activity, interactionId, phase) {
+    return `event:${activity}:${interactionId}:${phase}`;
+}
+
+/**
+ * An event-shop purchase's event currency coming back when the item or effect
+ * could not be granted (#873, pass 8).
+ *
+ * `/eventshop buy` debits the currency atomically, then grants the item or adds
+ * the effect; a grant that fails refunds the currency. That refund was a bare
+ * `$inc` with `.catch(() => {})` that read nothing back and told the player the
+ * purchase failed while, if the refund itself also failed, the currency was
+ * simply gone — the pass-3 `/market` unwind shape, on the currency the keyed
+ * helpers did not cover. Keyed, the refund is recorded as owed when it will not
+ * land and a retry cannot refund twice.
+ *
+ * Keyed by the interaction, like the other refunds beside it: the same player
+ * retrying the same purchase a second later is a different attempt and refunds
+ * separately, so a key built from the item alone would collide and drop the
+ * second refund.
+ */
+function eventShopRefundPayoutKey(interactionId) {
+    return `eventshop:${interactionId}:refund`;
+}
+
 module.exports = {
     gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
@@ -764,7 +889,8 @@ module.exports = {
     tradeCoinPayoutKey, tradeItemDeliverPayoutKey, tradeItemReturnPayoutKey,
     tradeBudgetRefundKey,
     jackpotPayoutKey, casinoPayoutKey,
-    payoutKeyGuard, payoutKeyAppendExpr, classifyUnmatchedPayout,
-    creditCoinsOnce, grantItemOnce, isDuplicateKeyError,
+    eventActivityPayoutKey, eventShopRefundPayoutKey,
+    payoutKeyGuard, payoutKeyAppendExpr, eventCurrencyCreditExpr, classifyUnmatchedPayout,
+    creditCoinsOnce, grantItemOnce, creditEventCurrencyOnce, isDuplicateKeyError,
     RETENTION_DAYS, RETENTION_MS, KEY_CAP,
 };
