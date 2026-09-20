@@ -50,6 +50,22 @@ ${body}
 const rssXml = ({ title = 'Feed', itemTitle = 'Post', link = 'https://x/post', pubDate = 'Wed, 20 Aug 2025 12:00:00 GMT' } = {}) =>
     rssXmlItems([{ title: itemTitle, link, pubDate }], title);
 
+// An X/Twitter-style feed as the RSSHub bridge emits it: the tweet text and any
+// photo live in an HTML <description>, and <title> is empty or generic.
+function xXml({ title = '', description, link = 'https://x/post', pubDate = 'Wed, 20 Aug 2025 12:00:00 GMT', feedTitle = '@NOTWOKESHOWS', feedImage } = {}) {
+    const image = feedImage ? `<image><url>${feedImage}</url></image>` : '';
+    return `<?xml version="1.0"?>
+<rss version="2.0"><channel><title>${feedTitle}</title>${image}
+<item><title>${title}</title><link>${link}</link>
+<description><![CDATA[${description}]]></description>
+<pubDate>${pubDate}</pubDate></item>
+</channel></rss>`;
+}
+
+function xFeed(id, url, channelId, lastPublished = null) {
+    return { _id: id, platform: 'twitter', ref: '@NOTWOKESHOWS', feedUrl: url, channelId, lastPublished };
+}
+
 function makeClient() {
     const send = jest.fn(async () => ({}));
     const channel = { send, isTextBased: () => true };
@@ -127,6 +143,66 @@ test('first sight posts one item and styles the embed for its platform', async (
     expect(embed.color).toBe(0xFF0000); // YouTube red
     expect(embed.author.name).toContain('YouTube');
     expect(embed.author.name).toContain('@creator');
+});
+
+test('an X post shows the tweet text and photo instead of a bare "New post"', async () => {
+    const url = 'https://bridge/twitter/user/NOTWOKESHOWS';
+    mockFeedBodies.set(url, xXml({
+        description: '<p>They cancelled the show. Absolute clown world.</p>'
+            + '<img src="https://pbs.twimg.com/media/photo.jpg" />',
+        feedImage: 'https://pbs.twimg.com/profile/avatar.jpg',
+    }));
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [xFeed('f1', url, 'c1')] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    expect(client.send).toHaveBeenCalledTimes(1);
+    const embed = client.send.mock.calls[0][0].embeds[0].data;
+    // The tweet body leads; there is no meaningless "New post" headline.
+    expect(embed.title).toBeUndefined();
+    expect(embed.description).toBe('They cancelled the show. Absolute clown world.');
+    // The photo is shown large, and the profile picture badges the author.
+    expect(embed.image.url).toBe('https://pbs.twimg.com/media/photo.jpg');
+    expect(embed.author.icon_url).toBe('https://pbs.twimg.com/profile/avatar.jpg');
+    expect(embed.author.url).toBe('https://x/post');
+    expect(embed.author.name).toContain('X (Twitter)');
+    expect(embed.author.name).toContain('@NOTWOKESHOWS');
+    expect(embed.color).toBe(0x1DA1F2);
+});
+
+test('a text-only X post still reads as the tweet, with the avatar as thumbnail', async () => {
+    const url = 'https://bridge/twitter/user/someone';
+    mockFeedBodies.set(url, xXml({
+        description: 'just setting up my twttr',
+        feedImage: 'https://pbs.twimg.com/profile/avatar.jpg',
+    }));
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [xFeed('f1', url, 'c1')] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    const embed = client.send.mock.calls[0][0].embeds[0].data;
+    expect(embed.title).toBeUndefined();
+    expect(embed.description).toBe('just setting up my twttr');
+    expect(embed.image).toBeUndefined();
+    expect(embed.thumbnail.url).toBe('https://pbs.twimg.com/profile/avatar.jpg');
+});
+
+test('a photo-only X post shows the image with no empty headline', async () => {
+    const url = 'https://bridge/twitter/user/pics';
+    mockFeedBodies.set(url, xXml({
+        description: '<img src="https://pbs.twimg.com/media/only.jpg" />',
+    }));
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [xFeed('f1', url, 'c1')] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    const embed = client.send.mock.calls[0][0].embeds[0].data;
+    expect(embed.title).toBeUndefined();
+    expect(embed.description).toBeUndefined();
+    expect(embed.image.url).toBe('https://pbs.twimg.com/media/only.jpg');
 });
 
 test('an item no newer than the cursor sends and writes nothing', async () => {

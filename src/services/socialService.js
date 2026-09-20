@@ -122,31 +122,112 @@ async function fetchSendableChannel(client, channelId) {
     return channel;
 }
 
-// The item's own image, if it carries one, else the feed's — a channel avatar
-// or subreddit icon. Parsed feeds expose enclosures and media in a few shapes.
-function itemThumbnail(item, parsedFeed) {
-    const enclosureUrl = item.enclosure?.url;
-    if (typeof enclosureUrl === 'string' && /^https?:\/\//i.test(enclosureUrl)) return enclosureUrl;
+// Discord caps a description at 4096, but a social post is short — a fuller slice
+// than a headline needs, without turning a thread or a long caption into a wall.
+const DESCRIPTION_LIMIT = 700;
+const TITLE_LIMIT = 256;
+const AUTHOR_LIMIT = 256;
+
+function isHttpUrl(url) {
+    return typeof url === 'string' && /^https?:\/\//i.test(url);
+}
+
+// The raw content fields a bridge might carry a post's body in, richest first.
+// rss-parser maps <content:encoded> to both `content:encoded` and `content`, and
+// Atom's <summary> to `summary`; the X/Instagram bridges use these when they
+// leave <title> empty, which is why the old title-only path showed "New post".
+const CONTENT_FIELDS = ['content:encoded', 'content', 'summary', 'description'];
+
+// Strip the HTML a feed leaves in a post body down to readable text, keeping the
+// paragraph and line breaks that a tweet or a caption relies on. rss-parser's
+// contentSnippet is already tag-free, so this only runs on the raw fallbacks.
+function htmlToText(html) {
+    return String(html)
+        .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/(?:p|div|li)\s*>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#0*39;|&#x0*27;|&apos;/gi, "'")
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+// The readable text of a post: the parser's clean snippet when it has one, else
+// the first raw content field, stripped of markup ourselves. Empty string when a
+// post genuinely carries no text (a bare photo tweet).
+function postText(item) {
+    const snippet = typeof item.contentSnippet === 'string' ? item.contentSnippet.trim() : '';
+    if (snippet) return snippet;
+    for (const field of CONTENT_FIELDS) {
+        const raw = item[field];
+        if (typeof raw === 'string' && raw.trim()) return htmlToText(raw);
+    }
+    return '';
+}
+
+// The post's own media, to show large. A bridge exposes it as an enclosure, a
+// media:* element, or — the shape the X and Instagram bridges use — an <img> in
+// the content HTML, which the enclosure/media checks alone miss.
+function postMedia(item) {
+    if (isHttpUrl(item.enclosure?.url)) return item.enclosure.url;
     const mediaUrl = item['media:thumbnail']?.$?.url || item['media:content']?.$?.url;
-    if (typeof mediaUrl === 'string' && /^https?:\/\//i.test(mediaUrl)) return mediaUrl;
-    const feedImage = parsedFeed.image?.url;
-    if (typeof feedImage === 'string' && /^https?:\/\//i.test(feedImage)) return feedImage;
+    if (isHttpUrl(mediaUrl)) return mediaUrl;
+    for (const field of CONTENT_FIELDS) {
+        const raw = item[field];
+        if (typeof raw !== 'string') continue;
+        const match = /<img\b[^>]*?\bsrc=["']([^"']+)["']/i.exec(raw);
+        if (match && isHttpUrl(match[1])) return match[1];
+    }
     return null;
+}
+
+// The feed's own image — a channel avatar, subreddit icon or profile picture —
+// used as the small author/thumbnail badge rather than as the post's media.
+function feedAvatar(parsedFeed) {
+    return isHttpUrl(parsedFeed?.image?.url) ? parsedFeed.image.url : null;
 }
 
 function buildSocialEmbed(provider, feed, item, date, parsedFeed) {
     const account = feed.ref || parsedFeed.title || provider.label;
+    const avatar = feedAvatar(parsedFeed);
+    const media = postMedia(item);
+    const body = postText(item);
+
     const embed = new EmbedBuilder()
         .setColor(provider.color)
-        .setAuthor({ name: `${provider.emoji} ${provider.label} • ${account} ${provider.verb}` })
-        .setTitle((item.title || 'New post').slice(0, 256))
-        .setDescription((item.contentSnippet?.slice(0, 300)) || null)
+        .setAuthor({
+            name: `${provider.emoji} ${provider.label} • ${account} ${provider.verb}`.slice(0, AUTHOR_LIMIT),
+            ...(item.link ? { url: item.link } : {}),
+            ...(avatar ? { iconURL: avatar } : {}),
+        })
         .setFooter({ text: provider.label })
         .setTimestamp(date);
 
     if (item.link) embed.setURL(item.link);
-    const thumb = itemThumbnail(item, parsedFeed);
-    if (thumb) embed.setThumbnail(thumb);
+
+    if (provider.kind === 'post') {
+        // A microblog or photo post has no headline — the text is the post — so
+        // the body leads and the media carries the visual. This is what turns a
+        // bare "New post" line into something that reads like the tweet it is.
+        if (body) embed.setDescription(body.slice(0, DESCRIPTION_LIMIT));
+        else if (!media) embed.setTitle(`${provider.label} post`);
+        if (media) embed.setImage(media);
+        else if (avatar) embed.setThumbnail(avatar);
+    } else {
+        // A video or link post has a real headline: keep the title prominent,
+        // the text beneath it, and the artwork in the corner.
+        embed.setTitle((item.title || body || 'New post').slice(0, TITLE_LIMIT));
+        if (body && body !== item.title) embed.setDescription(body.slice(0, DESCRIPTION_LIMIT));
+        const thumb = media || avatar;
+        if (thumb) embed.setThumbnail(thumb);
+    }
+
     return embed;
 }
 
@@ -286,6 +367,7 @@ module.exports = {
         feedFailCounts, feedLastFailTime, shouldSkipDeadFeed,
         pruneFeedFailureState, DEAD_FEED_STATE_TTL_MS,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, SOCIAL_FETCH_CONCURRENCY,
-        datedItems, MAX_ITEMS_PER_SWEEP, buildSocialEmbed, itemThumbnail,
+        datedItems, MAX_ITEMS_PER_SWEEP, buildSocialEmbed,
+        postText, postMedia, feedAvatar, htmlToText,
     },
 };

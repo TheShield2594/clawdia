@@ -287,6 +287,10 @@ function resolveTiktok(input) {
 
 // ── Provider registry ───────────────────────────────────────────────────────
 
+// `kind` tells socialService how to lay the post out. An `article` (a video or a
+// link post) has a real headline, so its title leads and the text sits beneath;
+// a `post` (a microblog or photo post) has no headline — the text *is* the post —
+// so its body leads and its media is shown large. See buildSocialEmbed.
 const PROVIDERS = {
     youtube: {
         id: 'youtube',
@@ -294,6 +298,7 @@ const PROVIDERS = {
         emoji: '▶️',
         color: 0xFF0000,
         verb: 'posted a new video',
+        kind: 'article',
         requiresBridge: false,
         placeholder: 'youtube.com/@handle, channel URL, or channel ID (UC…)',
         resolve: (input, ctx) => resolveYoutube(input, ctx.fetchText),
@@ -304,6 +309,7 @@ const PROVIDERS = {
         emoji: '👽',
         color: 0xFF4500,
         verb: 'has a new post',
+        kind: 'article',
         requiresBridge: false,
         placeholder: 'r/subreddit or u/username',
         resolve: input => resolveReddit(input),
@@ -314,6 +320,7 @@ const PROVIDERS = {
         emoji: '𝕏',
         color: 0x1DA1F2,
         verb: 'posted',
+        kind: 'post',
         requiresBridge: true,
         placeholder: '@handle or profile URL (needs a social bridge)',
         resolve: input => resolveTwitter(input),
@@ -324,6 +331,7 @@ const PROVIDERS = {
         emoji: '📸',
         color: 0xE1306C,
         verb: 'shared a new post',
+        kind: 'post',
         requiresBridge: true,
         placeholder: '@handle or profile URL (needs a social bridge)',
         resolve: input => resolveInstagram(input),
@@ -334,6 +342,7 @@ const PROVIDERS = {
         emoji: '🎵',
         color: 0x69C9D0,
         verb: 'posted a new video',
+        kind: 'post',
         requiresBridge: true,
         placeholder: '@handle or profile URL (needs a social bridge)',
         resolve: input => resolveTiktok(input),
