@@ -133,56 +133,75 @@ function isHttpUrl(url) {
 }
 
 // The raw content fields a bridge might carry a post's body in, richest first.
-// rss-parser maps <content:encoded> to both `content:encoded` and `content`, and
-// Atom's <summary> to `summary`; the X/Instagram bridges use these when they
-// leave <title> empty, which is why the old title-only path showed "New post".
+// rss-parser maps <content:encoded> and <description> to both `content` and (once
+// stripped) `contentSnippet`, and Atom's <summary> to `summary`; the X/Instagram
+// bridges also inline a post's photo as an <img> in these fields.
 const CONTENT_FIELDS = ['content:encoded', 'content', 'summary', 'description'];
 
-// Strip the HTML a feed leaves in a post body down to readable text, keeping the
-// paragraph and line breaks that a tweet or a caption relies on. rss-parser's
-// contentSnippet is already tag-free, so this only runs on the raw fallbacks.
-function htmlToText(html) {
-    return String(html)
-        .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<\/(?:p|div|li)\s*>/gi, '\n')
-        .replace(/<[^>]+>/g, '')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/&amp;/gi, '&')
-        .replace(/&lt;/gi, '<')
-        .replace(/&gt;/gi, '>')
-        .replace(/&quot;/gi, '"')
-        .replace(/&#0*39;|&#x0*27;|&apos;/gi, "'")
-        .replace(/[ \t]+\n/g, '\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
-}
-
-// The readable text of a post: the parser's clean snippet when it has one, else
-// the first raw content field, stripped of markup ourselves. Empty string when a
-// post genuinely carries no text (a bare photo tweet).
+// The readable text of a post. rss-parser already strips the markup out of a
+// feed's content into `contentSnippet` (the same field rssService renders from),
+// so the body needs no HTML handling of our own; the plain-text content fields
+// are a fallback for the rare feed that leaves contentSnippet empty. Empty string
+// when a post genuinely carries no text (a bare photo tweet).
 function postText(item) {
     const snippet = typeof item.contentSnippet === 'string' ? item.contentSnippet.trim() : '';
     if (snippet) return snippet;
     for (const field of CONTENT_FIELDS) {
         const raw = item[field];
-        if (typeof raw === 'string' && raw.trim()) return htmlToText(raw);
+        // Only accept a field that is already plain text — deriving readable text
+        // from HTML is rss-parser's job (via contentSnippet), not a regex here.
+        if (typeof raw === 'string' && raw.trim() && !raw.includes('<')) return raw.trim();
     }
     return '';
 }
 
+// The value of a quoted attribute inside one tag string, read by plain string
+// scanning. Deliberately not a regex: a tag-matching regex is unreliable HTML
+// filtering (CodeQL js/bad-tag-filter), and this codebase leaves real parsing to
+// rss-parser. Returns null when the attribute is absent or unquoted.
+function readTagAttr(tag, name) {
+    const lower = tag.toLowerCase();
+    for (let at = lower.indexOf(name); at !== -1; at = lower.indexOf(name, at + name.length)) {
+        let i = at + name.length;
+        while (i < tag.length && (tag[i] === ' ' || tag[i] === '\t' || tag[i] === '\n' || tag[i] === '\r')) i++;
+        if (tag[i] !== '=') continue; // e.g. matched "srcset" — keep looking for "src"
+        i++;
+        while (i < tag.length && (tag[i] === ' ' || tag[i] === '\t' || tag[i] === '\n' || tag[i] === '\r')) i++;
+        const quote = tag[i];
+        if (quote !== '"' && quote !== "'") return null;
+        const end = tag.indexOf(quote, i + 1);
+        return end === -1 ? null : tag.slice(i + 1, end);
+    }
+    return null;
+}
+
+// The first inline <img> URL in an HTML fragment, located by scanning rather than
+// a tag-matching regex (see readTagAttr). Used only for bridges that embed a
+// post's photo in the body instead of exposing it as an enclosure or media:*.
+function firstInlineImageUrl(html) {
+    const lower = html.toLowerCase();
+    for (let start = lower.indexOf('<img'); start !== -1; start = lower.indexOf('<img', start + 4)) {
+        const close = html.indexOf('>', start);
+        const tag = close === -1 ? html.slice(start) : html.slice(start, close + 1);
+        const src = readTagAttr(tag, 'src');
+        if (isHttpUrl(src)) return src;
+        if (close === -1) break;
+    }
+    return null;
+}
+
 // The post's own media, to show large. A bridge exposes it as an enclosure, a
-// media:* element, or — the shape the X and Instagram bridges use — an <img> in
-// the content HTML, which the enclosure/media checks alone miss.
+// media:* element, or — the shape the X and Instagram bridges use — an inline
+// <img> in the content HTML, which the enclosure/media checks alone miss.
 function postMedia(item) {
     if (isHttpUrl(item.enclosure?.url)) return item.enclosure.url;
     const mediaUrl = item['media:thumbnail']?.$?.url || item['media:content']?.$?.url;
     if (isHttpUrl(mediaUrl)) return mediaUrl;
     for (const field of CONTENT_FIELDS) {
         const raw = item[field];
-        if (typeof raw !== 'string') continue;
-        const match = /<img\b[^>]*?\bsrc=["']([^"']+)["']/i.exec(raw);
-        if (match && isHttpUrl(match[1])) return match[1];
+        if (typeof raw !== 'string' || !raw.includes('<img')) continue;
+        const url = firstInlineImageUrl(raw);
+        if (url) return url;
     }
     return null;
 }
@@ -368,6 +387,6 @@ module.exports = {
         pruneFeedFailureState, DEAD_FEED_STATE_TTL_MS,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, SOCIAL_FETCH_CONCURRENCY,
         datedItems, MAX_ITEMS_PER_SWEEP, buildSocialEmbed,
-        postText, postMedia, feedAvatar, htmlToText,
+        postText, postMedia, feedAvatar,
     },
 };

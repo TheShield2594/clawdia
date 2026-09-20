@@ -189,6 +189,22 @@ test('a text-only X post still reads as the tweet, with the avatar as thumbnail'
     expect(embed.thumbnail.url).toBe('https://pbs.twimg.com/profile/avatar.jpg');
 });
 
+test('inline-image extraction skips srcset and reads the real src, single-quoted', async () => {
+    // Guards the string-scanning src reader: "srcset" must not be mistaken for
+    // "src", and single-quoted values must parse.
+    const { postMedia } = __test__;
+    expect(postMedia({
+        content: "<img srcset='https://x/small.jpg 1x' src='https://x/real.jpg' alt='x' />",
+    })).toBe('https://x/real.jpg');
+    // An enclosure still wins over inline content when present.
+    expect(postMedia({
+        enclosure: { url: 'https://x/enclosure.jpg' },
+        content: '<img src="https://x/inline.jpg" />',
+    })).toBe('https://x/enclosure.jpg');
+    // No usable image anywhere.
+    expect(postMedia({ content: '<p>text only, no picture</p>' })).toBeNull();
+});
+
 test('a photo-only X post shows the image with no empty headline', async () => {
     const url = 'https://bridge/twitter/user/pics';
     mockFeedBodies.set(url, xXml({
