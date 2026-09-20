@@ -162,6 +162,10 @@ function postText(item) {
 function readTagAttr(tag, name) {
     const lower = tag.toLowerCase();
     for (let at = lower.indexOf(name); at !== -1; at = lower.indexOf(name, at + name.length)) {
+        // The name must start at an attribute boundary, or `data-src`/`x-src`
+        // would satisfy a search for `src` and hand back the wrong URL.
+        const before = at > 0 ? tag[at - 1] : '<';
+        if (before !== '<' && before !== ' ' && before !== '\t' && before !== '\n' && before !== '\r') continue;
         let i = at + name.length;
         while (i < tag.length && (tag[i] === ' ' || tag[i] === '\t' || tag[i] === '\n' || tag[i] === '\r')) i++;
         if (tag[i] !== '=') continue; // e.g. matched "srcset" — keep looking for "src"
@@ -234,7 +238,11 @@ function buildSocialEmbed(provider, feed, item, date, parsedFeed) {
         // A microblog or photo post has no headline — the text is the post — so
         // the body leads and the media carries the visual. This is what turns a
         // bare "New post" line into something that reads like the tweet it is.
-        if (body) embed.setDescription(body.slice(0, DESCRIPTION_LIMIT));
+        // Some bridges (RSSHub's TikTok route, which maps a clip's caption to the
+        // item <title> and fills <description> with the player embed) carry the
+        // caption in the title, so fall back to it when there is no body text.
+        const caption = body || (typeof item.title === 'string' ? item.title.trim() : '');
+        if (caption) embed.setDescription(caption.slice(0, DESCRIPTION_LIMIT));
         else if (!media) embed.setTitle(`${provider.label} post`);
         if (media) embed.setImage(media);
         else if (avatar) embed.setThumbnail(avatar);

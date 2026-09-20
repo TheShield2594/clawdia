@@ -203,6 +203,33 @@ test('inline-image extraction skips srcset and reads the real src, single-quoted
     })).toBe('https://x/enclosure.jpg');
     // No usable image anywhere.
     expect(postMedia({ content: '<p>text only, no picture</p>' })).toBeNull();
+    // `data-src` must not be mistaken for `src` — the real src wins.
+    expect(postMedia({
+        content: '<img data-src="https://cdn/placeholder.jpg" src="https://cdn/photo.jpg">',
+    })).toBe('https://cdn/photo.jpg');
+});
+
+test('a TikTok post uses the caption from the item title as its body', async () => {
+    // RSSHub's TikTok route maps a clip's caption to <title> and fills
+    // <description> with the video-player embed, so the caption lives in title.
+    const url = 'https://bridge/tiktok/user/@creator';
+    mockFeedBodies.set(url, `<?xml version="1.0"?>
+<rss version="2.0"><channel><title>@creator</title>
+<item><title>Check out my new dance! #fyp</title><link>https://tt/v/1</link>
+<description>&lt;iframe src="https://tiktok/player/1"&gt;&lt;/iframe&gt;</description>
+<pubDate>Wed, 20 Aug 2025 12:00:00 GMT</pubDate></item>
+</channel></rss>`);
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [
+        { _id: 'f1', platform: 'tiktok', ref: '@creator', feedUrl: url, channelId: 'c1', lastPublished: null },
+    ] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    const embed = client.send.mock.calls[0][0].embeds[0].data;
+    expect(embed.description).toBe('Check out my new dance! #fyp');
+    expect(embed.title).toBeUndefined();
+    expect(embed.author.name).toContain('TikTok');
 });
 
 test('a photo-only X post shows the image with no empty headline', async () => {
