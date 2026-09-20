@@ -3,6 +3,8 @@ const User = require('../../../models/User');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { logTransaction } = require('../../../utils/logTransaction');
 const { debitUpTo } = require('../../../utils/balanceDebit');
+const { creditCoinsOrOwe, creditEventCurrencyOrOwe } = require('../../../utils/creditOrOwe');
+const { eventActivityPayoutKey } = require('../../../utils/payoutKey');
 const {
     hasActiveEvent,
     getEventCurrencyId,
@@ -89,6 +91,7 @@ async function handleSnowball(interaction) {
     const hit = Math.random() < HIT_CHANCE;
 
     let coinsGained, stolen, defender, description;
+    let coinsOwed = false, currencyOwed = false;
 
     if (hit) {
         // Debit the defender first, atomically guarded against their balance
@@ -121,37 +124,31 @@ async function handleSnowball(interaction) {
         }
 
         coinsGained = BASE_COIN_REWARD + stolen;
-        attacker = await User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id },
-            { $inc: { balance: coinsGained } },
-            { new: true },
-        );
+
+        // The stake — a snowball and the 5-minute cooldown — is already spent, so
+        // a credit that fails costs the attacker both with nothing to show for it.
+        // Both the coins and the snowflakes are keyed (#873, pass 8): the bare
+        // `$inc` they replace read nothing back, so a write against a pruned
+        // document announced coins that never moved, and a lost response left no
+        // replayable record. The event currency also no longer needs the
+        // increment-then-push dance — `creditEventCurrencyOnce` appends the entry
+        // when the player holds none in the same guarded write.
+        const attackerFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+        const coinCredit = await creditCoinsOrOwe(attackerFilter, coinsGained, {
+            payoutKey: eventActivityPayoutKey('snowball', interaction.id, 'coins'),
+            service: 'snowball', jobName: 'snowballHit',
+        });
+        coinsOwed = !coinCredit.credited;
+        if (coinCredit.doc) attacker = coinCredit.doc;
 
         const currencyId = getEventCurrencyId(guildSettings);
         if (currencyId) {
-            let creditedCurrency = await User.findOneAndUpdate(
-                { userId: interaction.user.id, guildId: interaction.guild.id, 'eventCurrency.currencyId': currencyId },
-                { $inc: { 'eventCurrency.$.amount': SNOWFLAKE_REWARD } },
-                { new: true },
-            );
-            if (!creditedCurrency) {
-                // Only push a new entry if one still doesn't exist — guards against
-                // a concurrent /snowball hit pushing a duplicate currencyId entry
-                // between the increment attempt above and this push.
-                creditedCurrency = await User.findOneAndUpdate(
-                    { userId: interaction.user.id, guildId: interaction.guild.id, 'eventCurrency.currencyId': { $ne: currencyId } },
-                    { $push: { eventCurrency: { currencyId, amount: SNOWFLAKE_REWARD } } },
-                    { new: true },
-                );
-                if (!creditedCurrency) {
-                    creditedCurrency = await User.findOneAndUpdate(
-                        { userId: interaction.user.id, guildId: interaction.guild.id, 'eventCurrency.currencyId': currencyId },
-                        { $inc: { 'eventCurrency.$.amount': SNOWFLAKE_REWARD } },
-                        { new: true },
-                    );
-                }
-            }
-            if (creditedCurrency) attacker = creditedCurrency;
+            const currencyCredit = await creditEventCurrencyOrOwe(attackerFilter, currencyId, SNOWFLAKE_REWARD, {
+                payoutKey: eventActivityPayoutKey('snowball', interaction.id, 'currency'),
+                service: 'snowball', jobName: 'snowflakeReward',
+            });
+            currencyOwed = !currencyCredit.credited;
+            if (currencyCredit.doc) attacker = currencyCredit.doc;
         }
 
         description = [
@@ -178,6 +175,16 @@ async function handleSnowball(interaction) {
         .setDescription(description)
         .setFooter({ text: 'Cooldown: 5m • Use /eventshop to restock snowballs' })
         .setTimestamp();
+
+    // A credit that could not land is recorded as owed, not lost — say so rather
+    // than let the description above stand as if it had paid.
+    if (coinsOwed || currencyOwed) {
+        const parts = [coinsOwed && 'your coins', currencyOwed && 'your Snowflakes'].filter(Boolean);
+        embed.addFields({
+            name: '⚠️ Not Yet Delivered',
+            value: `We couldn't credit ${parts.join(' and ')} just now — it's been recorded as owed and will arrive once the problem clears. Tell an admin if it doesn't.`,
+        });
+    }
 
     return interaction.editReply({ embeds: [embed] });
 }

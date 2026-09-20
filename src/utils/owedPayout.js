@@ -121,12 +121,20 @@ function payoutKeyForPayload(payload) {
  * on a payout that has been paid. `classifyUnmatchedPayout` is what tells them
  * apart; the silent-skip #804 closed does not come back under a new name.
  *
- * Four kinds:
+ * Five kinds:
  *
- *   coins        { kind: 'coins',        userId, guildId, amount,           payoutKey?, counters? }
- *   items        { kind: 'items',        userId, guildId, itemId, quantity, payoutKey?, budgetRefund? }
- *   reversal     { kind: 'reversal',     userId, guildId, amount,           payoutKey }
- *   budgetRefund { kind: 'budgetRefund', userId, guildId, usedField, resetField, cap, amount, window, payoutKey }
+ *   coins         { kind: 'coins',         userId, guildId, amount,             payoutKey?, counters? }
+ *   items         { kind: 'items',         userId, guildId, itemId, quantity,   payoutKey?, budgetRefund? }
+ *   eventCurrency { kind: 'eventCurrency', userId, guildId, currencyId, amount, payoutKey }
+ *   reversal      { kind: 'reversal',      userId, guildId, amount,             payoutKey }
+ *   budgetRefund  { kind: 'budgetRefund',  userId, guildId, usedField, resetField, cap, amount, window, payoutKey }
+ *
+ * `eventCurrency` is a credit like `coins`, but to the `eventCurrency` array
+ * rather than `balance` (#873, pass 8), so it replays through
+ * `creditEventCurrencyOnce`. Its `payoutKey` is required, not optional: the
+ * helper that files it always supplies one, and there is no pre-key derivation to
+ * fall back to the way the coin and item kinds have for records written before
+ * keys existed — event currency was never credited unkeyed *and* recorded.
  *
  * `reversal` is not a credit — it is a debit that could not be given back (#1023
  * review). A trade escrow debit that landed but whose keyed reversal could not be
@@ -224,6 +232,28 @@ async function replayOwedPayout(payload) {
         throw new Error(`return for ${userId} in ${guildId} matched nothing (${status}) — retry`);
     }
 
+    if (kind === 'eventCurrency') {
+        const { userId, guildId, currencyId, amount } = payload;
+        // The key is load-bearing here: event currency has no pre-key payload
+        // shape to derive one from, so a record without it cannot be replayed
+        // safely. Refuse rather than fall back to a blind credit.
+        if (!userId || !guildId || !currencyId || !(amount > 0) || !key) {
+            throw new Error(`owed eventCurrency payload is incomplete: ${JSON.stringify(payload)}`);
+        }
+
+        const { creditEventCurrencyOnce } = require('./payoutKey');
+        const { status } = await creditEventCurrencyOnce({ userId, guildId }, currencyId, amount, key);
+        if (status === 'paid') return;
+        if (status === 'duplicate') {
+            console.log(`[owedPayout] ${key} had already been applied — no event currency moved`);
+            return;
+        }
+        if (status === 'missing') {
+            throw new Error(`no user document for ${userId} in ${guildId} — nothing to credit`);
+        }
+        throw new Error(`event-currency credit for ${userId} in ${guildId} matched nothing but ${key} is absent — retry`);
+    }
+
     if (kind === 'budgetRefund') {
         // A daily-cap allowance a trade reserved and then had to hand back, whose
         // decrement could not be confirmed on the unwind (#1025). Not a credit —
@@ -288,6 +318,9 @@ function describeOwedPayout(payload) {
     }
     if (payload?.kind === 'items') {
         return `${payload.quantity}x ${payload.itemId} to ${payload.userId} in ${payload.guildId}`;
+    }
+    if (payload?.kind === 'eventCurrency') {
+        return `${payload.amount} ${payload.currencyId} to ${payload.userId} in ${payload.guildId}`;
     }
     if (payload?.kind === 'reversal') {
         return `reverse ${payload.amount} coins held from ${payload.userId} in ${payload.guildId}`;

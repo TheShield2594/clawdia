@@ -2,14 +2,15 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and seven passes over the
+long-stable, low-churn subsystems have been audited, and eight passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
 `daily`, `work`, `jobs`, `crime`, `invest`), the gathering-loop payouts
-(`hunt`, `fish`, `mine`, `explore`), and the progression and group/PvP reward
+(`hunt`, `fish`, `mine`, `explore`), the progression and group/PvP reward
 payouts (the season pass, a syndicate's founding, a fishing tournament, the war
-resolution) (#873). The majority of the
+resolution), and the seasonal-event currency (candy, hearts, snowflakes, and the
+event shop) (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -1070,6 +1071,109 @@ economy carries, closed by the guard on the replay, not by the live write.
 
 ---
 
+## Economy — Seasonal Events
+
+**Status: Audited — all findings resolved** ✓
+
+The eighth pass of the economy audit #873, over the **seasonal-event currency**:
+candy, hearts, snowflakes, shells and frost tokens. This is the currency pass 7
+named and stopped short of — it lives in the `eventCurrency` array on the user
+document, not in `balance`, so `creditCoinsOnce` could not credit it and there
+was no keyed helper for it at all. As on every path before, the forward
+direction was sound (the `/eventshop` debit is an atomic, guarded, result-read
+compare-and-set); the failure was the familiar shape, on the credits and the
+refund. Each moved the currency with a bare, unkeyed write — a positional `$inc`,
+a `$push`, or a snapshot `$set` ridden along on a `save()` — announced as
+delivered whether or not it matched a document, and recorded nowhere when it did
+not. Unkeyed, that is three failures at once: the retry inside the owe helper
+re-credits a write whose response was lost, a credit against a pruned document
+reads as paid, and a credit that ultimately fails is lost with nothing for
+`payouts:replay` to settle.
+
+The piece pass 7 said this pass would have to build first is the keyed
+event-currency helper. `creditEventCurrencyOnce` credits the array in one
+aggregation-pipeline update — bumping the matching entry or appending a fresh one
+— with the payout-key guard in the write's own filter, the exactly-once shape
+`creditCoinsOnce` has for `balance`; `creditEventCurrencyOrOwe` wraps it with the
+retry and a replayable owed `eventCurrency` payload, and `replayOwedPayout` gains
+the matching `kind`.
+
+Scope, stated so the next pass does not assume more was covered: this pass
+audited the **event-currency and coin credits, the bonus item grants and the
+refund** of the seasonal-event commands. It did not re-audit the event
+*definition* surface (`/event start`/`end`/`status` in `event/manage.js`, and the
+auto-start/auto-end scheduler in `seasonalEventService.js`), which moves no player
+currency, nor the shop's *browse*/*balance* reads. One event-currency credit is
+deliberately left for a follow-up — see the closing bound.
+
+**Files reviewed/fixed:**
+- `src/commands/economy/eventshop.js`
+- `src/commands/economy/event/snowball.js`
+- `src/commands/economy/event/trickortreat.js`
+- `src/commands/economy/event/sandcastle.js`
+- `src/commands/economy/event/lovenote.js`
+- `src/commands/economy/event/trackhunt.js`
+- `src/utils/payoutKey.js` (added `creditEventCurrencyOnce`, `eventCurrencyCreditExpr`, `eventActivityPayoutKey`, `eventShopRefundPayoutKey`)
+- `src/utils/creditOrOwe.js` (added `creditEventCurrencyOrOwe`)
+- `src/utils/owedPayout.js` (added the `eventCurrency` replay kind)
+- `src/utils/eventActivityReward.js` (added)
+- `tests/eventCurrencyPayoutRecovery.test.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | `/trickortreat`, `/sandcastle`, `/lovenote` and `/trackhunt` each credited their **coins** through `saveWithBalanceDelta` with **no `payoutKey`** — the pass-6 degraded branch: the `$inc` is retried and re-credits a lost-response write, a missing document is reported as paid, and a hard failure files a keyless `FailedJob` `payouts:replay` cannot pay. The cooldown is claimed up front, so a failed payout costs the player the cooldown too | The coin credit carries `eventActivityPayoutKey(activity, interaction.id, 'coins')` | `event/{trickortreat,sandcastle,lovenote,trackhunt}.js` |
+| 2 | Those same four rode their **event currency** on the run's `save()` via `addEventCurrency` — a snapshot `$set` of the whole `eventCurrency` array that a concurrent `/eventshop` spend landing in the window would flatten, restoring the spent currency for free — and it was not keyed or recoverable | The currency is detached from the save and credited through `creditEventCurrencyOrOwe` under `eventActivityPayoutKey(activity, interaction.id, 'currency')` (shared as `creditActivityReward`); a credit that will not land is recorded as owed and shown as owed | `event/*.js`, `eventActivityReward.js`, `creditOrOwe.js`, `payoutKey.js` |
+| 3 | Those four granted their themed **bonus item** with a bare `grantInventoryItem` that read nothing back, so a grant against a pruned document (which answers `null`, not a throw) was announced as delivered over an empty bag | Through `grantItemsOrOwe` under `eventActivityPayoutKey(activity, interaction.id, 'item')` — result read, recorded as owed when it will not land, embed says so | `event/*.js`, `eventActivityReward.js` |
+| 4 | `/event snowball`'s attacker **coin credit** was a bare unkeyed `$inc` and its **snowflake credit** an increment-then-push dance, both over a snowball and 5-minute cooldown already spent — a write that matched nothing announced coins and currency that never moved, with nothing to replay | Both go through the owe helpers keyed to the interaction (`'coins'`/`'currency'` phases); the append-when-absent case is folded into `creditEventCurrencyOnce`, so the three-write push dance is gone | `event/snowball.js`, `payoutKey.js`, `creditOrOwe.js` |
+| 5 | `/eventshop buy` debits the currency atomically, then grants the item or effect; a grant that failed refunded the currency with a bare `$inc` and `.catch(() => {})` that read nothing back and told the player only that the purchase failed — so a refund that itself failed lost the currency outright, with no owed record (the pass-3 `/market` unwind shape, on the currency the keyed helpers did not cover) | The refund goes through `creditEventCurrencyOrOwe` under `eventShopRefundPayoutKey(interaction.id)`, and the message is worded from what the refund actually did — refunded, recorded as owed, or (neither) contact an admin | `eventshop.js`, `payoutKey.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 6 | Event currency had no keyed credit primitive — `creditCoinsOnce` credits `balance`, not the `eventCurrency` array | `eventCurrencyCreditExpr` (bump-or-append in one pipeline expression) and `creditEventCurrencyOnce` (the guarded write) join the coin and item primitives; `replayOwedPayout` gains the `eventCurrency` kind, keyed like the others | `payoutKey.js`, `owedPayout.js` |
+| 7 | Two key constructors were needed and did not exist | `eventActivityPayoutKey(activity, interactionId, phase)` and `eventShopRefundPayoutKey(interactionId)` | `payoutKey.js` |
+| 8 | No tests over the keyed event-currency paths | `tests/eventCurrencyPayoutRecovery.test.js` drives `creditEventCurrencyOrOwe`, the `eventCurrency` replay and `creditActivityReward` against a store that evaluates the payout-key guard and the credit pipeline for real, and holds the six call sites to the keyed path | `tests/` |
+
+**Reviewed and found sound** — no change needed, recorded so the next pass does
+not re-derive it:
+
+- **The `/eventshop` debit** (step 2 of a purchase) is an atomic
+  `findOneAndUpdate` guarded on `'eventCurrency.amount': { $gte: totalCost }`
+  with its result read back — the sound compare-and-set. So is the stock
+  decrement that precedes it (`$elemMatch` on `itemId` + `stock: { $gte: qty }`).
+- **The stock revert** on a failed grant stays a best-effort `$inc` with
+  `.catch`: it moves guild inventory, not player value, and mis-counting one
+  shelf by `qty` is not a coin-integrity failure — deliberately not keyed.
+- **`spendEventCurrency` / `getEventCurrencyBalance` / `addEventCurrency`** in
+  `seasonalEventService.js` are in-memory helpers with unit tests; the activities
+  no longer route their credit through `addEventCurrency` (it wrote through
+  `save()`), but it stays for the tests and any read-side use.
+- **`event/manage.js`** (`/event start`/`end`/`status`) and
+  **`seasonalEventService.checkSeasonalEvents`** move no player currency — they
+  write the guild's `activeEvent` definition and its shop stock, guarded where it
+  matters (the uncached, projected read before `/event start`'s write).
+
+**The bound this pass leaves open.** One event-currency credit is *not* keyed
+here: `/explore`'s while-an-event-runs drop (`explore.js:addEventCurrency`), which
+still rides the expedition's `save()`. It is left deliberately, for two reasons —
+`explore.js` is a gathering command (pass 6's file, and its non-payout surface is
+already queued under [Not yet reviewed](#not-yet-reviewed)), and it is frozen at
+its `command-file-size` ceiling, so detaching and keying the drop cannot be done
+without first splitting the file. The helper now exists, so it is a mechanical
+follow-up once explore is split, not new infrastructure. Within this pass's own
+scope, the same residual millisecond corner every keyed credit carries applies: a
+keyed write that commits and loses its response between the credit and its
+acknowledgement is closed by the guard on the replay, not by the live write.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -1079,7 +1183,7 @@ wide, and it is widest exactly where the risk is.
 
 **Economy** — the largest uncovered area:
 
-- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the rest of these commands is not: repair/upgrade/unlock pricing, quest/mission crediting (through the already-audited `onEconomyEarn`), prestige, pet drops that ride the run's `save()`, the tournament/map/raid flows, and `event/trackhunt.js`, `craft.js`, `forge.js`
+- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the rest of these commands is not: repair/upgrade/unlock pricing, quest/mission crediting (through the already-audited `onEconomyEarn`), prestige, pet drops that ride the run's `save()`, the tournament/map/raid flows, and `craft.js`, `forge.js`. `/explore`'s while-an-event-runs **event-currency drop** is the one event-currency credit pass 8 did not key (it rides the expedition `save()` and `explore.js` is at its file-size ceiling) — the keyed helper now exists, so it is a follow-up once explore is split
 - `pet` (`petService.js`, `pet.js`)
 - `use` / items / effects — the seasonal loot-box item grant is audited above (pass 6); `effectsService.js`, `inventory.js`, `shop.js` and the rest of `use.js` are not
 - casino (`src/games/casino/*`, `casino.js`) — `confirmBet`, the bet guards, the
@@ -1090,7 +1194,7 @@ wide, and it is widest exactly where the risk is.
 - core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market.js` and `gift.js` have had their unwind paths audited (pass 3), the rest of both commands has not
 - group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is not reviewed
 - progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (the view/leaderboard/history/admin flows) is not reviewed
-- seasonal events (`seasonalEventService.js`, `eventshop.js`, and the seasonal commands) — **pass 8**. These move an event currency (candy, hearts, snowflakes) with no keyed helper and no `save()`-detach: the event-shop debit-then-grant refund, the activity coin and event-currency credits, and the bonus item grants all need infrastructure pass 7 deliberately did not build (see the pass-7 section's closing bound)
+- seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. Not reviewed: the event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end scheduler in `seasonalEventService.js`) and the shop's browse/balance reads, none of which move player currency; and `/explore`'s event-currency drop, noted under the gathering bullet above
 
 **Everything else uncovered:**
 
@@ -1112,5 +1216,5 @@ economy escrow and payout paths on 2026-09-01; the progressive jackpot on
 2026-09-04; the gift and market unwind paths on 2026-09-05; the casino hand
 payouts on 2026-09-08; the core currency commands on 2026-09-17; the
 gathering-loop payouts on 2026-09-18; the progression and group/PvP payouts on
-2026-09-19. "Not yet reviewed" carries no review date, because nothing in it has
-been reviewed.*
+2026-09-19; the seasonal-event currency on 2026-09-20. "Not yet reviewed" carries
+no review date, because nothing in it has been reviewed.*
