@@ -34,6 +34,12 @@ const CONSUMED_OUTSIDE_SRC = new Set([
     // The loopback host port the bundled rsshub service binds in compose; the
     // bot process never reads it.
     'RSSHUB_HOST_PORT',
+    // Credentials the stacks pass through to the bundled rsshub service so it can
+    // read the platforms that block anonymous access; the bot never sees them.
+    'TWITTER_AUTH_TOKEN',
+    'IG_COOKIE',
+    'IG_USERNAME',
+    'IG_PASSWORD',
     'BACKUP_RETENTION_DAYS',
     'MONGODB_ROOT_USERNAME',
     'MONGODB_ROOT_PASSWORD',

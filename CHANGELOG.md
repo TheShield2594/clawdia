@@ -14,6 +14,21 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.12.2] - 2026-09-20
+
+Migrations through `025_social_feeds_index`.
+
+Bundled RSSHub bridge: pass social credentials through to the container. The
+`social`-profile `rsshub` service now forwards `TWITTER_AUTH_TOKEN` and the
+Instagram credentials (`IG_COOKIE`, `IG_USERNAME`, `IG_PASSWORD`) from the stack
+environment, empty by default so nothing changes until one is set. X, Instagram
+and TikTok block anonymous access, so RSSHub needs credentials to read them;
+before this, a stack-level variable never reached the container (Portainer only
+uses stack vars for `${...}` substitution, and the service did not reference
+them), so the Twitter route stayed unconfigured however the token was set.
+YouTube and Reddit are unaffected — they need no credentials. Documented in
+`.env.example`, with the ToS/account-suspension warning stated plainly.
+
 ## [4.12.1] - 2026-09-19
 
 Migrations through `025_social_feeds_index`.
