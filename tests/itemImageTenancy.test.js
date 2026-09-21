@@ -13,6 +13,18 @@ const express = require('express');
 
 jest.mock('../src/models/ItemImage');
 
+// Since PR #1080 the bundled catalogue (utils/defaultItemImages) is authoritative
+// and overrides uploads for any item it ships art for — and the baked set under
+// src/assets/item-icons/ now includes ITEM. These tests are about the per-guild
+// upload tenancy and the DB fallback, which is the path taken for any item the
+// catalogue does *not* cover (custom shop items, anything new). Force the
+// catalogue off so that path is what's under test, independent of which ids
+// happen to be baked in. The bundled-override behaviour has its own coverage.
+jest.mock('../src/utils/defaultItemImages', () => ({
+    ...jest.requireActual('../src/utils/defaultItemImages'),
+    getDefaultItemImage: jest.fn(() => null),
+}));
+
 const ItemImage = require('../src/models/ItemImage');
 const stubBotGateway = require('./helpers/stubBotGateway');
 

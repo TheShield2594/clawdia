@@ -84,14 +84,23 @@ const MID_LABEL = { 4: 'EPIC', 5: 'LEGENDARY', 6: 'EVENT' };
  * @param {string|null} tier the drop's rarity name, or null for a miss.
  * @param {object} finalEmbed the result embed to land on.
  * @param {string} activity which grind's copy to use — a key of REVEAL_COPY.
+ * @param {Array} [files] attachments the final embed references (e.g. the catch
+ *   art `finalEmbed.setThumbnail('attachment://…')` points at). Only the final
+ *   edit carries them — the fog/reveal beats show their own art-free embeds — so
+ *   the attachment lands exactly on the render that references it.
  */
-async function stagedLootReveal(interaction, tier, finalEmbed, activity) {
+async function stagedLootReveal(interaction, tier, finalEmbed, activity, files = []) {
     const copy = REVEAL_COPY[activity];
     if (!copy) throw new Error(`stagedLootReveal: no reveal copy for "${activity}"`);
 
+    // Only the final edit carries the attachments, and only when there are any —
+    // the fog/reveal beats show their own art-free embeds, so an empty `files`
+    // would just tell Discord to clear attachments that were never added.
+    const finalPayload = files.length ? { embeds: [finalEmbed], files } : { embeds: [finalEmbed] };
+
     const tierNum = TIER_NUM[tier] ?? 0;
     if (tierNum < REVEAL_FROM_TIER) {
-        await interaction.editReply({ embeds: [finalEmbed] });
+        await interaction.editReply(finalPayload);
         return;
     }
 
@@ -125,7 +134,7 @@ async function stagedLootReveal(interaction, tier, finalEmbed, activity) {
         }
     }
 
-    await interaction.editReply({ embeds: [finalEmbed] });
+    await interaction.editReply(finalPayload);
 }
 
 module.exports = { stagedLootReveal, REVEAL_COPY, REVEAL_FROM_TIER, STAGE_MS };

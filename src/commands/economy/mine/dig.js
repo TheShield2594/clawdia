@@ -35,6 +35,7 @@ const { PITY_COPY } = require('../../../utils/pityBonus');
 const { buildMineEmbed } = require('./embeds');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
+const { attachResultThumbnail } = require('../../../utils/itemImageHelper');
 const { gatherPayoutKey } = require('../../../utils/payoutKey');
 
 // Presentation timings for the pre-dig prompt and the vein read. The ladder itself
@@ -518,8 +519,15 @@ async function handleDig(interaction) {
             }
         }
 
+        // Result artwork — the mined ore's icon as the embed thumbnail (emoji
+        // fallback). An abandoned cave-in keeps result.success true but revokes
+        // the haul, so it shows no ore art — same guard as the rare-pet drop above.
+        const oreFiles = result.success && !result.caveInAbandoned
+            ? await attachResultThumbnail(embed, 'mine', result.ore, interaction.guild.id)
+            : [];
+
         // Staged loot reveal for rare+ drops
-        await stagedLootReveal(interaction, result.success ? result.tier : null, embed, 'mine');
+        await stagedLootReveal(interaction, result.success ? result.tier : null, embed, 'mine', oreFiles);
 
         if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;

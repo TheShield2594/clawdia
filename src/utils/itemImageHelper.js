@@ -75,4 +75,26 @@ async function getItemImageAttachment(itemId, guildId = null, { label } = {}) {
     return { attachment, url: `attachment://${filename}` };
 }
 
-module.exports = { getItemImageAttachment };
+/**
+ * Sets a catch/kill/mine result's icon as `embed`'s thumbnail and returns the
+ * files array to attach, or `[]` when no art is bundled/uploaded (the emoji in
+ * the embed title is the fallback). Shared by the /fish, /hunt and /mine result
+ * renderers; `activity` is 'fish' | 'hunt' | 'mine' and `resultItem` is the
+ * caught fish / animal / ore (or null/undefined on a miss).
+ *
+ * The attachment it returns must ride with every render of `embed` — the boss
+ * and apex multi-phase edits included — so callers thread it through, not just
+ * the final reply.
+ */
+async function attachResultThumbnail(embed, activity, resultItem, guildId) {
+    if (!resultItem?.id) return [];
+    const { resultItemId } = require('../data/activityItems');
+    const art = await getItemImageAttachment(
+        resultItemId(activity, resultItem.id), guildId, { label: resultItem.name },
+    ).catch(() => null);
+    if (!art) return [];
+    embed.setThumbnail(art.url);
+    return [art.attachment];
+}
+
+module.exports = { getItemImageAttachment, attachResultThumbnail };

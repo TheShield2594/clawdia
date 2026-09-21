@@ -4,9 +4,10 @@
 /**
  * Builds the full icon generation manifest for Clawdia's economy/shop icons.
  *
- * One entry per uploadable item (83 activity ids + 35 guild shop items). Each
- * entry carries the storage key, the on-disk filename, the item's rarity, the
- * rim colour that rarity maps to, and the finished Higgsfield prompt.
+ * One entry per uploadable item: 83 shop-browse activity ids + 35 guild shop
+ * items + 144 catch/kill/mine results (caught fish, hunted animals, mined ores).
+ * Each entry carries the storage key, the on-disk filename, the item's rarity,
+ * the rim colour that rarity maps to, and the finished Higgsfield prompt.
  *
  * The look was settled on 2026-09-21 (STYLE.md §0): idiom B (minimal flat
  * shading, two tones per material, no gloss) + a rarity-coloured rim (option
@@ -251,15 +252,47 @@ const CONSUMABLE_RARITY = {
 // guild shop -> explicit rarity field, bare itemId key
 SHOP.forEach((s) => add(s.itemId, s.rarity, SUBJECT[s.itemId]));
 
+// --- catch / kill / mine results --------------------------------------------
+// The species/animals/ores a cast, hunt or dig produces. They are not gear and
+// not shop items, so they carry their own namespace (`fishcatch:`, `animal:`,
+// `ore:`) — see src/data/activityItems.js. Their rarity is the item's own `tier`
+// field, and the subject is written from the item's name + `flavor` (the flavor
+// is where the visual idea lives, the same role `lore`/`description` plays for
+// gear). The `event` tier — Clawdia's rarest, the "MYTHICAL CATCH" bracket —
+// maps onto the Mythic rim (molten-orange), the one rarity above Legendary.
+const CATCH_RARITY = {
+    common: 'Common', uncommon: 'Uncommon', rare: 'Rare',
+    epic: 'Epic', legendary: 'Legendary', event: 'Mythic',
+};
+// Flavor lines open with a scene-setting emoji on the rarest drops (🚨, 🔥, 🌠);
+// strip any leading non-letters so the prompt starts on the sentence.
+const flavorText = (s) => (s || '').replace(/^[^\p{L}\p{N}]+/u, '').trim();
+const RESULT_SUBJECT = {
+    fish:   (f) => `a ${f.name}, a single fish shown side-on. ${flavorText(f.flavor)}`,
+    animal: (a) => `a ${a.name}, a single wild animal. ${flavorText(a.flavor)}`,
+    ore:    (o) => `a single raw chunk of ${o.name}, a mined mineral ore. ${flavorText(o.flavor)}`,
+};
+const addResult = (ns, kind, item) => {
+    const rarityName = CATCH_RARITY[item.tier];
+    if (!rarityName) throw new Error(`${ns}:${item.id}: unmapped tier "${item.tier}"`);
+    add(`${ns}:${item.id}`, rarityName, RESULT_SUBJECT[kind](item));
+};
+Object.values(fish.FISH).forEach((f) => addResult('fishcatch', 'fish', f));
+Object.values(hunt.ANIMALS).forEach((a) => addResult('animal', 'animal', a));
+Object.values(mine.ORES).forEach((o) => addResult('ore', 'ore', o));
+
 // --- validate against the upload registry -----------------------------------
-const { ACTIVITY_ITEM_IDS } = require('../../src/data/activityItems.js');
+// Every namespaced key must be one the upload route would accept — a shop-browse
+// gear id or a catch/kill/mine result id.
+const { ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS } = require('../../src/data/activityItems.js');
+const uploadableIds = new Set([...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS]);
 const missingSubjects = manifest.filter((m) => !m.prompt.includes('Game item icon: ')).map((m) => m.key);
 const badActivity = manifest
     .filter((m) => m.key.includes(':'))
-    .filter((m) => !ACTIVITY_ITEM_IDS.has(m.key))
+    .filter((m) => !uploadableIds.has(m.key))
     .map((m) => m.key);
 if (missingSubjects.length) throw new Error(`missing subjects: ${missingSubjects.join(', ')}`);
-if (badActivity.length) throw new Error(`keys not in ACTIVITY_ITEM_IDS: ${badActivity.join(', ')}`);
+if (badActivity.length) throw new Error(`keys not in the uploadable id set: ${badActivity.join(', ')}`);
 
 const outDir = __dirname;
 fs.writeFileSync(path.join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);

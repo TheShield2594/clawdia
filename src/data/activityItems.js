@@ -18,11 +18,22 @@
  * image by — gear, upgrades, packs and consumables, *and* the zones, locations
  * and depths those views also draw. The panel renders a subset of these; the
  * route validates against all of them.
+ *
+ * The catch/kill/mine *results* — caught fish, hunted animals, mined ores — are
+ * a second, parallel registry below (`RESULT_ITEMS`). They are not shop items
+ * (you can't browse or buy a fish species), so they are kept out of
+ * `ACTIVITY_ITEMS` — which stays the shop catalog the dashboard panel renders —
+ * and given their own namespaces (`fishcatch:`, `animal:`, `ore:`) distinct from
+ * the gear namespaces (`fish:`, `hunt:`, `mine:`). The upload route accepts an id
+ * that is in *either* registry (`isUploadableItemId`), so custom art for a result
+ * can be uploaded and the bundled catalogue can ship default art for it, while
+ * the shop-panel contract — the panel can only offer ids the route accepts —
+ * still holds for the ids the panel actually offers.
  */
 
-const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES, ZONE_LIST } = require('./huntData');
-const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES, LOCATION_LIST } = require('./fishData');
-const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES, DEPTH_LIST } = require('./mineData');
+const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES, ZONE_LIST, ANIMALS } = require('./huntData');
+const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES, LOCATION_LIST, FISH } = require('./fishData');
+const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES, DEPTH_LIST, ORES } = require('./mineData');
 
 // Tiered gear is keyed by `slug`; everything else by `id`. That difference is
 // in the game data, so it is honoured here rather than normalised away — the
@@ -66,9 +77,53 @@ const ACTIVITY_ITEM_IDS = new Set(
         .map(item => item.id)
 );
 
-/** Whether `itemId` names an activity item that exists in the game data. */
+/** Whether `itemId` names a shop-browsable activity item that exists in the game data. */
 function isActivityItemId(itemId) {
     return typeof itemId === 'string' && ACTIVITY_ITEM_IDS.has(itemId);
 }
 
-module.exports = { ACTIVITY_ITEMS, ACTIVITY_ITEM_IDS, isActivityItemId };
+// ─── RESULT ITEMS (caught fish, hunted animals, mined ores) ────────────────────
+//
+// The things a `/fish cast`, `/hunt start` or `/mine dig` produces. They are not
+// gear and not shop items, so they carry their own namespace, distinct from the
+// gear one, and never collide with a gear id even when a species and a tier share
+// a slug. Fish/animals/ores are all keyed by their `id` field.
+const RESULT_NAMESPACES = { fish: 'fishcatch', hunt: 'animal', mine: 'ore' };
+
+/** The storage key an activity's result is filed under (`fishcatch:minnow`, …). */
+function resultItemId(activity, id) {
+    const ns = RESULT_NAMESPACES[activity];
+    return ns ? `${ns}:${id}` : null;
+}
+
+const RESULT_ITEMS = {
+    fish:    Object.values(FISH).map(f => toItem('fishcatch', f)),
+    animals: Object.values(ANIMALS).map(a => toItem('animal', a)),
+    ores:    Object.values(ORES).map(o => toItem('ore', o)),
+};
+
+const RESULT_ITEM_IDS = new Set(
+    Object.values(RESULT_ITEMS)
+        .flat()
+        .map(item => item.id)
+);
+
+/** Whether `itemId` names a catch/kill/mine result that exists in the game data. */
+function isResultItemId(itemId) {
+    return typeof itemId === 'string' && RESULT_ITEM_IDS.has(itemId);
+}
+
+/**
+ * Whether `itemId` is an id the image upload route may accept — a shop-browsable
+ * activity item or a catch/kill/mine result. This is the check that bounds what
+ * the `itemimages` collection can store under an activity/result key.
+ */
+function isUploadableItemId(itemId) {
+    return isActivityItemId(itemId) || isResultItemId(itemId);
+}
+
+module.exports = {
+    ACTIVITY_ITEMS, ACTIVITY_ITEM_IDS, isActivityItemId,
+    RESULT_ITEMS, RESULT_ITEM_IDS, RESULT_NAMESPACES, resultItemId,
+    isResultItemId, isUploadableItemId,
+};

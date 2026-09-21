@@ -45,6 +45,7 @@ const { logBigWin } = require('../../../utils/bigWinLogger');
 const { PITY_COPY } = require('../../../utils/pityBonus');
 const { FISH_TIER_SCORE } = require('./shared');
 const { buildCastEmbed } = require('./embeds');
+const { attachResultThumbnail } = require('../../../utils/itemImageHelper');
 const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
@@ -330,6 +331,13 @@ async function handleCast(interaction) {
 
         const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
 
+        // Result artwork — the caught fish's icon as the embed thumbnail (emoji
+        // fallback). Threaded through every render of this embed, boss phases
+        // included, so the attachment rides with each one.
+        const catchFiles = result.success && result.catchType === 'fish'
+            ? await attachResultThumbnail(embed, 'fish', result.fish, interaction.guild.id)
+            : [];
+
         if (payoutOwed > 0) {
             embed.addFields({
                 name: '⚠️ Payout Not Yet Credited',
@@ -412,7 +420,7 @@ async function handleCast(interaction) {
             const idToKey  = { boss_match: 'match', boss_hold: 'hold', boss_safe: 'safe' };
 
             // Phase 1
-            await interaction.editReply({ embeds: [embed, buildBossPhaseEmbed(0, [])], components: [buildPhaseRow(0)] });
+            await interaction.editReply({ embeds: [embed, buildBossPhaseEmbed(0, [])], components: [buildPhaseRow(0)], files: catchFiles });
 
             const runPhase = async (phaseIndex, prevResults, prevBtn) => {
                 const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
@@ -431,7 +439,7 @@ async function handleCast(interaction) {
 
                         if (phaseIndex < phaseCount - 1) {
                             // More phases ahead
-                            await btn.update({ embeds: [embed, buildBossPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)] });
+                            await btn.update({ embeds: [embed, buildBossPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)], files: catchFiles });
                             resolve({ btn, results });
                         } else {
                             resolve({ btn, results, done: true });
@@ -455,7 +463,7 @@ async function handleCast(interaction) {
                         .setColor('#1C0A00')
                         .setTitle(`${bossType.emoji} ${bossType.name} Slipped Away`)
                         .setDescription(`⏱️ *You hesitated too long — the ${bossType.name} broke free before you could respond.*\n\nThe base catch above still counts; no bonus boss payout was earned.`);
-                    interaction.editReply({ embeds: [embed, timeoutEmbed], components: [] }).catch(() => {});
+                    interaction.editReply({ embeds: [embed, timeoutEmbed], components: [], files: catchFiles }).catch(() => {});
                     return;
                 }
             }
@@ -558,7 +566,7 @@ async function handleCast(interaction) {
                 });
             }
 
-            await state.btn.update({ embeds: [embed, bossResultEmbed], components: [] });
+            await state.btn.update({ embeds: [embed, bossResultEmbed], components: [], files: catchFiles });
             return;
         }
 
@@ -596,7 +604,7 @@ async function handleCast(interaction) {
         }
 
         // Staged loot reveal for rare+ drops
-        await stagedLootReveal(interaction, result.success ? result.tier : null, embed, 'fish');
+        await stagedLootReveal(interaction, result.success ? result.tier : null, embed, 'fish', catchFiles);
 
         if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
