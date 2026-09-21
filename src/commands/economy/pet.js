@@ -30,7 +30,6 @@ const {
     XP_BATTLE_LOSS,
     XP_WILD_WIN,
     XP_WILD_LOSS,
-    xpForLevel,
     getPetDisplay,
     getEffectiveBonusPct,
     applyPetXp,
@@ -45,6 +44,7 @@ const {
     RARE_PET_DROP_CHANCE,
 } = require('../../services/petService');
 const { generatePetSprite } = require('../../utils/cardGenerator');
+const { hungerBar, petArt, buildNavComponents, renderPetStatus } = require('../../services/petStatusView');
 const { applyXpGain, announceLevelUp } = require('../../services/levelingService');
 const { logTransaction } = require('../../utils/logTransaction');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
@@ -55,7 +55,6 @@ const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 
 const NO_SUCH_PET = "Couldn't find that pet — pick one from the list `/pet status` shows, or start typing to choose from your pets.";
-const HUNGER_BAR_LENGTH = 10;
 const BATTLE_COOLDOWN_MS  = 10 * 60 * 1000;    // per-pet battle cooldown
 const BATTLE_MIN_ACCOUNT_AGE_MS = 7 * 24 * 3_600_000; // wagered battles only
 const BATTLE_RAKE = 0.05;
@@ -77,15 +76,6 @@ function battleLogLines(rounds, nameA, nameB) {
         const crit = rd.crit ? ' 💥' : '';
         return `• **${who}** hits **${tgt}** for **${rd.damage}**${crit}`;
     });
-}
-
-// Hunger is stored at full precision (decay is continuous), so round for display —
-// otherwise the bar reads "80.41666666666666%".
-function hungerBar(hunger) {
-    const pct    = Math.round(Math.min(100, Math.max(0, Number(hunger) || 0)));
-    const filled = Math.round((pct / 100) * HUNGER_BAR_LENGTH);
-    const color  = pct >= STARVING_THRESHOLD ? '🟩' : '🟥';
-    return color.repeat(filled) + '⬛'.repeat(HUNGER_BAR_LENGTH - filled) + ` ${pct}%`;
 }
 
 // What a pet will actually eat: any known grind material, plus shop pet food.
@@ -247,98 +237,6 @@ async function syncHungerAndRunaway(user, interaction) {
     }
 }
 
-// ── Pet status card helpers ───────────────────────────────────────────────────
-
-function buildPetEmbed(pet, index, total, ownerAvatarURL) {
-    const def         = PET_DEFINITIONS[pet.petId];
-    const bondDays    = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
-    const hunger      = effectiveHunger(pet);
-    const moodLine    = getMoodLine(pet);
-    const moodColor   = getMoodColor(hunger);
-    const bonusActive = hunger >= STARVING_THRESHOLD;
-    const bonusEmoji  = bonusActive ? '✅' : '❌';
-    const effPct      = getEffectiveBonusPct(pet);
-    const bonusLabel  = `+${effPct}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}${bonusActive ? '' : ' *(inactive)*'}`;
-
-    const lastFedMs  = pet.lastFed ? Date.now() - new Date(pet.lastFed).getTime() : 0;
-    const lastFedH   = Math.floor(lastFedMs / 3600000);
-    const lastFedStr = lastFedH < 1
-        ? 'just now'
-        : lastFedH < 24
-        ? `${lastFedH}h ago`
-        : `${Math.floor(lastFedH / 24)}d ago`;
-
-    const isResting  = pet.restUntil && new Date(pet.restUntil).getTime() > Date.now();
-    const potwLine   = pet.potw     ? '\n🌟 **Pet of the Week**'               : '';
-    const restLine   = isResting    ? '\n🛏️ *Resting — hunger decays slower*' : '';
-
-    const personalityDef = pet.personality ? PERSONALITY_TRAITS[pet.personality] : null;
-    const personalityLine = personalityDef ? `\n${personalityDef.emoji} *${personalityDef.label}* — ${personalityDef.desc}` : '';
-
-    const { emoji: dispEmoji } = getPetDisplay(pet);
-    const level   = pet.level ?? 1;
-    const stage   = pet.evolutionStage ?? 1;
-    const stageStars = '⭐'.repeat(stage);
-    const xpInLevel  = (pet.xp ?? 0) - xpForLevel(level);
-    const xpToNext   = level >= PET_MAX_LEVEL ? 0 : xpForLevel(level + 1) - xpForLevel(level);
-    const levelLine  = level >= PET_MAX_LEVEL
-        ? `Lv. **${level}** (MAX) ${stageStars}`
-        : `Lv. **${level}** ${stageStars} — ${xpInLevel}/${xpToNext} XP`;
-    const record = `${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L`;
-
-    // Where to actually get the +25 food — previously only /pet list mentioned it.
-    const favMeta      = def ? MATERIAL_RARITY[def.favoriteMaterial] : null;
-    const favouriteLine = def
-        ? `${favMeta?.emoji ?? '🍖'} \`${def.favoriteMaterial}\` — from **/${def.materialSource}** *(+25 hunger, bonus XP)*`
-        : '—';
-
-    return new EmbedBuilder()
-        .setColor(moodColor)
-        .setAuthor({ name: `${getPetDisplay(pet).titledName} • ${def?.name ?? pet.petId}`, iconURL: ownerAvatarURL })
-        .setDescription(`${dispEmoji} *${moodLine}*${personalityLine}${potwLine}${restLine}`)
-        .addFields(
-            { name: '📈 Level',             value: levelLine,                            inline: false },
-            { name: '❤️ Bond',              value: `${heartBar(bondDays)} ${bondDays}d`, inline: false },
-            { name: '🍖 Hunger',            value: hungerBar(hunger),                    inline: false },
-            { name: `${bonusEmoji} Bonus`,  value: bonusLabel,                           inline: true  },
-            { name: '⚔️ Battle Record',     value: record,                               inline: true  },
-            { name: '🍗 Favourite Food',    value: favouriteLine,                        inline: false },
-        )
-        .setFooter({ text: `Pet ${index + 1} of ${total} • Last fed ${lastFedStr}` })
-        .setTimestamp();
-}
-
-function buildNavComponents(userId, index, total) {
-    const rows = [];
-
-    if (total > 1) {
-        rows.push(
-            new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`pet_prev:${userId}:${index}`)
-                    .setLabel('◀ Prev')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(index === 0),
-                new ButtonBuilder()
-                    .setCustomId(`pet_next:${userId}:${index}`)
-                    .setLabel('Next ▶')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(index === total - 1),
-            )
-        );
-    }
-
-    rows.push(
-        new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`pet_play:${userId}:${index}`)     .setLabel('🎾 Play')     .setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId(`pet_rest:${userId}:${index}`)     .setLabel('🛏️ Rest')    .setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId(`pet_showcase:${userId}:${index}`) .setLabel('📷 Showcase') .setStyle(ButtonStyle.Secondary),
-        )
-    );
-
-    return rows;
-}
-
 // ── Autocomplete ──────────────────────────────────────────────────────────────
 
 /** Pets the player currently owns, keyed by their stable _id. */
@@ -498,7 +396,9 @@ async function executeAdopt(interaction) {
         .setFooter({ text: 'Use /pet status to see your pet\'s mood, or /pet feed to keep it happy!' })
         .setTimestamp();
 
-    return interaction.reply({ embeds: [embed] });
+    const art = await petArt(petId, interaction.guild.id, displayName);
+    if (art) embed.setThumbnail(art.url);
+    return interaction.reply({ embeds: [embed], files: art ? [art.attachment] : [] });
 }
 
 async function executeStatus(interaction) {
@@ -525,11 +425,11 @@ async function executeStatus(interaction) {
 
     let currentIndex = 0;
     const ownerAvatarURL = interaction.user.displayAvatarURL();
+    const guildId = interaction.guild.id;
 
-    const reply = await interaction.editReply({
-        embeds:     [buildPetEmbed(user.pets[currentIndex], currentIndex, user.pets.length, ownerAvatarURL)],
-        components: buildNavComponents(interaction.user.id, currentIndex, user.pets.length),
-    });
+    const reply = await interaction.editReply(
+        await renderPetStatus(user.pets[currentIndex], currentIndex, user.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+    );
 
     const collector = reply.createMessageComponentCollector({
         filter: ownedBy(interaction.user.id, "This isn't your pet."),
@@ -549,17 +449,15 @@ async function executeStatus(interaction) {
 
         if (action === 'pet_prev') {
             currentIndex = Math.max(0, idx - 1);
-            await btn.update({
-                embeds:     [buildPetEmbed(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL)],
-                components: buildNavComponents(interaction.user.id, currentIndex, freshUser.pets.length),
-            });
+            await btn.update(
+                await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+            );
 
         } else if (action === 'pet_next') {
             currentIndex = Math.min(freshUser.pets.length - 1, idx + 1);
-            await btn.update({
-                embeds:     [buildPetEmbed(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL)],
-                components: buildNavComponents(interaction.user.id, currentIndex, freshUser.pets.length),
-            });
+            await btn.update(
+                await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+            );
 
         } else if (action === 'pet_play') {
             const pet  = freshUser.pets[idx];
@@ -611,10 +509,9 @@ async function executeStatus(interaction) {
                 ? `\n📈 **${name} reached pet Level ${petXpResult.toLevel}!**`
                 : '';
             await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n✨ **+${xpGain} XP** for you, **+${petXpResult.gained} XP** for ${name}!${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
-            await interaction.editReply({
-                embeds:     [buildPetEmbed(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL)],
-                components: buildNavComponents(interaction.user.id, idx, freshUser.pets.length),
-            }).catch(() => {});
+            await interaction.editReply(
+                await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+            ).catch(() => {});
 
         } else if (action === 'pet_rest') {
             const pet  = freshUser.pets[idx];
@@ -651,10 +548,9 @@ async function executeStatus(interaction) {
             }
 
             await btn.reply({ content: `🛏️ **${name}** is now resting! Hunger will decay at half speed for **2 hours**.`, flags: MessageFlags.Ephemeral });
-            await interaction.editReply({
-                embeds:     [buildPetEmbed(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL)],
-                components: buildNavComponents(interaction.user.id, idx, freshUser.pets.length),
-            }).catch(() => {});
+            await interaction.editReply(
+                await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+            ).catch(() => {});
 
         } else if (action === 'pet_showcase') {
             const pet      = freshUser.pets[idx];
@@ -808,7 +704,9 @@ async function executeFeed(interaction) {
         )
         .setTimestamp();
 
-    return interaction.editReply({ embeds: [embed] });
+    const art = await petArt(pet.petId, interaction.guild.id, displayName);
+    if (art) embed.setThumbnail(art.url);
+    return interaction.editReply({ embeds: [embed], files: art ? [art.attachment] : [] });
 }
 
 async function executeRelease(interaction) {

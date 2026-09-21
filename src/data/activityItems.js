@@ -122,8 +122,48 @@ function isUploadableItemId(itemId) {
     return isActivityItemId(itemId) || isResultItemId(itemId);
 }
 
+// ─── PET SPECIES (companion portrait art) ─────────────────────────────────────
+//
+// Pets are a fixed roster with their own art (issue #1082): the ten ownable
+// species in petService's PET_DEFINITIONS plus the four wild battle opponents
+// makeWildPet fields. /pet renders each as a portrait thumbnail via
+// getItemImageAttachment(petItemId(id), …), falling back to the species emoji.
+//
+// Unlike gear and results, pet art is *bundle-only*. The roster is fixed and
+// there is no dashboard panel to upload against, so — following the decision in
+// #1080 to make the bundled catalogue authoritative — pet keys are deliberately
+// kept out of isUploadableItemId: nothing may store a per-guild pet image, and
+// the only source of pet art is the baked default set (defaultItemImages.js).
+//
+// The ids live here as a literal because this file is pure data (requiring
+// petService would pull in the Mongoose models, and assets/icons/build-manifest.mjs
+// requires this file under a bare `node`). A test asserts the literal stays in
+// step with petService's PET_DEFINITIONS + WILD_PET_IDS, so a new species can't
+// silently ship with no art slot.
+const PET_NAMESPACE = 'pet';
+const PET_SPECIES_IDS = [
+    // ownable companions (PET_DEFINITIONS)
+    'dog', 'cat', 'bird', 'fish', 'fox', 'wolf',
+    'eagle', 'shark', 'crystal_fox', 'lantern_owl',
+    // wild battle opponents (makeWildPet)
+    'wild_boar', 'feral_cat', 'stray_hound', 'cave_bat',
+];
+
+/** The storage key a pet species' art is filed under (`pet:crystal_fox`). */
+function petItemId(petId) {
+    return `${PET_NAMESPACE}:${petId}`;
+}
+
+const PET_ITEM_IDS = new Set(PET_SPECIES_IDS.map(petItemId));
+
+/** Whether `itemId` names a pet species the bundled art set covers. */
+function isPetItemId(itemId) {
+    return typeof itemId === 'string' && PET_ITEM_IDS.has(itemId);
+}
+
 module.exports = {
     ACTIVITY_ITEMS, ACTIVITY_ITEM_IDS, isActivityItemId,
     RESULT_ITEMS, RESULT_ITEM_IDS, RESULT_NAMESPACES, resultItemId,
     isResultItemId, isUploadableItemId,
+    PET_NAMESPACE, PET_SPECIES_IDS, PET_ITEM_IDS, petItemId, isPetItemId,
 };

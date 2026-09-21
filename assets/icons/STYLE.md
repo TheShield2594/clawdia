@@ -169,15 +169,35 @@ activity as a prefix; the upload route rejects anything else.
 | Caught fish | `fishcatch:<id>` | `fishcatch:great_white` |
 | Hunted animals | `animal:<id>` | `animal:grizzly_bear` |
 | Mined ores | `ore:<id>` | `ore:diamond` |
+| Pets | `pet:<petId>` | `pet:crystal_fox` |
 
-Two registries in `src/data/activityItems.js` are the authority: the 83
-shop-browse gear ids (`ACTIVITY_ITEM_IDS`) and the 144 catch/kill/mine result
-ids (`RESULT_ITEM_IDS`). The upload route accepts an id in *either*
+Three registries in `src/data/activityItems.js` are the authority: the 83
+shop-browse gear ids (`ACTIVITY_ITEM_IDS`), the 144 catch/kill/mine result ids
+(`RESULT_ITEM_IDS`), and the 14 pet species ids (`PET_ITEM_IDS`, issue #1082).
+The upload route accepts an id in either of the first two
 (`isUploadableItemId`); `build-manifest.mjs` validates every namespaced key
-against their union and throws if one is missing. Colons are illegal in
-filenames on some OSes, so the on-disk name writes `:` as `__`
-(`hunt__steel_rifle.png`, `animal__grizzly_bear.png`) and the upload converts
-back.
+against the union of all three and throws if one is missing. Colons are illegal
+in filenames on some OSes, so the on-disk name writes `:` as `__`
+(`hunt__steel_rifle.png`, `animal__grizzly_bear.png`, `pet__crystal_fox.png`)
+and the upload converts back.
+
+**Pets are bundle-only.** They are a fixed roster with no dashboard panel to
+upload against, so `PET_ITEM_IDS` is deliberately kept *out* of
+`isUploadableItemId`: pet art ships only as a baked default and is never a
+per-guild upload. `getItemImageAttachment('pet:<id>', …)` still serves the baked
+portrait (it checks the default set first), and `/pet` renders it as a thumbnail
+on the status, adopt and feed embeds, falling back to the species emoji. The
+roster is the ten ownable species in `PET_DEFINITIONS` plus the four wild battle
+opponents `makeWildPet` fields; a test (`tests/petArtCatalog.test.js`) keeps the
+id list in step with both.
+
+Pet art uses a **portrait** framing distinct from the item silhouettes — a
+front-facing character mascot rather than a centered object — while keeping the
+B3 rarity rim and flat two-tone shading, so `build-manifest.mjs` gives them
+their own `PET_STYLE`/`petPrompt` (see the "Pet portrait icon:" prompts) instead
+of the item `STYLE`. Rarity is by tier: the six ownable species escalate by
+adoption cost (Common → Epic), the four unpurchasable rare companions are
+Legendary, and the wild opponents are Common.
 
 Results get their own namespaces so they never collide with the gear ones
 (`fish:`/`hunt:`/`mine:`) even when a species and a tier share a slug. Their
@@ -322,6 +342,17 @@ Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
 
+- **2026-09-21** — Added **14 pet portraits** (issue #1082) to the manifest: the
+  ten ownable species (`PET_DEFINITIONS`) plus the four wild battle opponents,
+  under a new bundle-only `pet:` namespace (`PET_ITEM_IDS` in
+  `src/data/activityItems.js`). New `PET_STYLE`/`petPrompt` in
+  `build-manifest.mjs` gives them a front-facing character-portrait framing on
+  top of the B3 rim + flat shading; rarity is by tier (ownable Common→Epic, rare
+  companions Legendary, wild opponents Common). `/pet` renders the baked art as a
+  thumbnail on the status/adopt/feed embeds with an emoji fallback. Prompts are
+  in `manifest.json` (now 276 items); **not yet generated / baked** — run the
+  generation + `Bake item icons` steps below to record job ids in
+  `icons.map.json` and ship the pixels.
 - **2026-09-21** — Retargeted to `gpt_image_2_5`; the 20 `gpt_image_2` icons
   became reference-only.
 - **2026-09-21** — Settled the look (§0): idiom **B** (minimal flat shading, no
@@ -368,3 +399,13 @@ catalogued items — purging them is a separate migration if ever wanted.
   actually generate + bake: all 144, or only the rarer tiers players linger on.
   The emoji fallback means either ships cleanly.
 - **Rod and pickaxe ladders** reuse the scope/glow escalation shape (§4).
+- **Pets** (issue #1082) — *scaffolded, not yet generated.* Storage keys,
+  bundle-only route handling, manifest prompts and the `/pet` thumbnail
+  renderers are all in place, with the emoji fallback covering the gap until art
+  ships. What remains is a credit-spending generation run on the owner's
+  Higgsfield account: the portrait framing is a new look for this set, so it is
+  worth a small **look-batch** (2–3 pets, `PET_STYLE`) before generating all 14,
+  then recording job ids + urls in `icons.map.json` and running the bake
+  workflow. Whether the four wild battle opponents want art wired into the
+  battle embeds (they only render as emoji in `/pet battle` today) is a separate,
+  optional follow-up — their portraits are in the manifest either way.

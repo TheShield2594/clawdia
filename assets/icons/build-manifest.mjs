@@ -4,10 +4,11 @@
 /**
  * Builds the full icon generation manifest for Clawdia's economy/shop icons.
  *
- * One entry per uploadable item: 83 shop-browse activity ids + 35 guild shop
- * items + 144 catch/kill/mine results (caught fish, hunted animals, mined ores).
- * Each entry carries the storage key, the on-disk filename, the item's rarity,
- * the rim colour that rarity maps to, and the finished Higgsfield prompt.
+ * One entry per catalogue key: 83 shop-browse activity ids + 35 guild shop
+ * items + 144 catch/kill/mine results (caught fish, hunted animals, mined ores)
+ * + 14 pet species (issue #1082). Each entry carries the storage key, the
+ * on-disk filename, the item's rarity, the rim colour that rarity maps to, and
+ * the finished Higgsfield prompt.
  *
  * The look was settled on 2026-09-21 (STYLE.md §0): idiom B (minimal flat
  * shading, two tones per material, no gloss) + a rarity-coloured rim (option
@@ -281,18 +282,85 @@ Object.values(fish.FISH).forEach((f) => addResult('fishcatch', 'fish', f));
 Object.values(hunt.ANIMALS).forEach((a) => addResult('animal', 'animal', a));
 Object.values(mine.ORES).forEach((o) => addResult('ore', 'ore', o));
 
-// --- validate against the upload registry -----------------------------------
-// Every namespaced key must be one the upload route would accept — a shop-browse
-// gear id or a catch/kill/mine result id.
-const { ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS } = require('../../src/data/activityItems.js');
-const uploadableIds = new Set([...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS]);
-const missingSubjects = manifest.filter((m) => !m.prompt.includes('Game item icon: ')).map((m) => m.key);
+// --- pets --------------------------------------------------------------------
+// Pets (issue #1082) are a fixed roster rendered in /pet. They carry their own
+// `pet:` namespace (src/data/activityItems.js) and a *portrait* framing distinct
+// from the item silhouettes — a front-facing character mascot rather than a
+// centered object — while keeping the B3 rarity rim + flat two-tone shading so
+// they read as the same set. Art is per species, not per personality.
+//
+// Rarity by tier: the six ownable species escalate by adoption cost
+// (dog/cat Common → bird/fish Uncommon → fox Rare → wolf Epic), the four
+// unpurchasable rare companions (eagle/shark/crystal_fox/lantern_owl) that only
+// drop from a legendary grind result are Legendary, and the four wild battle
+// opponents are Common.
+const PET_STYLE = (rarityName) => {
+    const rim = RARITY[rarityName].word;
+    return `Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick ${rim} rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size.`;
+};
+const petPrompt = (subject, rarityName) => `Pet portrait icon: ${subject} ${PET_STYLE(rarityName)}`;
+
+const PET_RARITY = {
+    dog: 'Common', cat: 'Common', bird: 'Uncommon', fish: 'Uncommon', fox: 'Rare', wolf: 'Epic',
+    eagle: 'Legendary', shark: 'Legendary', crystal_fox: 'Legendary', lantern_owl: 'Legendary',
+    wild_boar: 'Common', feral_cat: 'Common', stray_hound: 'Common', cave_bat: 'Common',
+};
+
+// One portrait per species, front-facing so the whole set frames alike. The
+// four Legendary companions carry a soft glow the way the higher gear tiers do,
+// to read as the rarer tier without breaking the flat B3 look.
+const PET_SUBJECT = {
+    dog:          'a cheerful brown-and-tan puppy with big friendly eyes, floppy ears and a lolling tongue, sitting and facing the viewer.',
+    cat:          'a sleek orange tabby cat with green eyes and a calm, curious expression, sitting upright and facing the viewer.',
+    bird:         'a small round songbird with bright blue and yellow plumage and a cheerful beak, perched and facing the viewer with its head tilted.',
+    fish:         'a plump tropical pet fish with orange and white fins, flowing tail and big round eyes, shown side-on and facing the viewer.',
+    fox:          'a bright orange-red fox with a white chest and a bushy tail, sitting alert with a clever grin and facing the viewer.',
+    wolf:         'a proud grey timber wolf with amber eyes and a thick furry ruff, head and shoulders facing the viewer.',
+    eagle:        'a majestic bald eagle with a white head, sharp golden hooked beak and a fierce gaze, head and shoulders facing the viewer, a faint radiant glow.',
+    shark:        'a sleek grey great white shark with a toothy grin and a pale underbelly, shown side-on facing the viewer, a faint aura.',
+    crystal_fox:  'a mystical fox sculpted from glowing translucent blue crystal, faceted fur and shining eyes, sitting and facing the viewer, a soft magical glow.',
+    lantern_owl:  'a wise round owl whose chest holds a glowing amber lantern, big luminous eyes and soft feathers, facing the viewer, a warm soft glow.',
+    wild_boar:    'a bristly brown wild boar with curved tusks, a snorting snout and small angry eyes, head and shoulders facing the viewer.',
+    feral_cat:    'a scruffy grey alley cat with a torn ear, patchy fur and a wary hiss, facing the viewer.',
+    stray_hound:  'a lean scruffy stray hound with matted brown fur and a scrappy, alert stance, facing the viewer.',
+    cave_bat:     'a small dark cave bat with spread leathery wings, big ears and beady eyes, facing the viewer.',
+};
+
+const addPet = (petId) => {
+    const rarityName = PET_RARITY[petId];
+    const subject = PET_SUBJECT[petId];
+    if (!rarityName) throw new Error(`no rarity for pet ${petId}`);
+    if (!subject) throw new Error(`no subject for pet ${petId}`);
+    manifest.push({
+        index: index++,
+        key: `pet:${petId}`,
+        file: `pet__${petId}.png`,
+        rarity: rarityName,
+        rim: RARITY[rarityName].word,
+        rimHex: RARITY[rarityName].hex,
+        prompt: petPrompt(subject, rarityName),
+    });
+};
+Object.keys(PET_SUBJECT).forEach(addPet);
+
+// --- validate against the game registries -----------------------------------
+// Every namespaced key must be a known game key: a shop-browse gear id or a
+// catch/kill/mine result id (both uploadable), or a pet species id (bundle-only,
+// see src/data/activityItems.js) — otherwise it is a typo the app will never ask
+// for. Pets are included here but not in `isUploadableItemId`: their art ships
+// only as a baked default, never a per-guild upload.
+const { ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS, PET_ITEM_IDS } = require('../../src/data/activityItems.js');
+const knownKeys = new Set([...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS, ...PET_ITEM_IDS]);
+// Every prompt ends with the shared B3 style block; "rarity rim," is the phrase
+// both the item and the pet-portrait style blocks carry, so its absence means a
+// prompt was never assembled.
+const missingSubjects = manifest.filter((m) => !m.prompt.includes('rarity rim,')).map((m) => m.key);
 const badActivity = manifest
     .filter((m) => m.key.includes(':'))
-    .filter((m) => !uploadableIds.has(m.key))
+    .filter((m) => !knownKeys.has(m.key))
     .map((m) => m.key);
 if (missingSubjects.length) throw new Error(`missing subjects: ${missingSubjects.join(', ')}`);
-if (badActivity.length) throw new Error(`keys not in the uploadable id set: ${badActivity.join(', ')}`);
+if (badActivity.length) throw new Error(`keys not in the known id set: ${badActivity.join(', ')}`);
 
 const outDir = __dirname;
 fs.writeFileSync(path.join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);

@@ -2356,5 +2356,131 @@
     "rim": "molten-orange",
     "rimHex": "#FF6600",
     "prompt": "Game item icon: a single raw chunk of Void Ore, a mined mineral ore. Ore from the space between dimensions. It should not exist. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 262,
+    "key": "pet:dog",
+    "file": "pet__dog.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Pet portrait icon: a cheerful brown-and-tan puppy with big friendly eyes, floppy ears and a lolling tongue, sitting and facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick silver-grey rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 263,
+    "key": "pet:cat",
+    "file": "pet__cat.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Pet portrait icon: a sleek orange tabby cat with green eyes and a calm, curious expression, sitting upright and facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick silver-grey rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 264,
+    "key": "pet:bird",
+    "file": "pet__bird.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Pet portrait icon: a small round songbird with bright blue and yellow plumage and a cheerful beak, perched and facing the viewer with its head tilted. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick emerald-green rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 265,
+    "key": "pet:fish",
+    "file": "pet__fish.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Pet portrait icon: a plump tropical pet fish with orange and white fins, flowing tail and big round eyes, shown side-on and facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick emerald-green rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 266,
+    "key": "pet:fox",
+    "file": "pet__fox.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Pet portrait icon: a bright orange-red fox with a white chest and a bushy tail, sitting alert with a clever grin and facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick sapphire-blue rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 267,
+    "key": "pet:wolf",
+    "file": "pet__wolf.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Pet portrait icon: a proud grey timber wolf with amber eyes and a thick furry ruff, head and shoulders facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick amethyst-purple rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 268,
+    "key": "pet:eagle",
+    "file": "pet__eagle.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Pet portrait icon: a majestic bald eagle with a white head, sharp golden hooked beak and a fierce gaze, head and shoulders facing the viewer, a faint radiant glow. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick radiant-gold rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 269,
+    "key": "pet:shark",
+    "file": "pet__shark.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Pet portrait icon: a sleek grey great white shark with a toothy grin and a pale underbelly, shown side-on facing the viewer, a faint aura. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick radiant-gold rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 270,
+    "key": "pet:crystal_fox",
+    "file": "pet__crystal_fox.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Pet portrait icon: a mystical fox sculpted from glowing translucent blue crystal, faceted fur and shining eyes, sitting and facing the viewer, a soft magical glow. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick radiant-gold rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 271,
+    "key": "pet:lantern_owl",
+    "file": "pet__lantern_owl.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Pet portrait icon: a wise round owl whose chest holds a glowing amber lantern, big luminous eyes and soft feathers, facing the viewer, a warm soft glow. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick radiant-gold rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 272,
+    "key": "pet:wild_boar",
+    "file": "pet__wild_boar.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Pet portrait icon: a bristly brown wild boar with curved tusks, a snorting snout and small angry eyes, head and shoulders facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick silver-grey rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 273,
+    "key": "pet:feral_cat",
+    "file": "pet__feral_cat.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Pet portrait icon: a scruffy grey alley cat with a torn ear, patchy fur and a wary hiss, facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick silver-grey rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 274,
+    "key": "pet:stray_hound",
+    "file": "pet__stray_hound.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Pet portrait icon: a lean scruffy stray hound with matted brown fur and a scrappy, alert stance, facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick silver-grey rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 275,
+    "key": "pet:cave_bat",
+    "file": "pet__cave_bat.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Pet portrait icon: a small dark cave bat with spread leathery wings, big ears and beady eyes, facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick silver-grey rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
   }
 ]
