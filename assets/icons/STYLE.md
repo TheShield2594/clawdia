@@ -165,15 +165,27 @@ activity as a prefix; the upload route rejects anything else.
 | --- | --- | --- |
 | Hunt / fish / mine gear | `<activity>:<slug>` | `hunt:steel_rifle` |
 | Guild shop items | bare id (route adds `shop:`) | `lucky_charm` |
+| Caught fish | `fishcatch:<id>` | `fishcatch:great_white` |
+| Hunted animals | `animal:<id>` | `animal:grizzly_bear` |
+| Mined ores | `ore:<id>` | `ore:diamond` |
 
-The authority is `ACTIVITY_ITEM_IDS` in `src/data/activityItems.js` (83 ids).
-`build-manifest.mjs` validates every activity key against it and throws if one
-is missing. Colons are illegal in filenames on some OSes, so the on-disk name
-writes `:` as `__` (`hunt__steel_rifle.png`) and the upload converts back.
+Two registries in `src/data/activityItems.js` are the authority: the 83
+shop-browse gear ids (`ACTIVITY_ITEM_IDS`) and the 144 catch/kill/mine result
+ids (`RESULT_ITEM_IDS`). The upload route accepts an id in *either*
+(`isUploadableItemId`); `build-manifest.mjs` validates every namespaced key
+against their union and throws if one is missing. Colons are illegal in
+filenames on some OSes, so the on-disk name writes `:` as `__`
+(`hunt__steel_rifle.png`, `animal__grizzly_bear.png`) and the upload converts
+back.
 
-**Not covered:** caught fish, hunted animals, and mined ores have no upload
-route — they render as their unicode emoji. Don't generate for them without a
-code change first.
+Results get their own namespaces so they never collide with the gear ones
+(`fish:`/`hunt:`/`mine:`) even when a species and a tier share a slug. Their
+rarity comes from the item's `tier` field, and the `event` tier — Clawdia's
+"MYTHICAL CATCH" bracket, above Legendary — maps onto the **Mythic** rim
+(molten-orange). The catch/hunt/mine result renderers call
+`getItemImageAttachment()` for the caught item and set it as the embed
+thumbnail, falling back to the unicode emoji (already in the title) when no art
+is bundled or uploaded — so the set can ship incrementally.
 
 ## 5. Identify the downloads — `rename-icons.mjs`
 
@@ -342,6 +354,9 @@ catalogued items — purging them is a separate migration if ever wanted.
 
 ## Open questions
 
-- **Caught fish / animals / ores** still can't take art without a code change
-  (§4b).
+- **Caught fish / animals / ores** — *resolved* (issue #1081). They now have
+  storage keys, upload-route validation, manifest prompts, and result renderers
+  that show their art (§4b). What remains is a scope call on **which** to
+  actually generate + bake: all 144, or only the rarer tiers players linger on.
+  The emoji fallback means either ships cleanly.
 - **Rod and pickaxe ladders** reuse the scope/glow escalation shape (§4).

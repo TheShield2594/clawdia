@@ -44,6 +44,8 @@ const { pickApproachProfile, runAimPhase } = require('./aim');
 const { buildBonusLines, buildHuntEmbed } = require('./embeds');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
+const { getItemImageAttachment } = require('../../../utils/itemImageHelper');
+const { resultItemId } = require('../../../data/activityItems');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // START (was /hunt)
@@ -311,6 +313,21 @@ async function executeStart(interaction) {
         const timeBand = getTimeBand();
         const embed = buildHuntEmbed(result, user, zone, weapon, currency, interaction.user);
 
+        // Result artwork — the hunted animal's icon as the embed thumbnail,
+        // falling back to its emoji (already in the title) when no art is
+        // bundled/uploaded. The attachment must ride with every render of this
+        // embed (apex phases included), so it is resolved once and threaded below.
+        let catchFiles = [];
+        if (result.success && result.animal?.id) {
+            const catchArt = await getItemImageAttachment(
+                resultItemId('hunt', result.animal.id), interaction.guild.id, { label: result.animal.name },
+            ).catch(() => null);
+            if (catchArt) {
+                embed.setThumbnail(catchArt.url);
+                catchFiles = [catchArt.attachment];
+            }
+        }
+
         if (payoutOwed > 0) {
             embed.addFields({
                 name: '⚠️ Payout Not Yet Credited',
@@ -387,7 +404,7 @@ async function executeStart(interaction) {
         // Staged loot reveal for rare+ drops. A quick hunt skips the ceremony
         // here too — the fog-and-fanfare build-up is the same forced wait the
         // player opted out of, and the tier is still announced on the embed.
-        await stagedLootReveal(interaction, !quick && result.success ? result.tier : null, embed, 'hunt');
+        await stagedLootReveal(interaction, !quick && result.success ? result.tier : null, embed, 'hunt', catchFiles);
 
         if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
@@ -458,7 +475,7 @@ async function executeStart(interaction) {
             const validIds = ['apex_match', 'apex_hold', 'apex_safe'];
             const idToKey  = { apex_match: 'match', apex_hold: 'hold', apex_safe: 'safe' };
 
-            await interaction.editReply({ embeds: [embed, buildApexPhaseEmbed(0, [])], components: [buildPhaseRow(0)] });
+            await interaction.editReply({ embeds: [embed, buildApexPhaseEmbed(0, [])], components: [buildPhaseRow(0)], files: catchFiles });
 
             const runPhase = async (phaseIndex, prevResults, prevBtn) => {
                 const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
@@ -475,7 +492,7 @@ async function executeStart(interaction) {
                         choicesMade.push(chosen);
 
                         if (phaseIndex < phaseCount - 1) {
-                            await btn.update({ embeds: [embed, buildApexPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)] });
+                            await btn.update({ embeds: [embed, buildApexPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)], files: catchFiles });
                             resolve({ btn, results });
                         } else {
                             resolve({ btn, results, done: true });
@@ -498,7 +515,7 @@ async function executeStart(interaction) {
                         .setTitle(`💨 ${apexType.emoji} The ${apexType.name} Escaped`)
                         .setDescription('You hesitated too long — it melted back into the wild. No bonus this time.')
                         .setTimestamp();
-                    interaction.editReply({ embeds: [embed, timeoutEmbed], components: [] }).catch(() => {});
+                    interaction.editReply({ embeds: [embed, timeoutEmbed], components: [], files: catchFiles }).catch(() => {});
                     return;
                 }
             }
@@ -507,7 +524,7 @@ async function executeStart(interaction) {
             const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             if (!freshUser) {
                 console.error(`[hunt apex] user document vanished mid-encounter — user=${interaction.user.id} guild=${interaction.guild.id}`);
-                return state.btn.update({ content: 'Something went wrong resolving the encounter — your hunt rewards were already saved.', embeds: [embed], components: [] }).catch(() => {});
+                return state.btn.update({ content: 'Something went wrong resolving the encounter — your hunt rewards were already saved.', embeds: [embed], components: [], files: catchFiles }).catch(() => {});
             }
             await attachGrind(freshUser);
             ensureHuntData(freshUser);
@@ -612,7 +629,7 @@ async function executeStart(interaction) {
                 });
             }
 
-            await state.btn.update({ embeds: [embed, apexEmbed], components: [] }).catch(() => {});
+            await state.btn.update({ embeds: [embed, apexEmbed], components: [], files: catchFiles }).catch(() => {});
             return;
         }
     } catch (err) {

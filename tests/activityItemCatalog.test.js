@@ -16,10 +16,13 @@ const fs = require('fs');
 const path = require('path');
 const { grindCommandFiles } = require('./helpers/grindSources');
 
-const { ACTIVITY_ITEMS, ACTIVITY_ITEM_IDS, isActivityItemId } = require('../src/data/activityItems');
-const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES, ZONE_LIST } = require('../src/data/huntData');
-const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES, LOCATION_LIST } = require('../src/data/fishData');
-const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES, DEPTH_LIST } = require('../src/data/mineData');
+const {
+    ACTIVITY_ITEMS, ACTIVITY_ITEM_IDS, isActivityItemId,
+    RESULT_ITEMS, RESULT_ITEM_IDS, isResultItemId, isUploadableItemId, resultItemId,
+} = require('../src/data/activityItems');
+const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES, ZONE_LIST, ANIMALS } = require('../src/data/huntData');
+const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES, LOCATION_LIST, FISH } = require('../src/data/fishData');
+const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES, DEPTH_LIST, ORES } = require('../src/data/mineData');
 
 // The shape the upload route requires of an id before it even reaches the
 // catalog. A catalog entry that cannot pass it is unreachable.
@@ -80,5 +83,54 @@ describe('the catalog covers every image slot the shop views draw', () => {
         const slots = shopSource(activity).match(new RegExp(`imageId:\\s*\`${activity}:`, 'g')) || [];
         expect(slots.length).toBeGreaterThan(0);
         expect(Object.keys(ACTIVITY_ITEMS[activity])).toHaveLength(slots.length);
+    });
+});
+
+// The catch/kill/mine results (issue #1081) are a second, parallel registry.
+// They are not shop items, so they are kept out of ACTIVITY_ITEMS and given
+// their own namespaces — but the upload route must still accept them, and the
+// bundled catalogue must be able to ship art for every one.
+describe('every catch/kill/mine result is in the result registry', () => {
+    const cases = [
+        ['fish',    'fish',   'fishcatch', FISH],
+        ['animals', 'hunt',   'animal',    ANIMALS],
+        ['ores',    'mine',   'ore',       ORES],
+    ];
+
+    test.each(cases)('%s: every species/animal/ore is a result id', (group, activity, namespace, data) => {
+        const memberIds = Object.values(data).map(item => item.id);
+        expect(memberIds.length).toBeGreaterThan(0);
+        // The registry key, the namespaced helper, and the uploadable check all agree.
+        const missing = memberIds.filter(id => !isResultItemId(`${namespace}:${id}`));
+        expect(missing).toEqual([]);
+        for (const id of memberIds) {
+            expect(resultItemId(activity, id)).toBe(`${namespace}:${id}`);
+            expect(isUploadableItemId(`${namespace}:${id}`)).toBe(true);
+        }
+        // The grouped structure matches the flat id set for this group.
+        expect(RESULT_ITEMS[group].map(i => i.id).sort())
+            .toEqual(memberIds.map(id => `${namespace}:${id}`).sort());
+    });
+
+    test('every result id can pass the upload route\'s own shape check', () => {
+        const malformed = [...RESULT_ITEM_IDS].filter(id => !ROUTE_ID_SHAPE.test(id));
+        expect(malformed).toEqual([]);
+    });
+
+    test('result ids are unique and disjoint from the gear catalog', () => {
+        const all = Object.values(RESULT_ITEMS).flat();
+        expect(RESULT_ITEM_IDS.size).toBe(all.length);
+        const overlap = [...RESULT_ITEM_IDS].filter(id => ACTIVITY_ITEM_IDS.has(id));
+        expect(overlap).toEqual([]);
+    });
+
+    test('the two registries together are what the upload route accepts', () => {
+        // A gear id and a result id both pass; a bare or unknown id does not.
+        expect(isUploadableItemId('hunt:steel_rifle')).toBe(true);
+        expect(isUploadableItemId('animal:rabbit')).toBe(true);
+        expect(isActivityItemId('animal:rabbit')).toBe(false);
+        expect(isResultItemId('hunt:steel_rifle')).toBe(false);
+        expect(isUploadableItemId('not_a_real_item')).toBe(false);
+        expect(resultItemId('forage', 'x')).toBeNull();
     });
 });

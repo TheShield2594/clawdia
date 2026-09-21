@@ -117,6 +117,35 @@ describe('the contract with the caller', () => {
     });
 });
 
+describe('result artwork rides the final edit only', () => {
+    const FILES = [{ name: 'item-fishcatch_minnow.png' }];
+
+    // The catch/hunt/mine renderers set the result's icon as the embed thumbnail
+    // (`attachment://…`) and pass the attachment here. It must land on the edit
+    // that renders that embed — the last one — and nowhere else, or the fog beats
+    // would carry an attachment no embed references.
+    test.each(ACTIVITIES)('%s: a straight-to-result drop carries the files', async activity => {
+        const { interaction, edits } = recorder();
+        await stagedLootReveal(interaction, 'common', FINAL, activity, FILES);
+        expect(edits).toEqual([{ embeds: [FINAL], files: FILES }]);
+    });
+
+    test.each(ACTIVITIES)('%s: only the final staged edit carries the files', async activity => {
+        const { interaction, edits } = recorder();
+        await stagedLootReveal(interaction, 'legendary', FINAL, activity, FILES);
+        // fog + partial + fanfare + final = 4 edits; only the last one has files.
+        expect(edits).toHaveLength(4);
+        expect(edits.slice(0, -1).every(e => e.files === undefined)).toBe(true);
+        expect(edits[edits.length - 1]).toEqual({ embeds: [FINAL], files: FILES });
+    });
+
+    test('no files means no empty files key on the payload', async () => {
+        const { interaction, edits } = recorder();
+        await stagedLootReveal(interaction, 'common', FINAL, 'fish', []);
+        expect(edits).toEqual([{ embeds: [FINAL] }]);
+    });
+});
+
 describe('the copy tables', () => {
     test('all three grinds carry a full set', () => {
         expect(ACTIVITIES.sort()).toEqual(['fish', 'hunt', 'mine']);

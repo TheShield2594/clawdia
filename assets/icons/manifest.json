@@ -1060,5 +1060,1301 @@
     "rim": "molten-orange",
     "rimHex": "#FF6600",
     "prompt": "Game item icon: a dark obsidian crown with sharp black points and a subtle glow. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 118,
+    "key": "fishcatch:minnow",
+    "file": "fishcatch__minnow.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Minnow, a single fish shown side-on. A tiny minnow barely big enough to see. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 119,
+    "key": "fishcatch:perch",
+    "file": "fishcatch__perch.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Perch, a single fish shown side-on. A striped perch with vibrant yellow fins. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 120,
+    "key": "fishcatch:catfish",
+    "file": "fishcatch__catfish.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Catfish, a single fish shown side-on. A whiskered catfish wallowing in the murky bottom. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 121,
+    "key": "fishcatch:bluegill",
+    "file": "fishcatch__bluegill.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Bluegill, a single fish shown side-on. A plump bluegill sunning itself near the surface. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 122,
+    "key": "fishcatch:carp",
+    "file": "fishcatch__carp.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Carp, a single fish shown side-on. A golden carp leisurely swimming through the reeds. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 123,
+    "key": "fishcatch:tilapia",
+    "file": "fishcatch__tilapia.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Tilapia, a single fish shown side-on. A steady-swimming tilapia, a staple of calm waters. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 124,
+    "key": "fishcatch:mudfish",
+    "file": "fishcatch__mudfish.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Mudfish, a single fish shown side-on. A mudfish dragged up from the silty depths. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 125,
+    "key": "fishcatch:herring",
+    "file": "fishcatch__herring.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Herring, a single fish shown side-on. A silver herring darting in tight formations. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 126,
+    "key": "fishcatch:bass",
+    "file": "fishcatch__bass.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Largemouth Bass, a single fish shown side-on. A largemouth bass erupts from the water in a spectacular leap. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 127,
+    "key": "fishcatch:trout",
+    "file": "fishcatch__trout.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Rainbow Trout, a single fish shown side-on. A rainbow trout explodes from the rapids, scales glittering. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 128,
+    "key": "fishcatch:pike",
+    "file": "fishcatch__pike.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Northern Pike, a single fish shown side-on. A toothy northern pike lurking beneath the lily pads. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 129,
+    "key": "fishcatch:flounder",
+    "file": "fishcatch__flounder.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Flounder, a single fish shown side-on. A flat flounder camouflaged perfectly against the sandy sea floor. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 130,
+    "key": "fishcatch:snapper",
+    "file": "fishcatch__snapper.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Red Snapper, a single fish shown side-on. A vivid red snapper, prized by anglers and chefs alike. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 131,
+    "key": "fishcatch:mackerel",
+    "file": "fishcatch__mackerel.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Mackerel, a single fish shown side-on. A sleek mackerel zipping through the current. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 132,
+    "key": "fishcatch:salmon",
+    "file": "fishcatch__salmon.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a King Salmon, a single fish shown side-on. A mighty king salmon fighting its way upstream. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 133,
+    "key": "fishcatch:tuna",
+    "file": "fishcatch__tuna.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Bluefin Tuna, a single fish shown side-on. A bluefin tuna surging through the deep blue at full sprint. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 134,
+    "key": "fishcatch:swordfish",
+    "file": "fishcatch__swordfish.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Swordfish, a single fish shown side-on. A swordfish breaches the surface, its bill gleaming like steel. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 135,
+    "key": "fishcatch:barracuda",
+    "file": "fishcatch__barracuda.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Barracuda, a single fish shown side-on. A barracuda snaps at your lure with razor teeth. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 136,
+    "key": "fishcatch:grouper",
+    "file": "fishcatch__grouper.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Giant Grouper, a single fish shown side-on. A massive grouper emerges from its coral cave. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 137,
+    "key": "fishcatch:marlin",
+    "file": "fishcatch__marlin.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Blue Marlin, a single fish shown side-on. A blue marlin launches itself skyward in a display of raw power. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 138,
+    "key": "fishcatch:giant_squid",
+    "file": "fishcatch__giant_squid.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Giant Squid, a single fish shown side-on. Enormous tentacles coil around your line as the giant squid surfaces! Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 139,
+    "key": "fishcatch:oarfish",
+    "file": "fishcatch__oarfish.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Oarfish, a single fish shown side-on. The legendary oarfish, thirty feet long, ribbons through the dark water. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 140,
+    "key": "fishcatch:hammerhead",
+    "file": "fishcatch__hammerhead.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Hammerhead Shark, a single fish shown side-on. A hammerhead shark circles once before exploding after your lure. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 141,
+    "key": "fishcatch:great_white",
+    "file": "fishcatch__great_white.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Great White Shark, a single fish shown side-on. The apex predator of the ocean tears through the surface with terrifying force. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 142,
+    "key": "fishcatch:whale",
+    "file": "fishcatch__whale.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Blue Whale, a single fish shown side-on. The ocean trembles as an immense blue whale breaches beside your boat. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 143,
+    "key": "fishcatch:kraken",
+    "file": "fishcatch__kraken.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Kraken Tentacle, a single fish shown side-on. A single enormous tentacle rises from the abyss. The Kraken stirs. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 144,
+    "key": "fishcatch:goldfish",
+    "file": "fishcatch__goldfish.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Goldfish, a single fish shown side-on. A shimmering goldfish catches the light as it darts away. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 145,
+    "key": "fishcatch:sunfish",
+    "file": "fishcatch__sunfish.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Sunfish, a single fish shown side-on. A broad, flat sunfish basks just beneath the surface. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 146,
+    "key": "fishcatch:crappie",
+    "file": "fishcatch__crappie.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Crappie, a single fish shown side-on. A speckled crappie wriggles on your line. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 147,
+    "key": "fishcatch:koi",
+    "file": "fishcatch__koi.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Koi, a single fish shown side-on. A majestic, ornately-patterned koi glides through the shallows. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 148,
+    "key": "fishcatch:sturgeon",
+    "file": "fishcatch__sturgeon.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Sturgeon, a single fish shown side-on. An ancient armored sturgeon surges from the riverbed. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 149,
+    "key": "fishcatch:walleye",
+    "file": "fishcatch__walleye.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Walleye, a single fish shown side-on. A glassy-eyed walleye stares up from the current. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 150,
+    "key": "fishcatch:eel",
+    "file": "fishcatch__eel.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Eel, a single fish shown side-on. A writhing eel coils around your line as you reel it in. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 151,
+    "key": "fishcatch:silver_trout",
+    "file": "fishcatch__silver_trout.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Silver Trout, a single fish shown side-on. A silver trout flashes like a coin in the rapids. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 152,
+    "key": "fishcatch:gar",
+    "file": "fishcatch__gar.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Alligator Gar, a single fish shown side-on. A snout full of needle teeth breaks the surface — alligator gar! Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 153,
+    "key": "fishcatch:lake_sturgeon",
+    "file": "fishcatch__lake_sturgeon.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Lake Sturgeon, a single fish shown side-on. A colossal lake sturgeon, ancient as the bedrock, tears your line taut. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 154,
+    "key": "fishcatch:muskie",
+    "file": "fishcatch__muskie.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Muskellunge, a single fish shown side-on. The toothy muskie strikes with explosive force. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 155,
+    "key": "fishcatch:whitefish",
+    "file": "fishcatch__whitefish.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Lake Whitefish, a single fish shown side-on. A pale whitefish drifts upward from the cold lake depths. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 156,
+    "key": "fishcatch:black_crappie",
+    "file": "fishcatch__black_crappie.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Black Crappie, a single fish shown side-on. A large black crappie, speckled and plump. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 157,
+    "key": "fishcatch:silver_carp",
+    "file": "fishcatch__silver_carp.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Silver Carp, a single fish shown side-on. A silver carp leaps from the misty surface. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 158,
+    "key": "fishcatch:mahi_mahi",
+    "file": "fishcatch__mahi_mahi.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Mahi-Mahi, a single fish shown side-on. A radiant mahi-mahi bursts from the waves in a spray of color. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 159,
+    "key": "fishcatch:stingray",
+    "file": "fishcatch__stingray.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Stingray, a single fish shown side-on. A broad stingray glides up from the sandy shallows. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 160,
+    "key": "fishcatch:anglerfish",
+    "file": "fishcatch__anglerfish.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Anglerfish, a single fish shown side-on. A nightmarish anglerfish snaps its luminous lure at you. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 161,
+    "key": "fishcatch:reef_shark",
+    "file": "fishcatch__reef_shark.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Reef Shark, a single fish shown side-on. A reef shark circles once and then slams into your lure. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 162,
+    "key": "fishcatch:lionfish",
+    "file": "fishcatch__lionfish.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Lionfish, a single fish shown side-on. A flamboyant lionfish fans its toxic spines as you reel it in. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 163,
+    "key": "fishcatch:abyssal_eel",
+    "file": "fishcatch__abyssal_eel.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Abyssal Eel, a single fish shown side-on. A pitch-black eel longer than your boat writhes up from the void. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 164,
+    "key": "fishcatch:void_ray",
+    "file": "fishcatch__void_ray.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Void Ray, a single fish shown side-on. A manta-like creature from the void pulses with dark light. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 165,
+    "key": "fishcatch:lanternfish",
+    "file": "fishcatch__lanternfish.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Lanternfish, a single fish shown side-on. A bioluminescent lanternfish bobs to the surface, glowing faintly. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 166,
+    "key": "fishcatch:deep_horror",
+    "file": "fishcatch__deep_horror.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Deep Horror, a single fish shown side-on. Something unspeakable rises from the abyss. You dare not look directly at it. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 167,
+    "key": "fishcatch:colossal_isopod",
+    "file": "fishcatch__colossal_isopod.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Colossal Isopod, a single fish shown side-on. An armored isopod the size of a dog rolls onto your deck. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 168,
+    "key": "fishcatch:megalodon",
+    "file": "fishcatch__megalodon.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Megalodon, a single fish shown side-on. The ocean darkens. A jaw the size of a doorway rises from the deep — MEGALODON! Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 169,
+    "key": "fishcatch:phoenix_koi",
+    "file": "fishcatch__phoenix_koi.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Phoenix Koi, a single fish shown side-on. The water ignites — a blazing Phoenix Koi erupts from the depths of the pond! Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 170,
+    "key": "fishcatch:void_serpent",
+    "file": "fishcatch__void_serpent.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Void Serpent, a single fish shown side-on. Reality warps as the Void Serpent coils around your line from the abyss! Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 171,
+    "key": "fishcatch:celestial_whale",
+    "file": "fishcatch__celestial_whale.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Celestial Whale, a single fish shown side-on. Stars appear at midday as a Celestial Whale breaches beside your boat! Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 172,
+    "key": "fishcatch:ancient_turtle",
+    "file": "fishcatch__ancient_turtle.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Ancient Turtle, a single fish shown side-on. A turtle older than memory surfaces — it has seen empires rise and fall! Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 173,
+    "key": "fishcatch:deep_kraken",
+    "file": "fishcatch__deep_kraken.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Deep Kraken, a single fish shown side-on. The sea SCREAMS as the Deep Kraken erupts from the abyss! Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 174,
+    "key": "fishcatch:sea_dragon",
+    "file": "fishcatch__sea_dragon.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a Sea Dragon, a single fish shown side-on. Impossibly ancient, a luminescent sea dragon coils around your line! Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 175,
+    "key": "fishcatch:leviathan",
+    "file": "fishcatch__leviathan.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a Leviathan, a single fish shown side-on. The ocean itself seems to recoil as the Leviathan awakens from its slumber. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 176,
+    "key": "fishcatch:ghost_fish",
+    "file": "fishcatch__ghost_fish.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a Ghost Fish, a single fish shown side-on. A translucent spectral fish phases in and out of reality before your eyes. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 177,
+    "key": "animal:rabbit",
+    "file": "animal__rabbit.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Rabbit, a single wild animal. A swift cottontail darts through the brush. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 178,
+    "key": "animal:squirrel",
+    "file": "animal__squirrel.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Squirrel, a single wild animal. A chattering squirrel scurries up the nearest tree. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 179,
+    "key": "animal:dove",
+    "file": "animal__dove.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Dove, a single wild animal. A white dove takes flight in the open sky. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 180,
+    "key": "animal:quail",
+    "file": "animal__quail.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Quail, a single wild animal. A small quail bursts from the tall grass. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 181,
+    "key": "animal:duck",
+    "file": "animal__duck.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Duck, a single wild animal. A mallard lifts off from the still water. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 182,
+    "key": "animal:pheasant",
+    "file": "animal__pheasant.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Pheasant, a single wild animal. A pheasant erupts from the underbrush in a flash of color. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 183,
+    "key": "animal:raccoon",
+    "file": "animal__raccoon.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Raccoon, a single wild animal. A masked bandit rummages through the campsite. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 184,
+    "key": "animal:chipmunk",
+    "file": "animal__chipmunk.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Chipmunk, a single wild animal. A tiny chipmunk freezes mid-sprint, cheeks stuffed with acorns. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 185,
+    "key": "animal:crow",
+    "file": "animal__crow.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Crow, a single wild animal. A glossy crow caws loudly from a dead branch. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 186,
+    "key": "animal:frog",
+    "file": "animal__frog.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Frog, a single wild animal. A green frog leaps from a lily pad with a resonant splash. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 187,
+    "key": "animal:opossum",
+    "file": "animal__opossum.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Opossum, a single wild animal. A hissing opossum plays dead until you're almost on top of it. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 188,
+    "key": "animal:woodpecker",
+    "file": "animal__woodpecker.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a Woodpecker, a single wild animal. A red-crested woodpecker hammers away at an old oak. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 189,
+    "key": "animal:deer",
+    "file": "animal__deer.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Deer, a single wild animal. A white-tailed deer grazes peacefully in the clearing. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 190,
+    "key": "animal:wild_boar",
+    "file": "animal__wild_boar.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Wild Boar, a single wild animal. A tusked boar charges through the forest floor. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 191,
+    "key": "animal:turkey",
+    "file": "animal__turkey.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Turkey, a single wild animal. A gobbling tom turkey struts in the meadow. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 192,
+    "key": "animal:badger",
+    "file": "animal__badger.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Badger, a single wild animal. A feisty badger emerges from its burrow. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 193,
+    "key": "animal:beaver",
+    "file": "animal__beaver.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Beaver, a single wild animal. A beaver slaps its broad tail on the dark water. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 194,
+    "key": "animal:coyote",
+    "file": "animal__coyote.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Coyote, a single wild animal. A lone coyote howls from a sun-bleached ridge. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 195,
+    "key": "animal:jackrabbit",
+    "file": "animal__jackrabbit.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Jackrabbit, a single wild animal. A jackrabbit bolts across the sand flats in a zigzag blur. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 196,
+    "key": "animal:vulture",
+    "file": "animal__vulture.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Vulture, a single wild animal. A bald-headed vulture circles lazily on the hot thermals. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 197,
+    "key": "animal:roadrunner",
+    "file": "animal__roadrunner.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Roadrunner, a single wild animal. A roadrunner dashes across the cracked earth at blinding speed. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 198,
+    "key": "animal:scorpion",
+    "file": "animal__scorpion.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Scorpion, a single wild animal. A large scorpion emerges from beneath a sun-bleached rock, stinger raised. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 199,
+    "key": "animal:desert_fox",
+    "file": "animal__desert_fox.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Desert Fox, a single wild animal. A fennec fox peers from behind a cactus with enormous ears perked up. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 200,
+    "key": "animal:crane",
+    "file": "animal__crane.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Crane, a single wild animal. A great crane stands motionless in the shallows, watching the water. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 201,
+    "key": "animal:wild_hog",
+    "file": "animal__wild_hog.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Wild Hog, a single wild animal. A mud-caked wild hog bursts from the reeds with a furious squeal. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 202,
+    "key": "animal:giant_salamander",
+    "file": "animal__giant_salamander.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a Giant Salamander, a single wild animal. An enormous spotted salamander slides out of the black shallows, scales gleaming. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 203,
+    "key": "animal:wolf",
+    "file": "animal__wolf.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Wolf, a single wild animal. A grey wolf stalks you silently through the treeline. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 204,
+    "key": "animal:elk",
+    "file": "animal__elk.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Elk, a single wild animal. A massive bull elk bugles across the valley. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 205,
+    "key": "animal:lynx",
+    "file": "animal__lynx.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Lynx, a single wild animal. A spotted lynx watches you with cold yellow eyes. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 206,
+    "key": "animal:bald_eagle",
+    "file": "animal__bald_eagle.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Bald Eagle, a single wild animal. A bald eagle circles overhead, eyeing you keenly. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 207,
+    "key": "animal:mountain_goat",
+    "file": "animal__mountain_goat.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Mountain Goat, a single wild animal. A sure-footed mountain goat leaps between rocky ledges. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 208,
+    "key": "animal:rattlesnake",
+    "file": "animal__rattlesnake.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Rattlesnake, a single wild animal. A diamondback rattlesnake coils in the sun, shaking its lethal rattle. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 209,
+    "key": "animal:hyena",
+    "file": "animal__hyena.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Hyena, a single wild animal. A spotted hyena cackles in the darkness at the edge of camp. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 210,
+    "key": "animal:caribou",
+    "file": "animal__caribou.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Caribou, a single wild animal. A caribou trudges across the frozen tundra, antlers caked in frost. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 211,
+    "key": "animal:arctic_fox",
+    "file": "animal__arctic_fox.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Arctic Fox, a single wild animal. A pristine white arctic fox vanishes into the snowdrift in an instant. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 212,
+    "key": "animal:snowy_owl",
+    "file": "animal__snowy_owl.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Snowy Owl, a single wild animal. A great snowy owl swoops silently from the frozen treetops. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 213,
+    "key": "animal:giant_frog",
+    "file": "animal__giant_frog.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Giant Frog, a single wild animal. An enormous frog erupts from the mud, its toxic skin glistening. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 214,
+    "key": "animal:cottonmouth",
+    "file": "animal__cottonmouth.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Cottonmouth, a single wild animal. A cottonmouth flashes its white mouth as a warning from the dark water. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 215,
+    "key": "animal:ancient_ram",
+    "file": "animal__ancient_ram.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Ancient Ram, a single wild animal. A battle-scarred ram stands unmoving at the edge of a sheer cliff. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 216,
+    "key": "animal:ruin_stalker",
+    "file": "animal__ruin_stalker.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a Ruin Stalker, a single wild animal. A creature of living stone guards a forgotten altar at the summit. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 217,
+    "key": "animal:black_bear",
+    "file": "animal__black_bear.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Black Bear, a single wild animal. A black bear rears up on its hind legs, sniffing the air. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 218,
+    "key": "animal:moose",
+    "file": "animal__moose.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Moose, a single wild animal. A towering moose crashes through the undergrowth. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 219,
+    "key": "animal:mountain_lion",
+    "file": "animal__mountain_lion.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Mountain Lion, a single wild animal. A mountain lion stalks you from the rocky outcrop above. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 220,
+    "key": "animal:wolverine",
+    "file": "animal__wolverine.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Wolverine, a single wild animal. A ferocious wolverine snarls and charges straight at you! Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 221,
+    "key": "animal:musk_ox",
+    "file": "animal__musk_ox.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Musk Ox, a single wild animal. A massive musk ox lowers its horns and paws the frozen ground. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 222,
+    "key": "animal:woolly_mammoth",
+    "file": "animal__woolly_mammoth.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Woolly Mammoth, a single wild animal. An ancient woolly mammoth emerges from the blizzard, curved tusks sheathed in ice. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 223,
+    "key": "animal:polar_bear",
+    "file": "animal__polar_bear.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Polar Bear, a single wild animal. A massive polar bear rises from the ice floe, blotting out the horizon. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 224,
+    "key": "animal:saber_cat",
+    "file": "animal__saber_cat.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Saber Cat, a single wild animal. A prehistoric saber cat prowls the permafrost with ancient, hungry eyes. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 225,
+    "key": "animal:alligator",
+    "file": "animal__alligator.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Alligator, a single wild animal. An alligator lurches from the black water in an explosive ambush. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 226,
+    "key": "animal:panther",
+    "file": "animal__panther.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Panther, a single wild animal. A jet-black panther drops from the canopy without making a sound. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 227,
+    "key": "animal:dire_wolf",
+    "file": "animal__dire_wolf.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Dire Wolf, a single wild animal. A Dire Wolf the size of a pony emerges from the alpine mist, eyes burning red. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 228,
+    "key": "animal:alpha_bear",
+    "file": "animal__alpha_bear.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a Alpha Bear, a single wild animal. An Alpha Bear, scarred from a hundred battles, roars down the mountainside. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 229,
+    "key": "animal:snow_leopard",
+    "file": "animal__snow_leopard.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Snow Leopard, a single wild animal. A ghostly snow leopard materialises from the blizzard. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 230,
+    "key": "animal:giant_elk",
+    "file": "animal__giant_elk.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Giant Elk, a single wild animal. An ancient Giant Elk stands like a living monument in the mist. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 231,
+    "key": "animal:golden_fox",
+    "file": "animal__golden_fox.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Golden Fox, a single wild animal. A shimmering golden fox vanishes between the trees in a flash of light. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 232,
+    "key": "animal:white_wolf",
+    "file": "animal__white_wolf.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a White Wolf, a single wild animal. A spectral white wolf howls beneath the aurora borealis. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 233,
+    "key": "animal:obsidian_stag",
+    "file": "animal__obsidian_stag.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Obsidian Stag, a single wild animal. An Obsidian Stag with jet-black antlers like volcanic glass glares from the summit. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 234,
+    "key": "animal:storm_hawk",
+    "file": "animal__storm_hawk.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Storm Hawk, a single wild animal. A Storm Hawk the size of a horse shrieks as lightning crackles across its wingspan. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 235,
+    "key": "animal:fire_lynx",
+    "file": "animal__fire_lynx.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a Fire Lynx, a single wild animal. A Fire Lynx with smoldering eyes and an ashen coat stalks the lava fields. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 236,
+    "key": "animal:dire_bear",
+    "file": "animal__dire_bear.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a Dire Bear, a single wild animal. An enormous prehistoric bear erupts from the swamp fog with a thunderous roar! Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 237,
+    "key": "animal:thunderbird",
+    "file": "animal__thunderbird.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a Thunderbird, a single wild animal. Lightning splits the sky as a titanic Thunderbird descends from the clouds! Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 238,
+    "key": "animal:ghost_stag",
+    "file": "animal__ghost_stag.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a Ghost Stag, a single wild animal. A translucent stag shimmers in the silver moonlight, barely real. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 239,
+    "key": "ore:stone",
+    "file": "ore__stone.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single raw chunk of Stone, a mined mineral ore. Ordinary stone, but every strike brings you closer to something greater. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 240,
+    "key": "ore:coal",
+    "file": "ore__coal.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single raw chunk of Coal, a mined mineral ore. A thick coal seam runs through the rock face. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 241,
+    "key": "ore:copper",
+    "file": "ore__copper.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single raw chunk of Copper Ore, a mined mineral ore. Greenish copper veins snake through the stone. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 242,
+    "key": "ore:tin",
+    "file": "ore__tin.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single raw chunk of Tin Ore, a mined mineral ore. Dull tin ore, useful in bulk. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 243,
+    "key": "ore:iron",
+    "file": "ore__iron.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single raw chunk of Iron Ore, a mined mineral ore. Dense iron ore runs in a thick dark vein. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 244,
+    "key": "ore:silver",
+    "file": "ore__silver.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single raw chunk of Silver Ore, a mined mineral ore. Lustrous silver catches the light of your lamp. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 245,
+    "key": "ore:lead",
+    "file": "ore__lead.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single raw chunk of Lead Ore, a mined mineral ore. Heavy lead ore weighs down your haul. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 246,
+    "key": "ore:quartz",
+    "file": "ore__quartz.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single raw chunk of Quartz Crystal, a mined mineral ore. A perfect quartz formation juts from the wall. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 247,
+    "key": "ore:gold",
+    "file": "ore__gold.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single raw chunk of Gold Ore, a mined mineral ore. Glittering gold threads run through the rock like veins of fire. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 248,
+    "key": "ore:sapphire",
+    "file": "ore__sapphire.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single raw chunk of Sapphire, a mined mineral ore. A deep blue sapphire catches your eye amid grey stone. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 249,
+    "key": "ore:amethyst",
+    "file": "ore__amethyst.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single raw chunk of Amethyst, a mined mineral ore. Rich purple amethyst clusters bristle from the cavern wall. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 250,
+    "key": "ore:topaz",
+    "file": "ore__topaz.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single raw chunk of Topaz, a mined mineral ore. A warm amber topaz gleams in the stone. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 251,
+    "key": "ore:emerald",
+    "file": "ore__emerald.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single raw chunk of Emerald, a mined mineral ore. A flawless emerald, green as deep forest, buried in the dark. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 252,
+    "key": "ore:ruby",
+    "file": "ore__ruby.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single raw chunk of Ruby, a mined mineral ore. A ruby blazes red, pulsing like an ember in the rock. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 253,
+    "key": "ore:obsidian",
+    "file": "ore__obsidian.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single raw chunk of Obsidian, a mined mineral ore. Razor-sharp obsidian glass, formed from ancient lava. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 254,
+    "key": "ore:platinum",
+    "file": "ore__platinum.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single raw chunk of Platinum Ore, a mined mineral ore. Rare platinum gleams dully, worth more than its weight in gold. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 255,
+    "key": "ore:diamond",
+    "file": "ore__diamond.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single raw chunk of Diamond, a mined mineral ore. A perfect diamond, the hardest substance known, catches every light. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 256,
+    "key": "ore:dark_crystal",
+    "file": "ore__dark_crystal.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single raw chunk of Dark Crystal, a mined mineral ore. An impossible dark crystal that seems to absorb light itself. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 257,
+    "key": "ore:mythril",
+    "file": "ore__mythril.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single raw chunk of Mythril Ore, a mined mineral ore. Legendary mythril, lighter than steel and stronger than diamond. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 258,
+    "key": "ore:zenith_shard",
+    "file": "ore__zenith_shard.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single raw chunk of Zenith Shard, a mined mineral ore. A shard of condensed starlight, fallen from somewhere beyond the sky. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 259,
+    "key": "ore:primordial_ore",
+    "file": "ore__primordial_ore.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a single raw chunk of Primordial Ore, a mined mineral ore. Ore forged in the core of a newborn world, still radiating primal heat! Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 260,
+    "key": "ore:celestial_fragment",
+    "file": "ore__celestial_fragment.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a single raw chunk of Celestial Fragment, a mined mineral ore. A fragment of a fallen star, still warm and humming with cosmic energy! Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 261,
+    "key": "ore:void_ore",
+    "file": "ore__void_ore.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a single raw chunk of Void Ore, a mined mineral ore. Ore from the space between dimensions. It should not exist. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   }
 ]

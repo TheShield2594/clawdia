@@ -5,7 +5,7 @@ const ItemImage = require('../../../models/ItemImage');
 const { rateLimit } = require('express-rate-limit');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { readRateLimitOptions } = require('../../lib/readRateLimit');
-const { isActivityItemId } = require('../../../data/activityItems');
+const { isUploadableItemId } = require('../../../data/activityItems');
 const { shopImageId } = require('../../../models/itemImageKeys');
 const { getDefaultItemImage } = require('../../../utils/defaultItemImages');
 
@@ -194,11 +194,13 @@ router.delete('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, 
 // that guild's row. See migration 014.
 function invalidItemId(itemId) {
     // The shape check first, so a wildly malformed id is rejected as malformed,
-    // then membership of the catalog the game actually renders. The catalog is
-    // also what bounds this collection: without it any id at all could be
-    // stored, at 512 KB and 60 writes a minute.
+    // then membership of the catalog the game actually renders — a shop-browsable
+    // gear item (`hunt:steel_rifle`) or a catch/kill/mine result
+    // (`animal:rabbit`, `fishcatch:minnow`, `ore:stone`). The catalog is also what
+    // bounds this collection: without it any id at all could be stored, at 512 KB
+    // and 60 writes a minute.
     if (typeof itemId !== 'string' || !/^[a-z0-9_:-]{1,64}$/.test(itemId)) return 'Invalid itemId';
-    if (!isActivityItemId(itemId)) return 'Unknown activity item';
+    if (!isUploadableItemId(itemId)) return 'Unknown activity item';
     return null;
 }
 
