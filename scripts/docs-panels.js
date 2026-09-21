@@ -17,7 +17,7 @@
 //
 // ── Where each column comes from ────────────────────────────────────────────
 //
-// Nothing here is written twice. The group, order, emoji and label are read off
+// Nothing here is written twice. The group, order and label are read off
 // the sidebar in guild-settings.ejs, because that is the structure a reader of
 // the docs is going to see on screen — a list in a different order, or using
 // different names, is a list they have to translate.
@@ -56,7 +56,7 @@ const SUMMARY_MAX = 200;
 
 // One sidebar entry. The markup is written on a single line per panel, which is
 // what lets this stay a regex rather than an HTML parse.
-const NAV_ITEM_RE = /<button[^>]*\bclass="nav-item[^"]*"[^>]*\bdata-tab="([\w-]+)"[^>]*>\s*<span class="nav-emoji"[^>]*>([^<]*)<\/span>\s*<span>([^<]+)<\/span>/;
+const NAV_ITEM_RE = /<button[^>]*\bclass="nav-item[^"]*"[^>]*\bdata-tab="([\w-]+)"[^>]*>\s*<svg[^>]*class="nav-ico"[\s\S]*?<\/svg>\s*<span>([^<]+)<\/span>/;
 // The group heading above each `<ul>`; `// Configure` renders as "Configure".
 const NAV_GROUP_RE = /<div class="dash-nav-label"[^>]*>\/\/\s*([^<]+)<\/div>/;
 // Anything else that declares a tab. Matching one of these means the parser has
@@ -96,7 +96,7 @@ function decodeEntities(text) {
 /**
  * The sidebar sections, in the order they are rendered.
  *
- * @returns {Array<{panel: string, label: string, emoji: string, group: string}>}
+ * @returns {Array<{panel: string, label: string, group: string}>}
  */
 function parseSidebar() {
     const lines = fs.readFileSync(SIDEBAR, 'utf8').split('\n');
@@ -122,12 +122,12 @@ function parseSidebar() {
             return;
         }
 
-        const [, panel, emoji, label] = item;
+        const [, panel, label] = item;
         if (!group) {
             throw new Error(`guild-settings.ejs:${index + 1} — the "${panel}" tab appears above any // group heading.`);
         }
 
-        items.push({ panel, label: decodeEntities(label).trim(), emoji: emoji.trim(), group });
+        items.push({ panel, label: decodeEntities(label).trim(), group });
     });
 
     if (!items.length) throw new Error('guild-settings.ejs has no sidebar nav items — has the sidebar markup changed?');
@@ -267,7 +267,7 @@ function renderPanels(sections) {
         '',
         '| Section | What it configures |',
         '| --- | --- |',
-        ...rows.map(row => `| ${row.emoji} **${escapeCell(row.label)}** | ${escapeCell(row.summary)} |`),
+        ...rows.map(row => `| **${escapeCell(row.label)}** | ${escapeCell(row.summary)} |`),
     ].join('\n'));
 
     return [

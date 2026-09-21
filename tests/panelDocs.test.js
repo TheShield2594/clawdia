@@ -81,10 +81,9 @@ describe('the sections it finds', () => {
         expect(sections).toHaveLength(27);
     });
 
-    test('each carry a label, an emoji and a group', () => {
+    test('each carry a label and a group', () => {
         for (const section of sections) {
             expect([section.panel, section.label.length > 0]).toEqual([section.panel, true]);
-            expect([section.panel, section.emoji.length > 0]).toEqual([section.panel, true]);
             expect([section.panel, section.group.length > 0]).toEqual([section.panel, true]);
         }
     });
@@ -194,10 +193,10 @@ describe('the generator itself', () => {
 
     test('escapes a pipe in a description rather than splitting the table cell', () => {
         const body = renderPanels([{
-            panel: 'probe', label: 'Probe', emoji: '🧪', group: 'Tools', summary: 'Either a | or a comma',
+            panel: 'probe', label: 'Probe', group: 'Tools', summary: 'Either a | or a comma',
         }]);
 
-        expect(body).toContain('| 🧪 **Probe** | Either a \\| or a comma |');
+        expect(body).toContain('| **Probe** | Either a \\| or a comma |');
     });
 
     test('groups consecutive sections under one heading', () => {
