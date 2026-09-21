@@ -1,0 +1,52 @@
+name: Bake item icons
+
+# Downloads the generated icon catalogue from the Higgsfield CDN and commits the
+# normalized PNGs into src/assets/item-icons/, where the app serves them as
+# default item art (src/utils/defaultItemImages.js). Run manually against the
+# branch that carries assets/icons/icons.map.json.
+#
+# It runs here rather than in a Claude Code sandbox because a GitHub-hosted
+# runner can reach the CDN, and the sandbox's egress proxy cannot. It is
+# idempotent: re-running re-fetches from the current map and overwrites, so
+# regenerated icons (new job ids in the map) are picked up on the next run.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: bake-item-icons-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  bake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install sharp
+        run: npm install --no-save sharp
+
+      - name: Download and bake icons
+        run: node assets/icons/bake-icons.mjs
+
+      - name: Commit baked icons
+        run: |
+          git config user.name "TheShield2594"
+          git config user.email "82059300+TheShield2594@users.noreply.github.com"
+          git add src/assets/item-icons
+          if git diff --cached --quiet; then
+            echo "No icon changes to commit."
+            exit 0
+          fi
+          git commit -m "Bake item icons into src/assets/item-icons (from icons.map.json)"
+          git push origin HEAD:${{ github.ref_name }}

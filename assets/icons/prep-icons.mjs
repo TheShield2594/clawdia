@@ -73,7 +73,6 @@ let failed = false;
 const files = fs.readdirSync(inDir).filter((f) => f.toLowerCase().endsWith('.png'));
 for (const file of files) {
     try {
-        // eslint-disable-next-line no-await-in-loop
         const bytes = await prep(file);
         console.log(`${file}: ${(bytes / 1024).toFixed(1)} KB`);
     } catch (e) {

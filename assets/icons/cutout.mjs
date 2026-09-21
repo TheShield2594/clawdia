@@ -124,7 +124,6 @@ async function cut(file) {
 let failed = false;
 const files = fs.readdirSync(inDir).filter((f) => f.toLowerCase().endsWith('.png'));
 for (const file of files) {
-    // eslint-disable-next-line no-await-in-loop
     const pct = await cut(file);
     let flag = '';
     if (pct < 15) {

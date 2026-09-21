@@ -238,11 +238,35 @@ dashboard economy panel -> ItemImage collection                              man
 
 Only generation costs credits: ~1 per icon, nothing after that.
 
+## How the app uses them — baked-in defaults (no upload needed)
+
+The whole set ships **inside the app** as default artwork, so every item shows
+its icon with no per-guild upload:
+
+- The PNGs live at **`src/assets/item-icons/<storage-key>.png`** (under `src/`
+  because the Docker build context is an allowlist that ships `src/` and drops
+  `assets/`). `src/utils/defaultItemImages.js` serves them.
+- `getItemImageAttachment()` (`src/utils/itemImageHelper.js`) now checks, in
+  order: the guild's own shop upload → its activity upload → the shared pre-#561
+  upload → **the bundled default**. A guild upload still overrides the default.
+- The PNGs are committed by the **`Bake item icons`** GitHub Action
+  (`.github/workflows/bake-item-icons.yml`), which runs `assets/icons/bake-icons.mjs`:
+  it reads the `url` of each item in `icons.map.json`, downloads it, normalizes
+  it (same as `prep-icons.mjs`) and writes it under `src/assets/item-icons/`.
+  This runs in CI because a GitHub runner can reach the Higgsfield CDN that a
+  sandbox cannot — **no local download or dashboard upload required.** Trigger it
+  from the Actions tab (workflow_dispatch) on the branch that carries the map;
+  re-running picks up any regenerated icons (new job ids in the map).
+
+The manual `rename-icons.mjs` → `prep-icons.mjs` → dashboard-upload path (below)
+still works and is how a guild replaces a default with its own art.
+
 ## Where these icons render
 
-Icons are **not** Discord emojis. They're stored per guild in the `ItemImage`
-collection (`src/models/ItemImage.js`), uploaded through the dashboard economy
-panel, and drawn into shop tiles by `src/utils/shopBanner.js`.
+Icons are **not** Discord emojis. Per-guild uploads live in the `ItemImage`
+collection (`src/models/ItemImage.js`) via the dashboard economy panel; the
+baked defaults ship in `src/assets/item-icons/`. Either way they're rendered as
+Discord embed attachments through `getItemImageAttachment()`.
 
 - **Backgrounds must be transparent.** Tile interiors are dark — `#222222`
   (common), `#12283d` (fish), `#1c0c2e` (epic). A white-background PNG renders
@@ -299,13 +323,16 @@ Price text across every banner is gold `#f1c40f`.
 - **2026-09-21** — Re-generated the shipped `hunt:steel_rifle` icon against the
   anchor (`309b1ed7-…`) so its background matches the rest of the set.
 
-## Next steps (run on your own machine)
+## Next steps — bake them in (no manual work)
 
-1. Download the 118 icons from Higgsfield (they're in your account; the job ids
-   are in `icons.map.json`).
-2. `node assets/icons/rename-icons.mjs ~/Downloads ./assets/icons/generated`
-3. `npm install sharp && node assets/icons/prep-icons.mjs ./assets/icons/generated ./assets/icons/icons`
-4. Upload `./assets/icons/icons/*.png` via the dashboard economy panel.
+Run the **Bake item icons** workflow (Actions tab → `workflow_dispatch`) on this
+branch. It downloads all 118 from the CDN, normalizes them, and commits them to
+`src/assets/item-icons/`. After that they're the default art everywhere — no
+download, no upload. Re-run it any time the map changes.
+
+(Optional, per-guild override) A server admin can still upload custom art for an
+item via the dashboard economy panel; that overrides the baked default for that
+guild only.
 
 ## Open questions
 

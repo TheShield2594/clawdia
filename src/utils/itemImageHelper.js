@@ -11,11 +11,15 @@ const { AttachmentBuilder } = require('discord.js');
  * should pass it: activity images (hunt/fish/mine) are per guild since #561,
  * and a lookup without one can only find the shared pre-#561 image.
  *
- * Three places are checked, most specific first: the guild's own shop image,
+ * Four places are checked, most specific first: the guild's own shop image,
  * then that guild's activity image, then the shared image left over from when
- * the collection was global. All three are rows in `itemimages` since #888 —
+ * the collection was global, and finally the artwork bundled with the app
+ * (defaultItemImages.js). The first three are rows in `itemimages` since #888 —
  * the first used to be a scan of the guild settings document's shop array,
- * which meant loading every other item's Buffer to find one of them.
+ * which meant loading every other item's Buffer to find one of them. The last
+ * is the generated catalogue that ships in the image, so an item shows its
+ * icon everywhere without any guild having to upload one; a guild upload still
+ * overrides it.
  */
 async function getItemImageAttachment(itemId, guildId = null, { label } = {}) {
     const ItemImage = require('../models/ItemImage');
@@ -39,10 +43,20 @@ async function getItemImageAttachment(itemId, guildId = null, { label } = {}) {
         .filter(doc => doc?.imageData?.length)
         .sort((a, b) => rank(a) - rank(b))[0];
 
-    if (!best) return null;
-
-    const imageData = best.imageData;
-    const imageType = best.imageType || 'image/png';
+    // No guild-specific or shared upload — fall back to the artwork that ships
+    // with the app, so items still render their icon without any upload.
+    let imageData;
+    let imageType;
+    if (best) {
+        imageData = best.imageData;
+        imageType = best.imageType || 'image/png';
+    } else {
+        const { getDefaultItemImage } = require('./defaultItemImages');
+        const fallback = getDefaultItemImage(itemId);
+        if (!fallback) return null;
+        imageData = fallback.data;
+        imageType = fallback.type;
+    }
 
     const ext = (imageType.split('/')[1] || 'png').replace('jpeg', 'jpg');
     // itemId may contain characters (e.g. the `system:slug` colon used by
