@@ -54,11 +54,29 @@ async function normalize(buf) {
     return out;
 }
 
+// A just-published CloudFront object can answer 403/404 for a short window
+// while it propagates to the edge, and a single failed fetch fails the whole
+// bake (one missing icon exits the job non-zero). So retry a few times with
+// backoff before giving up — transient edge errors clear on the next attempt,
+// and a genuinely missing url still fails after the retries are spent.
+async function fetchBuffer(url, key, attempts = 4) {
+    let lastErr;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        try {
+            const res = await fetch(url);
+            if (res.ok) return Buffer.from(await res.arrayBuffer());
+            lastErr = new Error(`fetch ${res.status} ${res.statusText}`);
+        } catch (err) {
+            lastErr = err;
+        }
+        if (attempt < attempts - 1) await new Promise(r => setTimeout(r, 1000 * 2 ** attempt));
+    }
+    throw new Error(`${key}: ${lastErr.message} after ${attempts} attempts`);
+}
+
 async function one([key, meta]) {
     if (!meta.url) throw new Error(`${key}: no url in icons.map.json`);
-    const res = await fetch(meta.url);
-    if (!res.ok) throw new Error(`${key}: fetch ${res.status} ${res.statusText}`);
-    const buf = Buffer.from(await res.arrayBuffer());
+    const buf = await fetchBuffer(meta.url, key);
     const out = await normalize(buf);
     fs.writeFileSync(path.join(OUT_DIR, meta.file), out);
     return { key, bytes: out.length };
