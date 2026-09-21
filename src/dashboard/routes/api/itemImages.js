@@ -53,19 +53,6 @@ function uploadImage(req, res, next) {
     });
 }
 
-// Serves a guild shop item's image.
-//
-// Authenticated and guild-scoped like every other route here (#565). It was
-// public on the reasoning that a browser rendering an <img> cannot present a
-// session — which is not true of these images: every consumer is a dashboard
-// page on the dashboard's own origin (views/partials/game-item-card.ejs and
-// public/guild-settings.js), so the session cookie rides along with the image
-// request like any other same-origin subresource. Discord never fetches these
-// URLs at all; a shop or activity image reaches a message as an uploaded
-// attachment, built by utils/itemImageHelper.js straight from the database.
-//
-// So nothing needed them open, and open meant anyone who could guess a guild id
-// and an item id could read that guild's uploaded artwork.
 // The catalogue artwork bundled with the app (utils/defaultItemImages.js) is
 // the standard: when it ships art for an item it is served here, overriding any
 // guild upload, so the dashboard preview matches what players see in Discord.
@@ -82,6 +69,19 @@ function trySendBundledDefault(res, itemId) {
     return true;
 }
 
+// Serves a guild shop item's image.
+//
+// Authenticated and guild-scoped like every other route here (#565). It was
+// public on the reasoning that a browser rendering an <img> cannot present a
+// session — which is not true of these images: every consumer is a dashboard
+// page on the dashboard's own origin (views/partials/game-item-card.ejs and
+// public/guild-settings.js), so the session cookie rides along with the image
+// request like any other same-origin subresource. Discord never fetches these
+// URLs at all; a shop or activity image reaches a message as an uploaded
+// attachment, built by utils/itemImageHelper.js straight from the database.
+//
+// So nothing needed them open, and open meant anyone who could guess a guild id
+// and an item id could read that guild's uploaded artwork.
 router.get('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
     try {
         // The bundled catalogue is the standard and overrides uploads.
