@@ -351,7 +351,9 @@ Price text across every banner is gold `#f1c40f`.
   `/pet` renders the art as a thumbnail on the status/adopt/feed embeds with an
   emoji fallback. All 14 generated on `gpt_image_2_5` B3 at `quality: high`
   against the steel_rifle anchor; job ids + urls recorded in `icons.map.json`
-  (now 276 items). Run the **Bake item icons** workflow to ship the pixels.
+  (now 276 items), and the PNGs are baked and shipped under
+  `src/assets/item-icons/pet__*.png`, served as bundled default art by
+  `defaultItemImages.js`.
 - **2026-09-21** — Retargeted to `gpt_image_2_5`; the 20 `gpt_image_2` icons
   became reference-only.
 - **2026-09-21** — Settled the look (§0): idiom **B** (minimal flat shading, no
@@ -398,10 +400,10 @@ catalogued items — purging them is a separate migration if ever wanted.
   actually generate + bake: all 144, or only the rarer tiers players linger on.
   The emoji fallback means either ships cleanly.
 - **Rod and pickaxe ladders** reuse the scope/glow escalation shape (§4).
-- **Pets** (issue #1082) — *generated; bake pending.* Storage keys, bundle-only
-  route handling, manifest prompts, the `/pet` thumbnail renderers and all 14
-  generated portraits (job ids + urls in `icons.map.json`) are in place; the
-  emoji fallback covers `/pet` until the **Bake item icons** workflow commits the
-  PNGs. Whether the four wild battle opponents want art wired into the battle
-  embeds (they only render as emoji in `/pet battle` today) is a separate,
+- **Pets** (issue #1082) — *shipped.* Storage keys, bundle-only route handling,
+  manifest prompts, the `/pet` thumbnail renderers and all 14 portraits are in
+  place: the PNGs are baked under `src/assets/item-icons/pet__*.png` and served
+  as bundled default art by `defaultItemImages.js`, with the species emoji as
+  the fallback. Whether the four wild battle opponents want art wired into the
+  battle embeds (they only render as emoji in `/pet battle` today) is a separate,
   optional follow-up — their portraits are in the set either way.

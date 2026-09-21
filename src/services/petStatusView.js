@@ -45,6 +45,12 @@ function petArt(petId, guildId, label) {
     return getItemImageAttachment(petItemId(petId), guildId, { label }).catch(() => null);
 }
 
+/**
+ * The status-card embed for one pet — mood, level, bond, hunger, bonus, battle
+ * record and favourite food — coloured by its mood. `thumbUrl`, when given, sets
+ * the portrait thumbnail (an `attachment://` url); the species emoji in the
+ * description is the fallback when none ships.
+ */
 function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
     const def         = PET_DEFINITIONS[pet.petId];
     const bondDays    = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
@@ -106,6 +112,11 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
     return embed;
 }
 
+/**
+ * The button rows under a status card: a prev/next nav row (only when the owner
+ * has more than one pet) and the play/rest/showcase action row. `userId` is
+ * baked into every custom id so the collector can reject other users' clicks.
+ */
 function buildNavComponents(userId, index, total) {
     const rows = [];
 
