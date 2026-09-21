@@ -84,6 +84,7 @@
 
     <!-- HERO -->
     <header class="cw-hero">
+      <div class="cw-hero-copy">
         <div class="cw-hero-eyebrow">
             <span class="cw-dot"></span>
             v<%= version %> · Insights layer is live
@@ -122,7 +123,9 @@
             <% } %>
             <div><b>MIT</b><span>open source</span></div>
         </div>
+      </div><!-- .cw-hero-copy -->
 
+      <div class="cw-hero-figure">
         <%# Clawdia herself — a chill cat mid-swipe, the tagline made literal.
             Decorative: the hero's meaning is carried by the heading and copy, so
             the mark is hidden from assistive tech rather than announced. The
@@ -132,6 +135,7 @@
         <img class="cw-hero-art" src="<%= asset('/clawdia-hero.png') %>"
              width="604" height="900" alt="" aria-hidden="true"
              decoding="async" fetchpriority="high">
+      </div><!-- .cw-hero-figure -->
     </header>
 
     <!-- MODULE STRIP -->
