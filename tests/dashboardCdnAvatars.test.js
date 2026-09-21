@@ -218,8 +218,8 @@ describe('the head asks for its render-critical bytes up front', () => {
     it('preloads the two faces that render above the fold', () => {
         const preloads = [...head.matchAll(/<link rel="preload"[^>]*href="([^"]+)"/g)].map(m => m[1]);
         expect(preloads).toEqual([
-            '/fonts/inter-tight-400-latin.woff2',
-            '/fonts/inter-tight-600-latin.woff2',
+            '/fonts/hanken-grotesk-400-latin.woff2',
+            '/fonts/hanken-grotesk-600-latin.woff2',
         ]);
         for (const tag of head.match(/<link rel="preload"[^>]*>/g)) {
             // Fonts are fetched in CORS mode; a preload whose mode does not

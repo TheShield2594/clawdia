@@ -15,7 +15,7 @@ set -euo pipefail
 
 FONTS_DIR="$(cd "$(dirname "$0")/.." && pwd)/src/dashboard/public/fonts"
 # Keep this in sync with the families and weights styles.css actually asks for.
-CSS_URL="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+CSS_URL="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
 # Google serves woff2 only to a user agent it recognises as supporting it.
 UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
