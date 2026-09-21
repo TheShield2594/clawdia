@@ -70,7 +70,7 @@ const BASELINE = {
     'partials/panels/leveling.ejs': 28,
     'partials/panels/moderation.ejs': 28,
     'partials/panels/newspaper.ejs': 4,
-    'partials/panels/overview.ejs': 18,
+    'partials/panels/overview.ejs': 17,
     'partials/panels/progressiontracks.ejs': 2,
     'partials/panels/quests.ejs': 5,
     'partials/panels/raiddetection.ejs': 1,
@@ -104,10 +104,8 @@ const SCRIPT_BASELINE = {
     'panel-leveling.js': 4,
     'panel-mcp.js': 8,
     'panel-moderation.js': 20,
-    'panel-overview.js': 8,
     'panel-roles.js': 1,
-    'panel-rss.js': 9,
-    'panel-social.js': 3,
+    'panel-rss.js': 5,
 };
 
 // Every form HTML actually accepts, because the browser and the CSP accept them

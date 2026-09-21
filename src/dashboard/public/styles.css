@@ -1294,9 +1294,13 @@ textarea.auto-resize {
 .cw-compare th, .cw-compare td { padding: 18px 22px; border-bottom: 1px solid rgba(20,17,13,.06); font-size: 14.5px; text-align: left; font-weight: 400; vertical-align: top; }
 .cw-compare thead th { background: var(--cream-100); font-family: 'JetBrains Mono', monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-600); }
 .cw-compare .hi { background: rgba(217,119,66,.06); border-left: 2px solid var(--claw-500); }
-.cw-compare-yes { color: var(--good); font-weight: 600; }
-.cw-compare-no { color: var(--ink-400); }
-.cw-compare-warn { color: #c89834; }
+/* Contrast on the white comparison table (v5): --good was 4.00:1 and the amber
+   2.63:1 — both under 4.5 for this 14.5px text. --good-text (the small-text
+   green the tokens define), a darker amber, and --ink-500 for the muted cells
+   all clear 4.5. */
+.cw-compare-yes { color: var(--good-text); font-weight: 600; }
+.cw-compare-no { color: var(--ink-500); }
+.cw-compare-warn { color: #9a6a10; }
 
 /* Self-host */
 .cw-host { background: var(--cream-100); padding: 96px 0; }
@@ -1536,7 +1540,10 @@ textarea.auto-resize {
 .dash-nav .nav-item.active { background: var(--claw-500); color: #fff; }
 .dash-nav .nav-item.active .badge { background: rgba(255,255,255,.2); color: #fff; }
 .dash-nav .nav-item svg { flex-shrink: 0; color: inherit; }
-.dash-nav .nav-emoji { font-size: 15px; width: 17px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+/* Section icons: one consistent line-icon set in place of the old emoji glyphs
+   (#… v5). Colour inherits from .nav-item svg above, so an icon is ink on idle
+   and white on the active claw row — the label and its icon read as one unit. */
+.dash-nav .nav-ico { width: 16px; height: 16px; }
 .dash-nav .badge { margin-left: auto; background: var(--ink-800); color: var(--ink-300); font-size: 10.5px; padding: 2px 7px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; }
 .dash-side-footer { margin-top: auto; padding-top: 18px; border-top: 1px solid var(--ink-800); }
 .dash-user { display: flex; align-items: center; gap: 10px; padding: 4px; }
@@ -1553,17 +1560,50 @@ textarea.auto-resize {
 .dash-subgreeting { color: var(--ink-300); margin-top: 8px; font-size: 15px; }
 
 /* KPI cards */
-.dash-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
-.dash-kpi { background: var(--ink-900); border: 1px solid var(--ink-800); border-radius: 18px; padding: 22px; position: relative; overflow: hidden; }
+/* Overview KPI strip (v5). A hero metric leads and the rest recede; charts
+   render on the hero only, so the strip reads as one headline with support
+   rather than seven tiles competing. Trend colour lives in the delta chip, not
+   the number, and stays inside the warm palette. */
+.dash-kpis { display: grid; grid-template-columns: 1.15fr 1fr 1fr 1fr; grid-auto-rows: 1fr; gap: 16px; margin-bottom: 20px; }
+.dash-kpi { background: var(--ink-900); border: 1px solid var(--ink-800); border-radius: 18px; padding: 22px; position: relative; overflow: hidden; display: flex; flex-direction: column; }
 .dash-kpi-label { font-size: 12.5px; color: var(--ink-400); letter-spacing: 0.04em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
-.dash-kpi-value { font-family: 'Instrument Serif', serif; font-size: 44px; line-height: 1; color: var(--cream-50); }
-.dash-kpi-meta { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12.5px; }
-.dash-kpi-delta { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; font-weight: 500; }
-.dash-kpi-delta.up { background: rgba(93,138,90,.18); color: #92c490; }
-.dash-kpi-delta.down { background: rgba(185,76,60,.18); color: #d68a7e; }
+/* Tabular figures so a column of numbers aligns on its digits. */
+.dash-kpi-value { font-family: 'Instrument Serif', serif; font-size: 44px; line-height: 1; color: var(--cream-50); font-variant-numeric: tabular-nums; }
+.dash-kpi-meta { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12.5px; flex-wrap: wrap; }
+.dash-kpi-delta { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.dash-kpi-delta-arrow { font-size: 10px; line-height: 1; }
+/* Warm trend colours: moss for up, terracotta for down. #a7b585 is moss-400
+   lightened to clear 4.5:1 on the tile; both verified against WCAG. Direction
+   is carried by the ▲/▼ glyph too, never by colour alone. */
+.dash-kpi-delta.up { background: rgba(138,152,99,.16); color: #a7b585; }
+.dash-kpi-delta.down { background: rgba(214,138,126,.16); color: #d68a7e; }
+.dash-kpi-delta.flat { background: var(--ink-800); color: var(--ink-300); }
 .dash-kpi-foot { color: var(--ink-400); font-size: 12.5px; }
-.dash-kpi.feature { background: linear-gradient(135deg, #2b1d14, #1c1814); border-color: var(--ink-700); }
-.dash-kpi.feature .dash-kpi-value { color: var(--claw-300); }
+.dash-kpi-foot.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+
+/* Bot status is a word, not a numeral, with a live dot ahead of it. */
+.dash-kpi-value.status { font-size: 34px; display: inline-flex; align-items: center; gap: 10px; }
+.dash-kpi-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 4px rgba(93,138,90,.14); flex: none; }
+
+/* Modules-on is a ratio, so it gets a meter rather than a trend line. */
+.dash-kpi-meter { height: 6px; border-radius: 999px; background: var(--ink-800); overflow: hidden; margin-top: 12px; }
+.dash-kpi-meter > i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--claw-500), var(--claw-400)); }
+
+/* Hero: the one dominant metric, taller and the only tile with a chart. */
+.dash-kpi-hero { grid-row: span 2; }
+.dash-kpi-hero .dash-kpi-value { font-size: 62px; }
+.dash-kpi-spark { margin-top: auto; padding-top: 16px; }
+.dash-kpi-spark svg { display: block; width: 100%; height: 76px; }
+.dash-kpi-spark:empty { display: none; }
+
+/* Interactive tiles are entry points into their panel. */
+.dash-kpi-link { appearance: none; -webkit-appearance: none; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color .15s, background .15s; }
+.dash-kpi-link:hover { border-color: var(--ink-600); background: var(--ink-850); }
+.dash-kpi-link:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 3px; }
+.dash-kpi-cta { position: absolute; top: 18px; right: 18px; color: var(--ink-500); opacity: 0; transition: opacity .15s; }
+.dash-kpi-link:hover .dash-kpi-cta, .dash-kpi-link:focus-visible .dash-kpi-cta { opacity: 1; }
+/* Reduced motion is handled by the universal block below (#675) — a dedicated
+   block here would shadow it as the first reduced-motion match in the file. */
 
 /* Dashboard cards */
 .dash-card { background: var(--ink-900); border: 1px solid var(--ink-800); border-radius: 18px; padding: 22px; }
@@ -1585,7 +1625,12 @@ textarea.auto-resize {
    serif display face — which is not what this line is. Put the body font back
    on it, and drop the margin the flex `gap` above already provides. */
 .gs-toggle .dash-card-sub { font-family: 'Inter Tight', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin-top: 0; }
-.gs-toggle-icon { font-size: 1.2rem; line-height: 1; flex: none; }
+/* The disclosure chevron rotates with the collapse rather than swapping a
+   ▾/▸ glyph; aria-expanded on the button drives it, so state and rotation
+   cannot disagree. */
+.gs-toggle-icon { display: inline-flex; flex: none; color: var(--ink-300); transition: transform .2s ease; }
+.gs-toggle-icon svg { width: 18px; height: 18px; display: block; }
+.gs-toggle[aria-expanded="false"] .gs-toggle-icon { transform: rotate(-90deg); }
 .gs-toggle:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 4px; border-radius: 4px; }
 .dash-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--ink-850); font-size: 12px; color: var(--ink-200); border: 1px solid var(--ink-800); font-family: 'JetBrains Mono', monospace; }
 
@@ -1602,6 +1647,17 @@ textarea.auto-resize {
 .dash-module.on .dash-module-toggle { background: var(--claw-500); }
 .dash-module.on .dash-module-toggle::after { transform: translateX(14px); background: #fff; }
 .dash-module.on .dash-module-icon { background: rgba(217,119,66,.18); color: var(--claw-300); }
+
+/* Getting-started steps are a checklist, not toggles: the indicator is a check
+   that fills in when the step is done, not an on/off pip. The sr-only "— done /
+   — not done yet" text beside it carries the same state for screen readers
+   (#910), so the visual and the announced state still agree. */
+.gs-step .dash-module-toggle { width: 22px; height: 22px; border-radius: 50%; background: transparent; border: 1.6px solid var(--ink-600); margin-top: 0; align-self: center; transition: background .15s, border-color .15s; }
+.gs-step .dash-module-toggle::after { inset: 0; top: 0; left: 0; width: auto; height: auto; border-radius: 0; transform: none; background-color: transparent;
+    -webkit-mask: center / 12px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 13l4 4L19 7'/%3E%3C/svg%3E");
+    mask: center / 12px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 13l4 4L19 7'/%3E%3C/svg%3E"); }
+.gs-step.on .dash-module-toggle { background: var(--claw-500); border-color: var(--claw-500); }
+.gs-step.on .dash-module-toggle::after { transform: none; background-color: #fff; }
 
 /* Row layouts */
 .dash-two-col { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; margin-top: 20px; }
@@ -1622,6 +1678,33 @@ textarea.auto-resize {
 .dash-feed-icon.bad { background: rgba(185,76,60,.18); color: #db8478; }
 .dash-feed-icon.good { background: rgba(93,138,90,.18); color: #91c08e; }
 .dash-feed-icon.info { background: rgba(217,119,66,.18); color: var(--claw-300); }
+.dash-feed-icon svg { width: 16px; height: 16px; }
+.dash-feed-empty { opacity: .4; font-size: .85em; }
+
+/* Status glyphs as masked line icons (v5), replacing the ✓ ✗ ⚠ text glyphs in
+   the panels' error and connection-test states. The icon is a mask filled with
+   the element's own colour, so it inherits whatever the status class sets. */
+.load-error::before, .test-ok::before, .test-bad::before,
+.mcp-test-result.ok::before, .mcp-test-result.bad::before {
+    content: ""; display: inline-block; width: 1em; height: 1em;
+    vertical-align: -0.14em; margin-right: 0.4em; background-color: currentColor;
+    -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat;
+}
+.load-error { color: #e0b85a; }
+.load-error::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4l9 16H3z'/%3E%3Cline x1='12' y1='10' x2='12' y2='14'/%3E%3Cline x1='12' y1='17' x2='12' y2='17'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4l9 16H3z'/%3E%3Cline x1='12' y1='10' x2='12' y2='14'/%3E%3Cline x1='12' y1='17' x2='12' y2='17'/%3E%3C/svg%3E");
+}
+.test-ok { color: var(--success, #3ba55d); }
+.test-ok::before, .mcp-test-result.ok::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 13l4 4L19 7'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 13l4 4L19 7'/%3E%3C/svg%3E");
+}
+.test-bad { color: var(--danger, #ed4245); }
+.test-bad::before, .mcp-test-result.bad::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3C/svg%3E");
+}
 .dash-feed-body { font-size: 13.5px; color: var(--cream-100); flex: 1; line-height: 1.4; }
 .dash-feed-body b { color: var(--cream-50); font-weight: 600; }
 .dash-feed-body .who { color: var(--claw-300); }
@@ -1636,6 +1719,12 @@ textarea.auto-resize {
 .dash-bot-text { flex: 1; font-size: 14px; line-height: 1.55; color: rgba(255,255,255,.92); }
 .dash-bot-btn { background: rgba(0,0,0,.25); color: #fff; border: 1px solid rgba(255,255,255,.2); padding: 8px 14px; border-radius: 10px; font-size: 13px; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; transition: background .15s; }
 .dash-bot-btn:hover { background: rgba(0,0,0,.4); }
+.dash-bot-btn.ghost { background: transparent; }
+.dash-bot-dim { opacity: .7; }
+/* Recommendation row inside the Ask Clawdia card: a line icon (in the card's
+   white ink) beside the text, replacing the old 💡 emoji + inline styles. */
+.dash-rec { display: flex; gap: .5rem; align-items: flex-start; margin-bottom: .4rem; }
+.dash-rec svg { flex: none; margin-top: 2px; color: rgba(255,255,255,.9); }
 
 /* Nav item keyboard focus */
 .dash-nav .nav-item:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; border-radius: 10px; }
@@ -1714,7 +1803,11 @@ textarea.auto-resize {
 
 /* Responsive */
 @media (max-width: 1024px) {
-    .dash-kpis { grid-template-columns: repeat(2, 1fr); }
+    /* Below the wide grid the hero can no longer span two rows sensibly, so it
+       becomes a full-width banner above a two-column supporting grid. */
+    .dash-kpis { grid-template-columns: repeat(2, 1fr); grid-auto-rows: auto; }
+    .dash-kpi-hero { grid-column: span 2; grid-row: span 1; }
+    .dash-kpi-hero .dash-kpi-value { font-size: 52px; }
     .dash-two-col { grid-template-columns: 1fr; }
     .dash-three-col { grid-template-columns: 1fr; }
 }
@@ -1846,10 +1939,12 @@ textarea.auto-resize {
 .heatmap-hour { text-align: center; color: var(--text-dim); }
 .heatmap-label { color: var(--text-dim); white-space: nowrap; align-self: center; }
 .heatmap-cell { aspect-ratio: 1; border-radius: 2px; background: rgba(255, 255, 255, .03); }
-.heatmap-cell.heat-1 { background: rgba(93, 138, 90, .25); }
-.heatmap-cell.heat-2 { background: rgba(93, 138, 90, .45); }
-.heatmap-cell.heat-3 { background: rgba(93, 138, 90, .7); }
-.heatmap-cell.heat-4 { background: rgba(93, 138, 90, .95); }
+/* A claw ramp: warm reads as "heat" for an activity map, and keeps it in the
+   v5 palette rather than the old green. */
+.heatmap-cell.heat-1 { background: rgba(217, 119, 66, .22); }
+.heatmap-cell.heat-2 { background: rgba(217, 119, 66, .42); }
+.heatmap-cell.heat-3 { background: rgba(217, 119, 66, .68); }
+.heatmap-cell.heat-4 { background: rgba(217, 119, 66, .95); }
 .heatmap-note { font-size: .68rem; opacity: .55; margin-top: .4rem; }
 /* Text for a screen reader and no one else — the numbers behind each chart
    beside the canvas (#669), the compare table's caption (#912).
