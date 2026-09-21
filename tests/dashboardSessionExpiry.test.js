@@ -134,7 +134,14 @@ describe('it replaces the misleading message rather than adding to it', () => {
     });
 
     it('tells a failed panel to say what will load it, not that it is broken', async () => {
-        bootPage({ panelFetch: name => (name === 'starboard' ? opaqueRedirect() : ok({})) });
+        bootPage();
+        // A genuinely expired session: the panel fragment comes back as an opaque
+        // redirect, and the confirmation probe against /session agrees the session
+        // is gone. Both have to say so before the banner and the stub message do.
+        window.fetch = jest.fn(async url =>
+            /\/panel\//.test(String(url)) ? opaqueRedirect()
+                : /\/session/.test(String(url)) ? unauthorized()
+                    : ok({}));
 
         clickTab('starboard');
         await settle();
@@ -227,6 +234,99 @@ describe('nothing is thrown away, and the retry clears it', () => {
         await window.apiFetch('/api/v1/guild/1/settings', { method: 'POST' });
 
         expect(banner().hidden).toBe(true);
+    });
+});
+
+// A single 401 or opaque redirect is not proof the session is gone. The overview
+// fires its two reads in parallel on load, and a transient 401 on a session that
+// is still good — one the very next request would not reproduce — used to raise a
+// banner the page then had no way to take back down. The suspicion is now
+// confirmed against /session before the banner is raised.
+describe('a suspected expiry is confirmed before the banner is raised', () => {
+    it('does not raise the banner when the probe says the session is still alive', async () => {
+        bootPage();
+        await settle();
+
+        window.fetch = jest.fn(async url =>
+            /\/session/.test(String(url)) ? ok({ authenticated: true }) : unauthorized());
+        await window.apiFetch('/api/v1/guild/1/stats');
+        await settle();
+
+        expect(banner().hidden).toBe(true);
+    });
+
+    it('raises the banner once the probe confirms the session is gone', async () => {
+        bootPage();
+        await settle();
+
+        window.fetch = jest.fn(async () => unauthorized());
+        await window.apiFetch('/api/v1/guild/1/stats');
+
+        expect(banner().hidden).toBe(false);
+    });
+
+    it('probes once for a burst of failures, not once per request', async () => {
+        bootPage();
+        await settle();
+
+        const urls = [];
+        window.fetch = jest.fn(async url => { urls.push(String(url)); return unauthorized(); });
+        await Promise.all([
+            window.apiFetch('/api/v1/guild/1/stats'),
+            window.apiFetch('/api/v1/guild/1/insights'),
+        ]);
+
+        expect(urls.filter(u => /\/session/.test(u))).toHaveLength(1);
+        expect(banner().hidden).toBe(false);
+    });
+
+    it('does not probe for a response that is not a suspected expiry', async () => {
+        bootPage();
+        await settle();
+
+        const urls = [];
+        window.fetch = jest.fn(async url => {
+            urls.push(String(url));
+            return { ok: false, status: 500, type: 'basic', redirected: false, url: '', json: async () => ({}) };
+        });
+        await window.apiFetch('/api/v1/guild/1/stats');
+
+        expect(urls.some(u => /\/session/.test(u))).toBe(false);
+        expect(banner().hidden).toBe(true);
+    });
+});
+
+// A banner raised on a genuine expiry has nothing on the overview to take it back
+// down: the page makes no further requests once it has loaded. Bringing the tab
+// forward — the moment someone returns from signing in beside it — re-checks.
+describe('a stuck banner clears itself when the tab comes back to a good session', () => {
+    it('takes the banner down on focus once the probe confirms the session is back', async () => {
+        bootPage();
+        await settle();
+
+        window.fetch = jest.fn(async () => unauthorized());
+        await window.apiFetch('/api/v1/guild/1/stats');
+        expect(banner().hidden).toBe(false);
+
+        window.fetch = jest.fn(async () => ok({ authenticated: true }));
+        window.dispatchEvent(new window.Event('focus'));
+        await settle();
+
+        expect(banner().hidden).toBe(true);
+    });
+
+    it('leaves the banner up on focus while the session is still gone', async () => {
+        bootPage();
+        await settle();
+
+        window.fetch = jest.fn(async () => unauthorized());
+        await window.apiFetch('/api/v1/guild/1/stats');
+        expect(banner().hidden).toBe(false);
+
+        window.dispatchEvent(new window.Event('focus'));
+        await settle();
+
+        expect(banner().hidden).toBe(false);
     });
 });
 

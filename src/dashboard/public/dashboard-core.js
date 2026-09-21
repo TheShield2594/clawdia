@@ -130,6 +130,57 @@ function clearSessionExpired() {
     if (sessionExpiredBanner) sessionExpiredBanner.hidden = true;
 }
 
+// ── Confirming an expiry before alarming ──────────────────────────────
+// One 401 or one opaque redirect is not proof the session is gone. The overview
+// fires stats and insights in parallel on load, and a transient 401 against a
+// session that is in fact still good — one the very next request would not
+// reproduce — used to be enough to raise the banner, which then had nothing to
+// take it back down because the overview makes no further requests. The banner
+// "kept appearing" while every control on the page still worked.
+//
+// So a suspected expiry is now checked against /session, which answers only about
+// the session and never redirects: 200 while the cookie authenticates, a clean
+// 401 once it does not. The banner goes up only on a confirmed expiry, and comes
+// down again the moment the probe says the session is back.
+const SESSION_PROBE_URL = '/api/v1/session';
+
+// At most one probe in flight. A page load can have several requests suspect
+// expiry in the same tick; they share this one probe rather than each firing
+// their own. Cleared when it settles, so a later suspicion can probe afresh.
+let sessionProbe = null;
+
+// Resolves 'expired', 'alive', or 'unknown'. `unknown` is for a probe that could
+// not get a clear answer — offline, rate-limited, a 500 — where guessing either
+// way is worse than leaving the banner as it is. Uses window.fetch directly, not
+// apiFetch: the probe is the second opinion, so it must not be second-guessed by
+// the same suspicion logic (which would recurse).
+function probeSession() {
+    if (sessionProbe) return sessionProbe;
+    sessionProbe = window.fetch(SESSION_PROBE_URL, { redirect: 'manual', headers: { Accept: 'application/json' } })
+        .then(res => {
+            if (res.ok) return 'alive';
+            if (isSessionExpired(res)) return 'expired';
+            return 'unknown';
+        })
+        .catch(() => 'unknown')
+        .finally(() => { sessionProbe = null; });
+    return sessionProbe;
+}
+
+// A banner raised on a genuine expiry has nothing on the overview to take it back
+// down. So when a backgrounded tab is brought forward — the moment someone
+// returns from signing in beside it — re-check the session and clear the banner
+// if it is alive again. Only ever probes while the banner is up, so it costs
+// nothing in the common case.
+function recheckSessionIfExpired() {
+    if (!sessionExpired) return;
+    probeSession().then(verdict => { if (verdict === 'alive') clearSessionExpired(); });
+}
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') recheckSessionIfExpired();
+});
+window.addEventListener('focus', recheckSessionIfExpired);
+
 /**
  * fetch() for everything this page asks of its own server.
  *
@@ -149,9 +200,23 @@ function apiFetch(url, options) {
     // still dead.
     const expiredWhenSent = sessionExpired;
 
-    return window.fetch(url, { redirect: 'manual', ...(options || {}) }).then(res => {
-        if (isSessionExpired(res)) showSessionExpired();
-        else if (res.ok && (expiredWhenSent || !sessionExpired)) clearSessionExpired();
+    return window.fetch(url, { redirect: 'manual', ...(options || {}) }).then(async res => {
+        if (isSessionExpired(res)) {
+            // Not proof on its own — confirm against /session before alarming, so
+            // a transient 401 on a session that is still good does not raise a
+            // banner the page then has no way to take back down. Skipped once the
+            // banner is already up: this signal only agrees with it, and the
+            // probe has already had its say. Awaited before returning so the
+            // banner (and the toast suppression that keys off it) is settled by
+            // the time the caller reads the response.
+            if (!sessionExpired) {
+                const verdict = await probeSession();
+                if (verdict === 'expired') showSessionExpired();
+                else if (verdict === 'alive') clearSessionExpired();
+            }
+        } else if (res.ok && (expiredWhenSent || !sessionExpired)) {
+            clearSessionExpired();
+        }
         return res;
     });
 }
