@@ -178,7 +178,7 @@ async function loadOverviewStats() {
         const aiVal = document.getElementById('kpi-ai-value');
         const aiFoot = document.getElementById('kpi-ai-foot');
         overviewCount(aiVal, aiTotal);
-        if (aiFoot) aiFoot.textContent = aiTotal === 1 ? 'AI request' : 'AI requests';
+        if (aiFoot) aiFoot.textContent = aiTotal === 1 ? 'Clawdia chat' : 'Clawdia chats';
 
         // Ask Clawdia recommendations.
         //
