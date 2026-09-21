@@ -17,3 +17,7 @@ coverage/
 # and serving last week's JavaScript the first time someone forgets (#905).
 src/dashboard/public/*.min.js
 src/dashboard/public/*.min.css
+
+# Impeccable design detector — commit shared config.json, ignore cache + local overrides
+.impeccable/hook.cache.json
+.impeccable/config.local.json
