@@ -67,14 +67,17 @@ describe('getItemImageAttachment', () => {
         expect(getDefaultItemImage).toHaveBeenCalledWith('hunt:steel_rifle');
     });
 
-    test('a stored image wins over the bundled default', async () => {
+    // The catalogue is the standard: a bundled icon overrides a guild upload of
+    // the same item, and the DB is not even consulted.
+    test('the bundled default overrides a guild upload', async () => {
         rows({ guildId: 'g1', itemId: 'shop:lucky_charm', ...png('uploaded') });
         getDefaultItemImage.mockReturnValue({ data: Buffer.from('baked'), type: 'image/png' });
 
         const result = await getItemImageAttachment('lucky_charm', 'g1');
 
-        expect(result.attachment.name).toBe('item-lucky_charm.png');
-        expect(getDefaultItemImage).not.toHaveBeenCalled();
+        expect(result).not.toBeNull();
+        expect(getDefaultItemImage).toHaveBeenCalledWith('lucky_charm');
+        expect(ItemImage.find).not.toHaveBeenCalled();
     });
 
     // #888. The shop image is a row in the same collection now, under a

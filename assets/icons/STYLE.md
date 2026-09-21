@@ -241,14 +241,18 @@ Only generation costs credits: ~1 per icon, nothing after that.
 ## How the app uses them — baked-in defaults (no upload needed)
 
 The whole set ships **inside the app** as default artwork, so every item shows
-its icon with no per-guild upload:
+its icon with no per-guild upload — and the catalogue is the **standard**: it
+overrides any guild upload, so every server looks the same.
 
 - The PNGs live at **`src/assets/item-icons/<storage-key>.png`** (under `src/`
   because the Docker build context is an allowlist that ships `src/` and drops
   `assets/`). `src/utils/defaultItemImages.js` serves them.
-- `getItemImageAttachment()` (`src/utils/itemImageHelper.js`) now checks, in
-  order: the guild's own shop upload → its activity upload → the shared pre-#561
-  upload → **the bundled default**. A guild upload still overrides the default.
+- `getItemImageAttachment()` (`src/utils/itemImageHelper.js`) checks the
+  **bundled default first**: when the catalogue ships art for an item it wins,
+  overriding uploads. Only for items the catalogue does *not* cover (custom shop
+  items, anything new) does it fall back to uploads — the guild's own shop
+  image, then its activity image, then the shared pre-#561 one. The dashboard
+  image routes apply the same order, so the panel preview matches Discord.
 - The PNGs are committed by the **`Bake item icons`** GitHub Action
   (`.github/workflows/bake-item-icons.yml`), which runs `assets/icons/bake-icons.mjs`:
   it reads the `url` of each item in `icons.map.json`, downloads it, normalizes
@@ -330,9 +334,11 @@ branch. It downloads all 118 from the CDN, normalizes them, and commits them to
 `src/assets/item-icons/`. After that they're the default art everywhere — no
 download, no upload. Re-run it any time the map changes.
 
-(Optional, per-guild override) A server admin can still upload custom art for an
-item via the dashboard economy panel; that overrides the baked default for that
-guild only.
+The baked catalogue is the standard and overrides guild uploads for every item
+it covers. Dashboard uploads still work, but only take effect for items the
+catalogue does not ship (custom shop items an admin named themselves, anything
+new). Existing upload rows are left in the DB, just no longer shown for
+catalogued items — purging them is a separate migration if ever wanted.
 
 ## Open questions
 

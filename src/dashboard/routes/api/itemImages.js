@@ -66,21 +66,26 @@ function uploadImage(req, res, next) {
 //
 // So nothing needed them open, and open meant anyone who could guess a guild id
 // and an item id could read that guild's uploaded artwork.
-// When a guild has not uploaded its own image, serve the catalogue artwork
-// bundled with the app (utils/defaultItemImages.js) so the dashboard preview
-// matches what players see in Discord. Only 404 when nothing ships either.
+// The catalogue artwork bundled with the app (utils/defaultItemImages.js) is
+// the standard: when it ships art for an item it is served here, overriding any
+// guild upload, so the dashboard preview matches what players see in Discord.
+// Returns true once it has sent the default; callers fall through to the
+// uploaded image (and then 404) only for items the catalogue does not cover.
 // `itemId` is the storage key for activity items (`hunt:steel_rifle`) and the
 // bare id for shop items (`lucky_charm`) — the same keys the defaults use.
-function sendDefaultOr404(res, itemId) {
+function trySendBundledDefault(res, itemId) {
     const def = getDefaultItemImage(itemId);
-    if (!def) return res.status(404).end();
+    if (!def) return false;
     res.set('Content-Type', def.type);
     res.set('Cache-Control', 'private, max-age=86400');
-    return res.send(def.data);
+    res.send(def.data);
+    return true;
 }
 
 router.get('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
     try {
+        // The bundled catalogue is the standard and overrides uploads.
+        if (trySendBundledDefault(res, req.params.itemId)) return;
         // One keyed lookup on `{ guildId, itemId }` against a document holding
         // one image, rather than a read of the whole guild settings document to
         // find one element of its shop array (#888).
@@ -88,7 +93,7 @@ router.get('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, asy
             guildId: req.params.guildId,
             itemId: shopImageId(req.params.itemId),
         });
-        if (!img?.imageData?.length) return sendDefaultOr404(res, req.params.itemId);
+        if (!img?.imageData?.length) return res.status(404).end();
         res.set('Content-Type', img.imageType || 'image/png');
         // `private`: the response is scoped to a session now, so it may sit in
         // the requesting browser's cache but not in a shared one.
@@ -202,9 +207,11 @@ function invalidItemId(itemId) {
 router.get('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId, itemId } = req.params;
     try {
+        // The bundled catalogue is the standard and overrides uploads.
+        if (trySendBundledDefault(res, itemId)) return;
         const img = await ItemImage.findOne({ guildId, itemId })
             || await ItemImage.findOne({ guildId: null, itemId });
-        if (!img?.imageData?.length) return sendDefaultOr404(res, itemId);
+        if (!img?.imageData?.length) return res.status(404).end();
         res.set('Content-Type', img.imageType || 'image/png');
         // Per guild, so the cache key must be too: this URL carries the guild id,
         // and the response varies by nothing else. `private` because the route
