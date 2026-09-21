@@ -46,7 +46,7 @@ describe('web fonts load under the dashboard\'s own CSP', () => {
         const declared = new Set(
             [...fontsCss.matchAll(/font-family:\s*'([^']+)'/g)].map(m => m[1]),
         );
-        for (const family of ['Instrument Serif', 'Inter Tight', 'JetBrains Mono']) {
+        for (const family of ['Instrument Serif', 'Hanken Grotesk', 'JetBrains Mono']) {
             expect([family, declared.has(family)]).toEqual([family, true]);
             // The family is only worth vendoring if something still uses it.
             expect([family, stylesCss.includes(`'${family}'`)]).toEqual([family, true]);
@@ -60,14 +60,14 @@ describe('web fonts load under the dashboard\'s own CSP', () => {
         const shipped = new Set(
             [...fontsCss.matchAll(/font-weight:\s*(\d{3})/g)].map(m => m[1]),
         );
-        // Inter Tight is the body font, so it is the family that has to carry
-        // every weight the design system uses.
-        const interWeights = new Set(
-            [...fontsCss.matchAll(/font-family: 'Inter Tight';\s*font-style: \w+;\s*font-weight: (\d{3})/g)]
+        // Hanken Grotesk is the body font, so it is the family that has to
+        // carry every weight the design system uses.
+        const bodyWeights = new Set(
+            [...fontsCss.matchAll(/font-family: 'Hanken Grotesk';\s*font-style: \w+;\s*font-weight: (\d{3})/g)]
                 .map(m => m[1]),
         );
         expect([...wanted].filter(w => !shipped.has(w))).toEqual([]);
-        expect([...wanted].filter(w => !interWeights.has(w))).toEqual([]);
+        expect([...wanted].filter(w => !bodyWeights.has(w))).toEqual([]);
     });
 
     it('points every @font-face at a file that is actually on disk', () => {
