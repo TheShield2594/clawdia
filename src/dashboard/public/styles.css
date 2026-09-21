@@ -1602,10 +1602,8 @@ textarea.auto-resize {
 .dash-kpi-link:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 3px; }
 .dash-kpi-cta { position: absolute; top: 18px; right: 18px; color: var(--ink-500); opacity: 0; transition: opacity .15s; }
 .dash-kpi-link:hover .dash-kpi-cta, .dash-kpi-link:focus-visible .dash-kpi-cta { opacity: 1; }
-@media (prefers-reduced-motion: reduce) {
-    .dash-kpi-link { transition: none; }
-    .dash-kpi-cta { transition: none; opacity: .5; }
-}
+/* Reduced motion is handled by the universal block below (#675) — a dedicated
+   block here would shadow it as the first reduced-motion match in the file. */
 
 /* Dashboard cards */
 .dash-card { background: var(--ink-900); border: 1px solid var(--ink-800); border-radius: 18px; padding: 22px; }
@@ -1633,7 +1631,6 @@ textarea.auto-resize {
 .gs-toggle-icon { display: inline-flex; flex: none; color: var(--ink-300); transition: transform .2s ease; }
 .gs-toggle-icon svg { width: 18px; height: 18px; display: block; }
 .gs-toggle[aria-expanded="false"] .gs-toggle-icon { transform: rotate(-90deg); }
-@media (prefers-reduced-motion: reduce) { .gs-toggle-icon { transition: none; } }
 .gs-toggle:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 4px; border-radius: 4px; }
 .dash-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--ink-850); font-size: 12px; color: var(--ink-200); border: 1px solid var(--ink-800); font-family: 'JetBrains Mono', monospace; }
 
