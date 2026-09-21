@@ -5,6 +5,7 @@
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const { WEAPON_UPGRADES, WEAPON_BY_TIER } = require('../../../../data/huntData');
 const { chargeBalance, refundBalance } = require('../shared');
+const { attachItemThumbnail } = require('../../../../utils/itemImageHelper');
 const COLORS = require('../../../../utils/embedColors');
 
 async function handleBuyUpgrade(interaction, user, currency) {
@@ -58,20 +59,19 @@ async function handleBuyUpgrade(interaction, user, currency) {
         return interaction.reply({ content: 'Installing the upgrade failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
     }
 
-    return interaction.reply({
-        embeds: [
-            new EmbedBuilder()
-                .setColor(COLORS.SUCCESS)
-                .setTitle(`${upgradeDef.emoji} Upgrade Installed!`)
-                .setDescription(`**${upgradeDef.name}** has been installed on your **${weapon.name}**.`)
-                .addFields(
-                    { name: 'Effect',      value: upgradeDef.description,                       inline: true },
-                    { name: 'Cost',        value: `${currency}${cost.toLocaleString()}`,         inline: true },
-                    { name: 'New Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
-                )
-                .setFooter({ text: 'Upgrade is permanently attached to this weapon instance.' })
-        ]
-    });
+    const installedEmbed = new EmbedBuilder()
+        .setColor(COLORS.SUCCESS)
+        .setTitle(`${upgradeDef.emoji} Upgrade Installed!`)
+        .setDescription(`**${upgradeDef.name}** has been installed on your **${weapon.name}**.`)
+        .addFields(
+            { name: 'Effect',      value: upgradeDef.description,                       inline: true },
+            { name: 'Cost',        value: `${currency}${cost.toLocaleString()}`,         inline: true },
+            { name: 'New Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
+        )
+        .setFooter({ text: 'Upgrade is permanently attached to this weapon instance.' });
+    const installedFiles = await attachItemThumbnail(installedEmbed, `hunt:${moduleId}`, interaction.guild.id, upgradeDef.name);
+
+    return interaction.reply({ embeds: [installedEmbed], files: installedFiles });
 }
 
 module.exports = { handleBuyUpgrade };

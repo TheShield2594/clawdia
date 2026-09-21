@@ -6,6 +6,7 @@ const { MessageFlags, EmbedBuilder } = require('discord.js');
 const { persistGrindIfNew, saveGrind } = require('../../../../utils/grindProfile');
 const { PICKAXE_UPGRADES, PICKAXE_BY_TIER } = require('../../../../data/mineData');
 const { chargeBalance, refundBalance } = require('../shared');
+const { attachItemThumbnail } = require('../../../../utils/itemImageHelper');
 
 async function handleBuyUpgrade(interaction, user, currency) {
     const m = user.mining;
@@ -56,7 +57,8 @@ async function handleBuyUpgrade(interaction, user, currency) {
         .setDescription(`**${upgradeDef.name}** has been installed on your **${pickaxe.name}**.\n> ${upgradeDef.description}`)
         .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
         .setTimestamp();
-    return interaction.reply({ embeds: [embed] });
+    const files = await attachItemThumbnail(embed, `mine:${moduleId}`, interaction.guild.id, upgradeDef.name);
+    return interaction.reply({ embeds: [embed], files });
 }
 
 module.exports = { handleBuyUpgrade };

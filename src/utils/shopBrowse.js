@@ -8,6 +8,7 @@ const {
 const ItemImage = require('../models/ItemImage');
 const { renderCategoryBanner, getTheme } = require('./shopBanner');
 const { shopImageId, shopItemIdOf } = require('../models/itemImageKeys');
+const { getDefaultItemImage } = require('./defaultItemImages');
 
 const COLOR_HEX = {
     hunt:          '#27ae60',
@@ -108,16 +109,22 @@ async function runShopBrowse(interaction, config) {
     const activityOf = (section, page) => page?.activity ?? section?.activity ?? config.activity;
 
     const imageCache = new Map();
+    // The bundled catalogue is authoritative (#1080): when it ships art for an
+    // item that art wins on the banner too, matching getItemImageAttachment and
+    // the dashboard — so a guild upload is read only for items the catalogue does
+    // not cover. getDefaultItemImage caches its buffers, so this stays cheap.
+    const bundledBufferFor = it => (it.imageId ? getDefaultItemImage(it.imageId)?.data ?? null : null);
     async function hydrate(page) {
-        const wanted = page.items.map(it => it.imageId).filter(Boolean);
-        const missing = wanted.filter(id => !imageCache.has(id));
+        const missing = page.items
+            .filter(it => it.imageId && !bundledBufferFor(it) && !imageCache.has(it.imageId))
+            .map(it => it.imageId);
         if (missing.length) {
             const fetched = await loadImagesByItemIds(missing, guildId);
             for (const id of missing) imageCache.set(id, fetched[id] || null);
         }
         return page.items.map(it => ({
             ...it,
-            imageBuffer: it.imageId ? imageCache.get(it.imageId) : null
+            imageBuffer: bundledBufferFor(it) ?? (it.imageId ? imageCache.get(it.imageId) ?? null : null),
         }));
     }
 

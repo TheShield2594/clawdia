@@ -13,6 +13,7 @@ const User = require('../../../../models/User');
 const { persistGrindIfNew } = require('../../../../utils/grindProfile');
 const { BLAST_PACKS, CONSUMABLES } = require('../../../../data/mineData');
 const GrindProfile = require('../../../../models/GrindProfile');
+const { attachItemThumbnail } = require('../../../../utils/itemImageHelper');
 const COLORS = require('../../../../utils/embedColors');
 const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
 const { shopRefundPayoutKey, shopGrantPayoutKey } = require('../../../../utils/payoutKey');
@@ -90,12 +91,14 @@ async function handleBuy(interaction, user, currency, override = {}) {
         )
         .setFooter({ text: 'Confirmation expires in 30 seconds' });
 
+    const confirmFiles = await attachItemThumbnail(confirmEmbed, `mine:${itemId}`, interaction.guild.id, itemDef.name);
+
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('minebuy_confirm').setLabel('Buy').setStyle(ButtonStyle.Success).setEmoji('✅'),
         new ButtonBuilder().setCustomId('minebuy_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
-    const response = await interaction.reply({ embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, withResponse: true });
+    const response = await interaction.reply({ embeds: [confirmEmbed], components: [row], files: confirmFiles, flags: MessageFlags.Ephemeral, withResponse: true });
     const reply = response.resource.message;
     const collector = reply.createMessageComponentCollector({ time: 30_000 });
 

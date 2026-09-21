@@ -97,4 +97,19 @@ async function attachResultThumbnail(embed, activity, resultItem, guildId) {
     return [art.attachment];
 }
 
-module.exports = { getItemImageAttachment, attachResultThumbnail };
+/**
+ * Sets an item's icon as `embed`'s thumbnail and returns the files array to
+ * attach (`[]` when no art is bundled/uploaded — the emoji in the title is the
+ * fallback). `itemId` is the full storage key: an activity gear key
+ * (`fish:worm_bait_pack`, `hunt:scope`), a `shop:`-less guild id, etc. Shared by
+ * the shop purchase/upgrade confirmations so every item card shows its art the
+ * way the rod/weapon/pickaxe buy flows already do.
+ */
+async function attachItemThumbnail(embed, itemId, guildId, label) {
+    const art = await getItemImageAttachment(itemId, guildId, { label }).catch(() => null);
+    if (!art) return [];
+    embed.setThumbnail(art.url);
+    return [art.attachment];
+}
+
+module.exports = { getItemImageAttachment, attachResultThumbnail, attachItemThumbnail };

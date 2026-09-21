@@ -14,6 +14,7 @@ const { persistGrindIfNew } = require('../../../../utils/grindProfile');
 const { AMMO_PACKS, CONSUMABLES } = require('../../../../data/huntData');
 const GrindProfile = require('../../../../models/GrindProfile');
 const { ACTIVATABLE } = require('../shared');
+const { attachItemThumbnail } = require('../../../../utils/itemImageHelper');
 const COLORS = require('../../../../utils/embedColors');
 const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
 const { shopRefundPayoutKey, shopGrantPayoutKey } = require('../../../../utils/payoutKey');
@@ -101,12 +102,14 @@ async function handleBuy(interaction, user, currency, override = {}) {
         )
         .setFooter({ text: 'Confirmation expires in 30 seconds' });
 
+    const confirmFiles = await attachItemThumbnail(confirmEmbed, `hunt:${itemId}`, interaction.guild.id, itemDef.name);
+
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('huntbuy_confirm').setLabel('Buy').setStyle(ButtonStyle.Success).setEmoji('✅'),
         new ButtonBuilder().setCustomId('huntbuy_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
-    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, fetchReply: true });
+    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], files: confirmFiles, flags: MessageFlags.Ephemeral, fetchReply: true });
     const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
     collector.on('collect', async btn => {
