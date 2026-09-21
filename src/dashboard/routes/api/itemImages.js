@@ -7,6 +7,7 @@ const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/
 const { readRateLimitOptions } = require('../../lib/readRateLimit');
 const { isActivityItemId } = require('../../../data/activityItems');
 const { shopImageId } = require('../../../models/itemImageKeys');
+const { getDefaultItemImage } = require('../../../utils/defaultItemImages');
 
 // Recognised read limiter for the item-image reads. They are <img> subresources
 // a single page loads in bulk (the activity-items page renders the whole
@@ -65,6 +66,19 @@ function uploadImage(req, res, next) {
 //
 // So nothing needed them open, and open meant anyone who could guess a guild id
 // and an item id could read that guild's uploaded artwork.
+// When a guild has not uploaded its own image, serve the catalogue artwork
+// bundled with the app (utils/defaultItemImages.js) so the dashboard preview
+// matches what players see in Discord. Only 404 when nothing ships either.
+// `itemId` is the storage key for activity items (`hunt:steel_rifle`) and the
+// bare id for shop items (`lucky_charm`) — the same keys the defaults use.
+function sendDefaultOr404(res, itemId) {
+    const def = getDefaultItemImage(itemId);
+    if (!def) return res.status(404).end();
+    res.set('Content-Type', def.type);
+    res.set('Cache-Control', 'private, max-age=86400');
+    return res.send(def.data);
+}
+
 router.get('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
     try {
         // One keyed lookup on `{ guildId, itemId }` against a document holding
@@ -74,7 +88,7 @@ router.get('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, asy
             guildId: req.params.guildId,
             itemId: shopImageId(req.params.itemId),
         });
-        if (!img?.imageData?.length) return res.status(404).end();
+        if (!img?.imageData?.length) return sendDefaultOr404(res, req.params.itemId);
         res.set('Content-Type', img.imageType || 'image/png');
         // `private`: the response is scoped to a session now, so it may sit in
         // the requesting browser's cache but not in a shared one.
@@ -190,7 +204,7 @@ router.get('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess,
     try {
         const img = await ItemImage.findOne({ guildId, itemId })
             || await ItemImage.findOne({ guildId: null, itemId });
-        if (!img?.imageData?.length) return res.status(404).end();
+        if (!img?.imageData?.length) return sendDefaultOr404(res, itemId);
         res.set('Content-Type', img.imageType || 'image/png');
         // Per guild, so the cache key must be too: this URL carries the guild id,
         // and the response varies by nothing else. `private` because the route
