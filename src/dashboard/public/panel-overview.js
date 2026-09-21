@@ -28,15 +28,12 @@ onPanel('overview', initGettingStarted);
 function toggleGettingStarted() {
     const body   = document.getElementById('getting-started-body');
     const toggle = document.getElementById('gs-toggle');
-    const icon   = document.getElementById('gs-toggle-icon');
     if (!body) return;
     const open = body.style.display === 'none';
     body.style.display = open ? '' : 'none';
-    // The glyph is decorative (aria-hidden in the view), so aria-expanded is the
-    // only thing reporting the state to anyone not looking at it (#882). The two
-    // move together or the button lies.
+    // aria-expanded reports the state to anyone not looking at it (#882) and
+    // also drives the chevron's rotation in CSS, so the two cannot disagree.
     if (toggle) toggle.setAttribute('aria-expanded', String(open));
-    if (icon) icon.textContent = open ? '▾' : '▸';
 }
 function dismissGettingStarted() {
     const guildId = BOOT.guildId;

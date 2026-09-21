@@ -868,9 +868,10 @@ describe('the Getting Started collapse', () => {
         // rather than read out as a symbol with no name.
         const icon = document.getElementById('gs-toggle-icon');
         expect(icon.getAttribute('aria-hidden')).toBe('true');
-
-        toggle().click();
-        expect(icon.textContent).toBe('\u25b8');
+        // An <svg> chevron that rotates in CSS off aria-expanded, not a \u25be/\u25b8 glyph
+        // a screen reader would read out \u2014 so it is hidden and names nothing.
+        expect(icon.querySelector('svg')).not.toBeNull();
+        expect(icon.textContent.trim()).toBe('');
     });
 });
 

@@ -1623,7 +1623,13 @@ textarea.auto-resize {
    serif display face — which is not what this line is. Put the body font back
    on it, and drop the margin the flex `gap` above already provides. */
 .gs-toggle .dash-card-sub { font-family: 'Inter Tight', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin-top: 0; }
-.gs-toggle-icon { font-size: 1.2rem; line-height: 1; flex: none; }
+/* The disclosure chevron rotates with the collapse rather than swapping a
+   ▾/▸ glyph; aria-expanded on the button drives it, so state and rotation
+   cannot disagree. */
+.gs-toggle-icon { display: inline-flex; flex: none; color: var(--ink-300); transition: transform .2s ease; }
+.gs-toggle-icon svg { width: 18px; height: 18px; display: block; }
+.gs-toggle[aria-expanded="false"] .gs-toggle-icon { transform: rotate(-90deg); }
+@media (prefers-reduced-motion: reduce) { .gs-toggle-icon { transition: none; } }
 .gs-toggle:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 4px; border-radius: 4px; }
 .dash-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--ink-850); font-size: 12px; color: var(--ink-200); border: 1px solid var(--ink-800); font-family: 'JetBrains Mono', monospace; }
 
@@ -1640,6 +1646,17 @@ textarea.auto-resize {
 .dash-module.on .dash-module-toggle { background: var(--claw-500); }
 .dash-module.on .dash-module-toggle::after { transform: translateX(14px); background: #fff; }
 .dash-module.on .dash-module-icon { background: rgba(217,119,66,.18); color: var(--claw-300); }
+
+/* Getting-started steps are a checklist, not toggles: the indicator is a check
+   that fills in when the step is done, not an on/off pip. The sr-only "— done /
+   — not done yet" text beside it carries the same state for screen readers
+   (#910), so the visual and the announced state still agree. */
+.gs-step .dash-module-toggle { width: 22px; height: 22px; border-radius: 50%; background: transparent; border: 1.6px solid var(--ink-600); margin-top: 0; align-self: center; transition: background .15s, border-color .15s; }
+.gs-step .dash-module-toggle::after { inset: 0; top: 0; left: 0; width: auto; height: auto; border-radius: 0; transform: none; background-color: transparent;
+    -webkit-mask: center / 12px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 13l4 4L19 7'/%3E%3C/svg%3E");
+    mask: center / 12px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 13l4 4L19 7'/%3E%3C/svg%3E"); }
+.gs-step.on .dash-module-toggle { background: var(--claw-500); border-color: var(--claw-500); }
+.gs-step.on .dash-module-toggle::after { transform: none; background-color: #fff; }
 
 /* Row layouts */
 .dash-two-col { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; margin-top: 20px; }
