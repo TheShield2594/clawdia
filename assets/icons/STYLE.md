@@ -7,9 +7,10 @@ This file and its scripts (`build-manifest.mjs`, `rename-icons.mjs`,
 `cutout.mjs`, `prep-icons.mjs`, `manifest.json`, `icons.map.json`) live in
 `assets/icons/`.
 
-**The full catalogue was generated on 2026-09-21** — 118 icons on
-`gpt_image_2_5`, look **B3** (see §0), anchored to `hunt:steel_rifle`. Every
-job id is in `icons.map.json`; every prompt is in `manifest.json`, built by
+**The catalogue is 262 icons on `gpt_image_2_5`**, look **B3** (see §0),
+anchored to `hunt:steel_rifle`: the original 118 shop-browse gear/guild icons
+plus the 144 catch/kill/mine results (issue #1081). Every job id is in
+`icons.map.json`; every prompt is in `manifest.json`, built by
 `build-manifest.mjs` from the game data. To reproduce or extend the set, that
 is the source of truth — start there, not from memory.
 
@@ -66,7 +67,7 @@ small per-id table. Change it there, not by hand.
 | Resolution | `1k` (1024×1024 — final icons are 256px, so 2k/4k is waste) |
 | Background | `transparent` |
 | Variant | `flare` (default) |
-| Cost | ~1 credit per image; preflight with `get_cost: true` |
+| Cost | `quality: high` = 2 credits, `quality: medium` = 1 (both at `1k`); preflight with `get_cost: true` |
 
 `background: "transparent"` is the reason to be on this model — it emits alpha
 directly, so the cut-out step disappears (§6). Confirm the media role against
@@ -338,6 +339,13 @@ Price text across every banner is gold `#f1c40f`.
   proxy — download + prep + upload run on the owner's machine).
 - **2026-09-21** — Re-generated the shipped `hunt:steel_rifle` icon against the
   anchor (`309b1ed7-…`) so its background matches the rest of the set.
+- **2026-09-21** — Added the **144 catch/kill/mine result icons** (issue #1081):
+  59 fish (`fishcatch:`), 62 animals (`animal:`), 23 ores (`ore:`), rarity from
+  each item's `tier` (`event` → Mythic rim), all on `gpt_image_2_5` B3 against
+  the same anchor. Generated at `quality: high` for parity with the gear set —
+  which is **2 credits each** (the earlier "~1 credit" note was wrong); at `1k`,
+  `medium` (1 credit) is a near-identical alternative once downscaled to 256px.
+  Job ids + urls recorded in `icons.map.json` (now 262 items).
 
 ## Next steps — bake them in (no manual work)
 
