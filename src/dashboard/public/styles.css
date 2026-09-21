@@ -1294,9 +1294,13 @@ textarea.auto-resize {
 .cw-compare th, .cw-compare td { padding: 18px 22px; border-bottom: 1px solid rgba(20,17,13,.06); font-size: 14.5px; text-align: left; font-weight: 400; vertical-align: top; }
 .cw-compare thead th { background: var(--cream-100); font-family: 'JetBrains Mono', monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-600); }
 .cw-compare .hi { background: rgba(217,119,66,.06); border-left: 2px solid var(--claw-500); }
-.cw-compare-yes { color: var(--good); font-weight: 600; }
-.cw-compare-no { color: var(--ink-400); }
-.cw-compare-warn { color: #c89834; }
+/* Contrast on the white comparison table (v5): --good was 4.00:1 and the amber
+   2.63:1 — both under 4.5 for this 14.5px text. --good-text (the small-text
+   green the tokens define), a darker amber, and --ink-500 for the muted cells
+   all clear 4.5. */
+.cw-compare-yes { color: var(--good-text); font-weight: 600; }
+.cw-compare-no { color: var(--ink-500); }
+.cw-compare-warn { color: #9a6a10; }
 
 /* Self-host */
 .cw-host { background: var(--cream-100); padding: 96px 0; }
