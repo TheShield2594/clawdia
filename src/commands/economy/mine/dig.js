@@ -519,8 +519,10 @@ async function handleDig(interaction) {
             }
         }
 
-        // Result artwork — the mined ore's icon as the embed thumbnail (emoji fallback).
-        const oreFiles = result.success
+        // Result artwork — the mined ore's icon as the embed thumbnail (emoji
+        // fallback). An abandoned cave-in keeps result.success true but revokes
+        // the haul, so it shows no ore art — same guard as the rare-pet drop above.
+        const oreFiles = result.success && !result.caveInAbandoned
             ? await attachResultThumbnail(embed, 'mine', result.ore, interaction.guild.id)
             : [];
 

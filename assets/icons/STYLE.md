@@ -238,7 +238,7 @@ any icon fails.
 ```
 build-manifest.mjs    (game data -> manifest.json + icons.map.json seed)     free, local
 generate_image_batch  (gpt_image_2_5, background: transparent, B3 style,
-                       anchor via image_references)                           ~1 credit each
+                       anchor via image_references)                           ~2 credits each (high; 1 at medium)
         ↓  record every job_id in icons.map.json   ← do this immediately
         ↓  download from Higgsfield (the CDN is reachable from your machine,
            not from a Claude Code web session behind the egress proxy)
@@ -249,7 +249,7 @@ prep-icons.mjs        (trim -> center -> pad -> 256px -> compress)            fr
 dashboard economy panel -> ItemImage collection                              manual upload
 ```
 
-Only generation costs credits: ~1 per icon, nothing after that.
+Only generation costs credits: ~2 per icon at `quality: high` (1 at `medium`), nothing after that.
 
 ## How the app uses them — baked-in defaults (no upload needed)
 
@@ -350,7 +350,7 @@ Price text across every banner is gold `#f1c40f`.
 ## Next steps — bake them in (no manual work)
 
 Run the **Bake item icons** workflow (Actions tab → `workflow_dispatch`) on this
-branch. It downloads all 118 from the CDN, normalizes them, and commits them to
+branch. It downloads all 262 from the CDN, normalizes them, and commits them to
 `src/assets/item-icons/`. After that they're the default art everywhere — no
 download, no upload. Re-run it any time the map changes.
 
