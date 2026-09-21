@@ -39,6 +39,7 @@ router.use((req, res, next) => {
 
 const settingsRouter = require('./api/settings');
 router.use(settingsRouter);
+router.use(require('./api/session'));
 router.use(require('./api/stats'));
 router.use(require('./api/autorole'));
 router.use(require('./api/reactionRoles'));
