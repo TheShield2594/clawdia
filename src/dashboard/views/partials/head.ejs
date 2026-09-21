@@ -33,7 +33,7 @@
     it is still two round trips of it. A preload moves the fetch to the first,
     alongside the stylesheets.
 
-    Only the latin subsets of Inter Tight 400 and 600, and deliberately so: a
+    Only the latin subsets of Hanken Grotesk 400 and 600, and deliberately so: a
     preload for a face the page does not end up rendering is a wasted download
     that also warns in the console. 400 is the body text and 600 is every heading
     and label, on all three pages; every other weight, family and subset stays
@@ -61,8 +61,8 @@
     different <head> from a plain checkout. Neither is worth a request that is
     already parallel.
 -%>
-<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/inter-tight-400-latin.woff2">
-<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/inter-tight-600-latin.woff2">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/hanken-grotesk-400-latin.woff2">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/hanken-grotesk-600-latin.woff2">
 <link rel="stylesheet" href="<%= asset('/fonts/fonts.css') %>">
 <link rel="stylesheet" href="<%= asset('/styles.css') %>">
 <%#

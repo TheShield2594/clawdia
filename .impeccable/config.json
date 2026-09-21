@@ -5,12 +5,6 @@
     "ignoreValues": [
       {
         "rule": "overused-font",
-        "value": "inter",
-        "createdAt": "2026-09-21T13:17:19.714Z",
-        "reason": "Clawdia brand type (Inter Tight); user confirmed"
-      },
-      {
-        "rule": "overused-font",
         "value": "instrument serif",
         "createdAt": "2026-09-21T13:17:20.452Z",
         "reason": "Clawdia brand display face; user confirmed"
