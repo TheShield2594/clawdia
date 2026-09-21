@@ -68,10 +68,16 @@ function getDefaultItemImage(itemId) {
     return { data: buf, type: 'image/png' };
 }
 
+/** Whether a bundled default ships for this item, without reading its bytes. */
+function hasDefaultItemImage(itemId) {
+    if (!index) index = buildIndex();
+    return index.has(itemId);
+}
+
 /** Test seam: drop the cached directory listing and buffers. */
 function _reset() {
     index = null;
     bufferCache.clear();
 }
 
-module.exports = { getDefaultItemImage, _reset, ICON_DIR };
+module.exports = { getDefaultItemImage, hasDefaultItemImage, _reset, ICON_DIR };

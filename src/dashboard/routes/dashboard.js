@@ -7,6 +7,7 @@ const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { ACHIEVEMENTS } = require('../../data/achievements');
 const { ensureDefaultShopItems } = require('../../data/defaultShopItems');
 const { ACTIVITY_ITEMS } = require('../../data/activityItems');
+const { hasDefaultItemImage } = require('../../utils/defaultItemImages');
 const { REGION_LIST } = require('../../data/exploreData');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 
@@ -179,10 +180,18 @@ async function buildGuildSettingsLocals(req) {
     // The item list itself comes from data/activityItems.js, which is also what
     // the upload route validates against — one catalog, so the panel cannot
     // offer an id the route would refuse.
+    // An item shows its <img> when this guild uploaded one *or* the app ships a
+    // bundled default for it (src/utils/defaultItemImages.js) — the same two
+    // sources the activity image route serves, so the flag matches what the
+    // route returns. Without the default check, a catalogued item with no upload
+    // renders only its emoji and never requests the icon that does ship.
     const withImageFlags = groups => Object.fromEntries(
         Object.entries(groups).map(([group, items]) => [
             group,
-            items.map(item => ({ ...item, hasImage: uploadedImageIds.has(item.id) })),
+            items.map(item => ({
+                ...item,
+                hasImage: uploadedImageIds.has(item.id) || hasDefaultItemImage(item.id),
+            })),
         ])
     );
 
