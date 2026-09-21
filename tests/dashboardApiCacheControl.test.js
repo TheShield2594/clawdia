@@ -103,6 +103,9 @@ describe('a route with its own policy still overrides it', () => {
             path.join(__dirname, '..', 'src', 'dashboard', 'routes', 'api', 'itemImages.js'),
             'utf8',
         );
-        expect(source.match(/'Cache-Control', 'private, max-age=86400'/g)).toHaveLength(2);
+        // Three read paths declare it: the shop route, the activity route, and
+        // the shared bundled-default sender (trySendBundledDefault) that both
+        // routes fall through to.
+        expect(source.match(/'Cache-Control', 'private, max-age=86400'/g)).toHaveLength(3);
     });
 });

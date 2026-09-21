@@ -7,6 +7,7 @@ const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/
 const { readRateLimitOptions } = require('../../lib/readRateLimit');
 const { isActivityItemId } = require('../../../data/activityItems');
 const { shopImageId } = require('../../../models/itemImageKeys');
+const { getDefaultItemImage } = require('../../../utils/defaultItemImages');
 
 // Recognised read limiter for the item-image reads. They are <img> subresources
 // a single page loads in bulk (the activity-items page renders the whole
@@ -52,6 +53,22 @@ function uploadImage(req, res, next) {
     });
 }
 
+// The catalogue artwork bundled with the app (utils/defaultItemImages.js) is
+// the standard: when it ships art for an item it is served here, overriding any
+// guild upload, so the dashboard preview matches what players see in Discord.
+// Returns true once it has sent the default; callers fall through to the
+// uploaded image (and then 404) only for items the catalogue does not cover.
+// `itemId` is the storage key for activity items (`hunt:steel_rifle`) and the
+// bare id for shop items (`lucky_charm`) — the same keys the defaults use.
+function trySendBundledDefault(res, itemId) {
+    const def = getDefaultItemImage(itemId);
+    if (!def) return false;
+    res.set('Content-Type', def.type);
+    res.set('Cache-Control', 'private, max-age=86400');
+    res.send(def.data);
+    return true;
+}
+
 // Serves a guild shop item's image.
 //
 // Authenticated and guild-scoped like every other route here (#565). It was
@@ -67,6 +84,8 @@ function uploadImage(req, res, next) {
 // and an item id could read that guild's uploaded artwork.
 router.get('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
     try {
+        // The bundled catalogue is the standard and overrides uploads.
+        if (trySendBundledDefault(res, req.params.itemId)) return;
         // One keyed lookup on `{ guildId, itemId }` against a document holding
         // one image, rather than a read of the whole guild settings document to
         // find one element of its shop array (#888).
@@ -188,6 +207,8 @@ function invalidItemId(itemId) {
 router.get('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId, itemId } = req.params;
     try {
+        // The bundled catalogue is the standard and overrides uploads.
+        if (trySendBundledDefault(res, itemId)) return;
         const img = await ItemImage.findOne({ guildId, itemId })
             || await ItemImage.findOne({ guildId: null, itemId });
         if (!img?.imageData?.length) return res.status(404).end();

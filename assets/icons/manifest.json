@@ -1,0 +1,1064 @@
+[
+  {
+    "index": 0,
+    "key": "hunt:wooden_rifle",
+    "file": "hunt__wooden_rifle.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: raw timber barrel and receiver, plain wooden stock, a rope-wrapped grip. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 1,
+    "key": "hunt:iron_rifle",
+    "file": "hunt__iron_rifle.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: forged iron barrel and receiver, plain wooden stock, a riveted iron band around the barrel. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 2,
+    "key": "hunt:copper_rifle",
+    "file": "hunt__copper_rifle.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: polished copper and brass barrel and receiver, dark wooden stock, delicate engraved scrollwork. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 3,
+    "key": "hunt:steel_rifle",
+    "file": "hunt__steel_rifle.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: polished steel barrel and receiver, dark synthetic stock, a compact telescopic scope mounted on top. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 4,
+    "key": "hunt:cobalt_rifle",
+    "file": "hunt__cobalt_rifle.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: cobalt-blue alloy barrel and receiver, dark synthetic stock, a telescopic scope, and a faint blue energy glow running along the barrel. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 5,
+    "key": "hunt:gold_rifle",
+    "file": "hunt__gold_rifle.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: gleaming gold barrel and receiver, dark lacquered stock, ornate engraved filigree, a telescopic scope, glowing accents. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 6,
+    "key": "hunt:platinum_rifle",
+    "file": "hunt__platinum_rifle.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: sleek white platinum all-metal frame with no wooden parts, a telescopic scope, subtle glowing accents. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 7,
+    "key": "hunt:crimson_rifle",
+    "file": "hunt__crimson_rifle.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: crimson-lacquered iron barrel and receiver, black grip, a telescopic scope, glowing red runes and wisps of muzzle smoke. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 8,
+    "key": "hunt:adamantine_rifle",
+    "file": "hunt__adamantine_rifle.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: dark adamantine metal barrel and receiver with faceted armor plating, armored grip, a telescopic scope, glowing accents. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 9,
+    "key": "hunt:fateful_rifle",
+    "file": "hunt__fateful_rifle.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: void-black metal barrel and receiver wrapped in woven glowing fate-threads, void-black grip, a telescopic scope. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 10,
+    "key": "hunt:angelic_rifle",
+    "file": "hunt__angelic_rifle.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: white and pale-gold barrel and receiver with feathered wing motifs and a golden halo, white grip, a telescopic scope, a radiant divine glow. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 11,
+    "key": "hunt:altair_rifle",
+    "file": "hunt__altair_rifle.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: Same silhouette as a basic hunting rifle: cosmic blue-black barrel and receiver with a swirling starfield surface and glowing constellation points, a telescopic scope, a cosmic glow. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 12,
+    "key": "fish:bamboo_rod",
+    "file": "fish__bamboo_rod.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: Same silhouette as a fishing rod: a natural bamboo rod shaft with a simple cord wrap, no reel, fishing line hanging with a small hook. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 13,
+    "key": "fish:fiberglass_rod",
+    "file": "fish__fiberglass_rod.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: Same silhouette as a fishing rod: a green fiberglass rod shaft with a simple spinning reel, fishing line and a small hook. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 14,
+    "key": "fish:carbon_rod",
+    "file": "fish__carbon_rod.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: Same silhouette as a fishing rod: a black carbon-fiber rod shaft with a precision spinning reel and metal handle, fishing line and a small hook. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 15,
+    "key": "fish:titanium_rod",
+    "file": "fish__titanium_rod.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: Same silhouette as a fishing rod: a polished titanium rod shaft with a high-end machined reel and a subtle metallic sheen, fishing line and a small hook. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 16,
+    "key": "fish:crystal_rod",
+    "file": "fish__crystal_rod.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: Same silhouette as a fishing rod: a translucent glowing crystal rod shaft with an ornate reel and a soft magical glow, enchanted line with a shimmering lure. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 17,
+    "key": "mine:wooden_pickaxe",
+    "file": "mine__wooden_pickaxe.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: Same silhouette as a mining pickaxe: a rough hewn stone-and-wood head on a sturdy wooden handle. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 18,
+    "key": "mine:iron_pickaxe",
+    "file": "mine__iron_pickaxe.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: Same silhouette as a mining pickaxe: a forged iron head on a wooden handle with a riveted band. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 19,
+    "key": "mine:steel_pickaxe",
+    "file": "mine__steel_pickaxe.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: Same silhouette as a mining pickaxe: a hardened polished steel head on a reinforced wooden handle. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 20,
+    "key": "mine:diamond_pickaxe",
+    "file": "mine__diamond_pickaxe.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: Same silhouette as a mining pickaxe: a steel head tipped with glittering diamond edges on a metal-banded handle, a faint sparkle. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 21,
+    "key": "mine:void_pickaxe",
+    "file": "mine__void_pickaxe.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: Same silhouette as a mining pickaxe: a dark void-matter head wreathed in purple smoke on an obsidian handle, a soft purple magical glow. Angled diagonally from lower-left to upper-right. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 22,
+    "key": "hunt:rifled_barrel",
+    "file": "hunt__rifled_barrel.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a machined steel rifle barrel section with visible internal rifling grooves. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 23,
+    "key": "hunt:scope",
+    "file": "hunt__scope.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a compact black telescopic rifle scope with glass lenses and adjustment turrets. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 24,
+    "key": "hunt:reinforced_stock",
+    "file": "hunt__reinforced_stock.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a heavy-duty reinforced rifle stock padded with metal bracing. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 25,
+    "key": "fish:enhanced_line",
+    "file": "fish__enhanced_line.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a spool of strong braided fishing line, a neat coil of thin high-tensile line. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 26,
+    "key": "fish:polarized_lens",
+    "file": "fish__polarized_lens.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a pair of polarized sunglasses with sleek dark frames and a blue reflective sheen. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 27,
+    "key": "fish:reinforced_grip",
+    "file": "fish__reinforced_grip.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a reinforced rubber fishing-rod grip handle with metal bracing. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 28,
+    "key": "mine:tempered_edge",
+    "file": "mine__tempered_edge.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a gleaming honed tempered pickaxe blade edge. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 29,
+    "key": "mine:gem_lens",
+    "file": "mine__gem_lens.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a jeweler's gem loupe, a small magnifying lens in a metal frame with a faint gem sparkle. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 30,
+    "key": "mine:reinforced_handle",
+    "file": "mine__reinforced_handle.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a reinforced pickaxe handle wrapped in metal bracing and grip tape. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 31,
+    "key": "hunt:iron_shot_pack",
+    "file": "hunt__iron_shot_pack.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: an open cardboard box of iron shotgun shells, brass-capped orange shells spilling out. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 32,
+    "key": "hunt:steel_shot_pack",
+    "file": "hunt__steel_shot_pack.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: an open cardboard box of dark steel shotgun shells with gunmetal casings. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 33,
+    "key": "hunt:composite_round_pack",
+    "file": "hunt__composite_round_pack.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: an open box of sleek blue composite rifle rounds. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 34,
+    "key": "hunt:titanium_round_pack",
+    "file": "hunt__titanium_round_pack.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: an open box of gleaming titanium rifle rounds with a diamond sheen. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 35,
+    "key": "fish:worm_bait_pack",
+    "file": "fish__worm_bait_pack.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a small plastic tub of pink fishing worms. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 36,
+    "key": "fish:shrimp_bait_pack",
+    "file": "fish__shrimp_bait_pack.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a small tub of pink shrimp bait. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 37,
+    "key": "fish:lure_pack",
+    "file": "fish__lure_pack.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a set of shiny metal fishing lures with treble hooks. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 38,
+    "key": "fish:enchanted_lure_pack",
+    "file": "fish__enchanted_lure_pack.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a set of glowing enchanted fishing lures shedding sparkles. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 39,
+    "key": "mine:iron_blast_pack",
+    "file": "mine__iron_blast_pack.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a bundle of iron blasting charges tied together with a fuse. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 40,
+    "key": "mine:steel_blast_pack",
+    "file": "mine__steel_blast_pack.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a cluster of round steel bombs with short lit fuses. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 41,
+    "key": "mine:explosive_charge_pack",
+    "file": "mine__explosive_charge_pack.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a bundle of red dynamite explosive charges tied together. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 42,
+    "key": "mine:void_charge_pack",
+    "file": "mine__void_charge_pack.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a cluster of glowing purple void-energy orbs. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 43,
+    "key": "hunt:basic_bait",
+    "file": "hunt__basic_bait.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a small open pouch of hunting bait feed pellets. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 44,
+    "key": "hunt:premium_bait",
+    "file": "hunt__premium_bait.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a premium hunting bait pouch with a golden tag and richer feed pellets. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 45,
+    "key": "hunt:luck_charm",
+    "file": "hunt__luck_charm.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a four-leaf clover lucky charm on a small chain. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 46,
+    "key": "hunt:hunters_focus",
+    "file": "hunt__hunters_focus.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a red-and-white archery target with an arrow struck in the bullseye. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 47,
+    "key": "hunt:repair_kit_small",
+    "file": "hunt__repair_kit_small.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a small open toolkit with a wrench and a screwdriver. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 48,
+    "key": "hunt:repair_kit_large",
+    "file": "hunt__repair_kit_large.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a large open toolbox with a hammer and assorted tools. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 49,
+    "key": "hunt:stamina_tonic",
+    "file": "hunt__stamina_tonic.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a glowing yellow energy tonic in a small glass bottle with a lightning-bolt label. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 50,
+    "key": "hunt:xp_scroll",
+    "file": "hunt__xp_scroll.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: an unrolled parchment scroll glowing with arcane symbols. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 51,
+    "key": "fish:chum_bait",
+    "file": "fish__chum_bait.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a metal bucket of fish chum bait. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 52,
+    "key": "fish:premium_chum",
+    "file": "fish__premium_chum.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a premium metal bucket of shrimp chum with a golden tag. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 53,
+    "key": "fish:anglers_luck",
+    "file": "fish__anglers_luck.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a four-leaf clover charm tied to a red-and-white fishing bobber. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 54,
+    "key": "fish:fish_xp_scroll",
+    "file": "fish__fish_xp_scroll.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: an unrolled parchment scroll glowing with blue aquatic runes. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 55,
+    "key": "fish:repair_kit_small",
+    "file": "fish__repair_kit_small.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a small open toolkit with a wrench and a screwdriver. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 56,
+    "key": "fish:repair_kit_large",
+    "file": "fish__repair_kit_large.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a large open toolbox with a hammer and assorted tools. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 57,
+    "key": "fish:energy_drink",
+    "file": "fish__energy_drink.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a tall can of energy drink with a lightning-bolt logo. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 58,
+    "key": "fish:hunters_brew",
+    "file": "fish__hunters_brew.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a bubbling brown potion in a glass Erlenmeyer flask. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 59,
+    "key": "mine:ore_magnet",
+    "file": "mine__ore_magnet.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a red horseshoe magnet attracting small chunks of ore. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 60,
+    "key": "mine:premium_magnet",
+    "file": "mine__premium_magnet.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a large premium magnet with golden accents attracting glowing ore. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 61,
+    "key": "mine:miners_lamp",
+    "file": "mine__miners_lamp.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a glowing brass miner's oil lamp. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 62,
+    "key": "mine:miners_instinct",
+    "file": "mine__miners_instinct.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a glowing brass compass with a crystal needle. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 63,
+    "key": "mine:repair_kit_small",
+    "file": "mine__repair_kit_small.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a small open toolkit with a wrench and a screwdriver. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 64,
+    "key": "mine:repair_kit_large",
+    "file": "mine__repair_kit_large.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a large open toolbox with a hammer and assorted tools. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 65,
+    "key": "mine:energy_tonic",
+    "file": "mine__energy_tonic.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a bubbling green stamina tonic in a glass flask. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 66,
+    "key": "mine:xp_scroll",
+    "file": "mine__xp_scroll.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: an unrolled parchment scroll glowing with arcane symbols. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 67,
+    "key": "mine:mine_lock",
+    "file": "mine__mine_lock.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a heavy iron padlock clamped shut over crossed pickaxes. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 68,
+    "key": "hunt:beginner_forest",
+    "file": "hunt__beginner_forest.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a round scene emblem of a peaceful green pine forest lit by sunlight. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 69,
+    "key": "hunt:desert_wastes",
+    "file": "hunt__desert_wastes.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a round scene emblem of a harsh sandy desert with dunes and a cactus under a hot sun. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 70,
+    "key": "hunt:arctic_tundra",
+    "file": "hunt__arctic_tundra.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a round scene emblem of a snowy frozen tundra with ice and distant white mountains. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 71,
+    "key": "hunt:murky_swamp",
+    "file": "hunt__murky_swamp.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a round scene emblem of a misty green swamp with murky water, reeds and gnarled trees. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 72,
+    "key": "hunt:legendary_peaks",
+    "file": "hunt__legendary_peaks.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a round scene emblem of towering majestic snow-capped mountain peaks glowing at dawn. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 73,
+    "key": "fish:pond",
+    "file": "fish__pond.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a round scene emblem of a calm pond with lily pads ringed by green reeds. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 74,
+    "key": "fish:river",
+    "file": "fish__river.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a round scene emblem of a fast-flowing blue river between grassy banks. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 75,
+    "key": "fish:lake",
+    "file": "fish__lake.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a round scene emblem of a vast misty blue lake with mountains behind it. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 76,
+    "key": "fish:ocean",
+    "file": "fish__ocean.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a round scene emblem of the open ocean with big rolling blue waves. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 77,
+    "key": "fish:deep_sea",
+    "file": "fish__deep_sea.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a round scene emblem of the dark crushing deep-sea abyss with faint bioluminescent glow. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 78,
+    "key": "mine:surface_quarry",
+    "file": "mine__surface_quarry.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a round scene emblem of a sunlit open-pit rock quarry with grey boulders. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 79,
+    "key": "mine:coal_tunnels",
+    "file": "mine__coal_tunnels.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a round scene emblem of dark sooty mine tunnels with black coal seams and timber supports. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 80,
+    "key": "mine:iron_mines",
+    "file": "mine__iron_mines.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a round scene emblem of deep mine tunnels with rusty-red iron ore veins in the rock. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 81,
+    "key": "mine:crystal_caves",
+    "file": "mine__crystal_caves.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a round scene emblem of a glittering cavern with glowing blue crystals growing from the walls. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 82,
+    "key": "mine:the_abyss",
+    "file": "mine__the_abyss.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a round scene emblem of a bottomless dark mining fissure glowing with veins of treasure far below. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 83,
+    "key": "padlock",
+    "file": "padlock.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a sturdy metal padlock clasped shut over a small bank vault. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 84,
+    "key": "shield",
+    "file": "shield.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a polished heraldic shield with a few battle dents and a glowing edge. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 85,
+    "key": "invisibility_cloak",
+    "file": "invisibility_cloak.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a translucent shimmering hooded cloak, partly see-through, shedding faint sparkles. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 86,
+    "key": "knife",
+    "file": "knife.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a sharp curved combat knife with a dark wrapped handle. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 87,
+    "key": "robbery_bag",
+    "file": "robbery_bag.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a bulging burlap money sack marked with a dollar sign. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 88,
+    "key": "lifesaver",
+    "file": "lifesaver.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a red-and-white ring life preserver. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 89,
+    "key": "lucky_charm",
+    "file": "lucky_charm.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a four-leaf clover charm with a small golden horseshoe and a thin gold clasp. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 90,
+    "key": "streak_shield",
+    "file": "streak_shield.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a shield with a small glowing flame ember emblem in the center. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 91,
+    "key": "streak_freeze",
+    "file": "streak_freeze.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a glowing blue ice cube with a small flame frozen inside it. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 92,
+    "key": "tier_skip_token",
+    "file": "tier_skip_token.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a golden token coin stamped with a fast-forward skip arrow. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 93,
+    "key": "coin_booster_2x",
+    "file": "coin_booster_2x.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a stack of gold coins launching upward on a rocket flame. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 94,
+    "key": "xp_booster_2x",
+    "file": "xp_booster_2x.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a glowing blue bottle emitting a bright star, a jolt of energy. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 95,
+    "key": "lucky_streak",
+    "file": "lucky_streak.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a glowing golden dart striking a bullseye target with sparkles. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 96,
+    "key": "salary_raise",
+    "file": "salary_raise.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a rising green financial arrow over a paycheck. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 97,
+    "key": "pet_food",
+    "file": "pet_food.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a bowl of brown kibble pet food with a bone beside it. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 98,
+    "key": "revive_scroll",
+    "file": "revive_scroll.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a glowing parchment scroll marked with a green phoenix rune. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 99,
+    "key": "custom_job_title",
+    "file": "custom_job_title.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: an engraved blank golden name plate. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 100,
+    "key": "vip_badge",
+    "file": "vip_badge.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a shiny diamond-studded VIP badge medallion. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 101,
+    "key": "golden_profile_frame",
+    "file": "golden_profile_frame.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: an ornate empty golden picture frame with gold accents. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 102,
+    "key": "server_trophy",
+    "file": "server_trophy.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a golden winner's trophy cup. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 103,
+    "key": "zone_unlock_token",
+    "file": "zone_unlock_token.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a glowing golden token coin stamped with a map and compass. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 104,
+    "key": "pet_slot_expansion",
+    "file": "pet_slot_expansion.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a glowing paw-print emblem with a small plus sign. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 105,
+    "key": "permanent_stamina",
+    "file": "permanent_stamina.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a radiant yellow lightning bolt with a small plus sign. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 106,
+    "key": "prestige_accelerator",
+    "file": "prestige_accelerator.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a glowing rocket launching upward on a star trail. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 107,
+    "key": "diamond_profile_frame",
+    "file": "diamond_profile_frame.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: an ornate empty crystal-diamond picture frame sparkling blue. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 108,
+    "key": "title_sovereign",
+    "file": "title_sovereign.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: an ornate royal golden crown on purple velvet with a regal glow. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 109,
+    "key": "prestige_aura",
+    "file": "prestige_aura.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a glowing radiant orb wreathed in a swirl of golden light. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 110,
+    "key": "grand_master_badge",
+    "file": "grand_master_badge.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: an ornate golden master's medal framed by laurel branches. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 111,
+    "key": "title_apex_legend",
+    "file": "title_apex_legend.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a radiant golden winged star crest. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 112,
+    "key": "phantom_token",
+    "file": "phantom_token.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a translucent ghostly coin token with a faint glow. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 113,
+    "key": "silvered_talisman",
+    "file": "silvered_talisman.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: an ornate engraved silver coin talisman on a chain. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 114,
+    "key": "black_market_contract",
+    "file": "black_market_contract.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a rolled dark parchment contract sealed with black wax and a quill. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 115,
+    "key": "voidsteel_cache",
+    "file": "voidsteel_cache.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a dark metal treasure chest overflowing with glowing void-blue coins. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 116,
+    "key": "ghost_ledger",
+    "file": "ghost_ledger.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: an old ledger book with ghostly fading ink entries and a faint glow. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 117,
+    "key": "obsidian_crown",
+    "file": "obsidian_crown.png",
+    "rarity": "Mythic",
+    "rim": "molten-orange",
+    "rimHex": "#FF6600",
+    "prompt": "Game item icon: a dark obsidian crown with sharp black points and a subtle glow. Style: bold cartoon game icon, thick molten-orange rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  }
+]

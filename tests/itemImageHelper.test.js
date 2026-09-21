@@ -4,7 +4,15 @@ jest.mock('../src/models/ItemImage', () => ({
     find: jest.fn(),
 }));
 
+// The bundled-default fallback reads the filesystem; mock it so these tests
+// stay about the lookup, and control what art "ships" per test. Default is
+// "nothing bundled", which keeps the pre-fallback expectations (null on miss).
+jest.mock('../src/utils/defaultItemImages', () => ({
+    getDefaultItemImage: jest.fn(() => null),
+}));
+
 const ItemImage = require('../src/models/ItemImage');
+const { getDefaultItemImage } = require('../src/utils/defaultItemImages');
 const { getItemImageAttachment } = require('../src/utils/itemImageHelper');
 
 /** The rows the one query answers with. */
@@ -16,6 +24,8 @@ describe('getItemImageAttachment', () => {
     beforeEach(() => {
         ItemImage.find.mockReset();
         rows();
+        getDefaultItemImage.mockReset();
+        getDefaultItemImage.mockReturnValue(null);
     });
 
     test('sanitizes colon-containing itemIds (hunt/fish/mine activity items) so the attachment filename stays valid', async () => {
@@ -37,10 +47,37 @@ describe('getItemImageAttachment', () => {
         expect(result.url).toBe('attachment://item-plain_item.jpg');
     });
 
-    test('returns null when no image is stored anywhere', async () => {
+    test('returns null when no image is stored anywhere and none is bundled', async () => {
         const result = await getItemImageAttachment('hunt:nonexistent');
 
         expect(result).toBeNull();
+    });
+
+    // The generated catalogue ships in the app, so an item renders its icon even
+    // when no guild has uploaded one. The upload is an override, not a
+    // requirement.
+    test('falls back to the bundled default when nothing is stored', async () => {
+        rows();
+        getDefaultItemImage.mockReturnValue({ data: Buffer.from('baked-png'), type: 'image/png' });
+
+        const result = await getItemImageAttachment('hunt:steel_rifle', 'g1');
+
+        expect(result).not.toBeNull();
+        expect(result.attachment.name).toBe('item-hunt_steel_rifle.png');
+        expect(getDefaultItemImage).toHaveBeenCalledWith('hunt:steel_rifle');
+    });
+
+    // The catalogue is the standard: a bundled icon overrides a guild upload of
+    // the same item, and the DB is not even consulted.
+    test('the bundled default overrides a guild upload', async () => {
+        rows({ guildId: 'g1', itemId: 'shop:lucky_charm', ...png('uploaded') });
+        getDefaultItemImage.mockReturnValue({ data: Buffer.from('baked'), type: 'image/png' });
+
+        const result = await getItemImageAttachment('lucky_charm', 'g1');
+
+        expect(result).not.toBeNull();
+        expect(getDefaultItemImage).toHaveBeenCalledWith('lucky_charm');
+        expect(ItemImage.find).not.toHaveBeenCalled();
     });
 
     // #888. The shop image is a row in the same collection now, under a

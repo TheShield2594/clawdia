@@ -11,38 +11,54 @@ const { AttachmentBuilder } = require('discord.js');
  * should pass it: activity images (hunt/fish/mine) are per guild since #561,
  * and a lookup without one can only find the shared pre-#561 image.
  *
- * Three places are checked, most specific first: the guild's own shop image,
- * then that guild's activity image, then the shared image left over from when
- * the collection was global. All three are rows in `itemimages` since #888 —
- * the first used to be a scan of the guild settings document's shop array,
- * which meant loading every other item's Buffer to find one of them.
+ * The artwork bundled with the app (defaultItemImages.js) is the standard: when
+ * the generated catalogue ships art for this item it is used, and it overrides
+ * any guild upload of the same item, so the set is uniform across every server.
+ * A guild upload therefore only applies to items the catalogue does *not* cover
+ * — custom shop items an admin named themselves, and anything new.
+ *
+ * When nothing is bundled, uploads decide it, most specific first: the guild's
+ * own shop image, then its activity image, then the shared image left over from
+ * when the collection was global (#561). Those three are rows in `itemimages`
+ * (#888), read in one query rather than up to three round trips.
  */
 async function getItemImageAttachment(itemId, guildId = null, { label } = {}) {
-    const ItemImage = require('../models/ItemImage');
-    const { shopImageId } = require('../models/itemImageKeys');
+    const { getDefaultItemImage } = require('./defaultItemImages');
 
-    // All three candidates are rows in one collection, so they are one query
-    // rather than up to three round trips resolved in precedence order. The
-    // shared pre-#561 row is only ever an activity id; a `shop:` key is always
-    // this guild's own.
-    const candidates = guildId
-        ? await ItemImage.find({
-            guildId: { $in: [guildId, null] },
-            itemId: { $in: [shopImageId(itemId), itemId] },
-        })
-        : await ItemImage.find({ guildId: null, itemId });
+    let imageData;
+    let imageType;
 
-    // Most specific first: this guild's shop image, then its activity image,
-    // then the shared one.
-    const rank = doc => (doc.itemId !== itemId ? 0 : doc.guildId != null ? 1 : 2);
-    const best = [...candidates]
-        .filter(doc => doc?.imageData?.length)
-        .sort((a, b) => rank(a) - rank(b))[0];
+    const bundled = getDefaultItemImage(itemId);
+    if (bundled) {
+        // The catalogue is authoritative — no DB read, and a guild upload for a
+        // catalogued item does not override it.
+        imageData = bundled.data;
+        imageType = bundled.type;
+    } else {
+        const ItemImage = require('../models/ItemImage');
+        const { shopImageId } = require('../models/itemImageKeys');
 
-    if (!best) return null;
+        // All candidates are rows in one collection, so they are one query
+        // rather than up to three round trips. The shared pre-#561 row is only
+        // ever an activity id; a `shop:` key is always this guild's own.
+        const candidates = guildId
+            ? await ItemImage.find({
+                guildId: { $in: [guildId, null] },
+                itemId: { $in: [shopImageId(itemId), itemId] },
+            })
+            : await ItemImage.find({ guildId: null, itemId });
 
-    const imageData = best.imageData;
-    const imageType = best.imageType || 'image/png';
+        // Most specific first: this guild's shop image, then its activity image,
+        // then the shared one.
+        const rank = doc => (doc.itemId !== itemId ? 0 : doc.guildId != null ? 1 : 2);
+        const best = [...candidates]
+            .filter(doc => doc?.imageData?.length)
+            .sort((a, b) => rank(a) - rank(b))[0];
+
+        if (!best) return null;
+        imageData = best.imageData;
+        imageType = best.imageType || 'image/png';
+    }
 
     const ext = (imageType.split('/')[1] || 'png').replace('jpeg', 'jpg');
     // itemId may contain characters (e.g. the `system:slug` colon used by
