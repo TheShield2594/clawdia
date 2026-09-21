@@ -161,5 +161,5 @@ Character-portrait framing (front-facing mascot) on the same B3 rim + flat shadi
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212038_7c72e3c2-6715-4cff-927a-bba496bad715.png" width="72"> | Lantern Owl | Legendary | `pet:lantern_owl` |
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212122_e61c45c9-2510-4452-af18-f0e8c887a1b0.png" width="72"> | Wild Boar | Common | `pet:wild_boar` |
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212122_bb9be24e-5ec0-4ae8-9bf0-24a60d3814a8.png" width="72"> | Feral Cat | Common | `pet:feral_cat` |
-| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212122_42e520f9-8d55-4189-bc62-1af19a03f158.png" width="72"> | Stray Hound | Common | `pet:stray_hound` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_213613_093d2fac-070e-43f7-b3b4-d4e252dc81f8.png" width="72"> | Stray Hound | Common | `pet:stray_hound` |
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212123_1276a446-370f-43dc-9015-a0984aefd0c9.png" width="72"> | Cave Bat | Common | `pet:cave_bat` |

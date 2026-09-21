@@ -3035,14 +3035,14 @@
     },
     "pet:stray_hound": {
       "file": "pet__stray_hound.png",
-      "jobId": "42e520f9-8d55-4189-bc62-1af19a03f158",
+      "jobId": "093d2fac-070e-43f7-b3b4-d4e252dc81f8",
       "rarity": "Common",
       "rim": "silver-grey",
       "rimHex": "#AAAAAA",
       "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
       "model": "gpt_image_2_5",
       "date": "2026-09-21",
-      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212122_42e520f9-8d55-4189-bc62-1af19a03f158.png"
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_213613_093d2fac-070e-43f7-b3b4-d4e252dc81f8.png"
     },
     "pet:cave_bat": {
       "file": "pet__cave_bat.png",
