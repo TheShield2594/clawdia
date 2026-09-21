@@ -31,6 +31,19 @@ const _chartDefaults = {
     scales: { x: { ticks: { color: '#b8a898', maxTicksLimit: 8 } }, y: { ticks: { color: '#b8a898' } } }
 };
 
+// Warm chart palette (v5): the charts read in the same cream/ink/claw system as
+// the rest of the dashboard — no stray blues, golds or purples. `claw` is the
+// primary, `moss` the positive/membership hue, `terra` the negative, `plum` the
+// secondary categorical, and a warm amber stands in for coins. Each is a
+// function of alpha so a single hue can also serve as a sequential ramp.
+const CHART = {
+    claw:  a => `rgba(217,119,66,${a})`,
+    moss:  a => `rgba(138,152,99,${a})`,
+    terra: a => `rgba(185,76,60,${a})`,
+    plum:  a => `rgba(126,85,112,${a})`,
+    gold:  a => `rgba(217,164,65,${a})`,
+};
+
 /** Sum one numeric key across a daily series, for the chart summaries. */
 function sumBy(rows, key) {
     return rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
@@ -139,8 +152,8 @@ async function renderAnalyticsCharts(data, insights) {
             data: {
                 labels: growthSlice.map(d => d.date.slice(5)),
                 datasets: [
-                    { label: 'Joins', data: growthSlice.map(d => d.joins), backgroundColor: 'rgba(93,138,90,0.7)', borderRadius: 3 },
-                    { label: 'Leaves', data: growthSlice.map(d => d.leaves), backgroundColor: 'rgba(185,76,60,0.6)', borderRadius: 3 }
+                    { label: 'Joins', data: growthSlice.map(d => d.joins), backgroundColor: CHART.moss(0.75), borderRadius: 3 },
+                    { label: 'Leaves', data: growthSlice.map(d => d.leaves), backgroundColor: CHART.terra(0.6), borderRadius: 3 }
                 ]
             },
             options: _chartDefaults
@@ -169,7 +182,7 @@ async function renderAnalyticsCharts(data, insights) {
                 type: 'bar',
                 data: {
                     labels: cmdSlice.map(d => d.date.slice(5)),
-                    datasets: [{ label: 'Commands', data: cmdSlice.map(d => d.count), backgroundColor: 'rgba(217,119,66,0.7)', borderRadius: 3 }]
+                    datasets: [{ label: 'Commands', data: cmdSlice.map(d => d.count), backgroundColor: CHART.claw(0.7), borderRadius: 3 }]
                 },
                 options: _chartDefaults
             });
@@ -178,7 +191,7 @@ async function renderAnalyticsCharts(data, insights) {
                 type: 'bar',
                 data: {
                     labels: cmdRows.map(([cmd]) => '/' + cmd),
-                    datasets: [{ label: 'Total runs', data: cmdRows.map(([,m]) => m.total), backgroundColor: 'rgba(217,119,66,0.7)', borderRadius: 3 }]
+                    datasets: [{ label: 'Total runs', data: cmdRows.map(([,m]) => m.total), backgroundColor: CHART.claw(0.7), borderRadius: 3 }]
                 },
                 options: { ...JSON.parse(JSON.stringify(_chartDefaults)), indexAxis: 'y', plugins: { legend: { display: false } } }
             });
@@ -220,9 +233,9 @@ async function renderAnalyticsCharts(data, insights) {
                 data: {
                     labels: cohorts.map(c => c.cohort),
                     datasets: [
-                        { label: 'D1 %', data: cohorts.map(c => pctOrGap(c.d1Pct)), backgroundColor: 'rgba(93,138,90,0.9)', borderRadius: 3 },
-                        { label: 'D7 %', data: cohorts.map(c => pctOrGap(c.d7Pct)), backgroundColor: 'rgba(93,138,90,0.6)', borderRadius: 3 },
-                        { label: 'D30 %', data: cohorts.map(c => pctOrGap(c.d30Pct)), backgroundColor: 'rgba(93,138,90,0.35)', borderRadius: 3 }
+                        { label: 'D1 %', data: cohorts.map(c => pctOrGap(c.d1Pct)), backgroundColor: CHART.moss(0.9), borderRadius: 3 },
+                        { label: 'D7 %', data: cohorts.map(c => pctOrGap(c.d7Pct)), backgroundColor: CHART.moss(0.6), borderRadius: 3 },
+                        { label: 'D30 %', data: cohorts.map(c => pctOrGap(c.d30Pct)), backgroundColor: CHART.moss(0.35), borderRadius: 3 }
                     ]
                 },
                 options: { ...JSON.parse(JSON.stringify(_chartDefaults)), scales: { ...JSON.parse(JSON.stringify(_chartDefaults.scales)), y: { ticks: { color: '#b8a898' }, max: 100 } } }
@@ -232,7 +245,7 @@ async function renderAnalyticsCharts(data, insights) {
                 type: 'bar',
                 data: {
                     labels: ['D7 retention', 'D30 retention'],
-                    datasets: [{ label: '%', data: [ret7, ret30], backgroundColor: ['rgba(93,138,90,0.8)', 'rgba(93,138,90,0.5)'], borderRadius: 4 }]
+                    datasets: [{ label: '%', data: [ret7, ret30], backgroundColor: [CHART.moss(0.8), CHART.moss(0.5)], borderRadius: 4 }]
                 },
                 options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#b8a898' }, max: 100 }, y: { ticks: { color: '#b8a898', font: { size: 11 } } } } }
             });
@@ -279,8 +292,8 @@ async function renderAnalyticsCharts(data, insights) {
                 data: {
                     labels: ecoSlice.map(d => d.date.slice(5)),
                     datasets: [
-                        { label: 'Coins earned', data: ecoSlice.map(d => d.earned || 0), backgroundColor: 'rgba(230,190,80,0.75)', borderRadius: 3 },
-                        { label: 'Coins spent', data: ecoSlice.map(d => d.spent || 0), backgroundColor: 'rgba(185,76,60,0.6)', borderRadius: 3 }
+                        { label: 'Coins earned', data: ecoSlice.map(d => d.earned || 0), backgroundColor: CHART.gold(0.8), borderRadius: 3 },
+                        { label: 'Coins spent', data: ecoSlice.map(d => d.spent || 0), backgroundColor: CHART.terra(0.6), borderRadius: 3 }
                     ]
                 },
                 options: _chartDefaults
@@ -311,8 +324,8 @@ async function renderAnalyticsCharts(data, insights) {
                 data: {
                     labels: xpSlice.map(d => d.date.slice(5)),
                     datasets: [
-                        { label: 'XP awarded', data: xpSlice.map(d => d.xp || 0), backgroundColor: 'rgba(122,167,255,0.7)', borderRadius: 3 },
-                        { label: 'Level-ups', data: xpSlice.map(d => d.levelUps || 0), backgroundColor: 'rgba(168,120,230,0.7)', borderRadius: 3, yAxisID: 'y2' }
+                        { label: 'XP awarded', data: xpSlice.map(d => d.xp || 0), backgroundColor: CHART.claw(0.7), borderRadius: 3 },
+                        { label: 'Level-ups', data: xpSlice.map(d => d.levelUps || 0), backgroundColor: CHART.plum(0.8), borderRadius: 3, yAxisID: 'y2' }
                     ]
                 },
                 options: { ...JSON.parse(JSON.stringify(_chartDefaults)), scales: { x: { ticks: { color: '#b8a898', maxTicksLimit: 8 } }, y: { ticks: { color: '#b8a898' }, position: 'left' }, y2: { ticks: { color: '#b8a898' }, position: 'right', grid: { drawOnChartArea: false } } } }
@@ -342,7 +355,7 @@ async function renderAnalyticsCharts(data, insights) {
                 type: 'line',
                 data: {
                     labels: aiSlice.map(d => d.date.slice(5)),
-                    datasets: [{ label: 'AI requests', data: aiSlice.map(d => d.count || 0), borderColor: 'rgba(122,167,255,0.9)', backgroundColor: 'rgba(122,167,255,0.15)', fill: true, tension: 0.3, pointRadius: 2 }]
+                    datasets: [{ label: 'AI requests', data: aiSlice.map(d => d.count || 0), borderColor: CHART.claw(0.9), backgroundColor: CHART.claw(0.15), fill: true, tension: 0.3, pointRadius: 2 }]
                 },
                 options: _chartDefaults
             });

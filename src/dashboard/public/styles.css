@@ -1938,10 +1938,12 @@ textarea.auto-resize {
 .heatmap-hour { text-align: center; color: var(--text-dim); }
 .heatmap-label { color: var(--text-dim); white-space: nowrap; align-self: center; }
 .heatmap-cell { aspect-ratio: 1; border-radius: 2px; background: rgba(255, 255, 255, .03); }
-.heatmap-cell.heat-1 { background: rgba(93, 138, 90, .25); }
-.heatmap-cell.heat-2 { background: rgba(93, 138, 90, .45); }
-.heatmap-cell.heat-3 { background: rgba(93, 138, 90, .7); }
-.heatmap-cell.heat-4 { background: rgba(93, 138, 90, .95); }
+/* A claw ramp: warm reads as "heat" for an activity map, and keeps it in the
+   v5 palette rather than the old green. */
+.heatmap-cell.heat-1 { background: rgba(217, 119, 66, .22); }
+.heatmap-cell.heat-2 { background: rgba(217, 119, 66, .42); }
+.heatmap-cell.heat-3 { background: rgba(217, 119, 66, .68); }
+.heatmap-cell.heat-4 { background: rgba(217, 119, 66, .95); }
 .heatmap-note { font-size: .68rem; opacity: .55; margin-top: .4rem; }
 /* Text for a screen reader and no one else — the numbers behind each chart
    beside the canvas (#669), the compare table's caption (#912).
