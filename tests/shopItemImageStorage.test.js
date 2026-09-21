@@ -23,6 +23,17 @@ const express = require('express');
 jest.mock('../src/models/ItemImage');
 jest.mock('../src/models/Guild');
 
+// Since PR #1080 the bundled catalogue (utils/defaultItemImages) overrides
+// uploads for any item it ships art for, and the baked set under
+// src/assets/item-icons/ now includes ITEM. These tests are about the shop
+// item's own DB row (write/delete/read), the path taken for any item the
+// catalogue does not cover, so force the catalogue off to exercise it directly.
+// The bundled-override behaviour has its own coverage.
+jest.mock('../src/utils/defaultItemImages', () => ({
+    ...jest.requireActual('../src/utils/defaultItemImages'),
+    getDefaultItemImage: jest.fn(() => null),
+}));
+
 const ItemImage = require('../src/models/ItemImage');
 const Guild = require('../src/models/Guild');
 const stubBotGateway = require('./helpers/stubBotGateway');
