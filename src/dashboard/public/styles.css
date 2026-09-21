@@ -1232,7 +1232,12 @@ textarea.auto-resize {
 .cw-hero-stats b { font-family: 'Instrument Serif', serif; font-size: 40px; font-weight: 400; }
 .cw-hero-stats span { font-size: 12px; color: var(--ink-500); letter-spacing: 0.06em; text-transform: uppercase; }
 .cw-hero-stats i { width: 1px; height: 38px; background: rgba(0,0,0,.08); display: block; }
-.cw-hero-art { position: absolute; right: 36px; top: 90px; width: 420px; height: 420px; pointer-events: none; }
+/* Clawdia, bottom-right of the hero. Width-driven so the portrait keeps its
+   aspect, bottom-anchored so she sits on the hero's baseline beside the copy,
+   and clamped so she never grows into the headline. Behind the text (z-index 0)
+   and click-through. Shown only where the single-column hero has room to its
+   right — folded away at and below the tablet breakpoint. */
+.cw-hero-art { position: absolute; right: 24px; bottom: 8px; width: clamp(230px, 25vw, 360px); height: auto; pointer-events: none; user-select: none; z-index: 0; }
 
 /* Module strip */
 .cw-strip { background: var(--ink-950); color: var(--cream-100); padding: 22px 48px; }
@@ -1331,6 +1336,13 @@ textarea.auto-resize {
 .cw-cta h2 em { font-style: italic; }
 .cw-cta p { font-size: 19px; opacity: 0.92; max-width: 540px; margin: 0 auto 32px; line-height: 1.5; }
 .cw-cta-btns { display: inline-flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+/* Clawdia's paw, pressed into the corner of the closing band. A faint tonal
+   watermark that gives the flat rust panel some depth — the claw strokes fall
+   away against the same rust, leaving just the darker pad. Decorative and
+   click-through, clipped by the section's own overflow, and held behind the
+   copy. */
+.cw-cta-paw { position: absolute; z-index: 0; right: -44px; bottom: -60px; width: min(42vw, 360px); opacity: 0.1; transform: rotate(-12deg); pointer-events: none; user-select: none; }
+.cw-cta h2, .cw-cta p, .cw-cta-btns { position: relative; z-index: 1; }
 .cw-btn-cream { background: #fff; color: var(--ink-950); }
 .cw-btn-cream:hover { background: var(--cream-100); }
 
@@ -1350,7 +1362,7 @@ textarea.auto-resize {
 /* ── Home page responsive ──────────────────────────── */
 @media (max-width: 1024px) {
     .cw-hero-title { font-size: 72px; }
-    .cw-hero-art { width: 300px; height: 300px; }
+    .cw-hero-art { display: none; }
     .cw-feature-grid { grid-template-columns: repeat(2, 1fr); }
     .cw-show-inner { grid-template-columns: 1fr; }
     .cw-host-inner { grid-template-columns: 1fr; }
@@ -1382,7 +1394,6 @@ textarea.auto-resize {
 @media (max-width: 640px) {
     .cw-hero { padding: 48px 24px 36px; }
     .cw-hero-title { font-size: 48px; line-height: 1.02; margin-bottom: 20px; }
-    .cw-hero-art { display: none; }
     .cw-hero-stats { gap: 20px; flex-wrap: wrap; }
     .cw-section { padding: 60px 24px; }
     .cw-section-header { flex-direction: column; align-items: flex-start; }

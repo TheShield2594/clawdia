@@ -123,19 +123,15 @@
             <div><b>MIT</b><span>open source</span></div>
         </div>
 
-        <!-- Decorative claw mark -->
-        <svg class="cw-hero-art" viewBox="0 0 460 460" fill="none" aria-hidden="true">
-            <ellipse cx="230" cy="320" rx="135" ry="95" fill="#14110d" opacity="0.06"/>
-            <ellipse cx="90" cy="170" rx="42" ry="62" fill="#14110d" opacity="0.06" transform="rotate(-18 90 170)"/>
-            <ellipse cx="180" cy="115" rx="42" ry="65" fill="#14110d" opacity="0.06" transform="rotate(-6 180 115)"/>
-            <ellipse cx="280" cy="115" rx="42" ry="65" fill="#14110d" opacity="0.06" transform="rotate(6 280 115)"/>
-            <ellipse cx="370" cy="170" rx="42" ry="62" fill="#14110d" opacity="0.06" transform="rotate(18 370 170)"/>
-            <g stroke="#d97742" stroke-width="3" stroke-linecap="round" opacity="0.7">
-                <path d="M170 280 Q 180 320 200 360"/>
-                <path d="M220 280 Q 230 322 250 365"/>
-                <path d="M270 280 Q 282 322 300 365"/>
-            </g>
-        </svg>
+        <%# Clawdia herself — a chill cat mid-swipe, the tagline made literal.
+            Decorative: the hero's meaning is carried by the heading and copy, so
+            the mark is hidden from assistive tech rather than announced. The
+            intrinsic width/height keep the box reserved before the PNG lands,
+            and fetchpriority marks it as the one above-the-fold image worth
+            racing the stylesheet for. -%>
+        <img class="cw-hero-art" src="<%= asset('/clawdia-hero.png') %>"
+             width="604" height="900" alt="" aria-hidden="true"
+             decoding="async" fetchpriority="high">
     </header>
 
     <!-- MODULE STRIP -->
@@ -410,6 +406,9 @@
 
     <!-- CTA -->
     <section class="cw-cta">
+        <%# A faint paw pressed into the corner of the closing band — decorative,
+            so hidden from assistive tech; the copy carries the message. -%>
+        <img class="cw-cta-paw" src="<%= asset('/clawdia-paw.png') %>" alt="" aria-hidden="true" decoding="async" loading="lazy">
         <h2 class="font-display">Stop running <em>five bots.</em><br>Start running <em>one.</em></h2>
         <p>Free forever. Open source. Add Clawdia to your server in under a minute, or clone the repo and self-host.</p>
         <div class="cw-cta-btns">
