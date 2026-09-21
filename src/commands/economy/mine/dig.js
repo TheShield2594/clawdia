@@ -35,8 +35,7 @@ const { PITY_COPY } = require('../../../utils/pityBonus');
 const { buildMineEmbed } = require('./embeds');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
-const { getItemImageAttachment } = require('../../../utils/itemImageHelper');
-const { resultItemId } = require('../../../data/activityItems');
+const { attachResultThumbnail } = require('../../../utils/itemImageHelper');
 const { gatherPayoutKey } = require('../../../utils/payoutKey');
 
 // Presentation timings for the pre-dig prompt and the vein read. The ladder itself
@@ -520,18 +519,10 @@ async function handleDig(interaction) {
             }
         }
 
-        // Result artwork — the mined ore's icon as the embed thumbnail, falling
-        // back to its emoji (already in the title) when no art is bundled/uploaded.
-        let oreFiles = [];
-        if (result.success && result.ore?.id) {
-            const oreArt = await getItemImageAttachment(
-                resultItemId('mine', result.ore.id), interaction.guild.id, { label: result.ore.name },
-            ).catch(() => null);
-            if (oreArt) {
-                embed.setThumbnail(oreArt.url);
-                oreFiles = [oreArt.attachment];
-            }
-        }
+        // Result artwork — the mined ore's icon as the embed thumbnail (emoji fallback).
+        const oreFiles = result.success
+            ? await attachResultThumbnail(embed, 'mine', result.ore, interaction.guild.id)
+            : [];
 
         // Staged loot reveal for rare+ drops
         await stagedLootReveal(interaction, result.success ? result.tier : null, embed, 'mine', oreFiles);

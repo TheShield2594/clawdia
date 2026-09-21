@@ -45,8 +45,7 @@ const { logBigWin } = require('../../../utils/bigWinLogger');
 const { PITY_COPY } = require('../../../utils/pityBonus');
 const { FISH_TIER_SCORE } = require('./shared');
 const { buildCastEmbed } = require('./embeds');
-const { getItemImageAttachment } = require('../../../utils/itemImageHelper');
-const { resultItemId } = require('../../../data/activityItems');
+const { attachResultThumbnail } = require('../../../utils/itemImageHelper');
 const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
@@ -332,20 +331,12 @@ async function handleCast(interaction) {
 
         const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
 
-        // Result artwork — the caught fish's icon as the embed thumbnail, falling
-        // back to its emoji (already in the title) when no art is bundled/uploaded.
-        // The attachment must ride with every render of this embed (boss phases
-        // included), so it is resolved once here and threaded through below.
-        let catchFiles = [];
-        if (result.success && result.catchType === 'fish' && result.fish?.id) {
-            const catchArt = await getItemImageAttachment(
-                resultItemId('fish', result.fish.id), interaction.guild.id, { label: result.fish.name },
-            ).catch(() => null);
-            if (catchArt) {
-                embed.setThumbnail(catchArt.url);
-                catchFiles = [catchArt.attachment];
-            }
-        }
+        // Result artwork — the caught fish's icon as the embed thumbnail (emoji
+        // fallback). Threaded through every render of this embed, boss phases
+        // included, so the attachment rides with each one.
+        const catchFiles = result.success && result.catchType === 'fish'
+            ? await attachResultThumbnail(embed, 'fish', result.fish, interaction.guild.id)
+            : [];
 
         if (payoutOwed > 0) {
             embed.addFields({

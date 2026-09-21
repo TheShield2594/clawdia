@@ -44,8 +44,7 @@ const { pickApproachProfile, runAimPhase } = require('./aim');
 const { buildBonusLines, buildHuntEmbed } = require('./embeds');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
-const { getItemImageAttachment } = require('../../../utils/itemImageHelper');
-const { resultItemId } = require('../../../data/activityItems');
+const { attachResultThumbnail } = require('../../../utils/itemImageHelper');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // START (was /hunt)
@@ -313,20 +312,12 @@ async function executeStart(interaction) {
         const timeBand = getTimeBand();
         const embed = buildHuntEmbed(result, user, zone, weapon, currency, interaction.user);
 
-        // Result artwork — the hunted animal's icon as the embed thumbnail,
-        // falling back to its emoji (already in the title) when no art is
-        // bundled/uploaded. The attachment must ride with every render of this
-        // embed (apex phases included), so it is resolved once and threaded below.
-        let catchFiles = [];
-        if (result.success && result.animal?.id) {
-            const catchArt = await getItemImageAttachment(
-                resultItemId('hunt', result.animal.id), interaction.guild.id, { label: result.animal.name },
-            ).catch(() => null);
-            if (catchArt) {
-                embed.setThumbnail(catchArt.url);
-                catchFiles = [catchArt.attachment];
-            }
-        }
+        // Result artwork — the hunted animal's icon as the embed thumbnail (emoji
+        // fallback). Threaded through every render of this embed, apex phases
+        // included, so the attachment rides with each one.
+        const catchFiles = result.success
+            ? await attachResultThumbnail(embed, 'hunt', result.animal, interaction.guild.id)
+            : [];
 
         if (payoutOwed > 0) {
             embed.addFields({
