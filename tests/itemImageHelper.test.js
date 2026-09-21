@@ -13,7 +13,7 @@ jest.mock('../src/utils/defaultItemImages', () => ({
 
 const ItemImage = require('../src/models/ItemImage');
 const { getDefaultItemImage } = require('../src/utils/defaultItemImages');
-const { getItemImageAttachment } = require('../src/utils/itemImageHelper');
+const { getItemImageAttachment, attachItemThumbnail } = require('../src/utils/itemImageHelper');
 
 /** The rows the one query answers with. */
 const rows = (...docs) => ItemImage.find.mockResolvedValue(docs);
@@ -175,5 +175,55 @@ describe('getItemImageAttachment', () => {
             const result = await getItemImageAttachment('x'.repeat(5_000));
             expect(result.attachment.description).toHaveLength(1024);
         });
+    });
+});
+
+// The shop purchase/upgrade confirmations use this to show a gear item's icon;
+// it is the generic sibling of attachResultThumbnail (which builds the key from
+// an activity + result item).
+describe('attachItemThumbnail', () => {
+    const fakeEmbed = () => {
+        const calls = [];
+        return { setThumbnail(url) { calls.push(url); return this; }, thumbnails: calls };
+    };
+
+    beforeEach(() => {
+        ItemImage.find.mockReset();
+        rows();
+        getDefaultItemImage.mockReset();
+        getDefaultItemImage.mockReturnValue(null);
+    });
+
+    test('sets the thumbnail and returns the attachment when art exists', async () => {
+        getDefaultItemImage.mockReturnValue({ data: Buffer.from('baked'), type: 'image/png' });
+        const embed = fakeEmbed();
+
+        const files = await attachItemThumbnail(embed, 'fish:worm_bait_pack', 'g1', 'Worm Bait');
+
+        expect(embed.thumbnails).toHaveLength(1);
+        expect(embed.thumbnails[0]).toMatch(/^attachment:\/\//);
+        expect(files).toHaveLength(1);
+        // The returned entry is the AttachmentBuilder that the thumbnail URL points at.
+        expect(files[0].name).toBe(embed.thumbnails[0].replace('attachment://', ''));
+    });
+
+    test('returns [] and leaves the embed untouched when no art is bundled or uploaded', async () => {
+        const embed = fakeEmbed();
+
+        const files = await attachItemThumbnail(embed, 'fish:worm_bait_pack', 'g1', 'Worm Bait');
+
+        expect(files).toEqual([]);
+        expect(embed.thumbnails).toHaveLength(0);
+    });
+
+    test('never throws — a lookup error degrades to no art', async () => {
+        getDefaultItemImage.mockReturnValue(null);
+        ItemImage.find.mockRejectedValue(new Error('db down'));
+        const embed = fakeEmbed();
+
+        const files = await attachItemThumbnail(embed, 'fish:worm_bait_pack', 'g1', 'Worm Bait');
+
+        expect(files).toEqual([]);
+        expect(embed.thumbnails).toHaveLength(0);
     });
 });

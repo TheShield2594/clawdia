@@ -13,6 +13,7 @@ const User = require('../../../../models/User');
 const { attachGrind } = require('../../../../utils/grindProfile');
 const { ensureFishingData } = require('../../../../services/fishService');
 const { ROD_UPGRADES, ROD_BY_TIER } = require('../../../../data/fishData');
+const { attachItemThumbnail } = require('../../../../utils/itemImageHelper');
 const COLORS = require('../../../../utils/embedColors');
 const { creditCoinsOrOwe } = require('../../../../utils/creditOrOwe');
 const { shopRefundPayoutKey, shopGrantPayoutKey } = require('../../../../utils/payoutKey');
@@ -60,12 +61,14 @@ async function handleBuyUpgrade(interaction, user, currency) {
         )
         .setFooter({ text: 'One upgrade per rod. This cannot be removed.' });
 
+    const confirmFiles = await attachItemThumbnail(confirmEmbed, `fish:${upgradeId}`, interaction.guild.id, upgradeDef.name);
+
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('upgrade_confirm').setLabel('Install').setStyle(ButtonStyle.Success).setEmoji('✅'),
         new ButtonBuilder().setCustomId('upgrade_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
-    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, fetchReply: true });
+    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], files: confirmFiles, flags: MessageFlags.Ephemeral, fetchReply: true });
     const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
     collector.on('collect', async btn => {
