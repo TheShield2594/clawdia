@@ -1660,6 +1660,8 @@ textarea.auto-resize {
 .dash-feed-icon.bad { background: rgba(185,76,60,.18); color: #db8478; }
 .dash-feed-icon.good { background: rgba(93,138,90,.18); color: #91c08e; }
 .dash-feed-icon.info { background: rgba(217,119,66,.18); color: var(--claw-300); }
+.dash-feed-icon svg { width: 16px; height: 16px; }
+.dash-feed-empty { opacity: .4; font-size: .85em; }
 .dash-feed-body { font-size: 13.5px; color: var(--cream-100); flex: 1; line-height: 1.4; }
 .dash-feed-body b { color: var(--cream-50); font-weight: 600; }
 .dash-feed-body .who { color: var(--claw-300); }
@@ -1674,6 +1676,12 @@ textarea.auto-resize {
 .dash-bot-text { flex: 1; font-size: 14px; line-height: 1.55; color: rgba(255,255,255,.92); }
 .dash-bot-btn { background: rgba(0,0,0,.25); color: #fff; border: 1px solid rgba(255,255,255,.2); padding: 8px 14px; border-radius: 10px; font-size: 13px; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; transition: background .15s; }
 .dash-bot-btn:hover { background: rgba(0,0,0,.4); }
+.dash-bot-btn.ghost { background: transparent; }
+.dash-bot-dim { opacity: .7; }
+/* Recommendation row inside the Ask Clawdia card: a line icon (in the card's
+   white ink) beside the text, replacing the old 💡 emoji + inline styles. */
+.dash-rec { display: flex; gap: .5rem; align-items: flex-start; margin-bottom: .4rem; }
+.dash-rec svg { flex: none; margin-top: 2px; color: rgba(255,255,255,.9); }
 
 /* Nav item keyboard focus */
 .dash-nav .nav-item:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; border-radius: 10px; }

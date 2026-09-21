@@ -98,6 +98,20 @@ function overviewSparkline(host, series) {
         '</svg>';
 }
 
+// Small line icons for the activity feed and recommendation list, in the same
+// language as the sidebar and the KPI tiles. Decorative — the row's text carries
+// the meaning — so aria-hidden, and coloured by currentColor off the chip class.
+const OV_ICON_PATHS = {
+    users: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/><circle cx="17" cy="9" r="2.5"/><path d="M22 19c0-2.5-2-4.5-5-4.5"/>',
+    shield: '<path d="M12 3l8 3v6c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V6l8-3z"/>',
+    alert: '<path d="M12 4l9 16H3z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="17" x2="12" y2="17"/>',
+    bulb: '<path d="M9.5 18h5"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5.9 1.1 1 1.9h5c.1-.8.4-1.4 1-1.9A6 6 0 0 0 12 3z"/>',
+    check: '<path d="M5 13l4 4L19 7"/>',
+};
+function ovIcon(name) {
+    return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${OV_ICON_PATHS[name] || ''}</svg>`;
+}
+
 // ── Overview live stats ──────────────────────────────────────────────
 async function loadOverviewStats() {
     const guildId = BOOT.guildId;
@@ -182,16 +196,16 @@ async function loadOverviewStats() {
         if (msgEl) {
             if (recs.length > 0) {
                 msgEl.innerHTML = recs.slice(0, 3).map(r =>
-                    `<div style="display:flex;gap:.5rem;align-items:flex-start;margin-bottom:.4rem"><span style="color:var(--accent,#f90);flex-shrink:0">💡</span><span>${escHtml(r)}</span></div>`
+                    `<div class="dash-rec">${ovIcon('bulb')}<span>${escHtml(r)}</span></div>`
                 ).join('');
             } else {
-                msgEl.innerHTML = `<b>Everything looks good on ${escHtml(BOOT.guildName)}.</b><br><span style="opacity:.7">No active recommendations right now.</span>`;
+                msgEl.innerHTML = `<b>Everything looks good on ${escHtml(BOOT.guildName)}.</b><br><span class="dash-bot-dim">No active recommendations right now.</span>`;
             }
         }
         if (actionsEl) {
             actionsEl.innerHTML = `
                 <button class="dash-bot-btn" data-action="goto-tab" data-tab="analytics">Open Analytics →</button>
-                <button class="dash-bot-btn" data-action="goto-tab" data-tab="moderation" style="background:transparent;">Configure Moderation</button>
+                <button class="dash-bot-btn ghost" data-action="goto-tab" data-tab="moderation">Configure Moderation</button>
             `;
         }
 
@@ -200,28 +214,28 @@ async function loadOverviewStats() {
         const lastUpdated = document.getElementById('overview-last-updated');
         if (lastUpdated) lastUpdated.textContent = 'updated just now';
         if (feed) {
+            // Built on the shared .dash-feed component (a tinted icon chip + body),
+            // not ad-hoc emoji rows. The chip's `kind` sets its colour; the row's
+            // words carry the meaning, so colour is never the only signal.
             const items = [];
             if (joins7 > 0 || leaves7 > 0) {
-                items.push({ icon: '👥', text: `${joins7} joined, ${leaves7} left in the last 7 days`, color: net7 >= 0 ? 'var(--good)' : 'inherit' });
+                items.push({ kind: net7 >= 0 ? 'good' : 'warn', icon: 'users', text: `${joins7} joined, ${leaves7} left in the last 7 days` });
             }
             if (modTotal > 0) {
-                items.push({ icon: '🛡️', text: `${modTotal} moderation action${modTotal === 1 ? '' : 's'} recorded recently` });
+                items.push({ kind: 'info', icon: 'shield', text: `${modTotal} moderation action${modTotal === 1 ? '' : 's'} recorded recently` });
             }
             const churnAlerts = a.churnAlerts || [];
             for (const alert of churnAlerts.slice(0, 2)) {
-                items.push({ icon: '⚠️', text: alert, color: 'var(--warn, #f90)' });
+                items.push({ kind: 'warn', icon: 'alert', text: alert });
             }
             if (recs.length > 0) {
-                items.push({ icon: '💡', text: `${recs.length} recommendation${recs.length === 1 ? '' : 's'} available — see Ask Clawdia above` });
+                items.push({ kind: 'info', icon: 'bulb', text: `${recs.length} recommendation${recs.length === 1 ? '' : 's'} available — see Ask Clawdia above` });
             }
             if (items.length === 0) {
-                items.push({ icon: '✓', text: 'No notable activity signals right now. Check Analytics for deeper insights.' });
+                items.push({ kind: 'good', icon: 'check', text: 'No notable activity signals right now. Check Analytics for deeper insights.' });
             }
             feed.innerHTML = items.map(it =>
-                `<div style="display:flex;gap:.6rem;align-items:flex-start;padding:.4rem 0;border-bottom:1px solid rgba(255,255,255,.05)">
-                    <span style="flex-shrink:0;font-size:1rem">${it.icon}</span>
-                    <span style="font-size:.875rem;color:${it.color || 'inherit'}">${escHtml(it.text)}</span>
-                </div>`
+                `<div class="dash-feed-item"><span class="dash-feed-icon ${it.kind}">${ovIcon(it.icon)}</span><div class="dash-feed-body">${escHtml(it.text)}</div></div>`
             ).join('');
         }
     } catch {
@@ -244,7 +258,7 @@ async function loadOverviewStats() {
         if (botVal2) botVal2.textContent = 'Online';
         if (botFoot2) { botFoot2.textContent = 'Active'; botFoot2.style.color = 'var(--good)'; }
         const feed = document.getElementById('overview-activity-feed');
-        if (feed) feed.innerHTML = '<span style="opacity:.4;font-size:.85em">Could not load activity data.</span> <button class="btn btn-sm" type="button" data-action="reload-overview">Retry</button>';
+        if (feed) feed.innerHTML = '<span class="dash-feed-empty">Could not load activity data.</span> <button class="btn btn-sm" type="button" data-action="reload-overview">Retry</button>';
     }
 }
 onPanel('overview', loadOverviewStats);

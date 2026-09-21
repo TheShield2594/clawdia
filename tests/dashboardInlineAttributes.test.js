@@ -104,7 +104,6 @@ const SCRIPT_BASELINE = {
     'panel-leveling.js': 4,
     'panel-mcp.js': 8,
     'panel-moderation.js': 20,
-    'panel-overview.js': 8,
     'panel-roles.js': 1,
     'panel-rss.js': 9,
     'panel-social.js': 3,
