@@ -372,7 +372,9 @@ async function testMcpServer(name, out) {
         if (!out) return;
         const okay = resp.ok && data.success;
         out.className = 'mcp-test-result ' + (okay ? 'ok' : 'bad');
-        out.textContent = (okay ? '✓ ' : '✗ ') + (data.message || data.error || (okay ? 'Connected' : 'Failed'));
+        // The ✓/✗ glyph is drawn by the .ok/.bad ::before in styles.css now, so
+        // the text is just the message — and stays textContent, never innerHTML.
+        out.textContent = data.message || data.error || (okay ? 'Connected' : 'Failed');
         // Tool names come from the server, so they are set as text on their own
         // element rather than concatenated into any markup.
         // Resources and prompts are the two halves of the protocol that are not
@@ -406,7 +408,7 @@ async function testMcpServer(name, out) {
         }
     } catch (e) {
         console.error(e);
-        if (out) { out.className = 'mcp-test-result bad'; out.textContent = '✗ Request failed'; }
+        if (out) { out.className = 'mcp-test-result bad'; out.textContent = 'Request failed'; }
     }
 }
 

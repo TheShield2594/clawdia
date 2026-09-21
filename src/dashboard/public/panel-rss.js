@@ -111,8 +111,8 @@ async function validateMainFeeds() {
     statusEl.textContent = `Checking ${urls.length} feed(s)…`;
     const results = await Promise.all(urls.map(url => validateFeedUrl(url, guildId).then(r => ({ url, ...r })).catch(() => ({ url, valid: false, error: 'Request failed' }))));
     statusEl.innerHTML = results.map(r => r.valid
-        ? `<span style="color:var(--success,#3ba55d);">✓ ${escHtml(r.url)} — ${escHtml(r.title || 'untitled')} (${r.itemCount} items)</span>`
-        : `<span style="color:var(--danger,#ed4245);">✗ ${escHtml(r.url)} — ${escHtml(r.error)}</span>`
+        ? `<span class="test-ok">${escHtml(r.url)} — ${escHtml(r.title || 'untitled')} (${r.itemCount} items)</span>`
+        : `<span class="test-bad">${escHtml(r.url)} — ${escHtml(r.error)}</span>`
     ).join('<br>');
 }
 
@@ -128,8 +128,8 @@ async function validateProfileFeeds(index) {
     statusEl.textContent = `Checking ${urls.length} feed(s)…`;
     const results = await Promise.all(urls.map(url => validateFeedUrl(url, guildId).then(r => ({ url, ...r })).catch(() => ({ url, valid: false, error: 'Request failed' }))));
     statusEl.innerHTML = results.map(r => r.valid
-        ? `<span style="color:var(--success,#3ba55d);">✓ ${escHtml(r.url)} — ${escHtml(r.title || 'untitled')} (${r.itemCount} items)</span>`
-        : `<span style="color:var(--danger,#ed4245);">✗ ${escHtml(r.url)} — ${escHtml(r.error)}</span>`
+        ? `<span class="test-ok">${escHtml(r.url)} — ${escHtml(r.title || 'untitled')} (${r.itemCount} items)</span>`
+        : `<span class="test-bad">${escHtml(r.url)} — ${escHtml(r.error)}</span>`
     ).join('<br>');
 }
 async function triggerDailyNewsNow() {

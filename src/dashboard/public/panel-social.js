@@ -104,11 +104,11 @@ async function validateSocial() {
         });
         const r = await resp.json().catch(() => ({}));
         statusEl.innerHTML = r.valid
-            ? `<span style="color:var(--success,#3ba55d);">✓ ${escHtml(r.ref || '')} — ${escHtml(r.title || 'untitled')} (${r.itemCount} items)</span>`
-            : `<span style="color:var(--danger,#ed4245);">✗ ${escHtml(r.error || 'Could not resolve that account.')}</span>`;
+            ? `<span class="test-ok">${escHtml(r.ref || '')} — ${escHtml(r.title || 'untitled')} (${r.itemCount} items)</span>`
+            : `<span class="test-bad">${escHtml(r.error || 'Could not resolve that account.')}</span>`;
     } catch (error) {
         console.error(error);
-        statusEl.innerHTML = '<span style="color:var(--danger,#ed4245);">✗ Request failed</span>';
+        statusEl.innerHTML = '<span class="test-bad">Request failed</span>';
     }
 }
 

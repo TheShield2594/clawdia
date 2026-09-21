@@ -105,8 +105,7 @@ const SCRIPT_BASELINE = {
     'panel-mcp.js': 8,
     'panel-moderation.js': 20,
     'panel-roles.js': 1,
-    'panel-rss.js': 9,
-    'panel-social.js': 3,
+    'panel-rss.js': 5,
 };
 
 // Every form HTML actually accepts, because the browser and the CSP accept them

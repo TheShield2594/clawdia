@@ -1662,6 +1662,31 @@ textarea.auto-resize {
 .dash-feed-icon.info { background: rgba(217,119,66,.18); color: var(--claw-300); }
 .dash-feed-icon svg { width: 16px; height: 16px; }
 .dash-feed-empty { opacity: .4; font-size: .85em; }
+
+/* Status glyphs as masked line icons (v5), replacing the ✓ ✗ ⚠ text glyphs in
+   the panels' error and connection-test states. The icon is a mask filled with
+   the element's own colour, so it inherits whatever the status class sets. */
+.load-error::before, .test-ok::before, .test-bad::before,
+.mcp-test-result.ok::before, .mcp-test-result.bad::before {
+    content: ""; display: inline-block; width: 1em; height: 1em;
+    vertical-align: -0.14em; margin-right: 0.4em; background-color: currentColor;
+    -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat;
+}
+.load-error { color: #e0b85a; }
+.load-error::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4l9 16H3z'/%3E%3Cline x1='12' y1='10' x2='12' y2='14'/%3E%3Cline x1='12' y1='17' x2='12' y2='17'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4l9 16H3z'/%3E%3Cline x1='12' y1='10' x2='12' y2='14'/%3E%3Cline x1='12' y1='17' x2='12' y2='17'/%3E%3C/svg%3E");
+}
+.test-ok { color: var(--success, #3ba55d); }
+.test-ok::before, .mcp-test-result.ok::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 13l4 4L19 7'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 13l4 4L19 7'/%3E%3C/svg%3E");
+}
+.test-bad { color: var(--danger, #ed4245); }
+.test-bad::before, .mcp-test-result.bad::before {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='6' y1='6' x2='18' y2='18'/%3E%3Cline x1='18' y1='6' x2='6' y2='18'/%3E%3C/svg%3E");
+}
 .dash-feed-body { font-size: 13.5px; color: var(--cream-100); flex: 1; line-height: 1.4; }
 .dash-feed-body b { color: var(--cream-50); font-weight: 600; }
 .dash-feed-body .who { color: var(--claw-300); }
