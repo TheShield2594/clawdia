@@ -70,7 +70,7 @@ const BASELINE = {
     'partials/panels/leveling.ejs': 28,
     'partials/panels/moderation.ejs': 28,
     'partials/panels/newspaper.ejs': 4,
-    'partials/panels/overview.ejs': 18,
+    'partials/panels/overview.ejs': 17,
     'partials/panels/progressiontracks.ejs': 2,
     'partials/panels/quests.ejs': 5,
     'partials/panels/raiddetection.ejs': 1,

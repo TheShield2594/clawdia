@@ -1553,17 +1553,52 @@ textarea.auto-resize {
 .dash-subgreeting { color: var(--ink-300); margin-top: 8px; font-size: 15px; }
 
 /* KPI cards */
-.dash-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
-.dash-kpi { background: var(--ink-900); border: 1px solid var(--ink-800); border-radius: 18px; padding: 22px; position: relative; overflow: hidden; }
+/* Overview KPI strip (v5). A hero metric leads and the rest recede; charts
+   render on the hero only, so the strip reads as one headline with support
+   rather than seven tiles competing. Trend colour lives in the delta chip, not
+   the number, and stays inside the warm palette. */
+.dash-kpis { display: grid; grid-template-columns: 1.15fr 1fr 1fr 1fr; grid-auto-rows: 1fr; gap: 16px; margin-bottom: 20px; }
+.dash-kpi { background: var(--ink-900); border: 1px solid var(--ink-800); border-radius: 18px; padding: 22px; position: relative; overflow: hidden; display: flex; flex-direction: column; }
 .dash-kpi-label { font-size: 12.5px; color: var(--ink-400); letter-spacing: 0.04em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
-.dash-kpi-value { font-family: 'Instrument Serif', serif; font-size: 44px; line-height: 1; color: var(--cream-50); }
-.dash-kpi-meta { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12.5px; }
-.dash-kpi-delta { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; font-weight: 500; }
-.dash-kpi-delta.up { background: rgba(93,138,90,.18); color: #92c490; }
-.dash-kpi-delta.down { background: rgba(185,76,60,.18); color: #d68a7e; }
+/* Tabular figures so a column of numbers aligns on its digits. */
+.dash-kpi-value { font-family: 'Instrument Serif', serif; font-size: 44px; line-height: 1; color: var(--cream-50); font-variant-numeric: tabular-nums; }
+.dash-kpi-meta { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12.5px; flex-wrap: wrap; }
+.dash-kpi-delta { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.dash-kpi-delta-arrow { font-size: 10px; line-height: 1; }
+/* Warm trend colours: moss for up, terracotta for down. #a7b585 is moss-400
+   lightened to clear 4.5:1 on the tile; both verified against WCAG. Direction
+   is carried by the ▲/▼ glyph too, never by colour alone. */
+.dash-kpi-delta.up { background: rgba(138,152,99,.16); color: #a7b585; }
+.dash-kpi-delta.down { background: rgba(214,138,126,.16); color: #d68a7e; }
+.dash-kpi-delta.flat { background: var(--ink-800); color: var(--ink-300); }
 .dash-kpi-foot { color: var(--ink-400); font-size: 12.5px; }
-.dash-kpi.feature { background: linear-gradient(135deg, #2b1d14, #1c1814); border-color: var(--ink-700); }
-.dash-kpi.feature .dash-kpi-value { color: var(--claw-300); }
+.dash-kpi-foot.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+
+/* Bot status is a word, not a numeral, with a live dot ahead of it. */
+.dash-kpi-value.status { font-size: 34px; display: inline-flex; align-items: center; gap: 10px; }
+.dash-kpi-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 4px rgba(93,138,90,.14); flex: none; }
+
+/* Modules-on is a ratio, so it gets a meter rather than a trend line. */
+.dash-kpi-meter { height: 6px; border-radius: 999px; background: var(--ink-800); overflow: hidden; margin-top: 12px; }
+.dash-kpi-meter > i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--claw-500), var(--claw-400)); }
+
+/* Hero: the one dominant metric, taller and the only tile with a chart. */
+.dash-kpi-hero { grid-row: span 2; }
+.dash-kpi-hero .dash-kpi-value { font-size: 62px; }
+.dash-kpi-spark { margin-top: auto; padding-top: 16px; }
+.dash-kpi-spark svg { display: block; width: 100%; height: 76px; }
+.dash-kpi-spark:empty { display: none; }
+
+/* Interactive tiles are entry points into their panel. */
+.dash-kpi-link { appearance: none; -webkit-appearance: none; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color .15s, background .15s; }
+.dash-kpi-link:hover { border-color: var(--ink-600); background: var(--ink-850); }
+.dash-kpi-link:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 3px; }
+.dash-kpi-cta { position: absolute; top: 18px; right: 18px; color: var(--ink-500); opacity: 0; transition: opacity .15s; }
+.dash-kpi-link:hover .dash-kpi-cta, .dash-kpi-link:focus-visible .dash-kpi-cta { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+    .dash-kpi-link { transition: none; }
+    .dash-kpi-cta { transition: none; opacity: .5; }
+}
 
 /* Dashboard cards */
 .dash-card { background: var(--ink-900); border: 1px solid var(--ink-800); border-radius: 18px; padding: 22px; }
@@ -1714,7 +1749,11 @@ textarea.auto-resize {
 
 /* Responsive */
 @media (max-width: 1024px) {
-    .dash-kpis { grid-template-columns: repeat(2, 1fr); }
+    /* Below the wide grid the hero can no longer span two rows sensibly, so it
+       becomes a full-width banner above a two-column supporting grid. */
+    .dash-kpis { grid-template-columns: repeat(2, 1fr); grid-auto-rows: auto; }
+    .dash-kpi-hero { grid-column: span 2; grid-row: span 1; }
+    .dash-kpi-hero .dash-kpi-value { font-size: 52px; }
     .dash-two-col { grid-template-columns: 1fr; }
     .dash-three-col { grid-template-columns: 1fr; }
 }
