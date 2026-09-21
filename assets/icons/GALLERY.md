@@ -1,6 +1,6 @@
 # Clawdia economy & shop icons — visual gallery
 
-All 118 icons generated on Higgsfield `gpt_image_2_5` in the **B3** look (flat two-tone shading, no gloss, rarity-coloured rim, transparent background). Images are served from Higgsfield's CDN and proxied by GitHub, so they render here and in the PR.
+All 132 icons generated on Higgsfield `gpt_image_2_5` in the **B3** look (flat two-tone shading, no gloss, rarity-coloured rim, transparent background) — 118 economy/shop icons plus the 14 pet portraits (issue #1082), which use a front-facing character-portrait framing. Images are served from Higgsfield's CDN and proxied by GitHub, so they render here and in the PR.
 
 > To save one on mobile: long-press the image. The storage key under each icon is the `ItemImage` upload key (`:` becomes `__` as a filename).
 
@@ -142,3 +142,24 @@ All 118 icons generated on Higgsfield `gpt_image_2_5` in the **B3** look (flat t
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_173227_9ecf056d-782c-4cea-89a7-e41e3cab8bde.png" width="72"> | Ghost Ledger | Mythic | `ghost_ledger` |
 | <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_173229_e25fe4bd-0572-42ac-acb0-57066e171154.png" width="72"> | Obsidian Crown | Mythic | `obsidian_crown` |
 
+
+## Pets (14)
+
+Character-portrait framing (front-facing mascot) on the same B3 rim + flat shading. Bundle-only — not per-guild uploadable. Rarity by tier: ownable Common→Epic, rare companions Legendary, wild battle opponents Common.
+
+| Icon | Pet | Rarity | Storage key |
+|---|---|---|---|
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_211950_43c41c68-5efe-4df9-80a7-49f501b73106.png" width="72" alt="Dog portrait"> | Dog | Common | `pet:dog` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_211950_e28c01ef-d5c2-47eb-9025-1736b3cdffb0.png" width="72" alt="Cat portrait"> | Cat | Common | `pet:cat` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_211950_4ce15c31-ba40-4528-b028-582e13f60700.png" width="72" alt="Bird portrait"> | Bird | Uncommon | `pet:bird` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_211950_2c048b9e-d126-4e9b-9365-c5f41fa0f58b.png" width="72" alt="Fish portrait"> | Fish | Uncommon | `pet:fish` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_211950_6827928e-104d-4723-adb3-3e85726f73ad.png" width="72" alt="Fox portrait"> | Fox | Rare | `pet:fox` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212038_9a70c3c1-218e-45a3-a6b5-60a58932d410.png" width="72" alt="Wolf portrait"> | Wolf | Epic | `pet:wolf` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212038_223340d2-c29b-4da7-ae95-2bd4d169f319.png" width="72" alt="Eagle portrait"> | Eagle | Legendary | `pet:eagle` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212038_e2b483a6-cfa7-46c7-bfef-5c0f751d23bc.png" width="72" alt="Shark portrait"> | Shark | Legendary | `pet:shark` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212038_757cc5cb-b9c2-4e62-a2a3-3c63ef923fd1.png" width="72" alt="Crystal Fox portrait"> | Crystal Fox | Legendary | `pet:crystal_fox` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212038_7c72e3c2-6715-4cff-927a-bba496bad715.png" width="72" alt="Lantern Owl portrait"> | Lantern Owl | Legendary | `pet:lantern_owl` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212122_e61c45c9-2510-4452-af18-f0e8c887a1b0.png" width="72" alt="Wild Boar portrait"> | Wild Boar | Common | `pet:wild_boar` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212122_bb9be24e-5ec0-4ae8-9bf0-24a60d3814a8.png" width="72" alt="Feral Cat portrait"> | Feral Cat | Common | `pet:feral_cat` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_213613_093d2fac-070e-43f7-b3b4-d4e252dc81f8.png" width="72" alt="Stray Hound portrait"> | Stray Hound | Common | `pet:stray_hound` |
+| <img src="https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212123_1276a446-370f-43dc-9015-a0984aefd0c9.png" width="72" alt="Cave Bat portrait"> | Cave Bat | Common | `pet:cave_bat` |

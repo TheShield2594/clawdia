@@ -633,17 +633,25 @@ function simulateBattle(petA, petB, rng = Math.random) {
     return { winner, rounds, finalHpA: hpA, finalHpB: hpB };
 }
 
+// The wild opponents /pet battle fields when a player has no PvP target. They
+// are never ownable and never enter PET_DEFINITIONS, but they are still pet
+// species with their own portrait art (issue #1082), so their ids are part of
+// the roster the icon set covers. Lifted to module scope (from inside
+// makeWildPet) so that roster is discoverable — src/data/activityItems.js keys
+// pet art off PET_DEFINITIONS plus these.
+const WILD_OPPONENTS = [
+    { petId: 'wild_boar',   name: 'Wild Boar',   personality: 'energetic' },
+    { petId: 'feral_cat',   name: 'Feral Cat',   personality: 'mischievous' },
+    { petId: 'stray_hound', name: 'Stray Hound', personality: 'loyal' },
+    { petId: 'cave_bat',    name: 'Cave Bat',    personality: 'energetic' },
+];
+const WILD_PET_IDS = WILD_OPPONENTS.map(w => w.petId);
+
 /**
  * Build a scaled "wild" opponent pet near the given level for PvE battles.
  */
 function makeWildPet(level, rng = Math.random) {
-    const WILD = [
-        { petId: 'wild_boar',   name: 'Wild Boar',   personality: 'energetic' },
-        { petId: 'feral_cat',   name: 'Feral Cat',   personality: 'mischievous' },
-        { petId: 'stray_hound', name: 'Stray Hound', personality: 'loyal' },
-        { petId: 'cave_bat',    name: 'Cave Bat',    personality: 'energetic' },
-    ];
-    const pick = WILD[Math.floor(rng() * WILD.length)];
+    const pick = WILD_OPPONENTS[Math.floor(rng() * WILD_OPPONENTS.length)];
     const lvl  = Math.max(1, level + Math.floor(rng() * 3) - 1); // ±1 around the player
     return {
         petId: pick.petId, name: pick.name, personality: pick.personality,
@@ -808,6 +816,8 @@ async function selectPetOfTheWeek(client) {
 
 module.exports = {
     PET_DEFINITIONS,
+    WILD_OPPONENTS,
+    WILD_PET_IDS,
     PERSONALITY_TRAITS,
     PERSONALITY_KEYS,
     TRAIT_FLAVOR,

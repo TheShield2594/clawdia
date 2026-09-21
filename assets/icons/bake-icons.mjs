@@ -54,11 +54,42 @@ async function normalize(buf) {
     return out;
 }
 
+// A just-published CloudFront object can answer 403/404 for a short window
+// while it propagates to the edge, and a single failed fetch fails the whole
+// bake (one missing icon exits the job non-zero). So retry a few times with
+// backoff before giving up — transient edge errors clear on the next attempt,
+// and a genuinely missing url still fails after the retries are spent.
+//
+// Only genuinely transient responses are retried: the CloudFront 403/404
+// propagation window, plus the usual 408/425/429/5xx server-side hiccups. A
+// 400/401 or any other client error will never clear, so it fails immediately
+// rather than waiting out the full backoff for a foregone result.
+const TRANSIENT_STATUS = new Set([403, 404, 408, 425, 429, 500, 502, 503, 504]);
+
+async function fetchBuffer(url, key, attempts = 4) {
+    let lastErr;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        let res;
+        try {
+            res = await fetch(url);
+        } catch (err) {
+            lastErr = err; // network error (DNS, reset, timeout) — always transient
+        }
+        if (res) {
+            if (res.ok) return Buffer.from(await res.arrayBuffer());
+            if (!TRANSIENT_STATUS.has(res.status)) {
+                throw new Error(`${key}: fetch ${res.status} ${res.statusText}`);
+            }
+            lastErr = new Error(`fetch ${res.status} ${res.statusText}`);
+        }
+        if (attempt < attempts - 1) await new Promise(r => setTimeout(r, 1000 * 2 ** attempt));
+    }
+    throw new Error(`${key}: ${lastErr.message} after ${attempts} attempts`);
+}
+
 async function one([key, meta]) {
     if (!meta.url) throw new Error(`${key}: no url in icons.map.json`);
-    const res = await fetch(meta.url);
-    if (!res.ok) throw new Error(`${key}: fetch ${res.status} ${res.statusText}`);
-    const buf = Buffer.from(await res.arrayBuffer());
+    const buf = await fetchBuffer(meta.url, key);
     const out = await normalize(buf);
     fs.writeFileSync(path.join(OUT_DIR, meta.file), out);
     return { key, bytes: out.length };
