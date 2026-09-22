@@ -259,6 +259,13 @@ describe('the data migrations, over pre-migration documents', () => {
                 memberEvents: [{ date: '2024-01-01', joins: 2, leaves: 1 }],
                 commandUsage: [{ command: 'fish', hour: 3, success: true }],
             },
+            // The pre-`itemId` shop shape 026 exists to repair: a default item
+            // seeded with no id, beside one already tagged and one custom.
+            shop: [
+                { name: 'Knife',           itemId: null,    price: 3000 },
+                { name: 'Shield',          itemId: 'shield', price: 10000 },
+                { name: 'Homebrew Widget', itemId: null,    price: 100 },
+            ],
         });
 
         // The pre-#561 shape: no guildId, and the single-field unique index
@@ -416,6 +423,19 @@ describe('the data migrations, over pre-migration documents', () => {
         // And the already-expired listing is still there for the sweep to
         // claim, which is the entire point.
         expect(await db().collection('marketlistings').countDocuments({})).toBe(1);
+    }, 60_000);
+
+    test('026 gives id-less default shop items their catalogue id, by name', async () => {
+        await seed();
+
+        await runMigrations({ dir: MIGRATIONS_DIR });
+
+        const guild = await db().collection('guilds').findOne({ guildId: 'g1' });
+        const byName = Object.fromEntries(guild.shop.map(i => [i.name, i.itemId]));
+        // The id-less default is recovered from its name; the already-tagged one
+        // is left as it was; the custom item, whose name is not in the
+        // catalogue, keeps its null id (its art comes from a guild upload).
+        expect(byName).toEqual({ Knife: 'knife', Shield: 'shield', 'Homebrew Widget': null });
     }, 60_000);
 
     // The claim every one of the above rests on: applying twice is applying
