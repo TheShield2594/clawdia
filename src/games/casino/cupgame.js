@@ -9,6 +9,7 @@ const User  = require('../../models/User');
 const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
+const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const {
@@ -294,6 +295,10 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
                 max: 1,
                 time: 60_000,
             }).on('collect', async i => {
+                // A new game answers to the settings as they are now, not as
+                // they were when the first one was typed.
+                const refused = await replayRefusal(interaction.guild.id, bet);
+                if (refused) return refuseReplay(i, interaction, refused);
                 await i.deferUpdate();
                 await playMonte(interaction, bet, 1, null, onWager);
             }).on('end', (_, reason) => {
@@ -382,6 +387,8 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
                         filter: ownedBy(interaction.user.id, i => i.customId === replayId, "This isn't your game."),
                         max: 1, time: 60_000,
                     }).on('collect', async i => {
+                        const refused = await replayRefusal(interaction.guild.id, bet);
+                        if (refused) return refuseReplay(i, interaction, refused);
                         await i.deferUpdate();
                         await playMonte(interaction, bet, 1, null, onWager);
                     }).on('end', (_, reason) => {
@@ -468,10 +475,10 @@ module.exports = {
         }
 
         const bet          = interaction.options.getInteger('bet');
-        const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
-        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+        const refusal = casinoRefusal(guildSettings, bet);
+        if (refusal) {
             releaseLock?.();
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: refusal, flags: MessageFlags.Ephemeral });
         }
 
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });

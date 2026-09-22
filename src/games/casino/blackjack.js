@@ -9,6 +9,7 @@ const User  = require('../../models/User');
 const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
+const { casinoRefusal } = require('./betGuard');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const { randomFrom, BJ_WIN_LINES, BJ_LOSE_LINES, BJ_BUST_LINES, BJ_PUSH_LINES } = require('../../utils/copyLines');
 const COLORS = require('../../utils/embedColors');
@@ -194,10 +195,10 @@ module.exports = {
 
         const currency     = guildSettings?.economy?.currency || '💰';
         const bet          = interaction.options.getInteger('bet');
-        const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
-        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+        const refusal = casinoRefusal(guildSettings, bet);
+        if (refusal) {
             releaseLock?.();
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: refusal, flags: MessageFlags.Ephemeral });
         }
 
         let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });

@@ -8,6 +8,7 @@ const {
 const User = require('../../models/User');
 const { placeWager } = require('../../utils/placeWager');
 const { confirmBet } = require('../../utils/confirmBet');
+const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const Guild = require('../../models/Guild');
 const { randomFrom, SLOTS_LOSE_LINES, SLOTS_WIN_LINES } = require('../../utils/copyLines');
@@ -27,6 +28,8 @@ const {
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b0.png';
 
 const WIN_ANNOUNCE_MULT = 50;
+// Consecutive losses that lock the first reel to a high-value symbol.
+const HOT_REEL_STREAK = 3;
 
 // The jackpot slots plays for is the shared progressive pool
 // (services/casinoJackpotService) — the same one `/casino jackpot` reports and
@@ -191,10 +194,10 @@ module.exports = {
     async execute(interaction, { releaseLock, onWager } = {}) {
         const bet           = interaction.options.getInteger('bet');
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-        const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
-        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+        const refusal = casinoRefusal(guildSettings, bet);
+        if (refusal) {
             releaseLock?.();
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: refusal, flags: MessageFlags.Ephemeral });
         }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
@@ -250,8 +253,23 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         const jackpotPool = guildSettings?.casinoJackpot?.pool ?? JACKPOT_SEED;
 
         // ── Hot Reel mechanic: after 3 consecutive losses, lock reel 1 ────────
-        const lossStreak = userDoc.casinoStats?.slotsLossStreak ?? 0;
-        const hotReelTriggered = lossStreak >= 3;
+        //
+        // The streak is claimed, not read. It used to be read off `userDoc` —
+        // fetched before the wager — and written back with a plain `$set` once
+        // the spin settled, which let two spins in flight at once both see the
+        // same three losses and both lock a reel: a replay does not hold the
+        // casino lock, so a player's "Spin Again" and a fresh `/casino slots`
+        // in another channel run side by side. The spin that wins the claim
+        // zeroes the streak in the same write that proves it was there; the
+        // other finds it gone and spins cold. The losses are counted with `$inc`
+        // for the same reason — a `$set` of `read + 1` loses one spin's loss
+        // to the other.
+        const hotReelTriggered = (userDoc.casinoStats?.slotsLossStreak ?? 0) >= HOT_REEL_STREAK
+            && Boolean(await User.findOneAndUpdate(
+                { ...userFilter, 'casinoStats.slotsLossStreak': { $gte: HOT_REEL_STREAK } },
+                { $set: { 'casinoStats.slotsLossStreak': 0 } },
+                { projection: { _id: 1 } },
+            ).catch(() => null));
 
         let reels = [spinReel(), spinReel(), spinReel()];
         if (hotReelTriggered) {
@@ -330,9 +348,15 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         }
 
         // ── Update loss streak ──────────────────────────────────────────────────
+        // A hot-reel spin reset it when it claimed the streak, and a loss on one
+        // does not count toward the next — so it writes nothing more.
         const isWin = result.outcome !== 'lose';
-        const newStreak = isWin || hotReelTriggered ? 0 : lossStreak + 1;
-        await User.updateOne(userFilter, { $set: { 'casinoStats.slotsLossStreak': newStreak } }).catch(() => {});
+        if (isWin || !hotReelTriggered) {
+            await User.updateOne(userFilter, isWin
+                ? { $set: { 'casinoStats.slotsLossStreak': 0 } }
+                : { $inc: { 'casinoStats.slotsLossStreak': 1 } },
+            ).catch(() => {});
+        }
 
         // Apply coin booster to payout (net profit portion only). A claimed jackpot
         // is exempt: the pool is a fixed pot of coins other players paid in, not a
@@ -489,6 +513,10 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 await i.reply({ embeds: [paytableEmbed()], flags: MessageFlags.Ephemeral });
                 return;
             }
+            // A new spin is a new hand, so it answers to the settings as they
+            // are now, not as they were when the first one was typed.
+            const refused = await replayRefusal(interaction.guild.id, bet);
+            if (refused) { collector.stop('refused'); return refuseReplay(i, interaction, refused); }
             collector.stop('replay');
             await i.deferUpdate();
             await playSlots(interaction, bet, null, onWager);

@@ -9,6 +9,7 @@ const User  = require('../../models/User');
 const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
+const { casinoRefusal } = require('./betGuard');
 const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const { ownedByMembers } = require('../../utils/collectorOwner');
@@ -29,6 +30,7 @@ const {
 const { creditCoinsOnce, casinoPayoutKey } = require('../../utils/payoutKey');
 const { counterSetExpr } = require('../../utils/balanceDebit');
 const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
+const { updateCrashStats, buildWeeklyLeaderboard } = require('./crashStats');
 
 const TICK_MS = 1200;
 const MIN_BET = 10;
@@ -59,94 +61,6 @@ function progressBar(m) {
     const empty  = total - filled;
     const glyph  = m < 5 ? '▰' : m < 15 ? '▮' : '█';
     return `\`${glyph.repeat(filled)}${'▱'.repeat(empty)}\``;
-}
-
-// ── Weekly leaderboard helpers ───────────────────────────────────────────────
-
-function getCurrentWeekStart() {
-    const now  = new Date();
-    const day  = now.getUTCDay(); // 0 = Sun
-    const diff = now.getUTCDate() - day + (day === 0 ? -6 : 1); // shift to Monday
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), diff));
-}
-
-async function updateCrashStats(userId, guildId, multiplier, username) {
-    const weekStart = getCurrentWeekStart();
-
-    // Same-week path: atomically raise weekBest and allTimeBest without reading first.
-    const sameWeek = await User.updateOne(
-        { userId, guildId, 'crashStats.weekStart': { $gte: weekStart } },
-        {
-            $max: { 'crashStats.weekBest': multiplier, 'crashStats.allTimeBest': multiplier },
-            ...(username && { $set: { 'crashStats.username': username } }),
-        }
-    ).catch(() => null);
-
-    if (sameWeek?.matchedCount === 0) {
-        // Week rollover or first record: reset weekBest/weekStart, still $max allTimeBest.
-        await User.updateOne(
-            {
-                userId, guildId,
-                $or: [
-                    { 'crashStats.weekStart': { $lt: weekStart } },
-                    { 'crashStats.weekStart': null },
-                ],
-            },
-            {
-                $set: {
-                    'crashStats.weekBest':  multiplier,
-                    'crashStats.weekStart': weekStart,
-                    ...(username && { 'crashStats.username': username }),
-                },
-                $max: { 'crashStats.allTimeBest': multiplier },
-            }
-        ).catch(err => console.error('[crash] weekRollover update failed:', err));
-
-        // A concurrent request that also hit the rollover path may have won the
-        // conditional $or race and set weekStart already, causing the update above
-        // to match nothing. Run an unconditional $max so allTimeBest is never missed.
-        await User.updateOne(
-            { userId, guildId },
-            { $max: { 'crashStats.allTimeBest': multiplier } }
-        ).catch(err => console.error('[crash] allTimeBest fallback failed:', err));
-    }
-}
-
-async function buildWeeklyLeaderboard(guildId, _client) {
-    const weekStart = getCurrentWeekStart();
-
-    const topUsers = await User.find({
-        guildId,
-        'crashStats.weekStart': { $gte: weekStart },
-        'crashStats.weekBest':  { $gt: 0 },
-    })
-        .sort({ 'crashStats.weekBest': -1 })
-        .limit(10)
-        .lean()
-        .catch(() => []);
-
-    if (topUsers.length === 0) {
-        return new EmbedBuilder()
-            .setColor(COLORS.INFO)
-            .setTitle('💥 Crash — Weekly Multiplier Leaderboard')
-            .setDescription('No crash cash-outs recorded this week yet. Be the first!')
-            .setFooter({ text: 'Resets every Monday at midnight UTC' });
-    }
-
-    const lines = [];
-    for (let i = 0; i < topUsers.length; i++) {
-        const u        = topUsers[i];
-        const medal    = ['🥇','🥈','🥉'][i] ?? `**${i + 1}.**`;
-        const username = u.crashStats.username ?? u.userId;
-        lines.push(`${medal} **${username}** — ${multLabel(u.crashStats.weekBest)}`);
-    }
-
-    return new EmbedBuilder()
-        .setColor(COLORS.PRIZE)
-        .setTitle('💥 Crash — Weekly Multiplier Leaderboard')
-        .setDescription(lines.join('\n'))
-        .setFooter({ text: `Week of ${weekStart.toDateString()} · Resets every Monday` })
-        .setTimestamp();
 }
 
 // ── Lobby embed ──────────────────────────────────────────────────────────────
@@ -220,6 +134,11 @@ async function buildFinalEmbed(crashPoint, bet, players, client, _guildId) {
             const net    = payout - bet;
             const auto   = state.autoTriggered ? ' *(auto)*' : '';
             lines.push(`✅ **${user.username}** cashed at **${multLabel(state.cashedOutAt)}**${auto} (+${net.toLocaleString()} coins)`);
+        } else if (state.cashing) {
+            // Pressed before the crash, and the write settling it had not
+            // answered when the round ended. It pays either way; calling it a
+            // loss would tell the channel otherwise.
+            lines.push(`⏳ **${user.username}** cashed out as it crashed — payout settling`);
         } else if (state.cashFailed) {
             const net = Math.floor(bet * state.cashFailedAt) - bet;
             lines.push(state.cashOutcome === 'owed'
@@ -259,10 +178,10 @@ module.exports = {
         const bet         = interaction.options.getInteger('bet');
         const autoCashout = interaction.options.getNumber('auto_cashout') ?? null;
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-        const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
-        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+        const refusal = casinoRefusal(guildSettings, bet);
+        if (refusal) {
             releaseLock?.();
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: refusal, flags: MessageFlags.Ephemeral });
         }
         const user        = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user?.balance ?? 0, 'Crash', guildSettings);
@@ -486,8 +405,18 @@ async function startCrashGame(interaction, lobby, lobbyId) {
      */
     async function cashOutPlayer(uid, mult, autoTriggered = false) {
         const state = lobby.players.get(uid);
-        if (!state || state.cashedOutAt !== null || state.cashFailed) return 'already';
+        if (!state || state.cashedOutAt !== null || state.cashFailed || state.cashing) return 'already';
 
+        // In flight from here until the write answers. The round keeps running
+        // while it is — the tick is an async interval callback, and the button
+        // handler is another — so the crash resolution and the tick-error refund
+        // can both run in the gap, and both used to read this player as still
+        // riding the multiplier. The resolution then decremented the marker the
+        // write below was about to decrement too, driving `pendingCrashRefund`
+        // negative, where it silently absorbs the next lobby's stake; the error
+        // refund returned the stake the payout below already includes. This
+        // write settles the player either way, so both leave them to it.
+        state.cashing = true;
         const payout = Math.floor(bet * mult);
         const { status } = await creditCoinsOnce(
             { userId: uid, guildId },
@@ -498,6 +427,10 @@ async function startCrashGame(interaction, lobby, lobbyId) {
             console.error('[crash] cashOut DB write failed:', err);
             return { status: 'unknown' };
         });
+        // Cleared in the same synchronous step that records the outcome, so
+        // there is no moment at which the player reads as neither in flight nor
+        // settled.
+        state.cashing = false;
 
         if (status !== 'paid' && status !== 'duplicate') {
             // The multiplier and the outcome are recorded beside the flag: this
@@ -603,6 +536,13 @@ async function startCrashGame(interaction, lobby, lobbyId) {
             }
         }
 
+        // The interval does not wait for this callback, so a tick that awaited a
+        // cash-out above can wake to a round a later tick has already resolved.
+        // Carrying on resolved it a second time: the losers' markers swept
+        // again — eating a stake counted there for another channel's lobby —
+        // the crash point pushed to the history twice, and a second final embed.
+        if (gameOver) return;
+
         if (currentMult >= crash) {
             gameOver = true;
             clearInterval(lobby.interval);
@@ -614,8 +554,12 @@ async function startCrashGame(interaction, lobby, lobbyId) {
             // tick-error refund or through the reconciler in
             // src/events/ready.js. Clearing it here, as this once did, threw
             // away the stake of the one group that had already lost the payout.
+            //
+            // `cashing` is excluded for the same reason: a cash-out whose write
+            // is still in flight settles the marker itself, whichever way it
+            // lands, and decrementing it here as well is a double decrement.
             const loserIds = [...lobby.players.entries()]
-                .filter(([, s]) => s.cashedOutAt === null && !s.cashFailed)
+                .filter(([, s]) => s.cashedOutAt === null && !s.cashFailed && !s.cashing)
                 .map(([uid]) => uid);
             if (loserIds.length > 0) {
                 User.updateMany(
@@ -693,8 +637,14 @@ async function startCrashGame(interaction, lobby, lobbyId) {
                 // half is already written down as owed. So they keep the
                 // `lifetimeGambled` they earned; taking it back would say the
                 // hand never happened when it is about to be paid out.
+                //
+                // A player whose cash-out write is still in flight is in
+                // neither group. That write pays out the stake with the
+                // winnings and clears the marker in one; refunding the stake
+                // here as well pays it twice. If it fails, it leaves the
+                // marker standing and the restart sweep returns the stake.
                 const byOutcome = (failed) => [...lobby.players.entries()]
-                    .filter(([, s]) => s.cashedOutAt === null && Boolean(s.cashFailed) === failed)
+                    .filter(([, s]) => s.cashedOutAt === null && !s.cashing && Boolean(s.cashFailed) === failed)
                     .map(([uid]) => uid);
 
                 const refunds = [

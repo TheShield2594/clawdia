@@ -9,6 +9,7 @@ const User  = require('../../models/User');
 const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
+const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
 const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
@@ -201,10 +202,10 @@ module.exports = {
         }
 
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-        const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
-        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+        const refusal = casinoRefusal(guildSettings, bet);
+        if (refusal) {
             releaseLock?.();
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: refusal, flags: MessageFlags.Ephemeral });
         }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
@@ -319,6 +320,11 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock, onWag
             time: 60_000,
         });
         collector.on('collect', async i => {
+            // A new spin is a new hand, so it answers to the settings as they
+            // are now, not as they were when the first one was typed.
+            const refused = await replayRefusal(interaction.guild.id, bet);
+            if (refused) return refuseReplay(i, interaction, refused);
+
             const user   = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             const wallet = user?.balance ?? 0;
 

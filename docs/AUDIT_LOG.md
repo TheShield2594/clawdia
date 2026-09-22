@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and eight passes over the
+long-stable, low-churn subsystems have been audited, and twelve passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -12,7 +12,10 @@ payouts (the season pass, a syndicate's founding, a fishing tournament, the war
 resolution), the seasonal-event currency (candy, hearts, snowflakes, and the
 event shop), and the gathering commands' non-payout surface (the
 repair/upgrade/unlock shop refunds, the quest-claim credits, the fishing
-tournament's entry fee, and `/forge`) (#873). The majority of the
+tournament's entry fee, and `/forge`), the `/pet` command's payouts, the
+quest-reward credit at every caller, and the rest of the casino (`confirmBet`,
+the bet guards, the crash restart refund, and the games' leaderboard and stat
+writes) (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -1448,6 +1451,109 @@ not re-derive it:
 
 ---
 
+## Economy — The Rest of the Casino
+
+**Status: Audited — all findings resolved** ✓
+
+The twelfth pass of the economy audit #873, over what pass 4 named as out of its
+scope and left listed: `confirmBet`, the bet guards, and the games' leaderboard
+writes. Pass 4 took the coins a settled hand credits. This pass takes everything
+around that credit — the prompt before the stake, the guild's say over whether a
+hand may be played at all and at what size, and the stat writes that ride beside
+the payout — and, because it had to be read to judge the crash stat write, the
+crash round's own ordering.
+
+The worst finding is not in any of those. Pass 4 left the crash join refund as a
+bare `$inc` and argued it was safe *because* a failure leaves `pendingCrashRefund`
+set, and a restart sweep in `src/events/ready.js` returns it; a failed cash-out
+keeps its marker for the same reason. That sweep has never refunded anything. It
+issued its update as a pipeline whose first stage was `$inc`, which is not a
+pipeline stage — Mongoose refuses it before it is sent ("Invalid update pipeline
+operator") — so the first stranded player threw out of the loop, the whole sweep
+was logged as failed, and every marker in the database was left where it was, on
+every boot. Its unit test mocked the model and asserted exactly that shape, which
+is how a recovery path that could not run stayed green. Every stake the crash
+lobby ever stranded across a restart is still sitting in a marker.
+
+The forward direction of the rest was sound as it has been on every pass:
+`placeWager`'s compare-and-set is the authority on whether a stake moves, and
+nothing in this pass could get past it. The failures were in what the guards
+*didn't* ask, and in writes racing each other inside one crash round.
+
+**Files reviewed/fixed:**
+- `src/games/casino/crashRefund.js` (added — the restart sweep, moved out of
+  `ready.js`), `src/events/ready.js`
+- `src/games/casino/betGuard.js` (added — `casinoRefusal`, `replayRefusal`,
+  `refuseReplay`)
+- `src/games/casino/crashStats.js` (added — the weekly leaderboard, moved out of
+  `crash.js`), `src/games/casino/crash.js`
+- `src/games/casino/slots.js`, `roulette.js`, `keno.js`, `poker.js`,
+  `higherlower.js`, `cupgame.js`, `blackjack.js`, `coinflip.js`, `dice.js`
+- `src/utils/confirmBet.js`, `src/utils/placeWager.js`,
+  `src/commands/economy/casino.js` (reviewed, unchanged)
+- `tests/crashRestartRefund.test.js`, `tests/crashCashOutInFlight.test.js`,
+  `tests/casinoReplayGuard.test.js` (added); `tests/readyEvent.test.js` (the
+  crash sweep's wiring only — its logic moved to its own suite)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | **The crash restart refund never ran.** `ready.js` returned stranded stakes with `findOneAndUpdate(_, [{ $inc: { balance: '$pendingCrashRefund' } }, { $set: { pendingCrashRefund: 0 } }], { updatePipeline: true })`. `$inc` is not an update-pipeline stage; Mongoose throws `Invalid update pipeline operator: "$inc"` before the write is sent. The loop had no per-player catch, so the first stranded player aborted the sweep and every marker survived every boot. Pass 4's finding 13 (the join refund) and finding 2 (the failed cash-out) both rest on this sweep. The sweep was also unscoped under sharding — any shard's boot swept every guild's markers, including stakes riding a live round on another shard, which that round would then settle as well | The sweep is `reconcileCrashRefunds` in `games/casino/crashRefund.js`: a `$set` pipeline that adds the marker to the balance and zeroes it in one write, with `pendingCrashRefund: { $gt: 0 }` in the filter so two sweeps racing each other cannot both pay one marker; the amount logged is read off the pre-image, not the list; a failure on one player is logged and the rest are still swept; and only guilds this shard owns (`ownsGuild`) are touched. `tests/crashRestartRefund.test.js` runs the issued update through Mongoose's own cast against the real schema, where the old shape is rejected | `crashRefund.js`, `ready.js` |
+| 2 | **A crash cash-out in flight when the round ended was settled twice.** The round is an async `setInterval` callback the interval does not wait for. A tick awaiting an auto cash-out, or a button press awaiting its write, left the player reading as still riding the multiplier, so: the crash resolution swept them as a loser and decremented `pendingCrashRefund`, and the cash-out write then decremented it again — the marker is unclamped, so it went negative and silently absorbed the next lobby's stake; the tick-error refund returned the stake the in-flight payout already included; every later tick re-fired the same auto cash-out, one credit write per tick; and the stalled tick woke to a round already resolved and resolved it a second time (the losers' markers swept again, the crash point pushed twice, a second final embed) | `cashOutPlayer` marks the player `cashing` for the life of its write and clears it in the same synchronous step that records the outcome; the resolution sweep and the tick-error refund both leave a `cashing` player to the write that settles them; a second cash-out for the same player answers `'already'`; the tick returns when it wakes to a round that is over; and the final embed says the payout is settling rather than calling the player a loser | `crash.js` |
+| 3 | **The bet guards ran once per command, not once per hand.** The casino's three switches (`economy.enabled`, `gamesEnabled`, `casinoEnabled`) and `casinoMaxBet` were checked before the first hand only. Every game but blackjack, coinflip and dice ends its hand with a "Play Again" that stakes the same bet again from a button whose collector re-arms on every replay — slots, roulette, keno (both "Play Again" and the quick reroll), poker, higher-or-lower, and Monte's two. None of them asked again, so an admin who closed the casino or lowered the limit did so for new commands only, and a player holding a replay button kept playing at the old stake for as long as they kept pressing it | `games/casino/betGuard.js` states the rule once. `casinoRefusal` replaces the ten hand-copied limit checks in the games' `execute`; `replayRefusal` asks it again at every replay site against the settings as they are now (`getGuildSettings`), failing closed on a failed read, and `refuseReplay` tells the player privately and takes the button off the hand. The freeze is deliberately not part of it — it already rides `placeWager`'s filter (#870), the one place a refusal cannot race the debit | `betGuard.js`, all ten games |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 4 | **Two replays took their stake and then acknowledged the press with a call that could throw.** Keno's quick reroll and higher-or-lower's "Play Again" debit inside the collector and only then `deferUpdate()`. A rejected acknowledgement escaped — keno's out of the collector as an unhandled rejection, higher-or-lower's into a catch that said "something went wrong" — with the stake gone and nothing started that could return it: the hand whose rollback refunds it had not been entered | The acknowledgement cannot throw (`.catch(() => {})`); the hand starts either way, and its own rollback covers everything after | `keno.js`, `higherlower.js` |
+| 5 | **Slots' Hot Reel streak could be spent twice.** The loss streak was read off the user document fetched before the wager and written back with a plain `$set` once the spin settled. A replay does not hold the casino lock, so a "Spin Again" and a fresh `/casino slots` in another channel run side by side — both read the same three losses and both locked a high-value reel, and each `$set` of `read + 1` overwrote the other's loss | The streak is claimed with a compare-and-set (`slotsLossStreak: { $gte: 3 }` → `0`); only the spin that wins the claim locks the reel. Losses are counted with `$inc`, wins reset with `$set`, and a losing hot-reel spin writes nothing more — the claim already left the streak at zero, as the old code did | `slots.js` |
+| 6 | **The crash weekly leaderboard lost a player's best multiplier at the week rollover.** Two cash-outs racing the Monday rollover (a player in two channels' rounds) both miss the same-week `$max`; the first rolls the week over, the second's conditional rollover then matches nothing, and its fallback raised `allTimeBest` only — so if the loser of the race was the higher multiplier, the week ranked the player on the lower one | When the rollover misses, the same-week `$max` is re-run — it now matches the week the other writer set, and raises `weekBest` with `allTimeBest`. The helpers moved to `crashStats.js` so the write can be tested without driving a round | `crashStats.js`, `crash.js` |
+
+#### Informational
+
+| # | Note |
+|---|------|
+| 7 | Two new modules, `crashRefund.js` and `betGuard.js`, and `crashStats.js` split out of `crash.js`. `tests/crashRestartRefund.test.js` holds the sweep to an update Mongoose will cast and drives it against the pipeline evaluator (the refund arithmetic, a marker summed across two lobbies, exactly-once across two racing sweeps, one failure not stranding the rest, shard scoping). `tests/crashCashOutInFlight.test.js` hangs a cash-out write across the bust. `tests/casinoReplayGuard.test.js` drives slots, roulette and keno through a replay after the casino closes and after the limit drops, with an open-casino control, and holds the other replay sites to the check |
+
+**Reviewed and found sound** — no change needed, recorded so the next pass does
+not re-derive it:
+
+- **`confirmBet`.** It moves no coins and its answer is advisory: `placeWager`'s
+  compare-and-set is what decides whether a stake is taken, so a wallet that
+  changed while the prompt was open is still judged correctly. Every way out of
+  the prompt that is not a confirmation — cancel, the 15-second timeout, and a
+  Confirm whose own `update` fails — returns `shouldProceed: false` with nothing
+  debited, which is the safe direction to fail in. Its wallet-relative default
+  threshold (`min(10,000, 50% of the wallet)`) is reached only by a guild with
+  no settings document, since the schema defaults `betConfirmThreshold` to
+  10,000. The one caller that confirms against a button press rather than the
+  command — roulette's replay — was fixed before this pass and is correct.
+- **The crash lobby's joiners** skip `confirmBet` and the casino lock. The first
+  is deliberate: the lobby embed states the bet and pressing Join is the
+  confirmation. The second is safe for the reason the dispatcher gives — every
+  stake is its own compare-and-set, and the join refund is covered by the marker
+  (which, after finding 1, is now actually true).
+- **The mid-hand stakes** — blackjack's double-down, split and insurance, poker's
+  raises, keno's reroll — are guarded compare-and-sets through `placeWager` and
+  are held there by `tests/casinoBetGuard.test.js`. They are not checked against
+  `casinoMaxBet`, which is the per-bet limit on the hand's opening stake, the
+  way a table limit is read; keno's reroll costs half the bet it follows.
+- **The roulette and crash history writes** (`$push` with `$slice`) are atomic
+  and cosmetic. `/casino setlimit` requires Manage Server and writes without an
+  upsert, like every other command that writes guild settings; a guild with no
+  settings document yet has no casino to limit.
+- **The games' odds** (`*Odds.js`, `slotsReels.js`, `crashCurve.js`,
+  `settlement.js`) were read for the payouts pass 4 fixed and are pure functions
+  under their own tests; this pass did not re-derive the house edges.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -1460,11 +1566,12 @@ wide, and it is widest exactly where the risk is.
 - `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. Still not reviewed: prestige (reviewed sound in pass 7) and the map view. `/explore`'s while-an-event-runs **event-currency drop** is the one event-currency credit pass 8 did not key (it rides the expedition `save()` and `explore.js` is at its file-size ceiling) — the keyed helper now exists, so it is a follow-up once explore is split
 - `pet` (`petService.js`, `pet/`) — the `/pet` command's **PvP-battle winner payout, the battle escrow refunds and the adopt-fee refund** are audited above (pass 10, which also split `pet.js` into the `pet/` folder), alongside the pet **drops** the gathering runs grant, found sound in pass 9. The Pet-of-the-Week reward was reviewed and found sound. The pet-care **quest credits** (`/pet feed`, `play`, `rest` and the battle care rewards) are audited above (pass 11), keyed alongside every other caller of the shared `awardQuest` hook
 - `use` / items / effects — the seasonal loot-box item grant is audited above (pass 6); `effectsService.js`, `inventory.js`, `shop.js` and the rest of `use.js` are not
-- casino (`src/games/casino/*`, `casino.js`) — `confirmBet`, the bet guards, the
-  eight games' odds and their leaderboard writes. The progressive jackpot and the
-  hand payout paths (including the crash lobby's `pendingCrashRefund` escrow) have
-  been audited above; the stakes those hands are played for go through
-  `placeWager`, which #785 covered
+- casino (`src/games/casino/*`, `casino.js`) — the progressive jackpot (pass 2),
+  the hand payouts (pass 4), and `confirmBet`, the bet guards, the crash restart
+  refund and the games' leaderboard and stat writes (pass 12) are audited above;
+  the stakes go through `placeWager`, which #785 covered. Not reviewed: the
+  games' odds and house edges beyond what pass 4 needed for the payouts, and the
+  rendering (embeds, animations, the paytables)
 - core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market.js` and `gift.js` have had their unwind paths audited (pass 3), the rest of both commands has not
 - group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is not reviewed
 - progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (the view/leaderboard/history/admin flows) is not reviewed
@@ -1491,6 +1598,7 @@ economy escrow and payout paths on 2026-09-01; the progressive jackpot on
 payouts on 2026-09-08; the core currency commands on 2026-09-17; the
 gathering-loop payouts on 2026-09-18; the progression and group/PvP payouts on
 2026-09-19; the seasonal-event currency on 2026-09-20; the gathering
-commands' non-payout surface on 2026-09-22; and the `/pet` command's payouts on
+commands' non-payout surface on 2026-09-22; the `/pet` command's payouts on
+2026-09-22; the quest-reward credit on 2026-09-22; and the rest of the casino on
 2026-09-22. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*

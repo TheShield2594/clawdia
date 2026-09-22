@@ -14,19 +14,15 @@
 
 jest.mock('../src/utils/commandDeployer', () => ({ deployCommandsIfChanged: jest.fn() }));
 jest.mock('../src/services/scheduler', () => ({ startScheduler: jest.fn() }));
-jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 jest.mock('../src/services/casinoJackpotService', () => ({ reconcileJackpotClaims: jest.fn() }));
-jest.mock('../src/models/User', () => ({ find: jest.fn(), findOneAndUpdate: jest.fn() }));
+jest.mock('../src/games/casino/crashRefund', () => ({ reconcileCrashRefunds: jest.fn() }));
 
 const { deployCommandsIfChanged } = require('../src/utils/commandDeployer');
 const { startScheduler } = require('../src/services/scheduler');
-const { logTransaction } = require('../src/utils/logTransaction');
 const { reconcileJackpotClaims } = require('../src/services/casinoJackpotService');
-const User = require('../src/models/User');
+const { reconcileCrashRefunds } = require('../src/games/casino/crashRefund');
 
 const ready = require('../src/events/ready');
-
-const GUILD_ID = '111222333444555666';
 
 function makeClient() {
     return {
@@ -46,8 +42,7 @@ beforeEach(() => {
 
     deployCommandsIfChanged.mockResolvedValue({ deployed: true, count: 98, reason: 'command set changed' });
     reconcileJackpotClaims.mockResolvedValue({ reconciled: 0, failed: 0 });
-    User.find.mockReturnValue({ lean: async () => [] });
-    User.findOneAndUpdate.mockResolvedValue(null);
+    reconcileCrashRefunds.mockResolvedValue({ refunded: 0, failed: 0 });
 });
 
 afterEach(() => {
@@ -136,37 +131,41 @@ describe('jackpot reconciliation', () => {
         await ready.execute(makeClient());
 
         expect(errors).toHaveBeenCalledWith('[READY] Jackpot reconciliation failed:', expect.any(Error));
-        expect(User.find).toHaveBeenCalled();
+        expect(reconcileCrashRefunds).toHaveBeenCalled();
     });
 });
 
+// The sweep's own logic — the update it issues, the shard scoping, the race
+// between two boots — is pinned in tests/crashRestartRefund.test.js, against the
+// pipeline evaluator rather than a copy of the update. This only pins the wiring.
 describe('crash refund sweep', () => {
-    it('returns each pending bet and logs the refund', async () => {
-        User.find.mockReturnValue({
-            lean: async () => [{ _id: 'u1', userId: 'user-1', guildId: GUILD_ID, balance: 100, pendingCrashRefund: 250 }],
-        });
+    it('runs the sweep for this client and reports what it refunded', async () => {
+        reconcileCrashRefunds.mockResolvedValue({ refunded: 2, failed: 0 });
+        const client = makeClient();
 
-        await ready.execute(makeClient());
+        await ready.execute(client);
 
-        expect(User.findOneAndUpdate).toHaveBeenCalledWith(
-            { _id: 'u1' },
-            [{ $inc: { balance: '$pendingCrashRefund' } }, { $set: { pendingCrashRefund: 0 } }],
-            { updatePipeline: true }
-        );
-        expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({
-            type: 'crash_refund', amount: 250, balance: 350,
-        }));
+        expect(reconcileCrashRefunds).toHaveBeenCalledWith(client);
+        expect(logs).toHaveBeenCalledWith('[READY] Refunded crash bets for 2 user(s)');
     });
 
-    it('writes nothing when no bet is outstanding', async () => {
+    it('stays quiet when no bet is outstanding', async () => {
         await ready.execute(makeClient());
 
-        expect(User.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(logs).not.toHaveBeenCalledWith(expect.stringContaining('crash bets'));
         expect(logs).toHaveBeenCalledWith('[READY] Background services started');
     });
 
+    it('reports the refunds left for the next restart', async () => {
+        reconcileCrashRefunds.mockResolvedValue({ refunded: 0, failed: 1 });
+
+        await ready.execute(makeClient());
+
+        expect(errors).toHaveBeenCalledWith(expect.stringContaining('left for the next restart'));
+    });
+
     it('logs a failed sweep rather than aborting startup', async () => {
-        User.find.mockReturnValue({ lean: async () => { throw new Error('mongo is down'); } });
+        reconcileCrashRefunds.mockRejectedValue(new Error('mongo is down'));
 
         await ready.execute(makeClient());
 

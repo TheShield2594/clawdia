@@ -9,6 +9,7 @@ const User  = require('../../models/User');
 const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
+const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const {
@@ -188,10 +189,10 @@ module.exports = {
             return interaction.reply({ content: 'Economy games are disabled in this server.', flags: MessageFlags.Ephemeral });
         }
 
-        const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
-        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+        const refusal = casinoRefusal(guildSettings, bet);
+        if (refusal) {
             releaseLock?.();
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: refusal, flags: MessageFlags.Ephemeral });
         }
 
         const { shouldProceed: hlProceed, alreadyReplied: hlReplied } = await confirmBet(interaction, bet, wallet, 'Higher or Lower', guildSettings);
@@ -474,6 +475,11 @@ function attachReplay(message, replayId, interaction, bet, userFilter, guildSett
         time: 60_000,
     }).on('collect', async ri => {
         try {
+            // A new hand answers to the settings as they are now, not as they
+            // were when the first one was typed.
+            const refused = await replayRefusal(interaction.guild.id, bet);
+            if (refused) return refuseReplay(ri, interaction, refused);
+
             // A replay is a fresh hand paid for with fresh coins, so it reports
             // its own wager rather than riding on the one that opened the
             // original — the jackpot and the season mission both count it.
@@ -485,7 +491,11 @@ function attachReplay(message, replayId, interaction, bet, userFilter, guildSett
                     embeds: [], components: [],
                 });
             }
-            await ri.deferUpdate();
+            // The stake has left the wallet and the hand that would settle or
+            // roll it back has not started, so nothing between the two may
+            // throw. A failed acknowledgement used to land in the catch below,
+            // which reports "something went wrong" and returns nothing.
+            await ri.deferUpdate().catch(() => {});
             await playHigherLower(interaction, bet, userFilter, guildSettings, [], 0, null, onWager);
         } catch (replayErr) {
             console.error('[HigherLower] replay error:', replayErr);

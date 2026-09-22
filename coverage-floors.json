@@ -320,6 +320,12 @@
             "functions": 49,
             "lines": 88
         },
+        "src/games/casino/crashRefund.js": {
+            "statements": 97,
+            "branches": 80,
+            "functions": 97,
+            "lines": 97
+        },
         "src/games/casino/payout.js": {
             "statements": 97,
             "branches": 82,
