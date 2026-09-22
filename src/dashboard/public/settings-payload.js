@@ -55,7 +55,17 @@ function buildSettingsPayload(section, ctx = {}) {
             'birthdays.channelId': document.getElementById('birthday-channel').value || null,
             'birthdays.wishingHourUtc': (() => { const v = parseInt(document.getElementById('birthday-hour').value, 10); return Number.isNaN(v) ? 9 : v; })(),
             'birthdays.roleId': document.getElementById('birthday-role').value || null,
-            'birthdays.message': document.getElementById('birthday-message').value || "It's the birthday of {user} ({age}) ! 🎂"
+            'birthdays.message': document.getElementById('birthday-message').value,
+            'birthdays.useEmbed': document.getElementById('birthday-use-embed').checked,
+            'birthdays.showAvatar': document.getElementById('birthday-avatar').checked,
+            'birthdays.reactions': document.getElementById('birthday-reactions').checked,
+            'birthdays.embedColor': document.getElementById('birthday-color').value || '#ffd700',
+            'birthdays.title': document.getElementById('birthday-title').value,
+            'birthdays.authorText': document.getElementById('birthday-author').value,
+            'birthdays.authorIcon': document.getElementById('birthday-author-icon').value || null,
+            'birthdays.footerText': document.getElementById('birthday-footer').value,
+            'birthdays.footerIcon': document.getElementById('birthday-footer-icon').value || null,
+            'birthdays.image': document.getElementById('birthday-image').value || null
         };
     } else if (section === 'moderation') {
         const immunityRoleIds = Array.from(document.getElementById('mod-immunity-roles').selectedOptions).map(o => o.value);

@@ -1,8 +1,32 @@
 'use strict';
 
-jest.mock('discord.js', () => ({
-    PermissionFlagsBits: { SendMessages: 1n << 11n },
-}));
+jest.mock('discord.js', () => {
+    // A minimal EmbedBuilder that records what each setter is handed, so tests
+    // can assert on the finished embed via `send.mock.calls[i][0].embeds[0].data`.
+    class EmbedBuilder {
+        constructor() { this.data = {}; }
+        setColor(v) { this.data.color = v; return this; }
+        setTitle(v) { this.data.title = v; return this; }
+        setDescription(v) { this.data.description = v; return this; }
+        setThumbnail(v) { this.data.thumbnail = v; return this; }
+        setImage(v) { this.data.image = v; return this; }
+        setAuthor(v) { this.data.author = v; return this; }
+        setFooter(v) { this.data.footer = v; return this; }
+        setTimestamp() { this.data.timestamp = true; return this; }
+    }
+    class AttachmentBuilder {
+        constructor(attachment, opts) { this.attachment = attachment; this.name = opts && opts.name; }
+    }
+    return {
+        EmbedBuilder,
+        AttachmentBuilder,
+        PermissionFlagsBits: {
+            SendMessages: 1n << 11n,
+            EmbedLinks: 1n << 14n,
+            AddReactions: 1n << 6n,
+        },
+    };
+});
 
 jest.mock('../src/models/Guild', () => ({ find: jest.fn() }));
 jest.mock('../src/models/User', () => ({ find: jest.fn() }));
@@ -33,10 +57,12 @@ const WISHING_HOUR = '2026-05-15T09:00:00Z'; // the hour makeGuildSettings() wis
 
 function makeChannel(hasPerm = true) {
     const perms = { has: jest.fn().mockReturnValue(hasPerm) };
+    const message = { react: jest.fn().mockResolvedValue(undefined) };
     return {
         isTextBased: () => true,
         permissionsFor: jest.fn().mockReturnValue(perms),
-        send: jest.fn().mockResolvedValue(undefined),
+        send: jest.fn().mockResolvedValue(message),
+        _message: message,
     };
 }
 
@@ -63,12 +89,22 @@ function makeUser(month, day, year = null) {
     };
 }
 
-function makeClient(channel) {
-    const member = {
-        roles: { cache: { has: jest.fn().mockReturnValue(false) } },
-        roles_add: jest.fn(),
+function makeMember(overrides = {}) {
+    return {
+        displayName: 'SampleUser',
+        displayAvatarURL: jest.fn().mockReturnValue('https://cdn.example/avatar.png'),
+        roles: {
+            cache: { has: jest.fn().mockReturnValue(false) },
+            add: jest.fn().mockResolvedValue(undefined),
+            remove: jest.fn().mockResolvedValue(undefined),
+        },
+        ...overrides,
     };
+}
+
+function makeClient(channel, member = makeMember()) {
     const guild = {
+        id: 'guild1',
         members: {
             me: {},
             fetch: jest.fn().mockResolvedValue(member),
@@ -99,9 +135,10 @@ describe('birthday message age substitution', () => {
 
         await checkBirthdays(client);
 
-        expect(channel.send).toHaveBeenCalledWith(
-            expect.objectContaining({ content: expect.stringContaining('36') })
-        );
+        const embed = channel.send.mock.calls[0][0].embeds[0];
+        expect(embed.data.description).toContain('36');
+        // The mention rides in content so the birthday person is actually pinged.
+        expect(channel.send.mock.calls[0][0].content).toBe('<@user1>');
     });
 
     test('shows ? when no birth year is provided', async () => {
@@ -112,9 +149,8 @@ describe('birthday message age substitution', () => {
 
         await checkBirthdays(client);
 
-        expect(channel.send).toHaveBeenCalledWith(
-            expect.objectContaining({ content: expect.stringContaining('?') })
-        );
+        const embed = channel.send.mock.calls[0][0].embeds[0];
+        expect(embed.data.description).toContain('?');
     });
 });
 
@@ -227,5 +263,130 @@ describe('lastCelebratedYear tracking', () => {
 
         expect(u.birthday.lastCelebratedYear).toBe(2026);
         expect(u.save).toHaveBeenCalled();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Embed presentation
+// ---------------------------------------------------------------------------
+
+describe('birthday embed presentation', () => {
+    useFixedClock(WISHING_HOUR);
+    afterEach(() => jest.clearAllMocks());
+
+    test('renders title, author and avatar thumbnail from templates', async () => {
+        const channel = makeChannel();
+        const member = makeMember({ displayName: 'Brandon' });
+        const client = makeClient(channel, member);
+        Guild.find.mockResolvedValue([makeGuildSettings({
+            title: '🎉 Happy Birthday, {username}!',
+            authorText: 'Birthday Celebration',
+            footerText: '{server}',
+            message: 'Have a great one, {user}!',
+        })]);
+        User.find.mockResolvedValue([makeUser(5, 15, 1990)]);
+
+        await checkBirthdays(client);
+
+        const embed = channel.send.mock.calls[0][0].embeds[0];
+        expect(embed.data.title).toBe('🎉 Happy Birthday, Brandon!');
+        expect(embed.data.author).toEqual(expect.objectContaining({ name: 'Birthday Celebration' }));
+        expect(embed.data.thumbnail).toBe('https://cdn.example/avatar.png');
+        expect(embed.data.description).toContain('Have a great one, <@user1>!');
+    });
+
+    test('useEmbed:false falls back to a plain-text wish that still pings', async () => {
+        const channel = makeChannel();
+        const client = makeClient(channel);
+        Guild.find.mockResolvedValue([makeGuildSettings({ useEmbed: false, message: 'yo {user}' })]);
+        User.find.mockResolvedValue([makeUser(5, 15)]);
+
+        await checkBirthdays(client);
+
+        const payload = channel.send.mock.calls[0][0];
+        expect(payload.embeds).toBeUndefined();
+        expect(payload.content).toBe('yo <@user1>');
+        expect(payload.allowedMentions).toEqual({ users: ['user1'] });
+    });
+
+    test('picks one of several ---separated message variants', async () => {
+        const channel = makeChannel();
+        const client = makeClient(channel);
+        Guild.find.mockResolvedValue([makeGuildSettings({
+            message: 'first variant\n---\nsecond variant',
+        })]);
+        User.find.mockResolvedValue([makeUser(5, 15)]);
+
+        await checkBirthdays(client);
+
+        const embed = channel.send.mock.calls[0][0].embeds[0];
+        // Exactly one variant, never the raw separator or both joined.
+        expect(embed.data.description).toMatch(/^(first variant|second variant)$/);
+    });
+
+    test('reacts with 🎉🎂 when reactions are enabled', async () => {
+        const channel = makeChannel();
+        const client = makeClient(channel);
+        Guild.find.mockResolvedValue([makeGuildSettings()]);
+        User.find.mockResolvedValue([makeUser(5, 15)]);
+
+        await checkBirthdays(client);
+
+        expect(channel._message.react).toHaveBeenCalledWith('🎉');
+        expect(channel._message.react).toHaveBeenCalledWith('🎂');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Birthday role lifecycle — added on the day, removed afterwards
+// ---------------------------------------------------------------------------
+
+describe('birthday role lifecycle', () => {
+    useFixedClock(WISHING_HOUR);
+    afterEach(() => jest.clearAllMocks());
+
+    test('grants the role and flags the member as holding it', async () => {
+        const channel = makeChannel();
+        const member = makeMember();
+        const client = makeClient(channel, member);
+        Guild.find.mockResolvedValue([makeGuildSettings({ roleId: 'role1' })]);
+        const u = makeUser(5, 15);
+        User.find
+            .mockResolvedValueOnce([])   // cleanup sweep: nobody stale
+            .mockResolvedValueOnce([u]); // today's celebrant
+
+        await checkBirthdays(client);
+
+        expect(member.roles.add).toHaveBeenCalledWith('role1');
+        expect(u.birthday.roleAssigned).toBe(true);
+    });
+
+    test('removes the role from a member whose birthday has passed', async () => {
+        const channel = makeChannel();
+        // This member still holds the role but their birthday is not today.
+        const member = makeMember({
+            roles: {
+                cache: { has: jest.fn().mockReturnValue(true) },
+                add: jest.fn().mockResolvedValue(undefined),
+                remove: jest.fn().mockResolvedValue(undefined),
+            },
+        });
+        const client = makeClient(channel, member);
+        Guild.find.mockResolvedValue([makeGuildSettings({ roleId: 'role1' })]);
+        const stale = {
+            userId: 'old1',
+            guildId: 'guild1',
+            birthday: { month: 1, day: 1, roleAssigned: true },
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+        User.find
+            .mockResolvedValueOnce([stale]) // cleanup sweep finds the stale holder
+            .mockResolvedValueOnce([]);     // nobody celebrating today
+
+        await checkBirthdays(client);
+
+        expect(member.roles.remove).toHaveBeenCalledWith('role1');
+        expect(stale.birthday.roleAssigned).toBe(false);
+        expect(stale.save).toHaveBeenCalled();
     });
 });

@@ -79,7 +79,38 @@ const guildSchema = new Schema({
         channelId: { type: String, default: null },
         wishingHourUtc: { type: Number, default: 9, min: 0, max: 23 },
         roleId: { type: String, default: null },
-        message: { type: String, default: "It's the birthday of {user} ({age}) ! 🎂", maxlength: 2000 }
+        // The wish text — now the embed *description* when useEmbed is on. A line
+        // containing only `---` separates it into several variants; one is picked
+        // at random each birthday so the same person is not greeted identically
+        // year after year. Up to 4000 so a few variants fit (a single variant is
+        // still well under Discord's 4096 description cap).
+        message: { type: String, default: "🎂 It's your special day, {user}! Wishing you a fantastic birthday filled with joy, laughter and cake. Have an amazing one! 🥳\n---\n🎉 Happy Birthday, {username}! 🎈 Hope your day is every bit as wonderful as you are.\n---\n🥳 Another trip around the sun for {user}! 🎂 May this year bring you everything you wish for — Happy Birthday!", maxlength: 4000 },
+
+        // ── Embed presentation (#birthday-embed) ────────────────────────────
+        // A birthday should not look like every other bot line. Off falls back to
+        // the old plain-text wish; on (the default) renders a celebratory embed
+        // with the member's avatar, a festive colour and optional banner art.
+        useEmbed:   { type: Boolean, default: true },
+        // Accepts `#rrggbb` (with or without the hash). Gold by default —
+        // COLORS.PRIZE, the codebase's "moment worth celebrating" colour.
+        embedColor: { type: String, default: '#ffd700', maxlength: 7 },
+        // Embed title, author line and footer — each a template with the same
+        // variables as the message ({user}, {username}, {age}, {age_ordinal},
+        // {server}). Empty author/footer text hides that element.
+        title:      { type: String, default: '🎉 Happy Birthday, {username}!', maxlength: 256 },
+        authorText: { type: String, default: '🎂 Birthday Celebration', maxlength: 256 },
+        footerText: { type: String, default: '{server}', maxlength: 2048 },
+        // Optional image URLs. Left empty, the author/footer icons fall back to
+        // the bundled birthday art and the guild icon respectively (see
+        // utils/birthdayFlair), and no banner is shown unless one is set here.
+        authorIcon: { type: String, default: null, maxlength: 1024 },
+        footerIcon: { type: String, default: null, maxlength: 1024 },
+        image:      { type: String, default: null, maxlength: 1024 },
+        // The member's avatar as the embed thumbnail — the strongest "this is
+        // about me" signal — and the bot piling 🎉🎂 onto its own message so
+        // members can join in with one tap.
+        showAvatar: { type: Boolean, default: true },
+        reactions:  { type: Boolean, default: true }
     },
     
     moderation: {

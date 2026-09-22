@@ -199,13 +199,57 @@ describe('validateBirthdaysUpdate', () => {
             'birthdays.roleId': SNOWFLAKE,
             'birthdays.message': 'happy birthday {user}',
             'birthdays.wishingHourUtc': 9,
+            'birthdays.useEmbed': true,
+            'birthdays.showAvatar': true,
+            'birthdays.reactions': false,
+            'birthdays.embedColor': '#ffd700',
+            'birthdays.title': '🎉 Happy Birthday, {username}!',
+            'birthdays.authorText': 'Birthday Celebration',
+            'birthdays.footerText': '{server}',
+            'birthdays.authorIcon': 'https://cdn.example/icon.png',
+            'birthdays.footerIcon': null,
+            'birthdays.image': 'https://cdn.example/banner.png',
         })).toBeNull();
     });
 
-    it('holds the message to a shorter ceiling than welcome does', () => {
-        expect(validateBirthdaysUpdate({ 'birthdays.message': 'x'.repeat(2001) }))
-            .toBe('birthdays.message exceeds 2000 characters');
+    it('holds the message to a multi-variant ceiling', () => {
+        expect(validateBirthdaysUpdate({ 'birthdays.message': 'x'.repeat(4001) }))
+            .toBe('birthdays.message exceeds 4000 characters');
         expect(validateBirthdaysUpdate({ 'birthdays.message': 42 })).toBe('birthdays.message must be a string');
+    });
+
+    it('validates embed text-field ceilings', () => {
+        expect(validateBirthdaysUpdate({ 'birthdays.title': 'x'.repeat(257) }))
+            .toBe('birthdays.title exceeds 256 characters');
+        expect(validateBirthdaysUpdate({ 'birthdays.authorText': 'x'.repeat(257) }))
+            .toBe('birthdays.authorText exceeds 256 characters');
+        expect(validateBirthdaysUpdate({ 'birthdays.footerText': 'x'.repeat(2049) }))
+            .toBe('birthdays.footerText exceeds 2048 characters');
+    });
+
+    it('rejects a bad hex color and accepts a good one', () => {
+        expect(validateBirthdaysUpdate({ 'birthdays.embedColor': 'red' }))
+            .toBe('birthdays.embedColor must be a hex color like #ffd700');
+        expect(validateBirthdaysUpdate({ 'birthdays.embedColor': 'ffd700' })).toBeNull();
+        expect(validateBirthdaysUpdate({ 'birthdays.embedColor': '' })).toBeNull();
+    });
+
+    it('rejects a non-http image URL and accepts https or empty', () => {
+        expect(validateBirthdaysUpdate({ 'birthdays.image': 'file:///etc/passwd' }))
+            .toBe('birthdays.image must be a valid http(s) URL');
+        expect(validateBirthdaysUpdate({ 'birthdays.authorIcon': 'not a url' }))
+            .toBe('birthdays.authorIcon must be a valid http(s) URL');
+        expect(validateBirthdaysUpdate({ 'birthdays.footerIcon': '' })).toBeNull();
+        expect(validateBirthdaysUpdate({ 'birthdays.image': 'https://cdn.example/b.png' })).toBeNull();
+    });
+
+    it('rejects non-boolean embed toggles', () => {
+        expect(validateBirthdaysUpdate({ 'birthdays.useEmbed': 'yes' }))
+            .toBe('birthdays.useEmbed must be a boolean');
+        expect(validateBirthdaysUpdate({ 'birthdays.showAvatar': 1 }))
+            .toBe('birthdays.showAvatar must be a boolean');
+        expect(validateBirthdaysUpdate({ 'birthdays.reactions': 'no' }))
+            .toBe('birthdays.reactions must be a boolean');
     });
 
     it('rejects a malformed roleId as well as a malformed channelId', () => {
