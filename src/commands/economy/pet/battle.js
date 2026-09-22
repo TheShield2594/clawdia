@@ -27,6 +27,7 @@ const { ownedBy } = require('../../../utils/collectorOwner');
 const {
     payBattleWinner, refundBattleStake, refundBothStakes, battleRefundNote, stakeRefundNote,
 } = require('../../../utils/petEconomy');
+const { questRewardPayoutKey } = require('../../../utils/payoutKey');
 const {
     NO_SUCH_PET, resolveUser, syncHungerAndRunaway, readSlotOption,
     creditPetCare, collectPetAchievements, announcePetAchievements,
@@ -206,6 +207,9 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
             service: 'pet',
             jobName: 'battleQuestReward',
             guildId: interaction.guild.id,
+            // Keyed (#873, pass 11): a pet-care quest completing off this battle
+            // pays coins exactly once and is replayable on failure.
+            payoutKey: questRewardPayoutKey('pet', interaction.id),
         });
     } catch (err) {
         if (isVersionError(err)) return interaction.editReply({ content: 'Edit conflict — please try again.', embeds: [] });
@@ -374,12 +378,18 @@ async function pvpBattle(interaction, ctx) {
         // allSettled, not all: `all` rejects on the first failure and leaves the
         // second rejection unobserved, which Node reports as an unhandled
         // rejection. Both saves have to be waited on and both reported.
+        // Keyed (#873, pass 11), one key per fighter. The two credits land on
+        // two different documents, so the shared string cannot collide; the
+        // battle settles once per interaction, so each fighter's care reward is
+        // credited once and recorded as owed on failure.
+        const chQuestKey = questRewardPayoutKey('pet', `${interaction.id}:${chUser.userId}`);
+        const opQuestKey = questRewardPayoutKey('pet', `${interaction.id}:${opUser.userId}`);
         const [chSaved, opSaved] = await Promise.allSettled([
             saveWithBalanceDelta(User, chUser, chBalanceBeforeCare, {
-                service: 'pet', jobName: 'battleQuestReward', guildId,
+                service: 'pet', jobName: 'battleQuestReward', guildId, payoutKey: chQuestKey,
             }),
             saveWithBalanceDelta(User, opUser, opBalanceBeforeCare, {
-                service: 'pet', jobName: 'battleQuestReward', guildId,
+                service: 'pet', jobName: 'battleQuestReward', guildId, payoutKey: opQuestKey,
             }),
         ]);
         if (chSaved.status === 'rejected') console.error('[pet battle] challenger save error:', chSaved.reason);

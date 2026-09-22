@@ -14,6 +14,54 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.3] - 2026-09-22
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 11 (#873) — the quest-reward credit, keyed at every caller.
+Every command and event that ticks a quest hook routes its reward through the
+one `awardQuest`, which adds the coins to `balance` in memory for the flow's
+`save()` to persist as an `$inc`. The gathering runs already fold that credit
+into the run's keyed delta (`gatherPayoutKey`, pass 6); everywhere else it rode
+`saveWithBalanceDelta` with no key — the pass-6 degraded branch, on paths as
+high-volume as every message and every command. The forward direction was sound
+as always (`awardQuest` never over-pays); what no pass had keyed is the credit
+itself. Unkeyed, `commitBalanceDelta` is three failures at once: the retry
+re-credits a write whose response was lost, a run against a pruned document is
+reported as paid though no coins moved (#804), and a payout that ultimately fails
+is filed as a keyless `FailedJob` that `payouts:replay` cannot settle.
+
+- **The passive quest hooks** — `messageCreate`, `messageReactionAdd` and the
+  after-every-command `trackQuestCommandUse` — each credited a completed quest's
+  coins unkeyed. The message handler folds its streak-milestone coins into the
+  same delta, so those rode it too. All keyed now through
+  `questRewardPayoutKey(scope, id)`: exactly-once and a replayable owed record on
+  failure. The message and reaction handlers key by the message that earned the
+  reward; the command handler by the interaction.
+- **The command-use credit carries the freeze sanction, not the plain guard.**
+  It escapes the command gate — it runs after `/help` as much as `/work` — so a
+  freeze committed between its pre-check and the credit had to be refused by the
+  write itself. Keyed, a guarded miss is otherwise recorded as owed and
+  *replayed*, paying the frozen member the moment an operator runs the sweep. So
+  `commitBalanceDelta` gains `refuseWhenFrozen`: the freeze rides the update's
+  own filter, and a miss on a present document is confirmed as a freeze before
+  being withheld rather than owed. `creditCoinsOnce` gains an update-only `guard`
+  so the sanction never reaches the classification that tells a refusal from a
+  genuine miss.
+- **`/work` and `/daily`** credited their base-flow quest reward unkeyed, and
+  their challenge-bonus flow completed a *second* economy quest under a second
+  unkeyed credit. Both keyed, the bonus under a scope of its own so it cannot be
+  dropped as a duplicate of the base credit in the same interaction.
+- **`/pet feed`, `play`, `rest` and the battle care rewards** credited unkeyed.
+  Keyed now; the button-driven play and rest key by the button interaction, so a
+  player clicking either repeatedly is paid for each click rather than having all
+  but the first dropped as duplicates.
+
+The gathering runs were already keyed and are unchanged. No schema change.
+`tests/questRewardPayoutRecovery.test.js` drives the keyed credit and the freeze
+sanction against a store that evaluates both guards for real, and holds the ten
+call sites to the keyed path.
+
 ## [4.13.2] - 2026-09-22
 
 Migrations through `026_backfill_shop_item_ids`.

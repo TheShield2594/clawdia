@@ -18,7 +18,7 @@ const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
-const { challengeBonusPayoutKey } = require('../../utils/payoutKey');
+const { challengeBonusPayoutKey, questRewardPayoutKey } = require('../../utils/payoutKey');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { ownedBy } = require('../../utils/collectorOwner');
 
@@ -284,6 +284,10 @@ module.exports = {
                     service: 'work',
                     jobName: 'shiftQuestReward',
                     guildId: interaction.guild.id,
+                    // Keyed (#873, pass 11): a quest completing on this shift pays
+                    // coins exactly once and records a replayable owed payload on
+                    // failure, rather than the pass-6 degraded branch.
+                    payoutKey: questRewardPayoutKey('work', interaction.id),
                 });
                 if (questsDone.length || questsNear.length) {
                     notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, updated).catch(() => null);
@@ -400,6 +404,11 @@ module.exports = {
                                     service: 'work',
                                     jobName: 'challengeBonusQuestReward',
                                     guildId: interaction.guild.id,
+                                    // Keyed (#873, pass 11), under a scope of its own: the base
+                                    // shift already keyed `quest:earn:work:<id>`, and the bonus can
+                                    // complete a *different* economy quest in the same interaction —
+                                    // a shared key would drop the second credit as a duplicate.
+                                    payoutKey: questRewardPayoutKey('work-bonus', interaction.id),
                                 });
                                 if (earn.completed.length || earn.nearComplete.length) {
                                     notifyQuestComplete(guildSettings, interaction.member, earn.completed, interaction.channel, bonusUpdated).catch(() => null);

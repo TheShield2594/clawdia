@@ -1361,6 +1361,93 @@ here.
 
 ---
 
+## Economy — Quest and Mission Reward Crediting
+
+**Status: Audited — all findings resolved** ✓
+
+The eleventh pass of the economy audit #873, over the quest-reward credit — the
+bound the last four passes each named and left. Every command and event that
+ticks a quest hook (`onMessage`, `onReaction`, `onCommandUse`, `onEconomyEarn`,
+`onHunt`/`onFish`/`onMine`/`onExplore`, `onPetCare`) routes its reward through
+the one `awardQuest` in `questService.js`, which adds the coins to `balance` in
+memory for the flow's `save()` to persist as an `$inc` (`balanceDelta.js`). The
+gathering runs already fold that credit into the run's keyed delta
+(`gatherPayoutKey`, pass 6); every other caller rode `saveWithBalanceDelta` with
+no key. So keying one command's would have half-fixed it — this pass keys the
+credit at every caller instead.
+
+As on every path before it the forward direction was sound: `awardQuest` never
+over-pays, and the quest's `completedAt` gates it to one award. The failure is
+the audit's usual one, on the credit itself. Unkeyed, `commitBalanceDelta` is
+three failures at once: the retry re-credits a write whose response was lost
+(double pay), a run against a pruned document is reported as paid though no coins
+moved (#804), and a payout that ultimately fails is filed as a keyless
+`FailedJob` that `payouts:replay` cannot settle.
+
+The credit is keyed per *flow* rather than per quest, because it is one `$inc`
+of the flow's whole delta and cannot carry a different key for each quest folded
+into it — and per-flow is enough, because a quest completes in exactly one flow
+(its `completedAt` is set once and persisted by the save that runs before the
+credit), so the flow's coins are one credit that must land once. The one wrinkle
+is the economy freeze (#870): the passive hooks escape the command gate, so their
+credit carries the freeze sanction, and a *keyed* guarded miss is otherwise
+recorded as owed and replayed — which would pay the frozen member the moment an
+operator ran the sweep. `commitBalanceDelta` gains `refuseWhenFrozen` for exactly
+that: the freeze rides the update's own filter, and a miss on a present document
+is confirmed as a freeze before being withheld rather than owed.
+
+The "mission" half of the roadmap's title needed nothing: `recordMissionProgress`
+only advances progress, and the season-mission *coins* are paid at
+`/season claim-mission`, keyed since pass 7 (`seasonMissionCoinPayoutKey`).
+
+**Files reviewed/fixed:**
+- `src/utils/payoutKey.js` (`questRewardPayoutKey`; an update-only `guard` on
+  `creditCoinsOnce` so a sanction never reaches the miss classification),
+  `src/utils/balanceDelta.js` (`refuseWhenFrozen` on `commitBalanceDelta`)
+- `src/events/interactionCreate.js`, `src/events/messageCreate.js`,
+  `src/events/messageReactionAdd.js`
+- `src/commands/economy/work.js`, `src/commands/economy/daily.js`,
+  `src/commands/economy/pet/feed.js`, `src/commands/economy/pet/status.js`,
+  `src/commands/economy/pet/battle.js`
+- `tests/questRewardPayoutRecovery.test.js` (added);
+  `tests/economyFreezeQuestReward.test.js` (updated for the keyed sanction)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | **The passive quest hooks credited unkeyed** — `messageCreate` (which also folds its streak-milestone coins into the same delta), `messageReactionAdd`, and the after-every-command `trackQuestCommandUse` each credited a completed quest's coins through `saveWithBalanceDelta` with no `payoutKey`, the pass-6 degraded branch, on the highest-volume paths in the game (every message, every command) | Keyed through `questRewardPayoutKey(scope, id)` — the message and reaction handlers by the message that earned the reward, the command handler by the interaction — so each is exactly-once and a failure is a replayable owed `coins` payload | `messageCreate.js`, `messageReactionAdd.js`, `interactionCreate.js`, `payoutKey.js` |
+| 2 | **The command-use credit could not be keyed without regressing the freeze.** It escapes the command gate — it runs after `/help` as much as `/work` — so a freeze committed between its pre-check read and the credit was refused by the write's own `guard` (#870). Keyed, that guarded miss would be classified and filed as *owed*, and `payouts:replay` would pay the frozen member later — the sanction not being a sanction | `commitBalanceDelta` gains `refuseWhenFrozen`: the freeze rides the credit's update filter, and a miss on a present document is confirmed as a freeze and withheld rather than owed. `creditCoinsOnce` gains an update-only `guard` so the sanction never reaches the classification that tells a refusal from a genuine miss | `balanceDelta.js`, `payoutKey.js`, `interactionCreate.js` |
+| 3 | **`/work` and `/daily` credited unkeyed, twice.** The base shift/claim quest reward rode `saveWithBalanceDelta` with no key, and the challenge-bonus flow calls `onEconomyEarn` again on the bonus — a *second* economy quest completing under a second unkeyed credit in the same interaction | Both keyed (`questRewardPayoutKey('work'/'daily', interaction.id)`); the bonus under a scope of its own (`'work-bonus'`/`'daily-bonus'`) so it cannot be dropped as a duplicate of the base credit | `work.js`, `daily.js`, `payoutKey.js` |
+| 4 | **`/pet feed`, `play`, `rest` and the battle care rewards credited unkeyed** — the bound pass 10 named. `play` and `rest` are driven by buttons the player can click repeatedly | Keyed; the button-driven play and rest key by the **button** interaction id, so each click is its own credit rather than a duplicate of the first, and the two-fighter battle care keys each fighter apart | `pet/feed.js`, `pet/status.js`, `pet/battle.js`, `payoutKey.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 5 | A per-flow key constructor was needed and did not exist | `questRewardPayoutKey(scope, id)` — `scope` naming the flow so two flows reusing an id across a restart cannot collide, `id` the flow's own identifier (message, interaction, or the button interaction for a repeatable pet action) | `payoutKey.js` |
+| 6 | No tests over the keyed credit or the freeze sanction | `tests/questRewardPayoutRecovery.test.js` drives `commitBalanceDelta` against a store that evaluates the payout-key guard and the freeze guard for real (exactly-once, replayable-owed, missing-document, freeze-withheld-not-owed) and holds the ten call sites to the keyed path | `tests/` |
+
+**Reviewed and found sound** — no change needed, recorded so the next pass does
+not re-derive it:
+
+- **`awardQuest` itself, and the in-memory credit model.** It adds the reward to
+  `balance` in memory and lets the caller's save persist it; this pass keys that
+  save's credit rather than moving the credit into `awardQuest`, which would make
+  it a DB write per completion, break the save-first ordering `balanceDelta.js`
+  depends on, and force per-quest keys a single delta cannot carry.
+- **The gathering runs.** `/hunt`, `/fish`, `/mine` and `/explore` already fold
+  the quest reward into the run's keyed delta (`gatherPayoutKey`, pass 6),
+  including the apex and boss bonus flows; nothing to change.
+- **`recordMissionProgress`.** It advances season-mission progress only and moves
+  no coins; the mission payout is `/season claim-mission`, keyed since pass 7.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -1370,8 +1457,8 @@ wide, and it is widest exactly where the risk is.
 
 **Economy** — the largest uncovered area:
 
-- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound. Still not reviewed: quest/mission crediting through the already-audited `onEconomyEarn`, prestige (reviewed sound in pass 7), and the map view. `/explore`'s while-an-event-runs **event-currency drop** is the one event-currency credit pass 8 did not key (it rides the expedition `save()` and `explore.js` is at its file-size ceiling) — the keyed helper now exists, so it is a follow-up once explore is split
-- `pet` (`petService.js`, `pet/`) — the `/pet` command's **PvP-battle winner payout, the battle escrow refunds and the adopt-fee refund** are audited above (pass 10, which also split `pet.js` into the `pet/` folder), alongside the pet **drops** the gathering runs grant, found sound in pass 9. The Pet-of-the-Week reward was reviewed and found sound. Still not reviewed: the pet-care **quest credits** (`/pet feed`, `play`, `rest` and the battle care rewards), which ride the unkeyed `saveWithBalanceDelta` degraded branch — deferred to the cross-command **quest/mission crediting through `onEconomyEarn`** pass rather than fixed per-command
+- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. Still not reviewed: prestige (reviewed sound in pass 7) and the map view. `/explore`'s while-an-event-runs **event-currency drop** is the one event-currency credit pass 8 did not key (it rides the expedition `save()` and `explore.js` is at its file-size ceiling) — the keyed helper now exists, so it is a follow-up once explore is split
+- `pet` (`petService.js`, `pet/`) — the `/pet` command's **PvP-battle winner payout, the battle escrow refunds and the adopt-fee refund** are audited above (pass 10, which also split `pet.js` into the `pet/` folder), alongside the pet **drops** the gathering runs grant, found sound in pass 9. The Pet-of-the-Week reward was reviewed and found sound. The pet-care **quest credits** (`/pet feed`, `play`, `rest` and the battle care rewards) are audited above (pass 11), keyed alongside every other caller of the shared `awardQuest` hook
 - `use` / items / effects — the seasonal loot-box item grant is audited above (pass 6); `effectsService.js`, `inventory.js`, `shop.js` and the rest of `use.js` are not
 - casino (`src/games/casino/*`, `casino.js`) — `confirmBet`, the bet guards, the
   eight games' odds and their leaderboard writes. The progressive jackpot and the
