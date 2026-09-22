@@ -450,7 +450,7 @@ const TRANSACTION_SOURCES = {
     fish:    path.join('services', 'fishService.js'),
     hunt:    path.join('services', 'huntService.js'),
     mine:    path.join('services', 'mineService.js'),
-    explore: path.join('commands', 'economy', 'explore.js'),
+    explore: path.join('commands', 'economy', 'explore', 'go.js'),
 };
 
 describe.each(['fish', 'hunt', 'mine', 'explore'])('/%s keeps balance out of its save', (command) => {

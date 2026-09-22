@@ -1045,11 +1045,25 @@ const RELIC_EMOJI = {
     legendary: '👑',
 };
 
-// itemId → { itemId, rarity, lore, regionId, regionName, emoji, value }
+// A filename- and storage-key-safe slug for a relic. Relics have no id field of
+// their own — the display name is the inventory key — so the slug is derived
+// from it, and it is what namespaces a relic's icon art as `relic:<slug>` (see
+// src/data/activityItems.js). A relic rename is already a breaking change to the
+// inventory key, so deriving the slug from the same string adds no new fragility.
+function relicSlug(itemId) {
+    return itemId
+        .toLowerCase()
+        .replace(/['’]/g, '')          // drop apostrophes: "Curator's" → curators
+        .replace(/[^a-z0-9]+/g, '_')   // any other run of non-alphanumerics → underscore
+        .replace(/^_+|_+$/g, '');      // trim leading/trailing underscores
+}
+
+// itemId → { itemId, slug, rarity, lore, regionId, regionName, emoji, value }
 const RELIC_INDEX = Object.fromEntries(
     REGION_LIST.flatMap(region =>
         (region.relics ?? []).map(relic => [relic.itemId, {
             ...relic,
+            slug:       relicSlug(relic.itemId),
             regionId:   region.id,
             regionName: region.name,
             emoji:      RELIC_EMOJI[relic.rarity] ?? '🏺',
@@ -1115,6 +1129,7 @@ module.exports = {
     RELIC_EMOJI,
     RELIC_RARITY_ORDER,
     TOTAL_CORE_RELICS,
+    relicSlug,
     getRelicMeta,
     QUIET_LINES,
     FOOTER_LINES,

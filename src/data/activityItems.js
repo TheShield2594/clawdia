@@ -34,6 +34,7 @@
 const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES, ZONE_LIST, ANIMALS } = require('./huntData');
 const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES, LOCATION_LIST, FISH } = require('./fishData');
 const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES, DEPTH_LIST, ORES } = require('./mineData');
+const { REGION_LIST, RELIC_LIST } = require('./exploreData');
 
 // Tiered gear is keyed by `slug`; everything else by `id`. That difference is
 // in the game data, so it is honoured here rather than normalised away — the
@@ -161,9 +162,56 @@ function isPetItemId(itemId) {
     return typeof itemId === 'string' && PET_ITEM_IDS.has(itemId);
 }
 
+// ─── EXPLORE ITEMS (regions and relics) ───────────────────────────────────────
+//
+// Exploration's two icon families. Regions are the "places" of /explore — the
+// analog of the hunt zones, fish locations and mine depths that carry gear-side
+// art — so they take an `explore:` namespace parallel to those gear namespaces.
+// Relics are the keep-and-collect payoff a rare treasure drops, the analog of
+// the catch/kill/mine results, so they take their own `relic:` namespace the way
+// results take `fishcatch:`/`animal:`/`ore:`. Regions are keyed by their `id`;
+// relics have no id of their own, so they are keyed by the slug derived from
+// their display name (src/data/exploreData.js `relicSlug`).
+//
+// Like pets, explore art is *bundle-only*: /explore has no dashboard economy
+// panel to upload against, so these keys are deliberately kept out of
+// isUploadableItemId — the only source of the art is the baked default set. A
+// test (tests/exploreArtCatalog.test.js) keeps the id sets in step with the game
+// data and the icon manifest.
+const EXPLORE_NAMESPACE = 'explore';
+const RELIC_NAMESPACE = 'relic';
+
+/** The storage key a region's icon is filed under (`explore:whispering_forest`). */
+function exploreRegionItemId(regionId) {
+    return `${EXPLORE_NAMESPACE}:${regionId}`;
+}
+
+/** The storage key a relic's icon is filed under (`relic:whisperwood_charm`). */
+function relicItemId(slug) {
+    return `${RELIC_NAMESPACE}:${slug}`;
+}
+
+const EXPLORE_ITEMS = {
+    regions: REGION_LIST.map(r => ({ id: exploreRegionItemId(r.id), label: r.name, emoji: r.emoji || '🧭' })),
+    relics:  RELIC_LIST.map(r => ({ id: relicItemId(r.slug), label: r.itemId, emoji: r.emoji || '🏺' })),
+};
+
+const EXPLORE_ITEM_IDS = new Set(
+    Object.values(EXPLORE_ITEMS)
+        .flat()
+        .map(item => item.id)
+);
+
+/** Whether `itemId` names an explore region or relic the bundled art set covers. */
+function isExploreItemId(itemId) {
+    return typeof itemId === 'string' && EXPLORE_ITEM_IDS.has(itemId);
+}
+
 module.exports = {
     ACTIVITY_ITEMS, ACTIVITY_ITEM_IDS, isActivityItemId,
     RESULT_ITEMS, RESULT_ITEM_IDS, RESULT_NAMESPACES, resultItemId,
     isResultItemId, isUploadableItemId,
     PET_NAMESPACE, PET_SPECIES_IDS, PET_ITEM_IDS, petItemId, isPetItemId,
+    EXPLORE_NAMESPACE, RELIC_NAMESPACE, EXPLORE_ITEMS, EXPLORE_ITEM_IDS,
+    exploreRegionItemId, relicItemId, isExploreItemId,
 };

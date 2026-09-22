@@ -2482,5 +2482,320 @@
     "rim": "silver-grey",
     "rimHex": "#AAAAAA",
     "prompt": "Pet portrait icon: a small dark cave bat with spread leathery wings, big ears and beady eyes, facing the viewer. Style: bold cartoon creature portrait, front-facing friendly character mascot, head-and-shoulders framing, thick silver-grey rarity rim, minimal flat shading with two tones, no gloss highlight, vibrant saturated colors, single character centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 276,
+    "key": "explore:whispering_forest",
+    "file": "explore__whispering_forest.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a round scene emblem of a moody old-growth pine forest in green half-light, gnarled trunks and drifting mist. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 277,
+    "key": "explore:crumbling_ruins",
+    "file": "explore__crumbling_ruins.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a round scene emblem of toppled marble ruins, broken columns and a headless statue under a pale sky. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 278,
+    "key": "explore:crystal_caves",
+    "file": "explore__crystal_caves.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a round scene emblem of a glittering cavern of humming violet crystals, faceted walls glowing from within. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 279,
+    "key": "explore:sunken_docks",
+    "file": "explore__sunken_docks.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a round scene emblem of a half-sunken harbor town, barnacled docks and rooftops rising from calm blue water. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 280,
+    "key": "explore:starfall_wastes",
+    "file": "explore__starfall_wastes.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a round scene emblem of a black-glass desert under a starry night sky, meteor craters and a single falling star. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 281,
+    "key": "explore:frostveil_pass",
+    "file": "explore__frostveil_pass.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a round scene emblem of a snowbound mountain pass strung with glowing lanterns and soft falling snow. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 282,
+    "key": "explore:hollowgrave_lane",
+    "file": "explore__hollowgrave_lane.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a round scene emblem of a foggy crooked lane of leaning houses lit by grinning jack-o'-lanterns. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 283,
+    "key": "explore:scorchglass_shore",
+    "file": "explore__scorchglass_shore.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a round scene emblem of a sunlit beach of shimmering glass sand beside turquoise summer waves. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 284,
+    "key": "explore:velvet_arcade",
+    "file": "explore__velvet_arcade.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a round scene emblem of a gaslit covered arcade of little shopfronts with warm rose light and hanging lamps. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 285,
+    "key": "explore:arctic_tundra",
+    "file": "explore__arctic_tundra.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a round scene emblem of a flat frozen tundra under a green aurora, ice and distant white peaks. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 286,
+    "key": "relic:whisperwood_charm",
+    "file": "relic__whisperwood_charm.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a small charm of pale knotted wood on a leather cord, faint carved swirls. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 287,
+    "key": "relic:candlewax_antler",
+    "file": "relic__candlewax_antler.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a shed deer antler tip dripping warm candlewax, a tiny flame glowing at its point. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 288,
+    "key": "relic:the_tenth_owl",
+    "file": "relic__the_tenth_owl.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a small carved stone owl statuette with softly glowing eyes. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 289,
+    "key": "relic:headless_coin",
+    "file": "relic__headless_coin.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: an ancient tarnished gold coin stamped with a faceless headless figure. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 290,
+    "key": "relic:curators_brass_key",
+    "file": "relic__curators_brass_key.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: an ornate antique brass key with a museum-crest bow, faintly gleaming. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 291,
+    "key": "relic:the_final_decree",
+    "file": "relic__the_final_decree.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: an imperial wax seal on a ribbon, pressed with a signet crest and still glowing warm. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 292,
+    "key": "relic:singing_scale",
+    "file": "relic__singing_scale.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single translucent crystal dragon scale ringing with faint sound waves. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 293,
+    "key": "relic:bottled_resonance",
+    "file": "relic__bottled_resonance.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a corked glass vial holding swirling glowing sound-waves of violet light. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 294,
+    "key": "relic:shard_of_the_frozen_storm",
+    "file": "relic__shard_of_the_frozen_storm.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a jagged crystal shard with a bolt of golden lightning frozen and crackling inside it. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 295,
+    "key": "relic:harbormasters_stamp",
+    "file": "relic__harbormasters_stamp.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a heavy brass-bound wooden harbormaster's ink stamp dripping blue ink. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 296,
+    "key": "relic:bottled_fog",
+    "file": "relic__bottled_fog.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a corked glass bottle full of swirling grey harbor fog with a tiny lantern glow inside. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 297,
+    "key": "relic:the_return_ticket",
+    "file": "relic__the_return_ticket.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: an old unpunched steamship ticket, edges water-stained, faintly glowing gold. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 298,
+    "key": "relic:compacted_starlight",
+    "file": "relic__compacted_starlight.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a polished shard of glowing blue-white starlight lens, cool light held within. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 299,
+    "key": "relic:glassback_plate",
+    "file": "relic__glassback_plate.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a faceted plate of black volcanic glass armor with warm orange light in its cracks. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 300,
+    "key": "relic:the_still_falling_stone",
+    "file": "relic__the_still_falling_stone.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a dark meteor fragment hovering just above the ground, trailing faint golden falling-star light. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 301,
+    "key": "relic:unmelting_rose",
+    "file": "relic__unmelting_rose.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a delicate rose sculpted entirely from packed glittering snow. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 302,
+    "key": "relic:the_yetis_pencil",
+    "file": "relic__the_yetis_pencil.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a stubby well-chewed wooden pencil, oversized and dusted with frost. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 303,
+    "key": "relic:grinning_doorknocker",
+    "file": "relic__grinning_doorknocker.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: an ornate brass door knocker shaped like a grinning face. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 304,
+    "key": "relic:jar_of_bottled_dusk",
+    "file": "relic__jar_of_bottled_dusk.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a corked jar holding glowing orange October dusk, a tiny jack-o'-lantern light within. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 305,
+    "key": "relic:pocketful_of_july",
+    "file": "relic__pocketful_of_july.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a small handful of warm amber-gold glass pebbles catching sunlight. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 306,
+    "key": "relic:the_free_sample",
+    "file": "relic__the_free_sample.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a polished spiral conch shell glowing with soft summer light, faint music rising from it. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 307,
+    "key": "relic:exact_change_courage",
+    "file": "relic__exact_change_courage.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a small engraved brass token stamped with a heart-and-envelope crest. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 308,
+    "key": "relic:the_unclaimed_velvet_box",
+    "file": "relic__the_unclaimed_velvet_box.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: an open red velvet ring box holding a softly glowing gold ring. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 309,
+    "key": "relic:tundra_trackers_compass",
+    "file": "relic__tundra_trackers_compass.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a worn brass compass with a glowing needle and frost on its glass. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 310,
+    "key": "relic:sliver_of_the_white_stag",
+    "file": "relic__sliver_of_the_white_stag.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a sliver of pale antler carved with frost patterns, radiating faint cold blue light. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   }
 ]

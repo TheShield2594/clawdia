@@ -7,9 +7,10 @@ This file and its scripts (`build-manifest.mjs`, `rename-icons.mjs`,
 `cutout.mjs`, `prep-icons.mjs`, `manifest.json`, `icons.map.json`) live in
 `assets/icons/`.
 
-**The catalogue is 262 icons on `gpt_image_2_5`**, look **B3** (see §0),
-anchored to `hunt:steel_rifle`: the original 118 shop-browse gear/guild icons
-plus the 144 catch/kill/mine results (issue #1081). Every job id is in
+**The catalogue is 311 icons on `gpt_image_2_5`**, look **B3** (see §0),
+anchored to `hunt:steel_rifle`: the original 118 shop-browse gear/guild icons,
+the 144 catch/kill/mine results (issue #1081), the 14 pet portraits (issue
+#1082), and 10 explore regions + 25 explore relics. Every job id is in
 `icons.map.json`; every prompt is in `manifest.json`, built by
 `build-manifest.mjs` from the game data. To reproduce or extend the set, that
 is the source of truth — start there, not from memory.
@@ -342,6 +343,19 @@ Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
 
+- **2026-09-22** — Added **10 explore regions + 25 explore relics**: regions
+  under an `explore:` namespace (the "round scene emblem" framing shared with
+  hunt zones / fish locations / mine depths; core five laddered Common→Legendary
+  by depth, seasonal five a flat Rare), relics under a `relic:` namespace
+  (single-object icons, rarity from each relic's own tier — rare/epic/legendary
+  only). Both are bundle-only like pets (`EXPLORE_ITEM_IDS` in
+  `src/data/activityItems.js`, kept out of `isUploadableItemId`); relic keys use
+  a slug derived from the display name (`relicSlug` in `src/data/exploreData.js`).
+  All 35 generated on `gpt_image_2_5` B3 at `quality: high` against the
+  steel_rifle anchor; job ids + urls recorded in `icons.map.json` (now 311
+  items). `/explore` renders them as embed thumbnails (relic on a treasure find,
+  region on travel/regions/the result embed, rarest relic on the case) with the
+  emoji fallback until the PNGs are baked.
 - **2026-09-21** — Added **14 pet portraits** (issue #1082): the ten ownable
   species (`PET_DEFINITIONS`) plus the four wild battle opponents, under a new
   bundle-only `pet:` namespace (`PET_ITEM_IDS` in `src/data/activityItems.js`).
@@ -382,7 +396,7 @@ Price text across every banner is gold `#f1c40f`.
 ## Next steps — bake them in (no manual work)
 
 Run the **Bake item icons** workflow (Actions tab → `workflow_dispatch`) on this
-branch. It downloads all 262 from the CDN, normalizes them, and commits them to
+branch. It downloads all 311 from the CDN, normalizes them, and commits them to
 `src/assets/item-icons/`. After that they're the default art everywhere — no
 download, no upload. Re-run it any time the map changes.
 

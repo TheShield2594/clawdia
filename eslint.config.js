@@ -53,7 +53,6 @@ const DEPRECATED_EPHEMERAL = {
 // an entry in GRANDFATHERED_COMMANDS may only ever be lowered or deleted.
 const COMMAND_FILE_MAX_LINES = 900;
 const GRANDFATHERED_COMMANDS = {
-    'src/commands/economy/explore.js':   1655,
     'src/commands/economy/pet.js':       1388,
     'src/commands/economy/season.js':    1052,
     'src/commands/economy/syndicate.js': 1059,
