@@ -55,6 +55,7 @@ router.use(require('./api/members'));
 router.use(require('./api/achievements'));
 router.use(require('./api/itemImages'));
 router.use(require('./api/moderation'));
+router.use(require('./api/tickets'));
 router.use(require('./api/economy'));
 router.use(require('./api/leveling'));
 

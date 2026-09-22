@@ -14,6 +14,45 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.0] - 2026-09-22
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Tickets / modmail (#1012). Members can open a private thread with the team —
+`/ticket open [subject]`, or an **Open a ticket** button an admin posts with
+`/ticket panel`. The bot creates a private thread in the configured tickets
+channel, adds the opener and the support roles, and posts an opening embed with
+**Claim**, **Close** and **Transcript** buttons. Closing archives and locks the
+thread, files a `ticket` case (so it shows in the dashboard next to warns and
+appeals) and posts a text transcript to the log channel; a scheduled sweep
+idle-closes tickets after a configurable number of hours and clears the record
+for any thread deleted by hand. A per-member open cap and an open cooldown bound
+the spam surface. Configured under **Moderation → Tickets** in the dashboard,
+with a table of open tickets and who has claimed each.
+
+This is the first feature to need thread permissions, so the invite set gained
+**Create Private Threads**, **Send Messages in Threads** and **Manage Threads**
+(`src/config/invitePermissions.js`); the invite URL in `docs/SETUP_GUIDE.md` and
+the permission list in `docs/FEATURES.md` moved with it. No schema migration:
+the `tickets` config and the `ticket` case type are additive with defaults.
+
+## [4.12.5] - 2026-09-22
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Reaction-role panels and autorole no longer hand out privileged roles (#1061).
+Neither path checked whether the role it was about to give a member — on
+request, or to every joiner — carried admin or moderator permissions, so a
+`MANAGE_GUILD`-only dashboard admin could wire an `ADMINISTRATOR` role onto a
+panel and let anyone (themselves included) self-elevate, bounded only by
+Discord's hierarchy rather than anything the bot enforced. The gateway facade
+now reports the deny-set permissions a role carries (`Administrator`,
+`ManageGuild`, `ManageRoles`, `ManageChannels`, `ManageWebhooks`, `BanMembers`,
+`KickMembers`, `ModerateMembers`, `MentionEveryone`), the reaction-role,
+autorole and generic `/settings` routes refuse to configure such a role, and
+the `messageReactionAdd`/`guildMemberAdd` handlers refuse to assign one —
+closing the gap for a role that gains a permission after being configured.
+
 ## [4.12.4] - 2026-09-22
 
 Migrations through `026_backfill_shop_item_ids`.

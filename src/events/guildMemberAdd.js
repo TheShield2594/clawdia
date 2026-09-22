@@ -6,6 +6,7 @@ const { createWelcomeCard } = require('../utils/cardGenerator');
 const { renderQueued } = require('../utils/cardRenderQueue');
 const { handleMemberJoin: raidCheck } = require('../services/raidService');
 const { enforceJoinGate } = require('../services/antiNukeService');
+const { sensitivePermissionsOf } = require('../utils/sensitiveRolePermissions');
 const COLORS = require('../utils/embedColors');
 
 async function trackMemberEvent(guildId, dateKey, field) {
@@ -163,6 +164,22 @@ module.exports = {
                     guildSettings.autoRoles
                         .map(autoRole => ({ roleId: autoRole.roleId, role: member.guild.roles.cache.get(autoRole.roleId) }))
                         .filter(({ role }) => role)
+                        // Never auto-grant a role carrying admin or moderator
+                        // permissions, whatever the config says (#1061). The
+                        // dashboard blocks it up front; this backstops roles that
+                        // gained a permission after being configured, or were
+                        // written straight through `/settings`.
+                        .filter(({ roleId, role }) => {
+                            const dangerous = sensitivePermissionsOf(role.permissions);
+                            if (dangerous.length) {
+                                console.error(
+                                    `[autorole] skipping privileged role ${roleId} (${dangerous.join(', ')}) `
+                                    + `for ${member.id} in guild ${member.guild.id}`
+                                );
+                                return false;
+                            }
+                            return true;
+                        })
                         .map(({ roleId, role }) => member.roles.add(role).catch(err => { throw Object.assign(err, { roleId }); }))
                 );
                 for (const r of results) {

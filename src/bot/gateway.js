@@ -32,6 +32,7 @@
 
 const { PermissionFlagsBits } = require('discord.js');
 const { GATEWAY_METHODS, GATEWAY_METHOD_SET } = require('./gatewayProtocol');
+const { sensitivePermissionsOf } = require('../utils/sensitiveRolePermissions');
 
 // Discord channel type numbers, named so routes filter by meaning.
 const CHANNEL_TYPES = {
@@ -68,6 +69,11 @@ function plainRole(role) {
         name: role.name,
         position: role.position,
         managed: role.managed === true,
+        // The deny-set permissions this role carries, computed here where the
+        // live role and its permissions are, so a route that only ever holds
+        // plain data can refuse a privileged role from a self-assign panel
+        // without touching discord.js (#1061).
+        dangerousPermissions: sensitivePermissionsOf(role.permissions),
     };
 }
 

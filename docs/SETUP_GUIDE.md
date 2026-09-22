@@ -53,7 +53,7 @@
 Use this URL (replace CLIENT_ID with yours):
 
 ```
-https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=1101957033174&scope=bot%20applications.commands
+https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=1462734286038&scope=bot%20applications.commands
 ```
 
 The `permissions` value is the minimum set the bot's features need — the list in

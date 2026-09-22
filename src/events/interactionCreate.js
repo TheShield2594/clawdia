@@ -6,6 +6,9 @@ const { handleHeistButton } = require('../services/heistService');
 const { handleSyndicateButton } = require('../commands/economy/syndicate');
 const { handleDmButton } = require('../services/dmService');
 const {
+    isTicketButton, isTicketModal, handleTicketButton, handleTicketModal,
+} = require('../services/ticketService');
+const {
     isEightBallButton,
     isEightBallModal,
     handleEightBallButton,
@@ -302,6 +305,13 @@ module.exports = {
                 return;
             }
 
+            if (isTicketButton(interaction.customId)) {
+                await handleTicketButton(interaction, client).catch(err => {
+                    console.error('[tickets] button handler error:', err);
+                });
+                return;
+            }
+
             return;
         }
 
@@ -309,6 +319,13 @@ module.exports = {
             if (isEightBallModal(interaction.customId)) {
                 await handleEightBallModal(interaction).catch(err => {
                     console.error('[8ball] modal handler error:', err);
+                });
+                return;
+            }
+
+            if (isTicketModal(interaction.customId)) {
+                await handleTicketModal(interaction, client).catch(err => {
+                    console.error('[tickets] modal handler error:', err);
                 });
             }
             return;

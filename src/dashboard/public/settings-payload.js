@@ -265,6 +265,17 @@ function buildSettingsPayload(section, ctx = {}) {
             'caseSettings.slaHours':    parseInt(document.getElementById('cs-sla-hours').value, 10) || 48,
             'caseSettings.slaChannelId': document.getElementById('cs-sla-channel').value || null
         };
+    } else if (section === 'tickets') {
+        return {
+            'tickets.enabled': document.getElementById('tickets-enabled').checked,
+            'tickets.channelId': document.getElementById('tickets-channel').value || null,
+            'tickets.supportRoleIds': Array.from(document.getElementById('tickets-support-roles').selectedOptions).map(o => o.value),
+            'tickets.logChannelId': document.getElementById('tickets-log-channel').value || null,
+            'tickets.openingMessage': document.getElementById('tickets-opening-message').value || 'Thanks for reaching out — a member of the team will be with you shortly.',
+            'tickets.autoCloseHours': parseInt(document.getElementById('tickets-auto-close').value, 10) || 0,
+            'tickets.perUserCap': parseInt(document.getElementById('tickets-per-user-cap').value, 10) || 1,
+            'tickets.cooldownSeconds': parseInt(document.getElementById('tickets-cooldown').value, 10) || 0
+        };
     } else if (section === 'season') {
         const tierRewards = Array.from(document.querySelectorAll('#season-tier-rewards-list .season-tier-row')).map(row => ({
             tier: parseInt(row.querySelector('.season-tier-num').value, 10),

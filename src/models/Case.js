@@ -7,7 +7,7 @@ const caseSchema = new Schema({
     moderatorId: { type: String, required: true },
     type: {
         type: String,
-        enum: ['warn', 'mute', 'kick', 'ban', 'unban', 'unmute', 'note', 'appeal'],
+        enum: ['warn', 'mute', 'kick', 'ban', 'unban', 'unmute', 'note', 'appeal', 'ticket'],
         required: true
     },
     reason: { type: String, required: true },

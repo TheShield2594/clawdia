@@ -40,6 +40,7 @@ beforeEach(() => {
     bot = {
         hasGuild: jest.fn(() => true),
         hasChannel: jest.fn(() => true),
+        listRoles: jest.fn(async () => []),
         sendEmbed: jest.fn(async () => ({ messageId: MESSAGE_ID })),
         addReactions: jest.fn(async () => {}),
         deleteMessage: jest.fn(async () => {}),
@@ -140,6 +141,33 @@ describe('POST /guild/:guildId/reactionrole/panel', () => {
 
         expect(res.status).toBe(400);
         expect(res.body.error).toContain('Invalid roleId: admin');
+    });
+
+    it('refuses a role that carries admin or moderator permissions (#1061)', async () => {
+        // A member reacts to get this role, so a role that grants Administrator
+        // would let anyone who can see the panel elevate themselves. The check
+        // runs before the embed is posted, so a rejected panel never goes up.
+        bot.listRoles.mockResolvedValue([
+            { id: ROLE_ID, name: 'Staff', position: 5, managed: false, dangerousPermissions: ['Administrator'] },
+        ]);
+
+        const res = await createPanel(valid);
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('Staff');
+        expect(res.body.error).toContain('Administrator');
+        expect(bot.sendEmbed).not.toHaveBeenCalled();
+    });
+
+    it('allows a role with no deny-set permissions through', async () => {
+        bot.listRoles.mockResolvedValue([
+            { id: ROLE_ID, name: 'Colour', position: 2, managed: false, dangerousPermissions: [] },
+        ]);
+
+        const res = await createPanel(valid);
+
+        expect(res.status).toBe(200);
+        expect(bot.sendEmbed).toHaveBeenCalled();
     });
 
     it('refuses a duplicate emoji within one panel', async () => {

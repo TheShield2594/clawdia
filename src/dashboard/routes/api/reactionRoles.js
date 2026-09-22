@@ -6,6 +6,7 @@ const { isValidDiscordId } = require('../../lib/apiHelpers');
 // Grouped the same way the settings page groups it, so the list the browser
 // re-renders after a mutation matches the one a reload would produce (#689).
 const { groupReactionRolePanels } = require('../../lib/reactionRolePanels');
+const { describeSensitivePermissions } = require('../../../utils/sensitiveRolePermissions');
 
 // Posts a reaction role panel to a channel and stores its emoji-to-role mappings.
 router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
@@ -33,6 +34,22 @@ router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, c
     try {
         if (!await req.bot.hasGuild(guildId)) return res.status(404).json({ error: 'Guild not found' });
         if (!await req.bot.hasChannel(guildId, channelId)) return res.status(404).json({ error: 'Channel not found' });
+
+        // A member reacts to get one of these roles, so a role carrying admin or
+        // moderator permissions must not be on the panel — that would let anyone
+        // who can see it hand themselves those permissions (#1061). Checked
+        // before the embed goes out so a rejected panel is never posted.
+        const roles = await req.bot.listRoles(guildId);
+        const rolesById = new Map((roles || []).map(role => [role.id, role]));
+        for (const m of mappings) {
+            const role = rolesById.get(m.roleId.trim());
+            if (role?.dangerousPermissions?.length) {
+                return res.status(400).json({
+                    error: `The "${role.name}" role grants ${describeSensitivePermissions(role.dangerousPermissions)} `
+                        + 'and cannot be handed out through a reaction-role panel.',
+                });
+            }
+        }
 
         const guildSettings = await Guild.findOne({ guildId });
         if (!guildSettings) return res.status(404).json({ error: 'Guild settings not found' });

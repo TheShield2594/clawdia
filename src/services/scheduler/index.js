@@ -184,6 +184,17 @@ const JOBS = [
         fn: () => require('../marketService').returnExpiredMarketListings(),
     },
     {
+        // Idle-close tickets whose thread has gone quiet past the guild's
+        // configured window, and clear the record for any ticket thread deleted
+        // by hand (#1012). 'guild' scope: it closes threads and posts to a
+        // guild's log channel, so each shard sweeps its own guilds.
+        name: 'sweepIdleTickets',
+        scope: SCOPE.GUILD,
+        service: 'ticketService',
+        schedule: '*/15 * * * *',
+        fn: client => require('../ticketService').sweepIdleTickets(client),
+    },
+    {
         // Both of these used to be a bare setInterval inside their own service,
         // outside runJob: a throw recorded nothing, /health kept reporting
         // healthy, and the service was silently dead until someone noticed

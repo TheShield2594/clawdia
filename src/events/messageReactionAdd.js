@@ -7,6 +7,7 @@ const {
     notifyQuestComplete, notifyQuestNearComplete,
 } = require('../services/questService');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
+const { sensitivePermissionsOf } = require('../utils/sensitiveRolePermissions');
 const COLORS = require('../utils/embedColors');
 const { MEMORY_CAP, MAX_MEMORY_LENGTH } = require('../utils/memoryLimits');
 
@@ -127,7 +128,22 @@ async function handleReactionRole(reaction, user, guild, guildSettings) {
     const member = await guild.members.fetch(user.id).catch(() => null);
     if (!member) return;
 
-    await member.roles.add(entry.roleId).catch(console.error);
+    // Refuse to self-assign a role that carries admin or moderator permissions,
+    // even if it was configured before this guard existed or the role gained the
+    // permission afterwards (#1061). The config route blocks it up front; this is
+    // the backstop that also covers entries written through `/settings`.
+    const role = guild.roles.cache.get(entry.roleId);
+    if (!role) return;
+    const dangerous = sensitivePermissionsOf(role.permissions);
+    if (dangerous.length) {
+        console.error(
+            `[reaction-role] refusing to self-assign privileged role ${role.id} (${dangerous.join(', ')}) `
+            + `to ${user.id} in guild ${guild.id}`
+        );
+        return;
+    }
+
+    await member.roles.add(role).catch(console.error);
 }
 
 async function handleStarboard(reaction, user, guild, guildSettings) {

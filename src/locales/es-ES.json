@@ -1416,6 +1416,27 @@
       "suggestion": { "description": "Tu sugerencia" }
     }
   },
+  "ticket": {
+    "name": "ticket",
+    "description": "Abre un ticket privado con los moderadores, o gestiona el sistema de tickets",
+    "options": {
+      "open": {
+        "description": "Abre un ticket privado con el equipo del servidor",
+        "options": {
+          "subject": { "description": "¿Con qué necesitas ayuda?" }
+        }
+      },
+      "close": {
+        "description": "Cierra el ticket de este hilo",
+        "options": {
+          "reason": { "description": "Motivo del cierre del ticket" }
+        }
+      },
+      "panel": {
+        "description": "Publica un botón «Abrir un ticket» en este canal (Gestionar servidor)"
+      }
+    }
+  },
   "syndicate": {
     "name": "sindicato",
     "description": "Sistema de sindicatos del crimen: atracos cooperativos, territorio y rivalidad.",

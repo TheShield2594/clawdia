@@ -33,6 +33,13 @@ const INVITE_PERMISSIONS = {
     'Manage Roles': PermissionFlagsBits.ManageRoles,
     // Slowmode, lockdown, anti-nuke recovery, temp voice channel create/delete.
     'Manage Channels': PermissionFlagsBits.ManageChannels,
+    // Tickets (#1012): a ticket is a private thread the bot opens in the
+    // configured channel, posts in, and locks + archives on close. Discord gates
+    // each of those on its own thread permission — Manage Channels does not cover
+    // them — so the ticket feature is why these three are here.
+    'Create Private Threads': PermissionFlagsBits.CreatePrivateThreads,
+    'Send Messages in Threads': PermissionFlagsBits.SendMessagesInThreads,
+    'Manage Threads': PermissionFlagsBits.ManageThreads,
     // Anti-nuke reads the audit log to attribute mass deletions to an actor.
     'View Audit Log': PermissionFlagsBits.ViewAuditLog,
     // Temp voice: the owner overwrite grants Mute/Deafen, and Discord only
