@@ -283,6 +283,9 @@
                     <!-- Personas -->
                     <div id="ai-personas" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-ai-personas">
                         <p class="ai-inner-desc">Assign a custom AI persona to specific channels. When the bot is active in a channel with a persona, it uses that persona's system prompt instead of the server-wide default.</p>
+                        <%# v5 de-emoji (#1074): the ⚠️ opening this caution is a KEEP — it leads a
+                            prose sentence in a warning banner (content), not a status chip, and rides
+                            the shared --warn-* surface rather than standing in as chrome. %>
                         <div id="persona-channel-warning" style="display:none;margin-bottom:1rem;padding:.75rem 1rem;background:var(--warn-bg);border:1px solid var(--warn-border);border-radius:6px;color:var(--warn-text);font-size:.9rem;">
                             ⚠️ The bot is currently restricted to a single channel in the <strong>Chat</strong> tab. Personas configured for other channels won't be active until you clear that restriction or select "All channels."
                         </div>
