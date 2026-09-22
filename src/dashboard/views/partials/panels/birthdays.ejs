@@ -1,7 +1,7 @@
                 <section id="birthdays" class="panel">
                     <div class="panel-head">
                         <h2>Birthday Settings</h2>
-                        <p>Configure automated birthday wishes and birthday role assignment.</p>
+                        <p>Automated birthday wishes sent as a customizable celebration embed — avatar, colour, title, banner and reactions — plus an optional one-day birthday role.</p>
                     </div>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable birthday system</strong><span>Send automated birthday wishes</span></span>
@@ -18,13 +18,65 @@
                     <div class="field">
                         <label class="field-label" for="birthday-role">Birthday role</label>
                         <%- include('../role-select', { id: 'birthday-role', placeholder: 'No birthday role', selected: settings.birthdays?.roleId }) %>
+                        <small>Given on the member's birthday and automatically removed the next day.</small>
                     </div>
                     <div class="field">
-                        <label class="field-label" for="birthday-message">Birthday message template</label>
-                        <textarea id="birthday-message" rows="2" data-input="msg-preview" data-preview-source="birthday-message" data-preview-target="birthday-preview"><%= settings.birthdays?.message || "It's the birthday of {user} ({age}) ! 🎂" %></textarea>
-                        <small>Variables: <code>{user}</code> · <code>{age}</code></small>
+                        <label class="field-label" for="birthday-message">Birthday message</label>
+                        <textarea id="birthday-message" rows="4" data-input="msg-preview" data-preview-source="birthday-message" data-preview-target="birthday-preview"><%= settings.birthdays?.message || '' %></textarea>
+                        <small>Variables: <code>{user}</code> · <code>{username}</code> · <code>{mention}</code> · <code>{age}</code> · <code>{age_ordinal}</code> · <code>{server}</code>. Separate several messages with a line containing only <code>---</code> and one is picked at random each birthday.</small>
                         <div class="msg-preview" id="birthday-preview"></div>
                     </div>
+
+                    <div class="panel-head panel-subhead">
+                        <h3>Embed appearance</h3>
+                        <p>How the birthday wish looks. Turn the embed off for a plain-text message.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Send as an embed</strong><span>A celebratory card instead of a plain message</span></span>
+                        <span class="switch"><input type="checkbox" id="birthday-use-embed" <%= settings.birthdays?.useEmbed !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Show the member's avatar</strong><span>Their avatar as the embed thumbnail</span></span>
+                        <span class="switch"><input type="checkbox" id="birthday-avatar" <%= settings.birthdays?.showAvatar !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Add 🎉🎂 reactions</strong><span>The bot reacts so members can join in with one tap</span></span>
+                        <span class="switch"><input type="checkbox" id="birthday-reactions" <%= settings.birthdays?.reactions !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="birthday-color">Embed color</label>
+                        <input type="text" id="birthday-color" maxlength="7" placeholder="#ffd700" value="<%= settings.birthdays?.embedColor || '#ffd700' %>">
+                        <small>Hex color, e.g. <code>#ffd700</code>.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="birthday-title">Title</label>
+                        <input type="text" id="birthday-title" maxlength="256" placeholder="🎉 Happy Birthday, {username}!" value="<%= settings.birthdays?.title || '' %>">
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="birthday-author">Author text</label>
+                        <input type="text" id="birthday-author" maxlength="256" placeholder="🎂 Birthday Celebration" value="<%= settings.birthdays?.authorText || '' %>">
+                        <small>Small line above the title. Leave empty to hide it.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="birthday-author-icon">Author icon URL</label>
+                        <input type="text" id="birthday-author-icon" maxlength="1024" placeholder="https://… (optional)" value="<%= settings.birthdays?.authorIcon || '' %>">
+                        <small>Leave empty to use the bundled birthday icon.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="birthday-footer">Footer text</label>
+                        <input type="text" id="birthday-footer" maxlength="2048" placeholder="{server}" value="<%= settings.birthdays?.footerText || '' %>">
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="birthday-footer-icon">Footer icon URL</label>
+                        <input type="text" id="birthday-footer-icon" maxlength="1024" placeholder="https://… (optional)" value="<%= settings.birthdays?.footerIcon || '' %>">
+                        <small>Leave empty to use the server icon.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="birthday-image">Banner image URL</label>
+                        <input type="text" id="birthday-image" maxlength="1024" placeholder="https://… (optional)" value="<%= settings.birthdays?.image || '' %>">
+                        <small>Large image at the bottom of the embed. Leave empty to use the bundled birthday banner.</small>
+                    </div>
+
                     <div class="actions-row">
                         <button class="btn btn-primary" data-action="save" data-section="birthdays">Save changes</button>
                     </div>

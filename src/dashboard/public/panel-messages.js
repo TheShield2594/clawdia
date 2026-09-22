@@ -34,11 +34,13 @@ async function sendWelcomeCardPreview() {
 // Message preview helper — substitutes template variables with sample values
 const PREVIEW_VARS = {
     user: '@SampleUser',
+    mention: '@SampleUser',
     username: 'SampleUser',
     tag: 'SampleUser#0000',
     server: BOOT.guildName,
     memberCount: '1,234',
-    age: '25'
+    age: '25',
+    age_ordinal: '25th'
 };
 function updateMsgPreview(textareaId, previewId) {
     const ta = document.getElementById(textareaId);

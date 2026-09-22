@@ -90,16 +90,49 @@ function validateFarewellUpdate(updates) {
     return null;
 }
 
+// Optional image URL for an embed (author/footer icon, banner). Discord, not the
+// bot, fetches these, so this is a shape check rather than the SSRF guard the AI
+// base-URL uses: reject anything that is not an http(s) URL so a typo drops the
+// field on the form rather than silently voiding the whole embed at send time.
+function validateOptionalImageUrl(value, label) {
+    if (value === undefined || value === null || value === '') return null;
+    if (typeof value !== 'string') return `${label} must be a string`;
+    if (value.length > 1024) return `${label} exceeds 1024 characters`;
+    let url;
+    try { url = new URL(value); } catch { return `${label} must be a valid http(s) URL`; }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        return `${label} must be a valid http(s) URL`;
+    }
+    return null;
+}
+
+// Length caps mirror the embed limits Discord enforces (title 256, footer 2048)
+// and the Guild schema's maxlengths, so the form refuses what the API would.
+const BIRTHDAY_TEXT_LIMITS = { message: 4000, title: 256, authorText: 256, footerText: 2048 };
+const BIRTHDAY_BOOLEAN_FIELDS = new Set(['enabled', 'useEmbed', 'showAvatar', 'reactions']);
+const BIRTHDAY_URL_FIELDS = new Set(['authorIcon', 'footerIcon', 'image']);
+
 function validateBirthdaysUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
         if (!key.startsWith('birthdays.') && key !== 'birthdays') continue;
         const field = key.split('.')[1];
-        if (field === 'message') {
-            if (typeof value !== 'string') return 'birthdays.message must be a string';
-            if (value.length > 2000) return 'birthdays.message exceeds 2000 characters';
+        if (field in BIRTHDAY_TEXT_LIMITS) {
+            if (typeof value !== 'string') return `birthdays.${field} must be a string`;
+            if (value.length > BIRTHDAY_TEXT_LIMITS[field]) {
+                return `birthdays.${field} exceeds ${BIRTHDAY_TEXT_LIMITS[field]} characters`;
+            }
         }
-        if (field === 'enabled') {
-            if (typeof value !== 'boolean') return 'birthdays.enabled must be a boolean';
+        if (BIRTHDAY_BOOLEAN_FIELDS.has(field)) {
+            if (typeof value !== 'boolean') return `birthdays.${field} must be a boolean`;
+        }
+        if (BIRTHDAY_URL_FIELDS.has(field)) {
+            const err = validateOptionalImageUrl(value, `birthdays.${field}`);
+            if (err) return err;
+        }
+        if (field === 'embedColor' && value !== null && value !== '') {
+            if (typeof value !== 'string' || !/^#?[0-9a-fA-F]{6}$/.test(value)) {
+                return 'birthdays.embedColor must be a hex color like #ffd700';
+            }
         }
         if (field === 'channelId' && value !== null && value !== '') {
             if (typeof value !== 'string' || !/^\d{17,20}$/.test(value)) {

@@ -195,7 +195,13 @@ const userSchema = new Schema({
         month: { type: Number, min: 1, max: 12, default: null },
         day: { type: Number, min: 1, max: 31, default: null },
         year: { type: Number, min: 1900, max: 2100, default: null },
-        lastCelebratedYear: { type: Number, default: null }
+        lastCelebratedYear: { type: Number, default: null },
+        // True while this member is currently holding the guild's birthday role,
+        // set when the role is granted on their day and cleared when the sweep
+        // removes it afterwards. Without it the role was added and never taken
+        // back, so anyone who ever had a birthday kept the "spotlight" role
+        // forever — see birthdayService's role cleanup.
+        roleAssigned: { type: Boolean, default: false }
     },
 
     // ── Grind systems (fishing / hunt / mining / exploration) ────────────────

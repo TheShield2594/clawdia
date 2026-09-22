@@ -1,0 +1,19 @@
+{
+  "_comment": "Generated birthday embed art (assets/birthday/STYLE.md). Each entry carries its Higgsfield job id, the CDN url the bake downloads, the on-disk file it writes under src/assets/birthday/, and how bake-birthday.mjs should shape it. Regenerate against the same brand recipe and drop the new job id + url here, then run the Bake birthday art workflow.",
+  "items": {
+    "icon": {
+      "jobId": "185086d7-4ba4-4956-90cc-4a1cbe116e56",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_154403_185086d7-4ba4-4956-90cc-4a1cbe116e56.png",
+      "file": "birthday-icon.png",
+      "shape": "square",
+      "size": 256
+    },
+    "banner": {
+      "jobId": "2318f32b-ea5f-4d89-b034-2c0baf082a35",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_154435_2318f32b-ea5f-4d89-b034-2c0baf082a35.png",
+      "file": "birthday-banner.png",
+      "shape": "wide",
+      "width": 1024
+    }
+  }
+}
