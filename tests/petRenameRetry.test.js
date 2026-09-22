@@ -48,7 +48,7 @@ jest.mock('../src/models/User', () => {
 jest.mock('../src/utils/grindProfile', () => ({ attachGrind: jest.fn(async (u) => u) }));
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn(async () => ({ guildId: 'g1' })) }));
 
-const petCommand = require('../src/commands/economy/pet.js');
+const petCommand = require('../src/commands/economy/pet');
 
 function buildInteraction(sub, slot) {
     const state = { replies: [] };

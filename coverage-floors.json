@@ -233,6 +233,12 @@
             "branches": 0,
             "functions": 19,
             "lines": 16
+        },
+        "src/commands/economy/pet": {
+            "statements": 17,
+            "branches": 0,
+            "functions": 21,
+            "lines": 19
         }
     },
     "neverExecuted": [
@@ -443,6 +449,13 @@
         "src/commands/economy/mine/shop/unlock.js",
         "src/commands/economy/mine/shop/upgrade.js",
         "src/commands/economy/mine/shop/use.js",
+        "src/commands/economy/pet/adopt.js",
+        "src/commands/economy/pet/autocomplete.js",
+        "src/commands/economy/pet/battle.js",
+        "src/commands/economy/pet/feed.js",
+        "src/commands/economy/pet/leaderboard.js",
+        "src/commands/economy/pet/release.js",
+        "src/commands/economy/pet/status.js",
         "src/commands/economy/rob/status.js",
         "src/commands/economy/rob/trap.js",
         "src/commands/economy/synergies.js",
@@ -505,6 +518,9 @@
             "lines"
         ],
         "src/commands/economy/explore": [
+            "branches"
+        ],
+        "src/commands/economy/pet": [
             "branches"
         ]
     }

@@ -298,7 +298,7 @@ describe('the piles the rest of the game reads', () => {
     // ternary chain ending in the mining pile — counts explore materials
     // against mining and shows zero forever.
     test('/pet feed draws from the exploration pile', () => {
-        expect(source('commands/economy/pet.js')).toContain("const MATERIAL_SYSTEMS = ['hunt', 'fishing', 'mining', 'exploration']");
+        expect(source('commands/economy/pet/shared.js')).toContain("const MATERIAL_SYSTEMS = ['hunt', 'fishing', 'mining', 'exploration']");
     });
 
     test('/showcase counts the exploration pile', () => {

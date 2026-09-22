@@ -88,7 +88,7 @@ describe('the command file size rule', () => {
             { filename: at('src/commands/fun/roll.js'), ...withOptions(lines(max)) },
             { filename: at('src/commands/economy/hunt/shop/buy.js'), ...withOptions(lines(200)) },
             // A frozen file that has shrunk but is still over the cap.
-            { filename: at('src/commands/economy/pet.js'), ...withOptions(lines(1200)) },
+            { filename: at('src/commands/economy/syndicate.js'), ...withOptions(lines(1000)) },
             // Scoping to src/commands is the config's `files` glob, asserted
             // above — the rule itself caps whatever it is pointed at, so there
             // is no "not a command file" case to write here.
@@ -101,14 +101,14 @@ describe('the command file size rule', () => {
             },
             {
                 // A frozen file that grew by one line.
-                filename: at('src/commands/economy/pet.js'),
-                ...withOptions(lines(grandfathered['src/commands/economy/pet.js'] + 1)),
+                filename: at('src/commands/economy/syndicate.js'),
+                ...withOptions(lines(grandfathered['src/commands/economy/syndicate.js'] + 1)),
                 errors: [{ messageId: 'grewPastCeiling' }],
             },
             {
                 // A frozen file that has come down under the cap: the exemption
                 // is stale, and a stale exemption is permission to grow back.
-                filename: at('src/commands/economy/pet.js'),
+                filename: at('src/commands/economy/syndicate.js'),
                 ...withOptions(lines(500)),
                 errors: [{ messageId: 'staleExemption' }],
             },
