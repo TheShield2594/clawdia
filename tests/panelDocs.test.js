@@ -76,9 +76,10 @@ describe('the sections it finds', () => {
 
     // The count grows with the sidebar. 20 documented against 25 existing was
     // the state (#705) this whole file exists to make unreachable; the Public
-    // Page panel (#1018) was the 26th, and the Social notifications panel the 27th.
-    test('cover all 27 of them', () => {
-        expect(sections).toHaveLength(27);
+    // Page panel (#1018) was the 26th, the Social notifications panel the 27th,
+    // and the Tickets panel (#1012) the 28th.
+    test('cover all 28 of them', () => {
+        expect(sections).toHaveLength(28);
     });
 
     test('each carry a label and a group', () => {

@@ -20,7 +20,7 @@ router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res
 
     try {
         const query = { guildId };
-        if (type && ['warn', 'mute', 'kick', 'ban', 'unban', 'unmute', 'note', 'appeal'].includes(type)) query.type = type;
+        if (type && ['warn', 'mute', 'kick', 'ban', 'unban', 'unmute', 'note', 'appeal', 'ticket'].includes(type)) query.type = type;
         if (status && ['open', 'closed', 'appealed', 'appeal_approved', 'appeal_denied'].includes(status)) query.status = status;
 
         const [cases, total] = await Promise.all([

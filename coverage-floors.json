@@ -245,6 +245,7 @@
         "src/dashboard/public/panel-roles.js",
         "src/dashboard/public/panel-rss.js",
         "src/dashboard/public/panel-social.js",
+        "src/dashboard/public/panel-tickets.js",
         "src/deploy-commands.js",
         "src/index.js",
         "src/shard.js"

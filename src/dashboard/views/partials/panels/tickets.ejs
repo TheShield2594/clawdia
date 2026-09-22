@@ -1,0 +1,71 @@
+                <section id="tickets" class="panel">
+                    <div class="panel-head">
+                        <h2>Tickets</h2>
+                        <p>Let members open a private thread with your team. Closing a ticket archives the thread, files a case and posts a transcript to your log channel.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable tickets</strong></span>
+                        <span class="switch"><input type="checkbox" id="tickets-enabled" <%= settings.tickets?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="tickets-channel">Tickets channel</label>
+                        <%- include('../channel-select', { id: 'tickets-channel', placeholder: 'Select a channel', selected: settings.tickets?.channelId }) %>
+                        <small>Private threads are opened here. Members do not need to see the channel's contents, only be able to run <code>/ticket open</code>.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="tickets-support-roles">Support roles</label>
+                        <%- include('../role-select', { id: 'tickets-support-roles', multiple: true, size: 4, selected: settings.tickets?.supportRoleIds }) %>
+                        <small>Members of these roles are added to each ticket and can claim, close and pull transcripts. Hold Ctrl/Cmd to select several.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="tickets-log-channel">Transcript / log channel <small style="font-weight:400">(optional)</small></label>
+                        <%- include('../channel-select', { id: 'tickets-log-channel', placeholder: 'Use the moderation log', selected: settings.tickets?.logChannelId }) %>
+                        <small>Where the closing record and transcript are posted. Falls back to your moderation log channel when blank.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="tickets-opening-message">Opening message</label>
+                        <textarea id="tickets-opening-message" rows="3" maxlength="1000"><%= settings.tickets?.openingMessage || 'Thanks for reaching out — a member of the team will be with you shortly.' %></textarea>
+                        <small>Shown at the top of every new ticket.</small>
+                    </div>
+                    <div class="field field-pair">
+                        <div>
+                            <label class="field-label" for="tickets-auto-close">Auto-close after idle (hours)</label>
+                            <input type="number" id="tickets-auto-close" min="0" max="8760" value="<%= settings.tickets?.autoCloseHours ?? 0 %>">
+                            <small>0 disables idle auto-close.</small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="tickets-per-user-cap">Open tickets per member</label>
+                            <input type="number" id="tickets-per-user-cap" min="1" max="25" value="<%= settings.tickets?.perUserCap ?? 1 %>">
+                        </div>
+                        <div>
+                            <label class="field-label" for="tickets-cooldown">Open cooldown (seconds)</label>
+                            <input type="number" id="tickets-cooldown" min="0" max="86400" value="<%= settings.tickets?.cooldownSeconds ?? 60 %>">
+                        </div>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" data-action="save" data-section="tickets">Save changes</button>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.5rem">
+                        <h3>Open tickets</h3>
+                        <p>Tickets currently open on this server, and who has claimed each.</p>
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;margin-bottom:.5rem">
+                        <button class="btn btn-sm" data-action="tickets-refresh">↻ Refresh</button>
+                    </div>
+                    <div id="tickets-loading">
+                        <div class="skel-bar" style="width:90%"></div>
+                        <div class="skel-bar" style="width:75%"></div>
+                    </div>
+                    <div id="tickets-error" style="display:none" class="analytics-error-card">
+                        <span class="load-error">Could not load tickets</span>
+                        <button class="btn btn-sm" data-action="tickets-refresh">Retry</button>
+                    </div>
+                    <div id="tickets-empty" style="display:none" class="empty-state"><h3>No open tickets</h3><p>Open tickets will appear here.</p></div>
+                    <div class="table-scroll" role="region" tabindex="0" aria-label="Open tickets" style="display:none">
+                        <table id="tickets-table" class="cases-table">
+                            <thead><tr><th>Ticket #</th><th>Opened by</th><th>Subject</th><th>Claimed by</th><th>Opened</th></tr></thead>
+                            <tbody id="tickets-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>

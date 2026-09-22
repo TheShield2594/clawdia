@@ -919,6 +919,40 @@ const guildSchema = new Schema({
         downvoteEmoji: { type: String, default: '👎' }
     },
 
+    // Private-thread tickets / modmail (#1012). A member opens a private thread
+    // in `channelId`; the opener and the members of `supportRoleIds` are added,
+    // the bot posts the opening embed with Claim/Close/Transcript buttons. Close
+    // archives the thread, files a `ticket` Case (so it shows in the dashboard
+    // next to warns and appeals) and posts a transcript to `logChannelId` (or the
+    // moderation log when that is blank). `open` is the live set of tickets and
+    // `nextTicketId` the per-guild counter, both owned by ticketService.
+    tickets: {
+        enabled: { type: Boolean, default: false },
+        channelId: { type: String, default: null },
+        supportRoleIds: [{ type: String }],
+        openingMessage: {
+            type: String,
+            default: 'Thanks for reaching out — a member of the team will be with you shortly.'
+        },
+        logChannelId: { type: String, default: null },
+        // Idle auto-close, in hours; 0 disables it. Swept by ticketService.
+        autoCloseHours: { type: Number, default: 0, min: 0, max: 8760 },
+        // How many tickets one member may have open at once, and how long they
+        // must wait between opening them — this is a spam surface.
+        perUserCap: { type: Number, default: 1, min: 1, max: 25 },
+        cooldownSeconds: { type: Number, default: 60, min: 0, max: 86400 },
+        nextTicketId: { type: Number, default: 1, min: 1 },
+        open: [{
+            ticketId: { type: Number, required: true },
+            threadId: { type: String, required: true },
+            channelId: { type: String, required: true },
+            openerId: { type: String, required: true },
+            subject: { type: String, default: '' },
+            claimedBy: { type: String, default: null },
+            openedAt: { type: Date, default: Date.now }
+        }]
+    },
+
     commandPolicies: {
         enabled: { type: Boolean, default: false },
         exceptions: {

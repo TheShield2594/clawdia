@@ -9,6 +9,7 @@ const PANELS = [
     'farewell',
     'birthdays',
     'moderation',
+    'tickets',
     'leveling',
     'economy',
     'achievements',

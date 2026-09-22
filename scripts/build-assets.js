@@ -53,6 +53,7 @@ const SOURCES = [
     'panel-overview.js',
     'panel-analytics.js',
     'panel-moderation.js',
+    'panel-tickets.js',
     'panel-economy.js',
     'panel-leveling.js',
     'panel-achievements.js',

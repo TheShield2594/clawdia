@@ -23,7 +23,7 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'raidDetection', 'antiNuke', 'caseSettings',
     'starboard', 'eventLog', 'quests',
     'season', 'progressionTracks', 'commandPolicies',
-    'suggestions', 'ai', 'tempVoice', 'bibleVerse',
+    'suggestions', 'tickets', 'ai', 'tempVoice', 'bibleVerse',
     'dailyNews', 'dailyNewsProfiles', 'rssFeeds',
     'autoRoles', 'reactionRoles',
     'giveaways', 'notifications',
