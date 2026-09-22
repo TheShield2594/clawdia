@@ -6,6 +6,7 @@ const { safeFetchFeed } = require('../../../utils/safeFeedFetch');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId } = require('../../lib/apiHelpers');
 const { PLATFORMS, resolveSocialTarget, getBridgeOrigin } = require('../../../services/socialProviders');
+const { loadXSource } = require('../../../services/socialService');
 
 /**
  * The guild's social subscriptions in the shape the dashboard list renders from.
@@ -44,6 +45,27 @@ router.post('/guild/:guildId/social/validate', checkAuth, checkGuildAccess, chec
         // resolveSocialTarget throws admin-readable messages (bad input, missing
         // bridge) — safe to surface directly.
         return res.json({ valid: false, error: err.message });
+    }
+
+    // An X account is read the way the sweep reads it — FxTwitter's timeline,
+    // then the bridge — so Test answers for the source that will actually post.
+    if (target.platform === 'twitter') {
+        try {
+            const { parsedFeed, entries } = await loadXSource(target.ref.replace(/^@/, ''), getBridgeOrigin(), [target.feedUrl]);
+            return res.json({
+                valid: true,
+                ref: target.ref,
+                feedUrl: target.feedUrl,
+                title: parsedFeed.title || '',
+                itemCount: entries.length,
+            });
+        } catch (err) {
+            return res.json({
+                valid: false,
+                ref: target.ref,
+                error: err.message || 'Could not read that X account. Check it exists and is public.',
+            });
+        }
     }
 
     try {
@@ -102,8 +124,14 @@ router.post('/guild/:guildId/social/add', checkAuth, checkGuildAccess, checkWrit
 
         // The poller delivers once per stored entry, so a repeated add would
         // double every future post for this account in this channel.
+        // Matched on the account too, not just the URL: an X subscription stored
+        // before FxTwitter carries a bridge URL where a new one carries the
+        // profile URL, and both follow the same account.
+        const sameAccount = feed => feed.feedUrl === target.feedUrl
+            || (feed.platform === target.platform && typeof feed.ref === 'string'
+                && feed.ref.toLowerCase() === target.ref.toLowerCase());
         const duplicate = (guildSettings.socialFeeds || []).some(
-            feed => feed.feedUrl === target.feedUrl && feed.channelId === channelId
+            feed => sameAccount(feed) && feed.channelId === channelId
         );
         if (duplicate) {
             return res.status(409).json({ error: 'This account already posts to that channel.' });

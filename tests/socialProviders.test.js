@@ -32,11 +32,11 @@ describe('the registry', () => {
         }
     });
 
-    test('only YouTube and Reddit work without a bridge', () => {
+    test('YouTube, Reddit and X work without a bridge', () => {
         const byId = Object.fromEntries(listProviders().map(p => [p.id, p]));
         expect(byId.youtube.requiresBridge).toBe(false);
         expect(byId.reddit.requiresBridge).toBe(false);
-        expect(byId.twitter.requiresBridge).toBe(true);
+        expect(byId.twitter.requiresBridge).toBe(false);
         expect(byId.instagram.requiresBridge).toBe(true);
         expect(byId.tiktok.requiresBridge).toBe(true);
     });
@@ -149,14 +149,12 @@ describe('bridged platforms', () => {
     test('refuse with an actionable message when no bridge is configured', async () => {
         delete process.env[BRIDGE_ENV_VAR];
         expect(isBridgeConfigured()).toBe(false);
-        await expect(resolveSocialTarget('twitter', '@jack')).rejects.toThrow(new RegExp(BRIDGE_ENV_VAR));
+        await expect(resolveSocialTarget('instagram', '@natgeo')).rejects.toThrow(new RegExp(BRIDGE_ENV_VAR));
     });
 
     test('build <bridge>/<route> when a bridge is set', async () => {
         process.env[BRIDGE_ENV_VAR] = 'https://rsshub.example.com';
         expect(isBridgeConfigured()).toBe(true);
-        expect((await resolveSocialTarget('twitter', '@jack')).feedUrl)
-            .toBe('https://rsshub.example.com/twitter/user/jack');
         expect((await resolveSocialTarget('instagram', 'https://instagram.com/natgeo')).feedUrl)
             .toBe('https://rsshub.example.com/instagram/user/natgeo');
         expect((await resolveSocialTarget('tiktok', '@gordonramsayofficial')).feedUrl)
@@ -174,28 +172,71 @@ describe('bridged platforms', () => {
 
     test('a trailing slash on the bridge base does not double up', async () => {
         process.env[BRIDGE_ENV_VAR] = 'https://rsshub.example.com/';
-        expect((await resolveSocialTarget('twitter', 'jack')).feedUrl)
-            .toBe('https://rsshub.example.com/twitter/user/jack');
+        expect((await resolveSocialTarget('instagram', 'natgeo')).feedUrl)
+            .toBe('https://rsshub.example.com/instagram/user/natgeo');
     });
 
     test('a bridge on a sub-path keeps the path', async () => {
         process.env[BRIDGE_ENV_VAR] = 'https://host.example/rss';
-        expect((await resolveSocialTarget('twitter', 'jack')).feedUrl)
-            .toBe('https://host.example/rss/twitter/user/jack');
+        expect((await resolveSocialTarget('instagram', 'natgeo')).feedUrl)
+            .toBe('https://host.example/rss/instagram/user/natgeo');
     });
 
     test('a bridge that is not a public http(s) URL is rejected', async () => {
         process.env[BRIDGE_ENV_VAR] = 'ftp://nope';
-        await expect(resolveSocialTarget('twitter', 'jack')).rejects.toThrow(new RegExp(`${BRIDGE_ENV_VAR} is not usable`));
+        await expect(resolveSocialTarget('instagram', 'natgeo')).rejects.toThrow(new RegExp(`${BRIDGE_ENV_VAR} is not usable`));
     });
 
     test('a bridge pointed at a literal private address is rejected', async () => {
         process.env[BRIDGE_ENV_VAR] = 'http://169.254.169.254';
-        await expect(resolveSocialTarget('twitter', 'jack')).rejects.toThrow(/not usable/);
+        await expect(resolveSocialTarget('instagram', 'natgeo')).rejects.toThrow(/not usable/);
     });
 
     test('an X username over 15 chars is refused', async () => {
         process.env[BRIDGE_ENV_VAR] = 'https://rsshub.example.com';
         await expect(resolveSocialTarget('twitter', 'a'.repeat(16))).rejects.toThrow(/not a valid X/);
+    });
+});
+
+describe('X/Twitter', () => {
+    const ORIGINAL_X_API = process.env.SOCIAL_X_API_BASE_URL;
+    afterEach(() => {
+        if (ORIGINAL_X_API === undefined) delete process.env.SOCIAL_X_API_BASE_URL;
+        else process.env.SOCIAL_X_API_BASE_URL = ORIGINAL_X_API;
+    });
+
+    test('resolves to the profile URL with no bridge, whatever was pasted', async () => {
+        delete process.env[BRIDGE_ENV_VAR];
+        delete process.env.SOCIAL_X_API_BASE_URL;
+        for (const input of ['@jack', 'jack', 'https://x.com/jack', 'https://twitter.com/jack?lang=en']) {
+            expect(await resolveSocialTarget('twitter', input)).toEqual({
+                platform: 'twitter', ref: '@jack', feedUrl: 'https://x.com/jack',
+            });
+        }
+    });
+
+    test('keeps the profile URL as its identity even when a bridge is set', async () => {
+        process.env[BRIDGE_ENV_VAR] = 'https://rsshub.example.com';
+        expect((await resolveSocialTarget('twitter', '@jack')).feedUrl).toBe('https://x.com/jack');
+    });
+
+    test('needs the bridge only when FxTwitter is switched off', async () => {
+        process.env.SOCIAL_X_API_BASE_URL = 'off';
+        delete process.env[BRIDGE_ENV_VAR];
+        expect(listProviders().find(p => p.id === 'twitter').requiresBridge).toBe(true);
+        await expect(resolveSocialTarget('twitter', '@jack')).rejects.toThrow(/SOCIAL_X_API_BASE_URL/);
+        process.env[BRIDGE_ENV_VAR] = 'https://rsshub.example.com';
+        expect((await resolveSocialTarget('twitter', '@jack')).feedUrl).toBe('https://x.com/jack');
+    });
+
+    test('twitterBridgeFeedUrl builds the fallback route, or null without a bridge', () => {
+        const { twitterBridgeFeedUrl } = require('../src/services/socialProviders');
+        delete process.env[BRIDGE_ENV_VAR];
+        expect(twitterBridgeFeedUrl('jack')).toBeNull();
+        process.env[BRIDGE_ENV_VAR] = 'http://rsshub:1200/';
+        expect(twitterBridgeFeedUrl('jack')).toBe('http://rsshub:1200/twitter/user/jack');
+        expect(twitterBridgeFeedUrl('not valid!')).toBeNull();
+        process.env[BRIDGE_ENV_VAR] = 'ftp://nope';
+        expect(twitterBridgeFeedUrl('jack')).toBeNull();
     });
 });
