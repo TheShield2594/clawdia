@@ -223,7 +223,7 @@ describe('the detached item grants say when a prize is only owed', () => {
     const read = rel => fs.readFileSync(path.join(__dirname, '..', 'src', 'commands', 'economy', rel), 'utf8');
 
     test('an owed expedition relic is not announced as in the bag', () => {
-        const src = read('explore.js');
+        const src = read('explore/go.js');
         expect(src).toMatch(/commitExpeditionRelic/);
         expect(src).toMatch(/relicOwed/);
         // Three-way: owed and unrecorded read differently.

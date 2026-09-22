@@ -227,6 +227,12 @@
             "branches": 52,
             "functions": 52,
             "lines": 65
+        },
+        "src/commands/economy/explore": {
+            "statements": 15,
+            "branches": 0,
+            "functions": 19,
+            "lines": 16
         }
     },
     "neverExecuted": [
@@ -401,6 +407,12 @@
         "src/commands/economy/event/snowball.js",
         "src/commands/economy/event/trackhunt.js",
         "src/commands/economy/event/trickortreat.js",
+        "src/commands/economy/explore/map.js",
+        "src/commands/economy/explore/prestige.js",
+        "src/commands/economy/explore/profile.js",
+        "src/commands/economy/explore/regions.js",
+        "src/commands/economy/explore/relics.js",
+        "src/commands/economy/explore/travel.js",
         "src/commands/economy/featured.js",
         "src/commands/economy/feed.js",
         "src/commands/economy/fish/craft.js",
@@ -491,6 +503,9 @@
         "src/dashboard/public": [
             "statements",
             "lines"
+        ],
+        "src/commands/economy/explore": [
+            "branches"
         ]
     }
 }

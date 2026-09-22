@@ -52,7 +52,7 @@ const GRIND_CLAIMS = [
     { file: '../../services/fishService.js', field: 'data.lastCast', shape: 'floor' },
     { file: '../../services/huntService.js', field: 'data.lastHunt', shape: 'floor' },
     { file: '../../services/mineService.js', field: 'data.lastMine', shape: 'floor' },
-    { file: 'explore.js', field: 'data.lastExplore', shape: 'floor' },
+    { file: 'explore/go.js', field: 'data.lastExplore', shape: 'floor' },
 ];
 
 const ALL = [...CLAIMS, ...GRIND_CLAIMS];
