@@ -63,7 +63,7 @@
                         </h2>
                     </div>
                     <div id="getting-started-body">
-                        <div class="dash-module-list" style="display:flex;flex-direction:column;gap:.35rem;padding-top:.25rem">
+                        <div class="dash-module-list gs-step-list">
                             <button type="button" class="dash-module gs-step <%= stepDone.welcome ? 'on' : '' %>" data-gs-step="welcome" data-action="goto-tab" data-tab="welcome">
                                 <div class="dash-module-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16c2 0 2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/><path d="M3 11c2 0 2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/></svg></div>
                                 <div class="dash-module-body"><h4>Set up a welcome message</h4><p>Greet new members automatically</p></div>
@@ -95,21 +95,24 @@
                                 <span class="sr-only"><%= stepDone.ai ? '— done' : '— not done yet' %></span>
                             </button>
                         </div>
-                        <div style="text-align:right;margin-top:.75rem">
-                            <button class="btn" type="button" data-action="dismiss-getting-started" style="font-size:.8rem;opacity:.6">Dismiss checklist</button>
+                        <div class="gs-dismiss-row">
+                            <button class="btn gs-dismiss-btn" type="button" data-action="dismiss-getting-started">Dismiss checklist</button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <%# KPI strip (v5). Members leads as the hero — it is the metric with
-                trend data (memberGrowth off /stats), so it carries the delta and
-                the only sparkline; the rest recede to a number and a foot. The
-                five tiles that map to a panel are buttons that navigate there via
-                the shared goto-tab action, so a headline is also a way in. Trend
-                colour lives in the delta chip, not the number, and stays warm
-                (moss up / terracotta down) — see styles.css. All styling is in
-                classes: this block keeps the inline-style ratchet falling (#692). %>
+            <%# KPI strip (v5). Members leads as the hero — the largest tile and
+                the widest sparkline. Economy, Leveling and Ask Clawdia now carry
+                the same delta chip and a shorter sparkline too, off the daily
+                metricTrends the snapshot job records (#1076); each degrades to a
+                bare number until it has two days of history, so the trend markup
+                is inert rather than wrong on a fresh guild. The five tiles that
+                map to a panel are buttons that navigate there via the shared
+                goto-tab action, so a headline is also a way in. Trend colour
+                lives in the delta chip, not the number, and stays warm (moss up /
+                terracotta down) — see styles.css. All styling is in classes: this
+                block keeps the inline-style ratchet falling (#692). %>
             <!-- KPIs -->
             <div class="dash-kpis">
                 <button type="button" class="dash-kpi dash-kpi-hero dash-kpi-link" id="kpi-members" data-action="goto-tab" data-tab="analytics">
@@ -189,7 +192,11 @@
                         Economy
                     </div>
                     <div class="dash-kpi-value" id="kpi-eco-value">—</div>
-                    <div class="dash-kpi-meta"><span class="dash-kpi-foot" id="kpi-eco-foot">active users (7d)</span></div>
+                    <div class="dash-kpi-meta">
+                        <span class="dash-kpi-delta" id="kpi-eco-delta" hidden></span>
+                        <span class="dash-kpi-foot" id="kpi-eco-foot">active users (7d)</span>
+                    </div>
+                    <div class="dash-kpi-spark" id="kpi-eco-spark" aria-hidden="true"></div>
                     <span class="sr-only">— open Economy</span>
                 </button>
                 <button type="button" class="dash-kpi dash-kpi-link" id="kpi-leveling-overview" data-action="goto-tab" data-tab="leveling">
@@ -199,7 +206,11 @@
                         Leveling
                     </div>
                     <div class="dash-kpi-value" id="kpi-level-value">—</div>
-                    <div class="dash-kpi-meta"><span class="dash-kpi-foot" id="kpi-level-foot">top level</span></div>
+                    <div class="dash-kpi-meta">
+                        <span class="dash-kpi-delta" id="kpi-level-delta" hidden></span>
+                        <span class="dash-kpi-foot" id="kpi-level-foot">top level</span>
+                    </div>
+                    <div class="dash-kpi-spark" id="kpi-level-spark" aria-hidden="true"></div>
                     <span class="sr-only">— open Leveling</span>
                 </button>
                 <button type="button" class="dash-kpi dash-kpi-link" id="kpi-ai-overview" data-action="goto-tab" data-tab="ai">
@@ -209,7 +220,11 @@
                         Ask Clawdia
                     </div>
                     <div class="dash-kpi-value" id="kpi-ai-value">—</div>
-                    <div class="dash-kpi-meta"><span class="dash-kpi-foot" id="kpi-ai-foot">chats (total)</span></div>
+                    <div class="dash-kpi-meta">
+                        <span class="dash-kpi-delta" id="kpi-ai-delta" hidden></span>
+                        <span class="dash-kpi-foot" id="kpi-ai-foot">chats (total)</span>
+                    </div>
+                    <div class="dash-kpi-spark" id="kpi-ai-spark" aria-hidden="true"></div>
                     <span class="sr-only">— open Ask Clawdia</span>
                 </button>
             </div>
@@ -222,7 +237,7 @@
                             <h2 class="dash-card-title">Modules</h2>
                             <div class="dash-card-sub">Click to configure · toggle reflects saved state</div>
                         </div>
-                        <span class="dash-pill"><span style="width:6px;height:6px;border-radius:50%;background:var(--good);display:inline-block;"></span> live</span>
+                        <span class="dash-pill"><span class="dash-pill-dot"></span> live</span>
                     </div>
                     <div class="dash-module-list">
                         <button type="button" class="dash-module <%= moduleOn.welcome ? 'on' : '' %>" data-tab-link="welcome">
@@ -294,23 +309,23 @@
                     <div class="dash-bot-content">
                         <div class="dash-bot-avatar" role="img" aria-label="Clawdia"></div>
                         <div class="dash-bot-text" id="clawdia-msg">
-                            <span style="opacity:.5;font-size:.85em">Checking server health…</span>
+                            <span class="dash-bot-loading">Checking server health…</span>
                         </div>
                     </div>
-                    <div id="clawdia-actions" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem"></div>
+                    <div id="clawdia-actions" class="dash-bot-actions"></div>
                 </div>
             </div>
 
             <!-- Recent Activity feed -->
-            <div class="dash-card" style="margin-top:1.25rem" id="overview-activity-card">
+            <div class="dash-card" id="overview-activity-card">
                 <div class="dash-card-header">
                     <div>
                         <h2 class="dash-card-title">Recent Activity</h2>
                         <div class="dash-card-sub">Latest signals from your server</div>
                     </div>
-                    <span class="dash-pill" style="font-size:10px;opacity:.6" id="overview-last-updated"></span>
+                    <span class="dash-pill dash-pill-sub" id="overview-last-updated"></span>
                 </div>
-                <div id="overview-activity-feed" aria-live="polite" style="display:flex;flex-direction:column;gap:.5rem;min-height:60px">
+                <div id="overview-activity-feed" aria-live="polite">
                     <div id="activity-feed-skeleton" style="width:100%">
                         <div class="skel-bar" style="width:80%"></div>
                         <div class="skel-bar" style="width:65%"></div>

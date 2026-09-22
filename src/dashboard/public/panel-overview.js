@@ -75,24 +75,45 @@ function overviewDelta(el, value) {
     el.hidden = false;
 }
 
-// A minimal area sparkline for the hero. Decorative — the container is
+// A minimal area sparkline for a KPI tile. Decorative — the container is
 // aria-hidden and the same trend is in the delta and foot — so it is built from
 // presentation attributes with no inline style, keeping the #692 ratchet clean.
-// One hero on the page, so the gradient id is fixed.
+// The gradient id is derived from the host id so several sparklines on the page
+// (Members plus the three supporting tiles, #1076) each reference their own def
+// rather than sharing one whose stops could be redefined out from under them.
 function overviewSparkline(host, series) {
     if (!host || series.length < 2) return;
     const w = 100, h = 40, pad = 3;
+    const gradId = `${host.id || 'ov'}-grad`;
     const min = Math.min(...series), max = Math.max(...series), span = (max - min) || 1;
     const pts = series.map((v, i) => [pad + (i * (w - pad * 2)) / (series.length - 1), h - pad - ((v - min) / span) * (h - pad * 2)]);
     const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
     const area = `M${pts[0][0].toFixed(1)} ${h} ` + pts.map(p => 'L' + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ') + ` L${pts[pts.length - 1][0].toFixed(1)} ${h} Z`;
     host.innerHTML =
         `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true" focusable="false">` +
-        '<defs><linearGradient id="ov-spark-grad" x1="0" y1="0" x2="0" y2="1">' +
+        `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">` +
         '<stop offset="0" stop-color="#9aa876" stop-opacity="0.24"/><stop offset="1" stop-color="#9aa876" stop-opacity="0"/></linearGradient></defs>' +
-        `<path d="${area}" fill="url(#ov-spark-grad)"/>` +
+        `<path d="${area}" fill="url(#${gradId})"/>` +
         `<path d="${line}" fill="none" stroke="#9aa876" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>` +
         '</svg>';
+}
+
+// Wire one supporting tile's delta chip + sparkline from a metricTrends series
+// (#1076). `snaps` is the daily snapshot rows off /stats; `key` picks the metric
+// out of each row. These are point-in-time values, not flows like member net —
+// so the sparkline plots the values themselves (last 7 days) and the delta is
+// the latest value minus the one a week earlier, which is what the chip's "vs
+// last wk" says. Fewer than two rows leaves both untouched, so the tile keeps
+// its bare number until the snapshot job has recorded some history.
+function overviewMetricTrend(snaps, key, sparkId, deltaId) {
+    if (!Array.isArray(snaps) || snaps.length < 2) return;
+    const series = snaps.map(s => s[key] || 0);
+    overviewSparkline(document.getElementById(sparkId), series.slice(-7));
+    const latest = series[series.length - 1];
+    // A week back when there is a week of history, else the earliest point, so a
+    // 3-day-old guild still gets an honest "since we started measuring" delta.
+    const prior = series[Math.max(0, series.length - 8)];
+    overviewDelta(document.getElementById(deltaId), latest - prior);
 }
 
 // Small line icons for the activity feed and recommendation list, in the same
@@ -161,9 +182,16 @@ async function loadOverviewStats() {
         overviewCount(modVal, modTotal);
         if (modFoot) modFoot.textContent = modTotal === 1 ? 'action this week' : 'actions this week';
 
+        // The three supporting tiles gain the same delta chip + sparkline as
+        // Members when the snapshot job has recorded a series for them (#1076).
+        // Each call is a no-op with fewer than two snapshots, so a fresh guild
+        // shows the bare number exactly as before.
+        const snaps = a.metricTrends || [];
+
         // Economy KPI
         const ecoActive = a.economyStats?.activeUsers ?? 0;
         overviewCount(document.getElementById('kpi-eco-value'), ecoActive);
+        overviewMetricTrend(snaps, 'economyActiveUsers', 'kpi-eco-spark', 'kpi-eco-delta');
 
         // Leveling KPI
         const topLevel = stats.topLevels?.[0]?.level ?? 0;
@@ -171,6 +199,7 @@ async function loadOverviewStats() {
         const levelFoot = document.getElementById('kpi-level-foot');
         overviewCount(levelVal, topLevel);
         if (levelFoot) levelFoot.textContent = topLevel ? 'highest member level' : 'no levels yet';
+        overviewMetricTrend(snaps, 'topLevel', 'kpi-level-spark', 'kpi-level-delta');
 
         // AI KPI
         const aiCmds = ['ask', 'ai', 'chat', 'aiask', 'clawdia'];
@@ -179,6 +208,7 @@ async function loadOverviewStats() {
         const aiFoot = document.getElementById('kpi-ai-foot');
         overviewCount(aiVal, aiTotal);
         if (aiFoot) aiFoot.textContent = aiTotal === 1 ? 'Clawdia chat' : 'Clawdia chats';
+        overviewMetricTrend(snaps, 'aiRequests', 'kpi-ai-spark', 'kpi-ai-delta');
 
         // Ask Clawdia recommendations.
         //

@@ -1574,10 +1574,11 @@ textarea.auto-resize {
 .dash-subgreeting { color: var(--ink-300); margin-top: 8px; font-size: 15px; }
 
 /* KPI cards */
-/* Overview KPI strip (v5). A hero metric leads and the rest recede; charts
-   render on the hero only, so the strip reads as one headline with support
-   rather than seven tiles competing. Trend colour lives in the delta chip, not
-   the number, and stays inside the warm palette. */
+/* Overview KPI strip (v5). A hero metric leads and the rest recede: the hero
+   is taller and carries the widest sparkline, while the three supporting metric
+   tiles carry a shorter one (#1076), so the strip still reads as one headline
+   with support rather than seven tiles competing. Trend colour lives in the
+   delta chip, not the number, and stays inside the warm palette. */
 .dash-kpis { display: grid; grid-template-columns: 1.15fr 1fr 1fr 1fr; grid-auto-rows: 1fr; gap: 16px; margin-bottom: 20px; }
 .dash-kpi { background: var(--ink-900); border: 1px solid var(--ink-800); border-radius: 18px; padding: 22px; position: relative; overflow: hidden; display: flex; flex-direction: column; }
 .dash-kpi-label { font-size: 12.5px; color: var(--ink-400); letter-spacing: 0.04em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
@@ -1609,6 +1610,11 @@ textarea.auto-resize {
 .dash-kpi-spark { margin-top: auto; padding-top: 16px; }
 .dash-kpi-spark svg { display: block; width: 100%; height: 76px; }
 .dash-kpi-spark:empty { display: none; }
+/* Supporting tiles are shorter than the hero, so their sparkline is too — a
+   full-height line would crowd the value. margin-top:auto still pins it to the
+   tile's foot, so the three trend tiles align whether or not a series exists. */
+.dash-kpi:not(.dash-kpi-hero) .dash-kpi-spark { padding-top: 12px; }
+.dash-kpi:not(.dash-kpi-hero) .dash-kpi-spark svg { height: 34px; }
 
 /* Interactive tiles are entry points into their panel. */
 .dash-kpi-link { appearance: none; -webkit-appearance: none; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color .15s, background .15s; }
@@ -1647,9 +1653,19 @@ textarea.auto-resize {
 .gs-toggle[aria-expanded="false"] .gs-toggle-icon { transform: rotate(-90deg); }
 .gs-toggle:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 4px; border-radius: 4px; }
 .dash-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--ink-850); font-size: 12px; color: var(--ink-200); border: 1px solid var(--ink-800); font-family: 'JetBrains Mono', monospace; }
+/* The "live" status dot inside a pill, and the smaller, dimmer pill the feed's
+   last-updated stamp uses. Both were inline styles on the overview (#1075). */
+.dash-pill-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); display: inline-block; }
+.dash-pill-sub { font-size: 10px; opacity: .6; }
 
 /* Modules grid */
 .dash-module-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* The Getting-started checklist stacks its steps in one column rather than the
+   two-up module grid, and sits a touch tighter — a modifier, not an inline
+   override of the grid it opts out of (#1075). */
+.dash-module-list.gs-step-list { display: flex; flex-direction: column; gap: .35rem; padding-top: .25rem; }
+.gs-dismiss-row { text-align: right; margin-top: .75rem; }
+.gs-dismiss-btn { font-size: .8rem; opacity: .6; }
 .dash-module { background: var(--ink-850); border: 1px solid var(--ink-800); border-radius: 14px; padding: 16px; display: flex; gap: 12px; align-items: flex-start; cursor: pointer; transition: border-color .15s, background .15s; text-decoration: none; color: inherit; font: inherit; -webkit-appearance: none; appearance: none; width: 100%; text-align: left; }
 .dash-module:hover { border-color: var(--ink-600); background: var(--ink-800); }
 .dash-module-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--ink-800); color: var(--cream-100); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 18px; }
@@ -1685,6 +1701,11 @@ textarea.auto-resize {
 
 /* Activity feed */
 .dash-feed { display: flex; flex-direction: column; gap: 12px; }
+/* The overview's activity feed and its card: a stack that holds a minimum
+   height while it loads, and a card that sits below the two-column row above it.
+   Both were inline styles before #1075. */
+#overview-activity-card { margin-top: 1.25rem; }
+#overview-activity-feed { display: flex; flex-direction: column; gap: .5rem; min-height: 60px; }
 .dash-feed-item { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px dashed var(--ink-800); }
 .dash-feed-item:last-child { border-bottom: none; }
 .dash-feed-icon { width: 32px; height: 32px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 14px; }
@@ -1740,6 +1761,10 @@ textarea.auto-resize {
 .dash-bot-btn { background: rgba(0,0,0,.25); color: #fff; border: 1px solid rgba(255,255,255,.2); padding: 8px 14px; border-radius: 10px; font-size: 13px; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; transition: background .15s; }
 .dash-bot-btn:hover { background: rgba(0,0,0,.4); }
 .dash-bot-btn.ghost { background: transparent; }
+/* The Ask-Clawdia action row and its "checking…" placeholder, moved off inline
+   styles on the overview (#1075). */
+.dash-bot-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+.dash-bot-loading { opacity: .5; font-size: .85em; }
 .dash-bot-dim { opacity: .7; }
 /* Recommendation row inside the Ask Clawdia card: a line icon (in the card's
    white ink) beside the text, replacing the old 💡 emoji + inline styles. */
