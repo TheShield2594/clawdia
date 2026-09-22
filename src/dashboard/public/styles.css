@@ -646,7 +646,11 @@ body {
    inline styles are what keep `style-src 'unsafe-inline'` in the CSP, and
    tests/dashboardInlineAttributes.test.js only lets their number fall. */
 .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
-@media (max-width: 620px) { .field-pair { grid-template-columns: 1fr; } }
+/* Three inputs across, the same family as .field-pair (#1075): the
+   `grid-template-columns:1fr 1fr 1fr;gap:.75rem` that was retyped inline at
+   each use, now with the same mobile collapse the pair gets. */
+.field-trio { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .75rem; }
+@media (max-width: 620px) { .field-pair, .field-trio { grid-template-columns: 1fr; } }
 
 input[type="text"],
 input[type="number"],

@@ -11,7 +11,7 @@
                         <label class="field-label" for="starboard-channel">Starboard channel</label>
                         <%- include('../channel-select', { id: 'starboard-channel', placeholder: 'Select a channel', selected: settings.starboard?.channelId }) %>
                     </div>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                    <div class="field field-pair">
                         <div>
                             <label class="field-label" for="starboard-emoji">Trigger emoji</label>
                             <input type="text" id="starboard-emoji" value="<%= settings.starboard?.emoji || '⭐' %>">

@@ -58,7 +58,7 @@
                             <label class="field-label" for="dailynews-channel">Post to channel</label>
                             <%- include('../channel-select', { id: 'dailynews-channel', placeholder: 'Select a channel', selected: settings.dailyNews?.channelId }) %>
                         </div>
-                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div class="field field-pair">
                             <div>
                                 <label class="field-label" for="dailynews-time">Delivery time (24h)</label>
                                 <input type="text" id="dailynews-time" value="<%= settings.dailyNews?.time || '09:00' %>" placeholder="09:00">

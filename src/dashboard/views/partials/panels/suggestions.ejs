@@ -11,7 +11,7 @@
                         <label class="field-label" for="suggestions-channel">Suggestions channel</label>
                         <%- include('../channel-select', { id: 'suggestions-channel', placeholder: 'Select a channel', selected: settings.suggestions?.channelId }) %>
                     </div>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                    <div class="field field-pair">
                         <div><label class="field-label" for="suggestions-upvote">Upvote emoji</label><input type="text" id="suggestions-upvote" value="<%= settings.suggestions?.upvoteEmoji || '👍' %>"></div>
                         <div><label class="field-label" for="suggestions-downvote">Downvote emoji</label><input type="text" id="suggestions-downvote" value="<%= settings.suggestions?.downvoteEmoji || '👎' %>"></div>
                     </div>
@@ -47,7 +47,7 @@
                         <h3>Suggestion statuses</h3>
                         <p>Configure which emoji staff react with to update a suggestion's status badge.</p>
                     </div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                    <div class="field-pair">
                         <div><label class="field-label" for="sug-status-approve">Approve emoji</label><input type="text" id="sug-status-approve" value="<%= settings.suggestions?.statusEmojis?.approve || '✅' %>"></div>
                         <div><label class="field-label" for="sug-status-deny">Deny emoji</label><input type="text" id="sug-status-deny" value="<%= settings.suggestions?.statusEmojis?.deny || '❌' %>"></div>
                         <div><label class="field-label" for="sug-status-review">Under review emoji</label><input type="text" id="sug-status-review" value="<%= settings.suggestions?.statusEmojis?.review || '🔎' %>"></div>
