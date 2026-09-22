@@ -333,6 +333,13 @@ services:
       mongodb:
         condition: service_healthy
     volumes:
+      # Where the runner writes its pre-migration mongodump, and with
+      # MIGRATION_BACKUP=require above a dump it cannot write aborts the boot.
+      # The container runs as `node` (uid 1000, see the Dockerfile's USER), so
+      # this host directory has to be writable by that uid — a fresh ./backups
+      # created by root is not, and the boot then stops with "backup directory
+      # /app/backups is not writable". Fix it on the host once, before first
+      # boot: `mkdir -p ./backups && chown 1000 ./backups`.
       - ./backups:/app/backups
       # MCP server list, read at startup. Mounted rather than baked into the
       # image so the file (which can hold OAuth tokens) stays on the host.
