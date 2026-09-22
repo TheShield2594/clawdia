@@ -97,7 +97,18 @@ function useMongo() {
         // asked for it. Here indexes exist only because a test called
         // buildIndexes(), which makes the index state of every test its own
         // statement rather than a race with the connection.
-        await mongoose.connect(handle.uri, { autoIndex: false });
+        //
+        // runtimeAdapters.os handed over explicitly. From mongodb 7.6 the driver
+        // loads `os` with a dynamic import(), which Jest's VM sandbox rejects
+        // without --experimental-vm-modules. The driver swallows that error and
+        // sends an empty `client` document in the handshake, which the server
+        // refuses ("Missing required sub-document 'driver'") — every query then
+        // buffers until it times out. Outside Jest the import works; this only
+        // skips it.
+        await mongoose.connect(handle.uri, {
+            autoIndex: false,
+            runtimeAdapters: { os: require('os') },
+        });
     }, BOOT_TIMEOUT_MS);
 
     afterEach(async () => {
