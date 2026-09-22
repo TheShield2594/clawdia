@@ -1,7 +1,9 @@
 'use strict';
 
 // /hunt profile, /hunt prestige and /hunt records: what the hunter has, what
-// they have become, and where they stand against everyone else.
+// they have become, and where they stand against everyone else. The profile's
+// shape — a carded overview plus tabs — is shared with /fish and /explore
+// through utils/grindProfileView.js and utils/grindProfileCard.js.
 
 const User = require('../../../models/User');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
@@ -11,18 +13,24 @@ const {
     ensureHuntData,
     applyStaminaRegen,
     getLevelData,
-    xpToNextLevel,
     getMaxStamina,
     msUntilNextStamina,
     formatMs,
-    getDiminishingReturns,
     msUntilDailyReset
 } = require('../../../services/huntService');
-const { ZONES, PRESTIGE_BONUSES, HUNTER_LEVELS, FIELD_TROPHIES, LIMITS } = require('../../../data/huntData');
+const {
+    ZONES, ZONE_LIST, ANIMALS, TIER_COLORS, TROPHY_QUALITIES,
+    PRESTIGE_BONUSES, HUNTER_LEVELS, FIELD_TROPHIES, LIMITS,
+} = require('../../../data/huntData');
 const { getActiveSynergies } = require('../../../services/synergyService');
 const GrindProfile = require('../../../models/GrindProfile');
 const { MAX_PRESTIGE, PRESTIGE_BADGES, PRESTIGE_LABELS } = require('./shared');
-const { buildXpBar, formatBonuses } = require('./embeds');
+const { formatBonuses } = require('./embeds');
+const { createGrindProfileCard, createGrindCollectionCard } = require('../../../utils/grindProfileCard');
+const {
+    buildTodayField: buildSharedTodayField, levelProgress, joinWithin, pagePayload, renderAttachment,
+    sendProfileTabs, staminaLine, xpLine,
+} = require('../../../utils/grindProfileView');
 const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
 
@@ -30,7 +38,64 @@ const { ownedBy } = require('../../../utils/collectorOwner');
 // PROFILE (was /huntprofile)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async function executeProfile(interaction) {
+// Best grade first. Only Good or better is ever stored (huntService).
+const GRADES = [
+    { id: 'mythic',   badge: 'M', color: '#9b59b6' },
+    { id: 'pristine', badge: 'P', color: '#3498db' },
+    { id: 'good',     badge: 'G', color: '#2ecc71' },
+];
+const TIER_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'event'];
+const TIER_LABELS = { common: 'Common', uncommon: 'Uncommon', rare: 'Rare', epic: 'Epic', legendary: 'Legendary', event: 'Mythical' };
+
+const ANIMAL_BY_NAME = new Map(Object.values(ANIMALS).map(a => [a.name, a]));
+
+/**
+ * Read the stored trophy strings ("🟣 Mythic Woodpecker") into the best grade
+ * held per species. A hunter who has a Good, a Pristine and a Mythic of the same
+ * animal has one cabinet slot for it, and it is Mythic. Strings that are not a
+ * species trophy — the prestige ribbons /hunt prestige adds — come back apart.
+ *
+ * @param {string[]} trophies
+ * @returns {{bySpecies: Map<string, {animal: object, grade: object}>,
+ *            gradeCounts: Record<string, number>, other: string[], total: number}}
+ */
+function readTrophies(trophies) {
+    const bySpecies = new Map();
+    const gradeCounts = { mythic: 0, pristine: 0, good: 0 };
+    const other = [];
+    let total = 0;
+
+    for (const t of trophies ?? []) {
+        const quality = TROPHY_QUALITIES.find(q => t.startsWith(`${q.emoji} ${q.label} `));
+        const grade = quality && GRADES.find(g => g.id === quality.id);
+        const animal = grade && ANIMAL_BY_NAME.get(t.slice(`${quality.emoji} ${quality.label} `.length));
+        if (!animal) {
+            other.push(t);
+            continue;
+        }
+        total += 1;
+        gradeCounts[grade.id] += 1;
+        const held = bySpecies.get(animal.id);
+        if (!held || GRADES.indexOf(grade) < GRADES.indexOf(held.grade)) {
+            bySpecies.set(animal.id, { animal, grade });
+        }
+    }
+    return { bySpecies, gradeCounts, other, total };
+}
+
+/** The shelf: best grade first, then the rarest animal. */
+function bestTrophies(bySpecies, limit = 10) {
+    return [...bySpecies.values()]
+        .sort((a, b) => GRADES.indexOf(a.grade) - GRADES.indexOf(b.grade)
+            || TIER_ORDER.indexOf(b.animal.tier) - TIER_ORDER.indexOf(a.animal.tier))
+        .slice(0, limit);
+}
+
+function gradeSummary(gradeCounts) {
+    return `🟣 ${gradeCounts.mythic} · 🔷 ${gradeCounts.pristine} · 🟢 ${gradeCounts.good}`;
+}
+
+async function loadProfile(interaction) {
     const target = interaction.options.getUser('user') ?? interaction.user;
     const isSelf = target.id === interaction.user.id;
 
@@ -39,8 +104,11 @@ async function executeProfile(interaction) {
         getGuildSettings(interaction.guild.id)
     ]);
     await attachGrind(userData);
+    return { target, isSelf, userData, currency: guildSettings?.economy?.currency ?? '💰' };
+}
 
-    const currency = guildSettings?.economy?.currency ?? '💰';
+async function executeProfile(interaction) {
+    const { target, isSelf, userData, currency } = await loadProfile(interaction);
 
     if (!userData) {
         return interaction.reply({
@@ -54,122 +122,69 @@ async function executeProfile(interaction) {
     ensureHuntData(userData);
     if (isSelf) applyStaminaRegen(userData);
 
-    const h        = userData.hunt;
+    const cabinet = readTrophies(userData.hunt.trophies);
+    const ctx = { interaction, target, isSelf, userData, currency, cabinet };
+
+    return sendProfileTabs(interaction, [
+        { id: 'overview', label: 'Overview', emoji: '🏹', build: () => buildOverviewPage(ctx) },
+        { id: 'trophies', label: 'Trophies', emoji: '🏆', build: () => buildTrophyPage(ctx) },
+        { id: 'progress', label: 'Progress', emoji: '🎖️', build: () => buildProgressPage(ctx) },
+    ]);
+}
+
+function profileColor(prestige) {
+    return prestige >= 4 ? '#f39c12' : prestige >= 2 ? '#95a5a6' : '#3498db';
+}
+
+async function buildOverviewPage({ target, isSelf, userData, currency, cabinet }) {
+    const h         = userData.hunt;
     const levelData = getLevelData(h.level);
-    const toNext   = xpToNextLevel(h.level, h.xp);
-    const maxStam  = getMaxStamina(userData);
-    const regenMs  = msUntilNextStamina(userData);
-    const zone     = ZONES[h.activeZone];
-    const prestige = h.prestige ?? 0;
-    const badge    = PRESTIGE_BADGES[Math.min(prestige, PRESTIGE_BADGES.length - 1)] ?? '';
+    const progress  = levelProgress(HUNTER_LEVELS, h.level, h.xp);
+    const maxStam   = getMaxStamina(userData);
+    const zone      = ZONES[h.activeZone];
+    const prestige  = h.prestige ?? 0;
+    const badge     = PRESTIGE_BADGES[Math.min(prestige, PRESTIGE_BADGES.length - 1)] ?? '';
+    const species   = cabinet.bySpecies.size;
+    const speciesTotal = Object.keys(ANIMALS).length;
 
     const successRate = h.totalHunts > 0
         ? `${Math.round((h.successfulHunts / h.totalHunts) * 100)}%`
         : 'N/A';
 
-    const xpProgressBar = buildXpBar(h, toNext);
-    const stamBar = '⚡'.repeat(h.stamina) + '▪️'.repeat(Math.max(0, maxStam - h.stamina));
-
     const buffs = [];
-    if (h.activeBait)    buffs.push(`Bait (${h.activeBaitHuntsLeft} hunts)`);
-    if (h.activeCharm)   buffs.push(`Charm (${h.activeCharmHuntsLeft} hunts)`);
-    if (h.activeFocus)   buffs.push('Focus (queued)');
+    if (h.activeBait)     buffs.push(`Bait (${h.activeBaitHuntsLeft} hunts)`);
+    if (h.activeCharm)    buffs.push(`Charm (${h.activeCharmHuntsLeft} hunts)`);
+    if (h.activeFocus)    buffs.push('Focus (queued)');
     if (h.activeXpScroll) buffs.push('XP Scroll (queued)');
 
-    const pBonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)];
+    const description = [
+        `**${levelData.title}** · Level ${h.level}${zone ? ` · ${zone.emoji} ${zone.name}` : ''}`
+            + (prestige > 0 ? ` · ${badge} P${prestige}` : ''),
+        xpLine(progress, h.level),
+        staminaLine(h.stamina, maxStam, msUntilNextStamina(userData), formatMs),
+        buffs.length ? `🔋 ${buffs.join(' · ')}` : null,
+    ].filter(Boolean).join('\n');
 
     const embed = new EmbedBuilder()
-        .setColor(prestige >= 4 ? '#f39c12' : prestige >= 2 ? '#95a5a6' : '#3498db')
-        .setTitle(`${badge} ${target.username}'s Hunter Profile`)
-        .setThumbnail(target.displayAvatarURL({ dynamic: true }))
+        .setColor(profileColor(prestige))
+        .setTitle(`${badge ? `${badge} ` : ''}${target.username}'s Hunter Profile`)
+        .setDescription(description)
         .addFields(
             {
-                name: '🏆 Rank',
-                value: `**${levelData.title}** (Level ${h.level})${prestige > 0 ? `\nPrestige ${badge} P${prestige}` : ''}`,
-                inline: true
-            },
-            {
-                name: '⭐ Hunter XP',
-                value: toNext !== null
-                    ? `${h.xp.toLocaleString()} / ${HUNTER_LEVELS[h.level]?.xpRequired?.toLocaleString() ?? '?'} XP\n${xpProgressBar}\n${toNext.toLocaleString()} to Level ${h.level + 1}`
-                    : `${h.xp.toLocaleString()} XP — **MAX LEVEL**`,
-                inline: true
-            },
-            {
-                name: '🗺️ Active Zone',
-                value: zone ? `${zone.emoji} ${zone.name}` : 'Unknown',
-                inline: true
-            },
-            {
-                name: '⚡ Stamina',
-                value: `${stamBar}\n${h.stamina}/${maxStam}${h.stamina < maxStam ? `\nNext regen: ${formatMs(regenMs)}` : '\nFull!'}`,
-                inline: true
-            },
-            {
-                name: '💰 Balance',
-                value: `${currency}${userData.balance.toLocaleString()}`,
-                inline: true
-            },
-            {
-                name: '🔋 Active Buffs',
-                value: buffs.length ? buffs.join('\n') : 'None',
-                inline: true
-            },
-            {
-                name: '📊 Hunt Stats',
+                name: '📊 Record',
                 value: [
-                    `Total Hunts:    **${h.totalHunts.toLocaleString()}**`,
-                    `Success Rate:   **${successRate}**`,
-                    `Total Earned:   **${currency}${h.totalEarned.toLocaleString()}**`,
-                    `Best Payout:    **${currency}${h.bestPayout.toLocaleString()}**`,
-                    `Legendary Kills: **${h.legendaryKills}**`,
-                    `Event Kills:    **${h.eventKills}**`
+                    `${h.totalHunts.toLocaleString()} hunts · ${successRate} success`,
+                    `${currency}${h.totalEarned.toLocaleString()} earned · best ${currency}${h.bestPayout.toLocaleString()}`,
+                    `${h.legendaryKills.toLocaleString()} legendary · ${h.eventKills.toLocaleString()} mythical`,
                 ].join('\n'),
-                inline: false
+                inline: true
+            },
+            {
+                name: '🏆 Trophy Cabinet',
+                value: `${species}/${speciesTotal} species · ${cabinet.total} trophies\n${gradeSummary(cabinet.gradeCounts)}`,
+                inline: true
             }
         );
-
-    if (prestige > 0) {
-        embed.addFields({
-            name: `${badge} Prestige Bonuses`,
-            value: [
-                pBonus.critBonus     > 0 ? `+${Math.round(pBonus.critBonus     * 100)}% crit chance`     : null,
-                pBonus.staminaBonus  > 0 ? `+${pBonus.staminaBonus} max stamina`                         : null,
-                pBonus.payoutBonus   > 0 ? `+${Math.round(pBonus.payoutBonus   * 100)}% all payouts`      : null,
-                pBonus.rarityBonus   > 0 ? `+${Math.round(pBonus.rarityBonus   * 100)}% rarity boost`     : null
-            ].filter(Boolean).join('\n') || 'None yet',
-            inline: true
-        });
-    }
-
-    const zoneList = h.unlockedZones.map(id => {
-        const z = ZONES[id];
-        return z ? `${z.emoji} ${z.name}` : id;
-    }).join('\n');
-    embed.addFields({ name: '🗺️ Unlocked Zones', value: zoneList || 'Beginner Forest only', inline: true });
-
-    if (h.trophies?.length) {
-        embed.addFields(buildTrophyField(h.trophies));
-    }
-
-    const fieldTrophies = buildFieldTrophyField(h);
-    if (fieldTrophies) embed.addFields(fieldTrophies);
-
-    // Cross-system synergies
-    const activeSynergies = getActiveSynergies(userData);
-    if (activeSynergies.length > 0) {
-        embed.addFields({
-            name: '🔗 Active Synergies',
-            value: activeSynergies.map(s => `${s.emoji} **${s.name}** — ${s.description}`).join('\n'),
-            inline: false
-        });
-    } else if (h.level >= 25) {
-        embed.addFields({
-            name: '🔗 Synergies',
-            value: 'Reach combined level milestones across Hunt, Fish, Mine & Explore to unlock cross-system bonuses!',
-            inline: false
-        });
-    }
 
     if (isSelf) embed.addFields(buildTodayField(userData, currency));
 
@@ -177,8 +192,144 @@ async function executeProfile(interaction) {
         embed.setFooter({ text: 'Max level reached! Use /hunt prestige to reset and unlock new bonuses.' });
     }
 
-    embed.setTimestamp();
-    return interaction.reply({ embeds: [embed] });
+    const shelf = bestTrophies(cabinet.bySpecies);
+    const card = await renderAttachment(() => createGrindProfileCard({
+        activity:      'hunt',
+        name:          target.username,
+        avatarUrl:     target.displayAvatarURL({ extension: 'png', size: 256 }),
+        rankTitle:     levelData.title,
+        level:         h.level,
+        prestige,
+        prestigeLabel: prestige > 0 ? PRESTIGE_LABELS[Math.min(prestige, PRESTIGE_LABELS.length - 1)] : null,
+        xp:            { total: h.xp, into: progress.into, span: progress.span },
+        place:         zone ? { name: zone.name, iconId: `hunt:${zone.id}` } : null,
+        stamina:       { current: h.stamina, max: maxStam },
+        stats: [
+            { label: 'Hunts',     value: h.totalHunts.toLocaleString('en-US') },
+            { label: 'Success',   value: successRate },
+            { label: 'Earned',    value: h.totalEarned.toLocaleString('en-US') },
+            { label: 'Legendary', value: h.legendaryKills.toLocaleString('en-US') },
+        ],
+        shelfTitle: `Best trophies · ${species}/${speciesTotal} species`,
+        shelf: shelf.map(({ animal, grade }) => ({
+            iconId: `animal:${animal.id}`, name: animal.name, badge: grade.badge, badgeColor: grade.color,
+        })),
+        shelfEmpty: 'No trophies yet — a Good or better kill earns one.',
+    }), 'hunt-profile.png',
+        `Hunter profile card for ${target.username}: ${levelData.title}, level ${h.level}, `
+        + `${progress.span == null ? 'max level' : `${Math.floor(progress.frac * 100)}% to level ${h.level + 1}`}, `
+        + `${zone ? `hunting in ${zone.name}, ` : ''}stamina ${h.stamina} of ${maxStam}, `
+        + `${h.totalHunts} hunts, ${successRate} success, ${h.legendaryKills} legendary. `
+        + (shelf.length ? `Best trophies: ${shelf.map(s => `${s.grade.id} ${s.animal.name}`).join(', ')}.` : 'No trophies yet.'));
+
+    return pagePayload(embed, card);
+}
+
+async function buildTrophyPage({ target, isSelf, userData, cabinet }) {
+    const h = userData.hunt;
+    const animals = Object.values(ANIMALS);
+    const species = cabinet.bySpecies.size;
+
+    const tierCounts = TIER_ORDER.map(tier => {
+        const inTier = animals.filter(a => a.tier === tier);
+        const got = inTier.filter(a => cabinet.bySpecies.has(a.id)).length;
+        return inTier.length ? `${TIER_LABELS[tier]} ${got}/${inTier.length}` : null;
+    }).filter(Boolean);
+
+    // What is still out there where this hunter can already go — the gaps the
+    // cabinet is asking them to fill, not the whole map's.
+    const reachable = new Set(h.unlockedZones);
+    const missing = animals
+        .filter(a => !cabinet.bySpecies.has(a.id) && a.tier !== 'event'
+            && (a.zones.includes('all') || a.zones.some(z => reachable.has(z))))
+        .sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier));
+
+    const embed = new EmbedBuilder()
+        .setColor(COLORS.PRIZE)
+        .setTitle(`🏆 ${target.username}'s Trophy Cabinet`)
+        .setDescription([
+            `**${species} of ${animals.length} species** · ${cabinet.total} trophies in all`,
+            gradeSummary(cabinet.gradeCounts),
+            tierCounts.join(' · '),
+        ].join('\n'))
+        .setFooter({ text: 'A Good or better kill earns a trophy · the cabinet shows your best grade of each species' });
+
+    if (missing.length) {
+        embed.addFields({
+            name: isSelf ? '🎯 Still to find in your zones' : '🎯 Still to find in their zones',
+            value: joinWithin(missing.map(a => `${a.emoji} ${a.name}`), ' · ', 1024),
+            inline: false,
+        });
+    }
+    if (cabinet.other.length) {
+        embed.addFields({ name: '🎗️ Ribbons', value: joinWithin(cabinet.other, '\n', 1024), inline: false });
+    }
+
+    const card = await renderAttachment(() => createGrindCollectionCard({
+        activity: 'hunt',
+        title:    `${target.username}'s Trophy Cabinet`,
+        subtitle: `${species} of ${animals.length} species · ${cabinet.gradeCounts.mythic} mythic · `
+                + `${cabinet.gradeCounts.pristine} pristine · ${cabinet.gradeCounts.good} good`,
+        sections: TIER_ORDER.map(tier => ({
+            label: TIER_LABELS[tier],
+            color: TIER_COLORS[tier],
+            entries: animals.filter(a => a.tier === tier).map(a => {
+                const held = cabinet.bySpecies.get(a.id);
+                return {
+                    iconId: `animal:${a.id}`, name: a.name, owned: Boolean(held),
+                    badge: held?.grade.badge, badgeColor: held?.grade.color,
+                };
+            }),
+        })),
+    }), 'hunt-trophies.png',
+        `Trophy cabinet for ${target.username}: ${species} of ${animals.length} species. ${tierCounts.join(', ')}.`);
+
+    return pagePayload(embed, card);
+}
+
+async function buildProgressPage({ target, userData }) {
+    const h        = userData.hunt;
+    const prestige = h.prestige ?? 0;
+    const badge    = PRESTIGE_BADGES[Math.min(prestige, PRESTIGE_BADGES.length - 1)] ?? '';
+    const pBonus   = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)];
+
+    const embed = new EmbedBuilder()
+        .setColor(profileColor(prestige))
+        .setTitle(`🎖️ ${target.username}'s Hunting Progress`);
+
+    embed.addFields({
+        name: prestige > 0 ? `${badge} Prestige ${prestige} Bonuses` : '✨ Prestige',
+        value: prestige > 0
+            ? formatBonuses(pBonus)
+            : `None yet — reach Level 50 and use \`/hunt prestige\` (Level ${h.level} now).`,
+        inline: true,
+    });
+
+    embed.addFields({
+        name: `🗺️ Zones (${h.unlockedZones.length}/${ZONE_LIST.length})`,
+        value: ZONE_LIST.map(z => h.unlockedZones.includes(z.id)
+            ? `${z.emoji} ${z.name}`
+            : `🔒 ${z.name} · Lv ${z.unlockLevel}`).join('\n'),
+        inline: true,
+    });
+
+    const upgrades = buildFieldTrophyField(h);
+    embed.addFields(upgrades ?? {
+        name: `🎖️ Permanent Upgrades (0/${Object.keys(FIELD_TROPHIES).length + 2})`,
+        value: 'None yet — each zone hides one.',
+        inline: false,
+    });
+
+    const activeSynergies = getActiveSynergies(userData);
+    embed.addFields({
+        name: '🔗 Synergies',
+        value: activeSynergies.length
+            ? activeSynergies.map(s => `${s.emoji} **${s.name}** — ${s.description}`).join('\n')
+            : 'Reach combined level milestones across Hunt, Fish, Mine & Explore to unlock cross-system bonuses — see `/synergies`.',
+        inline: false,
+    });
+
+    return pagePayload(embed, null);
 }
 
 function buildFieldTrophyField(h) {
@@ -198,60 +349,19 @@ function buildFieldTrophyField(h) {
     };
 }
 
-const TROPHY_RANK = { '🟣': 0, '🔷': 1, '🟢': 2 };
-
-const TROPHY_FIELD_BUDGET = 1024;
-
-function buildTrophyField(trophies) {
-    const ranked = trophies.slice().sort((a, b) =>
-        (TROPHY_RANK[a.slice(0, 2)] ?? 9) - (TROPHY_RANK[b.slice(0, 2)] ?? 9));
-
-    const shown = [];
-    let used = 0;
-    for (const trophy of ranked) {
-        // +2 for the ", " separator, and leave room for the "+N more" tail.
-        const tail = `, +${ranked.length - shown.length} more`;
-        if (used + trophy.length + 2 + tail.length > TROPHY_FIELD_BUDGET) break;
-        used += trophy.length + (shown.length ? 2 : 0);
-        shown.push(trophy);
-    }
-
-    const hidden = ranked.length - shown.length;
-    return {
-        name:   `🏆 Trophies (${ranked.length})`,
-        value:  shown.join(', ') + (hidden > 0 ? `, +${hidden} more` : ''),
-        inline: true,
-    };
-}
-
 // Takes the user rather than the hunt subdocument, like its siblings here and
 // like the engine's msUntilDailyReset (#892).
 function buildTodayField(user, currency) {
     const h = user.hunt ?? {};
-
-    const dim   = getDiminishingReturns(h.dailyHunts ?? 0);
-    const coins = h.dailyCoins ?? 0;
-
-    const barLen    = 12;
-    const filledLen = Math.min(barLen, Math.round((coins / LIMITS.DAILY_HARD_CAP) * barLen));
-    const bar       = '█'.repeat(filledLen) + '░'.repeat(barLen - filledLen);
-
-    const lines = [
-        `\`${bar}\` ${currency}${coins.toLocaleString()} / ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()}`,
-        `🏹 ${(h.dailyHunts ?? 0).toLocaleString()} hunts · payout ×${dim.multiplier.toFixed(2)}`,
-    ];
-
-    if (dim.nextAt) {
-        lines.push(`📉 Drops to ×${dim.nextMultiplier.toFixed(2)} at ${dim.nextAt} hunts`);
-    }
-    if (coins >= LIMITS.DAILY_SOFT_CAP) {
-        lines.push(`🪙 Past the soft cap — payouts halved`);
-    } else {
-        lines.push(`🪙 Soft cap (−50%) at ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()}`);
-    }
-    lines.push(`🕛 Resets in ${formatMs(msUntilDailyReset(user))}`);
-
-    return { name: '📅 Today', value: lines.join('\n'), inline: false };
+    return buildSharedTodayField({
+        coins:   h.dailyCoins ?? 0,
+        actions: h.dailyHunts ?? 0,
+        noun:    'hunts',
+        limits:  LIMITS,
+        resetMs: msUntilDailyReset(user),
+        currency,
+        formatMs,
+    });
 }
 
 async function executePrestige(interaction) {
@@ -515,11 +625,10 @@ module.exports = {
     GRAND_PRESTIGE_DIAMOND,
     RECORDS_QUERY_TIMEOUT_MS,
     RECORD_MEDALS,
-    TROPHY_FIELD_BUDGET,
-    TROPHY_RANK,
+    bestTrophies,
     buildFieldTrophyField,
     buildTodayField,
-    buildTrophyField,
+    readTrophies,
     checkGrandPrestige,
     executePrestige,
     executeProfile,

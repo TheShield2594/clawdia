@@ -10,29 +10,24 @@ const { MessageFlags, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle
 const {
     ensureFishingData,
     applyStaminaRegen,
-    getLevelData,
-    xpToNextLevel,
     getMaxStamina,
-    msUntilNextStamina,
-    formatMs,
+    applyDailyReset,
     rodStatusEmoji,
     durabilityBar
 } = require('../../../services/fishService');
 const {
-    LOCATIONS,
     PRESTIGE_BONUSES,
-    FISHER_LEVELS,
-    LIMITS,
     ROD_UPGRADES,
     BAIT_PACKS,
     CONSUMABLES,
     MATERIAL_NAMES
 } = require('../../../data/fishData');
-const { getActiveSynergies } = require('../../../services/synergyService');
 const { chunkByLength } = require('../../../utils/embedFields');
 const { paginate } = require('../../../utils/paginator');
-const { MAX_PRESTIGE, PRESTIGE_BADGES, PRESTIGE_LABELS } = require('./shared');
-const { buildXpBar, formatPrestigeBonuses } = require('./embeds');
+const { MAX_PRESTIGE, PRESTIGE_LABELS } = require('./shared');
+const { formatPrestigeBonuses } = require('./embeds');
+const { sendProfileTabs } = require('../../../utils/grindProfileView');
+const { readCatalog, fishOverviewPage, fishCatalogPage, fishProgressPage } = require('./profilePages');
 const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
 
@@ -63,128 +58,17 @@ async function handleProfile(interaction) {
 
     ensureFishingData(userData);
     if (isSelf) applyStaminaRegen(userData);
+    // Read-only, but Today should show a window that has already rolled over
+    // as the fresh one it is rather than yesterday's numbers.
+    applyDailyReset(userData);
 
-    const f         = userData.fishing;
-    const levelData = getLevelData(f.level);
-    const toNext    = xpToNextLevel(f.level, f.xp);
-    const maxStam   = getMaxStamina(userData);
-    const regenMs   = msUntilNextStamina(userData);
-    const location  = LOCATIONS[f.activeLocation];
-    const prestige  = f.prestige ?? 0;
-    const badge     = PRESTIGE_BADGES[Math.min(prestige, PRESTIGE_BADGES.length - 1)] ?? '';
+    const ctx = { target, isSelf, userData, currency, catalog: readCatalog(userData.fishing) };
 
-    const successRate = f.totalCasts > 0
-        ? `${Math.round((f.successfulCasts / f.totalCasts) * 100)}%`
-        : 'N/A';
-
-    const xpBar   = buildXpBar(f, toNext);
-    const stamBar = '⚡'.repeat(f.stamina) + '▪️'.repeat(Math.max(0, maxStam - f.stamina));
-
-    const buffs = [];
-    if (f.activeBait)    buffs.push(`Bait (${f.activeBaitCastsLeft} casts)`);
-    if (f.activeLuck)    buffs.push('Luck (queued)');
-    if (f.activeXpScroll) buffs.push('XP Scroll (queued)');
-
-    const pBonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)];
-
-    const embed = new EmbedBuilder()
-        .setColor(prestige >= 4 ? '#f39c12' : prestige >= 2 ? '#95a5a6' : '#3498db')
-        .setTitle(`${badge} ${target.username}'s Fishing Profile`)
-        .setThumbnail(target.displayAvatarURL({ dynamic: true }))
-        .addFields(
-            {
-                name: '🏆 Rank',
-                value: `**${levelData.title}** (Level ${f.level})${prestige > 0 ? `\nPrestige ${badge} P${prestige}` : ''}`,
-                inline: true
-            },
-            {
-                name: '⭐ Fisher XP',
-                value: toNext !== null
-                    ? `${f.xp.toLocaleString()} / ${FISHER_LEVELS[f.level]?.xpRequired?.toLocaleString() ?? '?'} XP\n${xpBar}\n${toNext.toLocaleString()} to Level ${f.level + 1}`
-                    : `${f.xp.toLocaleString()} XP — **MAX LEVEL**`,
-                inline: true
-            },
-            {
-                name: '📍 Active Location',
-                value: location ? `${location.emoji} ${location.name}` : 'Unknown',
-                inline: true
-            },
-            {
-                name: '⚡ Stamina',
-                value: `${stamBar}\n${f.stamina}/${maxStam}${f.stamina < maxStam ? `\nNext regen: ${formatMs(regenMs)}` : '\nFull!'}`,
-                inline: true
-            },
-            {
-                name: '💰 Balance',
-                value: `${currency}${userData.balance.toLocaleString()}`,
-                inline: true
-            },
-            {
-                name: '🔋 Active Buffs',
-                value: buffs.length ? buffs.join('\n') : 'None',
-                inline: true
-            },
-            {
-                name: '📊 Fishing Stats',
-                value: [
-                    `Total Casts:       **${f.totalCasts.toLocaleString()}**`,
-                    `Success Rate:      **${successRate}**`,
-                    `Total Earned:      **${currency}${f.totalEarned.toLocaleString()}**`,
-                    `Best Payout:       **${currency}${f.bestPayout.toLocaleString()}**`,
-                    `Legendary Catches: **${f.legendaryCatches}**`,
-                    `Event Catches:     **${f.eventCatches}**`
-                ].join('\n'),
-                inline: false
-            }
-        );
-
-    if (prestige > 0) {
-        embed.addFields({
-            name: `${badge} Prestige Bonuses`,
-            value: [
-                pBonus.critBonus    > 0 ? `+${Math.round(pBonus.critBonus    * 100)}% crit chance`  : null,
-                pBonus.staminaBonus > 0 ? `+${pBonus.staminaBonus} max stamina`                      : null,
-                pBonus.payoutBonus  > 0 ? `+${Math.round(pBonus.payoutBonus  * 100)}% all payouts`   : null,
-                pBonus.rarityBonus  > 0 ? `+${Math.round(pBonus.rarityBonus  * 100)}% rarity boost`  : null
-            ].filter(Boolean).join('\n') || 'None yet',
-            inline: true
-        });
-    }
-
-    const locationList = f.unlockedLocations.map(id => {
-        const loc = LOCATIONS[id];
-        return loc ? `${loc.emoji} ${loc.name}` : id;
-    }).join('\n');
-    embed.addFields({ name: '🗺️ Unlocked Locations', value: locationList || 'Quiet Pond only', inline: true });
-
-    if (f.trophies?.length) {
-        embed.addFields({ name: '🏆 Trophies', value: f.trophies.join(', '), inline: true });
-    }
-
-    // Cross-system synergies
-    const activeSynergies = getActiveSynergies(userData);
-    if (activeSynergies.length > 0) {
-        embed.addFields({
-            name: '🔗 Active Synergies',
-            value: activeSynergies.map(s => `${s.emoji} **${s.name}** — ${s.description}`).join('\n'),
-            inline: false
-        });
-    } else if (f.level >= 25) {
-        embed.addFields({
-            name: '🔗 Synergies',
-            value: 'Reach combined level milestones across Hunt, Fish & Mine to unlock cross-system bonuses! Use `/synergies` to see details.',
-            inline: false
-        });
-    }
-
-    if (prestige === 0 && f.level >= 50) {
-        embed.setFooter({ text: 'Max level reached! Use /fish prestige to reset and unlock new bonuses.' });
-    } else if (isSelf) {
-        embed.setFooter({ text: `Daily: ${f.dailyCasts} casts · ${currency}${f.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });
-    }
-
-    embed.setTimestamp();
-    return interaction.reply({ embeds: [embed] });
+    return sendProfileTabs(interaction, [
+        { id: 'overview', label: 'Overview', emoji: '🎣', build: () => fishOverviewPage(ctx) },
+        { id: 'catalog',  label: 'Catalog',  emoji: '📖', build: () => fishCatalogPage(ctx) },
+        { id: 'progress', label: 'Progress', emoji: '🎖️', build: () => fishProgressPage(ctx) },
+    ]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

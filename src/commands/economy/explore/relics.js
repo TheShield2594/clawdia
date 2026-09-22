@@ -159,5 +159,6 @@ function buildMissingRelicsField(collection, isSelf, username) {
 }
 
 module.exports = {
+    buildMissingRelicsField,
     handleRelics,
 };

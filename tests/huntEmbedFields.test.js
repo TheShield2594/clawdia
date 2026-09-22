@@ -241,7 +241,7 @@ describe('hunt failure embed field budget', () => {
 });
 
 describe('trophy case', () => {
-    const { buildTrophyField } = __test__;
+    const { readTrophies, bestTrophies } = __test__;
     const QUALITIES = TROPHY_QUALITIES.filter(q => q.id !== 'poor' && q.id !== 'normal');
 
     /** Every trophy string the game can ever store, in discovery order. */
@@ -253,30 +253,23 @@ describe('trophy case', () => {
         return all;
     }
 
-    it('keeps the field inside Discord limits for a full collection', () => {
-        const field = buildTrophyField(everyTrophy());
-        expect(field.value.length).toBeLessThanOrEqual(MAX_FIELD_VALUE);
-        expect(field.name.length).toBeLessThanOrEqual(MAX_FIELD_NAME);
+    it('reads every string the game stores as a species trophy', () => {
+        const cabinet = readTrophies(everyTrophy());
+        expect(cabinet.other).toEqual([]);
+        expect(cabinet.total).toBe(everyTrophy().length);
+        expect(cabinet.bySpecies.size).toBe(Object.keys(ANIMALS).length);
     });
 
-    it('reports the full count even when the list is trimmed', () => {
-        const all   = everyTrophy();
-        const field = buildTrophyField(all);
-        expect(field.name).toContain(String(all.length));
-        expect(field.value).toMatch(/\+\d+ more$/);
+    it('holds the best grade of each species', () => {
+        const cabinet = readTrophies(everyTrophy().reverse());
+        for (const { grade } of cabinet.bySpecies.values()) expect(grade.id).toBe('mythic');
     });
 
-    it('shows the best trophies first', () => {
-        const mythic   = `🟣 Mythic ${ANIMALS.rabbit.name}`;
-        const field    = buildTrophyField([...everyTrophy(), mythic].reverse());
-        expect(field.value.startsWith('🟣')).toBe(true);
-    });
-
-    it('lists a small collection in full with no tail', () => {
-        const few = ['🟢 Good Rabbit', '🔷 Pristine Wolf'];
-        const field = buildTrophyField(few);
-        expect(field.value).toBe('🔷 Pristine Wolf, 🟢 Good Rabbit');
-        expect(field.name).toBe('🏆 Trophies (2)');
+    it('shelves the best grade first, then the rarest animal', () => {
+        const shelf = bestTrophies(readTrophies([
+            `🟢 Good ${ANIMALS.rabbit.name}`, `🔷 Pristine ${ANIMALS.wolf.name}`, `🟣 Mythic ${ANIMALS.rabbit.name}`,
+        ]).bySpecies);
+        expect(shelf.map(s => s.animal.id)).toEqual(['rabbit', 'wolf']);
     });
 });
 

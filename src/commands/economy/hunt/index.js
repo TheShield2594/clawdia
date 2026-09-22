@@ -21,7 +21,7 @@ const {
     buildHuntEmbed, buildBonusLines, buildAmmoField, buildLowAmmoField, AMMO_LOW_THRESHOLD,
     buildDailyTollField,
 } = require('./embeds');
-const { buildTrophyField, buildFieldTrophyField, buildTodayField } = require('./profile');
+const { readTrophies, bestTrophies, buildFieldTrophyField, buildTodayField } = require('./profile');
 const { buildWeaponPages, WEAPON_SEPARATOR } = require('./inventory');
 const {
     isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS,
@@ -237,7 +237,7 @@ module.exports.__test__ = {
     ...require('./aim'),
     buildHuntEmbed, buildBonusLines, buildAmmoField, buildLowAmmoField, AMMO_LOW_THRESHOLD,
     buildDailyTollField,
-    buildTrophyField, buildFieldTrophyField, buildTodayField,
+    readTrophies, bestTrophies, buildFieldTrophyField, buildTodayField,
     buildWeaponPages, WEAPON_SEPARATOR,
     isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS,
 };
