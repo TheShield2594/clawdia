@@ -68,10 +68,13 @@
                         <div class="cw-dash-lp-info">
                             <div class="cw-dash-lp-name" title="<%= guild.name %>"><%= guild.name %></div>
                             <div class="cw-dash-lp-meta font-mono">
+                                <%# ● / ○ text glyphs retired for the status-dot language the v5
+                                    pass uses elsewhere (see .dash-kpi-dot). The dot is aria-hidden;
+                                    "bot active" / "not added" still carries the state as text. %>
                                 <% if (guild.botPresent) { %>
-                                    <span class="cw-dash-lp-status active">● bot active</span>
+                                    <span class="cw-dash-lp-status active"><span class="cw-dash-lp-dot" aria-hidden="true"></span>bot active</span>
                                 <% } else { %>
-                                    <span class="cw-dash-lp-status inactive">○ not added</span>
+                                    <span class="cw-dash-lp-status inactive"><span class="cw-dash-lp-dot" aria-hidden="true"></span>not added</span>
                                 <% } %>
                             </div>
                         </div>
