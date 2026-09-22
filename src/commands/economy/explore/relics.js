@@ -5,11 +5,13 @@
 
 const { EmbedBuilder, MessageFlags } = require('discord.js');
 const {
-    LIMITS, REGIONS, RELIC_LIST, RELIC_RARITY_ORDER, TOTAL_CORE_RELICS,
+    LIMITS, REGIONS, RELIC_LIST, RELIC_RARITY_ORDER, TOTAL_CORE_RELICS, relicSlug,
 } = require('../../../data/exploreData');
 const {
     getRelicCollection, getRelicBonus, getRelicBonusCap, getRelicCapacity,
 } = require('../../../services/exploreService');
+const { relicItemId } = require('../../../data/activityItems');
+const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
 const { fitDescription, EMBED_LIMITS } = require('../../../utils/embedFields');
 const { loadReadContext } = require('./shared');
 
@@ -98,7 +100,18 @@ async function handleRelics(interaction) {
         .setFooter({ text: 'Relics have no buyer — nothing out there is qualified. Trade them on the /market if someone disagrees.' })
         .setTimestamp();
 
-    return interaction.reply({ embeds: [embed] });
+    // The case wears its crown jewel — the rarest relic held — with the avatar
+    // above as the pre-bake fallback: attachItemThumbnail overrides the thumbnail
+    // only when the art exists, so nothing changes until the icons are baked.
+    const rarestFirst = [...RELIC_RARITY_ORDER].reverse();
+    const spotlight = [...collection].sort(
+        (a, b) => rarestFirst.indexOf(a.rarity) - rarestFirst.indexOf(b.rarity)
+    )[0];
+    const files = spotlight
+        ? await attachItemThumbnail(embed, relicItemId(relicSlug(spotlight.itemId)), interaction.guild.id, spotlight.itemId)
+        : [];
+
+    return interaction.reply({ embeds: [embed], files });
 }
 
 /**

@@ -7,6 +7,8 @@ const { EmbedBuilder } = require('discord.js');
 const { REGION_LIST } = require('../../../data/exploreData');
 const { isRegionEnabled, isRegionInSeason, regionCompletion } = require('../../../services/exploreService');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../../data/featuredRotation');
+const { exploreRegionItemId } = require('../../../data/activityItems');
+const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
 const { loadContext } = require('./shared');
 
 async function handleRegions(interaction) {
@@ -49,7 +51,14 @@ async function handleRegions(interaction) {
         .setFooter({ text: `🌟 ${todaysFeature.name} pays +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% today · seasonal regions come and go with /event seasons.` })
         .setTimestamp();
 
-    return interaction.reply({ embeds: [embed] });
+    // The list has no single focal region, so the header wears the one you're
+    // standing in. Bundle-only art — no-ops to no thumbnail until baked.
+    const active = e.activeRegion ? REGION_LIST.find(r => r.id === e.activeRegion) : null;
+    const files = active
+        ? await attachItemThumbnail(embed, exploreRegionItemId(active.id), interaction.guild.id, active.name)
+        : [];
+
+    return interaction.reply({ embeds: [embed], files });
 }
 
 module.exports = {

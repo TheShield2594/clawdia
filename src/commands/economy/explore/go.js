@@ -11,8 +11,10 @@ const { isVersionError } = require('../../../utils/versionRetry');
 const { detachBalanceDelta, commitBalanceDelta } = require('../../../utils/balanceDelta');
 const { gatherPayoutKey } = require('../../../utils/payoutKey');
 const {
-    LIMITS, TIER_COLORS, REGIONS, REGION_LIST, FOOTER_LINES, INJURY_LINES,
+    LIMITS, TIER_COLORS, REGIONS, REGION_LIST, FOOTER_LINES, INJURY_LINES, relicSlug,
 } = require('../../../data/exploreData');
+const { relicItemId, exploreRegionItemId } = require('../../../data/activityItems');
+const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
 const { TIER_STARS } = require('../../../data/materialRarity');
 const {
     commitExpeditionRelic, getMaxStamina, applyStaminaRegen, applyDailyReset,
@@ -440,7 +442,17 @@ async function handleGo(interaction) {
             });
         }
 
-        await interaction.editReply({ embeds: [embed], components: [] });
+        // Icon on the result: the recovered relic when there is one — the
+        // collectible moment, the way /fish, /hunt and /mine thumbnail the catch
+        // — otherwise the region itself. Bundle-only art, so this no-ops to the
+        // emoji fallback until the icons are baked (src/utils/itemImageHelper.js).
+        const thumbId = result.relic
+            ? relicItemId(relicSlug(result.relic.itemId))
+            : exploreRegionItemId(region.id);
+        const thumbLabel = result.relic ? result.relic.itemId : region.name;
+        const files = await attachItemThumbnail(embed, thumbId, interaction.guild.id, thumbLabel);
+
+        await interaction.editReply({ embeds: [embed], components: [], files });
 
         // Server-wide whisper for secrets
         if (result.type === 'secret' && guildSettings?.exploration?.announceSecrets !== false) {

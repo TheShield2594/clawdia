@@ -8,6 +8,8 @@ const User = require('../../../models/User');
 const { REGIONS } = require('../../../data/exploreData');
 const { isRegionInSeason, isRegionEnabled } = require('../../../services/exploreService');
 const { logTransaction } = require('../../../utils/logTransaction');
+const { exploreRegionItemId } = require('../../../data/activityItems');
+const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
 const { loadContext } = require('./shared');
 
 async function handleTravel(interaction) {
@@ -103,13 +105,14 @@ async function handleTravel(interaction) {
         logTransaction({ userId: user.userId, guildId: user.guildId, type: 'explore_unlock', amount: -unlockCharged, balance: user.balance, note: region.name });
     }
 
-    return interaction.reply({
-        embeds: [new EmbedBuilder()
-            .setColor(region.color)
-            .setTitle(`${region.emoji} Now Exploring: ${region.name}`)
-            .setDescription(`*${region.description}*${unlockLine}`)
-            .setFooter({ text: region.tagline })],
-    });
+    const embed = new EmbedBuilder()
+        .setColor(region.color)
+        .setTitle(`${region.emoji} Now Exploring: ${region.name}`)
+        .setDescription(`*${region.description}*${unlockLine}`)
+        .setFooter({ text: region.tagline });
+    const files = await attachItemThumbnail(embed, exploreRegionItemId(region.id), interaction.guild.id, region.name);
+
+    return interaction.reply({ embeds: [embed], files });
 }
 
 module.exports = {
