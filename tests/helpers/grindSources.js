@@ -3,9 +3,9 @@
 const fs = require('fs');
 const path = require('path');
 
-// /fish, /hunt and /mine are folders rather than single files (#721): each is
-// `commands/economy/<name>/index.js` plus the siblings it dispatches to.
-// /explore is still one file.
+// /fish, /hunt, /mine and /explore are folders rather than single files (#721,
+// #916): each is `commands/economy/<name>/index.js` plus the siblings it
+// dispatches to.
 //
 // Guards that read a command's source have to keep reading all of it, or the
 // split quietly shrinks what they cover — a check that used to scan the cast

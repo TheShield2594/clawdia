@@ -5,9 +5,6 @@
 // mining each had a daily and a weekly. These pin the new ones in place, and
 // pin the wiring that makes them reachable.
 
-const fs = require('fs');
-const path = require('path');
-
 const questService = require('../src/services/questService');
 const DAILY_QUEST_POOL  = questService.getDailyPool();
 const WEEKLY_QUEST_POOL = questService.getWeeklyPool();
@@ -118,7 +115,7 @@ describe('the hook that advances them', () => {
     });
 
     test('the expedition command calls it', () => {
-        const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'commands', 'economy', 'explore.js'), 'utf8');
+        const src = require('./helpers/grindSources').grindCommandSource('explore');
         expect(src).toContain('onExplore');
         // The trip counts even when the walk turned up nothing — the coin quests
         // are the ones gated on a payout.
@@ -158,7 +155,7 @@ describe('exploration competes in the weekly champion race', () => {
     });
 
     test('only a paying expedition enters', () => {
-        const src = read('commands', 'economy', 'explore.js');
+        const src = grindCommandSource('explore');
         const guardAt  = src.indexOf('if (result.payout > 0) {\n            await addWeeklyChampionProgress');
         expect(guardAt).toBeGreaterThan(-1);
     });
