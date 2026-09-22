@@ -9,6 +9,7 @@ const { attachGrind } = require('../../../utils/grindProfile');
 const { ensureFishingData, assignDailyFishQuests, formatMs, applyXp, getLevelData } = require('../../../services/fishService');
 const { FISH_QUEST_TEMPLATES } = require('../../../data/fishData');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
+const { questClaimPayoutKey } = require('../../../utils/payoutKey');
 const { buildQuestProgressBar } = require('./embeds');
 const COLORS = require('../../../utils/embedColors');
 
@@ -124,12 +125,18 @@ async function claimQuest(interaction, user, currency) {
     user.markModified('quests');
     user.markModified('fishing');
 
+    // Keyed like /hunt quests claim (#873, pass 9): the quest is already marked
+    // claimed above, so an unkeyed credit that fails would lock the reward out
+    // behind a keyless, unreplayable record. Keyed, a failure is owed and
+    // replayable, and the embed says so.
+    let claimCredited;
     try {
-        await saveWithBalanceDelta(User, user, balanceAtLoad, {
+        ({ credited: claimCredited } = await saveWithBalanceDelta(User, user, balanceAtLoad, {
             service: 'fish',
             jobName: 'questClaimCoins',
             guildId: interaction.guild.id,
-        });
+            payoutKey: questClaimPayoutKey('fish', interaction.user.id, questEntry.questId, questEntry.expiresAt?.getTime()),
+        }));
     } catch (err) {
         console.error('[fishquests claim] save error:', err);
         return interaction.reply({ content: 'Something went wrong. Please try again.', flags: MessageFlags.Ephemeral });
@@ -145,6 +152,14 @@ async function claimQuest(interaction, user, currency) {
             { name: 'Balance',     value: `${currency}${user.balance.toLocaleString()}`,           inline: true }
         )
         .setTimestamp();
+
+    if (!claimCredited) {
+        embed.addFields({
+            name:  '⏳ Payout Owed',
+            value: `The **${currency}${template.reward.coins.toLocaleString()}** reward could not be paid out just now and has been recorded as owed — the balance above does not include it. It will be applied once the problem clears; tell an admin if it does not.`,
+            inline: false,
+        });
+    }
 
     if (leveledUp) {
         const ld = getLevelData(lvResult.newLevel);

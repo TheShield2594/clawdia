@@ -12,7 +12,7 @@ const {
     updatePickaxeStatus,
 } = require('../../../../services/mineService');
 const { CONSUMABLES } = require('../../../../data/mineData');
-const { chargeBalance, refundBalance } = require('../shared');
+const { chargeBalance, refundBalanceOrOwe, shopRefundMessage } = require('../shared');
 
 async function handleRepair(interaction, user, currency) {
     const m = user.mining;
@@ -50,8 +50,11 @@ async function handleRepair(interaction, user, currency) {
             await saveGrind(user, ['mining']);
         } catch (err) {
             console.error('[mineshop repair] save error:', err);
-            await refundBalance(interaction, quote.cost);
-            return interaction.reply({ content: 'The repair failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+            const refund = await refundBalanceOrOwe(interaction, quote.cost);
+            return interaction.reply({
+                content: shopRefundMessage(refund, { action: 'The repair failed', currency, amount: quote.cost }),
+                flags: MessageFlags.Ephemeral,
+            });
         }
 
         const embed = new EmbedBuilder()

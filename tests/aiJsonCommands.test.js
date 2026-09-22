@@ -29,6 +29,13 @@ jest.mock('../src/utils/commandCooldowns', () => ({
     claimIfAvailable: jest.fn(async () => 0),
     release: jest.fn(async () => {}),
 }));
+// /forge's refund now goes through creditCoinsOrOwe (#873, pass 9): keyed, and
+// recorded as owed when it will not land. Mock the recorder — the real one
+// writes a FailedJob to a database not up in unit tests — and the retry delay so
+// a refund that keeps failing does not stall the suite. /questgen's own refund
+// is a bare $inc and touches neither.
+jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
+jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 
 const mockGetCompletion = jest.fn();
 // The `mock` provider is not in the registry, so getStructuredCompletion falls
@@ -55,6 +62,7 @@ const Guild = require('../src/models/Guild');
 const AiItem = require('../src/models/AiItem');
 const AiQuest = require('../src/models/AiQuest');
 const cooldownStore = require('../src/utils/commandCooldowns');
+const { recordOwedPayout } = require('../src/utils/owedPayout');
 
 const { useFixedClock, MINUTE } = require('./helpers/fixedClock');
 
@@ -87,9 +95,24 @@ const lastEmbed = interaction => {
     return payload?.embeds?.[0]?.data ?? null;
 };
 
-/** Every write that hands coins back, with the amount it returned. */
+/**
+ * Every write that hands coins back, with the amount it returned.
+ *
+ * Two shapes: `/questgen` still refunds with a bare `$inc: { balance }`, while
+ * `/forge`'s refund now goes through `creditCoinsOrOwe` (#873, pass 9), whose
+ * `creditCoinsOnce` is an aggregation-pipeline update —
+ * `[{ $set: { balance: { $add: [ …, amount ] } } }]`. A negative `$inc` is the
+ * debit and is filtered out by the positive-amount check.
+ */
 const refunds = () => [...User.updateOne.mock.calls, ...User.findOneAndUpdate.mock.calls]
-    .map(call => call[1]?.$inc?.balance)
+    .map(call => {
+        const update = call[1];
+        if (Array.isArray(update)) {
+            const add = update[0]?.$set?.balance?.$add;
+            return Array.isArray(add) ? add[add.length - 1] : undefined;
+        }
+        return update?.$inc?.balance;
+    })
     .filter(amount => typeof amount === 'number' && amount > 0);
 
 let errorSpy;
@@ -97,6 +120,10 @@ let errorSpy;
 beforeEach(() => {
     jest.clearAllMocks();
     errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    // clearAllMocks resets call history but not implementations, so restore the
+    // owed-recorder to its "recorded" default; the tests that need it to fail set
+    // that themselves.
+    recordOwedPayout.mockResolvedValue(true);
 
     Guild.findOne.mockResolvedValue({
         guildId: GUILD_ID,
@@ -168,25 +195,33 @@ describe('/forge', () => {
     });
 
     // The refund is what the message promises, so the message follows the write
-    // rather than the intent: a swallowed failure used to tell the user their
-    // coins were back when they were not.
-    test('says the coins are gone when the refund did not land', async () => {
+    // rather than the intent. The keyed refund (#873, pass 9) has three outcomes,
+    // not two: paid, recorded as owed, or neither — and the message says which.
+    test('records the refund as owed when it cannot land', async () => {
         mockGetCompletion.mockRejectedValue(new Error('provider down'));
-        User.updateOne.mockResolvedValue({ modifiedCount: 0 });
+        // The debit lands; the keyed refund that follows keeps failing.
+        User.findOneAndUpdate
+            .mockResolvedValueOnce({ userId: USER_ID, guildId: GUILD_ID, balance: 9_500, level: 4 })
+            .mockRejectedValue(new Error('mongo is down'));
 
         const interaction = await run();
 
-        expect(replyText(interaction)).toMatch(/refund failed to process/);
+        expect(recordOwedPayout).toHaveBeenCalled();
+        expect(replyText(interaction)).toMatch(/recorded as owed/);
         expect(replyText(interaction)).not.toMatch(/have been refunded/);
     });
 
-    test('and when the refund write itself throws', async () => {
+    test('tells the player to contact an admin when the refund can be neither made nor recorded', async () => {
         mockGetCompletion.mockRejectedValue(new Error('provider down'));
-        User.updateOne.mockRejectedValue(new Error('mongo is down'));
+        User.findOneAndUpdate
+            .mockResolvedValueOnce({ userId: USER_ID, guildId: GUILD_ID, balance: 9_500, level: 4 })
+            .mockRejectedValue(new Error('mongo is down'));
+        recordOwedPayout.mockResolvedValue(false);
 
         const interaction = await run();
 
         expect(replyText(interaction)).toMatch(/contact a server admin/);
+        expect(replyText(interaction)).not.toMatch(/have been refunded/);
     });
 
     // A limit refusal is the server's own setting talking. Told "the forge
@@ -215,22 +250,28 @@ describe('/forge', () => {
     // The persistence path promised a refund whatever became of the write —
     // its error was caught and dropped on the floor — so a user could pay
     // 25,000 coins, receive no item, and be told their coins were back (#829).
-    // It answers to the same write the AI path does now.
-    test('and says so when that refund did not land either', async () => {
+    // It answers to the same keyed refund the AI path does now.
+    test('records the refund as owed when the item cannot be saved and the refund cannot land', async () => {
         mockGetCompletion.mockResolvedValue('{"name":"Ember Fang"}');
         AiItem.create.mockRejectedValue(new Error('write failed'));
-        User.updateOne.mockResolvedValue({ modifiedCount: 0 });
+        User.findOneAndUpdate
+            .mockResolvedValueOnce({ userId: USER_ID, guildId: GUILD_ID, balance: 9_500, level: 4 })
+            .mockRejectedValue(new Error('mongo is down'));
 
         const interaction = await run();
 
-        expect(replyText(interaction)).toMatch(/contact a server admin/);
+        expect(recordOwedPayout).toHaveBeenCalled();
+        expect(replyText(interaction)).toMatch(/recorded as owed/);
         expect(replyText(interaction)).not.toMatch(/have been refunded/);
     });
 
-    test('and when that refund write throws', async () => {
+    test('tells the player to contact an admin when neither the save nor the refund can be recorded', async () => {
         mockGetCompletion.mockResolvedValue('{"name":"Ember Fang"}');
         AiItem.create.mockRejectedValue(new Error('write failed'));
-        User.updateOne.mockRejectedValue(new Error('mongo is down'));
+        User.findOneAndUpdate
+            .mockResolvedValueOnce({ userId: USER_ID, guildId: GUILD_ID, balance: 9_500, level: 4 })
+            .mockRejectedValue(new Error('mongo is down'));
+        recordOwedPayout.mockResolvedValue(false);
 
         const interaction = await run();
 

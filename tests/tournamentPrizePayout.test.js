@@ -346,15 +346,68 @@ describe('ending a tournament', () => {
 });
 
 describe('submitting a catch', () => {
-    test('an entry fee is added to the pool once, on the first catch', async () => {
+    test('the entry fee is debited from the entrant and added to the pool once', async () => {
+        // Until #873 pass 9 the pool grew by the fee without ever charging the
+        // player — a real-coin pool minted out of nothing, `entryFee` per
+        // entrant. The fee now comes out of the entrant's wallet, and the pool
+        // grows only by what was taken.
+        mockUsers.seed({ userId: 'a', guildId: GUILD, balance: 100 });
         const tournament = makeTournament({ prizePool: 100, entryFee: 25 });
         FishingTournament.findOne.mockResolvedValue(tournament);
 
         await tournamentService.submitCatch(GUILD, { userId: 'a', username: 'a', fishName: 'Cod', fishEmoji: '🐟', tier: 'common', score: 10 });
+        // A second catch by the same entrant updates their entry — it does not
+        // charge again or grow the pool a second time.
         await tournamentService.submitCatch(GUILD, { userId: 'a', username: 'a', fishName: 'Cod', fishEmoji: '🐟', tier: 'common', score: 20 });
 
+        expect(mockUsers.get('a').balance).toBe(75);
         expect(tournament.prizePool).toBe(125);
         expect(tournament.entries).toHaveLength(1);
+    });
+
+    test('an entrant who cannot afford the fee does not join, and the pool is not minted', async () => {
+        // The whole faucet: an unpaid entry used to grow the real-coin pool. A
+        // player who cannot cover the fee simply does not enter, and nothing is
+        // added to the pool.
+        mockUsers.seed({ userId: 'a', guildId: GUILD, balance: 10 });
+        const tournament = makeTournament({ prizePool: 100, entryFee: 25 });
+        FishingTournament.findOne.mockResolvedValue(tournament);
+
+        await tournamentService.submitCatch(GUILD, { userId: 'a', username: 'a', fishName: 'Cod', fishEmoji: '🐟', tier: 'common', score: 10 });
+
+        expect(mockUsers.get('a').balance).toBe(10);
+        expect(tournament.prizePool).toBe(100);
+        expect(tournament.entries).toHaveLength(0);
+    });
+
+    test('a free tournament enters without charging', async () => {
+        mockUsers.seed({ userId: 'a', guildId: GUILD, balance: 50 });
+        const tournament = makeTournament({ prizePool: 100, entryFee: 0 });
+        FishingTournament.findOne.mockResolvedValue(tournament);
+
+        await tournamentService.submitCatch(GUILD, { userId: 'a', username: 'a', fishName: 'Cod', fishEmoji: '🐟', tier: 'common', score: 10 });
+
+        expect(mockUsers.get('a').balance).toBe(50);
+        expect(tournament.prizePool).toBe(100);
+        expect(tournament.entries).toHaveLength(1);
+    });
+
+    test('a fee is refunded, keyed, when the entry cannot be saved', async () => {
+        // The debit lands but tournament.save() throws: the player is charged for
+        // an entry that did not persist, so the fee is refunded through the keyed
+        // owe path rather than left on the wallet.
+        mockUsers.seed({ userId: 'a', guildId: GUILD, balance: 100 });
+        const tournament = makeTournament({ prizePool: 100, entryFee: 25 });
+        tournament.save = jest.fn(async () => { throw new Error('write concern failed'); });
+        FishingTournament.findOne.mockResolvedValue(tournament);
+
+        await expect(tournamentService.submitCatch(GUILD, {
+            userId: 'a', username: 'a', fishName: 'Cod', fishEmoji: '🐟', tier: 'common', score: 10,
+        })).rejects.toThrow('write concern failed');
+
+        // Charged 25, then refunded 25 through creditCoinsOrOwe under the keyed refund.
+        expect(mockUsers.get('a').balance).toBe(100);
+        expect(mockUsers.get('a').paidPayouts.some(p => p.key === `tournament:${tournament._id}:entry:a:refund`)).toBe(true);
     });
 
     test('only a better catch replaces the one already recorded', async () => {

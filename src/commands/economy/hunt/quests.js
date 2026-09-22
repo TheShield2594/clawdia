@@ -9,6 +9,7 @@ const { attachGrind } = require('../../../utils/grindProfile');
 const { ensureHuntData, assignDailyHuntQuests, applyXp, getLevelData } = require('../../../services/huntService');
 const { HUNT_QUEST_TEMPLATES } = require('../../../data/huntData');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
+const { questClaimPayoutKey } = require('../../../utils/payoutKey');
 const { buildProgressBar, formatExpiry } = require('./embeds');
 const COLORS = require('../../../utils/embedColors');
 
@@ -137,12 +138,20 @@ async function executeQuests(interaction, sub) {
 
         questEntry.progress = -1;
         user.markModified('quests');
+        // The credit is keyed (#873, pass 9). Unkeyed, `saveWithBalanceDelta`
+        // reports a credit that never landed as paid and files a keyless
+        // `FailedJob` `payouts:replay` cannot settle — and the quest is already
+        // marked claimed above, so a failed credit would lock the reward out with
+        // the coins unrecoverable. Keyed, a failure is a replayable owed payload
+        // and the embed says the reward is owed rather than announcing it paid.
+        let claimCredited;
         try {
-            await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            ({ credited: claimCredited } = await saveWithBalanceDelta(User, user, balanceAtLoad, {
                 service: 'hunt',
                 jobName: 'questClaimCoins',
                 guildId: interaction.guild.id,
-            });
+                payoutKey: questClaimPayoutKey('hunt', interaction.user.id, questEntry.questId, questEntry.expiresAt?.getTime()),
+            }));
         } catch (err) {
             // The document was loaded at the top of the command and the message,
             // reaction and command handlers all write to it, so a version
@@ -161,6 +170,14 @@ async function executeQuests(interaction, sub) {
                 { name: '⭐ Hunter XP',        value: `+${template.reward.xp}`,                               inline: true },
                 { name: '💳 New Balance',      value: `${currency}${user.balance.toLocaleString()}`,          inline: true }
             );
+
+        if (!claimCredited) {
+            embed.addFields({
+                name:  '⏳ Payout Owed',
+                value: `The **${currency}${template.reward.coins.toLocaleString()}** reward could not be paid out just now and has been recorded as owed — the balance above does not include it. It will be applied once the problem clears; tell an admin if it does not.`,
+                inline: false,
+            });
+        }
 
         if (lvResult.leveledUp) {
             const ld = getLevelData(lvResult.newLevel);

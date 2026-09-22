@@ -4,7 +4,7 @@
 
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const { ZONES, MATERIAL_NAMES } = require('../../../../data/huntData');
-const { chargeBalance, refundBalance } = require('../shared');
+const { chargeBalance, refundBalanceOrOwe, shopRefundMessage } = require('../shared');
 const COLORS = require('../../../../utils/embedColors');
 
 async function handleUnlock(interaction, user, currency) {
@@ -47,8 +47,11 @@ async function handleUnlock(interaction, user, currency) {
     } catch (err) {
         console.error('[hunt unlock] save error:', err);
         h.unlockedZones = h.unlockedZones.filter(z => z !== zoneId);
-        await refundBalance(interaction, zone.unlockCost);
-        return interaction.reply({ content: 'Unlocking the zone failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+        const refund = await refundBalanceOrOwe(interaction, zone.unlockCost);
+        return interaction.reply({
+            content: shopRefundMessage(refund, { action: 'Unlocking the zone failed', currency, amount: zone.unlockCost }),
+            flags: MessageFlags.Ephemeral,
+        });
     }
 
     const tierStr = Object.entries(zone.tierWeights)

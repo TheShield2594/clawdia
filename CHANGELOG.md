@@ -14,6 +14,57 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.1] - 2026-09-22
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 9 (#873) — the gathering commands' non-payout surface.
+Every earlier pass keyed the run and bonus payouts and the buy/tool shop
+refunds; this one takes the value-moving writes those passes named as out of
+scope, and every one had the shape the audit keeps finding.
+
+- **The fishing-tournament entry fee was minted, not taken.** A new entrant's
+  first catch grew the real-coin prize pool by the fee — the fee the tournament
+  announcement calls "auto-deducted on first catch" — but nothing ever debited
+  the player, so an admin-set entry fee created `entryFee` coins per entrant out
+  of nothing and paid them to the winners for real. The fee now comes out of the
+  entrant's wallet in a guarded atomic charge before the pool grows; a player who
+  cannot cover it does not join (their catch still counts), and a fee debited for
+  an entry that then fails to save is refunded through the keyed owe path
+  (`tournamentService.submitCatch`).
+- **The repair / upgrade / unlock shop refunds** (seven handlers across
+  `/hunt`, `/fish`, `/mine`) put coins back through the bare `refundBalance` — an
+  unkeyed `$inc` that swallowed its own error and read nothing back — under a
+  reply that said "your coins were refunded" whether or not the write landed
+  (the pass-3/pass-6 unwind shape, in the shop handlers pass 6 did not reach).
+  Each now refunds through `refundBalanceOrOwe` (`creditCoinsOrOwe` under
+  `shopRefundPayoutKey`) and words the reply from the result — refunded, recorded
+  as owed, or neither.
+- **The gathering quest-claim credits** (`/hunt|/fish|/mine quests claim`) rode
+  `saveWithBalanceDelta` with no `payoutKey` while the quest was already marked
+  claimed, so a credit that failed after the save locked the reward out behind a
+  keyless, unreplayable record and still announced the coins as paid. Keyed with
+  `questClaimPayoutKey`, a failure is a replayable owed payload and the embed
+  says the reward is owed.
+- **`/forge`'s refund** read its own result (so it never announced a refund that
+  had not happened, unlike the shop unwinds) but carried no key and filed
+  nothing when it missed. Through `creditCoinsOrOwe` under `forgeRefundPayoutKey`
+  it is exactly-once and recorded as owed when it will not land.
+
+Reviewed and found sound, recorded so the next pass does not re-derive it:
+`craft.js`/`fish/craft.js` (ingredient debit and output grant ride one atomic
+`save()`), the pet drops the gathering runs grant through `tryGrantRarePet`
+(they ride the run's single atomic `save()`, the pass-6 shape), the `/mine raid`
+material transfer (a guarded two-phase transfer with a rollback that never
+reports a false success), and the shops' `use`/travel paths (no value moves).
+
+Deferred with the reasoning written down rather than folded in: the `/pet`
+command's PvP-battle payouts and the adopt refund are unkeyed writes of this
+same class, but `pet` is its own audit subsystem and `pet.js` is frozen at its
+`command-file-size` ceiling, so keying them needs the file split first — the
+same shape as pass 8's deferred `/explore` event-currency drop. Left for a
+dedicated `/pet` pass. No schema migration.
+
 ## [4.13.0] - 2026-09-22
 
 Migrations through `026_backfill_shop_item_ids`.
