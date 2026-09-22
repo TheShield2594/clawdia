@@ -636,6 +636,17 @@ body {
     padding-bottom: 1.25rem;
     border-bottom: 1px solid var(--border);
 }
+/* A second .panel-head used as a sub-section heading within one panel (e.g. the
+   birthday panel's "Embed appearance" group) — set off from the fields above it. */
+.panel-subhead { margin-top: 2.25rem; }
+.panel-head h3 {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-weight: 400;
+    font-size: 1.5rem;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    color: var(--cream-50);
+}
 /* v5 display pass (#1079). The dashboard's display face is Instrument Serif —
    the same editorial serif the landing keeps and the overview already uses for
    its greeting, KPI figures and card titles. Every settings panel opens on a

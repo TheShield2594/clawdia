@@ -28,11 +28,15 @@ const { AttachmentBuilder } = require('discord.js');
 
 const ASSET_DIR = path.join(__dirname, '..', 'assets', 'birthday');
 
-// filename on disk → the attachment name the embed references.
+// filename on disk → the attachment name the embed references, plus the alt
+// text screen readers announce for it (never the filename — a picture is
+// described, not named).
 const ICON_FILE = 'birthday-icon.png';
 const BANNER_FILE = 'birthday-banner.png';
+const ICON_ALT = 'A festive birthday cake with lit candles';
+const BANNER_ALT = 'A colourful birthday celebration banner with balloons, confetti and streamers';
 
-function attachmentFor(file) {
+function attachmentFor(file, description) {
     const full = path.join(ASSET_DIR, file);
     try {
         if (!fs.existsSync(full)) return null;
@@ -40,7 +44,7 @@ function attachmentFor(file) {
         return null;
     }
     return {
-        attachment: new AttachmentBuilder(full, { name: file }),
+        attachment: new AttachmentBuilder(full, { name: file, description }),
         url: `attachment://${file}`,
     };
 }
@@ -54,8 +58,8 @@ function attachmentFor(file) {
  *   baked in yet).
  */
 function getBirthdayFlair() {
-    const icon = attachmentFor(ICON_FILE);
-    const banner = attachmentFor(BANNER_FILE);
+    const icon = attachmentFor(ICON_FILE, ICON_ALT);
+    const banner = attachmentFor(BANNER_FILE, BANNER_ALT);
     const files = [];
     if (icon) files.push(icon.attachment);
     if (banner) files.push(banner.attachment);
