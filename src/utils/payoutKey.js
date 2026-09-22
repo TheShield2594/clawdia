@@ -828,6 +828,67 @@ function shopGrantPayoutKey(interactionId) {
 }
 
 /**
+ * The coins a gathering daily-quest claim pays — a `/hunt`, `/fish` or `/mine`
+ * quest-board reward (#873, pass 9).
+ *
+ * The claim marks the quest entry `progress: -1` ("claimed") in the same
+ * `save()` that detaches the coin credit, then credits through
+ * `saveWithBalanceDelta` — which, with no key, is the pass-6 degraded branch: the
+ * `$inc` is retried and re-credits a lost-response write, a missing document is
+ * reported as paid, and a hard failure files a keyless `FailedJob`
+ * `payouts:replay` cannot settle. Because the quest is already flagged claimed,
+ * a failed credit locks the reward out with the coins in a non-replayable
+ * record. Keyed, the credit is exactly-once and a failure is recorded as a
+ * replayable owed `coins` payload.
+ *
+ * `service` ('hunt'/'fish'/'mine') keeps the three boards' identical template
+ * ids from colliding; `questId` names the quest and `expiresAt` (the entry's
+ * expiry, in ms) names *this* instance of it — the board re-deals the same
+ * template ids each cycle, so a key without the expiry would guard next cycle's
+ * reward against this cycle's replay.
+ */
+function questClaimPayoutKey(service, userId, questId, expiresAt) {
+    return `quest:${service}:${userId}:${questId}:${expiresAt}`;
+}
+
+/**
+ * A fishing-tournament entrant's fee coming back when their entry could not be
+ * recorded (#873, pass 9).
+ *
+ * The fee funds the prize pool and is charged on a player's first catch of the
+ * tournament; a `tournament.save()` that throws after the debit leaves the
+ * player charged for an entry that did not persist. Keyed by the tournament and
+ * the entrant — one entry per player per tournament, and both ids are stable —
+ * so the refund records the debt for `payouts:replay` and a retry cannot refund
+ * twice. Apart from `tournamentPrizePayoutKey`, which credits the same wallet
+ * out of the same tournament: two credits, one guard that is a string comparison
+ * with nothing on it to say which wrote it.
+ */
+function tournamentEntryRefundPayoutKey(tournamentId, userId) {
+    return `tournament:${tournamentId}:entry:${userId}:refund`;
+}
+
+/**
+ * The coins a `/forge` hands back when the item could not be made (#873, pass 9).
+ *
+ * `/forge` debits the cost, calls the AI, then persists the item; a failure on
+ * either the AI or the persistence step refunds. That refund read its own result
+ * back (so it never announced a refund that did not happen, unlike the shop
+ * unwinds beside it), but it was a bare `$inc` with no key and no owed record —
+ * a transient failure was lost with nothing to replay, and a refund whose
+ * response was lost told the player to contact an admin over coins that had in
+ * fact come back. Keyed, it is recorded as owed when it will not land and a
+ * replay cannot refund twice.
+ *
+ * Keyed by the interaction, which names this forge: the AI-failure and
+ * persistence-failure refunds are mutually exclusive within one `execute`, so
+ * they share the key safely, and the next `/forge` is a new interaction.
+ */
+function forgeRefundPayoutKey(interactionId) {
+    return `forge:${interactionId}:refund`;
+}
+
+/**
  * Coins, event currency or a bonus item paid by a seasonal-event activity —
  * `/event snowball`, `trickortreat`, `sandcastle`, `lovenote`, `trackhunt`, and
  * the event-currency drop `/explore` pays while an event runs (#873, pass 8).
@@ -876,6 +937,7 @@ function eventShopRefundPayoutKey(interactionId) {
 
 module.exports = {
     gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
+    questClaimPayoutKey, tournamentEntryRefundPayoutKey, forgeRefundPayoutKey,
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
     marketSalePayoutKey, listingPurchasePayoutKey, listingCancelPayoutKey,
     listingUnwindPayoutKey,

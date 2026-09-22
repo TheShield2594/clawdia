@@ -9,8 +9,10 @@ casino's hand payouts, the core currency commands (`balance`, `bank`,
 `daily`, `work`, `jobs`, `crime`, `invest`), the gathering-loop payouts
 (`hunt`, `fish`, `mine`, `explore`), the progression and group/PvP reward
 payouts (the season pass, a syndicate's founding, a fishing tournament, the war
-resolution), and the seasonal-event currency (candy, hearts, snowflakes, and the
-event shop) (#873). The majority of the
+resolution), the seasonal-event currency (candy, hearts, snowflakes, and the
+event shop), and the gathering commands' non-payout surface (the
+repair/upgrade/unlock shop refunds, the quest-claim credits, the fishing
+tournament's entry fee, and `/forge`) (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -1174,6 +1176,106 @@ acknowledgement is closed by the guard on the replay, not by the live write.
 
 ---
 
+## Economy — The Gathering Commands' Non-Payout Surface
+
+**Status: Audited — all findings resolved** ✓
+
+The ninth pass of the economy audit #873, over the value-moving writes the
+gathering-loop payout pass (pass 6) named as out of its scope and
+[ROADMAP.md](ROADMAP.md) sequenced next: the `/hunt`, `/fish` and `/mine` shops'
+repair/upgrade/unlock refunds, the gathering quest-claim credits, `craft.js` and
+`forge.js`, and the tournament/map/raid flows. Pass 6 keyed the run and bonus
+payouts and the buy/tool shop refunds; this pass takes the rest of the same
+command trees.
+
+The shape is the one every pass finds. The forward direction was sound — the
+shop debits are guarded atomic charges that read their result back (pass 6), the
+craft/forge grants ride an atomic write, the raid transfer is a guarded
+two-phase move with a rollback — and the failure was on the unwind and the
+detached credit: a refund or credit written without a key, and on the shop
+unwinds without reading the write back either, announced as done regardless. The
+tournament fee is the exception and the most serious finding: not a durability
+gap but a mint, a real-coin pool grown out of nothing on every entry.
+
+Scope, stated so the next pass does not assume more was covered: this pass
+audited the **currency-mutation paths** of the gathering commands' non-payout
+surface. The `/pet` command's PvP-battle payouts and adopt refund are unkeyed
+writes of this same class but are **deliberately left** — see the closing bound.
+
+**Files reviewed/fixed:**
+- `src/services/tournamentService.js`
+- `src/utils/grindShop.js`, `src/utils/payoutKey.js`
+- `src/commands/economy/{hunt,fish,mine}/shop/{repair,upgrade,unlock}.js` (the seven bare refunds; `fish/shop/upgrade.js` was already keyed in pass 6)
+- `src/commands/economy/{hunt,fish,mine}/shared.js`
+- `src/commands/economy/{hunt,fish,mine}/quests.js`
+- `src/commands/economy/forge.js`
+- `tests/gatheringNonPayoutSurface.test.js` (added), `tests/tournamentPrizePayout.test.js`, `tests/aiJsonCommands.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | A fishing tournament's **entry fee was minted, not taken**. `submitCatch` grew the prize pool by `entryFee` on a new entrant's first catch but never debited the player — the fee the tournament announcement calls "auto-deducted on first catch" was conjured into a real-coin pool, `entryFee` coins per entrant, and then paid to the winners for real by the audited `endTournament`. An admin-set entry fee was a per-entrant coin faucet | The fee is charged atomically first (`chargeExact`, the guarded compare-and-set the shop debits use), and only a paid fee enters the player and grows the pool; a player who cannot cover it does not join, and their catch still counted as an ordinary cast. A fee debited for an entry that then fails to save is refunded through `creditCoinsOrOwe` under `tournamentEntryRefundPayoutKey` | `tournamentService.js`, `payoutKey.js` |
+| 2 | The **repair/upgrade/unlock shop refunds** — seven handlers across the three shops — put coins back through the bare `refundBalance` (`refundCharge`): an unkeyed `$inc` that swallowed its own error with `.catch` and read nothing back, under a reply that said "your coins were refunded" whether or not the write matched a document. The pass-3/pass-6 `/market` unwind shape, in the shop handlers pass 6 did not reach | Each refunds through the new `refundBalanceOrOwe` (`creditCoinsOrOwe` under `shopRefundPayoutKey`), and the reply is worded from the result by `shopRefundMessage` — refunded, recorded as owed, or (neither) contact an admin. `refundBalance` stays for its #884 tests but no handler calls it now | `grindShop.js`, `{hunt,fish,mine}/shop/{repair,upgrade,unlock}.js`, `{hunt,fish,mine}/shared.js` |
+| 3 | The **gathering quest-claim credits** (`/hunt`, `/fish`, `/mine quests claim`) rode `saveWithBalanceDelta` with no `payoutKey` — the pass-6 degraded branch: the `$inc` is retried and re-credits a lost-response write, a missing document is reported as paid, and a hard failure files a keyless `FailedJob` `payouts:replay` cannot settle. The quest is marked `progress: -1` (claimed) in the same `save()`, so a failed credit locked the reward out behind a permanent flag with nothing to replay, while the embed announced the coins as paid | The credit carries `questClaimPayoutKey(service, userId, questId, expiresAt)` — exactly-once, and a failure recorded as a replayable owed `coins` payload — and the embed adds a "Payout Owed" note when the credit does not land | `{hunt,fish,mine}/quests.js`, `payoutKey.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 4 | `/forge`'s refund read its own result (so, unlike the shop unwinds, it never announced a refund that had not happened — #829) but it was a bare `$inc` with no key: a transient failure lost the coins with nothing to replay, and a refund whose response was lost sent the player to an admin over coins that had in fact come back | Through `creditCoinsOrOwe` under `forgeRefundPayoutKey` — exactly-once, recorded as owed when it will not land — with the reply worded three ways by `refundClause` | `forge.js`, `payoutKey.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 5 | Three key constructors were needed and did not exist | `questClaimPayoutKey`, `tournamentEntryRefundPayoutKey` and `forgeRefundPayoutKey`, each keyed by the identifier that names its payout across a retry and a replay | `payoutKey.js` |
+| 6 | No tests over the keyed paths | `tests/gatheringNonPayoutSurface.test.js` drives `refundBalanceOrOwe` against a store that evaluates the payout-key guard for real (exactly-once, replayable-owed) and holds the ten command call sites and `/forge` to the keyed path; `tests/tournamentPrizePayout.test.js` gains the fee-debited, cannot-afford, free-entry and refund-on-save-failure cases; `tests/aiJsonCommands.test.js`'s `/forge` refund tests move to the three-way keyed outcomes | `tests/` |
+
+**Reviewed and found sound** — no change needed, recorded so the next pass does
+not re-derive it:
+
+- **`craft.js` and `fish/craft.js`.** Each debits the ingredients and grants the
+  crafted output by mutating the in-memory user document and persisting with one
+  `user.save()` — one atomic write, so there is no detached second write to lose
+  and no window a crash could dupe the output or eat the ingredients in.
+- **The pet drops the gathering runs grant.** `tryGrantRarePet` pushes the pet
+  onto `user.pets` in memory and the run's single `save()` persists it — the same
+  ride-the-atomic-save shape pass 6 found sound for the material, trophy, ore and
+  catch grants. The `balance` is what pass 6 detached and keyed; the pets, like
+  the rest of the run's document mutations, are one write.
+- **The `/mine raid` material transfer.** A guarded two-phase move — the
+  defender's materials debited under per-material `$gte` and a shield
+  compare-and-set, the raider's credited under a cooldown CAS, both read back —
+  with a rollback that restores the defender and tells the player "nothing was
+  taken, and nothing was lost" rather than reporting a false success. It moves
+  inventory materials, not coins, and mints nothing.
+- **The shops' `use` handlers and the travel/switch commands** (`hunt/zone.js`,
+  `fish/location.js`, `mine/map.js`). Activating a consumable decrements a stack
+  and applies a buff in one save; switching zone/location/depth sets a field and
+  is free — no toll, so no refund to get wrong.
+- **`refundCharge`/`refundBalance`** themselves are left as the #884 best-effort
+  primitive their own tests pin; finding 2 stops the handlers *calling* the bare
+  one, it does not delete the primitive.
+
+**The bound this pass leaves open.** The `/pet` command has unkeyed writes of
+exactly this class — the PvP-battle winner payout is a bare `$inc` that announces
+the win regardless of whether it landed, and the adopt refund tells the player
+their coins came back over a write it never read — but they are **deliberately
+not fixed here**, for the same two reasons pass 8 deferred the `/explore`
+event-currency drop: `pet` is its own audit-queue subsystem (`pet.js`,
+`petService.js`), and `pet.js` is frozen at its `command-file-size` ceiling, so
+keying its payouts (which needs the owe helpers and the three-way messaging)
+cannot be done without first splitting the file. The helpers all exist now, so it
+is a scoped follow-up rather than new infrastructure — a dedicated `/pet` pass,
+which is worth its own issue.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -1183,8 +1285,8 @@ wide, and it is widest exactly where the risk is.
 
 **Economy** — the largest uncovered area:
 
-- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the rest of these commands is not: repair/upgrade/unlock pricing, quest/mission crediting (through the already-audited `onEconomyEarn`), prestige, pet drops that ride the run's `save()`, the tournament/map/raid flows, and `craft.js`, `forge.js`. `/explore`'s while-an-event-runs **event-currency drop** is the one event-currency credit pass 8 did not key (it rides the expedition `save()` and `explore.js` is at its file-size ceiling) — the keyed helper now exists, so it is a follow-up once explore is split
-- `pet` (`petService.js`, `pet.js`)
+- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound. Still not reviewed: quest/mission crediting through the already-audited `onEconomyEarn`, prestige (reviewed sound in pass 7), and the map view. `/explore`'s while-an-event-runs **event-currency drop** is the one event-currency credit pass 8 did not key (it rides the expedition `save()` and `explore.js` is at its file-size ceiling) — the keyed helper now exists, so it is a follow-up once explore is split
+- `pet` (`petService.js`, `pet.js`) — pass 9 reviewed the pet **drops** the gathering runs grant (sound, they ride the run's `save()`) and found the `/pet` command's **PvP-battle payouts and adopt refund** to be unkeyed writes of the audit's usual class, but left them: `pet.js` is at its `command-file-size` ceiling, so keying them needs the file split first (the same bound pass 8 left on `/explore`). Worth a dedicated `/pet` pass. `pet` feeding, the pet-care quest credits and the Pet-of-the-Week reward were reviewed and found sound
 - `use` / items / effects — the seasonal loot-box item grant is audited above (pass 6); `effectsService.js`, `inventory.js`, `shop.js` and the rest of `use.js` are not
 - casino (`src/games/casino/*`, `casino.js`) — `confirmBet`, the bet guards, the
   eight games' odds and their leaderboard writes. The progressive jackpot and the
@@ -1216,5 +1318,6 @@ economy escrow and payout paths on 2026-09-01; the progressive jackpot on
 2026-09-04; the gift and market unwind paths on 2026-09-05; the casino hand
 payouts on 2026-09-08; the core currency commands on 2026-09-17; the
 gathering-loop payouts on 2026-09-18; the progression and group/PvP payouts on
-2026-09-19; the seasonal-event currency on 2026-09-20. "Not yet reviewed" carries
-no review date, because nothing in it has been reviewed.*
+2026-09-19; the seasonal-event currency on 2026-09-20; and the gathering
+commands' non-payout surface on 2026-09-22. "Not yet reviewed" carries no review
+date, because nothing in it has been reviewed.*

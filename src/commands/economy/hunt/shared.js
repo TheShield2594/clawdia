@@ -3,13 +3,14 @@
 // Values and helpers more than one part of /hunt needs. Nothing here reaches
 // for a sibling module, which is what keeps the folder free of require cycles.
 
-const { walletOf, grindWallet, PRESTIGE_BADGES } = require('../../../utils/grindShop');
+const { walletOf, grindWallet, shopRefundMessage, PRESTIGE_BADGES } = require('../../../utils/grindShop');
 const { PRESTIGE_BONUSES } = require('../../../data/huntData');
 const { WILDERNESS_YIELD_BONUS } = require('../../../data/crossSystemData');
 
 // The wallet, the charge and the refund are the same in all three grind
-// shops and live in utils/grindShop.js (#892).
-const { chargeBalance, refundBalance } = grindWallet('hunt');
+// shops and live in utils/grindShop.js (#892). `refundBalanceOrOwe` is the
+// keyed, recoverable refund the repair/upgrade/unlock handlers use (#873).
+const { chargeBalance, refundBalance, refundBalanceOrOwe } = grindWallet('hunt');
 
 const ACTIVATABLE     = ['basic_bait', 'premium_bait', 'luck_charm', 'hunters_focus', 'xp_scroll', 'stamina_tonic'];
 
@@ -32,5 +33,7 @@ module.exports = {
     WILDERNESS_YIELD_BONUS,
     chargeBalance,
     refundBalance,
+    refundBalanceOrOwe,
+    shopRefundMessage,
     walletOf,
 };

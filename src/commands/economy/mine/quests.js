@@ -9,6 +9,7 @@ const { attachGrind } = require('../../../utils/grindProfile');
 const { ensureMineData, assignDailyMineQuests, applyXp, getLevelData } = require('../../../services/mineService');
 const { MINE_QUEST_TEMPLATES } = require('../../../data/mineData');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
+const { questClaimPayoutKey } = require('../../../utils/payoutKey');
 const { buildProgressBar, formatExpiry } = require('./embeds');
 const COLORS = require('../../../utils/embedColors');
 
@@ -135,12 +136,18 @@ async function handleQuests(interaction, sub) {
 
         questEntry.progress = -1;
         user.markModified('quests');
+        // Keyed like /hunt quests claim (#873, pass 9): the quest is already
+        // marked claimed, so an unkeyed credit that fails would lock the reward
+        // out behind a keyless, unreplayable record. Keyed, a failure is owed and
+        // replayable, and the embed says so.
+        let claimCredited;
         try {
-            await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            ({ credited: claimCredited } = await saveWithBalanceDelta(User, user, balanceAtLoad, {
                 service: 'mine',
                 jobName: 'questClaimCoins',
                 guildId: interaction.guild.id,
-            });
+                payoutKey: questClaimPayoutKey('mine', interaction.user.id, questEntry.questId, questEntry.expiresAt?.getTime()),
+            }));
         } catch (err) {
             // Same reasoning as /hunt quests claim: a version conflict on this
             // document is ordinary, and an unanswered interaction is not.
@@ -157,6 +164,14 @@ async function handleQuests(interaction, sub) {
                 { name: '⭐ Miner XP',         value: `+${template.reward.xp}`,                     inline: true },
                 { name: '💳 New Balance',       value: `${currency}${user.balance.toLocaleString()}`, inline: true }
             );
+
+        if (!claimCredited) {
+            embed.addFields({
+                name:  '⏳ Payout Owed',
+                value: `The **${currency}${template.reward.coins.toLocaleString()}** reward could not be paid out just now and has been recorded as owed — the balance above does not include it. It will be applied once the problem clears; tell an admin if it does not.`,
+                inline: false,
+            });
+        }
 
         if (lvResult.leveledUp) {
             const ld = getLevelData(lvResult.newLevel);

@@ -22,16 +22,18 @@ coverage, which is [#873](https://github.com/TheShield2594/clawdia/issues/873):
 audit coverage is widest exactly where the risk is not.
 
 So net-new game features wait, and every currency-mutation path gets the
-treatment the nine long-stable subsystems got. Eight passes have landed under
+treatment the nine long-stable subsystems got. Nine passes have landed under
 that decision already — `/duel` escrow and the `/heist` and `/syndicate` crew
 splits in v4.5.2, the casino's progressive jackpot in v4.6.0, `/gift` and
 `/market` in v4.6.1, the casino's hand payouts in v4.7.0, the core currency
 commands (`balance`, `bank`, `daily`, `work`, `jobs`, `crime`, `invest`) in
 v4.11.1, the gathering-loop payouts (`hunt`, `fish`, `mine`, `explore`) in
 v4.11.2, the progression and group/PvP reward payouts (the season pass, a
-syndicate's founding, a fishing tournament, the war resolution) in v4.12.1, and
-the seasonal-event currency (the event activities and the event shop) in
-v4.12.3 — and between them they found the same defect on path after path: a
+syndicate's founding, a fishing tournament, the war resolution) in v4.12.1, the
+seasonal-event currency (the event activities and the event shop) in v4.12.3,
+and the gathering commands' non-payout surface (the shop refunds, the quest-claim
+credits, `/forge`, and a tournament entry fee that was minted rather than taken)
+in v4.13.1 — and between them they found the same defect on path after path: a
 credit or grant written without reading the write back and without a key to
 replay it. That is
 the argument for the order, and it is worth re-reading before anybody proposes
@@ -57,17 +59,21 @@ so that there is only ever one copy to correct.
    a public deferral makes refusals public, an ephemeral one hides successful
    moderation embeds from the channel. **Settle that first** — it is the whole
    of the work that cannot be started without a decision.
-2. **Economy audit, pass 9 — the gathering commands' non-payout surface.**
-   ([#873](https://github.com/TheShield2594/clawdia/issues/873)) Pass 8 (v4.12.3)
-   built the keyed event-currency helper and closed the seasonal-event currency
-   — the event activities' coin and currency credits, the bonus item grants, and
-   the `/eventshop` refund. What the earlier passes left is what remains on the
-   economy queue: the gathering shops' repair/upgrade/unlock pricing, quest and
-   mission crediting (through the already-audited `onEconomyEarn`), prestige, pet
-   drops that ride the run's `save()`, and the tournament/map/raid flows — plus
-   the one event-currency credit pass 8 could not reach, `/explore`'s
-   while-an-event-runs drop, which stays on its `save()` until `explore.js` is
-   split off its file-size ceiling (the helper for it now exists).
+2. **Economy audit, pass 10 — the `/pet` command's PvP and adopt payouts.**
+   ([#873](https://github.com/TheShield2594/clawdia/issues/873)) Pass 9 (v4.13.1)
+   closed the gathering commands' non-payout surface — the shops'
+   repair/upgrade/unlock refunds, the quest-claim credits, `/forge`, and a
+   fishing-tournament entry fee that was minted into the prize pool rather than
+   debited from the entrant — and found the pet **drops** the gathering runs
+   grant sound. What it deliberately left is the `/pet` command itself: its
+   PvP-battle winner payout is a bare `$inc` that announces the win regardless of
+   whether it landed, and its adopt refund tells the player their coins came back
+   over a write it never read — the audit's usual class, in a subsystem of its
+   own. It is deferred rather than folded in because `pet.js` is frozen at its
+   `command-file-size` ceiling, so keying the payouts (which needs the owe helpers
+   and their three-way messaging) cannot be done without first splitting the file
+   — the same bound pass 8 left on `/explore`. The helpers all exist now, so this
+   is a scoped follow-up, not new infrastructure; it wants its own issue.
 3. **What is left of the casino.**
    ([#873](https://github.com/TheShield2594/clawdia/issues/873)) Pass 4 took the
    payouts. `confirmBet`, the bet guards and the games' leaderboard writes were
@@ -102,21 +108,25 @@ each pass found; its
 [Not yet reviewed](AUDIT_LOG.md#not-yet-reviewed) section is the queue. That list
 is long and mostly unordered, deliberately — it is a survey, not a plan. The
 order this roadmap commits to, within the economy, is money-moving first.
-Eight passes have landed against it — `/duel` escrow and the crew splits, the
+Nine passes have landed against it — `/duel` escrow and the crew splits, the
 progressive jackpot, `/gift` and `/market`, the casino's hand payouts and crash
 refunds, the core currency commands, the gathering-loop payouts (`hunt`,
 `fish`, `mine`, `explore`, plus the `/explore` relic and `/use` loot-box item
 grants), the progression and group/PvP reward payouts (the season pass, a
-syndicate's founding, a fishing tournament, the war resolution), and the
-seasonal-event currency (the event activities and the event shop) — which leaves:
+syndicate's founding, a fishing tournament, the war resolution), the
+seasonal-event currency (the event activities and the event shop), and the
+gathering commands' non-payout surface (the shop refunds, the quest-claim
+credits, `/forge`, and the tournament entry fee) — which leaves:
 
-1. the rest of the gathering commands the payout pass left — the shops'
-   repair/upgrade/unlock pricing, quest and mission crediting, prestige, pet
-   drops, and the tournament/map/raid flows — and `pet`, `effects` and the rest
-   of `use`/`inventory`/`shop`. The season pass's non-reward surface
-   (view/leaderboard/history/admin) is unreviewed too, as is `/explore`'s
-   event-currency drop (pass 8's one deferred credit; the keyed helper exists,
-   but detaching it waits on `explore.js` being split off its file-size ceiling)
+1. the `/pet` command's PvP-battle payouts and adopt refund (unkeyed, deferred
+   from pass 9 for the `pet.js` file-size ceiling — the money-moving item next
+   on the queue), `effects` and the rest of `use`/`inventory`/`shop`, and the
+   gathering surface pass 9 did not need to touch — quest/mission crediting
+   through the already-audited `onEconomyEarn`, and the map view. The season
+   pass's non-reward surface (view/leaderboard/history/admin) is unreviewed too,
+   as is `/explore`'s event-currency drop (pass 8's one deferred credit; the
+   keyed helper exists, but detaching it waits on `explore.js` being split off
+   its file-size ceiling)
 
 Plus the remainder of the casino — `confirmBet`, the bet guards, the leaderboard
 writes — which pass 4 named as out of its scope rather than dropping.

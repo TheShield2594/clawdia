@@ -5,7 +5,7 @@
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const { persistGrindIfNew, saveGrind } = require('../../../../utils/grindProfile');
 const { DEPTHS } = require('../../../../data/mineData');
-const { chargeBalance, refundBalance } = require('../shared');
+const { chargeBalance, refundBalanceOrOwe, shopRefundMessage } = require('../shared');
 
 async function handleUnlock(interaction, user, currency) {
     const m = user.mining;
@@ -42,8 +42,11 @@ async function handleUnlock(interaction, user, currency) {
         console.error('[mineshop unlock] save error:', err);
         m.unlockedDepths = m.unlockedDepths.filter(id => id !== depthId);
         m.activeDepth = priorDepth;
-        await refundBalance(interaction, depthDef.unlockCost);
-        return interaction.reply({ content: 'The unlock failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+        const refund = await refundBalanceOrOwe(interaction, depthDef.unlockCost);
+        return interaction.reply({
+            content: shopRefundMessage(refund, { action: 'The unlock failed', currency, amount: depthDef.unlockCost }),
+            flags: MessageFlags.Ephemeral,
+        });
     }
 
     const embed = new EmbedBuilder()

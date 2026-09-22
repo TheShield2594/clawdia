@@ -10,7 +10,7 @@ const {
     quoteRepair,
     applyRepair,
 } = require('../../../../services/fishService');
-const { chargeBalance, refundBalance } = require('../shared');
+const { chargeBalance, refundBalanceOrOwe, shopRefundMessage } = require('../shared');
 const COLORS = require('../../../../utils/embedColors');
 
 async function handleRepair(interaction, user, currency) {
@@ -106,8 +106,11 @@ async function handleRepair(interaction, user, currency) {
         await user.save();
     } catch (err) {
         console.error('[fishshop repair shop] save error:', err);
-        await refundBalance(interaction, result.cost);
-        return interaction.reply({ content: 'The repair failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+        const refund = await refundBalanceOrOwe(interaction, result.cost);
+        return interaction.reply({
+            content: shopRefundMessage(refund, { action: 'The repair failed', currency, amount: result.cost }),
+            flags: MessageFlags.Ephemeral,
+        });
     }
 
     const embed = new EmbedBuilder()

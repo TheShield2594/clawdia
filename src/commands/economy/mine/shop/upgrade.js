@@ -5,7 +5,7 @@
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const { persistGrindIfNew, saveGrind } = require('../../../../utils/grindProfile');
 const { PICKAXE_UPGRADES, PICKAXE_BY_TIER } = require('../../../../data/mineData');
-const { chargeBalance, refundBalance } = require('../shared');
+const { chargeBalance, refundBalanceOrOwe, shopRefundMessage } = require('../shared');
 const { attachItemThumbnail } = require('../../../../utils/itemImageHelper');
 
 async function handleBuyUpgrade(interaction, user, currency) {
@@ -47,8 +47,11 @@ async function handleBuyUpgrade(interaction, user, currency) {
     } catch (err) {
         console.error('[mineshop upgrade] save error:', err);
         pickaxe.upgrade = null;
-        await refundBalance(interaction, cost);
-        return interaction.reply({ content: 'Installing the upgrade failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+        const refund = await refundBalanceOrOwe(interaction, cost);
+        return interaction.reply({
+            content: shopRefundMessage(refund, { action: 'Installing the upgrade failed', currency, amount: cost }),
+            flags: MessageFlags.Ephemeral,
+        });
     }
 
     const embed = new EmbedBuilder()

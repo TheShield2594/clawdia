@@ -4,7 +4,8 @@ const FishingTournament = require('../models/FishingTournament');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
 const { creditCoinsOrOwe } = require('../utils/creditOrOwe');
-const { tournamentPrizePayoutKey } = require('../utils/payoutKey');
+const { chargeExact } = require('../utils/balanceDebit');
+const { tournamentPrizePayoutKey, tournamentEntryRefundPayoutKey } = require('../utils/payoutKey');
 const { EmbedBuilder } = require('discord.js');
 const COLORS = require('../utils/embedColors');
 
@@ -62,13 +63,46 @@ async function submitCatch(guildId, { userId, username, fishName, fishEmoji, tie
             existing.caughtAt  = new Date();
             existing.isBossKill = isBossKill;
         }
-    } else {
-        if (tournament.entryFee > 0) {
-            tournament.prizePool += tournament.entryFee;
-        }
-        tournament.entries.push({ userId, username, fishName, fishEmoji, tier, score, caughtAt: new Date(), isBossKill });
+        await tournament.save();
+        return tournament;
     }
-    await tournament.save();
+
+    // A new entrant. The entry fee funds the prize pool — but until now it grew
+    // the pool without ever debiting the player: the fee the tournament
+    // announcement calls "auto-deducted on first catch" was minted into a
+    // real-coin pool out of nothing, `entryFee` coins per entrant, and then paid
+    // to the winners for real by `endTournament` (#873, pass 9). Charge it
+    // atomically first, and only enter — and only grow the pool — for a fee that
+    // was actually taken; a player who cannot cover it (or is frozen) simply
+    // does not join, and their catch still counted as an ordinary cast.
+    let feeCharged = false;
+    if (tournament.entryFee > 0) {
+        const charged = await chargeExact(User, { userId, guildId }, tournament.entryFee);
+        if (!charged) return tournament;
+        feeCharged = true;
+        tournament.prizePool += tournament.entryFee;
+    }
+    tournament.entries.push({ userId, username, fishName, fishEmoji, tier, score, caughtAt: new Date(), isBossKill });
+
+    try {
+        await tournament.save();
+    } catch (err) {
+        // The fee left the wallet above but the entry did not persist, so the
+        // player is charged for a tournament they are not in. Refund it —
+        // keyed, so a retry or a replay cannot refund twice — before letting the
+        // failure propagate to the fire-and-forget caller as before.
+        if (feeCharged) {
+            await creditCoinsOrOwe(
+                { userId, guildId },
+                tournament.entryFee,
+                {
+                    payoutKey: tournamentEntryRefundPayoutKey(tournament._id, userId),
+                    service: 'tournamentService', jobName: 'tournamentEntryRefund',
+                },
+            );
+        }
+        throw err;
+    }
     return tournament;
 }
 

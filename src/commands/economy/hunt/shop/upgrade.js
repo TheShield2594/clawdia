@@ -4,7 +4,7 @@
 
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const { WEAPON_UPGRADES, WEAPON_BY_TIER } = require('../../../../data/huntData');
-const { chargeBalance, refundBalance } = require('../shared');
+const { chargeBalance, refundBalanceOrOwe, shopRefundMessage } = require('../shared');
 const { attachItemThumbnail } = require('../../../../utils/itemImageHelper');
 const COLORS = require('../../../../utils/embedColors');
 
@@ -55,8 +55,11 @@ async function handleBuyUpgrade(interaction, user, currency) {
     } catch (err) {
         console.error('[huntshop upgrade] save error:', err);
         weapon.upgrade = null;
-        await refundBalance(interaction, cost);
-        return interaction.reply({ content: 'Installing the upgrade failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+        const refund = await refundBalanceOrOwe(interaction, cost);
+        return interaction.reply({
+            content: shopRefundMessage(refund, { action: 'Installing the upgrade failed', currency, amount: cost }),
+            flags: MessageFlags.Ephemeral,
+        });
     }
 
     const installedEmbed = new EmbedBuilder()

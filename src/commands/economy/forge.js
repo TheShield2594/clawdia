@@ -5,6 +5,8 @@ const User    = require('../../models/User');
 const AiItem  = require('../../models/AiItem');
 const { resolveProviderConfig, getStructuredCompletion } = require('../../services/aiService');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
+const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
+const { forgeRefundPayoutKey } = require('../../utils/payoutKey');
 const cooldownStore = require('../../utils/commandCooldowns');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 
@@ -80,22 +82,46 @@ async function releaseWindow(interaction, cooldownScope) {
  * refund regardless, which is how a user could pay 25,000 coins for nothing and
  * be told otherwise (#829). One helper, so the two cannot drift apart again.
  *
+ * Keyed and recoverable (#873, pass 9): the bare `$inc` this replaced read its
+ * own `modifiedCount` back — so unlike the shop unwinds it never announced a
+ * refund that had not happened — but it filed nothing when it missed, so a
+ * transient failure lost the coins with nothing to replay, and a refund whose
+ * response was lost sent the player to an admin over coins that had in fact
+ * come back. Through `creditCoinsOrOwe` the refund is exactly-once, records the
+ * debt for `payouts:replay` when it will not land, and the caller words the
+ * reply from the outcome (`refundClause`).
+ *
  * The claimed cooldown window goes back with the coins: a forge that produced
  * no item should not lock its rarity for the next day either.
  */
 async function refundForge(interaction, cost, cooldownScope, context) {
-    const refunded = await User.updateOne(
+    const refund = await creditCoinsOrOwe(
         { userId: interaction.user.id, guildId: interaction.guild.id },
-        { $inc: { balance: cost } },
-    ).then(res => res.modifiedCount > 0)
-     .catch(err => { console.error(`[FORGE] Refund failed after ${context}:`, err); return false; });
+        cost,
+        { payoutKey: forgeRefundPayoutKey(interaction.id), service: 'forge', jobName: `forgeRefund:${context}` },
+    );
 
     await releaseWindow(interaction, cooldownScope);
 
-    return refunded;
+    return refund;
 }
 
 const REFUND_FAILED = 'The refund failed to process — please contact a server admin, your coins were not returned automatically.';
+
+/**
+ * The refund half of a forge-failure message, worded from what `refundForge`
+ * actually did: refunded, recorded as owed, or neither. The lead clause differs
+ * between the AI-failure and persistence-failure paths, so only the tail is
+ * shared here.
+ */
+function refundClause(refund) {
+    if (refund.credited) return 'Your coins have been refunded. Try again in a moment.';
+    if (refund.owed) {
+        return 'Your coins could not be returned automatically — the refund has been recorded as owed ' +
+            'and will be applied once the problem clears. Tell an admin if it does not.';
+    }
+    return REFUND_FAILED;
+}
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -246,14 +272,12 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
             // decides what the message says. A swallowed write error used to
             // leave the user told they had been refunded when they had not,
             // with nothing but the log to say otherwise.
-            const refunded = await refundForge(interaction, cfg.cost, cooldownScope, 'AI failure');
+            const refund = await refundForge(interaction, cfg.cost, cooldownScope, 'AI failure');
             const failure = err?.rateLimited
                 ? `This server's AI limit has been reached (${err.limit} per ${err.windowMin}m).`
                 : 'The forge misfired!';
             return interaction.editReply({
-                content: refunded
-                    ? `${failure} Your coins have been refunded. Try again in a moment.`
-                    : `${failure} ${REFUND_FAILED}`,
+                content: `${failure} ${refundClause(refund)}`,
             });
         }
 
@@ -282,11 +306,9 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
             if (!granted) throw new Error('user document not found');
         } catch (err) {
             console.error('[FORGE] Persistence failed:', err?.message || err);
-            const refunded = await refundForge(interaction, cfg.cost, cooldownScope, 'persistence failure');
+            const refund = await refundForge(interaction, cfg.cost, cooldownScope, 'persistence failure');
             return interaction.editReply({
-                content: refunded
-                    ? 'The forge failed to save your item! Your coins have been refunded. Try again in a moment.'
-                    : `The forge failed to save your item! ${REFUND_FAILED}`,
+                content: `The forge failed to save your item! ${refundClause(refund)}`,
             });
         }
 
