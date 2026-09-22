@@ -11,8 +11,9 @@ const Guild = require('../../models/Guild');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const User = require('../../models/User');
 const Transaction = require('../../models/Transaction');
-const { ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, isP8BlackMarketItem, RARITY_ORDER } = require('../../data/defaultShopItems');
+const { ensureDefaultShopItems, getItemLore, getItemRarity, defaultItemIdByName, isPrestigeItem, isBlackMarketItem, isP8BlackMarketItem, RARITY_ORDER } = require('../../data/defaultShopItems');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
+const { hasDefaultItemImage } = require('../../utils/defaultItemImages');
 const { runShopBrowse } = require('../../utils/shopBrowse');
 const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
@@ -50,6 +51,22 @@ function extractEmoji(str) {
     if (!str) return '';
     const m = str.match(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic})/u);
     return m ? m[0] : '';
+}
+
+// The id to look an item's artwork up under. Normally its stored itemId, but a
+// guild seeded before the `itemId` field existed carries default items with a
+// null id, so their baked icon never resolves and the shop view shows the emoji
+// glyph instead of the catalogue art. Recover the catalogue id from the display
+// name — the one field those old rows still have — but only when there is no
+// stored id to protect, so a custom item that named itself after a default and
+// uploaded its own image is never shadowed by the bundled one.
+function shopIconId(item) {
+    if (item.itemId && hasDefaultItemImage(item.itemId)) return item.itemId;
+    if (!item.itemId) {
+        const byName = defaultItemIdByName(item.name);
+        if (byName) return byName;
+    }
+    return item.itemId;
 }
 
 // Returns the set of itemIds bought by 3+ unique users in the last 24h
@@ -136,7 +153,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             return {
                 name:    item.name,
                 buyId:   item.name,
-                imageId: item.itemId,
+                imageId: shopIconId(item),
                 emoji:   extractEmoji(item.description),
                 price:   ep,
                 badge,
@@ -177,7 +194,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             return {
                 name:    item.name,
                 buyId:   item.name,
-                imageId: item.itemId,
+                imageId: shopIconId(item),
                 emoji:   extractEmoji(item.description),
                 price:   ep,
                 badge,
@@ -214,7 +231,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             return {
                 name:    item.name,
                 buyId:   item.name,
-                imageId: item.itemId,
+                imageId: shopIconId(item),
                 emoji:   extractEmoji(item.description),
                 price:   ep,
                 badge:   'BLACK MARKET',
@@ -718,7 +735,7 @@ async function buyShopItem(interaction, { guildSettings, currency, viewerPrestig
                     successEmbed.addFields({ name: 'Role Granted', value: `<@&${freshItem.roleId}>`, inline: true });
                 }
 
-                const successImg = await getItemImageAttachment(freshItem.itemId, interaction.guildId, { label: freshItem.name }).catch(() => null);
+                const successImg = await getItemImageAttachment(shopIconId(freshItem), interaction.guildId, { label: freshItem.name }).catch(() => null);
                 if (successImg) successEmbed.setThumbnail(successImg.url);
                 const successPayload = { embeds: [successEmbed], components: [] };
                 if (successImg) successPayload.files = [successImg.attachment];
@@ -758,7 +775,7 @@ async function buyShopItem(interaction, { guildSettings, currency, viewerPrestig
                     )
                     .setFooter({ text: 'This confirmation expires in 30 seconds' });
 
-                const confirmImg = await getItemImageAttachment(item.itemId, interaction.guildId, { label: item.name }).catch(() => null);
+                const confirmImg = await getItemImageAttachment(shopIconId(item), interaction.guildId, { label: item.name }).catch(() => null);
                 if (confirmImg) confirmEmbed.setThumbnail(confirmImg.url);
                 const confirmPayload = { embeds: [confirmEmbed], components: [row], fetchReply: true, ...privacy };
                 if (confirmImg) confirmPayload.files = [confirmImg.attachment];

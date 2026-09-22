@@ -14,6 +14,30 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.12.4] - 2026-09-22
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Shop view artwork for legacy items (#shop white-icon report). A guild seeded
+before the shop grew an `itemId` field carries its default items with a null id,
+and everything that keys off that id then quietly falls back: the `/shop view`
+looks the bundled catalogue icon up by id and finds nothing, so it draws the
+emoji glyph — the white silhouette in the report — instead of the artwork;
+`getItemRarity` drops to price bucketing, so an item whose tier does not match
+its price lands on the wrong page. The recently backfilled items (endgame
+cosmetics, `streak_freeze`, `tier_skip_token`, `revive_scroll`) carry correct
+ids and never had the problem, which is why only the older items looked
+"unmapped".
+
+Two halves. The renderer now recovers the catalogue icon id from an item's
+display name — the one field those old rows still have — when the stored id has
+no bundled art, and only when there is no id to protect, so a custom item that
+named itself after a default keeps its own upload. And migration
+`026_backfill_shop_item_ids` gives those id-less default items their canonical id
+at the source, fixing the page placement too; inventory is left alone because
+`/use` already resolves the old name-keyed stacks through the legacy aliases in
+`effectsService`.
+
 ## [4.12.3] - 2026-09-20
 
 Migrations through `025_social_feeds_index`.

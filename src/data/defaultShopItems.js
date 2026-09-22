@@ -58,6 +58,23 @@ function getItemLore(itemId) {
     return ITEM_LORE_BY_ID[itemId] || '';
 }
 
+// Display name (lowercased) → canonical itemId, for recovering the catalogue id
+// of a shop item whose stored `itemId` is missing. Guilds seeded before the
+// `itemId` field existed carry default items with a null id, so their baked
+// icon (keyed by that id) never resolves and the shop view falls back to the
+// emoji glyph — see defaultItemIdByName() and its use in the /shop view.
+const ITEM_ID_BY_NAME = Object.fromEntries(
+    DEFAULT_SHOP_ITEMS.map(i => [i.name.toLowerCase(), i.itemId])
+);
+
+// The canonical itemId for a default item's display name, or null if the name
+// is not one of the catalogue's. Case-insensitive; the seeded name is the one
+// stable field on an old item whose id was never written.
+function defaultItemIdByName(name) {
+    if (!name) return null;
+    return ITEM_ID_BY_NAME[String(name).trim().toLowerCase()] ?? null;
+}
+
 const RARITY_ORDER = ['Common', 'Uncommon', 'Rare', 'Epic', 'Mythic'];
 
 // Returns the rarity tier for an item. Falls back to price-based bucketing for custom items.
@@ -133,4 +150,4 @@ function ensureDefaultShopItems(guildSettings) {
     return changed;
 }
 
-module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, isP8BlackMarketItem, isEndgameItem, RARITY_ORDER };
+module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, defaultItemIdByName, isPrestigeItem, isBlackMarketItem, isP8BlackMarketItem, isEndgameItem, RARITY_ORDER };
