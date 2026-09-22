@@ -9,6 +9,7 @@ const User  = require('../../models/User');
 const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
+const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const {
@@ -355,6 +356,11 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
             max: 1,
             time: 60_000,
         }).on('collect', async i => {
+            // Either button stakes a new hand, so it answers to the settings as
+            // they are now — the reroll at its own price, not the original bet.
+            const refused = await replayRefusal(interaction.guild.id, i.customId === rerollId ? rerollCost : bet);
+            if (refused) return refuseReplay(i, interaction, refused);
+
             if (i.customId === rerollId) {
                 // Quick reroll at 50% cost with same picks. A discounted draw is
                 // still a fresh draw paid for with fresh coins, so it reports its
@@ -363,7 +369,12 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
                 if (!rerollDebited) {
                     return i.update({ content: `❌ Not enough coins for the quick reroll (need **${rerollCost.toLocaleString()}** coins).`, embeds: [], components: [] });
                 }
-                await i.deferUpdate();
+                // The reroll's stake has left the wallet and playKeno — whose
+                // rollback is the only thing that can return it — has not
+                // started, so nothing between the two may throw. An
+                // acknowledgement that failed here used to reject out of the
+                // collector and take the stake with it.
+                await i.deferUpdate().catch(() => {});
                 await playKeno(interaction, rerollCost, picked, true, null, onWager);
             } else {
                 await i.deferUpdate();
@@ -413,10 +424,10 @@ module.exports = {
         }
 
         const bet          = interaction.options.getInteger('bet');
-        const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
-        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+        const refusal = casinoRefusal(guildSettings, bet);
+        if (refusal) {
             releaseLock?.();
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: refusal, flags: MessageFlags.Ephemeral });
         }
         const numbersRaw = interaction.options.getString('numbers');
 

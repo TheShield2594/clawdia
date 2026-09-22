@@ -411,6 +411,15 @@ describe('per-file floors', () => {
         // losing its coverage outright would not move; daily.js is floored lower
         // than the other two because its calendar and streak-freeze views are
         // display, not money, and thinly driven.
+        //
+        // games/casino/crashRefund.js joined in #873's twelfth pass. It is the
+        // restart sweep that returns every crash stake a restart stranded, and
+        // two of pass 4's findings were left as they were *because* it exists.
+        // It had never run — its update was one Mongoose refuses to send — and
+        // the only test over it mocked the model, so nothing about it being
+        // broken looked like a failure. A recovery path is exactly the code a
+        // directory floor cannot watch: it runs once per boot, on nobody's
+        // happy path.
         expect(Object.keys(floors.files).sort()).toEqual([
             'src/commands/economy/bank.js',
             'src/commands/economy/crime.js',
@@ -421,6 +430,7 @@ describe('per-file floors', () => {
             'src/commands/economy/market.js',
             'src/commands/economy/trade.js',
             'src/commands/economy/work.js',
+            'src/games/casino/crashRefund.js',
             'src/games/casino/payout.js',
             'src/services/casinoJackpotService.js',
             'src/services/marketService.js',

@@ -1,13 +1,16 @@
 const { deployCommandsIfChanged } = require('../utils/commandDeployer');
 const { startScheduler } = require('../services/scheduler');
 const { reconcileJackpotClaims } = require('../services/casinoJackpotService');
-const User = require('../models/User');
-const { logTransaction } = require('../utils/logTransaction');
+const { reconcileCrashRefunds, holdCrashUntilReconciled } = require('../games/casino/crashRefund');
 
 module.exports = {
     name: 'clientReady',
     once: true,
     async execute(client) {
+        // Synchronously, before the first await: interactions are dispatched
+        // while this handler is still running, and a crash round opened before
+        // the refund sweep below would have its live stake swept as stranded.
+        holdCrashUntilReconciled();
         console.log(`[READY] Logged in as ${client.user.tag}`);
         console.log(`[READY] Serving ${client.guilds.cache.size} guilds`);
 
@@ -58,20 +61,12 @@ module.exports = {
             console.error('[READY] Jackpot reconciliation failed:', err);
         }
 
-        // Refund any bets that were deducted during a crash game that was interrupted by a restart
+        // Refund any crash stakes a restart stranded mid-round. The marker the
+        // debit wrote is the whole record; the sweep owns what to do with it.
         try {
-            const pending = await User.find({ pendingCrashRefund: { $gt: 0 } }).lean();
-            if (pending.length > 0) {
-                for (const u of pending) {
-                    await User.findOneAndUpdate(
-                        { _id: u._id },
-                        [{ $inc: { balance: '$pendingCrashRefund' } }, { $set: { pendingCrashRefund: 0 } }],
-                        { updatePipeline: true }
-                    );
-                    logTransaction({ userId: u.userId, guildId: u.guildId, type: 'crash_refund', amount: u.pendingCrashRefund, balance: u.balance + u.pendingCrashRefund, note: 'bot restart refund' });
-                }
-                console.log(`[READY] Refunded crash bets for ${pending.length} user(s)`);
-            }
+            const { refunded, failed } = await reconcileCrashRefunds(client);
+            if (refunded) console.log(`[READY] Refunded crash bets for ${refunded} user(s)`);
+            if (failed) console.error(`[READY] ${failed} crash refund(s) could not be settled — left for the next restart`);
         } catch (err) {
             console.error('[READY] Crash refund sweep failed:', err);
         }

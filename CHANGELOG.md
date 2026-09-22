@@ -14,6 +14,60 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.4] - 2026-09-22
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 12 (#873) — the rest of the casino: `confirmBet`, the bet
+guards, and the games' leaderboard and stat writes, which pass 4 named as out of
+its scope. Reading the crash stat write meant reading the crash round's own
+ordering, and the recovery path pass 4 relied on.
+
+- **The crash restart refund never ran.** `pendingCrashRefund` is the record
+  that returns a crash stake stranded by a restart, and pass 4 left the join
+  refund as a bare `$inc` because a failure there leaves the marker for this
+  sweep. The sweep issued its update as a pipeline whose first stage was `$inc`,
+  which is not a pipeline stage: Mongoose rejects it before it is sent, the first
+  stranded player aborted the loop, and every marker survived every boot. It is
+  now `reconcileCrashRefunds` in `games/casino/crashRefund.js`: a `$set`
+  pipeline that moves the marker into the balance in one write, guarded on the
+  marker so two booting processes cannot both pay it, logged from the write's
+  pre-image, carrying on past a failed player, and scoped to the guilds this
+  shard owns — another shard's marker may be a stake riding a live round.
+  `/casino crash` stays closed until the sweep has run, because interactions
+  arrive while the ready handler is still awaiting and a round opened then
+  would have had its live stake swept.
+  Stakes already stranded are returned on the first boot of this version.
+- **A crash cash-out in flight when the round ended was settled twice.** The
+  round's tick is an async interval callback the interval does not wait for, so
+  a cash-out awaiting its write read as a player still riding the multiplier:
+  the crash resolution decremented their marker and the write decremented it
+  again (driving it negative, where it absorbs the next lobby's stake), the
+  tick-error refund returned a stake the payout already included, each later
+  tick re-fired the same auto cash-out, and the stalled tick woke to resolve the
+  round a second time. A cash-out is now marked in flight for the life of its
+  write, and everything else leaves it to that write.
+- **The bet guards ran once per command, not once per hand.** The casino's
+  switches and `casinoMaxBet` were checked before the first hand only, and every
+  "Play Again" — slots, roulette, keno and its reroll, poker, higher-or-lower,
+  Monte — staked the same bet again without asking, from a button that re-arms on
+  every replay. Closing the casino or lowering the limit reached new commands
+  only. `games/casino/betGuard.js` states the rule once; the ten games' opening
+  checks use it, and every replay asks it again against the settings as they are
+  now, failing closed.
+- **Keno's reroll and higher-or-lower's replay** took their stake and then
+  acknowledged the press with a call that could throw before the hand that would
+  return it had started. The acknowledgement can no longer throw.
+- **Slots' Hot Reel** read the loss streak before the wager and wrote it back with
+  a `$set`, so two spins in flight at once could both spend the same streak. It is
+  claimed with a compare-and-set now, and losses are counted with `$inc`.
+- **The crash weekly leaderboard** dropped a player's best multiplier when two of
+  their cash-outs raced the Monday rollover and the higher one lost. The loser now
+  re-runs the same-week `$max`. The leaderboard helpers moved to `crashStats.js`.
+
+`confirmBet`, the crash joiners, the mid-hand stakes and the history writes were
+reviewed and found sound. No schema change.
+
 ## [4.13.3] - 2026-09-22
 
 Migrations through `026_backfill_shop_item_ids`.
