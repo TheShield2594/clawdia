@@ -72,6 +72,8 @@
                         </div>
                         <div class="field">
                             <label class="field-label" for="dailynews-title">Digest title</label>
+                            <%# v5 de-emoji (#1074): the 📰 default is a KEEP — a user-editable
+                                default value, not chrome. See panel-rss.js for the seed. %>
                             <input type="text" id="dailynews-title" value="<%= settings.dailyNews?.title || '📰 Daily News Digest' %>">
                         </div>
                         <div class="field">

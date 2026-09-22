@@ -26,6 +26,9 @@ function loadLevelLeaderboard(page, force) {
             skel.style.display = 'none';
             const entries = data.items || [];
             if (!entries.length) { empty.style.display = ''; return; }
+            // v5 de-emoji (#1074): podium medals are a KEEP — they are rank data
+            // standing in for positions 1/2/3, not chrome, and every rank below
+            // renders as its plain number.
             const medals = ['🥇','🥈','🥉'];
             const tbody = document.getElementById('level-leaderboard-tbody');
             tbody.innerHTML = entries.map(function(u) {

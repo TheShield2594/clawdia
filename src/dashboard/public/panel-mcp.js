@@ -128,6 +128,12 @@ function applyMcpPreset() {
 // bot ships can use them — Anthropic through its own connector, the rest through
 // the bot's MCP client — so this is a note about *how*, and only turns into a
 // warning if a provider ever cannot.
+//
+// v5 de-emoji (#1074): the 🔌 / 🔑 / 📚 / 🌐 in these notes and usage lines, and
+// the ⚠️ that opens the caution sentences here and in the cap warning, are a
+// KEEP. They lead prose sentences — content, not the sidebar/heading/status
+// chrome the v5 pass swapped for line icons — and read as a mid-sentence glyph,
+// not a UI control that needs a status-dot equivalent.
 function renderMcpProviderNote(provider) {
     const note = mcpEl('mcp-provider-note');
     if (!note) return;

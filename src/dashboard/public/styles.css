@@ -1448,8 +1448,19 @@ textarea.auto-resize {
 .cw-dash-lp-info { flex: 1; min-width: 0; }
 .cw-dash-lp-name { font-size: 15px; font-weight: 600; color: var(--ink-950); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cw-dash-lp-meta { font-size: 12px; margin-top: 3px; }
+/* Status line. The old ● / ○ glyphs speak the status-dot language now — the same
+   filled-dot-with-a-ring as .dash-kpi-dot on the guild dashboard, recoloured for
+   this light card: a solid --good dot with a soft ring for the added bot, a
+   hollow ring for one not yet invited. Text weights keep their audited ratios on
+   the #fff card — --good-text is 5.0:1 at 12px (--good alone is <4.5:1), --ink-500
+   is 5.7:1 — and the hollow ring rides --ink-400 (3.7:1), decorative and clear of
+   the 3:1 non-text minimum. */
+.cw-dash-lp-status { display: inline-flex; align-items: center; gap: 7px; }
+.cw-dash-lp-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .cw-dash-lp-status.active { color: var(--good-text); }
+.cw-dash-lp-status.active .cw-dash-lp-dot { background: var(--good); box-shadow: 0 0 0 3px rgba(93,138,90,.14); }
 .cw-dash-lp-status.inactive { color: var(--ink-500); }
+.cw-dash-lp-status.inactive .cw-dash-lp-dot { box-shadow: inset 0 0 0 1.5px var(--ink-400); }
 
 .cw-btn.cw-dash-lp-action { flex-shrink: 0; padding: 9px 16px; font-size: 13px; border-radius: 999px; }
 .cw-btn.cw-dash-lp-action:focus-visible { outline: 2px solid var(--ink-950); outline-offset: 3px; }

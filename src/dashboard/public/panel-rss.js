@@ -8,6 +8,10 @@
 // redrawing would leave every row after it carrying an index one too high and
 // the next Remove would unsubscribe the wrong feed.
 
+// v5 de-emoji (#1074): the '📰 Daily News Digest' seed title is a KEEP. It is a
+// user-editable default that ships in the message an admin sends to their server
+// — a default value, not chrome — and the field's placeholder/seed is the only
+// place it lives until they change it.
 const DAILY_NEWS_INITIAL_PROFILES = boot('dailyNewsProfiles');
 const DAILY_NEWS_CHANNELS = boot('channels');
 onPanel('rss', renderDailyNewsProfiles);

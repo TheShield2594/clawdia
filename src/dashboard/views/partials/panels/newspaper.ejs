@@ -30,6 +30,11 @@
 
                     <div class="panel-head" style="margin-top:1.25rem"><h3>Sections</h3></div>
                     <p style="color:var(--ink-400);font-size:.85rem;margin:.25rem 0 .75rem;">Choose which sections appear in each edition. Disabled sections are silently skipped.</p>
+                    <%# v5 de-emoji (#1074): these section emoji are a KEEP. They are content,
+                        not chrome — each mirrors the heading the same section prints in the
+                        delivered newspaper (see src/services/newspaper/signals.js), so the
+                        toggle previews what a reader will see. Iconifying here would desync
+                        the config from the product it configures. %>
                     <label class="toggle"><span class="toggle-text">💰 Top Earners</span><span class="switch"><input type="checkbox" id="np-top-earners" <%= settings.newspaper?.sections?.topEarners !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text">📈 Level Ups</span><span class="switch"><input type="checkbox" id="np-level-ups" <%= settings.newspaper?.sections?.levelUps !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text">🎰 Casino Highlights</span><span class="switch"><input type="checkbox" id="np-casino" <%= settings.newspaper?.sections?.casinoHighlights !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
