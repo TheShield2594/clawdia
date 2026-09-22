@@ -24,8 +24,8 @@ const { EmbedBuilder, escapeMarkdown } = require('discord.js');
 
 const { safeFetchFeed } = require('../utils/safeFeedFetch');
 const { handlesGuild } = require('../utils/sharding');
-const { getProvider, getBridgeOrigin } = require('./socialProviders');
-const { fetchTweetDetails, formatDuration } = require('./xEnrichment');
+const { getProvider, getBridgeOrigin, twitterBridgeFeedUrl, X_USERNAME } = require('./socialProviders');
+const { fetchTweetDetails, fetchProfileTimeline, isXApiEnabled, formatDuration } = require('./xEnrichment');
 
 const Parser = require('rss-parser');
 const parser = new Parser();
@@ -528,10 +528,11 @@ async function deliverSocialUpdate(client, guild, feed, parsedFeed, entries) {
         if (!channel) return 0;
 
         const allowSensitive = channel.nsfw === true;
-        for (const { item, date } of toPost) {
-            // X posts are looked up for their full content; every other platform,
-            // and any X lookup that fails, renders from the feed item alone.
-            const tweet = provider.id === 'twitter' ? await fetchTweetDetails(item.link) : null;
+        for (const { item, date, tweet: known } of toPost) {
+            // An X post read from FxTwitter's timeline arrives described; one from
+            // the bridge is looked up by id. Every other platform, and any lookup
+            // that fails, renders from the feed item alone.
+            const tweet = known || (provider.id === 'twitter' ? await fetchTweetDetails(item.link) : null);
             await channel.send(buildSocialMessage(provider, feed, item, date, parsedFeed, { tweet, allowSensitive }));
             delivered++;
             cursor = date;
@@ -557,6 +558,104 @@ async function deliverSocialUpdate(client, guild, feed, parsedFeed, entries) {
     return delivered;
 }
 
+// ── Sources ─────────────────────────────────────────────────────────────────
+//
+// Most subscriptions are one feed URL, fetched as is. An X subscription is an
+// account: it is read from FxTwitter's timeline by handle, and from the bridge
+// only when that fails. Its sweep key is the handle, so a subscription stored
+// before this (whose feedUrl is a bridge URL) and one stored after (whose
+// feedUrl is the profile URL) share one fetch and one dead-source record.
+
+// The X handle a subscription follows, or null if its ref is not one.
+function xHandle(feed) {
+    const handle = (feed?.ref || '').trim().replace(/^@/, '');
+    return X_USERNAME.test(handle) ? handle : null;
+}
+
+function sourceKey(feed) {
+    if (feed.platform === 'twitter') {
+        const handle = xHandle(feed);
+        if (handle) return `x:${handle.toLowerCase()}`;
+    }
+    return feed.feedUrl;
+}
+
+// Timeline tweets as the sweep's dated entries, oldest first. The item carries
+// what buildSocialEmbed and the repost line read (link, text, the account's
+// display name), and `tweet` spares delivery a second lookup.
+function tweetEntries(tweets, handle) {
+    const own = tweets.find(t => t.author.handle.toLowerCase() === handle.toLowerCase());
+    const accountName = own ? own.author.name : '';
+    return tweets
+        .filter(t => t.createdAt && !Number.isNaN(t.createdAt.getTime()))
+        .map(t => ({
+            item: { link: t.url, title: t.text, creator: accountName },
+            date: t.createdAt,
+            tweet: t,
+        }))
+        .sort((a, b) => a.date - b.date);
+}
+
+// The bridge feed an X subscription can fall back to: the configured bridge's
+// route for the handle, or — for a subscription stored when the bridge was the
+// only X source — the bridge URL it was stored with.
+function xBridgeUrl(handle, storedFeedUrl) {
+    const current = twitterBridgeFeedUrl(handle);
+    if (current) return current;
+    if (typeof storedFeedUrl !== 'string' || !isHttpUrl(storedFeedUrl)) return null;
+    try {
+        // The stored profile URL is an identity, not a feed.
+        if (/(^|\.)x\.com$/i.test(new URL(storedFeedUrl).hostname)) return null;
+    } catch {
+        return null;
+    }
+    return storedFeedUrl;
+}
+
+/**
+ * An X account's latest posts: FxTwitter first, the bridge if that fails.
+ * Throws only when every available source failed.
+ *
+ * @returns {Promise<{ parsedFeed: object, entries: object[], via: string }>}
+ */
+async function loadXSource(handle, bridgeOrigin, storedFeedUrl) {
+    let apiError = null;
+    if (isXApiEnabled()) {
+        try {
+            const tweets = await fetchProfileTimeline(handle);
+            const own = tweets.find(t => t.author.handle.toLowerCase() === handle.toLowerCase());
+            return {
+                parsedFeed: {
+                    title: own ? `${own.author.name} (@${own.author.handle})` : `@${handle}`,
+                    ...(own?.author.avatar ? { image: { url: own.author.avatar } } : {}),
+                    items: [],
+                },
+                entries: tweetEntries(tweets, handle),
+                via: 'fxtwitter',
+            };
+        } catch (error) {
+            apiError = error;
+        }
+    }
+
+    const bridgeUrl = xBridgeUrl(handle, storedFeedUrl);
+    if (!bridgeUrl) throw apiError || new Error(`No source for @${handle}: FxTwitter is off and no bridge is set.`);
+    try {
+        const parsedFeed = await parseFeedUrl(bridgeUrl, bridgeOrigin);
+        if (apiError) console.warn(`[Social] FxTwitter failed for @${handle} (${apiError.message}); read the bridge instead.`);
+        return { parsedFeed, entries: datedItems(parsedFeed), via: 'bridge' };
+    } catch (bridgeError) {
+        if (!apiError) throw bridgeError;
+        throw new Error(`FxTwitter: ${apiError.message} Bridge: ${bridgeError.message}`, { cause: bridgeError });
+    }
+}
+
+async function loadSource(key, feed, bridgeOrigin) {
+    if (key.startsWith('x:')) return loadXSource(xHandle(feed), bridgeOrigin, feed.feedUrl);
+    const parsedFeed = await parseFeedUrl(feed.feedUrl, bridgeOrigin);
+    return { parsedFeed, entries: datedItems(parsedFeed), via: 'feed' };
+}
+
 /**
  * One sweep of every social subscription across every guild: fetch each unique
  * feed URL once, fan the parsed result out to every subscribing channel, and
@@ -575,16 +674,18 @@ async function checkSocialFeeds(client) {
         const bridgeOrigin = getBridgeOrigin();
         const guilds = await Guild.find({ 'socialFeeds.0': { $exists: true } }, 'guildId socialFeeds').lean();
 
-        // Fetch each resolved URL once and fan it out — a popular channel may be
-        // followed by many guilds.
-        const subscriptionsByUrl = new Map(); // feedUrl -> [{ guild, feed }]
+        // Fetch each source once and fan it out — a popular channel may be
+        // followed by many guilds. Keyed by sourceKey: the feed URL, or the
+        // handle for an X account.
+        const subscriptionsByUrl = new Map(); // sourceKey -> [{ guild, feed }]
         for (const guild of guilds) {
             // Per-guild job: each shard posts only for the guilds it can reach.
             if (!handlesGuild(guild.guildId, client)) continue;
             for (const feed of guild.socialFeeds) {
                 if (!feed?.feedUrl) continue;
-                let subs = subscriptionsByUrl.get(feed.feedUrl);
-                if (!subs) subscriptionsByUrl.set(feed.feedUrl, subs = []);
+                const key = sourceKey(feed);
+                let subs = subscriptionsByUrl.get(key);
+                if (!subs) subscriptionsByUrl.set(key, subs = []);
                 subs.push({ guild, feed });
             }
         }
@@ -599,9 +700,11 @@ async function checkSocialFeeds(client) {
                 const url = urls[next++];
                 if (shouldSkipDeadFeed(url)) { skipped++; continue; }
 
+                const subs = subscriptionsByUrl.get(url);
                 let parsedFeed;
+                let entries;
                 try {
-                    parsedFeed = await parseFeedUrl(url, bridgeOrigin);
+                    ({ parsedFeed, entries } = await loadSource(url, subs[0].feed, bridgeOrigin));
                     recordFeedSuccess(url);
                 } catch (error) {
                     recordFeedFailure(url, error);
@@ -609,10 +712,9 @@ async function checkSocialFeeds(client) {
                     continue;
                 }
 
-                const entries = datedItems(parsedFeed);
                 if (!entries.length) continue;
 
-                for (const { guild, feed } of subscriptionsByUrl.get(url)) {
+                for (const { guild, feed } of subs) {
                     posted += await deliverSocialUpdate(client, guild, feed, parsedFeed, entries);
                 }
             }
@@ -634,6 +736,7 @@ async function checkSocialFeeds(client) {
 
 module.exports = {
     checkSocialFeeds,
+    loadXSource,
     __test__: {
         feedFailCounts, feedLastFailTime, shouldSkipDeadFeed,
         pruneFeedFailureState, DEAD_FEED_STATE_TTL_MS,
@@ -641,5 +744,6 @@ module.exports = {
         datedItems, MAX_ITEMS_PER_SWEEP, buildSocialEmbed,
         postText, postMedia, postMediaList, feedAvatar, postAuthorName,
         buildSocialMessage, buildTweetEmbeds, linkifyTweetText, discordSafeImageUrl,
+        sourceKey, xBridgeUrl, tweetEntries,
     },
 };

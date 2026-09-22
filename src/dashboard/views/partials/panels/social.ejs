@@ -5,8 +5,9 @@
                     </div>
 
                     <p class="ai-inner-desc">
-                        YouTube and Reddit work out of the box. X&nbsp;(Twitter), Instagram, and TikTok publish no public feed,
-                        so following them needs an RSSHub-compatible bridge — set <code>SOCIAL_BRIDGE_BASE_URL</code> on the bot.
+                        YouTube, Reddit, and X&nbsp;(Twitter) work out of the box — X posts are read through the free FxTwitter API.
+                        Instagram and TikTok publish no public feed, so following them needs an RSSHub-compatible bridge —
+                        set <code>SOCIAL_BRIDGE_BASE_URL</code> on the bot. A bridge also serves as X's backup source.
                     </p>
 
                     <%# The list is re-rendered from the API response after every add or
@@ -35,7 +36,7 @@
                         <select id="social-platform">
                             <option value="youtube">▶️ YouTube</option>
                             <option value="reddit">👽 Reddit</option>
-                            <option value="twitter">𝕏 X (Twitter) — needs bridge</option>
+                            <option value="twitter">𝕏 X (Twitter)</option>
                             <option value="instagram">📸 Instagram — needs bridge</option>
                             <option value="tiktok">🎵 TikTok — needs bridge</option>
                         </select>

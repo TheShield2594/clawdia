@@ -514,3 +514,135 @@ test('linkify leaves emails, URL paths and fragments alone', () => {
     expect(linkifyTweetText('mail a@b.com or medium.com/@user and site.com/#frag')).toBe('mail a@b.com or medium.com/@user and site.com/#frag');
     expect(linkifyTweetText('@jack #1 #tag')).toBe('[@jack](https://x.com/jack) #1 [#tag](https://x.com/hashtag/tag)');
 });
+
+// ── X accounts read from the FxTwitter timeline ────────────────────────────
+//
+// An X subscription is swept by handle: FxTwitter's timeline first, the bridge
+// only if that fails. These pin the source order, the shared sweep key for old
+// (bridge URL) and new (profile URL) subscriptions, and cursor continuity.
+
+const TIMELINE_URL = 'https://api.fxtwitter.com/2/profile/NOTWOKESHOWS/statuses?count=20';
+
+function timelineTweet(id, seconds, overrides = {}) {
+    return {
+        id: String(id),
+        url: `https://x.com/NOTWOKESHOWS/status/${id}`,
+        text: `post ${id}`,
+        created_timestamp: seconds,
+        author: { name: 'NOT WOKE SHOWS.com', screen_name: 'NOTWOKESHOWS', avatar_url: 'https://pbs.twimg.com/a_normal.jpg' },
+        media: {},
+        ...overrides,
+    };
+}
+
+function timelineBody(tweets) {
+    return JSON.stringify({ code: 200, results: tweets });
+}
+
+function xProfileFeed(id, channelId, lastPublished = null) {
+    return { _id: id, platform: 'twitter', ref: '@NOTWOKESHOWS', feedUrl: 'https://x.com/NOTWOKESHOWS', channelId, lastPublished };
+}
+
+describe('X timeline source', () => {
+    const ORIGINAL_BRIDGE = process.env.SOCIAL_BRIDGE_BASE_URL;
+    beforeEach(() => require('../src/services/xEnrichment').__test__.cache.clear());
+    afterEach(() => {
+        if (ORIGINAL_BRIDGE === undefined) delete process.env.SOCIAL_BRIDGE_BASE_URL;
+        else process.env.SOCIAL_BRIDGE_BASE_URL = ORIGINAL_BRIDGE;
+    });
+
+    test('first sight posts the newest tweet from the timeline, with no bridge and no second lookup', async () => {
+        delete process.env.SOCIAL_BRIDGE_BASE_URL;
+        // Newest first, as X lists them, with an old pinned tweet on top.
+        mockFeedBodies.set(TIMELINE_URL, timelineBody([
+            timelineTweet(1, 1600000000, { text: 'pinned' }),
+            timelineTweet(3, 1758570300, { media: { photos: [{ type: 'photo', url: 'https://pbs.twimg.com/media/m.jpg', width: 1, height: 1 }] } }),
+            timelineTweet(2, 1758570000),
+        ]));
+        mockGuilds = [{ guildId: 'g1', socialFeeds: [xProfileFeed('f1', 'c1')] }];
+        const client = makeClient();
+
+        await checkSocialFeeds(client);
+
+        expect(mockFetches).toEqual([TIMELINE_URL]);
+        expect(client.send).toHaveBeenCalledTimes(1);
+        const embed = client.send.mock.calls[0][0].embeds[0].data;
+        expect(embed.description).toBe('post 3');
+        expect(embed.url).toBe('https://x.com/NOTWOKESHOWS/status/3');
+        expect(embed.image.url).toBe('https://pbs.twimg.com/media/m.jpg');
+        expect(embed.author.name).toBe('NOT WOKE SHOWS.com (@NOTWOKESHOWS)');
+        expect(Guild.updateOne).toHaveBeenCalledWith(
+            { guildId: 'g1', 'socialFeeds._id': 'f1' },
+            { $set: { 'socialFeeds.$.lastPublished': new Date(1758570300 * 1000) } },
+        );
+    });
+
+    test('only tweets newer than the cursor post, oldest first', async () => {
+        mockFeedBodies.set(TIMELINE_URL, timelineBody([
+            timelineTweet(4, 1758570900), timelineTweet(3, 1758570600), timelineTweet(2, 1758570300),
+        ]));
+        mockGuilds = [{ guildId: 'g1', socialFeeds: [xProfileFeed('f1', 'c1', new Date(1758570300 * 1000))] }];
+        const client = makeClient();
+
+        await checkSocialFeeds(client);
+
+        expect(client.send.mock.calls.map(c => c[0].embeds[0].data.description)).toEqual(['post 3', 'post 4']);
+    });
+
+    test('old bridge-URL and new profile-URL subscriptions to one account share one fetch', async () => {
+        mockFeedBodies.set(TIMELINE_URL, timelineBody([timelineTweet(2, 1758570000)]));
+        mockGuilds = [
+            { guildId: 'g1', socialFeeds: [xFeed('f1', 'http://rsshub:1200/twitter/user/NOTWOKESHOWS', 'c1')] },
+            { guildId: 'g2', socialFeeds: [{ ...xProfileFeed('f2', 'c2'), ref: '@notwokeshows' }] },
+        ];
+        const client = makeClient();
+
+        await checkSocialFeeds(client);
+
+        expect(mockFetches).toEqual([TIMELINE_URL]);
+        expect(client.send).toHaveBeenCalledTimes(2);
+    });
+
+    test('a repost says which account reposted it, by that account’s own name', async () => {
+        mockFeedBodies.set(TIMELINE_URL, timelineBody([
+            timelineTweet(9, 1758570600, { url: 'https://x.com/studio/status/9', author: { name: 'Studio', screen_name: 'studio' } }),
+            timelineTweet(2, 1758570000),
+        ]));
+        mockGuilds = [{ guildId: 'g1', socialFeeds: [xProfileFeed('f1', 'c1')] }];
+        const client = makeClient();
+
+        await checkSocialFeeds(client);
+
+        const embed = client.send.mock.calls[0][0].embeds[0].data;
+        expect(embed.author.name).toBe('Studio (@studio)');
+        expect(embed.description.startsWith('-# 🔁 NOT WOKE SHOWS.com reposted')).toBe(true);
+    });
+
+    test('when FxTwitter fails the configured bridge is read instead', async () => {
+        process.env.SOCIAL_BRIDGE_BASE_URL = 'https://rsshub.example.com';
+        const bridgeUrl = 'https://rsshub.example.com/twitter/user/NOTWOKESHOWS';
+        mockFeedBodies.set(TIMELINE_URL, new Error('Feed request failed with HTTP 503.'));
+        mockFeedBodies.set(bridgeUrl, xXml({ description: 'from the bridge' }));
+        mockGuilds = [{ guildId: 'g1', socialFeeds: [xProfileFeed('f1', 'c1')] }];
+        const client = makeClient();
+
+        await checkSocialFeeds(client);
+
+        expect(mockFetches).toEqual([TIMELINE_URL, bridgeUrl]);
+        expect(client.send.mock.calls[0][0].embeds[0].data.description).toBe('from the bridge');
+        expect(feedFailCounts.size).toBe(0);
+    });
+
+    test('when every source fails the account counts one failure, keyed by handle', async () => {
+        delete process.env.SOCIAL_BRIDGE_BASE_URL;
+        mockFeedBodies.set(TIMELINE_URL, new Error('Feed request failed with HTTP 503.'));
+        mockGuilds = [{ guildId: 'g1', socialFeeds: [xProfileFeed('f1', 'c1')] }];
+        const client = makeClient();
+
+        await checkSocialFeeds(client);
+
+        expect(client.send).not.toHaveBeenCalled();
+        expect(feedFailCounts.get('x:notwokeshows')).toBe(1);
+        expect(Guild.updateOne).not.toHaveBeenCalled();
+    });
+});

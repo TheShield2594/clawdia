@@ -154,3 +154,39 @@ test('non-X links and disabled lookups never fetch', async () => {
     expect(await fetchTweetDetails('https://x.com/a/status/1', { fetchText })).toBeNull();
     expect(fetchText).not.toHaveBeenCalled();
 });
+
+describe('fetchProfileTimeline', () => {
+    const { fetchProfileTimeline } = require('../src/services/xEnrichment');
+
+    test('reads the v2 timeline, flattens grouped threads and primes the per-id cache', async () => {
+        delete process.env.SOCIAL_X_API_BASE_URL;
+        const fetchText = jest.fn(async () => JSON.stringify({
+            code: 200,
+            results: [
+                fxTweet({ id: '1', url: 'https://x.com/NOTWOKESHOWS/status/1' }),
+                { type: 'thread', conversation_id: '2', statuses: [fxTweet({ id: '2' }), fxTweet({ id: '3' })] },
+                { type: 'tombstone' },
+            ],
+        }));
+
+        const tweets = await fetchProfileTimeline('NOTWOKESHOWS', { fetchText });
+
+        expect(fetchText).toHaveBeenCalledWith('https://api.fxtwitter.com/2/profile/NOTWOKESHOWS/statuses?count=20');
+        expect(tweets.map(t => t.id)).toEqual(['1', '2', '3']);
+        // A later per-id lookup of one of these is answered from the cache.
+        const lookup = jest.fn();
+        expect((await fetchTweetDetails('https://x.com/NOTWOKESHOWS/status/1', { fetchText: lookup })).id).toBe('1');
+        expect(lookup).not.toHaveBeenCalled();
+    });
+
+    test('throws readable errors so the sweep can fall back to the bridge', async () => {
+        const notFound = jest.fn(async () => JSON.stringify({ code: 404, results: [] }));
+        await expect(fetchProfileTimeline('nobody', { fetchText: notFound })).rejects.toThrow(/@nobody was not found/);
+
+        const html = jest.fn(async () => '<html>');
+        await expect(fetchProfileTimeline('jack', { fetchText: html })).rejects.toThrow(/did not answer with JSON/);
+
+        process.env.SOCIAL_X_API_BASE_URL = 'off';
+        await expect(fetchProfileTimeline('jack', { fetchText: html })).rejects.toThrow(/turned off/);
+    });
+});

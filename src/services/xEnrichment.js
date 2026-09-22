@@ -11,13 +11,17 @@
  * mobile renders as an embed with no body and no picture.
  *
  * FxTwitter (the service behind fxtwitter.com / fixupx.com unfurls) exposes a
- * free, keyless JSON API that returns a tweet already normalised: full text with
+ * free, keyless JSON API that returns tweets already normalised: full text with
  * links expanded, every photo, video thumbnails and durations, the quoted tweet,
- * the link card, the reply target and the author's avatar. So the bridge stays
- * the source of *what* is new, and each new tweet is looked up here by id to
- * learn *what it is*. Any failure — the API down, a deleted tweet, a disabled
- * lookup — returns null, and the caller falls back to rendering the RSSHub item
- * as before. Nothing here can stop a post from being delivered.
+ * the link card, the reply target and the author's avatar. It serves both halves
+ * of following an account:
+ *
+ *   fetchProfileTimeline — an account's latest posts. This is the primary
+ *   source for X subscriptions; it needs no bridge and no X login. It throws on
+ *   failure, and the sweep then falls back to the RSSHub bridge if one is set.
+ *
+ *   fetchTweetDetails — one tweet by id, for items that came from the bridge.
+ *   Any failure returns null and the caller renders the RSSHub item as it is.
  *
  * The lookup goes through `safeFetchFeed`, so the same SSRF guard, DNS pinning,
  * size cap and deadlines apply as to every other outbound fetch in the sweep.
@@ -186,10 +190,20 @@ function pruneCache(now) {
     }
 }
 
+// FxTwitter's answer as JSON. A JSON.parse message ("Unexpected token '<'…")
+// means nothing to an admin reading the dashboard's Test result, so say what
+// actually happened.
+function parseApiJson(body) {
+    try {
+        return JSON.parse(body);
+    } catch {
+        throw new Error('FxTwitter did not answer with JSON — the API may be down or blocked.');
+    }
+}
+
 async function lookup(base, status, fetchText) {
     const url = `${base}/${encodeURIComponent(status.user)}/status/${encodeURIComponent(status.id)}`;
-    const body = await fetchText(url);
-    const json = JSON.parse(body);
+    const json = parseApiJson(await fetchText(url));
     const code = json && typeof json.code === 'number' ? json.code : 200;
     // A deleted or protected tweet will not come back, so that answer is kept;
     // anything else non-OK (FxTwitter's own 5xx, a rate limit) is thrown so it
@@ -197,6 +211,51 @@ async function lookup(base, status, fetchText) {
     if (code === 401 || code === 404) return null;
     if (code !== 200) throw new Error(`FxTwitter answered ${code}`);
     return normaliseTweet(json?.tweet || json?.status);
+}
+
+/** Whether FxTwitter lookups are on (they are unless SOCIAL_X_API_BASE_URL=off). */
+function isXApiEnabled() {
+    return getApiBase() !== null;
+}
+
+// FxTwitter's page size for a profile timeline. Twenty is its default and more
+// than one sweep's worth: the sweep posts at most five per source.
+const TIMELINE_COUNT = 20;
+
+/**
+ * An account's latest posts, newest first as X lists them (the sweep re-sorts by
+ * date). Reposts arrive as the original tweet; replies are left out, as on the
+ * account's main X tab.
+ *
+ * Throws when lookups are off, the account does not exist, or the API fails, so
+ * the caller can fall back to the bridge. Each tweet also primes the per-id
+ * cache, so nothing looks the same tweet up again this sweep.
+ *
+ * @param {string} handle  X username without the @
+ * @param {object} [opts]
+ * @param {(url:string)=>Promise<string>} [opts.fetchText] overridable in tests
+ * @returns {Promise<object[]>} normalised tweets (see normaliseTweet)
+ */
+async function fetchProfileTimeline(handle, opts = {}) {
+    const base = getApiBase();
+    if (!base) throw new Error('X lookups are turned off (SOCIAL_X_API_BASE_URL=off).');
+    const fetchText = opts.fetchText || (url => safeFetchFeed(url));
+    const url = `${base}/2/profile/${encodeURIComponent(handle)}/statuses?count=${TIMELINE_COUNT}`;
+    const json = parseApiJson(await fetchText(url));
+    const code = json && typeof json.code === 'number' ? json.code : 200;
+    if (code !== 200 || !Array.isArray(json.results)) {
+        throw new Error(code === 404 ? `X account @${handle} was not found or has no posts.` : `FxTwitter answered ${code}.`);
+    }
+    // A `groupthreads` response nests a conversation's posts; flatten either shape.
+    const raw = json.results.flatMap(entry => (entry && entry.type === 'thread' && Array.isArray(entry.statuses) ? entry.statuses : [entry]));
+    const tweets = raw.map(t => normaliseTweet(t)).filter(Boolean);
+
+    const now = Date.now();
+    pruneCache(now);
+    for (const tweet of tweets) {
+        if (tweet.id) cache.set(tweet.id, { at: now, promise: Promise.resolve(tweet) });
+    }
+    return tweets;
 }
 
 /**
@@ -231,7 +290,9 @@ async function fetchTweetDetails(link, opts = {}) {
 
 module.exports = {
     fetchTweetDetails,
+    fetchProfileTimeline,
+    isXApiEnabled,
     parseStatusLink,
     formatDuration,
-    __test__: { normaliseTweet, getApiBase, largeAvatar, cache, CACHE_MAX },
+    __test__: { normaliseTweet, getApiBase, largeAvatar, cache, CACHE_MAX, TIMELINE_COUNT },
 };

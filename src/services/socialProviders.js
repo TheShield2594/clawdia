@@ -24,13 +24,18 @@
  *   channel; Reddit's is `.rss` on any listing). These resolve to a URL on the
  *   platform's own host and work out of the box.
  *
- *   Bridged feeds — X/Twitter, Instagram and TikTok publish nothing an
- *   unauthenticated reader can poll, and their private APIs cost money and
- *   change without notice. The honest, maintainable way to follow them is an
- *   RSSHub-compatible bridge the operator runs (or points at): set
- *   SOCIAL_BRIDGE_BASE_URL and these resolve to `<bridge>/<route>`. With no
- *   bridge configured they refuse at add-time with a message that says why,
- *   rather than being offered and silently never posting.
+ *   Bridged feeds — Instagram and TikTok publish nothing an unauthenticated
+ *   reader can poll, and their private APIs cost money and change without
+ *   notice. The honest, maintainable way to follow them is an RSSHub-compatible
+ *   bridge the operator runs (or points at): set SOCIAL_BRIDGE_BASE_URL and
+ *   these resolve to `<bridge>/<route>`. With no bridge configured they refuse
+ *   at add-time with a message that says why, rather than being offered and
+ *   silently never posting.
+ *
+ *   X/Twitter — read from the free FxTwitter API (see xEnrichment), which needs
+ *   no bridge and no X login. A subscription stores the account's profile URL
+ *   as its identity; the sweep reads the timeline by handle, and falls back to
+ *   the bridge's `/twitter/user/<handle>` route when one is configured.
  *
  * Every resolved URL is still fetched through `safeFetchFeed` by the poller, so
  * a bridge on a private host, or a platform host that resolves to one, is
@@ -39,6 +44,7 @@
 
 const { safeFetchFeed } = require('../utils/safeFeedFetch');
 const { assertPublicHttpUrl } = require('../utils/outboundGuard');
+const { isXApiEnabled } = require('./xEnrichment');
 
 /** The env var an operator points at an RSSHub-compatible bridge instance. */
 const BRIDGE_ENV_VAR = 'SOCIAL_BRIDGE_BASE_URL';
@@ -269,9 +275,33 @@ const X_USERNAME = /^[A-Za-z0-9_]{1,15}$/;
 const IG_USERNAME = /^[A-Za-z0-9_.]{1,30}$/;
 const TIKTOK_USERNAME = /^[A-Za-z0-9_.]{1,24}$/;
 
+// The stored identity of an X subscription: the profile URL, not a feed URL.
+// It stays the same whichever source the sweep reads from, and whether or not a
+// bridge is configured, so the add route's duplicate check keeps working.
+function twitterProfileUrl(user) {
+    return `https://x.com/${user}`;
+}
+
 function resolveTwitter(input) {
     const user = bridgeUsername(input, X_USERNAME, 'X/Twitter');
-    return { feedUrl: bridgeFeedUrl(`/twitter/user/${user}`, 'X/Twitter'), ref: `@${user}` };
+    if (!isXApiEnabled() && !getBridgeBaseUrl()) {
+        throw new Error(
+            'X/Twitter is turned off: SOCIAL_X_API_BASE_URL is `off` and no social bridge is set. ' +
+            `Unset SOCIAL_X_API_BASE_URL to use the free FxTwitter API, or set ${BRIDGE_ENV_VAR}.`
+        );
+    }
+    return { feedUrl: twitterProfileUrl(user), ref: `@${user}` };
+}
+
+// The bridge's feed for an X account, or null when no usable bridge is set —
+// the sweep's fallback when FxTwitter cannot be read.
+function twitterBridgeFeedUrl(user) {
+    if (!X_USERNAME.test(user || '') || !getBridgeBaseUrl()) return null;
+    try {
+        return bridgeFeedUrl(`/twitter/user/${user}`, 'X/Twitter');
+    } catch {
+        return null;
+    }
 }
 
 function resolveInstagram(input) {
@@ -321,8 +351,9 @@ const PROVIDERS = {
         color: 0x1DA1F2,
         verb: 'posted',
         kind: 'post',
-        requiresBridge: true,
-        placeholder: '@handle or profile URL (needs a social bridge)',
+        // Only when FxTwitter lookups are switched off does X need the bridge.
+        get requiresBridge() { return !isXApiEnabled(); },
+        placeholder: '@handle or profile URL',
         resolve: input => resolveTwitter(input),
     },
     instagram: {
@@ -417,6 +448,8 @@ module.exports = {
     listProviders,
     isBridgeConfigured,
     getBridgeOrigin,
+    twitterBridgeFeedUrl,
+    X_USERNAME,
     __test__: {
         resolveYoutube, resolveReddit, resolveTwitter, resolveInstagram, resolveTiktok,
         extractChannelId, bridgeFeedUrl, getBridgeBaseUrl, bridgeUsername,

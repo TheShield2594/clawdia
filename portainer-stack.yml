@@ -812,13 +812,14 @@ services:
   #
   #   deploy the stack, then start it on demand with the `social` profile.
   #
-  # YouTube and Reddit notifications need nothing here — they read the public
-  # feeds those platforms publish. X/Twitter, Instagram and TikTok publish no
-  # feed, so following them needs an RSSHub-compatible bridge. This runs one on
+  # YouTube, Reddit and X notifications need nothing here — YouTube and Reddit
+  # read the public feeds those platforms publish, and X is read through the
+  # free FxTwitter API. Instagram and TikTok publish no feed, so following them
+  # needs an RSSHub-compatible bridge; for X it is only a backup source. This runs one on
   # the internal network; set SOCIAL_BRIDGE_BASE_URL=http://rsshub:1200 in the
   # stack environment and redeploy the bot to turn those platforms on in the
-  # dashboard's Social panel. Left disabled, the feature still offers YouTube
-  # and Reddit.
+  # dashboard's Social panel. Left disabled, the feature still offers YouTube,
+  # Reddit and X.
   #
   # Those three routes are the fragile part: the platforms actively block
   # scraping, so a route can need extra RSSHub config (login cookies or tokens)

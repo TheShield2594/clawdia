@@ -809,12 +809,13 @@ services:
   #
   #   docker compose --profile social up -d
   #
-  # YouTube and Reddit notifications need nothing here — they read the public
-  # feeds those platforms publish. X/Twitter, Instagram and TikTok publish no
-  # feed, so following them needs an RSSHub-compatible bridge. This runs one on
+  # YouTube, Reddit and X notifications need nothing here — YouTube and Reddit
+  # read the public feeds those platforms publish, and X is read through the
+  # free FxTwitter API. Instagram and TikTok publish no feed, so following them
+  # needs an RSSHub-compatible bridge; for X it is only a backup source. This runs one on
   # the internal network; set SOCIAL_BRIDGE_BASE_URL=http://rsshub:1200 in .env
   # and restart the bot to turn those platforms on in the dashboard's Social
-  # panel. Left disabled, the feature still offers YouTube and Reddit.
+  # panel. Left disabled, the feature still offers YouTube, Reddit and X.
   #
   # Those three routes are the fragile part: the platforms actively block
   # scraping, so a route can need extra RSSHub config (login cookies or tokens)
@@ -840,8 +841,9 @@ services:
       # credentials to read them; YouTube and Reddit need none. These pass a
       # matching variable from .env through to RSSHub — empty by default, which
       # RSSHub reads as "not configured" (so nothing changes until you set one).
-      # X (Twitter): the auth_token cookie from a logged-in session, comma-separate
-      # several to rotate. Instagram: a session cookie, or a username+password.
+      # X (Twitter), only for the bridge's backup X route (the bot reads X through
+      # FxTwitter first): the auth_token cookie from a logged-in session,
+      # comma-separate several to rotate. Instagram: a session cookie, or a username+password.
       # TikTok's RSSHub route needs no credential. NEVER use an account you value —
       # scraping violates these platforms' ToS and can get it suspended; use a
       # throwaway, or the official X API instead. See .env.example.

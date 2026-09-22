@@ -77,7 +77,7 @@ function renderSocialFeeds(feeds) {
 const SOCIAL_PLACEHOLDERS = {
     youtube: 'youtube.com/@handle, channel URL, or channel ID (UC…)',
     reddit: 'r/subreddit or u/username',
-    twitter: '@handle or profile URL (needs a social bridge)',
+    twitter: '@handle or profile URL',
     instagram: '@handle or profile URL (needs a social bridge)',
     tiktok: '@handle or profile URL (needs a social bridge)',
 };
