@@ -4,7 +4,7 @@
     "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
     "style": "B3 (rarity rim, flat 2-tone, no gloss)",
     "date": "2026-09-21",
-    "count": 276,
+    "count": 311,
     "resultsAdded": {
       "date": "2026-09-21",
       "count": 144,
@@ -16,6 +16,12 @@
       "count": 14,
       "quality": "high",
       "note": "pet species portraits (issue #1082)"
+    },
+    "exploreAdded": {
+      "date": "2026-09-22",
+      "count": 35,
+      "quality": "high",
+      "note": "explore regions (10) and relics (25)"
     }
   },
   "items": {
@@ -3054,6 +3060,391 @@
       "model": "gpt_image_2_5",
       "date": "2026-09-21",
       "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260921_212123_1276a446-370f-43dc-9015-a0984aefd0c9.png"
+    },
+    "explore:whispering_forest": {
+      "file": "explore__whispering_forest.png",
+      "jobId": "539e4fb2-6574-419f-92eb-6caa4337f352",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_141739_539e4fb2-6574-419f-92eb-6caa4337f352.png"
+    },
+    "explore:crumbling_ruins": {
+      "file": "explore__crumbling_ruins.png",
+      "jobId": "51954a45-3833-470c-b6cb-7cc25fd24fd5",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_141740_51954a45-3833-470c-b6cb-7cc25fd24fd5.png"
+    },
+    "explore:crystal_caves": {
+      "file": "explore__crystal_caves.png",
+      "jobId": "32ac8155-2dac-4224-ad75-c28377f9a8e7",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_141741_32ac8155-2dac-4224-ad75-c28377f9a8e7.png"
+    },
+    "explore:sunken_docks": {
+      "file": "explore__sunken_docks.png",
+      "jobId": "249955ab-b925-4a67-9b11-a8398fcc3266",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_141740_249955ab-b925-4a67-9b11-a8398fcc3266.png"
+    },
+    "explore:starfall_wastes": {
+      "file": "explore__starfall_wastes.png",
+      "jobId": "30308ee4-8a39-4fab-97e7-9c7c757d2ca0",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_141900_30308ee4-8a39-4fab-97e7-9c7c757d2ca0.png"
+    },
+    "explore:frostveil_pass": {
+      "file": "explore__frostveil_pass.png",
+      "jobId": "6548f7b5-c876-427f-844f-ff1eeb01f969",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_141740_6548f7b5-c876-427f-844f-ff1eeb01f969.png"
+    },
+    "explore:hollowgrave_lane": {
+      "file": "explore__hollowgrave_lane.png",
+      "jobId": "0c00d53c-ace7-46e1-b580-d1b2cb4e66d5",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_141900_0c00d53c-ace7-46e1-b580-d1b2cb4e66d5.png"
+    },
+    "explore:scorchglass_shore": {
+      "file": "explore__scorchglass_shore.png",
+      "jobId": "fdebb774-3eff-4343-bee0-47832e43f648",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_141859_fdebb774-3eff-4343-bee0-47832e43f648.png"
+    },
+    "explore:velvet_arcade": {
+      "file": "explore__velvet_arcade.png",
+      "jobId": "2578db49-3049-43a0-a107-64f7fb7e34f9",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_141900_2578db49-3049-43a0-a107-64f7fb7e34f9.png"
+    },
+    "explore:arctic_tundra": {
+      "file": "explore__arctic_tundra.png",
+      "jobId": "cb7ea36a-2444-4286-8272-143005dc5e61",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_141900_cb7ea36a-2444-4286-8272-143005dc5e61.png"
+    },
+    "relic:whisperwood_charm": {
+      "file": "relic__whisperwood_charm.png",
+      "jobId": "4635bb1e-cbc3-4831-ac98-ca61e9afece6",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142007_4635bb1e-cbc3-4831-ac98-ca61e9afece6.png"
+    },
+    "relic:candlewax_antler": {
+      "file": "relic__candlewax_antler.png",
+      "jobId": "c37e8e56-da7b-4e7d-bf43-c8428c8002ee",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142007_c37e8e56-da7b-4e7d-bf43-c8428c8002ee.png"
+    },
+    "relic:the_tenth_owl": {
+      "file": "relic__the_tenth_owl.png",
+      "jobId": "22942986-5a8b-4abd-97d8-485c7af9ae4c",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142008_22942986-5a8b-4abd-97d8-485c7af9ae4c.png"
+    },
+    "relic:headless_coin": {
+      "file": "relic__headless_coin.png",
+      "jobId": "1519850e-272a-4b0e-8ee0-382c2e32e470",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142114_1519850e-272a-4b0e-8ee0-382c2e32e470.png"
+    },
+    "relic:curators_brass_key": {
+      "file": "relic__curators_brass_key.png",
+      "jobId": "c189d0e2-9b4e-4c94-9529-c01293fa8cbf",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142007_c189d0e2-9b4e-4c94-9529-c01293fa8cbf.png"
+    },
+    "relic:the_final_decree": {
+      "file": "relic__the_final_decree.png",
+      "jobId": "f89e0ab8-b909-4fa8-abb1-1f3bfdc266eb",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142115_f89e0ab8-b909-4fa8-abb1-1f3bfdc266eb.png"
+    },
+    "relic:singing_scale": {
+      "file": "relic__singing_scale.png",
+      "jobId": "1b7b63ed-0ee1-4818-ba0f-705a808aead9",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142115_1b7b63ed-0ee1-4818-ba0f-705a808aead9.png"
+    },
+    "relic:bottled_resonance": {
+      "file": "relic__bottled_resonance.png",
+      "jobId": "c7cad019-2eed-4131-b6da-823ad23e3fcf",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142116_c7cad019-2eed-4131-b6da-823ad23e3fcf.png"
+    },
+    "relic:shard_of_the_frozen_storm": {
+      "file": "relic__shard_of_the_frozen_storm.png",
+      "jobId": "6c81fa5b-7424-4797-ac27-0bfb9835634e",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142221_6c81fa5b-7424-4797-ac27-0bfb9835634e.png"
+    },
+    "relic:harbormasters_stamp": {
+      "file": "relic__harbormasters_stamp.png",
+      "jobId": "70519670-ed25-4af4-bc71-7c157ca867f1",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142222_70519670-ed25-4af4-bc71-7c157ca867f1.png"
+    },
+    "relic:bottled_fog": {
+      "file": "relic__bottled_fog.png",
+      "jobId": "65724eed-99f1-44a0-8da3-7866cef6276a",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142221_65724eed-99f1-44a0-8da3-7866cef6276a.png"
+    },
+    "relic:the_return_ticket": {
+      "file": "relic__the_return_ticket.png",
+      "jobId": "c198f8cb-a84e-4ae3-bef8-56f0f6588fb4",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142221_c198f8cb-a84e-4ae3-bef8-56f0f6588fb4.png"
+    },
+    "relic:compacted_starlight": {
+      "file": "relic__compacted_starlight.png",
+      "jobId": "14231613-637d-43f5-bb9a-a10ff83c4799",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142321_14231613-637d-43f5-bb9a-a10ff83c4799.png"
+    },
+    "relic:glassback_plate": {
+      "file": "relic__glassback_plate.png",
+      "jobId": "c6b13995-ed0c-4f3a-9336-67f3ca0f5b70",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142322_c6b13995-ed0c-4f3a-9336-67f3ca0f5b70.png"
+    },
+    "relic:the_still_falling_stone": {
+      "file": "relic__the_still_falling_stone.png",
+      "jobId": "e7963114-1a7f-420a-92e1-a2ee926a741d",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142322_e7963114-1a7f-420a-92e1-a2ee926a741d.png"
+    },
+    "relic:unmelting_rose": {
+      "file": "relic__unmelting_rose.png",
+      "jobId": "6e34d59c-f19e-4e0d-95db-2f1f682d870f",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142323_6e34d59c-f19e-4e0d-95db-2f1f682d870f.png"
+    },
+    "relic:the_yetis_pencil": {
+      "file": "relic__the_yetis_pencil.png",
+      "jobId": "86864c8a-7d10-4e6a-8428-722c0732c2f0",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142423_86864c8a-7d10-4e6a-8428-722c0732c2f0.png"
+    },
+    "relic:grinning_doorknocker": {
+      "file": "relic__grinning_doorknocker.png",
+      "jobId": "b1f2d697-5496-40d8-91ad-6c67c0ae8ff6",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142423_b1f2d697-5496-40d8-91ad-6c67c0ae8ff6.png"
+    },
+    "relic:jar_of_bottled_dusk": {
+      "file": "relic__jar_of_bottled_dusk.png",
+      "jobId": "c0e58de4-cbd8-44a0-ac18-38175306b56b",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142425_c0e58de4-cbd8-44a0-ac18-38175306b56b.png"
+    },
+    "relic:pocketful_of_july": {
+      "file": "relic__pocketful_of_july.png",
+      "jobId": "17d3281d-918c-46a2-b2ff-91b1d59cd84f",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142423_17d3281d-918c-46a2-b2ff-91b1d59cd84f.png"
+    },
+    "relic:the_free_sample": {
+      "file": "relic__the_free_sample.png",
+      "jobId": "fc50684a-4bc6-4869-99da-31ee0ba6dbf1",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142523_fc50684a-4bc6-4869-99da-31ee0ba6dbf1.png"
+    },
+    "relic:exact_change_courage": {
+      "file": "relic__exact_change_courage.png",
+      "jobId": "ee7e1f5c-5eb0-4f06-b27f-7f2d04c2fe0a",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142523_ee7e1f5c-5eb0-4f06-b27f-7f2d04c2fe0a.png"
+    },
+    "relic:the_unclaimed_velvet_box": {
+      "file": "relic__the_unclaimed_velvet_box.png",
+      "jobId": "4c080e69-e119-4951-8b5c-c06681376104",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142523_4c080e69-e119-4951-8b5c-c06681376104.png"
+    },
+    "relic:tundra_trackers_compass": {
+      "file": "relic__tundra_trackers_compass.png",
+      "jobId": "a2d1c099-89a9-43a7-80de-a8bf22f4dbcd",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142523_a2d1c099-89a9-43a7-80de-a8bf22f4dbcd.png"
+    },
+    "relic:sliver_of_the_white_stag": {
+      "file": "relic__sliver_of_the_white_stag.png",
+      "jobId": "904a53fa-b8d3-41cd-9471-6d59d8ba72b7",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142624_904a53fa-b8d3-41cd-9471-6d59d8ba72b7.png"
     }
   }
 }
