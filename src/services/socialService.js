@@ -421,9 +421,12 @@ function buildTweetEmbeds(provider, feed, tweet, item, date, parsedFeed, { allow
     }
     if (tweet.text) lines.push(tweetBody(tweet.text, TWEET_TEXT_LIMIT));
 
+    // Sensitivity is per post: a post X did not flag can quote one it did, and
+    // borrowing the quoted post's picture must not carry that past the gate.
     const hideMedia = tweet.sensitive && !allowSensitive;
+    const hideQuoteMedia = hideMedia || (Boolean(tweet.quote?.sensitive) && !allowSensitive);
     const media = hideMedia ? [] : tweet.media;
-    const quoteMedia = hideMedia || !tweet.quote ? [] : tweet.quote.media;
+    const quoteMedia = hideQuoteMedia || !tweet.quote ? [] : tweet.quote.media;
     // The tweet's own pictures lead; a quote tweet with none of its own borrows
     // the quoted tweet's, which is what X shows as the post's visual.
     const shown = media.length ? media : quoteMedia;
@@ -447,7 +450,9 @@ function buildTweetEmbeds(provider, feed, tweet, item, date, parsedFeed, { allow
         if (!hideMedia && card.image) images.push(discordSafeImageUrl(card.image));
     }
 
-    if (hideMedia && (tweet.media.length || quoteMedia.length || tweet.card?.image)) {
+    const withheld = (hideMedia && (tweet.media.length || tweet.card?.image))
+        || (hideQuoteMedia && !media.length && tweet.quote?.media.length);
+    if (withheld) {
         lines.push(`⚠️ Sensitive media hidden — [view on X](${tweet.url})`);
     }
 
@@ -583,33 +588,59 @@ function sourceKey(feed) {
 // Timeline tweets as the sweep's dated entries, oldest first. The item carries
 // what buildSocialEmbed and the repost line read (link, text, the account's
 // display name), and `tweet` spares delivery a second lookup.
+//
+// The entry date is what the cursor compares, and for a repost the tweet's own
+// date is the wrong one: reposting a week-old tweet today is new activity, but
+// its created time sits behind the cursor and it would never post. FxTwitter
+// gives no repost time, only the timeline's order — newest event first — so a
+// repost is dated just after the event listed below it. That is a lower bound
+// on when the repost happened, is stable from sweep to sweep (the entries below
+// a repost do not change as newer posts arrive above it), and so lands past the
+// cursor exactly once. Own posts keep their real date, which also leaves an old
+// pinned post (listed first, but not a repost) at its real place. The embed
+// still shows the original tweet's own date.
 function tweetEntries(tweets, handle) {
-    const own = tweets.find(t => t.author.handle.toLowerCase() === handle.toLowerCase());
+    const account = handle.toLowerCase();
+    const own = tweets.find(t => t.author.handle.toLowerCase() === account);
     const accountName = own ? own.author.name : '';
-    return tweets
-        .filter(t => t.createdAt && !Number.isNaN(t.createdAt.getTime()))
-        .map(t => ({
-            item: { link: t.url, title: t.text, creator: accountName },
-            date: t.createdAt,
-            tweet: t,
-        }))
-        .sort((a, b) => a.date - b.date);
+    const dated = tweets.filter(t => t.createdAt && !Number.isNaN(t.createdAt.getTime()));
+
+    const entries = [];
+    let below = null; // the event date of the entry listed just below, walking oldest-up
+    for (let i = dated.length - 1; i >= 0; i--) {
+        const tweet = dated[i];
+        const isRepost = Boolean(tweet.repostedBy) || tweet.author.handle.toLowerCase() !== account;
+        let date = tweet.createdAt;
+        if (isRepost && below && below >= date) date = new Date(below.getTime() + 1);
+        entries.push({ item: { link: tweet.url, title: tweet.text, creator: accountName }, date, tweet });
+        // A pinned post is out of order by design; letting its old date lower
+        // the floor would only ever date a repost earlier, never later.
+        if (!below || date > below) below = date;
+    }
+    return entries.sort((a, b) => a.date - b.date);
 }
 
 // The bridge feed an X subscription can fall back to: the configured bridge's
 // route for the handle, or — for a subscription stored when the bridge was the
 // only X source — the bridge URL it was stored with.
-function xBridgeUrl(handle, storedFeedUrl) {
+//
+// Every subscription to the account is a candidate, not just the first: an old
+// subscription's bridge URL may sit behind a new one that stores the profile URL.
+function xBridgeUrls(handle, storedFeedUrls) {
+    const urls = [];
     const current = twitterBridgeFeedUrl(handle);
-    if (current) return current;
-    if (typeof storedFeedUrl !== 'string' || !isHttpUrl(storedFeedUrl)) return null;
-    try {
-        // The stored profile URL is an identity, not a feed.
-        if (/(^|\.)x\.com$/i.test(new URL(storedFeedUrl).hostname)) return null;
-    } catch {
-        return null;
+    if (current) urls.push(current);
+    for (const stored of storedFeedUrls) {
+        if (typeof stored !== 'string' || !isHttpUrl(stored) || urls.includes(stored)) continue;
+        try {
+            // The stored profile URL is an identity, not a feed.
+            if (/(^|\.)x\.com$/i.test(new URL(stored).hostname)) continue;
+        } catch {
+            continue;
+        }
+        urls.push(stored);
     }
-    return storedFeedUrl;
+    return urls;
 }
 
 /**
@@ -618,7 +649,7 @@ function xBridgeUrl(handle, storedFeedUrl) {
  *
  * @returns {Promise<{ parsedFeed: object, entries: object[], via: string }>}
  */
-async function loadXSource(handle, bridgeOrigin, storedFeedUrl) {
+async function loadXSource(handle, bridgeOrigin, storedFeedUrls = []) {
     let apiError = null;
     if (isXApiEnabled()) {
         try {
@@ -638,20 +669,25 @@ async function loadXSource(handle, bridgeOrigin, storedFeedUrl) {
         }
     }
 
-    const bridgeUrl = xBridgeUrl(handle, storedFeedUrl);
-    if (!bridgeUrl) throw apiError || new Error(`No source for @${handle}: FxTwitter is off and no bridge is set.`);
-    try {
-        const parsedFeed = await parseFeedUrl(bridgeUrl, bridgeOrigin);
-        if (apiError) console.warn(`[Social] FxTwitter failed for @${handle} (${apiError.message}); read the bridge instead.`);
-        return { parsedFeed, entries: datedItems(parsedFeed), via: 'bridge' };
-    } catch (bridgeError) {
-        if (!apiError) throw bridgeError;
-        throw new Error(`FxTwitter: ${apiError.message} Bridge: ${bridgeError.message}`, { cause: bridgeError });
+    const bridgeUrls = xBridgeUrls(handle, Array.isArray(storedFeedUrls) ? storedFeedUrls : [storedFeedUrls]);
+    if (!bridgeUrls.length) throw apiError || new Error(`No source for @${handle}: FxTwitter is off and no bridge is set.`);
+    let bridgeError = null;
+    for (const bridgeUrl of bridgeUrls) {
+        try {
+            const parsedFeed = await parseFeedUrl(bridgeUrl, bridgeOrigin);
+            if (apiError) console.warn(`[Social] FxTwitter failed for @${handle} (${apiError.message}); read the bridge instead.`);
+            return { parsedFeed, entries: datedItems(parsedFeed), via: 'bridge' };
+        } catch (error) {
+            bridgeError = error;
+        }
     }
+    if (!apiError) throw bridgeError;
+    throw new Error(`FxTwitter: ${apiError.message} Bridge: ${bridgeError.message}`, { cause: bridgeError });
 }
 
-async function loadSource(key, feed, bridgeOrigin) {
-    if (key.startsWith('x:')) return loadXSource(xHandle(feed), bridgeOrigin, feed.feedUrl);
+async function loadSource(key, subs, bridgeOrigin) {
+    const { feed } = subs[0];
+    if (key.startsWith('x:')) return loadXSource(xHandle(feed), bridgeOrigin, subs.map(sub => sub.feed.feedUrl));
     const parsedFeed = await parseFeedUrl(feed.feedUrl, bridgeOrigin);
     return { parsedFeed, entries: datedItems(parsedFeed), via: 'feed' };
 }
@@ -704,7 +740,7 @@ async function checkSocialFeeds(client) {
                 let parsedFeed;
                 let entries;
                 try {
-                    ({ parsedFeed, entries } = await loadSource(url, subs[0].feed, bridgeOrigin));
+                    ({ parsedFeed, entries } = await loadSource(url, subs, bridgeOrigin));
                     recordFeedSuccess(url);
                 } catch (error) {
                     recordFeedFailure(url, error);
@@ -744,6 +780,6 @@ module.exports = {
         datedItems, MAX_ITEMS_PER_SWEEP, buildSocialEmbed,
         postText, postMedia, postMediaList, feedAvatar, postAuthorName,
         buildSocialMessage, buildTweetEmbeds, linkifyTweetText, discordSafeImageUrl,
-        sourceKey, xBridgeUrl, tweetEntries,
+        sourceKey, xBridgeUrls, tweetEntries,
     },
 };

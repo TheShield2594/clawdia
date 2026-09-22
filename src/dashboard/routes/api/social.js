@@ -51,7 +51,7 @@ router.post('/guild/:guildId/social/validate', checkAuth, checkGuildAccess, chec
     // then the bridge — so Test answers for the source that will actually post.
     if (target.platform === 'twitter') {
         try {
-            const { parsedFeed, entries } = await loadXSource(target.ref.replace(/^@/, ''), getBridgeOrigin(), target.feedUrl);
+            const { parsedFeed, entries } = await loadXSource(target.ref.replace(/^@/, ''), getBridgeOrigin(), [target.feedUrl]);
             return res.json({
                 valid: true,
                 ref: target.ref,

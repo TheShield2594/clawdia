@@ -646,3 +646,96 @@ describe('X timeline source', () => {
         expect(Guild.updateOne).not.toHaveBeenCalled();
     });
 });
+
+// ── Review follow-ups (#1105) ──────────────────────────────────────────────
+
+test('a quoted post X marked sensitive does not lend its picture outside age-restricted channels', async () => {
+    const tweet = fxTweet({
+        text: 'look at this',
+        quote: {
+            id: '7', url: 'https://x.com/other/status/7', text: 'nsfw',
+            author: { name: 'Other', screen_name: 'other' },
+            possibly_sensitive: true,
+            media: { photos: [{ type: 'photo', url: 'https://pbs.twimg.com/media/q.jpg', width: 1, height: 1 }] },
+        },
+    });
+    const sfw = await sweepEnrichedX(tweet);
+    expect(sfw[0].image).toBeUndefined();
+    expect(sfw[0].description).toContain('Sensitive media hidden');
+
+    const nsfw = await sweepEnrichedX(tweet, { nsfw: true });
+    expect(nsfw[0].image.url).toBe('https://pbs.twimg.com/media/q.jpg');
+    expect(nsfw[0].description).not.toContain('Sensitive media hidden');
+});
+
+describe('X timeline reposts and fallbacks', () => {
+    const ORIGINAL_BRIDGE = process.env.SOCIAL_BRIDGE_BASE_URL;
+    beforeEach(() => require('../src/services/xEnrichment').__test__.cache.clear());
+    afterEach(() => {
+        if (ORIGINAL_BRIDGE === undefined) delete process.env.SOCIAL_BRIDGE_BASE_URL;
+        else process.env.SOCIAL_BRIDGE_BASE_URL = ORIGINAL_BRIDGE;
+    });
+
+    const oldRepost = () => timelineTweet(5, 1700000000, {
+        url: 'https://x.com/studio/status/5', text: 'an old post', author: { name: 'Studio', screen_name: 'studio' },
+    });
+
+    test('reposting an old tweet after the cursor posts it once, and a later post does not bring it back', async () => {
+        const cursor = new Date(1758570000 * 1000);
+        // The repost is newer than own post 2 (listed below it), though the
+        // tweet it reposts is far older than the cursor.
+        mockFeedBodies.set(TIMELINE_URL, timelineBody([oldRepost(), timelineTweet(2, 1758570000)]));
+        mockGuilds = [{ guildId: 'g1', socialFeeds: [xProfileFeed('f1', 'c1', cursor)] }];
+        let client = makeClient();
+
+        await checkSocialFeeds(client);
+
+        expect(client.send).toHaveBeenCalledTimes(1);
+        const embed = client.send.mock.calls[0][0].embeds[0].data;
+        expect(embed.description).toContain('an old post');
+        // The embed keeps the reposted tweet's own date.
+        expect(embed.timestamp).toBe(new Date(1700000000 * 1000).toISOString());
+        const advanced = Guild.updateOne.mock.calls[0][1].$set['socialFeeds.$.lastPublished'];
+        expect(advanced > cursor).toBe(true);
+
+        // Next sweep: a new own post above the repost. Only it goes out.
+        Guild.updateOne.mockClear();
+        mockFeedBodies.set(TIMELINE_URL, timelineBody([timelineTweet(6, 1758571000), oldRepost(), timelineTweet(2, 1758570000)]));
+        mockGuilds = [{ guildId: 'g1', socialFeeds: [xProfileFeed('f1', 'c1', advanced)] }];
+        client = makeClient();
+
+        await checkSocialFeeds(client);
+
+        expect(client.send.mock.calls.map(c => c[0].embeds[0].data.description)).toEqual(['post 6']);
+    });
+
+    test('an old pinned post at the top of the timeline is not mistaken for new', async () => {
+        const cursor = new Date(1758570000 * 1000);
+        mockFeedBodies.set(TIMELINE_URL, timelineBody([timelineTweet(1, 1600000000, { text: 'pinned' }), timelineTweet(2, 1758570000)]));
+        mockGuilds = [{ guildId: 'g1', socialFeeds: [xProfileFeed('f1', 'c1', cursor)] }];
+        const client = makeClient();
+
+        await checkSocialFeeds(client);
+
+        expect(client.send).not.toHaveBeenCalled();
+    });
+
+    test('every subscription’s stored bridge URL is tried before the account counts as failed', async () => {
+        delete process.env.SOCIAL_BRIDGE_BASE_URL;
+        const legacyUrl = 'https://oldbridge.example/twitter/user/NOTWOKESHOWS';
+        mockFeedBodies.set(TIMELINE_URL, new Error('Feed request failed with HTTP 503.'));
+        mockFeedBodies.set(legacyUrl, xXml({ description: 'from the old bridge' }));
+        // The profile-URL subscription comes first; the legacy one holds the bridge.
+        mockGuilds = [
+            { guildId: 'g1', socialFeeds: [xProfileFeed('f1', 'c1')] },
+            { guildId: 'g2', socialFeeds: [xFeed('f2', legacyUrl, 'c2')] },
+        ];
+        const client = makeClient();
+
+        await checkSocialFeeds(client);
+
+        expect(mockFetches).toEqual([TIMELINE_URL, legacyUrl]);
+        expect(client.send).toHaveBeenCalledTimes(2);
+        expect(feedFailCounts.size).toBe(0);
+    });
+});
