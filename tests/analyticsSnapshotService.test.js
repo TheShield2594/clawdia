@@ -60,10 +60,17 @@ describe('computeSnapshot', () => {
         expect(Array.isArray(activeFilter.$or)).toBe(true);
         expect(activeFilter.$or.some(c => c.lastWork)).toBe(true);
 
-        // AI volume is counted in the pipeline, not by hydrating commandUsage.
+        // AI volume is counted in the pipeline, not by hydrating commandUsage,
+        // and bounded to the trailing window: the filter is AND(command in
+        // AI_COMMANDS, createdAt >= 7 days ago), so it reports the week's volume
+        // rather than the whole retained log.
         const pipeline = GuildAnalytics.aggregate.mock.calls[0][0];
         expect(JSON.stringify(pipeline)).toContain('$size');
-        expect(pipeline[1].$project.aiRequests.$size.$filter.cond.$in[1]).toEqual(AI_COMMANDS);
+        const cond = pipeline[1].$project.aiRequests.$size.$filter.cond;
+        expect(cond.$and).toEqual(expect.arrayContaining([{ $in: ['$$this.command', AI_COMMANDS] }]));
+        const gte = cond.$and.find(c => c.$gte);
+        expect(gte.$gte[0]).toBe('$$this.createdAt');
+        expect(gte.$gte[1]).toBeInstanceOf(Date);
     });
 
     test('degrades to zeroes for a guild with no users, no analytics doc', async () => {
@@ -123,9 +130,9 @@ describe('recordDailyMetricSnapshots', () => {
     }
 
     test('writes one row per guild this shard handles, skipping the rest', async () => {
-        Guild.find.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([
+        Guild.find.mockReturnValue({ lean: () => Promise.resolve([
             { guildId: 'mine-1' }, { guildId: 'other' }, { guildId: 'mine-2' },
-        ]) }) });
+        ]) });
         handlesGuild.mockImplementation(id => id.startsWith('mine'));
         stubCompute({ 'mine-1': { active: 1 }, 'mine-2': { active: 2 } });
         GuildAnalytics.updateOne.mockResolvedValue({ matchedCount: 1 });
@@ -138,7 +145,7 @@ describe('recordDailyMetricSnapshots', () => {
     });
 
     test('does nothing when the shard handles no guilds', async () => {
-        Guild.find.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([{ guildId: 'g' }]) }) });
+        Guild.find.mockReturnValue({ lean: () => Promise.resolve([{ guildId: 'g' }]) });
         handlesGuild.mockReturnValue(false);
 
         await recordDailyMetricSnapshots(client);
@@ -146,9 +153,9 @@ describe('recordDailyMetricSnapshots', () => {
     });
 
     test('a failing guild is logged and counted, and the run still throws', async () => {
-        Guild.find.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([
+        Guild.find.mockReturnValue({ lean: () => Promise.resolve([
             { guildId: 'ok' }, { guildId: 'boom' },
-        ]) }) });
+        ]) });
         stubCompute({ ok: { active: 1 }, boom: { active: 1 } });
         GuildAnalytics.updateOne.mockImplementation(filter =>
             filter.guildId === 'boom'

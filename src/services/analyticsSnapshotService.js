@@ -62,15 +62,21 @@ function activeUsersFilter(guildId) {
 /**
  * Compute the three snapshot metrics for one guild.
  *
- * AI request volume is counted in the aggregation rather than by hydrating the
- * whole (up to 3000-entry) commandUsage array into the process — `$size` over a
- * `$filter` returns just the number. Economy active-users and top level come
- * from the User collection, the same two questions /stats already asks.
+ * All three are trailing quantities as of now, so a day-over-day series of them
+ * is an honest trend. AI request volume is the count of Ask-Clawdia commands in
+ * the last 7 days — the same rolling window as economy active-users, and
+ * bounded rather than the whole retained log: commandUsage keeps up to 3000
+ * entries spanning many days, so counting all of them would report a cumulative
+ * figure that only ever grows, not the week's volume. It is counted in the
+ * aggregation (a `$size` over a `$filter`) rather than by hydrating the array
+ * into the process. Economy active-users and top level come from the User
+ * collection, the same two questions /stats already asks.
  *
  * @param {string} guildId
  * @returns {Promise<{economyActiveUsers: number, aiRequests: number, topLevel: number}>}
  */
 async function computeSnapshot(guildId) {
+    const since = new Date(Date.now() - ACTIVE_WINDOW_MS);
     const [economyActiveUsers, topUser, aiAgg] = await Promise.all([
         User.countDocuments(activeUsersFilter(guildId)),
         User.findOne({ guildId }).select('level').sort({ level: -1, xp: -1 }).lean(),
@@ -81,7 +87,10 @@ async function computeSnapshot(guildId) {
                     $size: {
                         $filter: {
                             input: { $ifNull: ['$commandUsage', []] },
-                            cond: { $in: ['$$this.command', AI_COMMANDS] }
+                            cond: { $and: [
+                                { $in: ['$$this.command', AI_COMMANDS] },
+                                { $gte: ['$$this.createdAt', since] }
+                            ] }
                         }
                     }
                 }
@@ -151,8 +160,10 @@ async function recordDailyMetricSnapshots(client) {
     const dateKey = new Date().toISOString().slice(0, 10);
 
     // Only guildId is read — the canonical set of guilds the bot is configured
-    // for, projected lean so the shop's image Buffers never enter this path.
-    const guilds = await Guild.find({}).select('guildId').lean();
+    // for. The projection is the second argument, not a `.select()`, so the
+    // collection scan never hydrates the Guild document's analytics arrays or
+    // shop image Buffers (tests/guildScanProjection.test.js enforces this shape).
+    const guilds = await Guild.find({}, 'guildId').lean();
     const mine = guilds.filter(g => handlesGuild(g.guildId, client));
     if (!mine.length) return;
 

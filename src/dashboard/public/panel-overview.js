@@ -101,19 +101,19 @@ function overviewSparkline(host, series) {
 // Wire one supporting tile's delta chip + sparkline from a metricTrends series
 // (#1076). `snaps` is the daily snapshot rows off /stats; `key` picks the metric
 // out of each row. These are point-in-time values, not flows like member net —
-// so the sparkline plots the values themselves (last 7 days) and the delta is
-// the latest value minus the one a week earlier, which is what the chip's "vs
-// last wk" says. Fewer than two rows leaves both untouched, so the tile keeps
-// its bare number until the snapshot job has recorded some history.
+// so the sparkline plots the values themselves (last 7 days). The sparkline
+// appears with two days of history; the delta waits for eight, because its chip
+// says "vs last wk" and that is only true once there is a value from seven days
+// before the latest to compare against (index len-8). Comparing a 3-day-old
+// guild's latest against its earliest and labelling it week-over-week would be a
+// lie, so the tile shows just the number and the sparkline until then.
 function overviewMetricTrend(snaps, key, sparkId, deltaId) {
     if (!Array.isArray(snaps) || snaps.length < 2) return;
     const series = snaps.map(s => s[key] || 0);
     overviewSparkline(document.getElementById(sparkId), series.slice(-7));
-    const latest = series[series.length - 1];
-    // A week back when there is a week of history, else the earliest point, so a
-    // 3-day-old guild still gets an honest "since we started measuring" delta.
-    const prior = series[Math.max(0, series.length - 8)];
-    overviewDelta(document.getElementById(deltaId), latest - prior);
+    if (series.length >= 8) {
+        overviewDelta(document.getElementById(deltaId), series[series.length - 1] - series[series.length - 8]);
+    }
 }
 
 // Small line icons for the activity feed and recommendation list, in the same

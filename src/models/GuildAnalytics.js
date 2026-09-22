@@ -21,7 +21,8 @@ const guildAnalyticsSchema = new Schema({
 
     // One point-in-time snapshot per UTC day of the three overview KPIs that
     // have no event stream of their own (#1076): economy active-users, AI
-    // request volume and the top member level. memberEvents gives Members a
+    // request volume (Ask-Clawdia commands in the trailing 7 days) and the top
+    // member level. memberEvents gives Members a
     // week-over-week delta and sparkline because joins/leaves are recorded as
     // they happen; these three are aggregates with nothing to reconstruct a
     // history from, so the daily snapshot job (services/analyticsSnapshotService)
