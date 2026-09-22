@@ -235,6 +235,28 @@ function preMigrationBackup(irreversibleNames) {
         return fail(`could not create backup directory ${backupDir}: ${err.message}`);
     }
 
+    // mkdirSync({ recursive: true }) is a no-op when the directory is already
+    // there, and it never asks whether this process can write into it. The
+    // bind-mounted ./backups is exactly the case that slips through: present on
+    // the host, owned by root, mounted into a container that runs as `node`
+    // (uid 1000) — so the directory exists but is read-only to the process.
+    // Without this check the first sign of it is mongodump exiting non-zero
+    // with a `permission denied` buried in its stderr and the boot aborting on
+    // an opaque `mongodump exited with status 1`. Checking up front turns that
+    // into a message that names the directory and points at the fix: make the
+    // host's ./backups writable by the uid the container runs as.
+    try {
+        fs.accessSync(backupDir, fs.constants.W_OK);
+    } catch (err) {
+        const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+        const asUid = uid === null ? '' : ` (the process runs as uid ${uid})`;
+        return fail(
+            `backup directory ${backupDir} is not writable${asUid}: ${err.code || err.message}. ` +
+            'On a Docker deploy this is the bind-mounted ./backups directory — make it writable ' +
+            'by the uid the container runs as (e.g. `chown 1000 ./backups` on the host)'
+        );
+    }
+
     console.log(`[MIGRATIONS] Taking pre-migration backup → ${archive}`);
     // Synchronous on purpose: this runs at boot before anything is served, and
     // the destructive migration must not start until the dump has finished.
@@ -576,4 +598,5 @@ module.exports = {
     pendingMigrationNames,
     waitForMigrations,
     isRecordableMigration,
+    preMigrationBackup,
 };

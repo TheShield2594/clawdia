@@ -171,6 +171,19 @@ COPY --chown=node:node . .
 # stage never ran — working exactly as it did.
 COPY --from=assets --chown=node:node /app/src/dashboard/public ./src/dashboard/public
 
+# The pre-migration dump (src/migrations/runner.js) is written to /app/backups,
+# and with MIGRATION_BACKUP=require — the default both stack files set — a dump
+# it cannot write aborts the boot. This container runs as `node` (below), so the
+# directory has to be writable by that uid. Creating it here, owned by node,
+# fixes the portainer-stack.yml case: a fresh named volume mounted over an
+# existing image directory inherits that directory's ownership, whereas over a
+# path Docker has to create it would default to root and lock `node` out. The
+# docker-compose.yml bind mount takes the host directory's ownership regardless,
+# so that side is handled by making ./backups writable on the host — either way
+# the runner now fails fast with a clear message rather than deep inside
+# mongodump when it cannot write here.
+RUN mkdir -p /app/backups && chown node:node /app/backups
+
 USER node
 
 ENV NODE_ENV=production
