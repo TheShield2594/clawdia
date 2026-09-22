@@ -6,9 +6,9 @@
  *
  * One entry per catalogue key: 83 shop-browse activity ids + 35 guild shop
  * items + 144 catch/kill/mine results (caught fish, hunted animals, mined ores)
- * + 14 pet species (issue #1082). Each entry carries the storage key, the
- * on-disk filename, the item's rarity, the rim colour that rarity maps to, and
- * the finished Higgsfield prompt.
+ * + 14 pet species (issue #1082) + 10 explore regions + 25 explore relics. Each
+ * entry carries the storage key, the on-disk filename, the item's rarity, the
+ * rim colour that rarity maps to, and the finished Higgsfield prompt.
  *
  * The look was settled on 2026-09-21 (STYLE.md §0): idiom B (minimal flat
  * shading, two tones per material, no gloss) + a rarity-coloured rim (option
@@ -32,6 +32,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const hunt = require('../../src/data/huntData');
 const fish = require('../../src/data/fishData');
 const mine = require('../../src/data/mineData');
+const explore = require('../../src/data/exploreData');
 const shopMod = require('../../src/data/defaultShopItems.js');
 const SHOP = Array.isArray(shopMod)
     ? shopMod
@@ -343,14 +344,87 @@ const addPet = (petId) => {
 };
 Object.keys(PET_SUBJECT).forEach(addPet);
 
+// --- explore regions and relics ---------------------------------------------
+// Exploration's two icon families (see src/data/activityItems.js). Regions are
+// the "places" of /explore — the analog of hunt zones / fish locations / mine
+// depths — so they take the same "round scene emblem" framing, and the five
+// core regions the same Common..Legendary depth ladder. The five seasonal
+// regions have no depth tier (the calendar gates them, not the level) and
+// neither /hunt nor /fish has a seasonal-place rarity to mirror, so they take a
+// flat Rare rim. Relics are the collectible payoff — single objects like the
+// gear icons — and read their rarity straight off the relic's own tier.
+const REGION_SUBJECT = {
+    whispering_forest: 'a round scene emblem of a moody old-growth pine forest in green half-light, gnarled trunks and drifting mist.',
+    crumbling_ruins:   'a round scene emblem of toppled marble ruins, broken columns and a headless statue under a pale sky.',
+    crystal_caves:     'a round scene emblem of a glittering cavern of humming violet crystals, faceted walls glowing from within.',
+    sunken_docks:      'a round scene emblem of a half-sunken harbor town, barnacled docks and rooftops rising from calm blue water.',
+    starfall_wastes:   'a round scene emblem of a black-glass desert under a starry night sky, meteor craters and a single falling star.',
+    frostveil_pass:    'a round scene emblem of a snowbound mountain pass strung with glowing lanterns and soft falling snow.',
+    hollowgrave_lane:  "a round scene emblem of a foggy crooked lane of leaning houses lit by grinning jack-o'-lanterns.",
+    scorchglass_shore: 'a round scene emblem of a sunlit beach of shimmering glass sand beside turquoise summer waves.',
+    velvet_arcade:     'a round scene emblem of a gaslit covered arcade of little shopfronts with warm rose light and hanging lamps.',
+    arctic_tundra:     'a round scene emblem of a flat frozen tundra under a green aurora, ice and distant white peaks.',
+};
+
+const RELIC_SUBJECT = {
+    // whispering_forest
+    whisperwood_charm:         'a small charm of pale knotted wood on a leather cord, faint carved swirls.',
+    candlewax_antler:          'a shed deer antler tip dripping warm candlewax, a tiny flame glowing at its point.',
+    the_tenth_owl:             'a small carved stone owl statuette with softly glowing eyes.',
+    // crumbling_ruins
+    headless_coin:             'an ancient tarnished gold coin stamped with a faceless headless figure.',
+    curators_brass_key:        'an ornate antique brass key with a museum-crest bow, faintly gleaming.',
+    the_final_decree:          'an imperial wax seal on a ribbon, pressed with a signet crest and still glowing warm.',
+    // crystal_caves
+    singing_scale:             'a single translucent crystal dragon scale ringing with faint sound waves.',
+    bottled_resonance:         'a corked glass vial holding swirling glowing sound-waves of violet light.',
+    shard_of_the_frozen_storm: 'a jagged crystal shard with a bolt of golden lightning frozen and crackling inside it.',
+    // sunken_docks
+    harbormasters_stamp:       "a heavy brass-bound wooden harbormaster's ink stamp dripping blue ink.",
+    bottled_fog:               'a corked glass bottle full of swirling grey harbor fog with a tiny lantern glow inside.',
+    the_return_ticket:         'an old unpunched steamship ticket, edges water-stained, faintly glowing gold.',
+    // starfall_wastes
+    compacted_starlight:       'a polished shard of glowing blue-white starlight lens, cool light held within.',
+    glassback_plate:           'a faceted plate of black volcanic glass armor with warm orange light in its cracks.',
+    the_still_falling_stone:   'a dark meteor fragment hovering just above the ground, trailing faint golden falling-star light.',
+    // frostveil_pass (seasonal)
+    unmelting_rose:            'a delicate rose sculpted entirely from packed glittering snow.',
+    the_yetis_pencil:          'a stubby well-chewed wooden pencil, oversized and dusted with frost.',
+    // hollowgrave_lane (seasonal)
+    grinning_doorknocker:      'an ornate brass door knocker shaped like a grinning face.',
+    jar_of_bottled_dusk:       "a corked jar holding glowing orange October dusk, a tiny jack-o'-lantern light within.",
+    // scorchglass_shore (seasonal)
+    pocketful_of_july:         'a small handful of warm amber-gold glass pebbles catching sunlight.',
+    the_free_sample:           'a polished spiral conch shell glowing with soft summer light, faint music rising from it.',
+    // velvet_arcade (seasonal)
+    exact_change_courage:      'a small engraved brass token stamped with a heart-and-envelope crest.',
+    the_unclaimed_velvet_box:  'an open red velvet ring box holding a softly glowing gold ring.',
+    // arctic_tundra (seasonal)
+    tundra_trackers_compass:   'a worn brass compass with a glowing needle and frost on its glass.',
+    sliver_of_the_white_stag:  'a sliver of pale antler carved with frost patterns, radiating faint cold blue light.',
+};
+
+const RELIC_RARITY = { rare: 'Rare', epic: 'Epic', legendary: 'Legendary' };
+
+// Regions: the core five ladder Common..Legendary by depth, the seasonal five
+// take a flat Rare rim.
+const coreRegions     = explore.REGION_LIST.filter(r => !r.seasonalEventId);
+const seasonalRegions = explore.REGION_LIST.filter(r =>  r.seasonalEventId);
+coreRegions.forEach((r, i) => add(`explore:${r.id}`, PLACE_RARITY[i] || 'Legendary', REGION_SUBJECT[r.id]));
+seasonalRegions.forEach((r) => add(`explore:${r.id}`, 'Rare', REGION_SUBJECT[r.id]));
+
+// Relics: single-object icons, rarity from the relic's own tier.
+explore.RELIC_LIST.forEach((r) => add(`relic:${r.slug}`, RELIC_RARITY[r.rarity], RELIC_SUBJECT[r.slug]));
+
 // --- validate against the game registries -----------------------------------
 // Every namespaced key must be a known game key: a shop-browse gear id or a
-// catch/kill/mine result id (both uploadable), or a pet species id (bundle-only,
-// see src/data/activityItems.js) — otherwise it is a typo the app will never ask
-// for. Pets are included here but not in `isUploadableItemId`: their art ships
-// only as a baked default, never a per-guild upload.
-const { ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS, PET_ITEM_IDS } = require('../../src/data/activityItems.js');
-const knownKeys = new Set([...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS, ...PET_ITEM_IDS]);
+// catch/kill/mine result id (both uploadable), or a pet species / explore region
+// / explore relic id (all bundle-only, see src/data/activityItems.js) —
+// otherwise it is a typo the app will never ask for. The bundle-only keys are
+// included here but not in `isUploadableItemId`: their art ships only as a baked
+// default, never a per-guild upload.
+const { ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS, PET_ITEM_IDS, EXPLORE_ITEM_IDS } = require('../../src/data/activityItems.js');
+const knownKeys = new Set([...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS, ...PET_ITEM_IDS, ...EXPLORE_ITEM_IDS]);
 // Every prompt ends with the shared B3 style block; "rarity rim," is the phrase
 // both the item and the pet-portrait style blocks carry, so its absence means a
 // prompt was never assembled.
