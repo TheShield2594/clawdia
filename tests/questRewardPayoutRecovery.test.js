@@ -164,13 +164,35 @@ describe('every quest-reward credit is keyed at its call site', () => {
         ['commands/economy/work.js',           [`questRewardPayoutKey('work', interaction.id)`, `questRewardPayoutKey('work-bonus', interaction.id)`]],
         ['commands/economy/daily.js',          [`questRewardPayoutKey('daily', interaction.id)`, `questRewardPayoutKey('daily-bonus', interaction.id)`]],
         ['commands/economy/pet/feed.js',       [`questRewardPayoutKey('pet', interaction.id)`]],
-        ['commands/economy/pet/status.js',     [`questRewardPayoutKey('pet', btn.id)`]],
-        ['commands/economy/pet/battle.js',     [`questRewardPayoutKey('pet'`]],
     ];
 
     test.each(cases)('%s keys its quest reward', (file, needles) => {
         const src = read(file);
         for (const needle of needles) expect(src).toContain(needle);
+    });
+
+    const countOf = (src, needle) => src.split(needle).length - 1;
+
+    // status.js and battle.js each key more than one write, and the writes share
+    // a key *shape*, so a bare substring check passes even if one of them lost
+    // its key. Assert each write independently (occurrence count, and the
+    // distinct per-fighter interpolations) so a regression on any single credit
+    // fails here.
+    test('pet status keys both the play and the rest care write', () => {
+        const src = read('commands/economy/pet/status.js');
+        // Play and rest each key by the button interaction; the string is
+        // identical, so the guard is that it appears once per write.
+        expect(countOf(src, `questRewardPayoutKey('pet', btn.id)`)).toBe(2);
+        for (const job of ['playQuestReward', 'restQuestReward']) expect(src).toContain(job);
+    });
+
+    test('pet battle keys the wild write and each PvP fighter apart', () => {
+        const src = read('commands/economy/pet/battle.js');
+        // Wild (single fighter) plus the two PvP fighters — three keyed writes.
+        expect(countOf(src, `questRewardPayoutKey('pet'`)).toBe(3);
+        expect(src).toContain(`questRewardPayoutKey('pet', interaction.id)`);       // wild
+        expect(src).toContain('${interaction.id}:${chUser.userId}');                // challenger
+        expect(src).toContain('${interaction.id}:${opUser.userId}');                // opponent
     });
 
     // The command-use handler is the one that escapes the freeze gate, so it must
