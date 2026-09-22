@@ -37,7 +37,7 @@
                         <span class="toggle-text"><strong>Spam protection</strong><span>Throttle rapid repeat messages</span></span>
                         <span class="switch"><input type="checkbox" id="mod-spam" <%= settings.moderation.spamProtection ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                    <div class="field field-pair">
                         <div><label class="field-label" for="mod-spam-threshold">Spam threshold (messages)</label><input type="number" id="mod-spam-threshold" value="<%= settings.moderation.spamThreshold || 5 %>" min="2" max="30"></div>
                         <div><label class="field-label" for="mod-spam-window">Spam window (seconds)</label><input type="number" id="mod-spam-window" value="<%= settings.moderation.spamWindow || 5 %>" min="1" max="60"></div>
                     </div>
@@ -109,7 +109,7 @@
                     <!-- Escalation tab -->
                     <div id="mod-tab-escalation" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-mod-tab-escalation">
                     <div class="panel-head"><h3>Escalation Thresholds</h3><p>Auto-actions taken as warning count rises. Set 0 to disable an action.</p></div>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                    <div class="field field-trio">
                         <div><label class="field-label" for="mod-warn-threshold">Warn count</label><input type="number" id="mod-warn-threshold" value="<%= settings.moderation.warnThreshold || 3 %>" min="1" max="50"><small>DM user at this many warnings</small></div>
                         <div><label class="field-label" for="mod-kick-threshold">Kick at (warnings)</label><input type="number" id="mod-kick-threshold" value="<%= settings.moderation.kickThreshold || 5 %>" min="0" max="50"><small>0 = disabled</small></div>
                         <div><label class="field-label" for="mod-ban-threshold">Ban at (warnings)</label><input type="number" id="mod-ban-threshold" value="<%= settings.moderation.banThreshold || 0 %>" min="0" max="50"><small>0 = disabled</small></div>
@@ -160,7 +160,7 @@
                     </div><!-- end moderation scope -->
                     <div data-save-scope="casesettings">
                     <div class="panel-head" style="margin-top:1.5rem"><h3>Case Management</h3><p>Configure SLA monitoring for open moderation cases.</p></div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                    <div class="field-pair">
                         <div>
                             <label class="field-label" for="cs-sla-hours">SLA deadline (hours)</label>
                             <input type="number" id="cs-sla-hours" value="<%= settings.caseSettings?.slaHours ?? 48 %>" min="1">

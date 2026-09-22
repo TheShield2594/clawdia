@@ -11,7 +11,7 @@
                         <label class="field-label" for="an-alert-channel">Alert channel</label>
                         <%- include('../channel-select', { id: 'an-alert-channel', placeholder: 'None', selected: settings.antiNuke?.alertChannelId }) %>
                     </div>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                    <div class="field field-pair">
                         <div>
                             <label class="field-label" for="an-window">Detection window (seconds)</label>
                             <input type="number" id="an-window" value="<%= settings.antiNuke?.windowSeconds ?? 30 %>" min="5">
@@ -43,7 +43,7 @@
                         <div><label class="field-label" for="an-jg-action">Action</label><select id="an-jg-action"><option value="kick" <%= settings.antiNuke?.joinGate?.action === 'kick' ? 'selected' : '' %>>Kick</option><option value="ban" <%= settings.antiNuke?.joinGate?.action === 'ban' ? 'selected' : '' %>>Ban</option></select></div>
                     </div>
                     <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Whitelist <small style="font-weight:400;color:var(--text-dim)">— one ID per line</small></div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                    <div class="field-pair">
                         <div>
                             <div class="field-label" id="an-whitelist-users-label">Whitelisted users</div>
                             <div class="user-search-widget" role="group" aria-labelledby="an-whitelist-users-label">

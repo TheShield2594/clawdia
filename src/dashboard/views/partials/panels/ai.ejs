@@ -80,7 +80,7 @@
                             <label class="field-label" for="ai-temperature">Temperature (<span id="ai-temp-display"><%= settings.ai.temperature ?? 0.7 %></span>)</label>
                             <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="<%= settings.ai.temperature ?? 0.7 %>" data-input="mirror-value" data-mirror-target="ai-temp-display">
                         </div>
-                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                        <div class="field field-trio">
                             <div><label class="field-label" for="ai-max-tokens">Max output tokens</label><input type="number" id="ai-max-tokens" min="32" max="8192" value="<%= settings.ai.maxTokens ?? 1024 %>"></div>
                             <div><label class="field-label" for="ai-max-history">Conversation history length</label><input type="number" id="ai-max-history" min="0" max="100" value="<%= settings.ai.maxHistory ?? 20 %>"><small>0 disables history</small></div>
                             <div><label class="field-label" for="ai-context-tokens">Model context window</label><input type="number" id="ai-context-tokens" min="1024" max="2000000" value="<%= settings.ai.contextTokens ?? '' %>"><small>Leave empty to derive it from the model name. Set it for a self-hosted model whose window only you know</small></div>
@@ -102,7 +102,7 @@
                             </select>
                             <small>Only used when semantic knowledge search is on</small>
                         </div>
-                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                        <div class="field field-trio">
                             <div><label class="field-label" for="ai-rate-limit">Rate limit (requests / user)</label><input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>"><small>0 disables. MCP tool calls share a per-window budget of 8 &times; this limit</small></div>
                             <div><label class="field-label" for="ai-rate-channel">Rate limit (requests / channel)</label><input type="number" id="ai-rate-channel" min="0" value="<%= settings.ai.rateLimitPerChannel ?? 0 %>"><small>0 disables</small></div>
                             <div><label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label><input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>"></div>
@@ -218,7 +218,7 @@
                             <label class="field-label" for="digest-sources">Source channels <small style="font-weight:normal;opacity:.7;">(leave empty to include all text channels)</small></label>
                             <%- include('../channel-select', { id: 'digest-sources', multiple: true, size: 4, selected: settings.ai?.dailyDigest?.sourceChannelIds || [] }) %>
                         </div>
-                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                        <div class="field field-trio">
                             <div>
                                 <label class="field-label" for="digest-hour">Hour (0–23)</label>
                                 <input type="number" id="digest-hour" min="0" max="23" value="<%= settings.ai?.dailyDigest?.hour ?? 9 %>">
@@ -260,7 +260,7 @@
                             <label class="field-label" for="summary-target">Target channel (where the summary is posted)</label>
                             <%- include('../channel-select', { id: 'summary-target', placeholder: 'Select a channel' }) %>
                         </div>
-                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div class="field field-pair">
                             <div>
                                 <label class="field-label" for="summary-hour">UTC hour (0–23)</label>
                                 <input type="number" id="summary-hour" min="0" max="23" value="9">
@@ -395,7 +395,7 @@
                             <small id="mcp-token-hint">Stored on the bot and sent to the MCP server when a tool is called — by Anthropic when Claude is your provider, by the bot itself otherwise. It is never shown again once saved.</small>
                         </div>
                         </form>
-                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div class="field field-pair">
                             <div>
                                 <label class="field-label" for="mcp-allowed">Only these tools <span style="font-weight:400;color:var(--text-mute)">(optional)</span></label>
                                 <input type="text" id="mcp-allowed" placeholder="search_repositories, get_file_contents">

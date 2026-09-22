@@ -46,7 +46,10 @@
         .cwp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
         .cwp-card { background: var(--cream-100); border-radius: 14px; padding: 16px 18px; }
         .cwp-card .k { font-size: 13px; color: var(--ink-500); }
-        .cwp-card .v { font-size: 18px; font-weight: 600; margin-top: 4px; }
+        /* The champion name and district totals are the card's display value:
+           Instrument Serif with tabular figures, matching the profile stats and
+           the v5 KPI numbers. */
+        .cwp-card .v { font-family: 'Instrument Serif', serif; font-size: 24px; line-height: 1.1; margin: 4px 0; font-variant-numeric: tabular-nums; }
         .cwp-event { background: var(--ink-950); color: var(--cream-50); border-radius: 16px; padding: 20px 24px; display: flex; align-items: center; gap: 16px; }
         .cwp-event .e { font-size: 32px; }
         .cwp-event .n { font-family: 'Instrument Serif', serif; font-size: 24px; }
@@ -56,13 +59,20 @@
         .cwp-row + .cwp-row { border-top: 1px solid var(--cream-200); }
         .cwp-rank { font-family: 'JetBrains Mono', monospace; color: var(--ink-500); font-size: 14px; }
         .cwp-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .cwp-name a { color: var(--rust, #d97742); text-decoration: none; }
+        /* Leaderboard name links are the page's one body-size interactive text,
+           on the cream card: the old claw-500 was 2.68:1, under WCAG 4.5. The
+           darker --claw-700 clears it and keeps the terracotta. The hover
+           underline is a second, non-colour signal. */
+        .cwp-name a { color: var(--claw-700); text-decoration: none; }
         .cwp-name a:hover { text-decoration: underline; }
         .cwp-val { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--ink-950); }
         .cwp-progress { appearance: none; -webkit-appearance: none; width: 100%; height: 6px; margin-top: 8px; border: none; border-radius: 999px; background: var(--cream-200); overflow: hidden; }
         .cwp-progress::-webkit-progress-bar { background: var(--cream-200); }
-        .cwp-progress::-webkit-progress-value { background: var(--rust, #d97742); }
-        .cwp-progress::-moz-progress-bar { background: var(--rust, #d97742); }
+        /* The filled portion carries the district's funding level, so it is a
+           meaningful graphic (WCAG 1.4.11, 3:1): claw-500 on the cream-200 track
+           was 2.35:1. --claw-700 clears 3:1 and matches the name links. */
+        .cwp-progress::-webkit-progress-value { background: var(--claw-700); }
+        .cwp-progress::-moz-progress-bar { background: var(--claw-700); }
         .cwp-foot { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--cream-200); font-size: 13px; color: var(--ink-500); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
         .cwp-foot a { color: var(--ink-950); }
         @media (max-width: 520px) { .cwp-head h1 { font-size: 30px; } }
@@ -86,6 +96,10 @@
             </div>
         </header>
 
+        <%# Emoji on this page are game content, not chrome, so the v5 de-emoji
+            sweep leaves them — the same keep #1074 records for ranks and event
+            data. The event glyph, champion values and board names are all the
+            guild's own data; none is a status or heading icon. %>
         <% if (page.event) { %>
             <section class="cwp-section">
                 <h2>Active event</h2>

@@ -13,7 +13,7 @@
                         <label class="field-label" for="bv-channel">Post to channel</label>
                         <%- include('../channel-select', { id: 'bv-channel', placeholder: 'Select a channel', selected: settings.bibleVerse && settings.bibleVerse.channelId }) %>
                     </div>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                    <div class="field field-pair">
                         <div>
                             <label class="field-label" for="bv-time">Post time (24h)</label>
                             <input type="text" id="bv-time" placeholder="08:00" value="<%= (settings.bibleVerse && settings.bibleVerse.time) || '08:00' %>">

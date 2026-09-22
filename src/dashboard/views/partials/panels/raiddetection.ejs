@@ -7,7 +7,7 @@
                         <span class="toggle-text"><strong>Enable raid detection</strong></span>
                         <span class="switch"><input type="checkbox" id="raid-enabled" <%= settings.raidDetection?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                    <div class="field field-pair">
                         <div>
                             <label class="field-label" for="raid-threshold">Join threshold</label>
                             <input type="number" id="raid-threshold" value="<%= settings.raidDetection?.threshold || 10 %>" min="2" max="100">

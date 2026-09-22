@@ -58,6 +58,7 @@
     --ink-100: #ece4d2;
     --claw-500: #d97742;
     --claw-600: #c25f2e;
+    --claw-700: #a8481f; /* claw as small text / UI fill on cream: --claw-500 is 2.68:1 and --claw-600 3.59:1, both under 4.5. This clears 4.5 on cream-50/100 and 3:1 as a fill on the cream-200 track. */
     --claw-400: #e89163;
     --claw-300: #f0ad88;
     --claw-100: #f7d8c4;
@@ -645,7 +646,11 @@ body {
    inline styles are what keep `style-src 'unsafe-inline'` in the CSP, and
    tests/dashboardInlineAttributes.test.js only lets their number fall. */
 .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
-@media (max-width: 620px) { .field-pair { grid-template-columns: 1fr; } }
+/* Three inputs across, the same family as .field-pair (#1075): the
+   `grid-template-columns:1fr 1fr 1fr;gap:.75rem` that was retyped inline at
+   each use, now with the same mobile collapse the pair gets. */
+.field-trio { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .75rem; }
+@media (max-width: 620px) { .field-pair, .field-trio { grid-template-columns: 1fr; } }
 
 input[type="text"],
 input[type="number"],

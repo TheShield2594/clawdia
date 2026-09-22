@@ -9,7 +9,7 @@
                     </label>
 
                     <div class="panel-head" style="margin-top:1.25rem"><h3>Delivery schedule</h3></div>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                    <div class="field field-trio">
                         <div>
                             <label class="field-label" for="newspaper-channel">Delivery channel</label>
                             <%- include('../channel-select', { id: 'newspaper-channel', placeholder: '— Select a channel —', selected: settings.newspaper?.channelId }) %>

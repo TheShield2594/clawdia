@@ -39,11 +39,19 @@
         .cwp-av-fallback { background: var(--ink-950); color: var(--cream-50); display: flex; align-items: center; justify-content: center; font-family: 'Instrument Serif', serif; font-size: 40px; }
         .cwp-head h1 { font-family: 'Instrument Serif', serif; font-size: 40px; margin: 0; line-height: 1.05; }
         .cwp-sub { font-family: 'JetBrains Mono', monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-500); margin-top: 6px; }
+        /* The guild link had no colour rule, so it fell back to UA blue — off the
+           warm palette. --claw-700 ties it to the page accent (5.4:1 on cream)
+           and matches the server page's leaderboard links. */
+        .cwp-sub a { color: var(--claw-700); text-decoration: none; }
+        .cwp-sub a:hover { text-decoration: underline; }
         .cwp-prestige { display: inline-block; margin-top: 10px; padding: 4px 12px; border-radius: 999px; background: var(--ink-950); color: var(--cream-50); font-size: 13px; }
         .cwp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-top: 36px; }
         .cwp-stat { background: var(--cream-100); border-radius: 14px; padding: 16px 18px; }
         .cwp-stat .k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-500); }
-        .cwp-stat .v { font-size: 24px; font-weight: 700; margin-top: 6px; }
+        /* Stat values speak the v5 KPI language: Instrument Serif at a display
+           size with tabular figures, so a column of numbers aligns on its
+           digits — the .dash-kpi-value treatment, on the light card. */
+        .cwp-stat .v { font-family: 'Instrument Serif', serif; font-size: 32px; line-height: 1; margin-top: 8px; font-variant-numeric: tabular-nums; }
         .cwp-section { margin-top: 40px; }
         .cwp-section > h2 { font-family: 'JetBrains Mono', monospace; font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-500); margin: 0 0 14px; }
         .cwp-chips { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -80,6 +88,11 @@
             <div class="cwp-stat"><div class="k">Achievements</div><div class="v"><%= card.achievementsCount.toLocaleString() %></div></div>
         </div>
 
+        <%# The profile's emoji are game content, kept by the same #1074 call as
+            the server page: the streak flame, the grind-skill glyphs below, and
+            the prestige / achievement / material glyphs are all the game's own
+            iconography (the game-card icons #1073 flags as "arguably content"),
+            not dashboard chrome the de-emoji sweep replaces with line icons. %>
         <section class="cwp-section">
             <h2>Grind levels</h2>
             <div class="cwp-chips">
