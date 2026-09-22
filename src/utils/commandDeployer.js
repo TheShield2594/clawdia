@@ -15,12 +15,13 @@ const GLOBAL_COMMAND_LIMIT = 100;
 // shape /hunt, /fish and /explore use).
 // Lower it when a consolidation lands; raising it spends the last of the
 // headroom between here and a deploy that cannot be undone by a revert. It last
-// moved for #1013, which added /mydata (the self-service data export and erasure
-// path); before that #1019/#1021/#1022 folded /coinflip and /roll into the
-// casino, folded /robstatus, /trap and /xpinfo into /rob and /rank, and deleted
-// /achievement, #1010 added /trade, and #875 folded five single-holiday commands
-// into the /event group they were gated by.
-const COMMAND_BUDGET = 88;
+// moved for #1012, which added /ticket (the private-thread ticket/modmail
+// system); before that #1013 added /mydata (the self-service data export and
+// erasure path); before that #1019/#1021/#1022 folded /coinflip and /roll into
+// the casino, folded /robstatus, /trap and /xpinfo into /rob and /rank, and
+// deleted /achievement, #1010 added /trade, and #875 folded five single-holiday
+// commands into the /event group they were gated by.
+const COMMAND_BUDGET = 89;
 
 /**
  * Serialize the command set that is about to be published, and refuse to

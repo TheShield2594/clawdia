@@ -18,7 +18,7 @@
                         <small>Members of these roles are added to each ticket and can claim, close and pull transcripts. Hold Ctrl/Cmd to select several.</small>
                     </div>
                     <div class="field">
-                        <label class="field-label" for="tickets-log-channel">Transcript / log channel <small style="font-weight:400">(optional)</small></label>
+                        <label class="field-label" for="tickets-log-channel">Transcript / log channel <small class="tickets-optional">(optional)</small></label>
                         <%- include('../channel-select', { id: 'tickets-log-channel', placeholder: 'Use the moderation log', selected: settings.tickets?.logChannelId }) %>
                         <small>Where the closing record and transcript are posted. Falls back to your moderation log channel when blank.</small>
                     </div>
@@ -46,23 +46,23 @@
                         <button class="btn btn-primary" data-action="save" data-section="tickets">Save changes</button>
                     </div>
 
-                    <div class="panel-head" style="margin-top:1.5rem">
+                    <div class="panel-head tickets-subhead">
                         <h3>Open tickets</h3>
                         <p>Tickets currently open on this server, and who has claimed each.</p>
                     </div>
-                    <div style="display:flex;justify-content:flex-end;margin-bottom:.5rem">
+                    <div class="tickets-toolbar">
                         <button class="btn btn-sm" data-action="tickets-refresh">↻ Refresh</button>
                     </div>
                     <div id="tickets-loading">
-                        <div class="skel-bar" style="width:90%"></div>
-                        <div class="skel-bar" style="width:75%"></div>
+                        <div class="skel-bar skel-w90"></div>
+                        <div class="skel-bar skel-w75"></div>
                     </div>
-                    <div id="tickets-error" style="display:none" class="analytics-error-card">
+                    <div id="tickets-error" class="analytics-error-card tickets-hidden">
                         <span class="load-error">Could not load tickets</span>
                         <button class="btn btn-sm" data-action="tickets-refresh">Retry</button>
                     </div>
-                    <div id="tickets-empty" style="display:none" class="empty-state"><h3>No open tickets</h3><p>Open tickets will appear here.</p></div>
-                    <div class="table-scroll" role="region" tabindex="0" aria-label="Open tickets" style="display:none">
+                    <div id="tickets-empty" class="empty-state tickets-hidden"><h3>No open tickets</h3><p>Open tickets will appear here.</p></div>
+                    <div id="tickets-table-wrap" class="table-scroll tickets-hidden" role="region" tabindex="0" aria-label="Open tickets">
                         <table id="tickets-table" class="cases-table">
                             <thead><tr><th>Ticket #</th><th>Opened by</th><th>Subject</th><th>Claimed by</th><th>Opened</th></tr></thead>
                             <tbody id="tickets-tbody"></tbody>

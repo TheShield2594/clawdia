@@ -1989,7 +1989,20 @@ textarea.auto-resize {
 @keyframes shimmer { 0%{opacity:.3} 50%{opacity:.7} 100%{opacity:.3} }
 .skel-tile { width: 120px; height: 56px; border-radius: 8px; background: var(--ink-700); animation: shimmer 1.4s ease-in-out infinite; }
 .skel-bar { height: 14px; border-radius: 4px; background: var(--ink-700); animation: shimmer 1.4s ease-in-out infinite; margin-bottom: .4rem; }
+.skel-bar.skel-w90 { width: 90%; }
+.skel-bar.skel-w75 { width: 75%; }
 .skel-chart { height: 160px; border-radius: 8px; background: var(--ink-700); animation: shimmer 1.4s ease-in-out infinite; margin-top: .75rem; }
+
+/* ── Tickets panel (#1012) ───────────────────────────────────────
+   Classes rather than inline styles: a new dashboard view/script must carry no
+   `style=` attribute (tests/dashboardInlineAttributes.js). `.tickets-hidden`
+   toggles the loading / error / empty / table states from panel-tickets.js. */
+.tickets-subhead { margin-top: 1.5rem; }
+.tickets-toolbar { display: flex; justify-content: flex-end; margin-bottom: .5rem; }
+.tickets-hidden { display: none; }
+.tickets-muted { opacity: .6; }
+.tickets-rawid { font-size: .8em; }
+.tickets-optional { font-weight: 400; }
 
 /* ── Analytics error / rec cards ─────────────────────────────── */
 .analytics-error-card { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; background: rgba(185,76,60,.12); border: 1px solid rgba(185,76,60,.3); border-radius: 8px; font-size: .9rem; }
