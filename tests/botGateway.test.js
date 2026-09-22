@@ -184,8 +184,26 @@ describe('botGateway hands out data, never live objects', () => {
             { id: 'v1', name: 'Voice', type: CHANNEL_TYPES.VOICE, parentId: null },
         ]);
         expect(await bot.listRoles('g1')).toEqual([
-            { id: 'r1', name: 'Member', position: 1, managed: false },
+            { id: 'r1', name: 'Member', position: 1, managed: false, dangerousPermissions: [] },
         ]);
+    });
+
+    // #1061: the facade computes which deny-set permissions a role carries where
+    // the live role is, so a dashboard route holding only plain data can refuse a
+    // privileged role from a self-assign panel without touching discord.js.
+    test('listRoles reports the deny-set permissions a role carries', async () => {
+        const { PermissionFlagsBits } = require('discord.js');
+        const priv = stubGuild();
+        priv.guild.roles.cache.set('r2', {
+            id: 'r2', name: 'Staff', position: 5, managed: false,
+            permissions: { bitfield: PermissionFlagsBits.BanMembers | PermissionFlagsBits.ManageRoles },
+        });
+        const withPriv = createBotGateway(stubClient({ guilds: { g1: priv.guild } }));
+
+        const roles = await withPriv.listRoles('g1');
+        expect(roles.find(r => r.id === 'r1').dangerousPermissions).toEqual([]);
+        // Severity order, not the order the bits were OR-ed in.
+        expect(roles.find(r => r.id === 'r2').dangerousPermissions).toEqual(['ManageRoles', 'BanMembers']);
     });
 
     // The whole facade answers "we are not in that guild" the same way, so a

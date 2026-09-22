@@ -8,6 +8,7 @@ const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { validateBaseUrl: validateOllamaBaseUrl } = require('../../../services/ai/providers/ollama');
 const { CONFIRM_MODES, MCP_ROUTES } = require('../../../config/mcpServers');
 const { isValidSlug } = require('../../lib/publicData');
+const { describeSensitivePermissions } = require('../../../utils/sensitiveRolePermissions');
 
 // Top-level Guild schema keys that the dashboard is allowed to update.
 // This whitelist prevents prototype pollution (__proto__, constructor, etc.)
@@ -445,6 +446,26 @@ function validateHeistUpdate(updates) {
     return null;
 }
 
+// `autoRoles` and `reactionRoles` are both in the allow-list, so this generic
+// endpoint can write role assignments that the dedicated routes would refuse —
+// a role carrying admin or moderator permissions handed out to joiners or to
+// anyone who reacts (#1061). Collect the role ids a patch would store into
+// either so the same deny check the dedicated routes make can be made here too.
+function collectSelfAssignRoleIds(updates) {
+    const ids = new Set();
+    const addFrom = value => {
+        if (!Array.isArray(value)) return;
+        for (const entry of value) {
+            const roleId = entry && typeof entry === 'object' ? entry.roleId : entry;
+            if (typeof roleId === 'string' && roleId) ids.add(roleId);
+        }
+    };
+    for (const [key, value] of Object.entries(updates)) {
+        if (key === 'autoRoles' || key === 'reactionRoles') addFrom(value);
+    }
+    return ids;
+}
+
 // Applies a patch of guild settings, rejecting any key outside the allow-list.
 router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
@@ -491,6 +512,25 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
     const publicPageError = validatePublicPageUpdate(updates);
     if (publicPageError) return res.status(400).json({ error: publicPageError });
+
+    // Deny-set check for self-assignable roles (#1061). Needs the live role
+    // permissions, so it is a facade call rather than a pure validator; only
+    // runs when the patch actually writes autoRoles/reactionRoles. A guild the
+    // bot is not in returns no roles — nothing to assign there anyway, and the
+    // event handlers refuse the assignment regardless.
+    const selfAssignRoleIds = collectSelfAssignRoleIds(updates);
+    if (selfAssignRoleIds.size) {
+        const roles = await req.bot.listRoles(guildId);
+        const offending = (roles || []).find(
+            role => selfAssignRoleIds.has(role.id) && role.dangerousPermissions?.length
+        );
+        if (offending) {
+            return res.status(400).json({
+                error: `The "${offending.name}" role grants ${describeSensitivePermissions(offending.dangerousPermissions)} `
+                    + 'and cannot be handed out through autorole or a reaction-role panel.',
+            });
+        }
+    }
 
     try {
         const guildSettings = await Guild.findOne({ guildId });
@@ -598,6 +638,7 @@ Object.defineProperty(module.exports, 'ALLOWED_SETTING_PARENTS', {
 
 Object.assign(module.exports, {
     isAllowedSettingKey,
+    collectSelfAssignRoleIds,
     validateWelcomeUpdate,
     validateFarewellUpdate,
     validateBirthdaysUpdate,

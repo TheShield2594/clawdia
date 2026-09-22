@@ -14,6 +14,23 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.12.5] - 2026-09-22
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Reaction-role panels and autorole no longer hand out privileged roles (#1061).
+Neither path checked whether the role it was about to give a member — on
+request, or to every joiner — carried admin or moderator permissions, so a
+`MANAGE_GUILD`-only dashboard admin could wire an `ADMINISTRATOR` role onto a
+panel and let anyone (themselves included) self-elevate, bounded only by
+Discord's hierarchy rather than anything the bot enforced. The gateway facade
+now reports the deny-set permissions a role carries (`Administrator`,
+`ManageGuild`, `ManageRoles`, `ManageChannels`, `ManageWebhooks`, `BanMembers`,
+`KickMembers`, `ModerateMembers`, `MentionEveryone`), the reaction-role,
+autorole and generic `/settings` routes refuse to configure such a role, and
+the `messageReactionAdd`/`guildMemberAdd` handlers refuse to assign one —
+closing the gap for a role that gains a permission after being configured.
+
 ## [4.12.4] - 2026-09-22
 
 Migrations through `026_backfill_shop_item_ids`.

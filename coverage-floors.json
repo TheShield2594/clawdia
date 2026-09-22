@@ -438,7 +438,6 @@
         "src/commands/utility/serverinfo.js",
         "src/dashboard/routes/api/achievements.js",
         "src/dashboard/routes/api/ai.js",
-        "src/dashboard/routes/api/autorole.js",
         "src/dashboard/routes/api/dailyDigest.js",
         "src/migrations/001_add_indexes.js",
         "src/migrations/002_hunt_indexes.js",

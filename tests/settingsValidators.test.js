@@ -44,6 +44,7 @@ const {
     validateDynamicPricingUpdate,
     validateAiUpdate,
     validateHeistUpdate,
+    collectSelfAssignRoleIds,
 } = settings;
 
 const SNOWFLAKE = '111222333444555666';
@@ -606,5 +607,85 @@ describe('POST /guild/:guildId/settings', () => {
         const res = await post({ 'welcome.enabled': true });
 
         expect(res.status).toBe(404);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #1061: autoRoles/reactionRoles are in the allow-list, so this generic
+// endpoint is a third way to configure a self-assignable role — one the
+// dedicated routes' deny check has to cover here too.
+// ---------------------------------------------------------------------------
+
+describe('collectSelfAssignRoleIds', () => {
+    it('gathers role ids from autoRoles and reactionRoles entries', () => {
+        const ids = collectSelfAssignRoleIds({
+            autoRoles: [{ roleId: 'a1' }, { roleId: 'a2' }],
+            reactionRoles: [{ roleId: 'r1', emoji: '👍' }],
+            'welcome.enabled': true,
+        });
+        expect([...ids].sort()).toEqual(['a1', 'a2', 'r1']);
+    });
+
+    it('ignores everything that is not one of the two role parents', () => {
+        expect(collectSelfAssignRoleIds({ 'welcome.enabled': true, levelRoles: [{ roleId: 'x' }] }).size).toBe(0);
+    });
+});
+
+describe('POST /guild/:guildId/settings — self-assignable role guard (#1061)', () => {
+    const bot = stubBotGateway({
+        listRoles: jest.fn(async () => [
+            { id: 'safe', name: 'Colour', position: 2, managed: false, dangerousPermissions: [] },
+            { id: 'admin', name: 'Staff', position: 9, managed: false, dangerousPermissions: ['Administrator', 'BanMembers'] },
+        ]),
+    });
+
+    function makeApp() {
+        const app = express();
+        app.use(express.json());
+        app.use((req, _res, next) => { req.bot = bot; next(); });
+        app.use('/api/v1', settings);
+        return app;
+    }
+
+    let app;
+    let doc;
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        app = makeApp();
+        doc = { guildId: 'g1', shop: [], set: jest.fn(), save: jest.fn(async () => {}) };
+        Guild.findOne.mockResolvedValue(doc);
+    });
+
+    const post = body => request(app).post('/api/v1/guild/g1/settings').send(body);
+
+    it('refuses a privileged role written through autoRoles, before saving', async () => {
+        const res = await post({ autoRoles: [{ roleId: 'safe' }, { roleId: 'admin' }] });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('Staff');
+        expect(res.body.error).toContain('Administrator');
+        expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses a privileged role written through reactionRoles', async () => {
+        const res = await post({ reactionRoles: [{ roleId: 'admin', emoji: '👍', messageId: 'm', channelId: 'c' }] });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('Staff');
+    });
+
+    it('saves when every self-assigned role is safe', async () => {
+        const res = await post({ autoRoles: [{ roleId: 'safe' }] });
+
+        expect(res.status).toBe(200);
+        expect(doc.save).toHaveBeenCalled();
+    });
+
+    it('does not look up roles when the patch touches neither parent', async () => {
+        const res = await post({ 'welcome.enabled': true });
+
+        expect(res.status).toBe(200);
+        expect(bot.listRoles).not.toHaveBeenCalled();
     });
 });
