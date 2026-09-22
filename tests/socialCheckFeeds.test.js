@@ -362,3 +362,155 @@ test('a sweep with no subscriptions still reports itself', async () => {
 
     expect(log).toHaveBeenCalledWith(expect.stringContaining('[Social] Sweep: 0 source(s)'));
 });
+
+// ── X posts enriched through FxTwitter ─────────────────────────────────────
+//
+// The bridge's item links to x.com, so the sweep looks the tweet up on the
+// FxTwitter API (fetched through the same mocked safeFetchFeed) and builds the
+// embed from that instead of the bridge's HTML.
+
+const X_LINK = 'https://x.com/NOTWOKESHOWS/status/1900000000000000001';
+const FX_URL = 'https://api.fxtwitter.com/NOTWOKESHOWS/status/1900000000000000001';
+
+function fxTweet(overrides = {}) {
+    return {
+        id: '1900000000000000001',
+        url: X_LINK,
+        text: 'Enjoy shows... that aren’t woke! MobLand is a crime drama series. #MobLand @paramountplus',
+        created_timestamp: 1758570000,
+        author: { name: 'NOT WOKE SHOWS.com', screen_name: 'NOTWOKESHOWS', avatar_url: 'https://pbs.twimg.com/profile_images/1/a_normal.jpg' },
+        media: {},
+        replying_to: null,
+        possibly_sensitive: false,
+        ...overrides,
+    };
+}
+
+async function sweepEnrichedX(tweet, { nsfw = false, description = '<br><video poster=\'https://pbs.twimg.com/amplify_video_thumb/1/img/x.jpg\'></video>' } = {}) {
+    require('../src/services/xEnrichment').__test__.cache.clear();
+    const url = 'https://bridge/twitter/user/NOTWOKESHOWS';
+    mockFeedBodies.set(url, xXml({ link: X_LINK, description, creator: 'NOT WOKE SHOWS.com' }));
+    mockFeedBodies.set(FX_URL, JSON.stringify({ code: 200, message: 'OK', tweet }));
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [xFeed('f1', url, 'c1')] }];
+    const client = makeClient();
+    if (nsfw) (await client.channels.fetch()).nsfw = true;
+    await checkSocialFeeds(client);
+    expect(client.send).toHaveBeenCalledTimes(1);
+    return client.send.mock.calls[0][0].embeds.map(e => e.data);
+}
+
+test('an X post with several photos renders the full text and a four-image gallery', async () => {
+    const photos = [1, 2, 3, 4, 5].map(n => ({ type: 'photo', url: `https://pbs.twimg.com/media/p${n}.jpg?name=orig`, width: 1, height: 1 }));
+    const embeds = await sweepEnrichedX(fxTweet({ media: { all: photos } }));
+
+    expect(mockFetches).toContain(FX_URL);
+    expect(embeds).toHaveLength(4); // Discord's gallery tops out at four
+    const [main, ...rest] = embeds;
+    expect(main.author.name).toBe('NOT WOKE SHOWS.com (@NOTWOKESHOWS)');
+    expect(main.author.icon_url).toBe('https://pbs.twimg.com/profile_images/1/a_400x400.jpg');
+    expect(main.url).toBe(X_LINK);
+    expect(main.description).toContain('MobLand is a crime drama series.');
+    expect(main.description).toContain('[#MobLand](https://x.com/hashtag/MobLand)');
+    expect(main.description).toContain('[@paramountplus](https://x.com/paramountplus)');
+    // `name=orig` is swapped for X's `large` rendition Discord can proxy.
+    expect(main.image.url).toBe('https://pbs.twimg.com/media/p1.jpg?name=large');
+    expect(rest.map(e => e.url)).toEqual([X_LINK, X_LINK, X_LINK]);
+    expect(rest.map(e => e.image.url)).toEqual([2, 3, 4].map(n => `https://pbs.twimg.com/media/p${n}.jpg?name=large`));
+    expect(main.timestamp).toBe(new Date(1758570000 * 1000).toISOString());
+});
+
+test('a video tweet shows its thumbnail and a watch link with the duration', async () => {
+    const embeds = await sweepEnrichedX(fxTweet({
+        text: '',
+        media: { videos: [{ type: 'video', url: 'https://video.twimg.com/v.mp4', thumbnail_url: 'https://pbs.twimg.com/thumb.jpg', duration: 92, width: 1, height: 1 }] },
+    }));
+    expect(embeds).toHaveLength(1);
+    expect(embeds[0].image.url).toBe('https://pbs.twimg.com/thumb.jpg');
+    expect(embeds[0].description).toBe(`▶️ [Watch video (1:32)](${X_LINK})`);
+});
+
+test('a link-card tweet shows the card as its picture instead of the avatar', async () => {
+    const embeds = await sweepEnrichedX(fxTweet({
+        card: { url: 'https://www.notwokeshows.com/show/mobland-2025', title: 'MobLand [2025]', domain: 'notwokeshows.com', image: { url: 'https://pbs.twimg.com/card_img/1?format=jpg&name=orig' } },
+    }));
+    const main = embeds[0];
+    expect(main.image.url).toBe('https://pbs.twimg.com/card_img/1?format=jpg&name=large');
+    expect(main.thumbnail).toBeUndefined();
+    expect(main.description).toContain('🔗 **[MobLand 2025](https://www.notwokeshows.com/show/mobland-2025)**');
+    expect(main.description).toContain('-# notwokeshows.com');
+});
+
+test('a quote tweet carries the quoted post as a field and borrows its picture', async () => {
+    const embeds = await sweepEnrichedX(fxTweet({
+        text: 'This one is great',
+        quote: {
+            id: '7', url: 'https://x.com/other/status/7', text: 'Season 2 confirmed',
+            author: { name: 'Other', screen_name: 'other' },
+            media: { photos: [{ type: 'photo', url: 'https://pbs.twimg.com/media/q.jpg', width: 1, height: 1 }] },
+        },
+    }));
+    const main = embeds[0];
+    expect(main.fields[0].name).toBe('💬 Quoting Other (@other)');
+    expect(main.fields[0].value).toBe('Season 2 confirmed\n[View quoted post](https://x.com/other/status/7)');
+    expect(main.image.url).toBe('https://pbs.twimg.com/media/q.jpg');
+});
+
+test('a repost and a reply say so above the text', async () => {
+    const repost = await sweepEnrichedX(fxTweet({
+        url: 'https://x.com/studio/status/9',
+        author: { name: 'Studio', screen_name: 'studio' },
+    }));
+    expect(repost[0].author.name).toBe('Studio (@studio)');
+    expect(repost[0].description.startsWith('-# 🔁 NOT WOKE SHOWS.com reposted')).toBe(true);
+
+    mockFetches.length = 0;
+    const reply = await sweepEnrichedX(fxTweet({ replying_to: 'someone' }));
+    expect(reply[0].description.startsWith('-# ↩️ Replying to [@someone](https://x.com/someone)')).toBe(true);
+});
+
+test('sensitive media is held back outside age-restricted channels', async () => {
+    const tweet = fxTweet({ possibly_sensitive: true, media: { photos: [{ type: 'photo', url: 'https://pbs.twimg.com/media/s.jpg', width: 1, height: 1 }] } });
+    const sfw = await sweepEnrichedX(tweet);
+    expect(sfw[0].image).toBeUndefined();
+    expect(sfw[0].description).toContain('Sensitive media hidden');
+
+    const nsfw = await sweepEnrichedX(tweet, { nsfw: true });
+    expect(nsfw[0].image.url).toBe('https://pbs.twimg.com/media/s.jpg');
+});
+
+test('when the X lookup fails the post still goes out from the bridge feed', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    require('../src/services/xEnrichment').__test__.cache.clear();
+    const url = 'https://bridge/twitter/user/NOTWOKESHOWS';
+    mockFeedBodies.set(url, xXml({
+        link: X_LINK,
+        // Not CDATA-escaped the way RSSHub sometimes is: the & arrives as &amp;.
+        description: 'Two pics<br><img src="https://pbs.twimg.com/media/a?format=jpg&amp;name=orig">'
+            + '<br><img src="https://pbs.twimg.com/media/b?format=jpg&amp;name=orig">',
+    }));
+    mockFeedBodies.set(FX_URL, new Error('Feed request failed with HTTP 503.'));
+    mockGuilds = [{ guildId: 'g1', socialFeeds: [xFeed('f1', url, 'c1')] }];
+    const client = makeClient();
+
+    await checkSocialFeeds(client);
+
+    const embeds = client.send.mock.calls[0][0].embeds.map(e => e.data);
+    expect(embeds).toHaveLength(2);
+    expect(embeds[0].description).toBe('Two pics');
+    expect(embeds[0].image.url).toBe('https://pbs.twimg.com/media/a?format=jpg&name=large');
+    expect(embeds[1].image.url).toBe('https://pbs.twimg.com/media/b?format=jpg&name=large');
+    expect(embeds[1].url).toBe(X_LINK);
+});
+
+test('a video tweet from the bridge alone shows its poster frame', () => {
+    const { postMediaList } = __test__;
+    expect(postMediaList({
+        content: "<br><video width=\"1\" src='https://video.twimg.com/v.mp4' controls='controls' poster='https://pbs.twimg.com/thumb.jpg'></video>",
+    })).toEqual(['https://pbs.twimg.com/thumb.jpg']);
+});
+
+test('linkify leaves emails, URL paths and fragments alone', () => {
+    const { linkifyTweetText } = __test__;
+    expect(linkifyTweetText('mail a@b.com or medium.com/@user and site.com/#frag')).toBe('mail a@b.com or medium.com/@user and site.com/#frag');
+    expect(linkifyTweetText('@jack #1 #tag')).toBe('[@jack](https://x.com/jack) #1 [#tag](https://x.com/hashtag/tag)');
+});

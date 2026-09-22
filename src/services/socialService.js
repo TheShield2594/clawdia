@@ -20,11 +20,12 @@
  */
 
 const Guild = require('../models/Guild');
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, escapeMarkdown } = require('discord.js');
 
 const { safeFetchFeed } = require('../utils/safeFeedFetch');
 const { handlesGuild } = require('../utils/sharding');
 const { getProvider, getBridgeOrigin } = require('./socialProviders');
+const { fetchTweetDetails, formatDuration } = require('./xEnrichment');
 
 const Parser = require('rss-parser');
 const parser = new Parser();
@@ -174,40 +175,100 @@ function readTagAttr(tag, name) {
         const quote = tag[i];
         if (quote !== '"' && quote !== "'") return null;
         const end = tag.indexOf(quote, i + 1);
-        return end === -1 ? null : tag.slice(i + 1, end);
+        return end === -1 ? null : decodeAttrEntities(tag.slice(i + 1, end));
     }
     return null;
 }
 
-// The first inline <img> URL in an HTML fragment, located by scanning rather than
-// a tag-matching regex (see readTagAttr). Used only for bridges that embed a
-// post's photo in the body instead of exposing it as an enclosure or media:*.
-function firstInlineImageUrl(html) {
+// An attribute value as the browser would read it. RSSHub escapes the `&` in a
+// photo URL's query (`?format=jpg&amp;name=orig`) when the description is not
+// CDATA-wrapped, and that literal `&amp;` in an embed image URL is a request
+// Discord's proxy cannot resolve — an embed with a picture that never appears.
+function decodeAttrEntities(value) {
+    return value
+        .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+        .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&');
+}
+
+// X photos arrive at `name=orig` — the uploaded original, which can be a 4096px
+// PNG of many megabytes. Discord's image proxy gives up on those and the embed
+// renders with no picture at all, so ask X's CDN for its 2048px `large` variant,
+// which is what x.com itself shows.
+function discordSafeImageUrl(url) {
+    if (!isHttpUrl(url)) return url;
+    let parsed;
+    try { parsed = new URL(url); } catch { return url; }
+    if (!/(^|\.)twimg\.com$/i.test(parsed.hostname)) return url;
+    if (parsed.searchParams.get('name') === 'orig') {
+        parsed.searchParams.set('name', 'large');
+        return parsed.toString();
+    }
+    const suffixed = /^(.*\.(?:jpe?g|png|webp|gif)):orig$/i.exec(parsed.pathname);
+    if (suffixed) {
+        parsed.pathname = `${suffixed[1]}:large`;
+        return parsed.toString();
+    }
+    return url;
+}
+
+// Every inline picture in an HTML fragment, in document order: an <img>'s src,
+// and a <video>'s poster — which is all RSSHub's X route gives a video or GIF
+// tweet, and which the <img>-only scan this replaced missed entirely, leaving
+// those tweets as an embed with no body and no picture. Located by scanning
+// rather than a tag-matching regex (see readTagAttr).
+function inlineImageUrls(html) {
+    const urls = [];
     const lower = html.toLowerCase();
-    for (let start = lower.indexOf('<img'); start !== -1; start = lower.indexOf('<img', start + 4)) {
-        const close = html.indexOf('>', start);
-        const tag = close === -1 ? html.slice(start) : html.slice(start, close + 1);
-        const src = readTagAttr(tag, 'src');
-        if (isHttpUrl(src)) return src;
+    let start = 0;
+    for (;;) {
+        const img = lower.indexOf('<img', start);
+        const video = lower.indexOf('<video', start);
+        if (img === -1 && video === -1) break;
+        const isVideo = img === -1 || (video !== -1 && video < img);
+        const at = isVideo ? video : img;
+        const close = html.indexOf('>', at);
+        const tag = close === -1 ? html.slice(at) : html.slice(at, close + 1);
+        const src = readTagAttr(tag, isVideo ? 'poster' : 'src');
+        if (isHttpUrl(src) && !urls.includes(src)) urls.push(src);
         if (close === -1) break;
+        start = close + 1;
     }
-    return null;
+    return urls;
 }
 
-// The post's own media, to show large. A bridge exposes it as an enclosure, a
-// media:* element, or — the shape the X and Instagram bridges use — an inline
-// <img> in the content HTML, which the enclosure/media checks alone miss.
-function postMedia(item) {
-    if (isHttpUrl(item.enclosure?.url)) return item.enclosure.url;
-    const mediaUrl = item['media:thumbnail']?.$?.url || item['media:content']?.$?.url;
-    if (isHttpUrl(mediaUrl)) return mediaUrl;
+// The post's own media, to show large, in the order the post shows it. A bridge
+// exposes it as an enclosure, a media:* element, or — the shape the X and
+// Instagram bridges use — inline <img>/<video poster> markup in the content
+// HTML, which the enclosure/media checks alone miss.
+function postMediaList(item) {
+    const urls = [];
+    const add = url => {
+        if (!isHttpUrl(url)) return;
+        const safe = discordSafeImageUrl(url);
+        if (!urls.includes(safe)) urls.push(safe);
+    };
+    add(item.enclosure?.url);
+    add(item['media:thumbnail']?.$?.url || item['media:content']?.$?.url);
     for (const field of CONTENT_FIELDS) {
         const raw = item[field];
-        if (typeof raw !== 'string' || !raw.includes('<img')) continue;
-        const url = firstInlineImageUrl(raw);
-        if (url) return url;
+        if (typeof raw !== 'string') continue;
+        const lower = raw.toLowerCase();
+        if (!lower.includes('<img') && !lower.includes('<video')) continue;
+        inlineImageUrls(raw).forEach(add);
+        // The fields are copies of one another; the first that has markup is
+        // the post, and scanning the rest would only find the same pictures.
+        if (urls.length) break;
     }
-    return null;
+    return urls;
+}
+
+function postMedia(item) {
+    return postMediaList(item)[0] || null;
 }
 
 // The feed's own image — a channel avatar, subreddit icon or profile picture —
@@ -297,6 +358,146 @@ function buildSocialEmbed(provider, feed, item, date, parsedFeed) {
     return embed;
 }
 
+// Discord shows up to four images in one message as a gallery when every embed
+// carries the same `url`: the first embed holds the post, and each extra embed
+// is just that shared URL and one more picture.
+const GALLERY_MAX = 4;
+
+function galleryEmbeds(color, url, images) {
+    if (!url) return [];
+    return images.slice(1, GALLERY_MAX).map(image =>
+        new EmbedBuilder().setColor(color).setURL(url).setImage(image));
+}
+
+// Tweet text reads best with its @mentions and #hashtags clickable, as they are
+// on X. Only a mention or tag that starts a word is linked, so the `@` in an
+// email or a medium.com/@user URL and the `#` in a URL fragment are left alone.
+function linkifyTweetText(text) {
+    return text
+        .replace(/(^|[^\w/@])@([A-Za-z0-9_]{1,15})(?![\w@])/g,
+            (_, pre, handle) => `${pre}[@${handle}](https://x.com/${handle})`)
+        .replace(/(^|[^\w/&#])#([\p{L}\p{N}_]*\p{L}[\p{L}\p{N}_]*)/gu,
+            (_, pre, tag) => `${pre}[#${tag}](https://x.com/hashtag/${encodeURIComponent(tag)})`);
+}
+
+// Text for an embed description or field, clipped on a character boundary with
+// an ellipsis, then linkified — unless the links would push it over the limit,
+// in which case the plain text is the safer thing to send.
+function tweetBody(text, limit) {
+    const clipped = text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text;
+    const linked = linkifyTweetText(clipped);
+    return linked.length <= limit * 1.5 ? linked : clipped;
+}
+
+// Description budget for a tweet: Discord allows 4096, and X's long posts can
+// run to thousands of characters. Leave room for the repost/reply lines, the
+// video/card line and link markup.
+const TWEET_TEXT_LIMIT = 2500;
+const QUOTE_TEXT_LIMIT = 600;
+
+/**
+ * The embeds for one tweet, built from FxTwitter's normalised data rather than
+ * the bridge's HTML — see xEnrichment. Shaped like Discord's own X unfurl:
+ * name and handle as the author, the text as the body, the pictures as a
+ * gallery, a quoted tweet beneath, the platform in the footer.
+ *
+ * @param {object} opts.allowSensitive  whether the channel is age-restricted, so
+ *   a tweet X marked sensitive may show its media inline.
+ */
+function buildTweetEmbeds(provider, feed, tweet, item, date, parsedFeed, { allowSensitive = false } = {}) {
+    const lines = [];
+
+    // RSSHub lists an account's reposts as its own items but links them to the
+    // original tweet; FxTwitter then describes the original. Say who reposted it,
+    // as X does above the post.
+    const feedHandle = (feed.ref || '').replace(/^@/, '');
+    const reposter = tweet.repostedBy
+        || (feedHandle && tweet.author.handle.toLowerCase() !== feedHandle.toLowerCase()
+            ? { name: posterName(item) || feedHandle, handle: feedHandle }
+            : null);
+    if (reposter) lines.push(`-# 🔁 ${escapeMarkdown(reposter.name)} reposted`);
+    if (tweet.replyingTo) {
+        lines.push(`-# ↩️ Replying to [@${tweet.replyingTo}](https://x.com/${tweet.replyingTo})`);
+    }
+    if (tweet.text) lines.push(tweetBody(tweet.text, TWEET_TEXT_LIMIT));
+
+    const hideMedia = tweet.sensitive && !allowSensitive;
+    const media = hideMedia ? [] : tweet.media;
+    const quoteMedia = hideMedia || !tweet.quote ? [] : tweet.quote.media;
+    // The tweet's own pictures lead; a quote tweet with none of its own borrows
+    // the quoted tweet's, which is what X shows as the post's visual.
+    const shown = media.length ? media : quoteMedia;
+    const images = shown.map(m => discordSafeImageUrl(m.image));
+
+    const video = shown.find(m => m.type === 'video' || m.type === 'gif');
+    if (video) {
+        const duration = formatDuration(video.duration);
+        const label = video.type === 'gif' ? 'GIF' : `Watch video${duration ? ` (${duration})` : ''}`;
+        lines.push(`▶️ [${label}](${tweet.url})`);
+    }
+
+    // A link-card tweet (an article, a show page) has no media of its own; the
+    // card is the post's visual, as it is on X.
+    const card = !images.length && !tweet.quote ? tweet.card : null;
+    if (card) {
+        // Brackets would end the masked link early, so they go from the title.
+        const title = escapeMarkdown(card.title.slice(0, 200)).replace(/[[\]]/g, '');
+        const heading = title ? `🔗 **[${title}](${card.url})**` : `🔗 ${card.url}`;
+        lines.push(card.domain ? `${heading}\n-# ${escapeMarkdown(card.domain)}` : heading);
+        if (!hideMedia && card.image) images.push(discordSafeImageUrl(card.image));
+    }
+
+    if (hideMedia && (tweet.media.length || quoteMedia.length || tweet.card?.image)) {
+        lines.push(`⚠️ Sensitive media hidden — [view on X](${tweet.url})`);
+    }
+
+    const embed = new EmbedBuilder()
+        .setColor(provider.color)
+        .setAuthor({
+            name: `${tweet.author.name} (@${tweet.author.handle})`.slice(0, AUTHOR_LIMIT),
+            url: tweet.author.url,
+            ...(tweet.author.avatar || feedAvatar(parsedFeed)
+                ? { iconURL: tweet.author.avatar || feedAvatar(parsedFeed) }
+                : {}),
+        })
+        .setURL(tweet.url)
+        .setFooter({ text: provider.label })
+        .setTimestamp(tweet.createdAt && !Number.isNaN(tweet.createdAt.getTime()) ? tweet.createdAt : date);
+
+    const description = lines.join('\n\n');
+    if (description) embed.setDescription(description.slice(0, 4096));
+    else if (!images.length) embed.setTitle(`${provider.label} post`);
+
+    if (tweet.quote) {
+        const q = tweet.quote;
+        const quoted = q.text ? tweetBody(q.text, QUOTE_TEXT_LIMIT) : '';
+        embed.addFields({
+            name: `💬 Quoting ${q.author.name} (@${q.author.handle})`.slice(0, 256),
+            value: `${quoted ? `${quoted}\n` : ''}[View quoted post](${q.url})`.slice(0, 1024),
+        });
+    }
+
+    if (images.length) embed.setImage(images[0]);
+
+    return [embed, ...galleryEmbeds(provider.color, tweet.url, images)];
+}
+
+/**
+ * Everything one post sends: the embed built from the bridge's item, or — for
+ * an X post FxTwitter could describe — the richer tweet embeds, plus a gallery
+ * for a post with several pictures.
+ */
+function buildSocialMessage(provider, feed, item, date, parsedFeed, { tweet = null, allowSensitive = false } = {}) {
+    if (tweet) {
+        return { embeds: buildTweetEmbeds(provider, feed, tweet, item, date, parsedFeed, { allowSensitive }) };
+    }
+    const embed = buildSocialEmbed(provider, feed, item, date, parsedFeed);
+    const extra = provider.kind === 'post' && item.link
+        ? galleryEmbeds(provider.color, item.link, postMediaList(item))
+        : [];
+    return { embeds: [embed, ...extra] };
+}
+
 /**
  * Delivers a freshly-parsed source to one guild's subscription: posts what is
  * new and advances its cursor only as far as delivery actually got. Per-guild
@@ -326,8 +527,12 @@ async function deliverSocialUpdate(client, guild, feed, parsedFeed, entries) {
         // good on a channel that was only briefly unreachable.
         if (!channel) return 0;
 
+        const allowSensitive = channel.nsfw === true;
         for (const { item, date } of toPost) {
-            await channel.send({ embeds: [buildSocialEmbed(provider, feed, item, date, parsedFeed)] });
+            // X posts are looked up for their full content; every other platform,
+            // and any X lookup that fails, renders from the feed item alone.
+            const tweet = provider.id === 'twitter' ? await fetchTweetDetails(item.link) : null;
+            await channel.send(buildSocialMessage(provider, feed, item, date, parsedFeed, { tweet, allowSensitive }));
             delivered++;
             cursor = date;
         }
@@ -434,6 +639,7 @@ module.exports = {
         pruneFeedFailureState, DEAD_FEED_STATE_TTL_MS,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, SOCIAL_FETCH_CONCURRENCY,
         datedItems, MAX_ITEMS_PER_SWEEP, buildSocialEmbed,
-        postText, postMedia, feedAvatar, postAuthorName,
+        postText, postMedia, postMediaList, feedAvatar, postAuthorName,
+        buildSocialMessage, buildTweetEmbeds, linkifyTweetText, discordSafeImageUrl,
     },
 };
