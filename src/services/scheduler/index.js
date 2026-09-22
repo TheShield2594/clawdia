@@ -220,6 +220,17 @@ const JOBS = [
         timezone: 'Etc/UTC',
         fn: client => require('../newspaperService').postScheduledNewspapers(client),
     },
+    {
+        // Daily at 00:10 UTC — after midnight so the row is dated to the day
+        // that just closed, and clear of the Monday 00:00–00:05 sweeps above so
+        // it is not contending with them for the same guild documents (#1076).
+        name: 'recordDailyMetricSnapshots',
+        scope: SCOPE.GUILD,
+        service: 'analyticsSnapshotService',
+        schedule: '10 0 * * *',
+        timezone: 'Etc/UTC',
+        fn: client => require('../analyticsSnapshotService').recordDailyMetricSnapshots(client),
+    },
 ];
 
 // Start-once services. A service belongs here only when its schedule cannot be

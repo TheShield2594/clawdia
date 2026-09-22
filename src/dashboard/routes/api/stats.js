@@ -61,6 +61,7 @@ async function buildGuildStats(guildId) {
     ]);
     const memberEvents = analytics?.memberEvents || [];
     const commandUsage = analytics?.commandUsage || [];
+    const metricSnapshots = analytics?.metricSnapshots || [];
 
     const { joins30, leaves30, retained7, retained30 } = computeRetention(memberEvents);
 
@@ -138,6 +139,22 @@ async function buildGuildStats(guildId) {
     // tallied in the single pass above.
     const messageVolume = memberGrowth.map(({ date }) => ({ date, count: msgVolMap[date] || 0 }));
 
+    // Point-in-time KPI snapshots (#1076): the daily rows the snapshot job
+    // records for economy active-users, AI request volume and top level. Passed
+    // through as recorded — the last 30 rows, oldest first — rather than
+    // back-filled: these are aggregates with no history to reconstruct, so a
+    // missing day is genuinely missing and the tile falls back to the number.
+    // Sorted defensively; the writer already pushes in date order.
+    const metricTrends = [...metricSnapshots]
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+        .slice(-30)
+        .map(s => ({
+            date: s.date,
+            economyActiveUsers: s.economyActiveUsers || 0,
+            aiRequests: s.aiRequests || 0,
+            topLevel: s.topLevel || 0
+        }));
+
     // Economy stats summary
     const [ecoTotalAgg, ecoActiveCount] = await Promise.all([
         cachedAggregate(`${guildId}:stats:ecoTotal`, () => User.aggregate([
@@ -178,6 +195,7 @@ async function buildGuildStats(guildId) {
             recommendations,
             messageVolume,
             memberGrowth,
+            metricTrends,
             economyStats: {
                 totalCoins: ecoTotalAgg[0]?.total || 0,
                 activeUsers: ecoActiveCount

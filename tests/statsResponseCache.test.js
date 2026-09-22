@@ -231,4 +231,29 @@ describe('/stats command-log aggregation', () => {
         expect(body.analytics.memberGrowth).toHaveLength(30);
         expect(body.analytics.memberGrowth.at(-1)).toEqual({ date: today, joins: 5, leaves: 1 });
     });
+
+    // #1076: the three supporting tiles get their delta + sparkline from the
+    // daily snapshot rows, passed through as recorded rather than back-filled.
+    test('surfaces metric snapshots as a sorted, capped trend series', async () => {
+        const rows = [];
+        for (let i = 40; i >= 0; i--) {
+            rows.push({ date: dayAgo(i), economyActiveUsers: i, aiRequests: i * 2, topLevel: 10 - (i % 3) });
+        }
+        // Recorded out of order to prove the route sorts before slicing.
+        stubAnalytics({ guildId: 'g1', memberEvents: [], commandUsage: [], metricSnapshots: [rows[5], ...rows] });
+
+        const { body } = await get('/guild/g1/stats');
+        const trends = body.analytics.metricTrends;
+
+        // Last 30 rows, oldest first, each carrying all three metrics.
+        expect(trends).toHaveLength(30);
+        expect(trends.map(r => r.date)).toEqual([...trends.map(r => r.date)].sort());
+        expect(trends.at(-1)).toEqual({ date: today, economyActiveUsers: 0, aiRequests: 0, topLevel: 10 });
+    });
+
+    test('metricTrends is an empty array when no snapshots have been recorded', async () => {
+        stubAnalytics({ guildId: 'g1', memberEvents: [], commandUsage: [] });
+        const { body } = await get('/guild/g1/stats');
+        expect(body.analytics.metricTrends).toEqual([]);
+    });
 });
