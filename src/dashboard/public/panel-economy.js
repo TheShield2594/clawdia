@@ -1,80 +1,12 @@
 
-// The Economy panel (#935): the shop, the job board and its tiers, the
-// activity-item images, and the Health tab.
+// The Economy panel (#935): the shop, the job board and its tiers, and the
+// Health tab.
 //
 // The one panel whose save is not finished when the POST returns: shop item
 // images are multipart and the settings are JSON, so the images go up
 // afterwards through the save follow-up registered below, and a failure there
 // leaves the section marked unsaved.
 
-// Activity images belong to this guild, not to every guild the bot is in (#561),
-// so the guild id is part of the path. `_guildId` is assigned further down this
-// file; both callers run on a click, long after the script has finished.
-function activityImageUrl(itemId) {
-    return '/api/v1/item-image/activity/' + encodeURIComponent(_guildId) + '/' + encodeURIComponent(itemId);
-}
-
-async function uploadActivityImage(itemId, input) {
-    const file = input.files[0];
-    if (!file) return;
-    const emojiEl = document.getElementById('gic-emoji-' + itemId);
-    let imgEl = document.getElementById('gic-img-' + itemId);
-    const fd = new FormData();
-    fd.append('image', file);
-    try {
-        const r = await apiFetch(activityImageUrl(itemId), { method: 'POST', body: fd });
-        if (r.ok) {
-            const dataUrl = await new Promise(function(res) {
-                const reader = new FileReader();
-                reader.onload = function(e) { res(e.target.result); };
-                reader.readAsDataURL(file);
-            });
-            // Card was rendered without an <img>; create one and insert before the emoji
-            if (!imgEl && emojiEl) {
-                imgEl = document.createElement('img');
-                imgEl.className = 'game-item-img';
-                imgEl.id = 'gic-img-' + itemId;
-                imgEl.alt = '';
-                emojiEl.parentNode.insertBefore(imgEl, emojiEl);
-            }
-            if (imgEl) {
-                imgEl.src = dataUrl;
-                imgEl.style.display = 'block';
-            }
-            if (emojiEl) emojiEl.style.display = 'none';
-            toast('Image uploaded', 'success');
-        } else {
-            const err = await r.json().catch(function(){ return {}; });
-            toast(err.error || 'Upload failed', 'error');
-        }
-    } catch {
-        toast('Upload error', 'error');
-    }
-    input.value = '';
-}
-
-async function removeActivityImage(itemId) {
-    const ok = await showConfirm({ title: 'Remove image', body: 'Remove the image for this activity item?', okText: 'Remove' });
-    if (!ok) return;
-    try {
-        const r = await apiFetch(activityImageUrl(itemId), { method: 'DELETE' });
-        if (r.ok) {
-            const imgEl = document.getElementById('gic-img-' + itemId);
-            const emojiEl = document.getElementById('gic-emoji-' + itemId);
-            if (imgEl) {
-                imgEl.src = '';
-                imgEl.style.display = 'none';
-            }
-            if (emojiEl) emojiEl.style.display = 'flex';
-            toast('Image removed', 'success');
-        } else {
-            const err = await r.json().catch(function(){ return {}; });
-            toast(err.error || 'Remove failed', 'error');
-        }
-    } catch {
-        toast('Error removing image', 'error');
-    }
-}
 var storeItems = boot('shop');
 var _serverJobs = boot('jobs');
 var jobsList = _serverJobs.length > 0 ? _serverJobs.slice() : boot('defaultJobs');
@@ -703,12 +635,10 @@ registerPanelActions({
         'eco-ledger':       () => loadLedger(1),
         'eco-ledger-prev':  () => loadLedger(Math.max(1, _ledgerPage - 1)),
         'eco-ledger-next':  () => loadLedger(_ledgerPage + 1),
-        'activity-image-remove': (el, d) => removeActivityImage(d.itemId),
     },
     change: {
         'shop-item-image': el => previewShopItemImage(el),
         'stock-toggle':    el => toggleStockInput(el),
-        'activity-image-upload': (el, d) => uploadActivityImage(d.itemId, el),
     },
 });
 
