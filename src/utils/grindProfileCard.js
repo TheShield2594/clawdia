@@ -513,4 +513,5 @@ module.exports = {
     THEMES,
     COLL_COLS,
     _resetCache,
+    __test__: { initials, shade },
 };
