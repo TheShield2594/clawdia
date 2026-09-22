@@ -20,9 +20,10 @@ const {
 } = require('../services/questService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const {
-    commandIsFreezeGated, isEconomyFrozen, NOT_FROZEN, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
+    commandIsFreezeGated, isEconomyFrozen, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
 } = require('../utils/economyFreeze');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
+const { questRewardPayoutKey } = require('../utils/payoutKey');
 const { resolveDeferral, markDeferred, sendEphemeralResponse } = require('../utils/interactionAck');
 const cooldownStore = require('../utils/commandCooldowns');
 const { recordCommandMetric } = require('../utils/commandMetricsBuffer');
@@ -146,17 +147,22 @@ async function trackQuestCommandUse(interaction) {
         service: 'interactionCreate',
         jobName: 'commandQuestReward',
         guildId: interaction.guild.id,
+        // Keyed (#873, pass 11), so a completed quest's coins are exactly-once
+        // and a failure is a replayable owed record rather than the pass-6
+        // degraded branch — a retry that double-pays, a pruned document reported
+        // as paid, and a keyless `FailedJob` the replay cannot settle.
+        payoutKey: questRewardPayoutKey('command', interaction.id),
         // The check above is a read, and by here it is a few round trips old: an
-        // admin freezing the member in between would still be paid out. The
-        // guard rides in the credit's own filter so that window closes, which is
-        // the same reason every debit carries it rather than checking beside it.
-        //
-        // This credit is unkeyed, so a filter that matches nothing refuses the
-        // coins outright rather than filing them as owed. What it cannot undo is
-        // the `save()` above, so a freeze landing inside that window still
-        // persists the quest progress and still shows the completion notice —
+        // admin freezing the member in between would still be paid out. The freeze
+        // rides in the credit's own filter so that window closes, the same reason
+        // every debit carries it rather than checking beside it. `refuseWhenFrozen`
+        // rather than the plain `guard` because this credit is now keyed: a
+        // guarded miss is otherwise filed as owed and replayed, so the freeze is
+        // confirmed on a miss and the refusal is withheld, never queued. What it
+        // still cannot undo is the `save()` above, so a freeze landing inside that
+        // window persists the quest progress and shows the completion notice —
         // both cosmetic, and neither pays anything.
-        guard: NOT_FROZEN,
+        refuseWhenFrozen: true,
     });
 
     await notifyQuestComplete(guildSettings, interaction.member, completed, interaction.channel, user);

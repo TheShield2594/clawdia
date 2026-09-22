@@ -22,6 +22,7 @@ const { hungerBar, buildNavComponents, renderPetStatus } = require('../../../ser
 const { applyXpGain, announceLevelUp } = require('../../../services/levelingService');
 const { isVersionError } = require('../../../utils/versionRetry');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
+const { questRewardPayoutKey } = require('../../../utils/payoutKey');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { resolveUser, syncHungerAndRunaway, creditPetCare } = require('./shared');
 
@@ -113,6 +114,11 @@ async function executeStatus(interaction) {
                     service: 'pet',
                     jobName: 'playQuestReward',
                     guildId: interaction.guild.id,
+                    // Keyed (#873, pass 11), on the *button* interaction, not the
+                    // opening command: play is a button the player can click many
+                    // times, and each click is its own care event that must credit
+                    // once rather than being dropped as a duplicate of the first.
+                    payoutKey: questRewardPayoutKey('pet', btn.id),
                 });
             } catch (err) {
                 if (isVersionError(err)) {
@@ -162,6 +168,9 @@ async function executeStatus(interaction) {
                     service: 'pet',
                     jobName: 'restQuestReward',
                     guildId: interaction.guild.id,
+                    // Keyed on the button interaction (#873, pass 11), like play:
+                    // each rest click is a separate care event and credits once.
+                    payoutKey: questRewardPayoutKey('pet', btn.id),
                 });
             } catch (err) {
                 if (isVersionError(err)) {

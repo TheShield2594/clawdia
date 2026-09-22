@@ -14,6 +14,7 @@ const autoMod = require('../services/autoModService');
 const { handleAutoModeration } = autoMod;
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
+const { questRewardPayoutKey } = require('../utils/payoutKey');
 const { BoundedRateLimiter } = require('../utils/boundedRateLimiter');
 const { withUserLock } = require('../utils/userMutex');
 
@@ -346,6 +347,13 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
                 service: 'messageCreate',
                 jobName: 'streakAndQuestRewards',
                 guildId: message.guild.id,
+                // Keyed (#873, pass 11). Every coin this write moves — a quest
+                // completion, and the streak milestones folded into the same
+                // delta — is exactly-once and replayable-on-failure, rather than
+                // the pass-6 degraded branch this highest-volume credit was on.
+                // One `$inc`, one key: the milestone and quest coins land or are
+                // owed together, keyed by the message that earned them.
+                payoutKey: questRewardPayoutKey('message', message.id),
             });
         }
         // Nothing modified at all is also "persisted": there is nothing left

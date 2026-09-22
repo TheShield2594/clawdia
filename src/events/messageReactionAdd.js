@@ -7,6 +7,7 @@ const {
     notifyQuestComplete, notifyQuestNearComplete,
 } = require('../services/questService');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
+const { questRewardPayoutKey } = require('../utils/payoutKey');
 const { sensitivePermissionsOf } = require('../utils/sensitiveRolePermissions');
 const COLORS = require('../utils/embedColors');
 const { MEMORY_CAP, MAX_MEMORY_LENGTH } = require('../utils/memoryLimits');
@@ -100,6 +101,11 @@ async function handleReactionQuests(reaction, discordUser, guild, guildSettings)
         service: 'messageReactionAdd',
         jobName: 'reactionQuestReward',
         guildId: guild.id,
+        // Keyed (#873, pass 11): a completed reaction quest's coins are
+        // exactly-once and replayable on failure. Keyed by the message and the
+        // reacting member — a distinct completion is on a distinct message, so
+        // the pair names this credit and nothing else.
+        payoutKey: questRewardPayoutKey('reaction', `${reaction.message.id}:${discordUser.id}`),
     });
     // The member fetch exists only to address the notification, so it is not
     // worth a REST call — or a cache miss's round trip — on the overwhelming

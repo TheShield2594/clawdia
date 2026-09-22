@@ -58,6 +58,7 @@ const { ensureQuests, onCommandUse } = require('../src/services/questService');
 const { saveWithBalanceDelta } = require('../src/utils/balanceDelta');
 
 const interaction = {
+    id: 'interaction-1',
     guild: { id: 'guild-1' },
     user: { id: 'player-1' },
     member: {},
@@ -106,14 +107,20 @@ test('an unfrozen member is tracked and paid as before', async () => {
 
 // The early return is a read, and the credit lands a few round trips later. A
 // freeze committed in between has to be refused by the write itself, which is
-// the same rule every debit follows.
-test('the reward write carries the freeze guard, not just the check', async () => {
+// the same rule every debit follows. The credit is keyed now (#873, pass 11), so
+// it carries the freeze as `refuseWhenFrozen` rather than the plain `guard`: a
+// keyed credit whose filter matches nothing is otherwise recorded as owed and
+// replayed, which would pay the frozen member the moment an operator runs the
+// sweep. `commitBalanceDelta` confirms the freeze on a miss and withholds it
+// instead — see tests/questRewardPayoutRecovery.test.js for that behaviour.
+test('the reward write carries the freeze sanction, not just the check', async () => {
     stubFindOne({ userId: 'player-1', guildId: 'guild-1', balance: 100 });
 
     await trackQuestCommandUse(interaction);
 
     const [, , , context] = saveWithBalanceDelta.mock.calls[0];
-    expect(context.guard).toEqual({ economyFrozen: { $ne: true } });
+    expect(context.refuseWhenFrozen).toBe(true);
+    expect(context.payoutKey).toBe('quest:earn:command:interaction-1');
 });
 
 test('a member with no document yet is tracked, not refused', async () => {

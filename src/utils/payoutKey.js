@@ -202,10 +202,10 @@ function isDuplicateKeyError(err) {
  * @returns {Promise<{status: 'paid'|'duplicate'|'missing'|'unknown', doc: ?object}>}
  */
 async function creditCoinsOnce(filter, amount, key, options = {}) {
-    const { extraSet = {}, projection, Model = DEFAULT_USER } = options;
+    const { extraSet = {}, projection, Model = DEFAULT_USER, guard = {} } = options;
 
     const credited = await Model.findOneAndUpdate(
-        { ...filter, ...payoutKeyGuard(key) },
+        { ...filter, ...guard, ...payoutKeyGuard(key) },
         [{
             $set: {
                 balance:     { $add: [{ $ifNull: ['$balance', 0] }, amount] },
@@ -218,6 +218,16 @@ async function creditCoinsOnce(filter, amount, key, options = {}) {
             : { updatePipeline: true, new: true },
     );
 
+    // `guard` is a *sanction* clause that rides only the update, never the
+    // classification below. A frozen member's document is still there and still
+    // without the key, so classifying it against a filter that carried the
+    // freeze guard would answer 'missing' — and a caller acting on 'missing'
+    // records the credit as owed and pays the frozen member the moment an
+    // operator runs the replay, which is the sanction not being a sanction
+    // (#873, pass 11). Classified against the plain `filter`, the same document
+    // answers 'unknown', which the caller re-reads to tell a freeze refusal from
+    // a genuine concurrent miss. The default `{}` leaves every existing caller
+    // unchanged.
     if (credited) return { status: 'paid', doc: credited };
     return { status: await classifyUnmatchedPayout(Model, filter, key), doc: null };
 }
@@ -753,6 +763,41 @@ function gatherPayoutKey(service, interactionId, phase) {
 }
 
 /**
+ * The coins a completed quest pays — the reward `awardQuest` hands out when a
+ * daily or weekly quest, or an AI legendary quest, is finished (#873, pass 11).
+ *
+ * Every command and event that ticks a quest hook — `/hunt`, `/fish`, `/mine`,
+ * `/explore`, `/work`, `/daily`, `/pet`, and the message, reaction and
+ * command-use handlers — routes its reward through the one `awardQuest`, which
+ * adds the coins to `balance` in memory for the flow's `save()` to persist as an
+ * `$inc` (src/utils/balanceDelta.js). The gathering runs already fold that credit
+ * into the run's keyed delta (`gatherPayoutKey`), but everywhere else it rode
+ * `saveWithBalanceDelta` with no key — the pass-6 degraded branch: the retry
+ * re-credits a write whose response was lost, a run against a pruned document is
+ * reported as paid though no coins moved (#804), and a payout that ultimately
+ * fails is filed as a keyless `FailedJob` that `payouts:replay` cannot settle.
+ *
+ * Keyed, the credit is exactly-once and a failure is a replayable owed `coins`
+ * payload. The key is per *flow* rather than per quest, because the credit is one
+ * `$inc` of the flow's whole delta and cannot carry a different key for each
+ * quest folded into it — and per-flow is enough: a quest completes in exactly one
+ * flow (its `completedAt` is set once and persisted by the save that runs before
+ * the credit), so the flow's coins are one credit that must land once. The
+ * message handler folds its streak-milestone coins into the same delta, and they
+ * ride this key too — one write, one key.
+ *
+ * `scope` names the flow ('message', 'reaction', 'command', 'work', 'daily',
+ * 'pet'), so two flows that reuse an `id` across a restart cannot collide, the
+ * same reason `gatherPayoutKey` carries its service. `id` is the flow's own
+ * identifier — the message id, the slash interaction id, or, for a pet action
+ * driven by a button the player can click repeatedly, that button interaction's
+ * id, so each click is its own credit rather than a duplicate of the first.
+ */
+function questRewardPayoutKey(scope, id) {
+    return `quest:earn:${scope}:${id}`;
+}
+
+/**
  * A relic recovered on an expedition (#873).
  *
  * The relic is the one thing an expedition grants that does not ride the run's
@@ -1000,7 +1045,7 @@ function petAdoptRefundPayoutKey(interactionId) {
 
 module.exports = {
     gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
-    questClaimPayoutKey, tournamentEntryRefundPayoutKey, forgeRefundPayoutKey,
+    questClaimPayoutKey, questRewardPayoutKey, tournamentEntryRefundPayoutKey, forgeRefundPayoutKey,
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
     marketSalePayoutKey, listingPurchasePayoutKey, listingCancelPayoutKey,
     listingUnwindPayoutKey,

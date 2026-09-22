@@ -112,6 +112,15 @@ async function commitBalanceDelta(Model, filter, user, delta, context = {}) {
 
     const payoutKey = delta > 0 ? (context.payoutKey || null) : null;
 
+    // A keyed credit can also carry the economy-freeze sanction (#870, #873
+    // pass 11). The passive quest hooks — the message, reaction and command-use
+    // handlers — escape the command gate, so a freeze that commits between their
+    // pre-check read and this credit has to be refused by the credit's own write,
+    // the same rule every debit follows. Unkeyed, that refusal was silent; keyed,
+    // a guarded miss is otherwise filed as owed and replayed, so the guard rides
+    // the update only and the freeze is confirmed on a miss before deciding.
+    const refuseWhenFrozen = payoutKey != null && context.refuseWhenFrozen === true;
+
     let lastError = null;
     for (let attempt = 1; attempt <= CREDIT_ATTEMPTS; attempt++) {
         try {
@@ -122,6 +131,7 @@ async function commitBalanceDelta(Model, filter, user, delta, context = {}) {
             const { creditCoinsOnce } = require('./payoutKey');
             const { status, doc } = await creditCoinsOnce(filter, delta, payoutKey, {
                 Model, projection: { balance: 1 },
+                guard: refuseWhenFrozen ? { economyFrozen: { $ne: true } } : {},
             });
 
             // 'duplicate' is a success: an earlier attempt landed and only its
@@ -142,6 +152,22 @@ async function commitBalanceDelta(Model, filter, user, delta, context = {}) {
                     user.unmarkModified('balance');
                 }
                 return { credited: true, balance: user.balance ?? 0 };
+            }
+
+            // The credit carried the freeze guard and matched nothing on a
+            // document that is present (`'unknown'`: it is there, without the
+            // key). A freeze that landed in the window is the expected cause, and
+            // it must be refused rather than owed — an owed record replays and
+            // pays the frozen member the moment an operator runs the sweep, which
+            // is the sanction not being a sanction. Confirm the freeze before
+            // deciding; a genuine concurrent write is not frozen and falls
+            // through to the retry. `'missing'` can't be a freeze refusal, since
+            // there is no document to be frozen.
+            if (refuseWhenFrozen && status === 'unknown') {
+                const probe = await Model.findOne(filter, { economyFrozen: 1 }).lean();
+                if (probe?.economyFrozen === true) {
+                    return { credited: false, owed: false, balance: user.balance ?? 0 };
+                }
             }
 
             lastError = new Error(

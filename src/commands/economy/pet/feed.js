@@ -16,6 +16,7 @@ const {
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { isVersionError } = require('../../../utils/versionRetry');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
+const { questRewardPayoutKey } = require('../../../utils/payoutKey');
 const { hungerBar, petArt } = require('../../../services/petStatusView');
 const {
     NO_SUCH_PET, resolveUser, syncHungerAndRunaway, readSlotOption,
@@ -87,6 +88,9 @@ async function executeFeed(interaction) {
             service: 'pet',
             jobName: 'feedQuestReward',
             guildId: interaction.guild.id,
+            // Keyed (#873, pass 11): a pet-care quest completing here pays coins
+            // exactly once and records a replayable owed payload on failure.
+            payoutKey: questRewardPayoutKey('pet', interaction.id),
         });
     } catch (err) {
         if (isVersionError(err)) return interaction.editReply('Edit conflict — please try again.');

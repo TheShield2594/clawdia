@@ -15,7 +15,7 @@ const { claimStarterKit } = require('../../utils/starterKit');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
-const { challengeBonusPayoutKey } = require('../../utils/payoutKey');
+const { challengeBonusPayoutKey, questRewardPayoutKey } = require('../../utils/payoutKey');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
@@ -380,6 +380,10 @@ module.exports = {
                     service: 'daily',
                     jobName: 'dailyQuestReward',
                     guildId: interaction.guild.id,
+                    // Keyed (#873, pass 11): a quest completing on this claim pays
+                    // coins exactly once and records a replayable owed payload on
+                    // failure, rather than the pass-6 degraded branch.
+                    payoutKey: questRewardPayoutKey('daily', interaction.id),
                 });
                 if (questsDone.length || questsNear.length) {
                     notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, updated).catch(() => null);
@@ -604,6 +608,11 @@ module.exports = {
                                 service: 'daily',
                                 jobName: 'challengeBonusQuestReward',
                                 guildId: interaction.guild.id,
+                                // Keyed (#873, pass 11), under a scope of its own: the base
+                                // claim already keyed `quest:earn:daily:<id>`, and the bonus can
+                                // complete a *different* economy quest in the same interaction —
+                                // a shared key would drop the second credit as a duplicate.
+                                payoutKey: questRewardPayoutKey('daily-bonus', interaction.id),
                             });
                             if (bonusEarn.completed.length || bonusEarn.nearComplete.length) {
                                 notifyQuestComplete(guildSettings, interaction.member, bonusEarn.completed, interaction.channel, bonusUpdated).catch(() => null);
