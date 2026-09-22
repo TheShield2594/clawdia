@@ -44,6 +44,32 @@ const User = require('../../models/User');
 const { logTransaction } = require('../../utils/logTransaction');
 const { ownsGuild } = require('../../utils/sharding');
 
+// ── The startup gate ─────────────────────────────────────────────────────────
+//
+// The sweep cannot tell a stranded stake from a live one: both are a marker
+// above zero. That is only safe while no round can be running in this process,
+// and discord.js does not await the ready handler — interactions are dispatched
+// while it is still deploying commands and reconciling the jackpot, so a lobby
+// opened in that window put a live stake into a marker the sweep then refunded
+// and cleared. So `/casino crash` stays closed from the first line of the ready
+// handler until the sweep has finished. Crash is the only writer of the marker,
+// and a joiner needs a lobby a host could not open, so the host's command is
+// the one place that has to ask.
+//
+// Open by default: a process that never runs the ready handler (every test that
+// drives a round) has nothing to reconcile and nothing to wait for.
+let gateClosed = false;
+
+/** Called first thing in the ready handler, before anything it awaits. */
+function holdCrashUntilReconciled() {
+    gateClosed = true;
+}
+
+/** False from `holdCrashUntilReconciled` until the sweep has run. */
+function crashOpen() {
+    return !gateClosed;
+}
+
 /**
  * Refunds every stranded crash stake in the guilds this process owns.
  *
@@ -54,6 +80,18 @@ const { ownsGuild } = require('../../utils/sharding');
  * @returns {Promise<{refunded: number, failed: number}>}
  */
 async function reconcileCrashRefunds(client = null) {
+    // Reopened however the sweep ends. A sweep that threw has left its markers
+    // standing for the next boot, and a new round adding to one is still
+    // counted correctly — the marker is a sum — so keeping crash shut until a
+    // restart would cost players the game and protect nothing.
+    try {
+        return await sweep(client);
+    } finally {
+        gateClosed = false;
+    }
+}
+
+async function sweep(client) {
     const pending = await User.find(
         { pendingCrashRefund: { $gt: 0 } },
         'userId guildId pendingCrashRefund',
@@ -97,4 +135,4 @@ async function reconcileCrashRefunds(client = null) {
     return { refunded, failed };
 }
 
-module.exports = { reconcileCrashRefunds };
+module.exports = { reconcileCrashRefunds, holdCrashUntilReconciled, crashOpen };

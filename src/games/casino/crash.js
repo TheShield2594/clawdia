@@ -31,6 +31,7 @@ const { creditCoinsOnce, casinoPayoutKey } = require('../../utils/payoutKey');
 const { counterSetExpr } = require('../../utils/balanceDebit');
 const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
 const { updateCrashStats, buildWeeklyLeaderboard } = require('./crashStats');
+const { crashOpen } = require('./crashRefund');
 
 const TICK_MS = 1200;
 const MIN_BET = 10;
@@ -175,6 +176,15 @@ module.exports = {
                 .setRequired(false)),
 
     async execute(interaction, { releaseLock, onWager } = {}) {
+        // Closed until the restart refund sweep has run: a stake taken before
+        // it would be refunded as stranded while its round was still live.
+        if (!crashOpen()) {
+            releaseLock?.();
+            return interaction.reply({
+                content: '⏳ Crash is still settling rounds from before the bot restarted — try again in a moment.',
+                flags: MessageFlags.Ephemeral,
+            });
+        }
         const bet         = interaction.options.getInteger('bet');
         const autoCashout = interaction.options.getNumber('auto_cashout') ?? null;
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });

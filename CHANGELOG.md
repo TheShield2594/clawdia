@@ -34,6 +34,9 @@ ordering, and the recovery path pass 4 relied on.
   marker so two booting processes cannot both pay it, logged from the write's
   pre-image, carrying on past a failed player, and scoped to the guilds this
   shard owns — another shard's marker may be a stake riding a live round.
+  `/casino crash` stays closed until the sweep has run, because interactions
+  arrive while the ready handler is still awaiting and a round opened then
+  would have had its live stake swept.
   Stakes already stranded are returned on the first boot of this version.
 - **A crash cash-out in flight when the round ended was settled twice.** The
   round's tick is an async interval callback the interval does not wait for, so

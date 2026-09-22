@@ -15,12 +15,15 @@
 jest.mock('../src/utils/commandDeployer', () => ({ deployCommandsIfChanged: jest.fn() }));
 jest.mock('../src/services/scheduler', () => ({ startScheduler: jest.fn() }));
 jest.mock('../src/services/casinoJackpotService', () => ({ reconcileJackpotClaims: jest.fn() }));
-jest.mock('../src/games/casino/crashRefund', () => ({ reconcileCrashRefunds: jest.fn() }));
+jest.mock('../src/games/casino/crashRefund', () => ({
+    reconcileCrashRefunds: jest.fn(),
+    holdCrashUntilReconciled: jest.fn(),
+}));
 
 const { deployCommandsIfChanged } = require('../src/utils/commandDeployer');
 const { startScheduler } = require('../src/services/scheduler');
 const { reconcileJackpotClaims } = require('../src/services/casinoJackpotService');
-const { reconcileCrashRefunds } = require('../src/games/casino/crashRefund');
+const { reconcileCrashRefunds, holdCrashUntilReconciled } = require('../src/games/casino/crashRefund');
 
 const ready = require('../src/events/ready');
 
@@ -147,6 +150,22 @@ describe('crash refund sweep', () => {
 
         expect(reconcileCrashRefunds).toHaveBeenCalledWith(client);
         expect(logs).toHaveBeenCalledWith('[READY] Refunded crash bets for 2 user(s)');
+    });
+
+    it('closes crash before its first await, ahead of everything the sweep waits behind', async () => {
+        // discord.js does not await this handler, so interactions arrive while
+        // it is still deploying commands. The gate has to be shut before then.
+        let closedBeforeDeploy = false;
+        deployCommandsIfChanged.mockImplementation(async () => {
+            closedBeforeDeploy = holdCrashUntilReconciled.mock.calls.length === 1;
+            return { deployed: false, count: 98, reason: 'unchanged' };
+        });
+
+        const pending = ready.execute(makeClient());
+        expect(holdCrashUntilReconciled).toHaveBeenCalledTimes(1);
+        await pending;
+
+        expect(closedBeforeDeploy).toBe(true);
     });
 
     it('stays quiet when no bet is outstanding', async () => {

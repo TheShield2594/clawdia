@@ -1,12 +1,16 @@
 const { deployCommandsIfChanged } = require('../utils/commandDeployer');
 const { startScheduler } = require('../services/scheduler');
 const { reconcileJackpotClaims } = require('../services/casinoJackpotService');
-const { reconcileCrashRefunds } = require('../games/casino/crashRefund');
+const { reconcileCrashRefunds, holdCrashUntilReconciled } = require('../games/casino/crashRefund');
 
 module.exports = {
     name: 'clientReady',
     once: true,
     async execute(client) {
+        // Synchronously, before the first await: interactions are dispatched
+        // while this handler is still running, and a crash round opened before
+        // the refund sweep below would have its live stake swept as stranded.
+        holdCrashUntilReconciled();
         console.log(`[READY] Logged in as ${client.user.tag}`);
         console.log(`[READY] Serving ${client.guilds.cache.size} guilds`);
 

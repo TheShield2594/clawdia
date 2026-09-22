@@ -26,7 +26,7 @@ jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 
 const { logTransaction } = require('../src/utils/logTransaction');
-const { reconcileCrashRefunds } = require('../src/games/casino/crashRefund');
+const { reconcileCrashRefunds, holdCrashUntilReconciled, crashOpen } = require('../src/games/casino/crashRefund');
 
 const GUILD_A = '111222333444555666';
 const GUILD_B = '222333444555666777';
@@ -187,5 +187,51 @@ describe('only this shard\'s guilds are swept', () => {
         );
 
         expect((await reconcileCrashRefunds()).refunded).toBe(2);
+    });
+});
+
+describe('crash stays closed until the sweep has run', () => {
+    // The sweep cannot tell a stranded stake from a live one, and discord.js
+    // dispatches interactions while the ready handler is still awaiting the
+    // command deploy. A round opened in that window had its live stake swept.
+
+    test('the gate is open when nothing has held it', () => {
+        expect(crashOpen()).toBe(true);
+    });
+
+    test('held by the ready handler, it reopens when the sweep finishes', async () => {
+        holdCrashUntilReconciled();
+        expect(crashOpen()).toBe(false);
+
+        await reconcileCrashRefunds();
+
+        expect(crashOpen()).toBe(true);
+    });
+
+    test('a sweep that throws still reopens it', async () => {
+        holdCrashUntilReconciled();
+        mockUsers.model.find.mockReturnValueOnce({ lean: async () => { throw new Error('mongo is down'); } });
+
+        await expect(reconcileCrashRefunds()).rejects.toThrow('mongo is down');
+
+        expect(crashOpen()).toBe(true);
+    });
+
+    test('a crash command in the window is turned away before any stake moves', async () => {
+        const crash = require('../src/games/casino/crash');
+        const { makeInteraction } = require('./helpers/fakeInteraction');
+        const interaction = makeInteraction({ options: { bet: 100, auto_cashout: null } });
+        const releaseLock = jest.fn();
+
+        holdCrashUntilReconciled();
+        try {
+            await crash.execute(interaction, { releaseLock });
+        } finally {
+            await reconcileCrashRefunds();
+        }
+
+        expect(interaction.replies.at(-1).content).toMatch(/still settling/);
+        expect(releaseLock).toHaveBeenCalled();
+        expect(mockUsers.writes).toEqual([]);
     });
 });
