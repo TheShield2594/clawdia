@@ -144,14 +144,14 @@ describe('the Today profile field', () => {
     it('shows the wall before a hunter reaches it', () => {
         const f = buildTodayField({ hunt: { dailyHunts: 10, dailyCoins: 5000, dailyWindowStart: FRESH_WINDOW() } }, '💰');
         expect(f.value).toContain('×1.00');
-        expect(f.value).toContain(`Drops to ×0.85 at ${LIMITS.DIM_RETURNS_THRESHOLD_1} hunts`);
-        expect(f.value).toContain('Soft cap');
+        expect(f.value).toContain(`×0.85 from ${LIMITS.DIM_RETURNS_THRESHOLD_1} hunts`);
+        expect(f.value).toContain(`💰${LIMITS.DAILY_SOFT_CAP.toLocaleString()} at full rate`);
     });
 
     it('says plainly when the soft cap is already biting', () => {
         const f = buildTodayField({ hunt: { dailyHunts: 95, dailyCoins: 92_000, dailyWindowStart: FRESH_WINDOW() } }, '💰');
         expect(f.value).toContain('×0.70');
-        expect(f.value).toContain('payouts halved');
+        expect(f.value).toContain('past the soft cap, payouts at 50%');
     });
 
     it('handles a hunter who has not hunted today', () => {

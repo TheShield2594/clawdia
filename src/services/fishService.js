@@ -65,6 +65,7 @@ function ensureFishingData(user) {
     if (f.weeklyRecord         == null) f.weeklyRecord         = { fish: null, weight: 0, userId: null, username: null, weekStart: null };
     if (f.lastBossEncounter    == null) f.lastBossEncounter    = null;
     if (!Array.isArray(f.trophies)) f.trophies = [];
+    if (!f.catalog || typeof f.catalog !== 'object' || Array.isArray(f.catalog)) f.catalog = {};
 
     if (!f.unlockedLocations.includes('pond')) f.unlockedLocations.push('pond');
 
@@ -737,6 +738,7 @@ function executeCast(user, locationId, options = {}) {
             f.consecutiveFails = 0;
             if (tier === 'legendary') f.legendaryCatches += 1;
             if (tier === 'event')     f.eventCatches     += 1;
+            recordCatalogCatch(f, fish, weightLbs);
 
             const lvResult = applyXp(user, xpGain);
 
@@ -1117,6 +1119,20 @@ async function claimCastCooldown(user) {
 }
 
 /**
+ * The species log behind the /fish profile catalog: how many of each fish the
+ * player has landed and the heaviest. Keyed by fish id, so it stays small —
+ * one short entry per species, at most one per row of FISH. It starts when this
+ * shipped; nothing earlier recorded species, so there is nothing to backfill.
+ */
+function recordCatalogCatch(f, fish, weightLbs) {
+    if (!f.catalog || typeof f.catalog !== 'object') f.catalog = {};
+    const entry = f.catalog[fish.id] ?? { count: 0, heaviest: 0 };
+    entry.count += 1;
+    if (weightLbs > (entry.heaviest ?? 0)) entry.heaviest = weightLbs;
+    f.catalog[fish.id] = entry;
+}
+
+/**
  * Snapshot every reward field a cast can mutate, taken before executeCast so
  * an escaped required reel-in can be reversed cleanly.
  */
@@ -1136,6 +1152,7 @@ function snapshotCastRewards(user) {
         materials: JSON.parse(JSON.stringify(f.materials ?? {})),
         personalBest: f.personalBest ? JSON.parse(JSON.stringify(f.personalBest)) : null,
         weeklyRecord: f.weeklyRecord ? JSON.parse(JSON.stringify(f.weeklyRecord)) : null,
+        catalog: JSON.parse(JSON.stringify(f.catalog ?? {})),
     };
 }
 
@@ -1158,6 +1175,8 @@ function revertEscapedCast(user, snapshot, result) {
     user.fishing.materials        = snapshot.materials;
     if (snapshot.personalBest !== null) user.fishing.personalBest = snapshot.personalBest;
     if (snapshot.weeklyRecord !== null) user.fishing.weeklyRecord = snapshot.weeklyRecord;
+    // An escaped fish was never landed, so it never joins the log.
+    if (snapshot.catalog) user.fishing.catalog = snapshot.catalog;
     // executeCast zeroed the fail streak on the successful roll; the fish was
     // never landed, so restore it and count this as the miss it was —
     // otherwise a required reel-in miss hands back pity progress.
@@ -1334,6 +1353,7 @@ module.exports = {
     prepareCastUser,
     validateCastPreflight,
     claimCastCooldown,
+    recordCatalogCatch,
     snapshotCastRewards,
     revertEscapedCast,
     downgradeOptionalMiss,
