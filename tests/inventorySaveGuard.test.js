@@ -37,7 +37,7 @@ const REVIEWED = new Map([
     // in the same save. Concurrency here can strand a unit of pet food, not
     // mint one. Reworking it means reshaping the material stores; tracked as
     // its own problem rather than waved through silently.
-    ['commands/economy/pet.js', 'decrementMaterial is a clamped debit of grind materials, not a credit'],
+    ['commands/economy/pet/shared.js', 'decrementMaterial is a clamped debit of grind materials, not a credit'],
     // Not a User inventory at all: `applyEffects` builds a copy of the DM
     // party's character list and pushes an adventuring item onto that copy, and
     // dmService writes the result back through an explicit `$set` under the

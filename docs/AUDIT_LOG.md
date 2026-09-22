@@ -1276,6 +1276,91 @@ which is worth its own issue.
 
 ---
 
+## Economy — The /pet Command's Payouts
+
+**Status: Audited — all findings resolved** ✓
+
+The tenth pass of the economy audit #873, over the `/pet` command's own
+currency-mutation paths — the bound pass 9 left open. Pass 9 reviewed the pet
+**drops** the gathering runs grant (sound: they ride the run's atomic `save()`)
+and named the command's own coin writes as unkeyed writes of the audit's usual
+class, but deferred them because `pet.js` was frozen at its `command-file-size`
+ceiling and keying them needs the owe helpers and their three-way messaging —
+the same bound pass 8 left on `/explore`.
+
+So the file is split first. `pet.js` (1,388 lines) becomes a `pet/` folder —
+`index.js` for the command definition and dispatch, one file per subcommand
+(`adopt`, `status`, `feed`, `release`, `rename`, `list`, `leaderboard`,
+`battle`), an `autocomplete.js` and a `shared.js` for the plumbing more than one
+subcommand needs — the same shape #721 gave the grind commands and pass 8 gave
+`/explore`. The loader treats `<category>/<name>/index.js` as one command, so
+the siblings never register as commands of their own, and `pet.js` leaves the
+`command-file-size` grandfathered list.
+
+The shape is the one every pass finds. The forward direction was sound: the
+adoption fee and both battle stakes are guarded compare-and-set debits, each read
+back in the same handler, so by the time a refund or the payout runs the debit is
+known to have landed — which is why an unconditional keyed credit is the right
+compensation and no keyed debit is needed (the `rollbackStake` "taken moments ago
+in this same call" case). The failure was on the credit and the unwind: a bare
+`$inc` that read nothing back and announced the coins as moved regardless.
+
+**Files reviewed/fixed:**
+- `src/commands/economy/pet/` (new folder; split from `pet.js`), with the payout
+  fixes in `pet/battle.js` and `pet/adopt.js`
+- `src/utils/petEconomy.js` (added), `src/utils/payoutKey.js`
+- `eslint.config.js` (`pet.js` off the grandfathered list), `coverage-floors.json`,
+  `README.md` (regenerated shape table)
+- `tests/petPayoutRecovery.test.js` (added); `tests/commandFileSize.test.js`,
+  `tests/exploreMaterials.test.js`, `tests/inventorySaveGuard.test.js`,
+  `tests/petRenameRetry.test.js` (paths updated for the split)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | The **wagered-battle winner payout** was a bare `$inc` that read nothing back and announced the win in the result embed regardless of whether it matched a document — the durability gap `/duel`'s pot had before pass 1, in the one wager outside `/duel` and the casino that stakes a player's own coins on an outcome. The jackpot-vs-hand asymmetry in reverse: the pot is built from both players' escrowed stakes and has nowhere else to be, yet the credit that delivered it was the one write that could vanish | Through `payBattleWinner` (`creditCoinsOrOwe` under `petBattlePayoutKey(battleId, winnerId)`, `battleId` the opening interaction id) — exactly-once, recorded as an owed `coins` payload for `payouts:replay` when it will not land, and the embed says the pot could not be paid rather than announcing a win that did not happen | `pet/battle.js`, `petEconomy.js`, `payoutKey.js` |
+| 2 | The **battle escrow refunds** — the challenger's stake back when the opponent cannot cover the wager, and both stakes back when a fighter drops out between the challenge and its acceptance — were bare `$inc`s that read nothing back and announced the refund regardless (the pass-3 `/market` unwind shape). The debit each reverses is read back in the same handler, so the refund is a known-landed compensation, but a write against a pruned or changed document moved no coins under a reply that said it had | Through `refundBattleStake` / `refundBothStakes` (`creditCoinsOrOwe` under `petBattleRefundPayoutKey(battleId, userId)`), worded from the result by `stakeRefundNote` / `battleRefundNote` — refunded, recorded as owed, or contact an admin | `pet/battle.js`, `petEconomy.js`, `payoutKey.js` |
+| 3 | The **adopt-fee refund** handed the adoption cost back on a failed save with a bare `$inc` that read nothing back and told the player their coins were refunded whether or not the write matched a document — the write this issue names by hand. Worse on the non-version-conflict path: the refund was attempted and the error rethrown, so the generic handler's "something went wrong" was all the player saw, with no word on the coins | Through `refundAdoptFee` (`creditCoinsOrOwe` under `petAdoptRefundPayoutKey(interactionId)`) — keyed, recorded as owed when it will not land — with the reply worded from the result by `adoptRefundNote`; the non-version failure is answered in the handler rather than rethrown, so the refund's outcome is what the player is told | `pet/adopt.js`, `petEconomy.js`, `payoutKey.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 4 | Three key constructors were needed and did not exist | `petBattlePayoutKey`, `petBattleRefundPayoutKey` and `petAdoptRefundPayoutKey`, each keyed by the identifier that names its payout across a retry and a replay (the battle's opening interaction, or the adoption's) | `payoutKey.js` |
+| 5 | No tests over the keyed paths | `tests/petPayoutRecovery.test.js` drives the three `petEconomy` helpers against a store that evaluates the payout-key guard for real (exactly-once, replayable-owed, missing-document), checks the wording is read off the result three ways, and holds `battle.js` and `adopt.js` to the keyed path | `tests/` |
+
+**Reviewed and found sound** — no change needed, recorded so the next pass does
+not re-derive it:
+
+- **The battle escrow debits.** Each stake leaves its owner through a guarded
+  `balance: { $gte: bet }` compare-and-set whose result is read back in the same
+  handler before anything else happens (`if (!ch) …`, `if (!op) …`), so the
+  forward direction cannot over-debit and every refund below it reverses a debit
+  known to have landed. The adoption fee is the same guarded charge.
+- **The wild-battle path.** `/pet battle` with no opponent pays no coins — XP and
+  the pet-care quest reward only — so there is no pot to lose.
+- **`/pet release` and `/pet rename`.** Roster mutations under `withVersionRetry`,
+  pure functions of the freshly read roster; no currency moves.
+
+**The bound this pass leaves open.** The pet-care **quest credits** — the coins
+`/pet feed`, `play` and `rest` pay through `onPetCare`, and the same reward on the
+wild and PvP battle paths — ride `saveWithBalanceDelta` with no `payoutKey`, which
+is the pass-6 degraded branch (a retried `$inc` re-credits a lost-response write,
+a pruned document reads as paid, a hard failure files a keyless `FailedJob`). It
+is **deliberately not fixed here**: this is not a `/pet`-specific gap but the
+cross-command **quest/mission crediting through `onEconomyEarn`** the roadmap
+already queues as its own pass — `/hunt`, `/fish`, `/mine` and `/pet` all credit
+quest rewards this way, and keying one command's while leaving the shared hook
+untouched would half-fix the concern. It belongs with that pass, not folded in
+here.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -1286,7 +1371,7 @@ wide, and it is widest exactly where the risk is.
 **Economy** — the largest uncovered area:
 
 - `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound. Still not reviewed: quest/mission crediting through the already-audited `onEconomyEarn`, prestige (reviewed sound in pass 7), and the map view. `/explore`'s while-an-event-runs **event-currency drop** is the one event-currency credit pass 8 did not key (it rides the expedition `save()` and `explore.js` is at its file-size ceiling) — the keyed helper now exists, so it is a follow-up once explore is split
-- `pet` (`petService.js`, `pet.js`) — pass 9 reviewed the pet **drops** the gathering runs grant (sound, they ride the run's `save()`) and found the `/pet` command's **PvP-battle payouts and adopt refund** to be unkeyed writes of the audit's usual class, but left them: `pet.js` is at its `command-file-size` ceiling, so keying them needs the file split first (the same bound pass 8 left on `/explore`). Worth a dedicated `/pet` pass. `pet` feeding, the pet-care quest credits and the Pet-of-the-Week reward were reviewed and found sound
+- `pet` (`petService.js`, `pet/`) — the `/pet` command's **PvP-battle winner payout, the battle escrow refunds and the adopt-fee refund** are audited above (pass 10, which also split `pet.js` into the `pet/` folder), alongside the pet **drops** the gathering runs grant, found sound in pass 9. The Pet-of-the-Week reward was reviewed and found sound. Still not reviewed: the pet-care **quest credits** (`/pet feed`, `play`, `rest` and the battle care rewards), which ride the unkeyed `saveWithBalanceDelta` degraded branch — deferred to the cross-command **quest/mission crediting through `onEconomyEarn`** pass rather than fixed per-command
 - `use` / items / effects — the seasonal loot-box item grant is audited above (pass 6); `effectsService.js`, `inventory.js`, `shop.js` and the rest of `use.js` are not
 - casino (`src/games/casino/*`, `casino.js`) — `confirmBet`, the bet guards, the
   eight games' odds and their leaderboard writes. The progressive jackpot and the
@@ -1318,6 +1403,7 @@ economy escrow and payout paths on 2026-09-01; the progressive jackpot on
 2026-09-04; the gift and market unwind paths on 2026-09-05; the casino hand
 payouts on 2026-09-08; the core currency commands on 2026-09-17; the
 gathering-loop payouts on 2026-09-18; the progression and group/PvP payouts on
-2026-09-19; the seasonal-event currency on 2026-09-20; and the gathering
-commands' non-payout surface on 2026-09-22. "Not yet reviewed" carries no review
+2026-09-19; the seasonal-event currency on 2026-09-20; the gathering
+commands' non-payout surface on 2026-09-22; and the `/pet` command's payouts on
+2026-09-22. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*

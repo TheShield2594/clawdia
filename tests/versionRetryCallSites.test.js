@@ -415,7 +415,7 @@ describe('each check can still fail', () => {
     });
 
     it('accepts the shape the primitive documents', () => {
-        // Lifted from src/commands/economy/pet.js: a re-read, a mutation that is
+        // Lifted from src/commands/economy/pet/release.js: a re-read, a mutation that is
         // a pure function of what came back, an abort when the precondition no
         // longer holds, and a label. No check here may reject this.
         const good = bad(

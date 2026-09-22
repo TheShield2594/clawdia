@@ -935,6 +935,69 @@ function eventShopRefundPayoutKey(interactionId) {
     return `eventshop:${interactionId}:refund`;
 }
 
+/**
+ * The pot a `/pet battle` wager pays its winner (#873, pass 10).
+ *
+ * A wagered pet battle escrows both stakes atomically the moment the challenge
+ * is accepted (each debit a guarded compare-and-set that is read back in the
+ * same handler, so the forward direction is sound), then pays the winner the
+ * pot less the house cut. That credit was a bare `$inc` that read nothing back
+ * and announced the win regardless — the same durability gap the duel payout
+ * had before pass 1, in the one wager outside `/duel` and the casino that puts a
+ * player's own coins on an outcome. Keyed, a pot that will not land is recorded
+ * as owed and a retry cannot pay it twice.
+ *
+ * `battleId` is the opening interaction's id — the one identifier that survives
+ * the 60s challenge window and the collector callback that settles the fight, so
+ * the live credit and its replay rebuild the same string. `winnerId` names the
+ * wallet: two battles the same player wins are two separate interactions and pay
+ * separately. Namespaced `:payout`, apart from the `:refund` a cancelled battle
+ * files under the same `battleId`.
+ */
+function petBattlePayoutKey(battleId, winnerId) {
+    return `pet:battle:${battleId}:${winnerId}:payout`;
+}
+
+/**
+ * One escrowed stake coming back when a `/pet battle` wager does not happen
+ * (#873, pass 10).
+ *
+ * A stake is handed back in two mutually exclusive places: the opponent cannot
+ * cover the wager after the challenger's stake was taken, or a fighter became
+ * unavailable between the challenge and its acceptance. Both were bare `$inc`s
+ * that read nothing back and announced the refund regardless — the pass-3
+ * `/market` unwind shape. The debit these reverse is known to have landed in the
+ * same handler (its result was read), so an unconditional keyed credit is the
+ * right compensation — the `rollbackStake` "taken moments ago in this same call"
+ * case — and needs no keyed debit. Keyed, a refund that will not land is
+ * recorded as owed and a retry cannot refund twice.
+ *
+ * Keyed by the battle and the player: one stake per player per battle, and the
+ * two refund sites are mutually exclusive, so they share the key safely.
+ * Namespaced `:refund`, apart from the winner's `:payout`.
+ */
+function petBattleRefundPayoutKey(battleId, userId) {
+    return `pet:battle:${battleId}:${userId}:refund`;
+}
+
+/**
+ * The adoption fee handed back when `/pet adopt` could not save the new pet
+ * (#873, pass 10).
+ *
+ * The fee is charged with a guarded compare-and-set, then the pet is pushed and
+ * the document saved; a save that throws has to give the fee back. That refund
+ * was a bare `$inc` that read nothing back and told the player their coins were
+ * refunded whether or not the write matched a document — the write it never
+ * read that this issue names. Keyed, the refund is recorded as owed when it will
+ * not land and a retry cannot refund twice.
+ *
+ * Keyed by the interaction, which names this adoption: the same player adopting
+ * again after a failure is a new interaction and refunds separately.
+ */
+function petAdoptRefundPayoutKey(interactionId) {
+    return `pet:adopt:${interactionId}:refund`;
+}
+
 module.exports = {
     gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
     questClaimPayoutKey, tournamentEntryRefundPayoutKey, forgeRefundPayoutKey,
@@ -952,6 +1015,7 @@ module.exports = {
     tradeBudgetRefundKey,
     jackpotPayoutKey, casinoPayoutKey,
     eventActivityPayoutKey, eventShopRefundPayoutKey,
+    petBattlePayoutKey, petBattleRefundPayoutKey, petAdoptRefundPayoutKey,
     payoutKeyGuard, payoutKeyAppendExpr, eventCurrencyCreditExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, creditEventCurrencyOnce, isDuplicateKeyError,
     RETENTION_DAYS, RETENTION_MS, KEY_CAP,

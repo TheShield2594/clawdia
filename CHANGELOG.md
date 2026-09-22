@@ -14,6 +14,55 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.2] - 2026-09-22
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 10 (#873) — the `/pet` command's PvP-battle payouts and
+adopt refund. Pass 9 found the pet **drops** the gathering runs grant sound and
+named the `/pet` command's own coin writes as unkeyed writes of the audit's
+usual class, but left them because `pet.js` was frozen at its `command-file-size`
+ceiling and keying them needs the owe helpers and their three-way messaging. So
+`pet.js` (1,388 lines) is split into a `pet/` folder — `index.js` plus one file
+per subcommand, the same shape `/explore` and the grind commands use — and the
+three writes are keyed. As on every path before them the forward direction was
+sound (the adoption fee and both battle stakes are guarded compare-and-set
+debits, each read back in the same handler); the failure was on the credit and
+the unwind.
+
+- **The wagered-battle winner payout was a bare `$inc` that read nothing back**
+  and announced the win regardless — the durability gap `/duel`'s pot had before
+  pass 1, in the one wager outside `/duel` and the casino that puts a player's
+  own coins on an outcome. Through `payBattleWinner` (`creditCoinsOrOwe` under
+  `petBattlePayoutKey`) it is exactly-once, recorded as owed for
+  `payouts:replay` when it will not land, and the embed says the pot could not
+  be paid rather than announcing a win that did not happen.
+- **The battle escrow refunds** — the challenger's stake back when the opponent
+  cannot cover the wager, and both stakes back when a fighter drops out between
+  the challenge and its acceptance — were bare `$inc`s that announced the refund
+  regardless (the pass-3 `/market` unwind shape). The debit each reverses is
+  read back in the same handler, so an unconditional keyed credit is the right
+  compensation. Through `refundBattleStake` / `refundBothStakes` under
+  `petBattleRefundPayoutKey`, worded from what the refund did.
+- **The adopt fee handed back on a failed save was a bare `$inc`** that told the
+  player their coins came back over a write it never read — the write this issue
+  names. Through `refundAdoptFee` under `petAdoptRefundPayoutKey` it is keyed,
+  recorded as owed when it will not land, and the reply is worded from the
+  result (the non-version-conflict failure is answered here rather than rethrown,
+  because the generic handler cannot say what became of the coins).
+
+The three helpers and their wording live in `src/utils/petEconomy.js`, beside
+`duelEscrow.js`; `tests/petPayoutRecovery.test.js` drives them against a store
+that evaluates the payout-key guard for real (exactly-once, replayable-owed,
+missing-document) and holds `battle.js` and `adopt.js` to the keyed path.
+
+Deliberately left, and why: the pet-care **quest credits** (`/pet feed`,
+`play`, `rest`, and the wild/PvP battle care rewards) go through the same
+unkeyed `saveWithBalanceDelta` degraded branch — but that is the cross-command
+**quest/mission crediting through `onEconomyEarn`** the roadmap already queues as
+its own pass, shared by `/hunt`, `/fish`, `/mine` and `/pet` alike, not a
+`/pet`-specific gap. Keying it belongs with that pass, not folded in here.
+
 ## [4.13.1] - 2026-09-22
 
 Migrations through `026_backfill_shop_item_ids`.
