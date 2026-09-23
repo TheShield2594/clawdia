@@ -7,6 +7,7 @@ const {
 const User = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { describeItem } = require('../../utils/itemDisplay');
+const { loadAiItems } = require('../../utils/aiItemLookup');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { isSoulbound } = require('../../data/soulboundItems');
 const { resolveEffectType, isActiveEffect } = require('../../services/effectsService');
@@ -162,6 +163,15 @@ module.exports = {
         const sides = { [a.id]: emptySide(), [b.id]: emptySide() };
         const confirmed = { [a.id]: false, [b.id]: false };
         let settling = false;
+        // Bumped on every change to either offer, and carried in the Confirm
+        // button's id (#873, pass 21). Resetting the confirmations on a change
+        // was not enough on its own: a press is sent from the message the
+        // clicker's client is showing, and between an offer changing and the
+        // redraw reaching them, a Confirm pressed on the old offer landed as a
+        // confirmation of the new one. Now a press carries the revision it was
+        // drawn for, and a stale one is refused.
+        let revision = 0;
+        const offerChanged = () => { revision += 1; resetConfirms(); };
         // Cleared when the collector ends (timeout/settle/cancel). A modal can
         // outlive it — opened before the window closed, submitted after — and
         // its handler checks this before touching anything.
@@ -174,7 +184,7 @@ module.exports = {
                 new ButtonBuilder().setCustomId(cid('item')).setLabel('Set item').setStyle(ButtonStyle.Secondary),
             ),
             new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(cid('confirm')).setLabel('Confirm').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId(cid(`confirm-${revision}`)).setLabel('Confirm').setStyle(ButtonStyle.Success),
                 new ButtonBuilder().setCustomId(cid('cancel')).setLabel('Cancel').setStyle(ButtonStyle.Danger),
             ),
         ];
@@ -189,7 +199,11 @@ module.exports = {
         const collector = message.createMessageComponentCollector({
             componentType: ComponentType.Button,
             filter: ownedBy(participants, i => i.customId.endsWith(tradeId), 'This trade is between two other people.'),
-            time: WINDOW_MS,
+            // Idle, as the embed has always said (#873, pass 21). An absolute
+            // window ended a trade two minutes after it opened however actively
+            // it was being negotiated, and dropped the offer a member was typing
+            // into a modal at the time.
+            idle: WINDOW_MS,
         });
 
         // Reading a fresh document each time a member sets coins/item, so the
@@ -228,7 +242,7 @@ module.exports = {
                 return submit.reply({ content: `You only have ${currency}${(doc?.balance ?? 0).toLocaleString()}.`, flags: MessageFlags.Ephemeral });
             }
             sides[btn.user.id].coins = raw;
-            resetConfirms();
+            offerChanged();
             await submit.deferUpdate().catch(() => {});
             await interaction.editReply({ embeds: [render()], components: controls() }).catch(() => {});
         };
@@ -239,7 +253,7 @@ module.exports = {
             const modal = new ModalBuilder().setCustomId(`${cid('itemm')}`).setTitle('Set an item to offer');
             modal.addComponents(
                 new ActionRowBuilder().addComponents(
-                    new TextInputBuilder().setCustomId('item').setLabel('Item name (blank to clear)').setStyle(TextInputStyle.Short).setRequired(false),
+                    new TextInputBuilder().setCustomId('item').setLabel('Item name (blank to clear)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100),
                 ),
                 new ActionRowBuilder().addComponents(
                     new TextInputBuilder().setCustomId('qty').setLabel('Quantity').setStyle(TextInputStyle.Short).setRequired(false).setValue('1'),
@@ -252,16 +266,20 @@ module.exports = {
             const typed = submit.fields.getTextInputValue('item').trim();
             if (!typed) {
                 sides[btn.user.id].item = null;
-                resetConfirms();
+                offerChanged();
                 await submit.deferUpdate().catch(() => {});
                 return interaction.editReply({ embeds: [render()], components: controls() }).catch(() => {});
             }
             const qty = Math.max(1, Math.floor(Number(submit.fields.getTextInputValue('qty')) || 1));
             const doc = await freshDoc(btn.user.id);
-            const resolved = resolveItemForTrade(doc, typed, qty, { shopItems });
+            // The forged item's own row, or `describeItem` prices it as a
+            // Legendary and the trade is charged against the caps at that.
+            const wanted = typed.toLowerCase();
+            const aiItems = await loadAiItems((doc?.inventory ?? []).map(i => i.itemId).filter(id => id.toLowerCase() === wanted));
+            const resolved = resolveItemForTrade(doc, typed, qty, { shopItems, aiItem: Object.values(aiItems)[0] ?? null });
             if (resolved.error) return submit.reply({ content: resolved.error, flags: MessageFlags.Ephemeral });
             sides[btn.user.id].item = resolved.item;
-            resetConfirms();
+            offerChanged();
             await submit.deferUpdate().catch(() => {});
             await interaction.editReply({ embeds: [render()], components: controls() }).catch(() => {});
         };
@@ -277,7 +295,14 @@ module.exports = {
                     return collector.stop('cancelled');
                 }
 
-                if (action === 'confirm') {
+                if (action.startsWith('confirm-')) {
+                    if (Number(action.slice('confirm-'.length)) !== revision) {
+                        await btn.update({ embeds: [render()], components: controls() }).catch(() => {});
+                        return void await btn.followUp({
+                            content: 'The offer changed before your confirmation arrived — check it and confirm again.',
+                            flags: MessageFlags.Ephemeral,
+                        }).catch(() => {});
+                    }
                     confirmed[btn.user.id] = true;
                     if (!(confirmed[a.id] && confirmed[b.id])) {
                         return void await btn.update({ embeds: [render()], components: controls() }).catch(() => {});
@@ -301,6 +326,12 @@ module.exports = {
                     if (!outcome.ok) {
                         settling = false;
                         resetConfirms();
+                        // The window may have closed while this settled; then the
+                        // buttons would be drawn back onto a trade nothing is
+                        // listening to any more.
+                        if (!active) {
+                            return void await interaction.editReply({ embeds: [render('expired').setDescription(`Trade expired — nothing was exchanged. ${outcome.message}`)], components: [] }).catch(() => {});
+                        }
                         await interaction.followUp({ content: `⚠️ ${outcome.message} You can adjust and try again.`, flags: MessageFlags.Ephemeral }).catch(() => {});
                         await interaction.editReply({ embeds: [render()], components: controls() }).catch(() => {});
                         return;
@@ -319,7 +350,9 @@ module.exports = {
 
         collector.on('end', async (_collected, reason) => {
             active = false;
-            if (['done', 'cancelled'].includes(reason)) return;
+            // A settle in flight writes its own outcome. "Nothing was exchanged"
+            // drawn over it would be untrue whenever the swap then completed.
+            if (['done', 'cancelled'].includes(reason) || settling) return;
             await interaction.editReply({ embeds: [render('expired')], components: [] }).catch(() => {});
         });
     },

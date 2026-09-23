@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and twenty passes over the
+long-stable, low-churn subsystems have been audited, and twenty-one passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -19,7 +19,8 @@ writes), `/explore`'s event-currency drop, and the items, effects and server
 shop (`/use`, `effectsService`, `/inventory`, `/shop buy`), the effect
 consumers, the map views, the `/explore` views, the season pass's
 non-reward surface, season XP, tier claims and mission progress, and the
-gathering commands' profiles, inventories and prestige (#873). The majority of the
+gathering commands' profiles, inventories and prestige, and the rest of
+`/market` and `/gift` with `/trade` (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -2131,6 +2132,79 @@ that is where both findings are.
 
 ---
 
+## Economy — The Player Market, Gifts and Trades
+
+**Status: Audited — all findings resolved** ✓
+
+The twenty-first pass of the economy audit #873, over what pass 3 left of
+`/market` and `/gift`. It also covers `/trade`, the third place one player
+hands coins or an item to another, which arrived after pass 3 (#1010) and no
+pass had read. Pass 3 audited the unwinds and #1010's own reviews covered
+`/trade`'s escrow. This pass re-read both money paths and found them sound
+(below). The findings are in what surrounds them: what a buyer is shown, which
+listings they can reach, who a transfer can be sent to, and what a trade
+confirmation is a confirmation *of*.
+
+**Files reviewed/fixed:**
+- `src/commands/economy/market/` (`browse.js`, `buy.js`, `pickers.js`, `index.js`, `shared.js`; the command was split into this folder on main while this pass was open, and the fixes were carried onto it)
+- `src/commands/economy/gift.js`
+- `src/commands/economy/trade.js`
+- `src/commands/economy/bank.js` (the transfer's recipient check)
+- `src/utils/coinTransfer.js`
+- `src/utils/tradeEscrow.js`, `src/services/marketService.js` (reviewed)
+- `tests/helpers/fakeInteraction.js`, `tests/helpers/fakeCollection.js`
+- `tests/pass21MarketGiftTrade.test.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | **`/trade` counted a Confirm pressed on an offer that had since changed.** Changing an offer resets both confirmations, but a press is sent from whatever message the clicker's client is showing. Between one side changing their offer and the redraw reaching the other side, a Confirm pressed on the old offer landed after the reset and was counted as confirming the new one. If the first side then confirmed, the trade settled on an offer the second side had never seen: the classic trade-window switch. The window is the edit's round trip, short but not zero, and it is the one guarantee a two-sided confirmation exists to give | Every change to either offer bumps a revision, and the Confirm button's id carries the revision it was drawn for. A press for an earlier revision is refused with "the offer changed before your confirmation arrived", and the controls are redrawn | `trade.js` |
+| 2 | **`/trade`'s window was two minutes from the start, not two minutes idle.** The embed has always said "Expires after two minutes idle", but the collector used `time`. A trade that was still being negotiated ended mid-negotiation, and an offer being typed into a modal at that moment was dropped with no reply. If the window closed while a settle was in flight, the end handler drew "Trade expired — nothing was exchanged" over a swap that then completed. If that settle was refused, the controls were redrawn onto a trade nothing was listening to any more | `idle` instead of `time`. The end handler leaves a settle in flight to write its own outcome. A refused settle on a closed window says the trade expired and why, and draws no buttons | `trade.js` |
+| 3 | **`/market browse` rated items by their asking price.** Rarity came from `getItemRarity(itemId, pricePerUnit)`, and for anything outside the default catalogue that function buckets by the price it is given, here the seller's. A Common relic, a guild's own shop item or a forged item listed at 9,001 or more was labelled Mythic, and the rarity sort placed it with the Mythics. The same code showed those items under their raw ids | The listing is described through `describeItem`: the catalogue, the guild's shop row at the guild's own price, the relic table, or the forged item's own row. The `/market` split on main (#1124) fixed this independently while this pass was open; the merge kept main's version, and the board test here still pins it | `market/browse.js` |
+| 4 | **An expired listing stayed on the board and buyable.** `/market buy`, `/market browse` and both pickers read listings without looking at `expiresAt`. The sweep that hands expired stock back claims 50 listings every ten minutes, so an expired listing stayed buyable for up to ten minutes normally, and for as long as a backlog lasted otherwise (up to the seven-day TTL grace). The seller had been shown "Expires in 48 hours". Expired listings also still counted towards the seller's five slots, which is unchanged: the sweep frees them | Every read a buyer sees filters to live listings. The seller's cancel picker still offers their own expired listings, since cancel returns the stock as the sweep would | `market/shared.js`, `buy.js`, `browse.js`, `pickers.js` |
+| 5 | **`/gift` and `/bank transfer` would send to someone who is not in the server.** A user option accepts any Discord user, and a pasted mention or id of someone who has left resolves fine. The transfer then upserted a document for them and moved the coins or item into it. Nobody sees that document unless the person comes back, and a gift cannot be undone | `nonMemberRefusal` beside `accountAgeRefusal`, from `options.getMember`, which is null for exactly that user. Checked before anything is read or written. `/trade` needs no check: a non-member cannot press its buttons, so the trade just expires | `coinTransfer.js`, `gift.js`, `bank.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 6 | `/trade` priced a forged item without its `AiItem` row, and `describeItem` prices an unknown forge as a Legendary (25,000). A Common forged item (500) therefore used fifty times its worth of the item-value cap, which refused trades the cap should allow, and the offer showed the raw `ai_` id | The offer loads the forged item's row through `loadAiItems`, as `/gift` already did | `trade.js` |
+| 7 | `/market browse` loads the cheapest 200 listings. Its footer counted those 200 as the whole market, and the rarity sort only ever saw them | The footer says "cheapest 200 of N" when there are more | `market/browse.js` |
+| 8 | Free-text item fields with no length cap (`/market list`, `/market browse`, `/gift`, `/trade`'s item modal) are echoed into replies. A value over 2,000 characters made the reply itself fail, leaving the deferred `/gift` stuck on "thinking…" | `setMaxLength(100)`, the length every picker value already has | `market/index.js`, `gift.js`, `trade.js` |
+| 9 | `/market browse`'s page-turn handler had no `catch`, so a failed edit (an expired token, a deleted message) was an unhandled rejection. Its refusal to another member said "This isn't your listing." | Caught and logged. The refusal names the view | `market/browse.js` |
+| 10 | Nothing pinned any of this, and the harness could not drive `/trade`: it had no modal submit and no way to press one button after another | `fakeInteraction` gains modal submits and `press()`, which delivers one press to a held collector and waits for it. `fakeCollection` applies `.limit()`. `tests/pass21MarketGiftTrade.test.js` (14 tests): 12 fail against the old code, and the other 2 exercise the new view directly | `tests/` |
+
+**Reviewed and found sound**, recorded so the next pass does not re-derive it:
+
+- **`/trade`'s escrow** (`utils/tradeEscrow.js`, #1010, #1023, #1025). The
+  caps are reserved in guarded writes before any asset moves; coin takes are
+  keyed; item takes use the `/gift` `$elemMatch` debit; a failed take unwinds
+  in reverse through keyed reversals and grants; and delivery is
+  owed-on-failure, so a swap past the take always completes. The snapshot
+  taken at the second confirm means a modal submit landing during the settle
+  cannot change what settles.
+- **`/market list` and `/market cancel`**: pass 3's shape, unchanged. Listing
+  creation is a compare-and-set on the stack plus a slot claimed by the unique
+  index; the cancel is a delete-to-claim plus a keyed return.
+- **`/market buy`'s confirmation** runs outside the economy lock, as every
+  collector does, and does not need it: the debit is guarded on the balance,
+  the listing is claimed by delete, and a listing's price and quantity never
+  change after it is created.
+- **`/gift`'s pre-flight reads** (the balance, the active-effect refusal, the
+  budgets) are wording only. The debit's own filter carries the stack, the
+  freeze and the budget.
+
+**The bound this pass leaves open:** a listing that expires while its buyer
+sits on the 30-second purchase prompt can still be bought. The sale is real and
+pays the seller, and refusing it after the buyer confirmed would be worse.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -2149,7 +2223,7 @@ wide, and it is widest exactly where the risk is.
   the stakes go through `placeWager`, which #785 covered. Not reviewed: the
   games' odds and house edges beyond what pass 4 needed for the payouts, and the
   rendering (embeds, animations, the paytables)
-- core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market.js` and `gift.js` have had their unwind paths audited (pass 3), the rest of both commands has not
+- core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market/` and `gift.js` have had their unwind paths audited (pass 3), and the rest of both, with `trade.js` and its escrow, is audited above (pass 21)
 - group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is not reviewed
 - progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (view, missions, leaderboard, me, history, event, admin start/end) is audited above (pass 18). Season XP, tier claims and mission progress are committed as guarded writes rather than through `save()` (pass 19)
 - seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. Not reviewed: the event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end scheduler in `seasonalEventService.js`) and the shop's browse/balance reads, none of which move player currency. `/explore`'s event-currency drop is audited above (pass 13). The `/eventshop` debit guard and its effect purchases are audited above (pass 14)
@@ -2181,6 +2255,6 @@ commands' non-payout surface on 2026-09-22; the `/pet` command's payouts on
 server shop on 2026-09-23; the effect consumers on 2026-09-23; the map views
 on 2026-09-23; the `/explore` views on 2026-09-23; the season pass's
 non-reward surface on 2026-09-23; season XP, tier claims and mission
-progress on 2026-09-23; and the gathering commands' remaining surface on
-2026-09-23. "Not yet reviewed" carries no review
+progress on 2026-09-23; the gathering commands' remaining surface on
+2026-09-23; and the player market, gifts and trades on 2026-09-23. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*

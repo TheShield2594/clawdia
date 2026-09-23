@@ -22,11 +22,19 @@ const SORT_PRICE  = 'price';
 // rather than letting it fall to the bottom with the unknowns.
 const RARITY_RANK = Object.fromEntries([...RARITY_ORDER, 'Legendary'].map((r, i) => [r, i]));
 
+// Browse loads at most this many listings, cheapest first.
+const BROWSE_LIMIT = 200;
+
+// A listing past its expiry is the sweep's to hand back, not anyone's to buy
+// (#873, pass 21). The sweep claims 50 a tick, so under a backlog an expired
+// listing could sit buyable for days; every read a buyer sees filters it out.
+const live = () => ({ expiresAt: { $gt: new Date() } });
+
 /** `🍀 **Lucky Charm**` — how an item is named inside a sentence. */
 const itemLabel = meta => `${meta.emoji} **${meta.name}**`;
 
 module.exports = {
     MAX_LISTINGS_PER_USER, LISTING_SLOTS, LISTING_TTL_MS, MARKET_FEE_RATE,
     MIN_PRICE_PER_ITEM, PAGE_SIZE, CONFIRM_BUY_THRESHOLD,
-    SORT_RARITY, SORT_PRICE, RARITY_RANK, itemLabel,
+    SORT_RARITY, SORT_PRICE, RARITY_RANK, itemLabel, BROWSE_LIMIT, live,
 };

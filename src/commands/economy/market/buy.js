@@ -15,14 +15,14 @@ const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { itemDescriber } = require('../../../utils/aiItemLookup');
 const { recordSale } = require('../../../services/marketPriceService');
-const { MARKET_FEE_RATE, CONFIRM_BUY_THRESHOLD, itemLabel } = require('./shared');
+const { MARKET_FEE_RATE, CONFIRM_BUY_THRESHOLD, itemLabel, live } = require('./shared');
 
 async function handleBuy(interaction, currency, guildSettings) {
     const rawId = interaction.options.getString('listing_id');
 
     let listing;
     try {
-        listing = await MarketListing.findOne({ _id: rawId, guildId: interaction.guild.id });
+        listing = await MarketListing.findOne({ _id: rawId, guildId: interaction.guild.id, ...live() });
     } catch {
         return interaction.reply({ content: 'Invalid listing ID.', flags: MessageFlags.Ephemeral });
     }
@@ -239,7 +239,7 @@ async function handleBuy(interaction, currency, guildSettings) {
         const msg = await interaction.reply({ embeds: [confirmEmbed], components: [row], fetchReply: true });
         const collector = msg.createMessageComponentCollector({
             componentType: ComponentType.Button,
-            filter: ownedBy(interaction.user.id, "This isn't your listing."),
+            filter: ownedBy(interaction.user.id, "This isn't your purchase."),
             time: 30_000,
             max: 1,
         });

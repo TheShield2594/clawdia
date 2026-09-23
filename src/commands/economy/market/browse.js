@@ -10,7 +10,7 @@ const Transaction = require('../../../models/Transaction');
 const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { itemDescriber } = require('../../../utils/aiItemLookup');
-const { PAGE_SIZE, SORT_RARITY, SORT_PRICE, RARITY_RANK, itemLabel } = require('./shared');
+const { PAGE_SIZE, SORT_RARITY, SORT_PRICE, RARITY_RANK, itemLabel, BROWSE_LIMIT, live } = require('./shared');
 
 // Batch-fetches seller rep counts and Discord usernames for a page slice.
 // Returns { repMap: Map<sellerId, label>, tagMap: Map<sellerId, username> }
@@ -52,7 +52,7 @@ function formatLine(l, currency, repMap, tagMap, describe) {
 async function handleBrowse(interaction, currency, guildSettings) {
     const filterItem = interaction.options.getString('item')?.trim() || null;
 
-    const query = { guildId: interaction.guild.id };
+    const query = { guildId: interaction.guild.id, ...live() };
     // Anchored and case-insensitive rather than an equality on the lowercased
     // string: a listed relic's itemId is "The Tenth Owl", so the old filter
     // matched nothing for exactly the items hardest to type. Escaped because the
@@ -67,8 +67,10 @@ async function handleBrowse(interaction, currency, guildSettings) {
         });
     }
 
-    // Fetch all listings (capped at 200 for performance) and sort client-side for rarity mode
-    const allListings = await MarketListing.find(query).sort({ pricePerUnit: 1 }).limit(200).lean();
+    // The cheapest BROWSE_LIMIT, sorted client-side for rarity mode. The footer
+    // says so when there are more: a count of the loaded page read as the whole
+    // market, and the listings past it never showed at all (#873, pass 21).
+    const allListings = await MarketListing.find(query).sort({ pricePerUnit: 1 }).limit(BROWSE_LIMIT).lean();
     const describe = await itemDescriber(allListings.map(l => l.itemId), guildSettings?.shop ?? []);
     // Ranked once per distinct item, not inside the comparator: describeItem
     // scans the shop catalogues, and the list is re-sorted on every page turn.
@@ -112,7 +114,7 @@ async function handleBrowse(interaction, currency, guildSettings) {
             .setColor(COLORS.INFO)
             .setTitle(title)
             .setDescription(lines.join('\n\n') || 'No listings.')
-            .setFooter({ text: `Page ${safePage + 1}/${totalPages} · ${sorted.length} listings · 5% fee · ${sortLabel}` })
+            .setFooter({ text: `Page ${safePage + 1}/${totalPages} · ${total > sorted.length ? `cheapest ${sorted.length} of ${total}` : total} listings · 5% fee · ${sortLabel}` })
             .setTimestamp();
     }
 
@@ -138,22 +140,28 @@ async function handleBrowse(interaction, currency, guildSettings) {
 
     const collector = msg.createMessageComponentCollector({
         componentType: ComponentType.Button,
-        filter: ownedBy(interaction.user.id, "This isn't your listing."),
+        filter: ownedBy(interaction.user.id, "This isn't your market view — run `/market browse` for your own."),
         time: 3 * 60_000,
     });
 
     collector.on('collect', async btn => {
-        await btn.deferUpdate();
-        if (btn.customId === `mkt_prev_${interaction.id}`) page = Math.max(0, page - 1);
-        else if (btn.customId === `mkt_next_${interaction.id}`) {
-            const tp = Math.ceil(sortedListings().length / PAGE_SIZE);
-            page = Math.min(tp - 1, page + 1);
-        } else if (btn.customId === `mkt_sort_${interaction.id}`) {
-            sortMode = sortMode === SORT_RARITY ? SORT_PRICE : SORT_RARITY;
-            page = 0;
+        // Caught: a page turn that fails (an expired token, a deleted message)
+        // was an unhandled rejection out of the collector.
+        try {
+            await btn.deferUpdate();
+            if (btn.customId === `mkt_prev_${interaction.id}`) page = Math.max(0, page - 1);
+            else if (btn.customId === `mkt_next_${interaction.id}`) {
+                const tp = Math.ceil(sortedListings().length / PAGE_SIZE);
+                page = Math.min(tp - 1, page + 1);
+            } else if (btn.customId === `mkt_sort_${interaction.id}`) {
+                sortMode = sortMode === SORT_RARITY ? SORT_PRICE : SORT_RARITY;
+                page = 0;
+            }
+            const updated = await buildEmbed();
+            await interaction.editReply({ embeds: [updated], components: buildComponents(page) });
+        } catch (err) {
+            console.error('[market browse] page turn failed:', err);
         }
-        const updated = await buildEmbed();
-        await interaction.editReply({ embeds: [updated], components: buildComponents(page) });
     });
 
     collector.on('end', () => {

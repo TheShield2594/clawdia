@@ -341,11 +341,14 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
         find: jest.fn((query = {}) => {
             const state = { positional: {} };
             const found = docs.filter(doc => matches(doc, query, state)).map(hydrate);
+            // `limit` is applied (in insertion order — `sort` is not modelled),
+            // so a command that caps a read is seen to cap it.
+            let cap = Infinity;
             return {
-                lean: async () => found.map(d => ({ ...d })),
+                lean: async () => found.slice(0, cap).map(d => ({ ...d })),
                 sort: function () { return this; },
-                limit: function () { return this; },
-                then: (resolve, reject) => Promise.resolve(found).then(resolve, reject),
+                limit: function (n) { cap = n > 0 ? n : Infinity; return this; },
+                then: (resolve, reject) => Promise.resolve(found.slice(0, cap)).then(resolve, reject),
             };
         }),
 

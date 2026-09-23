@@ -74,9 +74,28 @@ function makeInteraction({
     /** A filter the command supplied, run the way discord.js runs it. */
     const accepts = (filter, press) => (typeof filter === 'function' ? filter(press) !== false : true);
 
-    const componentInteraction = press => ({
+    const componentInteraction = press => {
+        // A press may open a modal; `press.modal` is what the member types into
+        // it, by field id. The submit takes the id of the modal the command
+        // showed, so the command's own `awaitModalSubmit` filter decides.
+        let shown = null;
+        const submit = () => ({
+            customId: shown?.data?.custom_id ?? shown?.toJSON?.().custom_id,
+            user: { id: press.user ?? userId },
+            fields: { getTextInputValue: id => String(press.modal?.[id] ?? '') },
+            deferUpdate: jest.fn().mockResolvedValue(undefined),
+            reply: jest.fn(record),
+            followUp: jest.fn(record),
+        });
+        return {
         customId: press.customId,
         user: { id: press.user ?? userId },
+        showModal: jest.fn(modal => { shown = modal; return Promise.resolve(); }),
+        awaitModalSubmit: jest.fn(async (opts = {}) => {
+            const entered = submit();
+            if (!press.modal || !accepts(opts.filter, entered)) throw new Error('Collector received no interactions before ending with reason: time');
+            return entered;
+        }),
         deferUpdate: jest.fn().mockResolvedValue(undefined),
         // `updateRejects` makes this press's render fail, which is how a test
         // reaches the catch that runs *after* a hand has already been settled.
@@ -87,7 +106,8 @@ function makeInteraction({
         editReply: jest.fn(record),
         followUp: jest.fn(record),
         message: { edit: jest.fn(record) },
-    });
+        };
+    };
 
     const collectors = [];
     const message = {
@@ -117,6 +137,12 @@ function makeInteraction({
                 on(event, fn) { (handlers[event] ??= []).push(fn); return this; },
                 stop: reason => end(reason ?? 'stopped'),
                 end,
+                /** One press, now, if this collector is open and accepts it; resolves once its handlers have. */
+                deliver(press) {
+                    if (ended || !accepts(opts.filter, press)) return null;
+                    collected.set(`${collected.size}`, press);
+                    return Promise.all((handlers.collect ?? []).map(fn => fn(press)));
+                },
             };
             collectors.push(collector);
             // Deliver once the command has finished wiring its handlers on,
@@ -224,6 +250,19 @@ function makeInteraction({
         // The message every reply resolves to, for a test that wants to reach it
         // without going through a return value.
         message,
+        /**
+         * Press a button on a held collector, after the command has already
+         * run, and wait for its handlers. For a flow where the order of presses
+         * matters, which a queue delivered all at once cannot express.
+         */
+        press: async spec => {
+            const press = componentInteraction(spec);
+            for (const collector of collectors) {
+                const delivered = collector.deliver(press);
+                if (delivered) { await delivered; return press; }
+            }
+            return null;
+        },
         /** Closes every collector opened so far — the counterpart to `holdCollectors`. */
         endCollectors: (reason = 'time') => collectors.forEach(c => c.end(reason)),
     };

@@ -14,6 +14,36 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.13] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 21 (#873) — the rest of `/market` and `/gift`, and
+`/trade`, which no pass had read.
+
+- **`/trade` counted a Confirm pressed on an offer that had since changed.** A
+  press lands from whatever the clicker's client is showing, so a Confirm on
+  the old offer, arriving just after the other side changed theirs, confirmed
+  the new one. The Confirm button now carries the offer's revision, and a stale
+  press is refused.
+- **`/trade`'s "two minutes idle" window was two minutes from the start.** A
+  trade still being negotiated closed mid-offer. An expiry during a settle also
+  drew "nothing was exchanged" over a swap that then completed. The window is
+  now idle time, and a settle in flight writes its own outcome.
+- **`/market browse` rated relics, guild shop items and forged items by their
+  asking price**, so a Common listed dear showed, and sorted, as Mythic. The
+  `/market` split on main fixed this too; the fixes below were carried onto
+  its `market/` folder.
+- **Expired listings stayed buyable** until the sweep reached them, for as long
+  as a backlog lasted. Buyers' reads now filter to live listings.
+- **`/gift` and `/bank transfer` would send to someone who had left the
+  server**, into a document nobody would see. They are refused now.
+- `/trade` prices a forged item from its own row rather than as a Legendary.
+  `/market browse` says when it is showing only the cheapest 200. The free-text
+  item fields are capped at 100 characters.
+- `tests/pass21MarketGiftTrade.test.js` (14 tests; 12 fail against the old
+  code). The fake interaction gains modal submits and one-at-a-time presses.
+
 ## [4.13.12] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

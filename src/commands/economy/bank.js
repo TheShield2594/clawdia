@@ -6,7 +6,7 @@ const User = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { logTransaction } = require('../../utils/logTransaction');
 const { giftLimits } = require('../../utils/giftCaps');
-const { accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal } = require('../../utils/coinTransfer');
+const { accountAgeRefusal, nonMemberRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal } = require('../../utils/coinTransfer');
 const { fetchTransactions, prettyType, signedAmount, DEFAULT_PAGE_SIZE } = require('../../utils/ledger');
 const { ownedBy } = require('../../utils/collectorOwner');
 const COLORS = require('../../utils/embedColors');
@@ -164,7 +164,8 @@ async function handleTransfer(interaction) {
     const currency = guildSettings?.economy?.currency ?? '💰';
     const limits = giftLimits(guildSettings);
 
-    const tooNew = accountAgeRefusal(interaction.user, recipient);
+    const tooNew = accountAgeRefusal(interaction.user, recipient)
+        ?? nonMemberRefusal(interaction.options.getMember('user'), recipient);
     if (tooNew) return deny(tooNew);
 
     // Read both sides for the refusal messages below. The atomic filters inside

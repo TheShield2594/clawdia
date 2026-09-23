@@ -23,6 +23,7 @@ module.exports = {
                     o.setName('item')
                         .setDescription('Item to sell — start typing to pick from your inventory.')
                         .setRequired(true)
+                        .setMaxLength(100)
                         .setAutocomplete(true))
                 .addIntegerOption(o =>
                     o.setName('quantity').setDescription('How many to sell.').setRequired(true).setMinValue(1))
@@ -35,6 +36,7 @@ module.exports = {
                     o.setName('item')
                         .setDescription('Filter by item — start typing to pick one that is actually listed.')
                         .setRequired(false)
+                        .setMaxLength(100)
                         .setAutocomplete(true)))
         .addSubcommand(sub =>
             sub.setName('buy')

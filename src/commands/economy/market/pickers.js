@@ -9,6 +9,7 @@ const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { isSoulbound } = require('../../../data/soulboundItems');
 const { itemDescriber } = require('../../../utils/aiItemLookup');
 const { priceSnapshot, shortHint } = require('../../../services/marketPriceService');
+const { live } = require('./shared');
 
 /** Prefix matches first, then substring, then alphabetical — as /shop buy ranks. */
 function rankByName(items, typed) {
@@ -54,7 +55,7 @@ async function inventoryChoices(interaction, typed) {
 /** The items that actually have listings, for the `/market browse` filter. */
 async function listedItemChoices(interaction, typed) {
     const [itemIds, guildSettings] = await Promise.all([
-        MarketListing.distinct('itemId', { guildId: interaction.guild.id }),
+        MarketListing.distinct('itemId', { guildId: interaction.guild.id, ...live() }),
         getGuildSettings(interaction.guild.id),
     ]);
     const describe = await itemDescriber(itemIds, guildSettings?.shop ?? []);
@@ -75,9 +76,10 @@ async function listedItemChoices(interaction, typed) {
  * listing that would be refused on submit.
  */
 async function listingChoices(interaction, typed, sub) {
+    // A seller can still cancel an expired listing the sweep has not reached.
     const query = sub === 'cancel'
         ? { guildId: interaction.guild.id, sellerId: interaction.user.id }
-        : { guildId: interaction.guild.id, sellerId: { $ne: interaction.user.id } };
+        : { guildId: interaction.guild.id, sellerId: { $ne: interaction.user.id }, ...live() };
 
     const [listings, guildSettings] = await Promise.all([
         MarketListing.find(query).sort({ pricePerUnit: 1 }).limit(100).lean(),

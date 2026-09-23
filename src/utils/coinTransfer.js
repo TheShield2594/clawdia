@@ -68,6 +68,20 @@ function accountAgeRefusal(sender, receiver, { now = Date.now(), noun = 'coins' 
 }
 
 /**
+ * Whether the recipient is somebody who is not in this server, as the sentence
+ * to show the sender, or null when they are (#873, pass 21).
+ *
+ * A user option takes any Discord user, not only members: a pasted mention or
+ * id of someone who has left resolves fine. The transfer then upserts a
+ * document for them and moves the coins or the item into it, where nobody will
+ * see them unless that person comes back — and a gift has no undo. `member` is
+ * `interaction.options.getMember(...)`, which is null for exactly that user.
+ */
+function nonMemberRefusal(member, user, { noun = 'coins' } = {}) {
+    return member ? null : `**${user.username}** isn't a member of this server, so they can't receive ${noun}.`;
+}
+
+/**
  * Whether either party's economy is frozen, as the sentence to show the sender.
  *
  * The filters inside `commitCoinTransfer` are what actually stop the coins, and
@@ -293,5 +307,5 @@ function transferRefusal(moved, { mention, currency, amount, sendCapLabel, recei
 }
 
 module.exports = {
-    MIN_ACCOUNT_AGE_MS, accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
+    MIN_ACCOUNT_AGE_MS, accountAgeRefusal, nonMemberRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
 };

@@ -14,7 +14,7 @@ const {
     BUDGETS, giftLimits, budgetState, spendBudgetGuarded, spendBudgetPipelineGuarded,
 } = require('../../utils/giftCaps');
 const {
-    accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
+    accountAgeRefusal, nonMemberRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
 } = require('../../utils/coinTransfer');
 const { NOT_FROZEN } = require('../../utils/economyFreeze');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
@@ -140,6 +140,7 @@ module.exports = {
                 // should have to know that the Pet Slot Expansion is spelled
                 // `pet_slot_expansion`, or retype a relic's name exactly.
                 .setDescription('Item to gift — start typing to pick from your inventory.')
+                .setMaxLength(100)
                 .setAutocomplete(true))
         .addIntegerOption(o =>
             o.setName('quantity')
@@ -214,7 +215,8 @@ module.exports = {
 
         if (target.id === interaction.user.id) return deny("You can't gift yourself.");
         if (target.bot)                        return deny("You can't gift a bot.");
-        const tooNew = accountAgeRefusal(interaction.user, target, { noun: 'gifts' });
+        const tooNew = accountAgeRefusal(interaction.user, target, { noun: 'gifts' })
+            ?? nonMemberRefusal(interaction.options.getMember('user'), target, { noun: 'gifts' });
         if (tooNew) return deny(tooNew);
 
         // The two halves of this command each ignore the other's options, and

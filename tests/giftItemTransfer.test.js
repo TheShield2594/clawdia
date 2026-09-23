@@ -174,6 +174,7 @@ function buildInteraction({ itemId = 'pet_food', quantity = 1 } = {}) {
             displayAvatarURL: () => 'https://cdn.example/sender.png',
         },
         options: {
+            getMember: () => ({ id: 'recipient' }),
             getUser: () => ({
                 id: 'recipient',
                 username: 'recipient',
