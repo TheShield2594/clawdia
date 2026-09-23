@@ -67,13 +67,15 @@ async function priceSnapshot(guildId, itemIds, { excludeSellerId = null } = {}) 
         MarketSale.aggregate([
             { $match: { guildId, itemId: { $in: ids } } },
             { $sort: { soldAt: -1 } },
+            // `$firstN` (MongoDB 5.2+) keeps at most RECENT_SALES prices per item
+            // while grouping. A `$push` then `$slice` would first gather every
+            // sale in the 90-day window into memory, once per keystroke.
             { $group: {
                 _id: '$itemId',
                 lastPrice: { $first: '$pricePerUnit' },
                 lastSoldAt: { $first: '$soldAt' },
-                prices: { $push: '$pricePerUnit' },
+                prices: { $firstN: { input: '$pricePerUnit', n: RECENT_SALES } },
             } },
-            { $project: { lastPrice: 1, lastSoldAt: 1, prices: { $slice: ['$prices', RECENT_SALES] } } },
         ]).catch(err => { console.error('[market] sale history lookup failed:', err?.message ?? err); return []; }),
         // At most five listings per seller, so this is bounded without a limit.
         MarketListing.find(listingQuery, 'itemId pricePerUnit').lean()
@@ -99,11 +101,18 @@ const REFERENCE_LABELS = { shop: 'shop price', relic: 'relic value', forged: 'fo
 
 const coins = (currency, n) => `${currency}${Math.round(n).toLocaleString()}`;
 
+// Sales needed before the median, rather than the latest sale, is the headline.
+// Below this there is no middle to speak of; at it, one odd sale — including a
+// seller buying their own listing through an alt to plant a price — moves the
+// headline no further than the sales around it allow.
+const MEDIAN_AFTER = 3;
+
 /**
  * The one-line hint for the picker: the best single figure there is.
  * `meta` is the item's `describeItem` result. Empty when nothing is known.
  */
 function shortHint(snapshot, meta, currency) {
+    if (snapshot?.sales >= MEDIAN_AFTER) return `sells for ~${coins(currency, snapshot.medianPrice)}`;
     if (snapshot?.lastPrice) return `last sold ${coins(currency, snapshot.lastPrice)}`;
     if (snapshot?.lowestListed) return `listed from ${coins(currency, snapshot.lowestListed)}`;
     const label = REFERENCE_LABELS[meta?.kind];

@@ -6,11 +6,10 @@ const { EmbedBuilder, MessageFlags } = require('discord.js');
 const MarketListing = require('../../../models/MarketListing');
 const { listingCancelPayoutKey } = require('../../../utils/payoutKey');
 const { grantItemsOrOwe } = require('../../../utils/creditOrOwe');
-const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { itemDescriber } = require('../../../utils/aiItemLookup');
 const { itemLabel } = require('./shared');
 
-async function handleCancel(interaction, _currency) {
+async function handleCancel(interaction, _currency, guildSettings) {
     const rawId = interaction.options.getString('listing_id');
 
     let listing;
@@ -65,8 +64,6 @@ async function handleCancel(interaction, _currency) {
             flags: MessageFlags.Ephemeral,
         });
     }
-
-    const guildSettings = await getGuildSettings(interaction.guild.id);
     const label = itemLabel((await itemDescriber([listing.itemId], guildSettings?.shop ?? []))(listing.itemId));
     const embed = new EmbedBuilder()
         .setColor('#e67e22')

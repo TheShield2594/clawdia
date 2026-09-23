@@ -13,12 +13,11 @@ const {
 } = require('../../../services/marketService');
 const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
-const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { itemDescriber } = require('../../../utils/aiItemLookup');
 const { recordSale } = require('../../../services/marketPriceService');
 const { MARKET_FEE_RATE, CONFIRM_BUY_THRESHOLD, itemLabel } = require('./shared');
 
-async function handleBuy(interaction, currency) {
+async function handleBuy(interaction, currency, guildSettings) {
     const rawId = interaction.options.getString('listing_id');
 
     let listing;
@@ -34,8 +33,6 @@ async function handleBuy(interaction, currency) {
     if (listing.sellerId === interaction.user.id) {
         return interaction.reply({ content: "You can't buy your own listing.", flags: MessageFlags.Ephemeral });
     }
-
-    const guildSettings  = await getGuildSettings(interaction.guild.id);
     const label          = itemLabel((await itemDescriber([listing.itemId], guildSettings?.shop ?? []))(listing.itemId));
     const totalCost      = listing.pricePerUnit * listing.quantity;
     const feeAmount      = Math.floor(totalCost * MARKET_FEE_RATE);

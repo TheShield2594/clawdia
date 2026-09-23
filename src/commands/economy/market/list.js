@@ -8,13 +8,20 @@ const MarketListing = require('../../../models/MarketListing');
 const { listingCreateRefundPayoutKey } = require('../../../utils/payoutKey');
 const { grantItemsOrOwe } = require('../../../utils/creditOrOwe');
 const COLORS = require('../../../utils/embedColors');
-const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { isSoulbound } = require('../../../data/soulboundItems');
 const { itemDescriber } = require('../../../utils/aiItemLookup');
 const { priceSnapshot, priceCheck } = require('../../../services/marketPriceService');
 const { MAX_LISTINGS_PER_USER, LISTING_SLOTS, LISTING_TTL_MS, itemLabel } = require('./shared');
 
-async function handleList(interaction, currency) {
+async function handleList(interaction, currency, guildSettings) {
+    // Deferred first, and ephemerally, as every reply below is. Between the
+    // upsert, the debit, the slot claim and the price lookup this does enough
+    // database work to outrun Discord's three-second window — and by the end
+    // the listing is written, so a missed acknowledgement would leave the
+    // seller told "the application did not respond" over a listing that exists.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const respond = ({ content = '', embeds = [] }) => interaction.editReply({ content, embeds });
+
     const typedItem = interaction.options.getString('item');
     const qty       = interaction.options.getInteger('quantity');
     const price     = interaction.options.getInteger('price');
@@ -43,9 +50,8 @@ async function handleList(interaction, currency) {
     const stack  = owned.find(i => i.quantity >= qty);
 
     if (!owned.length) {
-        return interaction.reply({
+        return respond({
             content: `You don't have **${typedItem}** in your inventory. Start typing in the \`item\` box to pick from what you're holding.`,
-            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -53,17 +59,16 @@ async function handleList(interaction, currency) {
     // — including the soulbound test, which on the raw string let `Lifesaver`
     // past and refused it several lines later with the wrong reason.
     const itemId = (stack ?? owned[0]).itemId;
-    const guildSettings = await getGuildSettings(interaction.guild.id);
     const meta   = (await itemDescriber([itemId], guildSettings?.shop ?? []))(itemId);
     const label  = itemLabel(meta);
 
     if (isSoulbound(itemId)) {
-        return interaction.reply({ content: `${label} is soulbound and cannot be listed.`, flags: MessageFlags.Ephemeral });
+        return respond({ content: `${label} is soulbound and cannot be listed.` });
     }
 
     if (!stack) {
         const held = owned.reduce((n, i) => n + i.quantity, 0);
-        return interaction.reply({ content: `You don't have ${qty}x ${label} in your inventory — you hold ${held}.`, flags: MessageFlags.Ephemeral });
+        return respond({ content: `You don't have ${qty}x ${label} in your inventory — you hold ${held}.` });
     }
 
     // The friendly refusal, before any stock moves: a seller who is already full
@@ -75,7 +80,7 @@ async function handleList(interaction, currency) {
         'slot',
     ).lean();
     if (openListings.length >= MAX_LISTINGS_PER_USER) {
-        return interaction.reply({ content: `You can only have ${MAX_LISTINGS_PER_USER} active listings at a time.`, flags: MessageFlags.Ephemeral });
+        return respond({ content: `You can only have ${MAX_LISTINGS_PER_USER} active listings at a time.` });
     }
 
     // The stock leaves as a compare-and-set, not `stack.quantity -= qty` followed
@@ -93,7 +98,7 @@ async function handleList(interaction, currency) {
         { new: true },
     );
     if (!debited) {
-        return interaction.reply({ content: `You don't have ${qty}x ${label} in your inventory.`, flags: MessageFlags.Ephemeral });
+        return respond({ content: `You don't have ${qty}x ${label} in your inventory.` });
     }
     // Drop inventory stacks the decrement above emptied. Advisory: a failure
     // leaves an empty stack, not wrong quantities.
@@ -159,7 +164,7 @@ async function handleList(interaction, currency) {
     } catch (err) {
         const returned = await returnStock();
         console.error('[market list] MarketListing.create failed:', err);
-        return interaction.reply({ content: `Failed to create listing. ${stockNote(returned)}`, flags: MessageFlags.Ephemeral });
+        return respond({ content: `Failed to create listing. ${stockNote(returned)}` });
     }
 
     // Every slot was taken by the time the insert went in — the check above and
@@ -167,9 +172,8 @@ async function handleList(interaction, currency) {
     // so losing the race costs the seller nothing but the refusal.
     if (!listing) {
         const returned = await returnStock();
-        return interaction.reply({
+        return respond({
             content: `You can only have ${MAX_LISTINGS_PER_USER} active listings at a time. ${stockNote(returned)}`,
-            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -190,7 +194,7 @@ async function handleList(interaction, currency) {
     const check = priceCheck(snapshot, meta, currency, price);
     if (check) embed.addFields({ name: '💡 Price Check', value: check, inline: false });
 
-    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    return respond({ embeds: [embed] });
 }
 
 /**
