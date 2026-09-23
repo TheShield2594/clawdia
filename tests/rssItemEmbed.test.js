@@ -168,6 +168,7 @@ describe('the daily digest', () => {
         mockFeedBodies.set(FEED_URL, rss({ items: [
             { title: 'Rust [1.90] *released*', link: '/rust_(lang)', pubDate: recent },
             { title: 'No link', link: 'javascript:void(0)', pubDate: recent },
+            { title: 'Escape \\] this', link: 'https://example.com/b', pubDate: recent },
         ] }));
         Guild.findOne.mockResolvedValue({
             guildId: 'g1',
@@ -181,5 +182,7 @@ describe('the daily digest', () => {
         const description = client.send.mock.calls[0][0].embeds[0].data.description;
         expect(description).toContain('[Rust \\[1.90\\] \\*released\\*](https://example.com/rust_%28lang%29)');
         expect(description).toContain('**2. No link**');
+        // The headline's own backslash is escaped too, so its `]` stays text.
+        expect(description).toContain('[Escape \\\\\\] this](https://example.com/b)');
     });
 });

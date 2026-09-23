@@ -712,9 +712,13 @@ async function checkRssFeeds(client) {
 }
 
 // Feed text is dropped into Markdown, where a stray `]`, `*` or `_` in a
-// headline closes the link or bolds the rest of the digest.
+// headline closes the link or bolds the rest of the digest. escapeMarkdown
+// does not cover the link brackets, so those are escaped here — in one pass
+// with backslashes, before anything else adds a backslash, so a headline's own
+// `\` cannot escape the one added before its `]` and leave the `]` live.
+// escapeMarkdown's own backslash pass is off: it would double these.
 function digestText(text) {
-    return escapeMarkdown(String(text)).replace(/[[\]]/g, '\\$&');
+    return escapeMarkdown(String(text).replace(/[\\[\]]/g, '\\$&'), { escape: false });
 }
 
 // A `)` in the URL ends a Markdown link early.
