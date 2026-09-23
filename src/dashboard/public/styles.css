@@ -1946,8 +1946,7 @@ textarea.auto-resize {
 .game-item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .25rem; }
 .game-item-name { font-size: .95rem; font-weight: 700; color: var(--cream-50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .game-item-id { font-size: .75rem; color: var(--text-mute, #6c7086); font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.game-item-actions { display: flex; gap: .4rem; flex-shrink: 0; }
-/* #880. Both of these labels wrap the file input that does the work. The input
+/* #880. This label wraps the file input that does the work. The input
    used to be `display: none`, which is not focusable, and a <label> is not a
    tab stop either — so between them there was no way to reach the control
    without a mouse. The input is `.sr-only` now: invisible, still focusable,
@@ -1959,9 +1958,7 @@ textarea.auto-resize {
    `:has(input:focus-visible)`: it works in every browser this page supports,
    and the cost is a ring after a mouse click too, which is the harmless half
    of the trade. */
-.game-item-upload-btn,
 .shop-img-upload-btn { cursor: pointer; position: relative; }
-.game-item-upload-btn:focus-within,
 .shop-img-upload-btn:focus-within { outline: 2px solid var(--claw-500); outline-offset: 2px; }
 
 /* ── Cases / Sanctions tables ────────────────────────────────── */

@@ -410,7 +410,7 @@ describe('inner tab behaviour', () => {
     });
 });
 
-// #880. Shop and game item images are uploaded through a <label> wrapping a
+// #880. Shop item images are uploaded through a <label> wrapping a
 // `display: none` file input. A label is not a tab stop and a hidden input
 // cannot take focus, and there was no other control bound to either action —
 // so for a keyboard-only or screen-reader user the feature was not awkward,
@@ -445,13 +445,6 @@ describe('image upload controls', () => {
             const name = input.getAttribute('aria-label') || label?.textContent.trim();
             expect([input.id, Boolean(name)]).toEqual([input.id, true]);
         }
-        // The per-item cards all read "Upload", so the item is what tells them
-        // apart — and it has to be on the input, where the name is read from.
-        const cards = [...document.querySelectorAll('.game-item-card input[type="file"]')];
-        expect(cards.length).toBeGreaterThan(1);
-        const names = cards.map(input => input.getAttribute('aria-label'));
-        expect(names.every(Boolean)).toBe(true);
-        expect(new Set(names).size).toBe(names.length);
     });
 
     it('keeps the input inside the label that labels it', () => {
@@ -465,7 +458,7 @@ describe('image upload controls', () => {
     it('shows the focus on the label, since the input itself is invisible', () => {
         // `.sr-only` is a 1px clipped box — a ring drawn on it is a ring nobody
         // sees, which is WCAG 2.4.7 failed a second way.
-        for (const cls of ['game-item-upload-btn', 'shop-img-upload-btn']) {
+        for (const cls of ['shop-img-upload-btn']) {
             const rule = new RegExp(`\\.${cls}:focus-within[^{]*\\{([^}]*)\\}`);
             const match = rule.exec(styles) || new RegExp(
                 `\\.${cls}:focus-within\\s*,[\\s\\S]{0,200}?\\{([^}]*)\\}`,
@@ -895,10 +888,13 @@ describe('injected images', () => {
         expect(withoutAlt).toEqual([]);
     });
 
-    it('sets alt on the one avatar built as an element rather than markup', () => {
+    it('sets alt on every <img> built as an element rather than markup', () => {
         // createElement('img') takes no HTML attribute list, so the sweep above
-        // cannot see it — it is asserted by name instead.
-        expect(script).toMatch(/imgEl\.alt\s*=/);
+        // cannot see it — each one has to set .alt on the variable it made.
+        const built = [...script.matchAll(/(?:const|let|var)?\s*(\w+)\s*=\s*document\.createElement\(['"]img['"]\)/g)]
+            .map(m => m[1]);
+        const withoutAlt = built.filter(name => !new RegExp(`\\b${name}\\.alt\\s*=`).test(script));
+        expect(withoutAlt).toEqual([]);
     });
 });
 

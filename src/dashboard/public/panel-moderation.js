@@ -247,6 +247,7 @@ function renderSanctions(data) {
         const tdUser = document.createElement('td');
         const img = document.createElement('img');
         img.src = item.avatarUrl;
+        img.alt = '';
         img.style.cssText = 'width:20px;height:20px;border-radius:50%;margin-right:.35rem;vertical-align:middle';
         img.onerror = function() { this.style.display = 'none'; };
         tdUser.appendChild(img);
