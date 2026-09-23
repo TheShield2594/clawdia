@@ -1046,8 +1046,16 @@ const guildSchema = new Schema({
 
     achievements: {
         enabled: { type: Boolean, default: false },
+        // Per-user reveal: every unlock, mystery beat then the card.
         announcementChannelId: { type: String, default: null },
-        // Minimum tier to broadcast server-wide: 'rare' | 'secret' | 'legendary'
+        // Server-wide broadcast of notable unlocks, in its own channel (e.g. a
+        // general chat) so a rare one is seen beyond the reveal channel. Unset
+        // means no broadcast; the same channel as the reveal is skipped too, so
+        // nothing posts twice.
+        broadcastChannelId: { type: String, default: null },
+        // Minimum tier to broadcast: 'rare' (rare, legendary and secret),
+        // 'legendary' (legendary and secret) or 'secret' (secret only).
+        // Secret unlocks always broadcast, redacted.
         achievementAnnounceThreshold: { type: String, enum: ['rare', 'secret', 'legendary'], default: 'rare' },
         disabledAchievements: [{ type: String }],
         customAchievements: [{

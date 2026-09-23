@@ -12,7 +12,23 @@
                     <div class="field">
                         <label class="field-label" for="ach-announce-channel">Announcement channel</label>
                         <%- include('../channel-select', { id: 'ach-announce-channel', placeholder: 'None (no announcements)', selected: settings.achievements?.announcementChannelId }) %>
-                        <small>Channel where achievement unlocks are posted</small>
+                        <small>Channel where every unlock is revealed to the member who earned it</small>
+                    </div>
+
+                    <div class="field">
+                        <label class="field-label" for="ach-broadcast-channel">Broadcast channel</label>
+                        <%- include('../channel-select', { id: 'ach-broadcast-channel', placeholder: 'None (no broadcast)', selected: settings.achievements?.broadcastChannelId }) %>
+                        <small>Server-wide shout-out for notable unlocks, e.g. your general chat. Secret unlocks are announced without naming the achievement. Skipped if it's the same as the announcement channel.</small>
+                    </div>
+
+                    <div class="field">
+                        <label class="field-label" for="ach-broadcast-threshold">Broadcast which unlocks</label>
+                        <select id="ach-broadcast-threshold">
+                            <% const achThreshold = settings.achievements?.achievementAnnounceThreshold || 'rare'; %>
+                            <option value="rare" <%= achThreshold === 'rare' ? 'selected' : '' %>>Rare, legendary and secret</option>
+                            <option value="legendary" <%= achThreshold === 'legendary' ? 'selected' : '' %>>Legendary and secret</option>
+                            <option value="secret" <%= achThreshold === 'secret' ? 'selected' : '' %>>Secret only</option>
+                        </select>
                     </div>
 
                     <!-- Built-in achievements toggle -->

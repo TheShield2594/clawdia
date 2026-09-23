@@ -23,6 +23,7 @@ const { ensureFontsRegistered } = require('./registerFonts');
 // The encode must not be the synchronous one (#592). See canvasEncode.js and
 // the note at the top of this file.
 const { encodeCanvas } = require('./canvasEncode');
+const { achievementTier } = require('./achievementTier');
 
 ensureFontsRegistered();
 
@@ -534,27 +535,23 @@ function _drawAchievementIcon(ctx, x, y, size, tierColor) {
     px([[13,1],[14,2],[13,3],[12,2]], goldLight);
 }
 
-function _achTier(xpReward) {
-    if (!xpReward || xpReward <= 50)  return { label: 'Bronze',   color: '#cd7f32' };
-    if (xpReward <= 200)              return { label: 'Silver',   color: '#c0c0c0' };
-    if (xpReward <= 500)              return { label: 'Gold',     color: '#ffd700' };
-    return                                   { label: 'Platinum', color: '#e5e4e2' };
-}
-
 /**
- * The 520×110 achievement toast. The XP reward picks the tier, which picks the
- * icon and its colour.
+ * The 520×110 achievement toast. The XP reward picks the rarity tier
+ * (src/utils/achievementTier.js), which sets the label and stripe colour. The
+ * icon slot shows the achievement's badge art when one is passed, and otherwise
+ * the pixel trophy tinted to the tier.
  *
  * @param {string} text the achievement's name
  * @param {string} description
  * @param {number} xpReward
+ * @param {Buffer|null} [iconArt] badge PNG (src/utils/achievementArt.js)
  * @returns {Promise<Buffer>} PNG
  */
-async function createAchievementCard(text, description, xpReward) {
+async function createAchievementCard(text, description, xpReward, iconArt = null) {
     const W = 520, H = 110, ICON_SIZE = 58, PAD = 16;
     const canvas = createCanvas(W, H);
     const ctx    = canvas.getContext('2d');
-    const tier   = _achTier(xpReward);
+    const tier   = achievementTier(xpReward);
 
     ctx.fillStyle = '#3c3c3c';
     ctx.fillRect(0, 0, W, H);
@@ -577,7 +574,15 @@ async function createAchievementCard(text, description, xpReward) {
     ctx.fillRect(iconX, iconY, ICON_SIZE, ICON_SIZE);
     ctx.strokeStyle = '#111111'; ctx.lineWidth = 2; ctx.strokeRect(iconX, iconY, ICON_SIZE, ICON_SIZE);
     ctx.strokeStyle = '#555555'; ctx.lineWidth = 1; ctx.strokeRect(iconX + 2, iconY + 2, ICON_SIZE - 4, ICON_SIZE - 4);
-    _drawAchievementIcon(ctx, iconX + 2, iconY + 2, ICON_SIZE - 4, tier.color);
+    let badge = null;
+    if (iconArt) {
+        try { badge = await loadImage(iconArt); } catch { badge = null; }
+    }
+    if (badge) {
+        ctx.drawImage(badge, iconX + 2, iconY + 2, ICON_SIZE - 4, ICON_SIZE - 4);
+    } else {
+        _drawAchievementIcon(ctx, iconX + 2, iconY + 2, ICON_SIZE - 4, tier.color);
+    }
 
     // Text
     const textX      = iconX + ICON_SIZE + 14;

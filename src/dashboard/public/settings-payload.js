@@ -167,6 +167,8 @@ function buildSettingsPayload(section, ctx = {}) {
         return {
             'achievements.enabled': document.getElementById('ach-enabled').checked,
             'achievements.announcementChannelId': document.getElementById('ach-announce-channel').value || null,
+            'achievements.broadcastChannelId': document.getElementById('ach-broadcast-channel').value || null,
+            'achievements.achievementAnnounceThreshold': document.getElementById('ach-broadcast-threshold').value || 'rare',
             'achievements.disabledAchievements': disabledAchievements,
             'achievements.customAchievements': customAchievements
         };

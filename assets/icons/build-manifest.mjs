@@ -6,7 +6,8 @@
  *
  * One entry per catalogue key: 83 shop-browse activity ids + 35 guild shop
  * items + 144 catch/kill/mine results (caught fish, hunted animals, mined ores)
- * + 14 pet species (issue #1082) + 10 explore regions + 25 explore relics. Each
+ * + 14 pet species (issue #1082) + 10 explore regions + 25 explore relics
+ * + achievement badges (`achievement:<id>`, filled in incrementally). Each
  * entry carries the storage key, the on-disk filename, the item's rarity, the
  * rim colour that rarity maps to, and the finished Higgsfield prompt.
  *
@@ -416,6 +417,89 @@ seasonalRegions.forEach((r) => add(`explore:${r.id}`, 'Rare', REGION_SUBJECT[r.i
 // Relics: single-object icons, rarity from the relic's own tier.
 explore.RELIC_LIST.forEach((r) => add(`relic:${r.slug}`, RELIC_RARITY[r.rarity], RELIC_SUBJECT[r.slug]));
 
+// --- achievement badges (pilot) ----------------------------------------------
+// Achievements are often abstract ("have 100 coins", "30 days without a
+// warning"), so they don't fit the single-object item framing. They get a round
+// medal-badge emblem with one symbolic subject inside — the achievement analog
+// of the zone/region "round scene emblem" — on top of the B3 rim + flat shading.
+// Rarity comes from xpReward via the shared scale in src/utils/achievementTier.js
+// (also the unlock card's label and the embed colour), which lines up with the
+// rim palette.
+// Subjects are filled in as they're generated (issue: remaining achievement
+// icons). Secret achievements do get art, but it must only ever render after the
+// achievement is earned — a locked list or dashboard must not show it.
+const { ACHIEVEMENTS } = require('../../src/data/achievements.js');
+const ACHIEVEMENT_STYLE = (rarityName) => {
+    const rim = RARITY[rarityName].word;
+    return `Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick ${rim} rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size.`;
+};
+const achievementPrompt = (subject, rarityName) => `Achievement badge icon: ${subject} ${ACHIEVEMENT_STYLE(rarityName)}`;
+// The shared achievement rarity scale (src/utils/achievementTier.js): the same
+// one the unlock card and embed colour use, so the rim always matches them.
+const { achievementTier } = require('../../src/utils/achievementTier.js');
+const achievementRarity = (xp) => achievementTier(xp).label;
+// Bronze/Silver/Gold ladders share one silhouette (STYLE.md §4): only the
+// metal changes, so later tiers match the ones already generated.
+const MINER_BADGE   = (metal) => `a crossed pair of iron pickaxes behind a large raw ${metal} nugget glinting in a rocky cave wall.`;
+const HUNTER_BADGE  = (metal) => `a crossed pair of wooden hunting bows behind a large ${metal} arrowhead trophy.`;
+const ANGLER_BADGE  = (metal) => `a crossed pair of fishing rods behind a large ${metal} fish-shaped trophy.`;
+const GAMBLER_BADGE = (metal) => `a crossed pair of playing cards behind a large ${metal} poker chip.`;
+const ACHIEVEMENT_SUBJECT = {
+    // pilot (2026-09-23)
+    first_steps:  'a small stack of three gold coins beside a single green banknote, a modest first fortune.',
+    clean_record: 'a white dove in flight carrying a green olive sprig over a blank rolled parchment scroll.',
+    miner_gold:   MINER_BADGE('gold'),
+    level_100:    'a laurel-wreathed star with five points radiating light beams, a legend\'s crest.',
+    century:      'a tall roaring flame rising from a golden torch, embers swirling around it like an unbroken streak.',
+    // legendary + secret (2026-09-23)
+    completionist:      'a radiant rainbow prism crystal refracting light into a full spectrum of beams, ringed by small shining stars.',
+    unstoppable:        'a crackling golden lightning bolt striking through an unbroken ring of fire.',
+    apex_predator:      'a snarling alpha wolf head with glowing amber eyes above a pair of crossed hunting spears.',
+    fishing_legend:     'a coiled sea dragon with glowing scales rising from a cresting ocean wave, a golden fishhook caught in its fin.',
+    secret_seeker:      'a burst of glowing sparkles spilling out of a half-open hidden wooden door set in a mossy stone wall.',
+    season_champion:    'a tall gilded champion\'s trophy cup with twin handles, a ribbon banner and a small crown on top.',
+    menagerie:          'a jeweled golden pet collar hung with four charms: an eagle feather, a shark tooth, a blue crystal and a tiny amber lantern.',
+    the_atlas_complete: 'a large open golden atlas showing a glowing world map scattered with small stars, a crown resting on its pages.',
+    // rare (2026-09-23)
+    millionaire:         'an overflowing treasure chest with its lid thrown open, heaped with gold coins and gems.',
+    high_roller:         'a pair of golden dice mid-tumble in front of a slot machine lever, lucky sparkles around them.',
+    social_butterfly:    'a vivid butterfly whose wings are shaped like colorful overlapping speech bubbles.',
+    level_50:            'a shining silver shooting star with a sweeping sparkling comet trail.',
+    veteran_hunter:      'a pair of crossed steel swords over a weathered leather hunter\'s shield.',
+    master_hunter:       'a proud stag head with a huge crown of antlers above a curled brass hunting horn.',
+    trophy_collector:    'a mounted wooden trophy plaque displaying a single curled ram horn.',
+    trophy_wall:         'a wooden wall display with three mounted trophies side by side: a bear claw, a deer antler and a boar tusk.',
+    master_angler:       'a bright tropical fish leaping over a crossed fishing rod and landing net.',
+    legendary_catch:     'a huge blue whale breaching from the waves with a taut fishing line trailing from its mouth.',
+    legendary_obsession: 'a swirling ocean wave curling around a glowing golden fish.',
+    devoted:             'a blank calendar page covered in a column of red check marks with a small flame burning on top.',
+    quest_veteran:       'a rolled-open treasure map with a red dashed trail ending at an X, a brass compass resting on it.',
+    quest_champion:      'an ornate ancient amphora urn painted with adventure scenes, laurel leaves wrapped around its handles.',
+    apex_companion:      'a glowing paw print at the heart of a rising starburst, evolution sparkles spiraling upward around it.',
+    pet_champion:        'a paw print emblazoned on a small gold battle shield with two crossed swords behind it.',
+    inseparable:         'a bright red heart with a small paw print on it, tied with a ribbon bow.',
+    hunter_gold:         HUNTER_BADGE('gold'),
+    angler_gold:         ANGLER_BADGE('gold'),
+    gambler_gold:        GAMBLER_BADGE('gold'),
+    no_blank_spaces:     'an unrolled parchment map completely filled in with forests, mountains and rivers, a quill pen resting on it.',
+    keeper_of_secrets:   'an ornate antique skeleton key whose bow holds a glowing keyhole-shaped gem.',
+};
+const ACHIEVEMENT_IDS = new Set(ACHIEVEMENTS.map((a) => a.id));
+Object.entries(ACHIEVEMENT_SUBJECT).forEach(([id, subject]) => {
+    const def = ACHIEVEMENTS.find((a) => a.id === id);
+    if (!def) throw new Error(`no achievement ${id}`);
+    const rarityName = achievementRarity(def.xpReward);
+    manifest.push({
+        index: index++,
+        key: `achievement:${id}`,
+        file: `achievement__${id}.png`,
+        rarity: rarityName,
+        rim: RARITY[rarityName].word,
+        rimHex: RARITY[rarityName].hex,
+        prompt: achievementPrompt(subject, rarityName),
+    });
+});
+
 // --- validate against the game registries -----------------------------------
 // Every namespaced key must be a known game key: a shop-browse gear id or a
 // catch/kill/mine result id (both uploadable), or a pet species / explore region
@@ -424,7 +508,10 @@ explore.RELIC_LIST.forEach((r) => add(`relic:${r.slug}`, RELIC_RARITY[r.rarity],
 // included here but not in `isUploadableItemId`: their art ships only as a baked
 // default, never a per-guild upload.
 const { ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS, PET_ITEM_IDS, EXPLORE_ITEM_IDS } = require('../../src/data/activityItems.js');
-const knownKeys = new Set([...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS, ...PET_ITEM_IDS, ...EXPLORE_ITEM_IDS]);
+const knownKeys = new Set([
+    ...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS, ...PET_ITEM_IDS, ...EXPLORE_ITEM_IDS,
+    ...[...ACHIEVEMENT_IDS].map((id) => `achievement:${id}`),
+]);
 // Every prompt ends with the shared B3 style block; "rarity rim," is the phrase
 // both the item and the pet-portrait style blocks carry, so its absence means a
 // prompt was never assembled.
