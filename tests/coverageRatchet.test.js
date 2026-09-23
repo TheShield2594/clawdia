@@ -375,6 +375,10 @@ describe('per-file floors', () => {
         // 0% branches once before (#784), inside a services directory whose
         // floor is a hundred files wide and could not have noticed.
         //
+        // (market.js has since been split into market/; its floor went to the
+        // three files that move stock or coins — list.js, buy.js, cancel.js —
+        // and the folder got a directory floor of its own.)
+        //
         // market.js, gift.js and marketService.js joined in #873's third pass,
         // over the two commands where a player hands something straight to
         // another player. They are the only place in the economy where an item
@@ -427,7 +431,9 @@ describe('per-file floors', () => {
             'src/commands/economy/duel.js',
             'src/commands/economy/gift.js',
             'src/commands/economy/invest.js',
-            'src/commands/economy/market.js',
+            'src/commands/economy/market/buy.js',
+            'src/commands/economy/market/cancel.js',
+            'src/commands/economy/market/list.js',
             'src/commands/economy/trade.js',
             'src/commands/economy/work.js',
             'src/games/casino/crashRefund.js',
