@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and seventeen passes over the
+long-stable, low-churn subsystems have been audited, and eighteen passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -17,7 +17,8 @@ quest-reward credit at every caller, and the rest of the casino (`confirmBet`,
 the bet guards, the crash restart refund, and the games' leaderboard and stat
 writes), `/explore`'s event-currency drop, and the items, effects and server
 shop (`/use`, `effectsService`, `/inventory`, `/shop buy`), the effect
-consumers, the map views, and the `/explore` views (#873). The majority of the
+consumers, the map views, the `/explore` views, and the season pass's
+non-reward surface (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -1940,6 +1941,76 @@ maps: Discord limits, whose data they show, and whether they write anything.
 
 ---
 
+## Economy — The Season Pass's Non-Reward Surface
+
+**Status: Audited — all findings resolved** ✓
+
+The eighteenth pass of the economy audit #873: everything in `season.js` that
+pass 7 did not need. That is `view`, `missions`, `leaderboard`, `me`,
+`history`, `event`, and the admin `start` and `end`. (Pass 7 covered the
+`claim`, `claim-all`, `claim-mission` and `tier-skip` payouts, and found
+`unlock` sound.) The "views" turned out not to be read-only. Two of them saved,
+and both admin commands wrote without the guard their counterparts elsewhere in
+the codebase carry.
+
+**Files reviewed/fixed:**
+- `src/commands/economy/season.js`
+- `src/services/seasonMissionService.js` (`dealMissionsIfStale`, `withTodaysMissions` added)
+- `src/services/economySeasonService.js` (`resolveOneSeason` exported)
+- `src/utils/seasonLabel.js` (added)
+- `eslint.config.js` (`season.js` ceiling lowered to 1,044)
+- `tests/pass18SeasonViews.test.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | `/season view` and `/season missions` dealt a stale mission hand in memory (`ensureMissions`) and `save()`d it. That write has none of the guard `advanceMissions` puts on the same deal, which exists "so that concurrent callers can't each deal a different three". At the day boundary a view could overwrite the hand `/crime`, `/quiz`, `/casino` or a duel had just dealt atomically, along with the progress recorded against it. `view` also reset a stale season sub-document in memory and saved it, a whole-object `$set` over anything granted in between. Both saves swallowed their own errors | Neither view saves. Both call the new `withTodaysMissions`, which deals through `dealMissionsIfStale` (the guarded rollover, now shared with `advanceMissions`) and re-reads the document, costing no write when the hand is already today's. `view` renders a stale season as a fresh pass for display only; the reward paths normalise where they write | `season.js`, `seasonMissionService.js` |
+| 2 | `/season end` ran its own copy of the season ending. `economySeasonService.resolveOneSeason` (#931) claims the season atomically by clearing `currentSeason.id`, then freezes the leaderboard (unique on guild and season) and resets season coins. The admin command did the same work without the claim, and finished with a `$set` that cleared `currentSeason` without checking which season it was clearing. An admin's end racing the scheduler's sweep could run the freeze and reset twice, and could erase a season a second admin had started in between. This is the pass-7 `war.js` shape: a hot path duplicating an audited resolver | `/season end` calls `resolveOneSeason` and reports its result. A season claimed first by the sweep or another admin is reported as already ended. An admin end now also sends the recap DMs and announcement an automatic end sends | `season.js`, `economySeasonService.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 3 | `/season start` checked for a running season with a read, then wrote with an unguarded `$set`. Two admins starting at once both passed the check, and the second replaced the first season, its id and the record it would have been frozen under, without either admin being told | The write is filtered on `currentSeason.id: null`; a miss is reported as a season already active | `season.js` |
+| 4 | A season name had no length limit. It is echoed into the leaderboard, `me` and end titles and the `history` field names, which Discord caps at 256 characters, and discord.js throws rather than truncating. `history` also threw on a record with no `top10` | The `name` option has `setMaxLength(100)`. `seasonLabel` shortens names already stored wherever they render, including the resolver's announcement, recap card and DM. `history` treats a missing `top10` as empty | `season.js`, `seasonLabel.js`, `economySeasonService.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 5 | Nothing pinned the views' writes or the admin commands | `tests/pass18SeasonViews.test.js` (15 tests), 12 of which fail against the old code. It covers: `view`/`missions` write nothing when today's hand is dealt, deal a stale hand only through the guarded write, and keep a hand another command dealt after the view read the old one; a stale season renders fresh and is not written; `start` refuses a season that appeared after its check, and caps the name; `end` delegates to the resolver, writes nothing itself, and reports a lost claim; `history` survives an over-long name and a missing `top10` | `tests/` |
+
+**Reviewed and found sound**, recorded so the next pass does not re-derive it:
+
+- **`leaderboard`, `me`, `history` and `event`** only read. `event` already
+  packs its milestone list into capped fields (`packFieldsCapped`).
+- **`/season end`'s permission gate** is the same `Administrator` check as
+  `start`, and the resolver it now calls is the audited one (#931).
+
+**The bound this pass leaves open:**
+
+- **Mission progress and season XP from the grind commands still persist through
+  snapshot saves.** `/hunt`, `/fish`, `/mine`, `/explore`, `/work` and `/daily`
+  advance missions with `recordMissionProgress` and grant season XP with
+  `awardSeasonXp` on the loaded document, and their `save()` writes
+  `seasonMissions` and the `season` sub-document back whole. `claim-mission` does
+  the same. A mission advanced atomically by `/crime`, `/quiz`, `/casino` or a
+  duel while one of those flows is in progress can be overwritten. The coins
+  cannot be paid twice, because pass 7 keyed `claim-mission`'s credit, but
+  progress and XP can be lost. It is the pass-15 effects shape, on two other
+  arrays, and wants the same fix: keep them out of `save()` and commit the
+  recorded advances as guarded writes. `docs/ROADMAP.md` sequences it next.
+- **The leaderboard lists members with 0 season coins, and members who have
+  left.** This is cosmetic, and matches the resolver's frozen top 10; it was
+  left as is.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -1960,7 +2031,7 @@ wide, and it is widest exactly where the risk is.
   rendering (embeds, animations, the paytables)
 - core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market.js` and `gift.js` have had their unwind paths audited (pass 3), the rest of both commands has not
 - group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is not reviewed
-- progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (the view/leaderboard/history/admin flows) is not reviewed
+- progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (view, missions, leaderboard, me, history, event, admin start/end) is audited above (pass 18). Mission progress and season XP from the grind commands still persist through snapshot saves (pass 18's bound)
 - seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. Not reviewed: the event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end scheduler in `seasonalEventService.js`) and the shop's browse/balance reads, none of which move player currency. `/explore`'s event-currency drop is audited above (pass 13). The `/eventshop` debit guard and its effect purchases are audited above (pass 14)
 
 **Everything else uncovered:**
@@ -1988,5 +2059,6 @@ commands' non-payout surface on 2026-09-22; the `/pet` command's payouts on
 2026-09-22; the quest-reward credit on 2026-09-22; the rest of the casino on
 2026-09-22; the `/explore` event-currency drop on 2026-09-23; the items, effects and
 server shop on 2026-09-23; the effect consumers on 2026-09-23; the map views
-on 2026-09-23; and the `/explore` views on 2026-09-23. "Not yet reviewed" carries no review
+on 2026-09-23; the `/explore` views on 2026-09-23; and the season pass's
+non-reward surface on 2026-09-23. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*

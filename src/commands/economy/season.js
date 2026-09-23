@@ -3,7 +3,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const SeasonRecord = require('../../models/SeasonRecord');
-const { ensureMissions: ensureMissionsShared } = require('../../services/seasonMissionService');
+const { ensureMissions: ensureMissionsShared, withTodaysMissions } = require('../../services/seasonMissionService');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { getEventCurrencyBalance } = require('../../services/seasonalEventService');
 const { progressBar } = require('../../utils/progressBar');
@@ -15,6 +15,8 @@ const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
 const { seasonTierCoinPayoutKey, seasonTierItemPayoutKey, seasonClaimAllCoinsPayoutKey, seasonMissionCoinPayoutKey } = require('../../utils/payoutKey');
 const { packFieldsCapped } = require('../../utils/embedFields');
+const { seasonLabel, SEASON_NAME_MAX } = require('../../utils/seasonLabel');
+const { resolveOneSeason } = require('../../services/economySeasonService');
 
 // Reset a user's season sub-document to the fresh shape when their stored
 // seasonId is stale (a new season started). Prevents carrying old xp / claimed
@@ -85,21 +87,25 @@ async function loadPlayerAndSettings(interaction) {
 }
 
 async function executeView(interaction) {
-    const [user, guildSettings] = await loadPlayerAndSettings(interaction);
+    const [loaded, guildSettings] = await loadPlayerAndSettings(interaction);
 
     const season = guildSettings?.season;
     if (!season?.enabled || !season?.seasonId) {
         return interaction.reply({ content: 'No active season pass is running on this server right now.', flags: MessageFlags.Ephemeral });
     }
 
-    await ensureMissions(user);
-    normalizeSeason(user, season.seasonId); // drop stale cross-season progress
+    const user = await withTodaysMissions(User, { userId: interaction.user.id, guildId: interaction.guild.id }, loaded);
+    // Progress stored under an earlier season shows as a fresh pass. Only for
+    // display: the view writes nothing (#873, pass 18) — it used to reset the
+    // stored season sub-document here and save it, a whole-object `$set` over
+    // anything granted in between. The reward paths normalise where they write.
+    const pass = user.season?.seasonId === season.seasonId ? user.season : {};
 
-    const userXp = user.season?.xp ?? 0;
+    const userXp = pass.xp ?? 0;
     const currentTier = getTierFromXp(userXp);
-    const premium = user.season?.premium === true;
-    const claimedFree    = new Set(user.season?.claimedTiers ?? []);
-    const claimedPremium = new Set(user.season?.claimedPremiumTiers ?? []);
+    const premium = pass.premium === true;
+    const claimedFree    = new Set(pass.claimedTiers ?? []);
+    const claimedPremium = new Set(pass.claimedPremiumTiers ?? []);
     const currency = guildSettings?.economy?.currency ?? '💰';
 
     // Upcoming rewards across both tracks
@@ -125,7 +131,7 @@ async function executeView(interaction) {
         : `🔒 Premium locked — unlock both tracks for **${currency}${premiumCost.toLocaleString()}** with \`/season unlock\`.`;
 
     const weeklyCap = season.weeklyXpCap ?? 0;
-    const weekXp    = user.season?.weekXp ?? 0;
+    const weekXp    = pass.weekXp ?? 0;
     const weeklyLine = weeklyCap > 0
         ? `\n🗓️ Weekly XP: **${Math.min(weekXp, weeklyCap)}/${weeklyCap}**`
         : '';
@@ -150,7 +156,6 @@ async function executeView(interaction) {
         .setFooter({ text: `Season XP: ${userXp} total | /season claim tier:<n> [premium:true]` })
         .setTimestamp();
 
-    await user.save().catch(() => {});
     return interaction.reply({ embeds: [embed] });
 }
 
@@ -358,14 +363,14 @@ async function executeUnlock(interaction) {
 }
 
 async function executeMissions(interaction) {
-    const [user, guildSettings] = await loadPlayerAndSettings(interaction);
+    const [loaded, guildSettings] = await loadPlayerAndSettings(interaction);
 
     const season = guildSettings?.season;
     if (!season?.enabled) {
         return interaction.reply({ content: 'No active season on this server.', flags: MessageFlags.Ephemeral });
     }
 
-    await ensureMissions(user);
+    const user = await withTodaysMissions(User, { userId: interaction.user.id, guildId: interaction.guild.id }, loaded);
     const currency = guildSettings?.economy?.currency ?? '💰';
 
     const missionLines = (user.seasonMissions ?? []).map((m, i) => {
@@ -384,7 +389,6 @@ async function executeMissions(interaction) {
         .addFields({ name: '⏰ Next Reset', value: `<t:${Math.floor(resetAt.getTime() / 1000)}:R>`, inline: true })
         .setTimestamp();
 
-    await user.save().catch(() => {});
     return interaction.reply({ embeds: [embed] });
 }
 
@@ -592,7 +596,7 @@ async function executeLeaderboard(interaction) {
 
     const embed = new EmbedBuilder()
         .setColor(COLORS.PRIZE)
-        .setTitle(`📊 Season Leaderboard — ${currentSeason.name ?? currentSeason.id}`)
+        .setTitle(`📊 Season Leaderboard — ${seasonLabel(currentSeason)}`)
         .setDescription(lines.join('\n'))
         .addFields({ name: '⏰ Season Ends', value: endsAt, inline: true })
         .setFooter({ text: 'Only season coins earned this season count — wallet is never reset!' })
@@ -624,7 +628,7 @@ async function executeSeasonMe(interaction) {
 
     const embed = new EmbedBuilder()
         .setColor(COLORS.INFO)
-        .setTitle(`📊 Your Season Stats — ${currentSeason.name ?? currentSeason.id}`)
+        .setTitle(`📊 Your Season Stats — ${seasonLabel(currentSeason)}`)
         .addFields(
             { name: 'Season Rank', value: `#${rank}`, inline: true },
             { name: 'Season Coins', value: `${(user.seasonCoins ?? 0).toLocaleString()} ${currency}`, inline: true }
@@ -645,8 +649,8 @@ async function executeHistory(interaction) {
     }
 
     const fields = records.map(r => ({
-        name: `${r.seasonName ?? r.seasonId} (ended <t:${Math.floor(new Date(r.endedAt).getTime() / 1000)}:D>)`,
-        value: r.top10.slice(0, 3).map((u, i) => {
+        name: `${seasonLabel({ name: r.seasonName, id: r.seasonId })} (ended <t:${Math.floor(new Date(r.endedAt).getTime() / 1000)}:D>)`,
+        value: (r.top10 ?? []).slice(0, 3).map((u, i) => {
             const medals = ['🥇', '🥈', '🥉'];
             return `${medals[i]} <@${u.userId}> — ${u.coins.toLocaleString()} coins`;
         }).join('\n') || 'No data',
@@ -666,7 +670,9 @@ async function executeHistory(interaction) {
 // The two admin writes below read currentSeason to decide whether to write it, so
 // they go to the model rather than getGuildSettings: a cached read would put a TTL
 // between the check and the write. Projected, which is what the cache was for.
-const readSeasonForWrite = guildId => Guild.findOne({ guildId }, 'currentSeason').lean();
+// `/season end` hands the result to the resolver, which also needs the
+// currency, announcement channel and AI settings its recap uses.
+const readSeasonForWrite = guildId => Guild.findOne({ guildId }, 'guildId name currentSeason economy ai').lean();
 
 async function executeAdminStart(interaction) {
     if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
@@ -685,17 +691,32 @@ async function executeAdminStart(interaction) {
     const now = new Date();
     const endsAt = new Date(now.getTime() + durationDays * 86400000);
 
-    await Guild.findOneAndUpdate(
-        { guildId: interaction.guild.id },
+    // Guarded on no season being active (#873, pass 18). The check above is a
+    // read; two admins running /season start together both passed it, and the
+    // second unguarded `$set` replaced the first season — its id, and the
+    // SeasonRecord it would have been frozen under — without either being told.
+    const started = await Guild.findOneAndUpdate(
+        { guildId: interaction.guild.id, 'currentSeason.id': null },
         { $set: { currentSeason: { id: seasonId, name, startedAt: now, endsAt } } }
     );
+    if (!started) {
+        return interaction.reply({ content: 'A season is already active. End it first with `/season end`.', flags: MessageFlags.Ephemeral });
+    }
 
     return interaction.reply({
-        content: `✅ Economy season **${name}** started! Ends <t:${Math.floor(endsAt.getTime() / 1000)}:R>.`,
+        content: `✅ Economy season **${seasonLabel({ name })}** started! Ends <t:${Math.floor(endsAt.getTime() / 1000)}:R>.`,
     });
 }
 
 // Admin: end economy season
+//
+// Ends the season through the same resolver the scheduler's sweep uses (#873,
+// pass 18). This handler used to carry its own copy of the ending — freeze,
+// reset, clear — with none of the resolver's claim: an admin's end racing the
+// sweep ran the freeze and the reset twice, and its closing `$set`, unguarded on
+// which season it cleared, could erase a season a second admin had started in
+// between. One path now, claimed atomically; the admin additionally gets the
+// recap DMs and announcement an automatic end already sent.
 async function executeAdminEnd(interaction) {
     if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
         return interaction.reply({ content: 'Administrator only.', flags: MessageFlags.Ephemeral });
@@ -703,57 +724,27 @@ async function executeAdminEnd(interaction) {
 
     await interaction.deferReply();
 
-    const guildSettings = await readSeasonForWrite(interaction.guild.id);
-    const currentSeason = guildSettings?.currentSeason;
-
-    if (!currentSeason?.id) {
+    const guildDoc = await readSeasonForWrite(interaction.guild.id);
+    if (!guildDoc?.currentSeason?.id) {
         return interaction.editReply('No active economy season to end.');
     }
 
-    const topUsers = await User.find({ guildId: interaction.guild.id })
-        .sort({ seasonCoins: -1 })
-        .limit(10)
-        .select('userId seasonCoins');
+    const ended = await resolveOneSeason(interaction.client, guildDoc);
+    if (!ended) {
+        // Claimed by someone else between the read and the claim — the sweep,
+        // or another admin. It is ended either way; this call just didn't do it.
+        return interaction.editReply('That season has just been ended already — its results are being posted.');
+    }
 
-    const resolvedNames = {};
-    try {
-        for (const u of topUsers.slice(0, 3)) {
-            const member = await interaction.guild.members.fetch(u.userId).catch(() => null);
-            resolvedNames[u.userId] = member?.user?.username ?? 'Unknown';
-        }
-    } catch {}
-
-    await SeasonRecord.create({
-        guildId: interaction.guild.id,
-        seasonId: currentSeason.id,
-        seasonName: currentSeason.name,
-        startedAt: currentSeason.startedAt,
-        endedAt: new Date(),
-        top10: topUsers.map(u => ({
-            userId: u.userId,
-            username: resolvedNames[u.userId] ?? 'Unknown',
-            coins: u.seasonCoins ?? 0
-        }))
-    });
-
-    // Reset all seasonCoins for this guild
-    await User.updateMany({ guildId: interaction.guild.id }, { $set: { seasonCoins: 0 } });
-
-    // Clear currentSeason from guild
-    await Guild.findOneAndUpdate(
-        { guildId: interaction.guild.id },
-        { $set: { currentSeason: { id: null, name: null, startedAt: null, endsAt: null } } }
-    );
-
+    const currency = guildDoc.economy?.currency ?? '💰';
     const medals = ['🥇', '🥈', '🥉'];
-    const winners = topUsers.slice(0, 3);
-    const winnerLines = winners.map((u, i) =>
-        `${medals[i]} <@${u.userId}> — ${(u.seasonCoins ?? 0).toLocaleString()} coins`
+    const winnerLines = ended.topUsers.slice(0, 3).map((u, i) =>
+        `${medals[i]} <@${u.userId}> — ${(u.seasonCoins ?? 0).toLocaleString()} ${currency}`
     ).join('\n') || '*No participants*';
 
     const embed = new EmbedBuilder()
         .setColor(COLORS.PRIZE)
-        .setTitle(`🏁 Season Ended: ${currentSeason.name ?? currentSeason.id}`)
+        .setTitle(`🏁 Season Ended: ${seasonLabel(ended.season)}`)
         .setDescription('The season leaderboard has been frozen and season coins have been reset.')
         .addFields({ name: '🏆 Final Top 3', value: winnerLines })
         .setTimestamp();
@@ -1004,6 +995,7 @@ module.exports = {
                     opt.setName('name')
                         .setDescription('Season name (e.g. "Season 1")')
                         .setRequired(false)
+                        .setMaxLength(SEASON_NAME_MAX)
                 )
                 .addIntegerOption(opt =>
                     opt.setName('duration')

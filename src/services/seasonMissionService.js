@@ -133,6 +133,50 @@ function missionAdvancePipeline(event, step) {
 }
 
 /**
+ * Deal today's hand if the stored one has expired, in one guarded write.
+ *
+ * Guarded on the stored date so that concurrent callers cannot each deal a
+ * different three: the first write moves the date to today and every later one
+ * matches nothing. Shared by `advanceMissions` and the `/season` views (#873,
+ * pass 18), which used to deal in memory and `save()` the result — a write with
+ * no such guard, which could replace a hand another command had just dealt, and
+ * the progress recorded against it.
+ *
+ * Never throws; a failed rollover is logged and the stored hand stands.
+ */
+async function dealMissionsIfStale(Model, filter, now = new Date()) {
+    const today = missionDayStart(now);
+    await Model.updateOne(
+        {
+            ...filter,
+            $or: [
+                { seasonMissionsDate: null },
+                { seasonMissionsDate: { $exists: false } },
+                { seasonMissionsDate: { $lt: today } },
+            ],
+        },
+        { $set: { seasonMissions: generateDailyMissions(), seasonMissionsDate: today } },
+    ).catch(err => console.error('[seasonMissions] rollover failed:', err));
+}
+
+/**
+ * `user` with today's missions dealt, for a caller that only reads them — the
+ * `/season view` and `/season missions` screens (#873, pass 18).
+ *
+ * Those used to deal a stale hand in memory and `save()` it, a write with none
+ * of `dealMissionsIfStale`'s guard: at the day boundary it could replace a hand
+ * `/crime`, `/quiz`, `/casino` or a duel had just dealt, and the progress
+ * recorded against it. The deal goes through the guarded write and the caller
+ * gets the document re-read; a hand that is already today's costs nothing.
+ */
+async function withTodaysMissions(Model, filter, user, now = new Date()) {
+    const stamped = user?.seasonMissionsDate ? new Date(user.seasonMissionsDate).getTime() : null;
+    if (stamped !== null && stamped >= missionDayStart(now).getTime() && Array.isArray(user.seasonMissions)) return user;
+    await dealMissionsIfStale(Model, filter, now);
+    return (await Model.findOne(filter)) ?? user;
+}
+
+/**
  * `recordMissionProgress` for callers that never hold a saved user document.
  *
  * Crime, quiz, casino and duels all move coins with targeted atomic updates and
@@ -148,20 +192,7 @@ async function advanceMissions(Model, filter, event, amount = 1, guildSettings =
     const step = Math.floor(amount);
     if (!(step > 0)) return [];
 
-    // Deal today's hand first if the stored one has expired. Guarded on the
-    // stored date so that concurrent callers can't each deal a different three.
-    const today = missionDayStart();
-    await Model.updateOne(
-        {
-            ...filter,
-            $or: [
-                { seasonMissionsDate: null },
-                { seasonMissionsDate: { $exists: false } },
-                { seasonMissionsDate: { $lt: today } },
-            ],
-        },
-        { $set: { seasonMissions: generateDailyMissions(), seasonMissionsDate: today } },
-    ).catch(err => console.error('[seasonMissions] rollover failed:', err));
+    await dealMissionsIfStale(Model, filter);
 
     // `new: false` returns the pre-image, which is the only way to tell which
     // missions this call is the one to finish — the update itself is applied by
@@ -179,4 +210,4 @@ async function advanceMissions(Model, filter, event, amount = 1, guildSettings =
         && ((m.progress ?? 0) + step) >= (m.target ?? 0));
 }
 
-module.exports = { ensureMissions, recordMissionProgress, advanceMissions, missionAdvancePipeline, missionDayStart };
+module.exports = { ensureMissions, dealMissionsIfStale, withTodaysMissions, recordMissionProgress, advanceMissions, missionAdvancePipeline, missionDayStart };

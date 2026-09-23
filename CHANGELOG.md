@@ -14,6 +14,46 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.10] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 18 (#873) — the season pass's non-reward surface: `/season
+view`, `missions`, `leaderboard`, `me`, `history`, `event`, and the admin
+`start` and `end`. Pass 7 audited the reward payouts. This pass found that some
+of the "views" were writing, and that both admin commands wrote without the
+guard their counterparts elsewhere have.
+
+- **`/season view` and `/season missions` could replace a mission hand another
+  command had dealt.** Both dealt a stale hand in memory and `save()`d it, with
+  none of the guard `advanceMissions` puts on the same deal. So at the day
+  boundary a view could overwrite the hand `/crime`, `/quiz`, `/casino` or a
+  duel had just dealt, along with the progress recorded against it. `view` also
+  reset a stale season sub-document and saved that as a whole-object `$set`.
+  Both now deal through the shared guarded write (`dealMissionsIfStale`) and
+  re-read. `view` renders a stale season as fresh without writing it. Neither
+  saves.
+- **`/season end` ran its own copy of the season ending.** The scheduler's
+  resolver claims the season atomically before freezing the leaderboard and
+  resetting coins. The admin command did the same work without the claim, and
+  finished with a `$set` that cleared `currentSeason` without checking which
+  season it was clearing. An admin's end racing the sweep ran the freeze and
+  reset twice, and could erase a season a second admin had started in between.
+  It now calls `resolveOneSeason`, so it also sends the recap DMs and
+  announcement an automatic end sends. A season already claimed is reported as
+  such.
+- **`/season start` checked, then wrote unguarded.** Two admins starting at
+  once both passed the "no season running" read, and the second `$set`
+  replaced the first season. The write is now guarded on no season being
+  active.
+- **A season name had no length limit.** It is echoed into embed titles and
+  field names, which Discord rejects past 256 characters, and discord.js throws
+  rather than truncating. The `name` option is capped at 100 characters, and
+  names already stored are shortened wherever they render. `history` also no
+  longer throws on a record with no `top10`.
+
+`season.js`'s frozen line ceiling drops from 1,052 to 1,044.
+
 ## [4.13.9] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.
