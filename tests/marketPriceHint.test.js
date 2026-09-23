@@ -9,7 +9,9 @@
 jest.mock('../src/models/MarketSale', () => ({ aggregate: jest.fn(), create: jest.fn() }));
 jest.mock('../src/models/MarketListing', () => ({ find: jest.fn() }));
 
-const { shortHint, priceCheck, median } = require('../src/services/marketPriceService');
+const { shortHint, priceCheck, median, priceSnapshot } = require('../src/services/marketPriceService');
+const MarketSale = require('../src/models/MarketSale');
+const MarketListing = require('../src/models/MarketListing');
 
 const forged = { kind: 'forged', value: 5000 };
 const event  = { kind: 'event', value: 0 };
@@ -62,5 +64,22 @@ describe('median', () => {
         expect(median([5, 1, 3])).toBe(3);
         expect(median([1, 2, 3, 4])).toBe(3); // 2.5 rounds to 3
         expect(median([])).toBeNull();
+    });
+});
+
+describe('priceSnapshot on a MongoDB older than 5.2', () => {
+    it('falls back from $firstN to $push + $slice instead of losing the history', async () => {
+        const unknownOperator = Object.assign(new Error('unknown group operator \'$firstN\''), { code: 15952 });
+        MarketSale.aggregate
+            .mockRejectedValueOnce(unknownOperator)
+            .mockResolvedValueOnce([{ _id: 'gem', lastPrice: 120, lastSoldAt: new Date(), prices: [120, 100, 110] }]);
+        MarketListing.find.mockReturnValue({ lean: async () => [] });
+
+        const snap = await priceSnapshot('g1', ['gem']);
+
+        expect(snap.get('gem')).toMatchObject({ lastPrice: 120, medianPrice: 110, sales: 3 });
+        const fallback = MarketSale.aggregate.mock.calls[1][0];
+        expect(fallback.find(stage => stage.$group).$group.prices).toEqual({ $push: '$pricePerUnit' });
+        expect(fallback.find(stage => stage.$project).$project.prices).toEqual({ $slice: ['$prices', 10] });
     });
 });

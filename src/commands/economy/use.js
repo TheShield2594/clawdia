@@ -11,7 +11,8 @@ const {
 } = require('../../services/effectsService');
 const { DEFAULT_SHOP_ITEMS } = require('../../data/defaultShopItems');
 const { getRelicMeta } = require('../../data/exploreData');
-const { describeItem, findShopRow } = require('../../utils/itemDisplay');
+const { describeItem, findShopRow, findDefaultRow } = require('../../utils/itemDisplay');
+const { withUserLock } = require('../../utils/userMutex');
 const { loadAiItems } = require('../../utils/aiItemLookup');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
 const { lootBoxItemPayoutKey, useRoleRefundPayoutKey } = require('../../utils/payoutKey');
@@ -77,9 +78,7 @@ function runningLabel(effect) {
 
 /** The catalogue description with its leading emoji stripped, for an embed body. */
 function describeEffect(itemId, shopItems) {
-    const lower = itemId.toLowerCase();
-    const row = findShopRow(itemId, shopItems)
-        ?? DEFAULT_SHOP_ITEMS.find(s => s.itemId.toLowerCase() === lower);
+    const row = findShopRow(itemId, shopItems) ?? findDefaultRow(itemId);
     return (row?.description ?? '')
         .replace(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic}|\uFE0F|\u200D)+\s*/u, '')
         .trim();
@@ -166,7 +165,15 @@ function useStatus(itemId, user, { shopItems = [], hasRole = () => false } = {})
     // A custom item the server's admins sell: theirs to define, so /use redeems it.
     if (shopItem) return { usable: true, ready: true, status: 'redeem' };
 
-    return { usable: false, redirect: "Nothing in the game activates it — it's a keepsake. Keep it, hand it over with `/gift`, or sell it with `/market list`." };
+    // Either nothing in the game ever activated it (a /work find), or it was a
+    // server shop item whose row has since been removed. Both are refused rather
+    // than consumed; the wording covers both without claiming to know which.
+    return {
+        usable: false, unknown: true,
+        redirect: "Nothing in the game or this server's shop uses it (any more), so there's nothing to activate. "
+            + 'Keep it, hand it over with `/gift`, or sell it with `/market list`. '
+            + "If it was a server shop item that's since been removed, ask an admin.",
+    };
 }
 
 /** How many of an item are left after a use, from the post-update document. */
@@ -294,6 +301,9 @@ module.exports = {
         // Refused before anything is written. The generic branch at the bottom
         // used to swallow these — a relic, a forged item or a bag of pet food
         // would be "used" into nothing.
+        // No settings (a guild that never saved any) means no custom shop, so
+        // an unknown item there is refused like any other. A settings read that
+        // fails throws out of the Promise.all above, before anything is spent.
         const status = useStatus(canonicalId, preview, { shopItems });
         if (!status.usable) {
             let shown = item;
@@ -672,82 +682,103 @@ module.exports = {
         // ── Generic (role-granting) items ─────────────────────────────────────
         const shopItem = findShopRow(canonicalId, shopItems);
 
-        // The role is checked before anything is spent. This used to consume the
-        // item first and only then look at the member, so a player who already
-        // had the role — or one whose member record could not be fetched — lost
-        // the item and got nothing for it.
-        let member = null;
-        if (shopItem?.roleId) {
-            member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-            if (!member) {
-                return interaction.reply({
-                    content: `Couldn't check your roles just now, so nothing was used. Try again in a moment.`,
-                    flags: MessageFlags.Ephemeral,
-                });
+        // A role item is acknowledged privately *before* the lock, as /gift is:
+        // a second press can wait out the first one's forced member fetch,
+        // write, roles.add and possibly a refund, and an unacknowledged wait
+        // past three seconds ends in "the application did not respond".
+        // Refusals and refund notes stay private in that reply; the success
+        // card goes out publicly as a follow-up.
+        const isRoleItem = Boolean(shopItem?.roleId);
+        if (isRoleItem) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const redeem = async () => {
+            // The role is checked before anything is spent, against a fresh fetch
+            // (`force`): a cached member can predate a role another bot or an
+            // admin just gave, and would let the item be spent on a no-op.
+            let member = null;
+            if (isRoleItem) {
+                member = await interaction.guild.members.fetch({ user: interaction.user.id, force: true }).catch(() => null);
+                if (!member) {
+                    return interaction.editReply({
+                        content: `Couldn't check your roles just now, so nothing was used. Try again in a moment.`,
+                    });
+                }
+                if (member.roles.cache.has(shopItem.roleId)) {
+                    return interaction.editReply({
+                        content: `You already have <@&${shopItem.roleId}>, so **${shopItem.name ?? item.name}** would do nothing. Nothing was used.`,
+                        allowedMentions: { parse: [] },
+                    });
+                }
+            } else {
+                // Acknowledged before the write, like the role path above.
+                await interaction.deferReply();
             }
-            if (member.roles.cache.has(shopItem.roleId)) {
-                return interaction.reply({
-                    content: `You already have <@&${shopItem.roleId}>, so **${shopItem.name ?? item.name}** would do nothing. Nothing was used.`,
-                    flags: MessageFlags.Ephemeral,
-                    allowedMentions: { parse: [] },
-                });
+
+            // Atomically consume one item before side-effects (role grant)
+            const user = await User.findOneAndUpdate(
+                { ...userFilter, inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } } },
+                { $inc: { 'inventory.$.quantity': -1 } },
+                { new: true }
+            );
+
+            if (!user) {
+                return interaction.editReply({ content: `You don't have **${itemName}** in your inventory.` });
             }
-        }
 
-        // Atomically consume one item before side-effects (role grant)
-        const user = await User.findOneAndUpdate(
-            { ...userFilter, inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } } },
-            { $inc: { 'inventory.$.quantity': -1 } },
-            { new: true }
-        );
+            await dropEmptyInventorySlots();
 
-        if (!user) {
-            return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
-        }
-
-        await dropEmptyInventorySlots();
-
-        let roleGranted = false;
-        if (member) {
-            try {
-                await member.roles.add(shopItem.roleId, `Used shop item: ${shopItem.name}`);
-                roleGranted = true;
-            } catch (err) {
-                // Discord refused (missing permission, role above the bot's). The
-                // item is already spent, so it goes back — keyed, and recorded as
-                // owed if even that will not land.
-                console.error('[use] role grant failed, returning the item:', err?.message ?? err);
-                const refund = await grantItemsOrOwe(
-                    { userId: userFilter.userId, guildId: userFilter.guildId },
-                    canonicalId, 1,
-                    { payoutKey: useRoleRefundPayoutKey(interaction.id), service: 'use', jobName: 'roleRefund' },
-                );
-                return interaction.reply({
-                    content: refund.granted
-                        ? `Couldn't give you <@&${shopItem.roleId}> — the bot may lack permission. Your **${item.name}** was returned; let an admin know.`
-                        : `Couldn't give you <@&${shopItem.roleId}>, and returning your **${item.name}** failed${refund.owed ? ' — it is recorded as owed and will come back' : ''}. Please tell an admin.`,
-                    flags: MessageFlags.Ephemeral,
-                    allowedMentions: { parse: [] },
-                });
+            let roleGranted = false;
+            if (member) {
+                try {
+                    await member.roles.add(shopItem.roleId, `Used shop item: ${shopItem.name}`);
+                    roleGranted = true;
+                } catch (err) {
+                    // Discord refused (missing permission, role above the bot's). The
+                    // item is already spent, so it goes back — keyed, and recorded as
+                    // owed if even that will not land.
+                    console.error('[use] role grant failed, returning the item:', err?.message ?? err);
+                    const refund = await grantItemsOrOwe(
+                        { userId: userFilter.userId, guildId: userFilter.guildId },
+                        canonicalId, 1,
+                        { payoutKey: useRoleRefundPayoutKey(interaction.id), service: 'use', jobName: 'roleRefund' },
+                    );
+                    return interaction.editReply({
+                        content: refund.granted
+                            ? `Couldn't give you <@&${shopItem.roleId}> — the bot may lack permission. Your **${item.name}** was returned; let an admin know.`
+                            : `Couldn't give you <@&${shopItem.roleId}>, and returning your **${item.name}** failed${refund.owed ? ' — it is recorded as owed and will come back' : ''}. Please tell an admin.`,
+                        allowedMentions: { parse: [] },
+                    });
+                }
             }
-        }
 
-        const baseDesc    = shopItem?.description || 'Redeemed from your inventory.';
-        const genericDesc = item.lore ? `${baseDesc}\n\n> *${item.lore}*` : baseDesc;
+            const baseDesc    = shopItem?.description || 'Redeemed from your inventory.';
+            const genericDesc = item.lore ? `${baseDesc}\n\n> *${item.lore}*` : baseDesc;
 
-        const embed = new EmbedBuilder()
-            .setColor(item.color ?? COLORS.SUCCESS)
-            .setTitle(`${item.emoji} Used: ${shopItem?.name ?? item.name}`)
-            .setDescription(genericDesc)
-            .setTimestamp();
+            const embed = new EmbedBuilder()
+                .setColor(item.color ?? COLORS.SUCCESS)
+                .setTitle(`${item.emoji} Used: ${shopItem?.name ?? item.name}`)
+                .setDescription(genericDesc)
+                .setTimestamp();
 
-        if (roleGranted) {
-            embed.addFields({ name: '🎭 Role Granted', value: `<@&${shopItem.roleId}>`, inline: true });
-        }
+            if (roleGranted) {
+                embed.addFields({ name: '🎭 Role Granted', value: `<@&${shopItem.roleId}>`, inline: true });
+            }
 
-        // `user` is the post-decrement document — no second subtraction.
-        embed.addFields(leftField(user, canonicalId));
+            // `user` is the post-decrement document — no second subtraction.
+            embed.addFields(leftField(user, canonicalId));
 
-        await interaction.reply({ embeds: [embed] });
+            if (isRoleItem) {
+                await interaction.editReply({ content: `✅ Used **${shopItem.name ?? item.name}**.` });
+                return interaction.followUp({ embeds: [embed] });
+            }
+            return interaction.editReply({ embeds: [embed] });
+        };
+
+        // One role redemption per member at a time: two quick /use presses on a
+        // stack of two would otherwise both pass the has-role check and spend
+        // the second item on a role the first had just granted.
+        return isRoleItem
+            ? withUserLock(`use-role:${userFilter.guildId}:${userFilter.userId}`, redeem)
+            : redeem();
     }
 };

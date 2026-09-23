@@ -80,17 +80,17 @@ async function handleBrowse(interaction, currency, guildSettings) {
 
     let sortMode = SORT_RARITY;
 
+    // Each order is sorted once, the first time it is shown; page turns and the
+    // button row read the cached array instead of re-sorting 200 listings.
+    const sortedByMode = new Map();
     function sortedListings() {
-        if (sortMode === SORT_PRICE) {
-            return [...allListings].sort((a, b) => a.pricePerUnit - b.pricePerUnit);
+        if (!sortedByMode.has(sortMode)) {
+            sortedByMode.set(sortMode, sortMode === SORT_PRICE
+                ? [...allListings].sort((a, b) => a.pricePerUnit - b.pricePerUnit)
+                // Rarity-first: group by tier ascending (Common first), then price within tier
+                : [...allListings].sort((a, b) => (rank(a) - rank(b)) || (a.pricePerUnit - b.pricePerUnit)));
         }
-        // Rarity-first: group by tier ascending (Common first), then price within tier
-        return [...allListings].sort((a, b) => {
-            const ra = rank(a);
-            const rb = rank(b);
-            if (ra !== rb) return ra - rb;
-            return a.pricePerUnit - b.pricePerUnit;
-        });
+        return sortedByMode.get(sortMode);
     }
 
     let page = 0;

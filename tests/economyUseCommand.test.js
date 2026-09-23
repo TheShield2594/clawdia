@@ -373,6 +373,47 @@ describe('a plain shop item', () => {
         expect(repliedText(interaction)).toContain('was returned');
     });
 
+    it('spends only one of two items when the role is redeemed twice at once', async () => {
+        seedUser({ inventory: [{ itemId: 'vip_pass', quantity: 2 }] });
+        seedGuild({ shop: [{ name: 'vip_pass', roleId: 'role-9' }] });
+
+        // One member whose role cache fills in once the first add lands, shared
+        // by both presses the way Discord's cache would be.
+        const roles = new Set();
+        const member = { roles: { cache: { has: id => roles.has(id) }, add: jest.fn(async id => { roles.add(id); }) } };
+        const press = () => {
+            const interaction = makeInteraction({ options: { item: 'vip_pass' } });
+            interaction.guild.members.fetch = jest.fn().mockResolvedValue(member);
+            return interaction;
+        };
+        const [first, second] = [press(), press()];
+
+        await Promise.all([use.execute(first), use.execute(second)]);
+
+        expect(member.roles.add).toHaveBeenCalledTimes(1);
+        expect(slot('vip_pass').quantity).toBe(1);
+        expect(repliedText(second)).toContain('already have');
+    });
+
+    it('fetches the member fresh, not from a cache that may be stale', async () => {
+        seedUser({ inventory: [{ itemId: 'vip_pass', quantity: 1 }] });
+        seedGuild({ shop: [{ name: 'vip_pass', roleId: 'role-9' }] });
+
+        const interaction = makeInteraction({ options: { item: 'vip_pass' } });
+        interaction.guild.members.fetch = jest.fn().mockResolvedValue({
+            roles: { cache: { has: () => false }, add: jest.fn(async () => {}) },
+        });
+        await use.execute(interaction);
+
+        expect(interaction.guild.members.fetch).toHaveBeenCalledWith({ user: USER_ID, force: true });
+        // Private acknowledgement first, before any of the slow work…
+        expect(interaction.deferReply).toHaveBeenCalledWith({ flags: expect.any(Number) });
+        expect(interaction.deferReply.mock.invocationCallOrder[0])
+            .toBeLessThan(interaction.guild.members.fetch.mock.invocationCallOrder[0]);
+        // …and the result announced publicly.
+        expect(interaction.followUp).toHaveBeenCalledWith(expect.objectContaining({ embeds: expect.any(Array) }));
+    });
+
     it('redeems a custom shop item with no role', async () => {
         seedUser({ inventory: [{ itemId: 'shoutout_ticket', quantity: 1 }] });
         seedGuild({ shop: [{ name: 'shoutout_ticket', description: 'Redeem for a shoutout.' }] });
@@ -396,6 +437,31 @@ describe('items nothing in the game handles', () => {
             expect(slot(itemId).quantity).toBe(1);
             expect(mockUsers.writes).toEqual([]);
         });
+
+    it('refuses an unknown item in a guild that has never saved settings', async () => {
+        seedUser({ inventory: [{ itemId: 'shoutout_ticket', quantity: 1 }] });
+        // No guild row at all: getGuildSettings answers null, which means "no
+        // custom shop", not "the read failed".
+
+        const interaction = await run('shoutout_ticket');
+
+        expect(repliedText(interaction)).toContain('Nothing was consumed');
+        expect(repliedText(interaction)).not.toContain("Couldn't load");
+        expect(slot('shoutout_ticket').quantity).toBe(1);
+        expect(mockUsers.writes).toEqual([]);
+    });
+
+    it('names a legacy /daily booster as the 2x booster it activates', async () => {
+        seedUser({ inventory: [{ itemId: 'coin_booster', quantity: 1 }] });
+        seedGuild();
+
+        const pick = makeInteraction({ options: { focused: '' } });
+        await use.autocomplete(pick);
+        expect(pick.respond.mock.calls[0][0][0].name).toContain('2x Coin Booster');
+
+        const interaction = await run('coin_booster');
+        expect(repliedText(interaction)).toMatch(/2x coin/i);
+    });
 
     it('activates the boosters /daily drops under their short ids', async () => {
         seedUser({ inventory: [{ itemId: 'coin_booster', quantity: 1 }] });
@@ -547,5 +613,17 @@ describe('autocomplete', () => {
         await use.autocomplete(interaction);
 
         expect(interaction.respond).toHaveBeenCalledWith([]);
+    });
+});
+
+describe('what /daily drops', () => {
+    // The drop table once handed out ids no effect was mapped to, so the item
+    // could never be activated. Every drop that lands in the bag must be one
+    // /use can do something with.
+    it('is always something /use can activate', () => {
+        const { DROP_TABLE, RARE_DROP_TABLE } = require('../src/data/dailyDropTable');
+        const { resolveEffectType } = require('../src/services/effectsService');
+        const bagged = [...DROP_TABLE, ...RARE_DROP_TABLE].filter(d => !d.streakFlag);
+        for (const drop of bagged) expect([drop.itemId, resolveEffectType(drop.itemId)]).toEqual([drop.itemId, expect.any(String)]);
     });
 });

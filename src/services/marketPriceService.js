@@ -37,6 +37,47 @@ function median(values) {
     return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
 }
 
+// Set once a server has refused `$firstN`, so the fallback is taken directly
+// from then on instead of failing a query first on every keystroke.
+let firstNUnsupported = false;
+
+/**
+ * Each item's last sale and its RECENT_SALES most recent prices.
+ *
+ * `$firstN` (MongoDB 5.2+) keeps at most RECENT_SALES prices per item while
+ * grouping. The deployment runs mongo:7, but a self-hosted server can be older
+ * and would reject the operator; that one case falls back to `$push` + `$slice`,
+ * which gathers the item's whole 90-day history before trimming it — correct,
+ * just heavier — rather than losing every price hint.
+ */
+async function saleHistory(guildId, ids) {
+    const head = [
+        { $match: { guildId, itemId: { $in: ids } } },
+        { $sort: { soldAt: -1 } },
+    ];
+    const group = prices => ({ $group: {
+        _id: '$itemId',
+        lastPrice: { $first: '$pricePerUnit' },
+        lastSoldAt: { $first: '$soldAt' },
+        prices,
+    } });
+
+    if (!firstNUnsupported) {
+        try {
+            return await MarketSale.aggregate([...head, group({ $firstN: { input: '$pricePerUnit', n: RECENT_SALES } })]);
+        } catch (err) {
+            // 15952: unknown group operator. Anything else is a real failure.
+            if (err?.code !== 15952 && !/firstN/.test(err?.message ?? '')) throw err;
+            firstNUnsupported = true;
+        }
+    }
+    return MarketSale.aggregate([
+        ...head,
+        group({ $push: '$pricePerUnit' }),
+        { $project: { lastPrice: 1, lastSoldAt: 1, prices: { $slice: ['$prices', RECENT_SALES] } } },
+    ]);
+}
+
 /**
  * Market figures for each of `itemIds` in one guild.
  *
@@ -64,19 +105,8 @@ async function priceSnapshot(guildId, itemIds, { excludeSellerId = null } = {}) 
     if (excludeSellerId) listingQuery.sellerId = { $ne: excludeSellerId };
 
     const [sales, listings] = await Promise.all([
-        MarketSale.aggregate([
-            { $match: { guildId, itemId: { $in: ids } } },
-            { $sort: { soldAt: -1 } },
-            // `$firstN` (MongoDB 5.2+) keeps at most RECENT_SALES prices per item
-            // while grouping. A `$push` then `$slice` would first gather every
-            // sale in the 90-day window into memory, once per keystroke.
-            { $group: {
-                _id: '$itemId',
-                lastPrice: { $first: '$pricePerUnit' },
-                lastSoldAt: { $first: '$soldAt' },
-                prices: { $firstN: { input: '$pricePerUnit', n: RECENT_SALES } },
-            } },
-        ]).catch(err => { console.error('[market] sale history lookup failed:', err?.message ?? err); return []; }),
+        saleHistory(guildId, ids)
+            .catch(err => { console.error('[market] sale history lookup failed:', err?.message ?? err); return []; }),
         // At most five listings per seller, so this is bounded without a limit.
         MarketListing.find(listingQuery, 'itemId pricePerUnit').lean()
             .catch(err => { console.error('[market] listing price lookup failed:', err?.message ?? err); return []; }),
@@ -102,9 +132,11 @@ const REFERENCE_LABELS = { shop: 'shop price', relic: 'relic value', forged: 'fo
 const coins = (currency, n) => `${currency}${Math.round(n).toLocaleString()}`;
 
 // Sales needed before the median, rather than the latest sale, is the headline.
-// Below this there is no middle to speak of; at it, one odd sale — including a
-// seller buying their own listing through an alt to plant a price — moves the
-// headline no further than the sales around it allow.
+// Below this there is no middle to speak of. The median takes one odd sale out
+// of the headline; it does not stop a determined seller, who could plant a
+// majority of a thin history through alts (paying the 5% fee each time). The
+// price check on the listing receipt shows the last sale and the median side
+// by side, so an odd one is visible there.
 const MEDIAN_AFTER = 3;
 
 /**
