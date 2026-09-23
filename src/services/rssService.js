@@ -1,6 +1,6 @@
 const Parser = require('rss-parser');
 const Guild = require('../models/Guild');
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, escapeMarkdown } = require('discord.js');
 const cron = require('node-cron');
 
 const { safeFetchFeed } = require('../utils/safeFeedFetch');
@@ -218,6 +218,68 @@ function datedItems(parsedFeed) {
         .sort((a, b) => a.date - b.date);
 }
 
+// Embed limits discord.js enforces at build time. Anything past them throws
+// from the builder, and a throw inside the delivery loop leaves the cursor
+// short of the item — so one over-long title used to be retried every sweep
+// for good, holding back everything the feed published after it.
+const EMBED_TITLE_LIMIT = 256;
+const ITEM_SNIPPET_LIMIT = 200;
+
+function truncate(text, max) {
+    return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+// rss-parser hands back whatever the XML held: usually a string, but an
+// element with attributes arrives as `{ _: 'text', $: {...} }`.
+function feedText(value) {
+    if (typeof value === 'string') return value.trim();
+    if (value && typeof value._ === 'string') return value._.trim();
+    return '';
+}
+
+// An absolute http(s) URL, or null. Feeds routinely carry root-relative links
+// ("/2025/08/post") and the odd `javascript:` or empty one; the builder rejects
+// all of them, so they are resolved against the feed or dropped here instead.
+function absoluteHttpUrl(raw, base) {
+    const text = feedText(raw);
+    if (!text) return null;
+    try {
+        const url = new URL(text, base);
+        return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+    } catch {
+        return null;
+    }
+}
+
+// Relative item links resolve against the site the feed describes, falling
+// back to the feed's own URL when its <link> is missing or unusable.
+function feedBaseUrl(parsedFeed, feedUrl) {
+    return absoluteHttpUrl(parsedFeed.link, feedUrl) || feedUrl;
+}
+
+/**
+ * The embed for one feed item, built only from values the builder accepts:
+ * the title is truncated, the link resolved to an absolute http(s) URL or left
+ * off, and a feed logo that is not a usable URL is dropped rather than failing
+ * every item the feed publishes.
+ */
+function buildItemEmbed(item, date, parsedFeed, feedUrl) {
+    const base = feedBaseUrl(parsedFeed, feedUrl);
+    const embed = new EmbedBuilder()
+        .setColor(COLORS.INFO)
+        .setTitle(truncate(feedText(item.title) || 'New Post', EMBED_TITLE_LIMIT))
+        .setDescription(truncate(feedText(item.contentSnippet), ITEM_SNIPPET_LIMIT) || 'No description available')
+        .setTimestamp(date);
+
+    const link = absoluteHttpUrl(item.link, base);
+    if (link) embed.setURL(link);
+
+    const thumbnail = absoluteHttpUrl(parsedFeed.image?.url, base);
+    if (thumbnail) embed.setThumbnail(thumbnail);
+
+    return embed;
+}
+
 // A feed that publishes a burst between two sweeps posts at most this many of
 // them, newest kept. The cursor still advances past the whole burst: a channel
 // is not a backfill target, and the alternative — posting all of them — is a
@@ -261,15 +323,17 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
         if (!channel) return 0;
 
         for (const { item, date } of toPost) {
-            const embed = new EmbedBuilder()
-                .setColor(COLORS.INFO)
-                .setTitle(item.title || 'New Post')
-                .setURL(item.link)
-                .setDescription(item.contentSnippet?.substring(0, 200) || 'No description available')
-                .setTimestamp(date);
-
-            if (parsedFeed.image?.url) {
-                embed.setThumbnail(parsedFeed.image.url);
+            // An item the builder still refuses is skipped, not retried: it
+            // is the item that is wrong, and it will be just as wrong on the
+            // next sweep. A failed *send* is different — that throws below and
+            // leaves the cursor where it is.
+            let embed;
+            try {
+                embed = buildItemEmbed(item, date, parsedFeed, feed.url);
+            } catch (error) {
+                console.error(`Skipping an RSS item from ${feed.url} that could not be rendered:`, error.message);
+                cursor = date;
+                continue;
             }
 
             await channel.send({ embeds: [embed] });
@@ -389,6 +453,17 @@ async function checkRssFeeds(client) {
     }
 }
 
+// Feed text is dropped into Markdown, where a stray `]`, `*` or `_` in a
+// headline closes the link or bolds the rest of the digest.
+function digestText(text) {
+    return escapeMarkdown(String(text)).replace(/[[\]]/g, '\\$&');
+}
+
+// A `)` in the URL ends a Markdown link early.
+function digestLink(url) {
+    return url.replace(/\(/g, '%28').replace(/\)/g, '%29');
+}
+
 async function sendDailyNewsForProfile(client, guild, profile) {
     const channel = await fetchSendableChannel(client, profile.channelId);
     if (!channel) {
@@ -406,13 +481,14 @@ async function sendDailyNewsForProfile(client, guild, profile) {
         try {
             const parsedFeed = await parseFeedUrl(feedUrl);
             recordFeedSuccess(feedUrl);
+            const base = feedBaseUrl(parsedFeed, feedUrl);
             const feedItems = parsedFeed.items
                 .map(item => ({
-                    title: item.title,
-                    link: item.link,
-                    normalizedLink: normalizeArticleLink(item.link),
+                    title: feedText(item.title) || 'Untitled',
+                    link: absoluteHttpUrl(item.link, base),
+                    normalizedLink: normalizeArticleLink(absoluteHttpUrl(item.link, base) || ''),
                     description: item.contentSnippet?.substring(0, 150) || 'No description',
-                    source: parsedFeed.title || 'Unknown Source',
+                    source: feedText(parsedFeed.title) || 'Unknown Source',
                     date: new Date(item.pubDate || item.isoDate)
                 }))
                 .filter(item => Number.isNaN(item.date.getTime()) || item.date.getTime() >= cutoffMs)
@@ -460,8 +536,10 @@ async function sendDailyNewsForProfile(client, guild, profile) {
     let description = '';
     for (let i = 0; i < Math.min(uniqueItems.length, 10); i++) {
         const item = uniqueItems[i];
-        description += `\n**${i + 1}. [${item.title}](${item.link})**\n`;
-        description += `*${item.source}* • ${item.description}\n`;
+        const title = digestText(item.title);
+        const heading = item.link ? `[${title}](${digestLink(item.link)})` : title;
+        description += `\n**${i + 1}. ${heading}**\n`;
+        description += `*${digestText(item.source)}* • ${digestText(item.description)}\n`;
     }
 
     if (description.length > 4000) {
@@ -623,6 +701,6 @@ module.exports = {
         pruneFeedFailureState, DEAD_FEED_STATE_TTL_MS,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, RSS_FETCH_CONCURRENCY,
         dailyNewsDue, runDueDailyNews, DAILY_NEWS_REFIRE_GUARD_MS,
-        datedItems, MAX_ITEMS_PER_SWEEP,
+        datedItems, MAX_ITEMS_PER_SWEEP, buildItemEmbed, EMBED_TITLE_LIMIT,
     },
 };
