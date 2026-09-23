@@ -9,7 +9,8 @@
  *
  *   - `/market browse` bucketed any item outside the default catalogue by the
  *     seller's asking price, so a Common relic listed dear was shown, and sorted,
- *     as Mythic.
+ *     as Mythic. (The `/market` split on main fixed this independently; the
+ *     board test below still pins it.)
  *   - A listing past its expiry stayed on the board and buyable until the sweep
  *     reached it.
  *   - `/gift` and `/bank transfer` would send to someone who is not in the
@@ -48,7 +49,6 @@ const market = require('../src/commands/economy/market');
 const gift = require('../src/commands/economy/gift');
 const bank = require('../src/commands/economy/bank');
 const trade = require('../src/commands/economy/trade');
-const { describeListing, byRarityThenPrice } = require('../src/views/marketView');
 const { nonMemberRefusal } = require('../src/utils/coinTransfer');
 
 const GUILD = 'guild-1';
@@ -92,26 +92,6 @@ afterEach(() => jest.restoreAllMocks());
 
 describe('/market browse', () => {
     const shopItems = [{ itemId: 'glow_stick', name: 'Glow Stick', price: 100, description: '✨ A stick.' }];
-
-    test('a relic, a custom item and a forged item are rated by what they are, not what they are listed at', () => {
-        const aiItems = { ai_pebble: { itemId: 'ai_pebble', name: 'Pebble of Note', rarity: 'Common' } };
-        const at = (itemId, pricePerUnit) => describeListing({ itemId, pricePerUnit }, { shopItems, aiItems });
-
-        // Each would have read Mythic off a price over 9,000.
-        expect(at('Whisperwood Charm', 20_000).rarity).toBe('Rare');
-        expect(at('glow_stick', 9_500)).toMatchObject({ rarity: 'Common', name: 'Glow Stick' });
-        expect(at('ai_pebble', 50_000)).toMatchObject({ rarity: 'Common', name: 'Pebble of Note' });
-        // A default item keeps its catalogue rarity either way.
-        expect(at('lucky_charm', 1).rarity).toBe(describeListing({ itemId: 'lucky_charm', pricePerUnit: 99_999 }, {}).rarity);
-    });
-
-    test('the rarity sort follows the item, so an overpriced Common does not sort with the Mythics', () => {
-        const context = { shopItems, aiItems: {} };
-        const cheapRelic = { itemId: 'The Tenth Owl', pricePerUnit: 50 };          // legendary relic → Mythic
-        const dearStick  = { itemId: 'glow_stick',    pricePerUnit: 50_000 };      // Common, priced high
-        const sorted = [cheapRelic, dearStick].sort(byRarityThenPrice(context));
-        expect(sorted.map(l => l.itemId)).toEqual(['glow_stick', 'The Tenth Owl']);
-    });
 
     test('renders the listing under its rarity and name, and leaves an expired listing off the board', async () => {
         seedGuild({}, { shop: shopItems });

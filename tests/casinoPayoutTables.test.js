@@ -219,6 +219,14 @@ describe('the crash curve', () => {
         expect(crash.generateCrashPoint(() => 0.99)).toBe(1.00);
     });
 
+    it('never deals a round below 1.00x, even at the very top of the roll', () => {
+        // 0.99 / 0.999 is 0.991, which rounded to 0.99 before the floor —
+        // about one roll in two hundred, and it failed this suite's own
+        // Math.random test when CI drew one.
+        expect(crash.generateCrashPoint(() => 0.996)).toBe(1.00);
+        expect(crash.generateCrashPoint(() => 0.999999)).toBe(1.00);
+    });
+
     it('tops out at 99x, which is where the instant-bust floor puts the ceiling', () => {
         // The 100x cap in the formula never binds: 0.99/r only reaches 100 at
         // r <= 0.0099, and everything below 0.01 has already returned 1.00. The

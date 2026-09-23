@@ -239,6 +239,12 @@
             "branches": 0,
             "functions": 21,
             "lines": 19
+        },
+        "src/commands/economy/market": {
+            "statements": 89,
+            "branches": 69,
+            "functions": 84,
+            "lines": 90
         }
     },
     "neverExecuted": [
@@ -302,11 +308,23 @@
             "functions": 86,
             "lines": 93
         },
-        "src/commands/economy/market.js": {
-            "statements": 86,
-            "branches": 65,
-            "functions": 83,
-            "lines": 86
+        "src/commands/economy/market/buy.js": {
+            "statements": 95,
+            "branches": 92,
+            "functions": 74,
+            "lines": 95
+        },
+        "src/commands/economy/market/cancel.js": {
+            "statements": 94,
+            "branches": 99,
+            "functions": 99,
+            "lines": 94
+        },
+        "src/commands/economy/market/list.js": {
+            "statements": 93,
+            "branches": 85,
+            "functions": 89,
+            "lines": 92
         },
         "src/commands/economy/trade.js": {
             "statements": 25,
@@ -423,7 +441,6 @@
         "src/commands/economy/explore/prestige.js",
         "src/commands/economy/explore/regions.js",
         "src/commands/economy/explore/relics.js",
-        "src/commands/economy/explore/travel.js",
         "src/commands/economy/featured.js",
         "src/commands/economy/feed.js",
         "src/commands/economy/fish/craft.js",

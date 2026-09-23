@@ -5,7 +5,7 @@
  *
  * Both player-to-player transfer routes — `/gift` and `/market list` — refuse
  * these, and they used to each carry their own copy of the list. Two copies of
- * a security rule is one copy too many: an item added to market.js and missed
+ * a security rule is one copy too many: an item added to market and missed
  * in gift.js is a hole nobody would notice until it was used.
  *
  * `lifesaver` and `streak_shield` are here because both are consumed
