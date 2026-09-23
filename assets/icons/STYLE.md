@@ -343,21 +343,25 @@ Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
 
-- **2026-09-23** — **Achievement badge pilot** (5 icons). Achievements are often
+- **2026-09-23** — **Achievement badges: 35 of 72.** Achievements are often
   abstract ("have 100 coins", "30 days without a warning"), so they get their own
   `ACHIEVEMENT_STYLE`/`achievementPrompt` in `build-manifest.mjs`: a round medal
   badge with one symbolic subject inside, on top of the B3 rim + flat shading,
   under a bundle-only `achievement:<id>` namespace. Rarity comes from `xpReward`
   on the same breakpoints as `getTierColor()` (`src/services/achievementService.js`),
   which lines up with the rim palette; no built-in achievement currently falls in
-  the Epic band. Secret achievements are excluded (art would spoil them). Pilot:
-  `first_steps` (Common), `clean_record` (Uncommon), `miner_gold` (Rare),
-  `level_100` and `century` (Legendary), all on `gpt_image_2_5` at
-  `quality: high` against the steel_rifle anchor; job ids + urls in
-  `icons.map.json` (now 316 items). **Not wired into the app yet** — next step is
-  to bake them and judge them in the 58px icon slot of `createAchievementCard`
-  (`src/utils/cardGenerator.js`) before generating the remaining achievements.
-
+  the Epic band. The Bronze/Silver/Gold ladders (hunter, angler, miner, gambler)
+  share one silhouette per ladder via `*_BADGE(metal)` so later tiers match.
+  Secret achievements get art too, but it must only render **after** the
+  achievement is earned — never in a locked list or on the dashboard.
+  Generated so far (all `gpt_image_2_5`, `quality: high`, steel_rifle anchor):
+  a 5-icon pilot (`first_steps`, `clean_record`, `miner_gold`, `level_100`,
+  `century`), then every Legendary, every secret and every Rare (30). Job ids +
+  urls in `icons.map.json` (now 346 items). The remaining 37 Common/Uncommon
+  badges are tracked in a GitHub issue. **Not wired into the app yet** — next is
+  baking them and showing them in the 58px icon slot of `createAchievementCard`
+  (`src/utils/cardGenerator.js`) and as embed thumbnails, with the pixel trophy
+  / emoji as fallback.
 - **2026-09-22** — Added **10 explore regions + 25 explore relics**: regions
   under an `explore:` namespace (the "round scene emblem" framing shared with
   hunt zones / fish locations / mine depths; core five laddered Common→Legendary
