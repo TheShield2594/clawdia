@@ -791,6 +791,9 @@ textarea { resize: vertical; min-height: 80px; }
    would have to reproduce line for line. */
 .rss-feed-main { min-width: 0; flex: 1; }
 .rss-feed-target { color: var(--text-mute); font-size: 0.78rem; }
+.rss-feed-title { font-weight: 600; overflow-wrap: anywhere; }
+.rss-feed-status { display: block; font-size: 0.78rem; margin-top: 0.15rem; color: var(--text-mute); overflow-wrap: anywhere; }
+.rss-feed-status--error { color: var(--danger); }
 .rr-panel-mappings { margin-top: .35rem; display: flex; flex-wrap: wrap; gap: .35rem; }
 .rr-panel-message-id { margin-top: .4rem; font-size: .78rem; color: var(--text-dim); }
 

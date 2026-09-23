@@ -152,7 +152,7 @@ test('an item no newer than lastPublished sends nothing and leaves the date alon
     expect(client.send).not.toHaveBeenCalled();
     expect(Guild.updateOne).toHaveBeenCalledWith(
         { guildId: 'g1', 'rssFeeds._id': 'f1' },
-        { $set: { 'rssFeeds.$.seenIds': [itemKey({ link: 'https://example.com/post' })] } }
+        { $set: expect.objectContaining({ 'rssFeeds.$.seenIds': [itemKey({ link: 'https://example.com/post' })] }) }
     );
 });
 
@@ -200,7 +200,7 @@ test('one guild whose delivery blows up does not stop the fan-out to the rest', 
     // only that it has been looked at — its one item is still owed.
     expect(Guild.updateOne).toHaveBeenCalledWith(
         { guildId: 'g1', 'rssFeeds._id': 'f1' },
-        { $set: { 'rssFeeds.$.seenIds': [] } }
+        { $set: expect.objectContaining({ 'rssFeeds.$.seenIds': [] }) }
     );
     expect(Guild.updateOne).toHaveBeenCalledWith(
         { guildId: 'g2', 'rssFeeds._id': 'f2' },
@@ -326,7 +326,7 @@ test('a feed with no usable dates at all still posts, going by item keys', async
     expect(client.send.mock.calls[0][0].embeds[0].data.timestamp).toBeUndefined();
     expect(Guild.updateOne).toHaveBeenCalledWith(
         { guildId: 'g1', 'rssFeeds._id': 'f1' },
-        { $set: { 'rssFeeds.$.seenIds': [itemKey({ link: 'https://example.com/undated' })] } }
+        { $set: expect.objectContaining({ 'rssFeeds.$.seenIds': [itemKey({ link: 'https://example.com/undated' })] }) }
     );
 });
 
@@ -399,7 +399,7 @@ describe('with item keys recorded', () => {
     const url = 'https://example.com/rss';
     const key = link => itemKey({ link });
     const keyed = (seenIds, lastPublished = new Date('2025-08-20T12:00:00Z')) =>
-        [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url, channelId: 'c1', lastPublished, seenIds }] }];
+        [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url, channelId: 'c1', lastPublished, seenIds, title: 'Feed' }] }];
     const titles = client => client.send.mock.calls.map(c => c[0].embeds[0].data.title);
 
     test('a second post sharing the cursor\'s timestamp is not lost', async () => {
@@ -589,5 +589,78 @@ describe('conditional fetches', () => {
         await checkRssFeeds(makeClient());
 
         expect(feedValidators.size).toBe(0);
+    });
+});
+
+
+// ── Feed health on the subscription ─────────────────────────────────────────
+//
+// A feed that stopped working used to say so only in the bot's console. The
+// sweep now records it where the dashboard reads it.
+
+describe('feed health', () => {
+    const url = 'https://example.com/rss';
+    const sub = extra => [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url, channelId: 'c1', lastPublished: null, title: 'Feed', ...extra }] }];
+
+    test('a failed fetch records the error and when the failure began', async () => {
+        mockFeedBodies.set(url, new Error('Feed request failed with HTTP 404.'));
+        mockGuilds = sub();
+
+        await checkRssFeeds(makeClient());
+
+        expect(Guild.updateOne).toHaveBeenCalledWith(
+            { guildId: 'g1', 'rssFeeds._id': 'f1' },
+            { $set: { 'rssFeeds.$.lastError': 'Feed request failed with HTTP 404.', 'rssFeeds.$.failingSince': expect.any(Date) } }
+        );
+    });
+
+    test('the same error again writes nothing', async () => {
+        mockFeedBodies.set(url, new Error('Feed request failed with HTTP 404.'));
+        mockGuilds = sub({ lastError: 'Feed request failed with HTTP 404.', failingSince: new Date('2026-09-01T00:00:00Z') });
+
+        await checkRssFeeds(makeClient());
+
+        expect(Guild.updateOne).not.toHaveBeenCalled();
+    });
+
+    test('a different error updates the message but keeps when the failure began', async () => {
+        mockFeedBodies.set(url, new Error('Feed request failed with HTTP 500.'));
+        mockGuilds = sub({ lastError: 'Feed request failed with HTTP 404.', failingSince: new Date('2026-09-01T00:00:00Z') });
+
+        await checkRssFeeds(makeClient());
+
+        expect(Guild.updateOne).toHaveBeenCalledWith(
+            { guildId: 'g1', 'rssFeeds._id': 'f1' },
+            { $set: { 'rssFeeds.$.lastError': 'Feed request failed with HTTP 500.' } }
+        );
+    });
+
+    test('the next good fetch clears the failure, even with nothing new to post', async () => {
+        mockFeedBodies.set(url, rssXml());
+        mockGuilds = [{ guildId: 'g1', rssFeeds: [{
+            _id: 'f1', url, channelId: 'c1', title: 'Feed', lastPublished: new Date('2025-08-21T00:00:00Z'),
+            seenIds: [itemKey({ link: 'https://example.com/post' })],
+            lastError: 'Feed request failed with HTTP 404.', failingSince: new Date('2026-09-01T00:00:00Z'),
+        }] }];
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        expect(client.send).not.toHaveBeenCalled();
+        expect(Guild.updateOne).toHaveBeenCalledWith(
+            { guildId: 'g1', 'rssFeeds._id': 'f1' },
+            { $set: { 'rssFeeds.$.lastError': null, 'rssFeeds.$.failingSince': null } }
+        );
+    });
+
+    test('a post records when it happened, and the feed\'s name is kept current', async () => {
+        mockFeedBodies.set(url, rssXml({ title: 'Renamed Feed' }));
+        mockGuilds = sub();
+
+        await checkRssFeeds(makeClient());
+
+        const $set = Guild.updateOne.mock.calls[0][1].$set;
+        expect($set['rssFeeds.$.lastPostedAt']).toEqual(expect.any(Date));
+        expect($set['rssFeeds.$.title']).toBe('Renamed Feed');
     });
 });

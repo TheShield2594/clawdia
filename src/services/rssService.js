@@ -421,15 +421,20 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
         }
     }
 
-    const recorded = await recordSeen(guild, feed, entries, fresh, handled);
+    const recorded = await recordSeen(guild, feed, entries, fresh, handled, {
+        title: truncate(feedText(parsedFeed.title), FEED_TITLE_LIMIT),
+        posted: delivered > 0,
+    });
     return { delivered, complete: recorded && fresh.every(entry => handled.has(entry.key)) };
 }
 
 // Writes back what this sweep learned about one subscription: every key the
-// feed lists except the fresh ones that did not get through, and the newest
-// date handled. Nothing is written when neither changed. Returns false when the
+// feed lists except the fresh ones that did not get through, the newest date
+// handled, and — for the dashboard — the feed's title, when it last posted,
+// and that it is no longer failing. Nothing is written when none of it
+// changed, so an idle feed costs no write per sweep. Returns false when the
 // write failed.
-async function recordSeen(guild, feed, entries, fresh, handled) {
+async function recordSeen(guild, feed, entries, fresh, handled, { title, posted }) {
     const pending = new Set(fresh.filter(e => !handled.has(e.key)).map(e => e.key));
     const previous = Array.isArray(feed.seenIds) ? feed.seenIds : [];
     const previousSet = new Set(previous);
@@ -454,6 +459,14 @@ async function recordSeen(guild, feed, entries, fresh, handled) {
         $set['rssFeeds.$.lastPublished'] = cursor;
     }
 
+    if (title && title !== feed.title) $set['rssFeeds.$.title'] = title;
+    if (posted) $set['rssFeeds.$.lastPostedAt'] = new Date();
+    // A good fetch ends a failure: the dashboard stops showing the error.
+    if (feed.lastError || feed.failingSince) {
+        $set['rssFeeds.$.lastError'] = null;
+        $set['rssFeeds.$.failingSince'] = null;
+    }
+
     if (!Object.keys($set).length) return true;
     try {
         // Targets the one subdocument rather than rewriting the whole rssFeeds
@@ -464,6 +477,28 @@ async function recordSeen(guild, feed, entries, fresh, handled) {
     } catch (error) {
         console.error(`Error recording RSS progress for ${feed.url} in guild ${guild.guildId}:`, error);
         return false;
+    }
+}
+
+const FEED_TITLE_LIMIT = 200;
+const FEED_ERROR_LIMIT = 200;
+
+// Puts a failed fetch where an admin will see it: on each subscription to the
+// URL, as the error and the time it started failing. Written only when that
+// changes — the first failure, or a different error — not on every failing
+// sweep, and `failingSince` keeps the first failure's time.
+async function recordFeedFailureOnSubscriptions(url, subscriptions, error) {
+    const message = truncate(feedText(error?.message) || 'Could not fetch or read the feed.', FEED_ERROR_LIMIT);
+    const now = new Date();
+    for (const { guild, feed } of subscriptions) {
+        if (feed.lastError === message && feed.failingSince) continue;
+        const $set = { 'rssFeeds.$.lastError': message };
+        if (!feed.failingSince) $set['rssFeeds.$.failingSince'] = now;
+        try {
+            await Guild.updateOne({ guildId: guild.guildId, 'rssFeeds._id': feed._id }, { $set });
+        } catch (writeError) {
+            console.error(`Error recording RSS failure for ${url} in guild ${guild.guildId}:`, writeError);
+        }
     }
 }
 
@@ -526,19 +561,20 @@ async function checkRssFeeds(client) {
                 } catch (error) {
                     feedValidators.delete(url);
                     recordFeedFailure(url, error);
+                    await recordFeedFailureOnSubscriptions(url, subscriptionsByUrl.get(url), error);
                     failed++;
                     continue;
                 }
                 if (!fetched) { unchanged++; continue; }
 
+                // Delivered even when the feed lists nothing: an empty feed
+                // is still a good fetch, which clears a recorded failure.
                 const entries = feedEntries(fetched.parsedFeed);
                 let complete = true;
-                if (entries.length) {
-                    for (const { guild, feed } of subscriptionsByUrl.get(url)) {
-                        const result = await deliverFeedUpdate(client, guild, feed, fetched.parsedFeed, entries);
-                        posted += result.delivered;
-                        if (!result.complete) complete = false;
-                    }
+                for (const { guild, feed } of subscriptionsByUrl.get(url)) {
+                    const result = await deliverFeedUpdate(client, guild, feed, fetched.parsedFeed, entries);
+                    posted += result.delivered;
+                    if (!result.complete) complete = false;
                 }
 
                 if (complete && fetched.validators) feedValidators.set(url, fetched.validators);

@@ -5,20 +5,7 @@ const Parser = require('rss-parser');
 const { safeFetchFeed } = require('../../../utils/safeFeedFetch');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId } = require('../../lib/apiHelpers');
-
-/**
- * The guild's feeds in the shape the dashboard's list renders from.
- *
- * Both mutations answer with the whole list rather than just the row that
- * changed (#689). The page patches its list in place instead of reloading, and
- * the feeds are addressed by *position* — so a client holding only its own idea
- * of the order is a client whose next delete removes the wrong feed. Handing
- * back the array the server just saved keeps the two in step for the cost of a
- * few hundred bytes on a request that was already round-tripping.
- */
-function feedList(guildSettings) {
-    return (guildSettings.rssFeeds || []).map(feed => ({ url: feed.url, channelId: feed.channelId }));
-}
+const { rssFeedRows } = require('../../lib/rssFeedRows');
 
 // Every subscription is a fetch every five minutes for the life of the guild,
 // so a guild gets a bounded number of them rather than as many as an admin
@@ -108,16 +95,22 @@ router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, checkWriteRa
         // Checked here and not only by the page's Validate button, which is
         // optional: a URL that is not a feed would otherwise be saved, fail
         // every sweep, and never say so to anyone who could fix it.
+        let parsedFeed;
         try {
-            await loadFeed(trimmed);
+            parsedFeed = await loadFeed(trimmed);
         } catch (err) {
             return res.status(422).json({ error: `Could not read that feed: ${err.message || 'it is not a valid RSS or Atom feed.'}` });
         }
 
-        guildSettings.rssFeeds.push({ url: trimmed, channelId });
+        // Both mutations answer with the whole list rather than just the row
+        // that changed (#689): the page redraws from it, and feeds are
+        // addressed by position, so a client holding only its own idea of the
+        // order is one whose next delete removes the wrong feed.
+        const title = typeof parsedFeed.title === 'string' ? parsedFeed.title.trim().slice(0, 200) : '';
+        guildSettings.rssFeeds.push({ url: trimmed, channelId, ...(title ? { title } : {}) });
         await guildSettings.save();
 
-        res.json({ success: true, feeds: feedList(guildSettings) });
+        res.json({ success: true, feeds: rssFeedRows(guildSettings.rssFeeds) });
     } catch (error) {
         console.error('RSS add error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -168,7 +161,7 @@ router.delete('/guild/:guildId/rss/:index', checkAuth, checkGuildAccess, checkWr
         guildSettings.rssFeeds.splice(position, 1);
         await guildSettings.save();
 
-        res.json({ success: true, feeds: feedList(guildSettings) });
+        res.json({ success: true, feeds: rssFeedRows(guildSettings.rssFeeds) });
     } catch (error) {
         console.error('RSS delete error:', error);
         res.status(500).json({ error: 'Internal server error' });

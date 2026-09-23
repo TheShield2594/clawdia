@@ -370,7 +370,15 @@ const guildSchema = new Schema({
         // a subscription saved before this field existed is told apart by its
         // absence and migrated on its next sweep rather than reading its whole
         // feed as unseen.
-        seenIds: { type: [String], default: undefined }
+        seenIds: { type: [String], default: undefined },
+        // What the dashboard shows for the subscription. `title` is the feed's
+        // own name; `lastError` and `failingSince` are set by the poller while
+        // the feed is failing and cleared by its next good fetch, so a feed
+        // that stopped working says so where an admin will see it.
+        title: { type: String, default: null },
+        lastPostedAt: { type: Date, default: null },
+        lastError: { type: String, default: null },
+        failingSince: { type: Date, default: null }
     }],
 
     // Social-media notifications (YouTube, Reddit, X, Instagram, TikTok). Each

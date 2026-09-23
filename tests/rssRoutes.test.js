@@ -25,8 +25,9 @@ jest.mock('../src/dashboard/lib/middleware', () => ({
 const Guild = require('../src/models/Guild');
 const { safeFetchFeed } = require('../src/utils/safeFeedFetch');
 const rss = require('../src/dashboard/routes/api/rss');
+const { rssFeedRows } = require('../src/dashboard/lib/rssFeedRows');
 
-const FEED_XML = '<?xml version="1.0"?><rss version="2.0"><channel><title>Feed</title></channel></rss>';
+const FEED_XML = '<?xml version="1.0"?><rss version="2.0"><channel><title>B Feed</title></channel></rss>';
 
 const CHANNEL_ID = '111222333444555666';
 const feed = name => ({ url: `https://${name}.example/feed.xml`, channelId: CHANNEL_ID });
@@ -68,8 +69,10 @@ describe('POST /guild/:guildId/rss/add', () => {
         // Trimmed on the way in, and the page redraws from what came back.
         expect(res.body).toEqual({
             success: true,
-            feeds: [feed('a'), { url: 'https://b.example/feed.xml', channelId: CHANNEL_ID }],
+            feeds: rssFeedRows([feed('a'), { url: 'https://b.example/feed.xml', channelId: CHANNEL_ID, title: 'B Feed' }]),
         });
+        // The feed's own name is kept, so the list can show it.
+        expect(doc.rssFeeds[1].title).toBe('B Feed');
     });
 
     it.each([
@@ -149,7 +152,7 @@ describe('DELETE /guild/:guildId/rss/:index', () => {
         const res = await deleteFeed(1);
 
         expect(res.status).toBe(200);
-        expect(res.body).toEqual({ success: true, feeds: [feed('a'), feed('c')] });
+        expect(res.body).toEqual({ success: true, feeds: rssFeedRows([feed('a'), feed('c')]) });
         expect(doc.rssFeeds).toEqual([feed('a'), feed('c')]);
     });
 

@@ -178,6 +178,13 @@ function rssFeedRow(feed, index) {
     const main = document.createElement('div');
     main.className = 'rss-feed-main';
 
+    if (feed.title) {
+        const title = document.createElement('div');
+        title.className = 'rss-feed-title';
+        title.textContent = feed.title;
+        main.appendChild(title);
+    }
+
     const url = document.createElement('div');
     url.className = 'url';
     url.textContent = feed.url;
@@ -188,6 +195,16 @@ function rssFeedRow(feed, index) {
 
     main.appendChild(url);
     main.appendChild(target);
+
+    // Worded by the server (lib/rssFeedRows.js); only the tone picks a class,
+    // and only from the three the stylesheet knows.
+    if (feed.status) {
+        const tone = ['error', 'ok', 'idle'].includes(feed.status.tone) ? feed.status.tone : 'idle';
+        const status = document.createElement('small');
+        status.className = 'rss-feed-status rss-feed-status--' + tone;
+        status.textContent = feed.status.text;
+        main.appendChild(status);
+    }
 
     const remove = document.createElement('button');
     remove.className = 'btn btn-danger btn-sm';

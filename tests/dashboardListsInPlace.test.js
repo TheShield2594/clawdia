@@ -22,6 +22,7 @@ global.TextDecoder = global.TextDecoder || TextDecoder;
 const { bootPage, renderPanel, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
 const { guildSettingsLocals } = require('./helpers/guildSettingsLocals');
 const { groupReactionRolePanels } = require('../src/dashboard/lib/reactionRolePanels');
+const { rssFeedRows } = require('../src/dashboard/lib/rssFeedRows');
 
 // The panel templates read a dozen keys off `settings`; overriding the object
 // wholesale would leave the rest undefined, so each case merges into the base.
@@ -114,7 +115,8 @@ describe('RSS feeds', () => {
     });
 
     it('adds a row without reloading, and matches what a reload would render', async () => {
-        apiResponses['/rss/add'] = { calls: [], body: { success: true, feeds: [{ url: FEED_URL, channelId: CHANNEL_ID }] } };
+        const stored = [{ url: FEED_URL, channelId: CHANNEL_ID }];
+        apiResponses['/rss/add'] = { calls: [], body: { success: true, feeds: rssFeedRows(stored) } };
 
         document.getElementById('rss-url').value = FEED_URL;
         document.getElementById('rss-channel').value = CHANNEL_ID;
@@ -127,7 +129,29 @@ describe('RSS feeds', () => {
         expect(row.querySelector('.rss-feed-target').textContent).toBe('→ #general');
         expect(document.querySelector('#rss-feeds .empty-state')).toBeNull();
 
-        const expected = serverRendered('rss', { settings: { ...BASE_SETTINGS, rssFeeds: [{ url: FEED_URL, channelId: CHANNEL_ID }] } });
+        const expected = serverRendered('rss', { settings: { ...BASE_SETTINGS, rssFeeds: stored }, rssFeedRows: rssFeedRows(stored) });
+        expect(markup(document.getElementById('rss-feeds'))).toBe(markup(expected.querySelector('#rss-feeds')));
+    });
+
+    it('shows a feed\'s name and health the same way a reload does', () => {
+        // A failing feed used to be a line in the bot's console and nothing
+        // else; the row is where an admin will actually see it.
+        const stored = [
+            { url: FEED_URL, channelId: CHANNEL_ID, title: 'Example <b>News</b>', lastError: 'Feed request failed with HTTP 404.', failingSince: new Date('2026-09-03T08:00:00Z') },
+            { url: 'https://b.example/feed', channelId: CHANNEL_ID, lastPostedAt: new Date('2026-09-20T23:59:00Z') },
+            { url: 'https://c.example/feed', channelId: CHANNEL_ID },
+        ];
+        window.renderRssFeeds(rssFeedRows(stored));
+
+        const rows = [...document.querySelectorAll('#rss-feeds .list-item')];
+        expect(rows[0].querySelector('.rss-feed-title').textContent).toBe('Example <b>News</b>');
+        expect(rows[0].querySelector('.rss-feed-status--error').textContent)
+            .toBe('Failing since 3 Sep 2026 — Feed request failed with HTTP 404.');
+        expect(rows[1].querySelector('.rss-feed-title')).toBeNull();
+        expect(rows[1].querySelector('.rss-feed-status--ok').textContent).toBe('Last post 20 Sep 2026');
+        expect(rows[2].querySelector('.rss-feed-status--idle')).not.toBeNull();
+
+        const expected = serverRendered('rss', { settings: { ...BASE_SETTINGS, rssFeeds: stored }, rssFeedRows: rssFeedRows(stored) });
         expect(markup(document.getElementById('rss-feeds'))).toBe(markup(expected.querySelector('#rss-feeds')));
     });
 

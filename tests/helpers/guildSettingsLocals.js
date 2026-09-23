@@ -14,6 +14,7 @@ const { jsonForScript } = require('../../src/dashboard/lib/jsonForScript');
 const { asset } = require('../../src/dashboard/lib/assets');
 const { PANELS, DEFAULT_PANEL } = require('../../src/dashboard/lib/panels');
 const { groupReactionRolePanels } = require('../../src/dashboard/lib/reactionRolePanels');
+const { rssFeedRows } = require('../../src/dashboard/lib/rssFeedRows');
 
 const toItem = (ns, item, idField = 'id') => ({
     id: `${ns}:${item[idField]}`,
@@ -36,6 +37,7 @@ function guildSettingsLocals(overrides = {}) {
         categories: [{ id: '30', name: 'Category' }],
         roles: [{ id: '40', name: 'Member' }, { id: '41', name: "Bob's crew" }],
         reactionRolePanels: groupReactionRolePanels(doc.toObject().reactionRoles),
+        rssFeedRows: rssFeedRows(doc.toObject().rssFeeds),
         defaultJobs: DEFAULT_JOBS,
         defaultTiers: DEFAULT_TIERS,
         builtinAchievements: ACHIEVEMENTS.map(a => ({
