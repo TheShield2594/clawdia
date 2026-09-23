@@ -8,7 +8,9 @@ const {
     hasEffect,
     timeRemaining,
 } = require('../../services/effectsService');
-const { getItemLore } = require('../../data/defaultShopItems');
+const { DEFAULT_SHOP_ITEMS } = require('../../data/defaultShopItems');
+const { getRelicMeta } = require('../../data/exploreData');
+const { describeItem } = require('../../utils/itemDisplay');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
 const { lootBoxItemPayoutKey } = require('../../utils/payoutKey');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
@@ -23,6 +25,158 @@ const LOOT_BOX_EVENTS = new Map(
         .map(ev => [ev.lootBox.itemId.toLowerCase(), ev])
 );
 
+// itemId of anything a seasonal loot box can roll -> the event it came from.
+// These are keepsakes: they sit in the bag, count toward /showcase and trade on
+// /market. The one exception is an item that is *also* an effect item (a loot
+// box can roll a booster), which the effect lookup reaches first.
+const EVENT_COLLECTIBLES = new Map(
+    Object.values(SEASONAL_EVENTS)
+        .flatMap(ev => (ev.lootBox?.items ?? []).map(item => [item.itemId.toLowerCase(), ev]))
+);
+
+const DEFAULT_ITEM_IDS = new Set(DEFAULT_SHOP_ITEMS.map(s => s.itemId.toLowerCase()));
+
+const MAX_FREEZES         = 2;
+const MAX_CONTRACT_STACKS = 3;
+
+// Built-in items that are spent by another command. /use used to fall through
+// to the generic branch for these and quietly delete them.
+const USED_ELSEWHERE = {
+    pet_food:        'Feed it to a pet with `/pet feed`.',
+    tier_skip_token: 'Spend it on the season pass with `/season tier-skip`.',
+};
+
+/** `7_200_000` → `2h`, `1_800_000` → `30m`. */
+function formatDuration(ms) {
+    const h = Math.floor(ms / 3_600_000);
+    const m = Math.round((ms % 3_600_000) / 60_000);
+    return [h && `${h}h`, m && `${m}m`].filter(Boolean).join(' ') || '0m';
+}
+
+/** Discord's relative timestamp — renders as "in 2 hours" and keeps ticking. */
+const relativeTime = date => `<t:${Math.floor(new Date(date).getTime() / 1000)}:R>`;
+
+/**
+ * The running effect of `type`, if any. Unlike `hasEffect` this never prunes
+ * (and so never mutates) the user — autocomplete reads a lean document.
+ */
+function runningEffect(user, type) {
+    const now = Date.now();
+    return (user?.activeEffects ?? []).find(e =>
+        e.type === type
+        && e.charges !== 0
+        && !(e.expiresAt && new Date(e.expiresAt).getTime() <= now));
+}
+
+/** How a running effect reads in a one-line status. */
+function runningLabel(effect) {
+    if (effect.expiresAt) return `active · ${timeRemaining(effect.expiresAt)} left`;
+    if (effect.charges > 1) return `armed · ${effect.charges} charges left`;
+    return 'armed';
+}
+
+/** The guild's shop row for an item — matched on id or name, as /shop stores either. */
+function findShopItem(itemId, shopItems = []) {
+    const lower = itemId.toLowerCase();
+    return shopItems.find(s =>
+        (s.itemId ?? '').toLowerCase() === lower || (s.name ?? '').toLowerCase() === lower);
+}
+
+/** The catalogue description with its leading emoji stripped, for an embed body. */
+function describeEffect(itemId, shopItems) {
+    const lower = itemId.toLowerCase();
+    const row = findShopItem(itemId, shopItems)
+        ?? DEFAULT_SHOP_ITEMS.find(s => s.itemId.toLowerCase() === lower);
+    return (row?.description ?? '')
+        .replace(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic}|\uFE0F|\u200D)+\s*/u, '')
+        .trim();
+}
+
+/**
+ * What `/use` would do with one inventory item, right now.
+ *
+ * One answer shared by the autocomplete and `execute`, so the dropdown never
+ * offers something the command then refuses for a reason it could have shown:
+ *
+ *   usable   false  → /use has nothing to do with it; `redirect` says what does.
+ *                     These are left out of the dropdown and refused on submit
+ *                     without consuming anything.
+ *   ready    false  → it is a /use item but is blocked for now (the effect is
+ *                     already running, a cap is reached, nobody to revive).
+ *                     Still offered, with `status` saying why, sorted last.
+ *   status          → the short tag the dropdown shows after the quantity.
+ *
+ * Anything unrecognised stays usable: a custom guild item whose shop row was
+ * since deleted is still the admin's to hand out and redeem.
+ */
+function useStatus(itemId, user, { shopItems = [] } = {}) {
+    const lower = itemId.toLowerCase();
+
+    const effectType = resolveEffectType(itemId);
+    if (effectType) {
+        const cfg = EFFECT_CONFIGS[effectType];
+        const running = runningEffect(user, effectType);
+        if (running) return { usable: true, ready: false, status: runningLabel(running) };
+        if (cfg.durationMs) return { usable: true, ready: true, status: `lasts ${formatDuration(cfg.durationMs)}` };
+        return {
+            usable: true, ready: true,
+            status: cfg.charges > 1 ? `arms ${cfg.charges} charges` : 'arms for the next trigger',
+        };
+    }
+
+    const capped = (have, max, noun) => ({ usable: true, ready: have < max, status: have < max ? `${have}/${max} ${noun}` : `maxed · ${max}/${max} ${noun}` });
+    switch (lower) {
+        case 'streak_freeze':         return capped(user?.streak?.freezes ?? 0, MAX_FREEZES, 'banked');
+        case 'black_market_contract': return capped(user?.crimeContractStacks ?? 0, MAX_CONTRACT_STACKS, 'stacks');
+        case 'permanent_stamina':     return capped(user?.staminaUpgrades ?? 0, MAX_STAMINA_UPGRADES, 'upgrades');
+        case 'pet_slot_expansion':    return capped(user?.petSlots ?? 0, MAX_SLOT_EXPANSIONS, 'expansions');
+        case 'revive_scroll': {
+            const fallen = user?.deceasedPets?.[0];
+            if (!fallen) return { usable: true, ready: false, status: 'no fallen pet to revive' };
+            const name = fallen.name || PET_DEFINITIONS[fallen.petId]?.name || fallen.petId;
+            return { usable: true, ready: true, status: `revives ${name}` };
+        }
+    }
+
+    if (LOOT_BOX_EVENTS.has(lower)) return { usable: true, ready: true, status: 'open it' };
+
+    if (USED_ELSEWHERE[lower]) return { usable: false, redirect: USED_ELSEWHERE[lower] };
+
+    if (getRelicMeta(itemId)) {
+        return { usable: false, redirect: "It's a relic from `/explore` — a collectible, not a consumable. Admire it in `/explore relics`, or trade it with `/market list`." };
+    }
+    if (lower.startsWith('ai_')) {
+        return { usable: false, redirect: "It's a forged collectible — it counts toward your `/showcase` and can be traded with `/market list`, but there's nothing to activate." };
+    }
+    const event = EVENT_COLLECTIBLES.get(lower);
+    if (event) {
+        return { usable: false, redirect: `It's a ${event.emoji} ${event.name} keepsake — a collectible for your \`/showcase\` or the \`/market\`, not a consumable.` };
+    }
+
+    const shopItem = findShopItem(itemId, shopItems);
+    if (shopItem?.roleId) return { usable: true, ready: true, status: 'grants a role' };
+
+    // A built-in item with no handler above (badges, frames, titles…) does its
+    // job by being owned. Spending it would only throw it away.
+    if (DEFAULT_ITEM_IDS.has(lower)) {
+        return { usable: false, redirect: 'It works just by being in your bag — there is nothing to activate, and using it would only throw it away.' };
+    }
+
+    return { usable: true, ready: true, status: 'redeem' };
+}
+
+/** How many of an item are left after a use, from the post-update document. */
+const leftInBag = (user, itemId) => Math.max(0, user.inventory.find(e => e.itemId === itemId)?.quantity ?? 0);
+const leftField = (user, itemId) => ({ name: '🎒 Left in bag', value: `${leftInBag(user, itemId)}x`, inline: true });
+
+/** `🍀 Lucky Charm — 3 held · lasts 2h`, clipped to Discord's 100. */
+function toChoice({ item, quantity, status }) {
+    return {
+        name: `${item.emoji} ${item.name} — ${quantity} held${status.status ? ` · ${status.status}` : ''}`.slice(0, 100),
+        value: item.itemId.slice(0, 100),
+    };
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('use')
@@ -36,21 +190,44 @@ module.exports = {
     async autocomplete(interaction) {
         try {
             const focused = interaction.options.getFocused()?.toLowerCase() ?? '';
-            const user = await User.findOne(
-                { userId: interaction.user.id, guildId: interaction.guild.id },
-                'inventory'
-            ).lean();
-            const inventory = (user?.inventory ?? []).filter(e => e.quantity > 0);
-            const matches = focused
-                ? inventory.filter(e => e.itemId.toLowerCase().includes(focused))
-                : inventory;
-            await interaction.respond(
-                matches.slice(0, 25).map(e => ({
-                    name: `${e.itemId} (${e.quantity}x)`,
-                    value: e.itemId,
+            const [user, guildSettings] = await Promise.all([
+                User.findOne(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    'inventory activeEffects streak crimeContractStacks staminaUpgrades petSlots deceasedPets'
+                ).lean(),
+                getGuildSettings(interaction.guild.id),
+            ]);
+            const shopItems = guildSettings?.shop ?? [];
+
+            // Only what /use can actually do something with. Pet food, relics,
+            // forged items and event keepsakes live in the same bag but belong
+            // to other commands, and offering them here was an invitation to
+            // throw them away.
+            const items = (user?.inventory ?? [])
+                .filter(e => e.quantity > 0)
+                .map(e => ({
+                    quantity: e.quantity,
+                    item: describeItem(e.itemId, { shopItems }),
+                    status: useStatus(e.itemId, user, { shopItems }),
                 }))
-            );
-        } catch {
+                .filter(c => c.status.usable);
+
+            // Matched on the display name and the raw id, like /gift.
+            const matches = focused
+                ? items.filter(c => c.item.name.toLowerCase().includes(focused) || c.item.itemId.toLowerCase().includes(focused))
+                : items;
+
+            // Ready to use first, blocked ones (already running, maxed) after;
+            // within each, prefix matches ahead of substring ones, then A–Z.
+            const prefix = c => (focused && !c.item.name.toLowerCase().startsWith(focused) ? 1 : 0);
+            const ranked = [...matches].sort((a, b) =>
+                (Number(b.status.ready) - Number(a.status.ready))
+                || (prefix(a) - prefix(b))
+                || a.item.name.localeCompare(b.item.name));
+
+            await interaction.respond(ranked.slice(0, 25).map(toChoice));
+        } catch (err) {
+            console.error('[use] autocomplete error:', err);
             await interaction.respond([]).catch(() => {});
         }
     },
@@ -85,21 +262,56 @@ module.exports = {
             return interaction.reply({ content: "Your inventory is empty. Buy items with `/shop buy`.", flags: MessageFlags.Ephemeral });
         }
 
-        const invEntry = preview.inventory.find(e => e.itemId.toLowerCase() === itemName.toLowerCase());
+        const shopItems = guildSettings?.shop ?? [];
+        const typed     = itemName.toLowerCase();
+
+        // The id first (what autocomplete submits), then the display name, so a
+        // player who types "Lucky Charm" by hand still gets their lucky_charm.
+        const held = preview.inventory.filter(e => e.quantity > 0);
+        const invEntry = held.find(e => e.itemId.toLowerCase() === typed)
+            ?? held.find(e => describeItem(e.itemId, { shopItems }).name.toLowerCase() === typed)
+            ?? preview.inventory.find(e => e.itemId.toLowerCase() === typed);
         if (!invEntry || invEntry.quantity < 1) {
-            return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({
+                content: `You don't have **${itemName}** in your inventory. Start typing in the \`item\` box to pick from what you're holding.`,
+                flags: MessageFlags.Ephemeral,
+            });
         }
 
         const canonicalId = invEntry.itemId; // preserve original casing for DB match
-        const effectType  = resolveEffectType(itemName);
+        const item        = describeItem(canonicalId, { shopItems });
+        const effectType  = resolveEffectType(canonicalId);
         const cfg         = effectType ? EFFECT_CONFIGS[effectType] : null;
+
+        // ── Items /use has nothing to do with ────────────────────────────────
+        // Refused before anything is written. The generic branch at the bottom
+        // used to swallow these — a relic, a forged item or a bag of pet food
+        // would be "used" into nothing.
+        const status = useStatus(canonicalId, preview, { shopItems });
+        if (!status.usable) {
+            let shown = item;
+            if (item.kind === 'forged') {
+                const aiItem = await require('../../models/AiItem')
+                    .findOne({ itemId: canonicalId }, 'itemId name emoji rarity lore').lean()
+                    .catch(() => null);
+                shown = describeItem(canonicalId, { shopItems, aiItem });
+            }
+            const embed = new EmbedBuilder()
+                .setColor(shown.color ?? COLORS.NEUTRAL)
+                .setTitle(`${shown.emoji} ${shown.name} can't be used`)
+                .setDescription(`${status.redirect}\n\nNothing was consumed.`);
+            return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+        }
 
         // ── Active-effect items ───────────────────────────────────────────────
         if (cfg) {
             if (hasEffect(preview, effectType)) {
                 const existing = preview.activeEffects.find(e => e.type === effectType);
+                const when = existing?.expiresAt
+                    ? `It runs out ${relativeTime(existing.expiresAt)} — use another once it does.`
+                    : 'It is armed and waiting for its trigger — use another once it fires.';
                 return interaction.reply({
-                    content: `**${cfg.emoji} ${cfg.label}** is already active (${timeRemaining(existing?.expiresAt)} remaining). It will refresh when it expires.`,
+                    content: `**${cfg.emoji} ${cfg.label}** is already active. ${when} Nothing was consumed.`,
                     flags: MessageFlags.Ephemeral
                 });
             }
@@ -124,34 +336,27 @@ module.exports = {
             await dropEmptyInventorySlots();
 
             const embed = new EmbedBuilder()
-                .setColor(COLORS.SUCCESS)
+                .setColor(item.color ?? COLORS.SUCCESS)
                 .setTitle(`${cfg.emoji} Activated: ${cfg.label}`)
                 .setTimestamp();
 
-            let activationDesc;
+            const what = describeEffect(canonicalId, shopItems);
+            embed.setDescription([what, item.lore && `> *${item.lore}*`].filter(Boolean).join('\n\n') || null);
+
             if (effect.expiresAt) {
-                activationDesc = `Effect active for **${timeRemaining(effect.expiresAt)}**.`;
-            } else if (effect.charges === 1) {
-                activationDesc = 'Single-use effect is now ready. It will trigger automatically on the next qualifying event.';
+                embed.addFields({ name: '⏳ Expires', value: relativeTime(effect.expiresAt), inline: true });
+            } else if (effect.charges > 1) {
+                embed.addFields({ name: '🔋 Charges', value: `${effect.charges} — spent automatically as they trigger`, inline: true });
             } else {
-                activationDesc = 'Effect is permanently active until removed.';
+                embed.addFields({ name: '🎯 Armed', value: 'Fires automatically on the next qualifying event', inline: true });
             }
-
-            const lore = getItemLore(canonicalId);
-            embed.setDescription(lore ? `${activationDesc}\n\n> *${lore}*` : activationDesc);
-
-            embed.addFields({
-                name: 'Remaining in inventory',
-                value: `${user.inventory.find(e => e.itemId === canonicalId)?.quantity ?? 0}x`,
-                inline: true
-            });
+            embed.addFields(leftField(user, canonicalId));
 
             return interaction.reply({ embeds: [embed] });
         }
 
         // ── Streak Freeze ──────────────────────────────────────────────────────
         if (canonicalId.toLowerCase() === 'streak_freeze') {
-            const MAX_FREEZES = 2;
             const currentFreezes = preview.streak?.freezes ?? 0;
             if (currentFreezes >= MAX_FREEZES) {
                 return interaction.reply({
@@ -190,7 +395,7 @@ module.exports = {
 
         // ── Black Market Contract ──────────────────────────────────────────────
         if (canonicalId.toLowerCase() === 'black_market_contract') {
-            const MAX_STACKS = 3;
+            const MAX_STACKS = MAX_CONTRACT_STACKS;
             const currentStacks = preview.crimeContractStacks ?? 0;
             if (currentStacks >= MAX_STACKS) {
                 return interaction.reply({
@@ -388,7 +593,7 @@ module.exports = {
                 )
                 .addFields(
                     { name: '🍖 Hunger', value: '50% — feed them soon', inline: true },
-                    { name: 'Scrolls left', value: `${user.inventory.find(e => e.itemId === canonicalId)?.quantity ?? 0}x`, inline: true },
+                    leftField(user, canonicalId),
                 )
                 .setTimestamp();
 
@@ -436,13 +641,15 @@ module.exports = {
 
             await dropEmptyInventorySlots();
 
-            const boxRemaining = (user.inventory.find(e => e.itemId === canonicalId)?.quantity ?? 1) - 1;
+            // `user` is the post-decrement document, so this is already net of
+            // the box just opened.
+            const boxRemaining = leftInBag(user, canonicalId);
 
             const embed = new EmbedBuilder()
                 .setColor(RARITY_COLORS[won.rarity] ?? '#5865F2')
                 .setTitle(`${lootBoxEvent.lootBox.emoji} Opened: ${lootBoxEvent.lootBox.name}`)
                 .setDescription(`You found a **${won.rarity}** item:\n\n${won.emoji} **${won.name}**`)
-                .addFields({ name: 'Remaining in inventory', value: `${boxRemaining}x ${lootBoxEvent.lootBox.name}`, inline: true })
+                .addFields({ name: '🎒 Left in bag', value: `${boxRemaining}x ${lootBoxEvent.lootBox.name}`, inline: true })
                 .setTimestamp();
 
             if (!wonGrant.granted) {
@@ -458,7 +665,7 @@ module.exports = {
         }
 
         // ── Generic (role-granting) items ─────────────────────────────────────
-        const shopItem = guildSettings?.shop?.find(s => s.name.toLowerCase() === itemName.toLowerCase());
+        const shopItem = findShopItem(canonicalId, shopItems);
 
         // Atomically consume one item before side-effects (role grant)
         const user = await User.findOneAndUpdate(
@@ -482,22 +689,23 @@ module.exports = {
             }
         }
 
-        const loreText    = shopItem?.lore ?? getItemLore(itemName.toLowerCase());
-        const baseDesc    = shopItem?.description || 'Item consumed from your inventory.';
-        const genericDesc = loreText ? `${baseDesc}\n\n> *${loreText}*` : baseDesc;
+        const baseDesc    = shopItem?.description || 'Redeemed from your inventory.';
+        const genericDesc = item.lore ? `${baseDesc}\n\n> *${item.lore}*` : baseDesc;
 
         const embed = new EmbedBuilder()
-            .setColor(COLORS.SUCCESS)
-            .setTitle(`✅ Used: ${shopItem?.name ?? itemName}`)
+            .setColor(item.color ?? COLORS.SUCCESS)
+            .setTitle(`${item.emoji} Used: ${shopItem?.name ?? item.name}`)
             .setDescription(genericDesc)
             .setTimestamp();
 
         if (roleGranted) {
-            embed.addFields({ name: 'Role Granted', value: `<@&${shopItem.roleId}>` });
+            embed.addFields({ name: '🎭 Role Granted', value: `<@&${shopItem.roleId}>`, inline: true });
+        } else if (shopItem?.roleId) {
+            embed.addFields({ name: '🎭 Role', value: `You already have <@&${shopItem.roleId}>`, inline: true });
         }
 
-        const remaining = (user.inventory.find(e => e.itemId === canonicalId)?.quantity ?? 1) - 1;
-        embed.addFields({ name: 'Remaining', value: `${remaining}x`, inline: true });
+        // `user` is the post-decrement document — no second subtraction.
+        embed.addFields(leftField(user, canonicalId));
 
         await interaction.reply({ embeds: [embed] });
     }

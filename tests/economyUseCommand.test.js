@@ -303,6 +303,8 @@ describe('a plain shop item', () => {
         expect(repliedText(interaction)).toContain('Used: party_hat');
         expect(repliedText(interaction)).toContain('A festive hat.');
         expect(slot('party_hat').quantity).toBe(1);
+        // The document read back is already net of the one just used.
+        expect(repliedText(interaction)).toContain('1x');
     });
 
     it('grants the role a shop item carries', async () => {
@@ -350,6 +352,38 @@ describe('a plain shop item', () => {
     });
 });
 
+describe('an item /use has nothing to do with', () => {
+    it.each([
+        ['pet_food', '/pet feed'],
+        ['tier_skip_token', '/season tier-skip'],
+        ['Whisperwood Charm', 'relic'],
+        ['seashell', 'keepsake'],
+        ['vip_badge', 'nothing to activate'],
+    ])('refuses %s, points somewhere useful, and consumes nothing', async (itemId, hint) => {
+        seedUser({ inventory: [{ itemId, quantity: 2 }] });
+        seedGuild();
+
+        const interaction = await run(itemId);
+
+        expect(repliedText(interaction)).toContain(hint);
+        expect(repliedText(interaction)).toContain('Nothing was consumed');
+        expect(slot(itemId).quantity).toBe(2);
+        expect(mockUsers.writes).toEqual([]);
+    });
+});
+
+describe('what the player typed', () => {
+    it('finds an item by its display name', async () => {
+        seedUser({ inventory: [{ itemId: 'lucky_charm', quantity: 2 }] });
+        seedGuild();
+
+        const interaction = await run('Lucky Charm');
+
+        expect(repliedText(interaction)).toContain('Activated: Lucky Charm');
+        expect(slot('lucky_charm').quantity).toBe(1);
+    });
+});
+
 describe('autocomplete', () => {
     it('offers what the player is holding, with quantities', async () => {
         seedUser({ inventory: [
@@ -362,8 +396,8 @@ describe('autocomplete', () => {
         await use.autocomplete(interaction);
 
         expect(interaction.respond).toHaveBeenCalledWith([
-            { name: 'lucky_charm (3x)', value: 'lucky_charm' },
-            { name: 'streak_freeze (1x)', value: 'streak_freeze' },
+            { name: '🍀 Lucky Charm — 3 held · lasts 2h', value: 'lucky_charm' },
+            { name: '🧊 Streak Freeze — 1 held · 0/2 banked', value: 'streak_freeze' },
         ]);
     });
 
@@ -377,8 +411,54 @@ describe('autocomplete', () => {
         await use.autocomplete(interaction);
 
         expect(interaction.respond).toHaveBeenCalledWith([
-            { name: 'streak_freeze (1x)', value: 'streak_freeze' },
+            { name: '🧊 Streak Freeze — 1 held · 0/2 banked', value: 'streak_freeze' },
         ]);
+    });
+
+    it('matches on the display name as well as the id', async () => {
+        seedUser({ inventory: [
+            { itemId: 'coin_booster_2x', quantity: 6 },
+            { itemId: 'lucky_charm', quantity: 1 },
+        ] });
+
+        const interaction = makeInteraction({ options: { focused: '2x coin' } });
+        await use.autocomplete(interaction);
+
+        expect(interaction.respond.mock.calls[0][0].map(c => c.value)).toEqual(['coin_booster_2x']);
+    });
+
+    it('leaves out what /use has nothing to do with', async () => {
+        seedUser({ inventory: [
+            { itemId: 'lucky_charm', quantity: 1 },
+            { itemId: 'pet_food', quantity: 4 },
+            { itemId: 'seashell', quantity: 2 },
+            { itemId: 'Whisperwood Charm', quantity: 1 },
+            { itemId: 'ai_1787098249128_rg760', quantity: 1 },
+            { itemId: 'vip_badge', quantity: 1 },
+        ] });
+
+        const interaction = makeInteraction({ options: { focused: '' } });
+        await use.autocomplete(interaction);
+
+        expect(interaction.respond.mock.calls[0][0].map(c => c.value)).toEqual(['lucky_charm']);
+    });
+
+    it('lists an effect that is already running after the ready ones, saying so', async () => {
+        seedUser({
+            inventory: [
+                { itemId: 'coin_booster_2x', quantity: 1 },
+                { itemId: 'xp_booster_2x', quantity: 1 },
+            ],
+            activeEffects: [{ type: 'coin_booster_2x', expiresAt: new Date(Date.now() + 30 * 60_000), charges: -1 }],
+        });
+
+        const interaction = makeInteraction({ options: { focused: '' } });
+        await use.autocomplete(interaction);
+
+        const [ready, running] = interaction.respond.mock.calls[0][0];
+        expect(ready.value).toBe('xp_booster_2x');
+        expect(running.value).toBe('coin_booster_2x');
+        expect(running.name).toMatch(/active · \d+m left$/);
     });
 
     it('answers with nothing rather than throwing when the lookup fails', async () => {
