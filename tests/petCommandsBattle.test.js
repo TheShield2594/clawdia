@@ -506,6 +506,21 @@ describe('/pet battle against a member', () => {
         expect(wallet(RIVAL)).toBe(1000);
     });
 
+    // #873. The wager's 5-level limit was checked only at the challenge, but the
+    // defender is re-picked at Accept — so a wager could be fought across any
+    // gap, by a pet the challenge never named or one that levelled since.
+    test('a wager whose fighters are now over the level gap cancels and refunds both stakes', async () => {
+        const interaction = await challenge({ bet: 100 });
+        mockUsers.get(RIVAL).pets[0].level = (mockUsers.get(USER).pets[0].level ?? 1) + 6;
+
+        await interaction.press(ACCEPT);
+
+        expect(interaction.replies.at(-1).embeds[0].data.description).toBe(
+            'The pets that would fight are now more than 5 levels apart, the limit for a wagered battle — the battle was cancelled. Both wagers have been refunded.');
+        expect(wallet(USER)).toBe(1000);
+        expect(wallet(RIVAL)).toBe(1000);
+    });
+
     test('a pot that cannot be paid is not announced as a win, and is recorded as owed', async () => {
         const interaction = await challenge({ bet: 100 });
         // The winner's document disappears after the fighters are re-read, so

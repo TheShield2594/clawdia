@@ -541,6 +541,27 @@ describe('/pet feed', () => {
         expect(interaction.channel.sent[0].content).toContain("'s pets 🐱 **Cat**, 🐦 **Bird** passed away");
         expect(textOf(interaction)).toContain('Your pets died from starvation');
     });
+
+    // #873. Every early return in /pet feed skipped its save, so a death was
+    // announced and never stored — and announced again on every run after. A
+    // player whose only pet starved got "passed away" each time they tried.
+    test('a death is stored when announced, so the next feed does not announce it again', async () => {
+        const starvedSince = new Date(Date.now() - 5 * DAY);
+        seedUser({
+            pets: [makePet({ _id: 'p-gone', petId: 'cat', name: 'Ghost', hunger: 0, starving: true, starvingStartAt: starvedSince, lastDecayAt: starvedSince })],
+            inventory: [{ itemId: 'pet_food', quantity: 1 }],
+        });
+
+        const first = await run('feed', { material: 'pet_food' });
+        expect(first.channel.sent).toHaveLength(1);
+        expect(textOf(first)).toContain('You have no pets to feed!');
+        expect(stored().pets).toEqual([]);
+        expect(stored().deceasedPets).toHaveLength(1);
+
+        const second = await run('feed', { material: 'pet_food' });
+        expect(second.channel.sent).toHaveLength(0);
+        expect(stored().deceasedPets).toHaveLength(1);
+    });
 });
 
 // ─── /pet release ───────────────────────────────────────────────────────────────

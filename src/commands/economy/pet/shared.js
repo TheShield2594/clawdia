@@ -161,6 +161,14 @@ async function syncHungerAndRunaway(user, interaction) {
     user.markModified('pets');
 
     if (ranAwayPets.length > 0) {
+        // Store the death before announcing it. Callers used to save after
+        // their own checks, and every early return skipped that save — so
+        // `/pet feed` on a starved pet announced it, returned "You have no pets
+        // to feed!", and announced it again on every run after (#873). A save
+        // that fails throws here, before the announcement: the death is found
+        // again and announced once on the next command.
+        await user.save();
+
         const names = ranAwayPets.map(p => {
             const def = PET_DEFINITIONS[p.petId];
             return `${def?.emoji ?? '🐾'} **${p.name || def?.name || p.petId}**`;
