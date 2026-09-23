@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and nineteen passes over the
+long-stable, low-churn subsystems have been audited, and twenty passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -18,7 +18,8 @@ the bet guards, the crash restart refund, and the games' leaderboard and stat
 writes), `/explore`'s event-currency drop, and the items, effects and server
 shop (`/use`, `effectsService`, `/inventory`, `/shop buy`), the effect
 consumers, the map views, the `/explore` views, the season pass's
-non-reward surface, and season XP, tier claims and mission progress (#873). The majority of the
+non-reward surface, season XP, tier claims and mission progress, and the
+gathering commands' profiles, inventories and prestige (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -2081,6 +2082,55 @@ reads.
 
 ---
 
+## Economy — The Gathering Commands' Remaining Surface
+
+**Status: Audited — all findings resolved** ✓
+
+The twentieth pass of the economy audit #873. Passes 6 and 9 covered the
+gathering commands' payouts and refunds, and passes 16 and 17 covered the map
+and `/explore` views. This pass covers what was left of `/hunt`, `/fish` and
+`/mine`: the profiles, the inventories (equip and discard), the records and
+tournament views, `/hunt aim`, and prestige. Pass 7 had checked prestige for
+currency and found none moved. This pass looked at how prestige writes, and
+that is where both findings are.
+
+**Files reviewed/fixed:**
+- `src/utils/grindPrestige.js` (added)
+- `src/services/grandPrestigeService.js` (added)
+- `src/commands/economy/hunt/profile.js`
+- `src/commands/economy/fish/profile.js`
+- `src/commands/economy/mine/profile.js`
+- `tests/pass20GatheringSurface.test.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | **`/hunt prestige` and `/fish prestige` could lose a run, or be lost to one.** The confirm button re-read the user, attached the grind profiles, reset level and XP and pushed the trophy in memory, then `save()`d. The grind-profile save writes `prof.data` wholesale. The confirm runs in a button collector after `execute` has returned and released the economy lock, so it did not exclude a hunt or cast. If a run landed between the confirm's read and its save, the prestige wrote back the materials, catches and XP it had read, and the run's gains were gone. If the run saved last, it wrote its pre-prestige level and XP over the reset, and the player kept level 50 with the new rank. | Both now ascend through `ascendGrind`: one `findOneAndUpdate` that sets the rank, level and XP and `$addToSet`s the trophy, touching nothing else in the profile. It is guarded on the level still being 50+ and the rank still being the one the player confirmed. A profile that predates the rank field matches as rank 0. A confirm whose conditions no longer hold is told so, and nothing is written. This is the update `/mine prestige` already made, moved into a shared helper | `grindPrestige.js`, `hunt/profile.js`, `fish/profile.js` |
+| 2 | **Grand Master could not be earned by finishing on `/mine`, and could be announced twice.** The Diamond-in-all-three check was duplicated in `/hunt` and `/fish` and never called from `/mine`. A player whose last Diamond rank was mining never got the award: getting it meant prestiging hunting or fishing again, which at Diamond they cannot. Each copy decided from the document in hand, which could miss a prestige that landed after it was read. Each then set `grandPrestige.level` with an unguarded `$set` and announced, so two prestiges finishing together could both broadcast | One `grandPrestigeService.checkGrandPrestige`, called after all three prestiges. It reads the three stored ranks, claims the award in a write guarded on `grandPrestige.level` being below 1, and announces only if its own claim landed. It never throws, so a failure cannot turn a completed prestige into an error | `grandPrestigeService.js`, `hunt/profile.js`, `fish/profile.js`, `mine/profile.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 3 | Nothing pinned either finding | `tests/pass20GatheringSurface.test.js` (14 tests) covers the following. `ascendGrind`: the reset and trophy, a run's materials written after the read surviving, two confirmations ascending once, and a profile below the level refused. `checkGrandPrestige`: `/mine` finishing last, one rank short, two concurrent checks announcing once, and never throwing. Call-site checks on all three commands. `/hunt prestige` end to end, with a run's materials landing while the confirmation is open. 6 of the 14 fail against the old code; the rest exercise the new modules directly | `tests/` |
+
+**Reviewed and found sound**, recorded so the next pass does not re-derive it:
+
+- **The inventories.** `/hunt` and `/mine` equip and discard, and `/fish`
+  equip, run inside `execute` under the economy lock and save there. No
+  collector writes after the lock is released.
+- **The profile, records and tournament views.** `/fish profile` attaches the
+  profiles to read and saves nothing. `/fish tournament` caps its standings at
+  15 rows.
+- **`/hunt aim`** runs the aiming mini-game and writes nothing of its own.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -2090,7 +2140,7 @@ wide, and it is widest exactly where the risk is.
 
 **Economy** — the largest uncovered area:
 
-- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. `/explore`'s while-an-event-runs **event-currency drop** is audited above (pass 13). The map views (`/explore map`, `/mine map`) are audited above (pass 16). The rest of `explore/`'s views (travel, profile, journal, regions, relics) are audited above (pass 17). Prestige was reviewed sound in pass 7
+- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. `/explore`'s while-an-event-runs **event-currency drop** is audited above (pass 13). The map views (`/explore map`, `/mine map`) are audited above (pass 16). The rest of `explore/`'s views (travel, profile, journal, regions, relics) are audited above (pass 17). The `/hunt`, `/fish` and `/mine` profiles, inventories and prestige are audited above (pass 20); pass 7 had found prestige moved no currency
 - `pet` (`petService.js`, `pet/`) — the `/pet` command's **PvP-battle winner payout, the battle escrow refunds and the adopt-fee refund** are audited above (pass 10, which also split `pet.js` into the `pet/` folder), alongside the pet **drops** the gathering runs grant, found sound in pass 9. The Pet-of-the-Week reward was reviewed and found sound. The pet-care **quest credits** (`/pet feed`, `play`, `rest` and the battle care rewards) are audited above (pass 11), keyed alongside every other caller of the shared `awardQuest` hook
 - `use` / items / effects — audited above: the seasonal loot-box item grant (pass 6), and `effectsService.js`, `use.js`, `inventory.js` and `/shop buy` (pass 14). The effect **consumers** (`/rob`, `/crime`, `/hunt`, the gathering yield charges, `messageCreate`'s streak shield) and every other reader and writer of `activeEffects` are audited above (pass 15). `shop.js`'s view and trends builders were read for writes only
 - casino (`src/games/casino/*`, `casino.js`) — the progressive jackpot (pass 2),
@@ -2130,6 +2180,7 @@ commands' non-payout surface on 2026-09-22; the `/pet` command's payouts on
 2026-09-22; the `/explore` event-currency drop on 2026-09-23; the items, effects and
 server shop on 2026-09-23; the effect consumers on 2026-09-23; the map views
 on 2026-09-23; the `/explore` views on 2026-09-23; the season pass's
-non-reward surface on 2026-09-23; and season XP, tier claims and mission
-progress on 2026-09-23. "Not yet reviewed" carries no review
+non-reward surface on 2026-09-23; season XP, tier claims and mission
+progress on 2026-09-23; and the gathering commands' remaining surface on
+2026-09-23. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*

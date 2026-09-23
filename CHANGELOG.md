@@ -14,6 +14,31 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.12] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 20 (#873) — the gathering commands' remaining surface: the
+`/hunt`, `/fish` and `/mine` profiles, inventories and prestige.
+
+- **`/hunt prestige` and `/fish prestige` could lose a run, or be lost to one.**
+  The confirm button reset level and XP on a re-read copy of the grind profile
+  and `save()`d it, which writes the whole profile back. The confirm runs in a
+  button collector after the command has released the economy lock, so a hunt
+  or cast that finished in between had its materials, XP and catches put back
+  to what the prestige read, or saved its own copy over the prestige. Both now
+  ascend in one conditional update (`utils/grindPrestige.js`): level, XP, rank
+  and trophy only, guarded on the level still being 50+ and the rank still
+  being the one confirmed, so two confirmations open at once ascend once. `/mine prestige`
+  already worked this way.
+- **Grand Master could not be earned by finishing on `/mine`, and could be
+  announced twice.** The Diamond-in-all-three check ran from `/hunt` and
+  `/fish` only, off the document in hand, and set the award with an unguarded
+  write. It is now one shared service (`services/grandPrestigeService.js`),
+  called from all three prestiges. It reads the stored ranks and claims the
+  award in a guarded write, and only the claim that lands announces it.
+- `tests/pass20GatheringSurface.test.js` (14 tests; 6 fail against the old code).
+
 ## [4.13.11] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

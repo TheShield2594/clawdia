@@ -29,6 +29,8 @@ const { formatPrestigeBonuses } = require('./embeds');
 const { sendProfileTabs } = require('../../../utils/grindProfileView');
 const { readCatalog, fishOverviewPage, fishCatalogPage, fishProgressPage } = require('./profilePages');
 const COLORS = require('../../../utils/embedColors');
+const { ascendGrind } = require('../../../utils/grindPrestige');
+const { checkGrandPrestige } = require('../../../services/grandPrestigeService');
 const { ownedBy } = require('../../../utils/collectorOwner');
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -165,28 +167,34 @@ async function handlePrestige(interaction) {
             return;
         }
 
-        ff.prestige = (ff.prestige ?? 0) + 1;
-        ff.level    = 1;
-        ff.xp       = 0;
-
-        if (!Array.isArray(ff.trophies)) ff.trophies = [];
-        const trophy = PRESTIGE_LABELS[ff.prestige];
-        if (trophy && !ff.trophies.includes(trophy)) {
-            ff.trophies.push(trophy);
-        }
-
-        freshUser.markModified('fishing');
-
+        // One conditional update, not a save() of the profile read here (#873,
+        // pass 20): this runs after execute has released the economy lock, so a
+        // cast mid-run could save over the prestige, or this over the cast.
+        const fromRank = ff.prestige ?? 0;
+        const trophy   = PRESTIGE_LABELS[fromRank + 1];
+        let ascended;
         try {
-            await freshUser.save();
+            ascended = await ascendGrind({
+                userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing',
+                minLevel: 50, fromRank, trophy,
+            });
         } catch (err) {
-            console.error('[fishprestige] save error:', err);
+            console.error('[fishprestige] ascend error:', err);
             await i.update({ content: 'Something went wrong saving your prestige. Please try again.', embeds: [], components: [] });
             return;
         }
+        if (!ascended) {
+            await i.update({
+                content: 'Prestige conditions are no longer met (level changed, or already prestiged).',
+                embeds: [], components: []
+            });
+            return;
+        }
+        ff.prestige = fromRank + 1;
+        ff.level    = 1;
+        ff.xp       = 0;
 
-        // Check grand prestige after successful fish prestige
-        checkGrandPrestige(i.client, freshUser, interaction.guild, interaction.guildId).catch(() => null);
+        checkGrandPrestige(i.client, interaction.user.id, interaction.guildId, interaction.guild);
 
         const resultEmbed = new EmbedBuilder()
             .setColor(COLORS.WARN)
@@ -464,53 +472,7 @@ function overviewEmbed(interaction, user) {
     return embed;
 }
 
-// ─── Grand Prestige Check ─────────────────────────────────────────────────────
-const GRAND_PRESTIGE_DIAMOND = 5;
-
-async function checkGrandPrestige(client, user, guild, guildId) {
-    const huntDiamond  = (user.hunt?.prestige ?? 0)    >= GRAND_PRESTIGE_DIAMOND;
-    const fishDiamond  = (user.fishing?.prestige ?? 0) >= GRAND_PRESTIGE_DIAMOND;
-    const mineDiamond  = (user.mining?.prestige ?? 0)  >= GRAND_PRESTIGE_DIAMOND;
-    const allDiamond   = huntDiamond && fishDiamond && mineDiamond;
-
-    if (!allDiamond) return;
-
-    const currentLevel = user.grandPrestige?.level ?? 0;
-    if (currentLevel >= 1) return; // already achieved Grand Master or higher
-
-    await User.updateOne(
-        { userId: user.userId, guildId },
-        { $set: { 'grandPrestige.level': 1, 'grandPrestige.awardedAt': new Date() } }
-    ).catch(() => {});
-
-    // Broadcast to economy channel
-    const guildSettings = await getGuildSettings(guildId).catch(() => null);
-    const announceChannelId = guildSettings?.accountPrestige?.announceChannelId
-        ?? guildSettings?.economy?.announcementChannelId
-        ?? null;
-
-    if (announceChannelId && client) {
-        const broadcastEmbed = new EmbedBuilder()
-            .setColor(COLORS.PRIZE)
-            .setTitle('⚜️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚜️')
-            .setDescription(
-                `**GRAND MASTER ACHIEVED!**\n\n` +
-                `<@${user.userId}> has reached **Diamond Prestige** in all three skill tracks!\n\n` +
-                `🏹 Diamond Hunter · 🎣 Diamond Angler · ⛏️ Diamond Miner\n\n` +
-                `*The rarest achievement in this server.*`
-            )
-            .setTimestamp();
-        try {
-            const g  = guild ?? await client.guilds.fetch(guildId).catch(() => null);
-            const ch = g?.channels?.cache?.get(announceChannelId);
-            if (ch?.isTextBased?.()) ch.send({ embeds: [broadcastEmbed] }).catch(() => {});
-        } catch { /* non-critical */ }
-    }
-}
-
 module.exports = {
-    GRAND_PRESTIGE_DIAMOND,
-    checkGrandPrestige,
     handleEquip,
     handleInv,
     handlePrestige,
