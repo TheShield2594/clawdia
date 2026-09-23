@@ -132,9 +132,25 @@
             intrinsic width/height keep the box reserved before the PNG lands,
             and fetchpriority marks it as the one above-the-fold image worth
             racing the stylesheet for. -%>
-        <img class="cw-hero-art" src="<%= asset('/clawdia-hero.png') %>"
-             width="604" height="900" alt="" aria-hidden="true"
-             decoding="async" fetchpriority="high">
+        <div class="cw-hero-cat">
+          <img class="cw-hero-art" src="<%= asset('/clawdia-hero.png') %>"
+               width="604" height="900" alt="" aria-hidden="true"
+               decoding="async" fetchpriority="high">
+          <%# The same pose, alive: a five-second idle loop generated from the
+              still above, which starts and ends on that exact frame. It is
+              drawn on white with a margin around the art (the tail swings past
+              the PNG's edge), so it is sized and offset to line its cat up with
+              the still's, and multiplied so the white vanishes into the page.
+              No autoplay and no preload: nothing is fetched until the script at
+              the foot of the page asks it to play, which it does not under
+              reduced motion and cannot without JS, and it stays hidden until
+              frames are actually painting, so all of those cases keep the PNG. -%>
+          <video class="cw-hero-video" width="720" height="960"
+                 muted loop playsinline preload="none" disablepictureinpicture
+                 aria-hidden="true" tabindex="-1">
+            <source src="<%= asset('/clawdia-hero.mp4') %>" type="video/mp4">
+          </video>
+        </div>
       </div><!-- .cw-hero-figure -->
     </header>
 
@@ -492,6 +508,29 @@
 </div><!-- .cw-home -->
 
 <script nonce="<%= locals.cspNonce %>">
+(function() {
+    // Clawdia's idle loop. Plays only while the visitor has not asked for
+    // reduced motion, and follows that setting if it changes mid-visit.
+    var video = document.querySelector('.cw-hero-video');
+    if (!video) return;
+    var cat = video.parentNode;
+    // Set as a property too: browsers only let a muted video play unprompted,
+    // and the attribute alone is not always reflected into that state.
+    video.muted = true;
+    var reduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    var sync = function() {
+        if (reduce && reduce.matches) {
+            video.pause();
+            cat.classList.remove('is-playing');
+            return;
+        }
+        var started = video.play();
+        if (started && started.catch) started.catch(function() {});
+    };
+    video.addEventListener('playing', function() { cat.classList.add('is-playing'); });
+    if (reduce && reduce.addEventListener) reduce.addEventListener('change', sync);
+    sync();
+})();
 (function() {
     var heatmap = document.getElementById('insights-heatmap');
     if (!heatmap) return;

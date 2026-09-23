@@ -1278,6 +1278,17 @@ textarea.auto-resize {
    and click-through. Shown only where the single-column hero has room to its
    right — folded away at and below the tablet breakpoint. */
 .cw-hero-art { width: 100%; max-width: 380px; height: auto; display: block; pointer-events: none; user-select: none; }
+/* The idle loop, laid over the still and swapped in once it is painting. Its
+   720x960 frame is the 604x900 art on white with a 58px/30px margin each side
+   (room for the tail's swing), so the box is scaled and pulled out by exactly
+   that margin to put its cat on top of the still's. Multiply turns the white
+   into whatever is behind it — the cream, the blobs, the strip below — so the
+   overhang never shows. The still is hidden rather than left underneath: under
+   multiply it would ghost through wherever the moving cat no longer covers it. */
+.cw-hero-cat { position: relative; width: 100%; max-width: 380px; }
+.cw-hero-video { position: absolute; left: -9.603%; top: -3.333%; width: 119.205%; height: auto; display: block; mix-blend-mode: multiply; opacity: 0; pointer-events: none; user-select: none; }
+.cw-hero-cat.is-playing .cw-hero-video { opacity: 1; }
+.cw-hero-cat.is-playing .cw-hero-art { visibility: hidden; }
 
 /* Module strip */
 .cw-strip { background: var(--ink-950); color: var(--cream-100); padding: 22px 48px; }
