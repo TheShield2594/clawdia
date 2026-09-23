@@ -149,24 +149,40 @@ describe('the cup game escalates', () => {
 });
 
 describe('higher-lower', () => {
-    it('starts a fresh session at 1x', () => {
-        expect(hl.sessionMult(0)).toBe(1.0);
+    // #873, pass 24. The session used to gain a flat +0.5× per correct call
+    // whatever the odds, and the first call alone returned about 115% of the
+    // stake. Every call is priced by its odds now, so each one returns the same
+    // HOUSE_RETURN off any card.
+    it('prices every call so it returns HOUSE_RETURN, off any card', () => {
+        for (let value = 1; value <= 13; value++) {
+            for (const higher of [true, false]) {
+                const q = hl.winChance(value, higher);
+                if (q === 0) continue;
+                const ev = q * hl.nextMult(1, value, higher);
+                // Floored to the cent, so a call returns at most the house figure.
+                expect([value, higher, ev <= hl.HOUSE_RETURN + 1e-9]).toEqual([value, higher, true]);
+                expect([value, higher, ev > hl.HOUSE_RETURN - 0.01]).toEqual([value, higher, true]);
+            }
+        }
     });
 
-    it('adds half a multiplier per correct guess', () => {
-        expect(hl.sessionMult(1)).toBe(1.5);
-        expect(hl.sessionMult(4)).toBe(3.0);
+    it('leaves ties out of the odds, since a tie is a push', () => {
+        // Off a seven, six ranks are higher and six lower: even money.
+        expect(hl.winChance(7, true)).toBe(0.5);
+        expect(hl.nextMult(1, 7, true)).toBe(1.9);
+        // Off an ace, higher is certain once ties push, and is priced to cost 5%.
+        expect(hl.winChance(1, true)).toBe(1);
+        expect(hl.nextMult(1, 1, true)).toBe(0.95);
     });
 
-    it('caps at six, however long the streak runs', () => {
-        expect(hl.sessionMult(10)).toBe(hl.MAX_SESSION_MULT);
-        expect(hl.sessionMult(1000)).toBe(hl.MAX_SESSION_MULT);
+    it('pays nothing for a call that cannot win', () => {
+        expect(hl.nextMult(3, 1, false)).toBe(0);
+        expect(hl.nextMult(3, 13, true)).toBe(0);
     });
 
-    it('reaches the cap exactly where the constants say it should', () => {
-        const atCap = (hl.MAX_SESSION_MULT - 1) / hl.STREAK_BONUS;
-        expect(hl.sessionMult(atCap)).toBe(hl.MAX_SESSION_MULT);
-        expect(hl.sessionMult(atCap - 1)).toBeLessThan(hl.MAX_SESSION_MULT);
+    it('builds on the session it is handed, and stops at the cap', () => {
+        expect(hl.nextMult(1.9, 7, false)).toBe(3.61);
+        expect(hl.nextMult(hl.MAX_SESSION_MULT, 7, true)).toBe(hl.MAX_SESSION_MULT);
     });
 
     it('labels the face cards and leaves the pips as numbers', () => {
@@ -209,36 +225,38 @@ describe('higher-lower', () => {
 });
 
 describe('the crash curve', () => {
-    it('busts instantly on the bottom one percent of rolls', () => {
-        expect(crash.generateCrashPoint(() => 0)).toBe(1.00);
-        expect(crash.generateCrashPoint(() => 0.009)).toBe(1.00);
-    });
-
-    it('follows 0.99/r above that, which is the one percent edge', () => {
-        expect(crash.generateCrashPoint(() => 0.5)).toBe(1.98);
-        expect(crash.generateCrashPoint(() => 0.99)).toBe(1.00);
-    });
-
-    it('never deals a round below 1.00x, even at the very top of the roll', () => {
-        // 0.99 / 0.999 is 0.991, which rounded to 0.99 before the floor —
-        // about one roll in two hundred, and it failed this suite's own
-        // Math.random test when CI drew one.
-        expect(crash.generateCrashPoint(() => 0.996)).toBe(1.00);
-        expect(crash.generateCrashPoint(() => 0.999999)).toBe(1.00);
-    });
-
-    it('tops out at 99x, which is where the instant-bust floor puts the ceiling', () => {
-        // The 100x cap in the formula never binds: 0.99/r only reaches 100 at
-        // r <= 0.0099, and everything below 0.01 has already returned 1.00. The
-        // largest round the game can deal is r exactly 0.01.
-        expect(crash.generateCrashPoint(() => 0.01)).toBe(99.00);
-        expect(crash.generateCrashPoint(() => 0.0099)).toBe(1.00);
-
-        let highest = 0;
-        for (let r = 0.01; r < 1; r += 0.0001) {
-            highest = Math.max(highest, crash.generateCrashPoint(() => r));
+    // #873, pass 24. The curve was 0.99/r with the bottom 1% of rolls busting
+    // instantly — and those are the rolls 0.99/r maps above 99×, so the edge
+    // came off the top: a 10× cash-out returned 89%, a 50× one 49%. The target
+    // a player picks must not change the edge.
+    it('returns 99% of the stake whichever multiplier a player cashes at', () => {
+        const n = 200_000;
+        for (const target of [1.01, 1.5, 2, 10, 50, 99]) {
+            let reached = 0;
+            for (let i = 0; i < n; i++) {
+                if (crash.generateCrashPoint(() => (i + 0.5) / n) >= target) reached++;
+            }
+            expect([target, +(reached / n * target).toFixed(3)]).toEqual([target, 0.99]);
         }
-        expect(highest).toBe(99.00);
+    });
+
+    it('busts at 1.00x on the bottom two percent of rolls', () => {
+        // The 1% below 1.00x, floored up, and the 1% between 1.00x and 1.01x.
+        expect(crash.generateCrashPoint(() => 0)).toBe(1.00);
+        expect(crash.generateCrashPoint(() => 0.0197)).toBe(1.00);
+        expect(crash.generateCrashPoint(() => 0.0199)).toBe(1.01);
+    });
+
+    it('floors to the cent rather than rounding up past the real crash', () => {
+        // 0.99 / 0.5 is 1.98 exactly; a hair under 2.00 stays at 1.99.
+        expect(crash.generateCrashPoint(() => 0.5)).toBe(1.98);
+        expect(crash.generateCrashPoint(() => 0.505)).toBe(2.00);
+        expect(crash.generateCrashPoint(() => 0.5049)).toBe(1.99);
+    });
+
+    it('never deals a round above the cap', () => {
+        expect(crash.generateCrashPoint(() => 0.99)).toBe(99.00);
+        expect(crash.generateCrashPoint(() => 0.9999999)).toBe(crash.MAX_CRASH);
     });
 
     it('never returns below 1.00, which would owe the player less than the stake', () => {
@@ -278,7 +296,7 @@ describe('the crash curve', () => {
     it('falls back to Math.random when handed nothing', () => {
         const point = crash.generateCrashPoint();
         expect(point).toBeGreaterThanOrEqual(1.00);
-        expect(point).toBeLessThanOrEqual(99.00);
+        expect(point).toBeLessThanOrEqual(crash.MAX_CRASH);
     });
 
     it('takes its roll from the rng it is handed', () => {

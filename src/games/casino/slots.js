@@ -172,12 +172,12 @@ function paytableEmbed() {
             { name: '​', value: '​', inline: false },
             { name: '🃏🃏🃏 Triple Wild', value: '🏆 **JACKPOT — wins the whole progressive pool** (`/casino jackpot`)', inline: true },
             { name: '⚡⚡⚡ Triple Boost', value: '**4× bet**', inline: true },
-            { name: 'Two of a Kind', value: 'Half of the 3-of-a-kind payout', inline: false },
+            { name: 'Two of a Kind', value: 'A quarter of the 3-of-a-kind payout', inline: false },
             { name: '🌸🌸 Two Scatters', value: '**3 free spins** (no bet deducted)', inline: true },
             { name: '🌸🌸🌸 Three Scatters', value: '**5 free spins** with **1.5× multiplier**', inline: true },
             { name: '🔥 Hot Reel', value: 'After 3 losses in a row, reel 1 locks to a high-value symbol', inline: false },
         )
-        .setFooter({ text: 'Two-of-a-kind pays 50% of the three-of-a-kind rate for that symbol • a Wild beside two different symbols completes the better-paying one' });
+        .setFooter({ text: 'Two-of-a-kind pays 25% of the three-of-a-kind rate for that symbol • a Wild beside two different symbols completes the better-paying one' });
 }
 
 module.exports = {

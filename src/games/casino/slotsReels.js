@@ -4,7 +4,7 @@
 // slots.js (#885). `evaluate` was module-private behind a three-stage reveal
 // animation, so nothing tested it directly — and it is what decides the payout
 // on every spin: wild substitution, the multiplier stack, the two-of-a-kind
-// half rate, and the jackpot hand-off contract all live in it.
+// rate, and the jackpot hand-off contract all live in it.
 //
 // The module is pure on purpose: no discord.js, no models, no services. It is
 // required by slots.js for the real game and by tests/casinoSlotsReels.test.js
@@ -34,9 +34,15 @@ const SPIN_POOL    = SYMBOLS.filter(s => s.type === 'regular' || s.type === 'wil
 // back. A Triple Wild is never a dead spin.
 const FREE_SPIN_JACKPOT_MULT = 25;
 
-// The half rate a two-of-a-kind pays, relative to that symbol's three-of-a-kind
-// row. Floored, so a partial win never rounds up into a coin that was not bet.
-const TWO_OF_A_KIND_RATE = 0.5;
+// The rate a two-of-a-kind pays, relative to that symbol's three-of-a-kind row.
+// Floored, so a partial win never rounds up into a coin that was not bet.
+//
+// It was 0.5. Nearly half of all spins are a two-of-a-kind (47.8%), so at half
+// the row they alone returned 1.30× the stake, and slots paid back about 157%
+// of everything wagered on it, Hot Reel and free spins included (#873, pass
+// 24). At a quarter the whole loop returns about 90% — beside keno's 92% and the
+// cup game's 93%. tests/casinoSlotsReels.test.js pins the figure.
+const TWO_OF_A_KIND_RATE = 0.25;
 
 /** One weighted reel. `rng` returns a float in [0, 1) — Math.random by default. */
 function spinReel(rng = Math.random) {
@@ -100,7 +106,8 @@ function bestRegular(regulars) {
  *      caller from `scatterCount` (2 → 3 spins, 3 → 5 spins at 1.5×). Payout is
  *      0: a scatter hand wins spins, not coins.
  *   4. three of a kind, counting wilds as the played symbol → `three`.
- *   5. two of a kind, likewise → `two`, at half the three-of-a-kind rate.
+ *   5. two of a kind, likewise → `two`, at TWO_OF_A_KIND_RATE of the
+ *      three-of-a-kind row.
  *   6. anything else → `lose`.
  *
  * Multipliers stack multiplicatively across the reels they appear on and apply

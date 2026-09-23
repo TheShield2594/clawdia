@@ -503,12 +503,16 @@ async function startCrashGame(interaction, lobby, lobbyId) {
             return i.reply({ content: "You've already cashed out.", flags: MessageFlags.Ephemeral });
         }
 
-        const outcome = await cashOutPlayer(i.user.id, currentMult, false);
+        // Read once. The tick keeps moving `currentMult` while the write below
+        // is awaited, and the reply used to recompute from it afterwards — so it
+        // could announce a later multiplier than the one that was paid.
+        const mult = currentMult;
+        const outcome = await cashOutPlayer(i.user.id, mult, false);
         if (outcome === 'already') {
             return i.reply({ content: "You've already cashed out.", flags: MessageFlags.Ephemeral });
         }
 
-        const payout = Math.floor(bet * currentMult);
+        const payout = Math.floor(bet * mult);
         // A failed cash-out used to answer "You've already cashed out" as well,
         // which is the one case where that sentence costs the player money: they
         // read it as being safely out, stopped watching, and lost the hand at
@@ -517,14 +521,14 @@ async function startCrashGame(interaction, lobby, lobbyId) {
         if (outcome !== 'paid') {
             return i.reply({
                 content: outcome === 'owed'
-                    ? `⚠️ Cashed out at **${multLabel(currentMult)}**, but the payout could not be credited right now. It has been recorded and will be paid automatically.`
-                    : `⚠️ Cashed out at **${multLabel(currentMult)}**, but the payout could not be credited or recorded. Please contact a server admin.`,
+                    ? `⚠️ Cashed out at **${multLabel(mult)}**, but the payout could not be credited right now. It has been recorded and will be paid automatically.`
+                    : `⚠️ Cashed out at **${multLabel(mult)}**, but the payout could not be credited or recorded. Please contact a server admin.`,
                 flags: MessageFlags.Ephemeral,
             }).catch(() => {});
         }
 
         await i.reply({
-            content: `✅ Cashed out at **${multLabel(currentMult)}** — **+${(payout - bet).toLocaleString()} coins**!`,
+            content: `✅ Cashed out at **${multLabel(mult)}** — **+${(payout - bet).toLocaleString()} coins**!`,
             flags: MessageFlags.Ephemeral,
         }).catch(() => {});
 
@@ -537,12 +541,23 @@ async function startCrashGame(interaction, lobby, lobbyId) {
         try {
 
         tick++;
-        currentMult = multiplierAt(tick);
+        const reached     = multiplierAt(tick);
+        const crashesHere = reached >= crash;
+        // A tick that crashes never becomes the multiplier on show. It used to,
+        // before the awaits below, so a Cash Out pressed while they ran was paid
+        // at a multiplier the round never survived to (#873, pass 24).
+        if (!crashesHere) currentMult = reached;
 
-        // Fire auto cash-outs for players whose target has been reached
+        // Auto cash-outs this tick passed. The curve is continuous and the ticks
+        // are not, so a target counts as reached when it is at or below the crash
+        // point, and it pays the target itself. It used to pay whatever this tick
+        // read, and to run before the crash check — so on the crashing tick every
+        // target the jump passed was paid, above the crash point, which returned
+        // about 109% of the stake at any target up to 5× (#873, pass 24).
         for (const [uid, state] of lobby.players.entries()) {
-            if (!state.cashedOutAt && state.autoCashout && currentMult >= state.autoCashout) {
-                await cashOutPlayer(uid, currentMult, true);
+            if (!state.cashedOutAt && state.autoCashout && reached >= state.autoCashout
+                && state.autoCashout <= crash) {
+                await cashOutPlayer(uid, state.autoCashout, true);
             }
         }
 
@@ -553,7 +568,7 @@ async function startCrashGame(interaction, lobby, lobbyId) {
         // the crash point pushed to the history twice, and a second final embed.
         if (gameOver) return;
 
-        if (currentMult >= crash) {
+        if (crashesHere) {
             gameOver = true;
             clearInterval(lobby.interval);
             collector.stop('crashed');

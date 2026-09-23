@@ -13,12 +13,12 @@ const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const {
-    STREAK_BONUS,
     MAX_SESSION_MULT,
-    sessionMult,
     rollCard,
     cardLabel,
     probabilities,
+    winChance,
+    nextMult,
 } = require('./higherlowerOdds');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
@@ -51,24 +51,22 @@ function embedAuthor(interaction) {
     };
 }
 
-function questionEmbed(card, bet, history, interaction, streak) {
-    const prob      = probabilities(card.value);
-    const mult      = sessionMult(streak);
-    const nextMult  = sessionMult(streak + 1);
-    const cashNow   = Math.floor(bet * mult);
-    const cashNext  = Math.floor(bet * nextMult);
-    const histStr   = history.length ? history.map(c => cardInline(c)).join(' → ') : '*No history yet*';
+function questionEmbed(card, bet, history, interaction, streak, mult, cashValue) {
+    const prob    = probabilities(card.value);
+    const histStr = history.length ? history.map(c => cardInline(c)).join(' → ') : '*No history yet*';
 
     const streakLine = streak > 0
-        ? `\n> 🔥 **${streak}-win streak** · ${mult.toFixed(1)}× · Cash out: **${cashNow.toLocaleString()}** or go for **${cashNext.toLocaleString()}** (${nextMult.toFixed(1)}×)`
+        ? `\n> 🔥 **${streak}-win streak** · ${mult.toFixed(2)}× · worth **${cashValue.toLocaleString()}** now`
         : '';
 
-    const higherField = prob.higher > 0
-        ? `${(prob.higher * 100).toFixed(0)}% chance`
-        : '*Impossible*';
-    const lowerField = prob.lower > 0
-        ? `${(prob.lower * 100).toFixed(0)}% chance`
-        : '*Impossible*';
+    // Each call shows its own odds and what winning it pays: a call is priced
+    // by its odds, so the two sides pay differently off the same card.
+    const sideField = pickedHigher => {
+        const share = pickedHigher ? prob.higher : prob.lower;
+        if (share <= 0) return '*Impossible*';
+        const win = Math.floor(bet * nextMult(mult, card.value, pickedHigher));
+        return `${(winChance(card.value, pickedHigher) * 100).toFixed(0)}% · win → **${win.toLocaleString()}**`;
+    };
 
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
@@ -77,19 +75,16 @@ function questionEmbed(card, bet, history, interaction, streak) {
         .setTitle('🃏 Higher or Lower')
         .setDescription(`**Current Card**\n\`\`\`\n${cardDisplay(card)}\n\`\`\`${streakLine}`)
         .addFields(
-            { name: '⬆️ Higher',  value: higherField,                                    inline: true },
-            { name: '⬇️ Lower',   value: lowerField,                                     inline: true },
+            { name: '⬆️ Higher',  value: sideField(true),                                inline: true },
+            { name: '⬇️ Lower',   value: sideField(false),                               inline: true },
             { name: '🟰 Tie',     value: `${(prob.equal * 100).toFixed(0)}% → push`,     inline: true },
             { name: '💰 Bet',     value: `**${bet.toLocaleString()}** coins`,             inline: true },
-            { name: '🎯 Win →',   value: `**${cashNext.toLocaleString()}** (${nextMult.toFixed(1)}×)`, inline: true },
             { name: '📜 History', value: histStr,                                        inline: false },
         )
-        .setFooter({ text: 'Equal value = push  •  15s to choose  •  Cash out any time after a win' });
+        .setFooter({ text: 'Odds shown leave out ties  •  Equal value = push  •  15s to choose' });
 }
 
-function riskEmbed(interaction, current, next, pickedHigher, bet, streak, payout) {
-    const mult = sessionMult(streak);
-    const nextMult = sessionMult(streak + 1);
+function riskEmbed(interaction, current, next, pickedHigher, bet, streak, mult, payout) {
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
@@ -97,16 +92,15 @@ function riskEmbed(interaction, current, next, pickedHigher, bet, streak, payout
         .setTitle(`🃏 Correct! 🔥×${streak}`)
         .setDescription(
             `✅ ${cardInline(current)} → ${cardInline(next)} — **${pickedHigher ? 'Higher' : 'Lower'}** was right!\n\n` +
-            `> 💰 **Cash out: ${payout.toLocaleString()} coins** (${mult.toFixed(1)}× your bet)\n` +
-            `> 🎴 Or risk it for **${Math.floor(bet * nextMult).toLocaleString()}** coins (${nextMult.toFixed(1)}×)\n` +
-            (streak >= Math.floor((MAX_SESSION_MULT - 1.0) / STREAK_BONUS)
+            `> 💰 **Cash out: ${payout.toLocaleString()} coins** (${mult.toFixed(2)}× your bet)\n` +
+            `> 🎴 Or draw another card — each correct call pays by its odds\n` +
+            (mult >= MAX_SESSION_MULT
                 ? '\n> ⚠️ *Max multiplier reached — cash out is the same regardless.*'
                 : '')
         )
         .addFields(
             { name: '💰 Bet',        value: `**${bet.toLocaleString()}** coins`,     inline: true },
             { name: '🏆 Cash Out',   value: `**${payout.toLocaleString()}** coins`,  inline: true },
-            { name: '🎲 If You Win', value: `**${Math.floor(bet * nextMult).toLocaleString()}** coins (${nextMult.toFixed(1)}×)`, inline: true },
         )
         .setFooter({ text: '30s to decide · Wrong guess = lose everything' });
 }
@@ -125,8 +119,7 @@ function lossEmbed(interaction, current, next, pickedHigher, bet, newBalance) {
         .setTimestamp();
 }
 
-function cashOutEmbed(interaction, bet, payout, newBalance, streak, note = '') {
-    const mult   = sessionMult(streak);
+function cashOutEmbed(interaction, bet, payout, newBalance, streak, mult, note = '') {
     const net    = payout - bet;
     const netStr = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
     return new EmbedBuilder()
@@ -134,7 +127,7 @@ function cashOutEmbed(interaction, bet, payout, newBalance, streak, note = '') {
         .setThumbnail(THUMB)
         .setColor(COLORS.SUCCESS)
         .setTitle(`🃏 Cashed Out! 🔥×${streak}`)
-        .setDescription(`💰 You locked in **${payout.toLocaleString()}** coins at **${mult.toFixed(1)}×**!${note}`)
+        .setDescription(`💰 You locked in **${payout.toLocaleString()}** coins at **${mult.toFixed(2)}×**!${note}`)
         .addFields(
             { name: '💰 Bet',     value: `**${bet.toLocaleString()}** coins`,          inline: true },
             { name: '🏆 Payout',  value: `**${payout.toLocaleString()}** coins`,       inline: true },
@@ -144,13 +137,15 @@ function cashOutEmbed(interaction, bet, payout, newBalance, streak, note = '') {
         .setTimestamp();
 }
 
-function timeoutEmbed(interaction, card, bet, newBalance, note = '') {
+function timeoutEmbed(interaction, card, returned, streak, newBalance, note = '') {
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
         .setColor(COLORS.NEUTRAL)
         .setTitle('🃏 Higher or Lower — Timed Out')
-        .setDescription(`⏱️ You didn't pick in time. Your bet of **${bet.toLocaleString()}** coins has been refunded.${note}`)
+        .setDescription(streak > 0
+            ? `⏱️ You didn't pick in time, so the streak was cashed out: **${returned.toLocaleString()}** coins.${note}`
+            : `⏱️ You didn't pick in time. Your bet of **${returned.toLocaleString()}** coins has been refunded.${note}`)
         .addFields(
             { name: '🃏 Card Was',  value: cardInline(card),                          inline: true },
             { name: '💰 Balance',   value: `**${newBalance.toLocaleString()}** coins`, inline: true },
@@ -228,12 +223,15 @@ module.exports = {
 };
 
 // streak = number of consecutive correct guesses in the current session (starts at 0).
+// mult = the session multiplier those guesses built, priced by their odds, and
+// cashValue = what the session is worth in coins now: the stake before the
+// first win, the cash-out after each one (coin boosters included).
 // A session ends when the player cashes out, loses, or starts a new game.
 // releaseLock is called as soon as the hand resolves to a final state (win/
 // loss/cash-out/timeout) — NOT held through "Play Again", since a replay
 // re-runs the same atomic debit as any fresh bet and can't double-spend even
 // if another casino game starts in parallel once this hand has settled.
-async function playHigherLower(interaction, bet, userFilter, guildSettings, history, streak, releaseLock, onWager, handId = newHandId()) {
+async function playHigherLower(interaction, bet, userFilter, guildSettings, history, streak, releaseLock, onWager, handId = newHandId(), mult = 1, cashValue = bet) {
     const current = rollCard();
     const canHigh = probabilities(current.value).higher > 0;
     const canLow  = probabilities(current.value).lower  > 0;
@@ -255,7 +253,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
     );
 
     await interaction.editReply({
-        embeds:     [questionEmbed(current, bet, history, interaction, streak)],
+        embeds:     [questionEmbed(current, bet, history, interaction, streak, mult, cashValue)],
         components: [row],
     });
 
@@ -289,7 +287,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                 // Tie: push — refund this round and continue session without changing streak
                 const newHistory = [...history, current];
                 await i.deferUpdate();
-                await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), streak, releaseLock, onWager, handId);
+                await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), streak, releaseLock, onWager, handId, mult, cashValue);
                 return;
             }
 
@@ -354,11 +352,13 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
 
             // WIN — calculate payout and present cash-out / risk-another choice
             const newStreak = streak + 1;
-            const mult      = sessionMult(newStreak);
-            let rawPayout   = Math.floor(bet * mult);
+            const newMult   = nextMult(mult, current.value, pickedHigher);
+            let rawPayout   = Math.floor(bet * newMult);
 
-            // Apply coin/server multiplier to profit only
-            if (totalMult > 1.0) {
+            // Apply coin/server multiplier to profit only. A certain call can
+            // price the session below the stake, and multiplying that "profit"
+            // would have multiplied the loss.
+            if (totalMult > 1.0 && rawPayout > bet) {
                 rawPayout = bet + Math.round((rawPayout - bet) * totalMult);
             }
 
@@ -373,13 +373,13 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                     .setStyle(ButtonStyle.Success),
                 new ButtonBuilder()
                     .setCustomId(riskId)
-                    .setLabel(`🎴 Risk It (${sessionMult(newStreak + 1).toFixed(1)}× next)`)
+                    .setLabel('🎴 Risk It')
                     .setStyle(ButtonStyle.Danger)
-                    .setDisabled(mult >= MAX_SESSION_MULT),
+                    .setDisabled(newMult >= MAX_SESSION_MULT),
             );
 
             await i.update({
-                embeds:     [riskEmbed(interaction, current, next, pickedHigher, bet, newStreak, rawPayout)],
+                embeds:     [riskEmbed(interaction, current, next, pickedHigher, bet, newStreak, newMult, rawPayout)],
                 components: [riskRow],
             });
 
@@ -400,7 +400,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                         payoutCredited = true;
                         const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                         await r.update({
-                            embeds:     [cashOutEmbed(interaction, bet, rawPayout, await settledBalance(userFilter, cashed.balance), newStreak, payoutNote(cashed))],
+                            embeds:     [cashOutEmbed(interaction, bet, rawPayout, await settledBalance(userFilter, cashed.balance), newStreak, newMult, payoutNote(cashed))],
                             components: [playAgainRow(replayId)],
                         });
                         attachReplay(riskMsg, replayId, interaction, bet, userFilter, guildSettings, onWager);
@@ -408,7 +408,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                     } else {
                         // Risk another card — recurse without paying out
                         await r.deferUpdate();
-                        await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), newStreak, releaseLock, onWager, handId);
+                        await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), newStreak, releaseLock, onWager, handId, newMult, rawPayout);
                     }
                 } catch (riskErr) {
                     console.error('[HigherLower] risk collect error:', riskErr);
@@ -433,7 +433,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                     { game: 'higherlower', handId, phase: 'cashout' });
                 const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                 await interaction.editReply({
-                    embeds:     [cashOutEmbed(interaction, bet, rawPayout, await settledBalance(userFilter, cashed.balance), newStreak, payoutNote(cashed))],
+                    embeds:     [cashOutEmbed(interaction, bet, rawPayout, await settledBalance(userFilter, cashed.balance), newStreak, newMult, payoutNote(cashed))],
                     components: [playAgainRow(replayId)],
                 }).catch(() => {});
                 attachReplay(riskMsg, replayId, interaction, bet, userFilter, guildSettings, onWager);
@@ -458,10 +458,14 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
 
     collector.on('end', async (collected, _reason) => {
         if (collected.size > 0) return;
-        const lapsed = await payHand(userFilter, bet,
+        // A lapse pays what the session is worth: the stake before the first
+        // win, the cash-out after one. It used to pay the stake either way — so
+        // a lapse mid-streak threw the winnings away, and one after a certain
+        // call priced below the stake handed back more than the session held.
+        const lapsed = await payHand(userFilter, cashValue,
             { game: 'higherlower', handId, phase: 'timeout' });
         await interaction.editReply({
-            embeds:     [timeoutEmbed(interaction, current, bet, await settledBalance(userFilter, lapsed.balance), payoutNote(lapsed))],
+            embeds:     [timeoutEmbed(interaction, current, cashValue, streak, await settledBalance(userFilter, lapsed.balance), payoutNote(lapsed))],
             components: [],
         }).catch(() => {});
         releaseLock?.();

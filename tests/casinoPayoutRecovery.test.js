@@ -242,9 +242,9 @@ describe('a crash cash-out whose write does not land', () => {
     const crash    = require('../src/games/casino/crash');
     const { deleteLobby } = require('../src/utils/crashLobby');
 
-    // 0.99 / 0.2 = 4.95x, so the round runs long enough for a 2.00x auto
+    // 0.99 / (1 − 0.8) = 4.95x, so the round runs long enough for a 2.00x auto
     // cash-out to fire well before the bust.
-    const CRASH_AT_495 = 0.2;
+    const CRASH_AT_495 = 0.8;
     const CHANNEL_ID   = 'channel-1';
 
     /** Everyone whose `pendingCrashRefund` the round decided to write off. */
@@ -381,7 +381,7 @@ describe('a cash-out the player pressed for', () => {
     const crash = require('../src/games/casino/crash');
     const { deleteLobby } = require('../src/utils/crashLobby');
 
-    const CRASH_AT_495 = 0.2;
+    const CRASH_AT_495 = 0.8;
     const CHANNEL_ID   = 'channel-1';
     const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 
