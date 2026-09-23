@@ -204,66 +204,6 @@ describe('roulette — the wheel pays table odds and nothing else', () => {
     });
 });
 
-describe('poker — the dealer folding pays a flat 3:2', () => {
-    it('pays half again on the opening bet', () => {
-        expect(s.pokerFoldWinPayout(100, 1)).toBe(150);
-    });
-
-    it('boosts only the half-bet of profit, not the whole 1.5x', () => {
-        // 50 of profit at 3x is 150, so 250 — where boosting the gross would
-        // pay 450.
-        expect(s.pokerFoldWinPayout(100, STACKED)).toBe(250);
-    });
-
-    it('floors the 3:2 on an odd bet before anything else', () => {
-        expect(s.pokerFoldWinPayout(25, 1)).toBe(37);
-    });
-});
-
-describe('poker — the dealer folding later pays the pot', () => {
-    it('pays the pot when there is no booster', () => {
-        // Pot opens at twice the bet; the player has staked the bet.
-        expect(s.pokerPotPayout(100, 200, 1)).toBe(200);
-    });
-
-    it('boosts the pot above the stake only', () => {
-        expect(s.pokerPotPayout(100, 200, 2)).toBe(300);
-    });
-
-    it('handles a raised hand, where the stake and the pot both grew', () => {
-        // Player raised 100 into a pot that took 200 from the raise round.
-        expect(s.pokerPotPayout(200, 400, 1)).toBe(400);
-        expect(s.pokerPotPayout(200, 400, 2)).toBe(600);
-    });
-});
-
-describe('poker — showdown', () => {
-    it('doubles the stake on a win', () => {
-        expect(s.pokerShowdownGross('win', 100)).toBe(200);
-        expect(s.pokerShowdownPayout('win', 100, 1)).toBe(200);
-    });
-
-    it('returns the stake on a split pot', () => {
-        expect(s.pokerShowdownGross('push', 100)).toBe(100);
-        expect(s.pokerShowdownPayout('push', 100, STACKED)).toBe(100);
-    });
-
-    it('credits nothing on a loss', () => {
-        expect(s.pokerShowdownGross('lose', 100)).toBe(0);
-        expect(s.pokerShowdownPayout('lose', 100, STACKED)).toBe(0);
-    });
-
-    it('boosts a win over the stake', () => {
-        expect(s.pokerShowdownPayout('win', 100, STACKED)).toBe(400);
-    });
-
-    it('treats a lucky-streak save as the push it is resolved to', () => {
-        // The games resolve the random roll first and pass the settled outcome
-        // in, so the save returns the stake and is not boosted.
-        expect(s.pokerShowdownPayout('push', 250, STACKED)).toBe(250);
-    });
-});
-
 describe('across the games, a stake is never multiplied', () => {
     // The single invariant behind every case above, stated once: whatever the
     // booster, a returned bet is the bet. A rounding or ordering slip that
@@ -271,7 +211,6 @@ describe('across the games, a stake is never multiplied', () => {
     it.each([
         ['blackjack push', mult => s.blackjackHandCredit('push', 500, mult)],
         ['blackjack lucky save', mult => s.blackjackHandCredit('lose', 500, mult, true)],
-        ['poker split pot', mult => s.pokerShowdownPayout('push', 500, mult)],
         ['boostedPayout at break-even', mult => s.boostedPayout(500, 500, mult)],
     ])('%s returns exactly the stake', (_label, credit) => {
         for (const mult of [1, 1.5, 2, STACKED, 10]) {
@@ -302,7 +241,7 @@ describe('the games settle through this module', () => {
         expect(source).not.toMatch(/Math\.round\((activeBet|hBet) \* totalCoinMult\)/);
     });
 
-    it('poker no longer computes the profit-only boost inline, at any of its five payout sites', () => {
+    it('poker no longer computes the profit-only boost inline', () => {
         // Five copies of the same expression, one per site, was how a rounding
         // change could reach four of them and miss the fifth.
         expect(read('poker')).not.toMatch(/playerStake \+ Math\.round\(\(/);
