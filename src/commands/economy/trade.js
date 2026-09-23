@@ -9,7 +9,7 @@ const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { describeItem } = require('../../utils/itemDisplay');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { isSoulbound } = require('../../data/soulboundItems');
-const { resolveEffectType } = require('../../services/effectsService');
+const { resolveEffectType, isActiveEffect } = require('../../services/effectsService');
 const { accountAgeRefusal, frozenRefusal } = require('../../utils/coinTransfer');
 const { giftLimits } = require('../../utils/giftCaps');
 const { settleTrade, checkTradeBudgets } = require('../../utils/tradeEscrow');
@@ -45,7 +45,7 @@ function resolveItemForTrade(userDoc, typedItem, quantity, { shopItems = [], aiI
         return { error: `You only have **${held}×** ${label} in a single stack — not enough to trade ${quantity}.` };
     }
     const effectType = resolveEffectType(itemId);
-    if (effectType && (userDoc.activeEffects || []).some(e => e.type === effectType)) {
+    if (effectType && (userDoc.activeEffects || []).some(e => e.type === effectType && isActiveEffect(e))) {
         return { error: `You can't trade ${label} while it's active as an effect.` };
     }
     return { item: { itemId, quantity, value: Math.max(0, meta.value ?? 0) * quantity, name: meta.name, emoji: meta.emoji } };

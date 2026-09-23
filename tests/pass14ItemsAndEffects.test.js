@@ -222,8 +222,8 @@ describe('/use', () => {
         await use.execute(interaction);
 
         expect(slot('item_abc123').quantity).toBe(1);
-        expect(stored().paidPayouts.some(p => p.key === `use:${interaction.id}:restore`)).toBe(true);
-        expect(repliedText(interaction)).toContain('back in your inventory');
+        expect(stored().paidPayouts.some(p => p.key === `use:${interaction.id}:role-refund`)).toBe(true);
+        expect(repliedText(interaction)).toContain('was returned');
     });
 
     test('a restore that will not land is recorded as owed, and says so', async () => {
@@ -231,14 +231,14 @@ describe('/use', () => {
         mockGuilds.seed({ guildId: GUILD, shop: [{ name: 'VIP Pass', itemId: 'item_abc123', roleId: 'role-9' }] });
 
         const interaction = makeInteraction({ options: { item: 'item_abc123' } });
-        interaction.guild.members.fetch = jest.fn().mockImplementation(async () => {
-            mockUsers.reset();                           // the document is gone by the time it is returned
-            return { roles: { cache: { has: () => false }, add: jest.fn().mockRejectedValue(new Error('nope')) } };
-        });
+        // The document is gone by the time the item is returned: after the
+        // spend, when the role is refused.
+        const add = jest.fn().mockImplementation(async () => { mockUsers.reset(); throw new Error('nope'); });
+        interaction.guild.members.fetch = jest.fn().mockResolvedValue({ roles: { cache: { has: () => false }, add } });
         await use.execute(interaction);
 
         expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
-            payload: expect.objectContaining({ kind: 'items', itemId: 'item_abc123', payoutKey: `use:${interaction.id}:restore` }),
+            payload: expect.objectContaining({ kind: 'items', itemId: 'item_abc123', payoutKey: `use:${interaction.id}:role-refund` }),
         }));
         expect(repliedText(interaction)).toContain('recorded as owed');
     });
