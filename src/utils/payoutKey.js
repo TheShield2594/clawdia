@@ -1089,6 +1089,25 @@ function useItemRestorePayoutKey(interactionId) {
     return `use:${interactionId}:restore`;
 }
 
+/**
+ * The toll `/explore travel` hands back when the route it paid for could not be
+ * saved (#873, pass 17).
+ *
+ * The toll is a guarded debit read back, and the refund already read its own
+ * `matchedCount`, so it never announced a refund that did not happen. But it was
+ * a bare `$inc` with no key and no owed record. A refund that failed told the
+ * player "tell an admin — it is recoverable" while writing down nothing an admin
+ * or `payouts:replay` could act on, and a refund whose response was lost told
+ * them the coins were gone when they had come back. This is the pass-9 `/forge`
+ * finding, on the one explore path that takes coins.
+ *
+ * Keyed by the interaction, which names this attempt to open the route: a retry
+ * is a new interaction and refunds separately.
+ */
+function exploreUnlockRefundPayoutKey(interactionId) {
+    return `explore:unlock:${interactionId}:refund`;
+}
+
 module.exports = {
     gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
     questClaimPayoutKey, questRewardPayoutKey, tournamentEntryRefundPayoutKey, forgeRefundPayoutKey,
@@ -1108,6 +1127,7 @@ module.exports = {
     eventActivityPayoutKey, eventShopRefundPayoutKey,
     petBattlePayoutKey, petBattleRefundPayoutKey, petAdoptRefundPayoutKey,
     serverShopGrantPayoutKey, serverShopRefundPayoutKey, useItemRestorePayoutKey,
+    exploreUnlockRefundPayoutKey,
     payoutKeyGuard, payoutKeyAppendExpr, eventCurrencyCreditExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, creditEventCurrencyOnce, isDuplicateKeyError,
     RETENTION_DAYS, RETENTION_MS, KEY_CAP,

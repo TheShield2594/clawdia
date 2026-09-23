@@ -8,6 +8,8 @@ const User = require('../../../models/User');
 const { REGIONS } = require('../../../data/exploreData');
 const { isRegionInSeason, isRegionEnabled } = require('../../../services/exploreService');
 const { logTransaction } = require('../../../utils/logTransaction');
+const { creditCoinsOrOwe } = require('../../../utils/creditOrOwe');
+const { exploreUnlockRefundPayoutKey } = require('../../../utils/payoutKey');
 const { exploreRegionItemId } = require('../../../data/activityItems');
 const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
 const { loadContext } = require('./shared');
@@ -72,30 +74,29 @@ async function handleTravel(interaction) {
         await user.save();
     } catch (err) {
         console.error('[explore travel] save error:', err);
-        let refunded = false;
+        let refund = { credited: false, owed: false };
         if (unlockCharged) {
             // The toll is already gone; hand it back rather than charging for a
-            // route that was never opened.
-            // A resolved promise is not proof the coins went back — an update
-            // that matched nothing resolves just as happily. Only a matched
-            // document means the toll actually returned.
-            refunded = await User.updateOne(
+            // route that was never opened. Keyed and recorded as owed when it
+            // will not land (#873, pass 17): this used to be a bare `$inc` that
+            // read its own result back but wrote nothing down when it missed,
+            // while telling the player it was recoverable.
+            refund = await creditCoinsOrOwe(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: unlockCharged } },
-            ).then(res => (res?.matchedCount ?? 0) > 0).catch(refundErr => {
-                console.error('[explore travel] refund after failed save:', refundErr);
-                return false;
-            });
+                unlockCharged,
+                { payoutKey: exploreUnlockRefundPayoutKey(interaction.id), service: 'explore', jobName: 'unlockRefund' },
+            );
         }
-        return interaction.reply({
-            // Only promise the refund that actually landed. Saying "refunded"
-            // when the refund itself threw sends the player away satisfied while
-            // their coins are still gone.
-            content: unlockCharged && !refunded
-                ? `Something went wrong opening the route, and the **${currency}${unlockCharged.toLocaleString()}** taken could not be returned automatically. Tell an admin — it is recoverable.`
-                : 'Something went wrong opening the route — any coins taken were refunded. Please try again.',
-            flags: MessageFlags.Ephemeral,
-        });
+        let content = 'Something went wrong opening the route. Please try again.';
+        if (unlockCharged) {
+            // Only promise the refund that actually landed.
+            content = refund.credited
+                ? 'Something went wrong opening the route — your toll was refunded. Please try again.'
+                : refund.owed
+                    ? `Something went wrong opening the route, and the **${currency}${unlockCharged.toLocaleString()}** toll couldn't be returned just now. It has been recorded as owed and will be paid back once the problem clears — tell an admin if it isn't.`
+                    : `Something went wrong opening the route, and the **${currency}${unlockCharged.toLocaleString()}** toll could not be returned or recorded — please contact a server admin.`;
+        }
+        return interaction.reply({ content, flags: MessageFlags.Ephemeral });
     }
 
     // Logged after the save, not before: the failure path above hands the toll
