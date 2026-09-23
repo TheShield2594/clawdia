@@ -19,6 +19,9 @@
  */
 
 const { generateDailyMissions } = require('../data/seasonMissions');
+// The advance pipeline and the recorders live beside the User model, whose save
+// hooks commit what these functions record (#873, pass 19).
+const { missionAdvancePipeline, recordMissionDeal, recordMissionAdvance } = require('../models/seasonWrites');
 
 /** Midnight UTC of the day `now` falls in — when a mission set expires. */
 function missionDayStart(now = new Date()) {
@@ -27,7 +30,9 @@ function missionDayStart(now = new Date()) {
 
 /**
  * Deal a fresh set of daily missions if the stored ones are from an earlier day.
- * Mutates `user` in memory; the caller is responsible for saving.
+ * Mutates `user` in memory and records the hand; the User model's post-save
+ * hook deals it under the guarded rollover, so a hand another command dealt
+ * first stands (#873, pass 19).
  *
  * @returns {boolean} true if a new set was dealt
  */
@@ -41,6 +46,7 @@ function ensureMissions(user, now = new Date()) {
     user.seasonMissionsDate = today;
     user.markModified('seasonMissions');
     user.markModified('seasonMissionsDate');
+    recordMissionDeal(user, user.seasonMissions, today);
     return true;
 }
 
@@ -49,7 +55,11 @@ function ensureMissions(user, now = new Date()) {
  *
  * Mutates `user` in memory and does not save — callers are already saving the
  * user document at the end of the action that triggered this, and a save here
- * would race the read-modify-write they are in the middle of.
+ * would race the read-modify-write they are in the middle of. The in-memory
+ * copy answers "which missions did this finish"; the stored copy is advanced by
+ * the recorded step through `missionAdvancePipeline` once that save lands, so a
+ * mission another command advanced in between is added to, not overwritten
+ * (#873, pass 19).
  *
  * @param {object} user           - user document (season missions live on it)
  * @param {string} event          - mission event key, e.g. 'hunt' | 'explore'
@@ -78,58 +88,11 @@ function recordMissionProgress(user, event, amount = 1, guildSettings = null) {
             finished.push(mission);
         }
     }
-    if (touched) user.markModified('seasonMissions');
+    if (touched) {
+        user.markModified('seasonMissions');
+        recordMissionAdvance(user, event, step);
+    }
     return finished;
-}
-
-/**
- * The mission-advancing half of `recordMissionProgress`, expressed as an
- * aggregation pipeline so Mongo applies it to whatever the document holds at
- * write time.
- *
- * The obvious implementation — read the array, mutate it, `$set` it back — loses
- * a race it is guaranteed to enter. Casino bets, crimes and quiz answers all
- * advance missions fire-and-forget, so two can be in flight at once and the
- * second write silently drops the first one's progress. Worse, `/season
- * claim-mission` marks a mission `claimed` with its own save: land that between
- * this read and this write and the flag is erased, and the same mission can be
- * claimed a second time for another payout.
- *
- * `$mergeObjects` touches only `progress` and `completed` on the missions
- * listening for this event, so `claimed` and every other field survive whatever
- * else is writing at the same moment.
- */
-function missionAdvancePipeline(event, step) {
-    return [{
-        $set: {
-            seasonMissions: {
-                $map: {
-                    input: { $ifNull: ['$seasonMissions', []] },
-                    as: 'm',
-                    in: {
-                        $cond: [
-                            { $and: [
-                                { $eq: ['$$m.event', event] },
-                                { $ne: ['$$m.completed', true] },
-                            ] },
-                            { $let: {
-                                vars: { next: { $add: [{ $ifNull: ['$$m.progress', 0] }, step] } },
-                                in: {
-                                    $mergeObjects: ['$$m', {
-                                        // min(next, target) and next >= target, in the
-                                        // operators Mongo and the test evaluator share.
-                                        progress:  { $cond: [{ $gt: ['$$next', '$$m.target'] }, '$$m.target', '$$next'] },
-                                        completed: { $not: [{ $gt: ['$$m.target', '$$next'] }] },
-                                    }],
-                                },
-                            } },
-                            '$$m',
-                        ],
-                    },
-                },
-            },
-        },
-    }];
 }
 
 /**
@@ -197,7 +160,11 @@ async function advanceMissions(Model, filter, event, amount = 1, guildSettings =
     // `new: false` returns the pre-image, which is the only way to tell which
     // missions this call is the one to finish — the update itself is applied by
     // Mongo, so the post-image alone cannot say who got there first.
-    const before = await Model.findOneAndUpdate(filter, missionAdvancePipeline(event, step), { new: false })
+    // `updatePipeline: true` is Mongoose 9's opt-in for an array update. Without
+    // it this threw before reaching the server, the callers' `.catch` swallowed
+    // it, and no /crime, /quiz, /casino or duel mission ever advanced (#873,
+    // pass 19). tests/updatePipelineOption.test.js now sees builder calls too.
+    const before = await Model.findOneAndUpdate(filter, missionAdvancePipeline(event, step), { new: false, updatePipeline: true })
         .catch(err => {
             console.error('[seasonMissions] write failed:', err);
             return null;

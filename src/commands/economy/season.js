@@ -17,15 +17,15 @@ const { seasonTierCoinPayoutKey, seasonTierItemPayoutKey, seasonClaimAllCoinsPay
 const { packFieldsCapped } = require('../../utils/embedFields');
 const { seasonLabel, SEASON_NAME_MAX } = require('../../utils/seasonLabel');
 const { resolveOneSeason } = require('../../services/economySeasonService');
+const { freshSeason, recordSeasonReset, recordTierClaim, claimMissionSlot, resetStaleSeason } = require('../../models/seasonWrites');
 
-// Reset a user's season sub-document to the fresh shape when their stored
-// seasonId is stale (a new season started). Prevents carrying old xp / claimed
-// tiers / premium across seasons. Returns true if a reset happened.
+// Reset a stale season sub-document (a new season started), so no xp, claimed
+// tiers or premium carry across seasons. Returns true if a reset happened.
 function normalizeSeason(user, seasonId) {
     if (!seasonId) return false;
     if (user.season?.seasonId === seasonId) return false;
-    user.season = { seasonId, xp: 0, tier: 0, claimedTiers: [], premium: false, claimedPremiumTiers: [], weekXp: 0, weekStart: null };
-    user.markModified('season');
+    user.season = freshSeason(seasonId);
+    recordSeasonReset(user, seasonId); // committed after the save (#873, pass 19)
     return true;
 }
 
@@ -208,9 +208,9 @@ async function executeClaim(interaction) {
 
     if (reward.coins > 0) user.balance += reward.coins;
     (wantsPremium ? user.season.claimedPremiumTiers : user.season.claimedTiers).push(tier);
-    user.markModified('season');
-
     const track = wantsPremium ? 'premium' : 'free';
+    recordTierClaim(user, season.seasonId, track, tier); // an $addToSet after the save (#873, pass 19)
+
     let coinsOwed = 0;
     try {
         // The `payoutKey` makes the owed record replayable and the credit
@@ -409,16 +409,18 @@ async function executeClaimMission(interaction) {
     if (!isDone) return interaction.reply({ content: 'Mission not completed yet.', flags: MessageFlags.Ephemeral });
     if (mission.claimed) return interaction.reply({ content: 'Already claimed!', flags: MessageFlags.Ephemeral });
 
+    // Its own guarded write; the missions array no longer rides the save (#873, pass 19).
+    const filter = { userId: interaction.user.id, guildId: interaction.guild.id };
+    if (!await claimMissionSlot(User, filter, missionIndex, mission, user.seasonMissionsDate)) {
+        return interaction.reply({ content: 'Already claimed!', flags: MessageFlags.Ephemeral });
+    }
     const balanceAtLoad = user.balance ?? 0;
-
     user.seasonMissions[missionIndex].claimed = true;
     normalizeSeason(user, season.seasonId);
     // Route through the shared grant so the weekly XP cap and rollover apply.
     // awardSeasonXp returns the actual granted amount (may be < mission.seasonXp if capped).
     const grantedXp = await awardSeasonXp(user, mission.seasonXp, guildSettings);
     user.balance += mission.coinReward;
-    user.markModified('seasonMissions');
-    user.markModified('season');
 
     // Names this mission instance for the key: the slot in a set dealt fresh
     // each UTC day, so today's slot 2 and tomorrow's are different credits (#873).
@@ -501,14 +503,9 @@ async function executeClaimAll(interaction) {
             itemsToGrant.push({ tier: tierDef.tier, itemId: reward.itemId });
         }
 
-        if (wantsPremium) {
-            user.season.claimedPremiumTiers.push(tierDef.tier);
-        } else {
-            user.season.claimedTiers.push(tierDef.tier);
-        }
+        (wantsPremium ? user.season.claimedPremiumTiers : user.season.claimedTiers).push(tierDef.tier);
+        recordTierClaim(user, season.seasonId, wantsPremium ? 'premium' : 'free', tierDef.tier);
     }
-
-    user.markModified('season');
 
     // Names this batch for the coin key: the exact set of tiers claimed, so two
     // concurrent claim-alls compute the same key and the second is a no-op (#873).
@@ -880,11 +877,14 @@ async function executeTierSkip(interaction) {
         return interaction.reply({ content: `You don't have a **Tier Skip Token** in your inventory. Purchase one from the event shop.`, flags: MessageFlags.Ephemeral });
     }
 
-    // Atomically consume the token and grant one full tier of XP
+    // Atomically consume the token and grant a tier of XP — to *this* season: a
+    // stale pass is reset first, or the XP landed on it and died there (#873, pass 19).
+    await resetStaleSeason(User, { userId: interaction.user.id, guildId: interaction.guild.id }, season.seasonId);
     const updatedUser = await User.findOneAndUpdate(
         {
             userId: interaction.user.id,
             guildId: interaction.guild.id,
+            'season.seasonId': season.seasonId,
             inventory: { $elemMatch: { itemId: invEntry.itemId, quantity: { $gt: 0 } } }
         },
         {

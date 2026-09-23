@@ -231,7 +231,9 @@ function applyUpdate(doc, update, { inserted = false, positional = {}, arrayFilt
     }
     for (const [path, value] of Object.entries(update.$addToSet ?? {})) {
         const array = getPath(doc, path) ?? [];
-        if (!array.some(el => equals(el, value))) array.push(value);
+        // `{ $each: [...] }` adds each value the set does not already hold.
+        const values = isPlainObject(value) && Array.isArray(value.$each) ? value.$each : [value];
+        for (const v of values) if (!array.some(el => equals(el, v))) array.push(v);
         setPath(doc, path, array);
     }
     for (const [path, condition] of Object.entries(update.$pull ?? {})) {

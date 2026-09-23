@@ -1,5 +1,6 @@
 const { Schema, model } = require('mongoose');
 const { detachEffectWrites, applyEffectSpends } = require('./effectSpends');
+const { detachSeasonWrites, applySeasonWrites } = require('./seasonWrites');
 
 // How many starved pets are retained for revival, most recent first.
 const DECEASED_PET_LIMIT = 5;
@@ -469,20 +470,36 @@ userSchema.pre('save', function() {
     // for the post-save hook below instead.
     this.$locals.pendingEffectSpends = detachEffectWrites(this);
 
+    // `season`, `seasonMissions` and `seasonMissionsDate` likewise (#873, pass
+    // 19): the flows that grant season XP, advance a mission or claim a tier
+    // record what they did, and the post-save hook commits it as guarded writes
+    // (models/seasonWrites.js) rather than writing back the snapshot — which
+    // erased a /season unlock, a Tier Skip Token or an atomic mission advance
+    // that landed in between.
+    this.$locals.pendingSeasonWrites = detachSeasonWrites(this);
+
     const ids = (this.achievements || []).map(a => a.id);
     if (new Set(ids).size !== ids.length) {
         throw new Error('User achievements contains duplicate id values');
     }
 });
 
-// Commit the charge spends the pre-save hook held back, now that the save has
-// landed — save first, then spend, as utils/balanceDelta.js does for coins, so a
-// save that fails spends nothing. `applyEffectSpends` never throws.
+// Commit what the pre-save hook held back — effect charge spends, and the season
+// XP, tier claims and mission progress — now that the save has landed: save
+// first, then these, as utils/balanceDelta.js does for coins, so a save that
+// fails commits nothing. Neither `apply*` function throws.
 userSchema.post('save', async function() {
+    const filter = { userId: this.userId, guildId: this.guildId };
     const spends = this.$locals.pendingEffectSpends;
-    if (!spends) return;
-    this.$locals.pendingEffectSpends = null;
-    await applyEffectSpends(this.constructor, { userId: this.userId, guildId: this.guildId }, spends);
+    if (spends) {
+        this.$locals.pendingEffectSpends = null;
+        await applyEffectSpends(this.constructor, filter, spends);
+    }
+    const seasonOps = this.$locals.pendingSeasonWrites;
+    if (seasonOps) {
+        this.$locals.pendingSeasonWrites = null;
+        await applySeasonWrites(this.constructor, filter, seasonOps);
+    }
 });
 
 module.exports = model('User', userSchema);

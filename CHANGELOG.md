@@ -14,6 +14,49 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.11] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 19 (#873) — season XP, tier claims and daily missions no
+longer ride `save()`. This is the bound pass 18 left, and the pass-15 effects
+fix applied to two more fields.
+
+- **`/crime`, `/quiz`, `/casino` and duel wins never advanced a mission.**
+  `advanceMissions` passed its pipeline update without Mongoose 9's
+  `updatePipeline: true` opt-in, so it threw before reaching the server, and
+  all four callers swallowed the error in a `.catch`. A daily mission for any
+  of those four events could never be completed or claimed.
+  `tests/updatePipelineOption.test.js` missed it because it only recognised a
+  pipeline written as a literal or held in a variable, not one returned by a
+  builder call; it now recognises `…Pipeline(...)` calls too.
+- **A save could erase a `/season unlock`.** `/season claim` and `claim-all`
+  marked the whole `season` sub-document modified, so their save wrote it back
+  as read: `premium: false`, over an unlock that had just set it true in the
+  same write that took the coins. Quest rewards (season XP) and grind-command
+  mission progress rode the same snapshot saves, over a Tier Skip Token's XP
+  and over missions advanced atomically. The `User` model's pre-save hook now
+  keeps `season`, `seasonMissions` and `seasonMissionsDate` out of every save
+  of an existing document. The flows record what they did, and the post-save
+  hook commits it as guarded writes (`models/seasonWrites.js`):
+  - XP is granted server-side, with the weekly cap applied against the stored
+    week;
+  - mission progress is added through the same pipeline `advanceMissions`
+    uses;
+  - today's hand is dealt under the guarded rollover;
+  - tier claims are `$addToSet`s on the current season;
+  - `/season claim-mission` claims its slot in its own guarded write.
+- **A document stored without these fields saved their defaults.** Mongoose
+  fills a schema default on load, and saves it. Every user an upsert created
+  has no `seasonMissions` until their first deal, so any save wrote `[]` over
+  a hand another command had just dealt. Default-state paths are detached too,
+  and the same fix is applied to pass 15's `activeEffects`.
+- **`/season tier-skip` could spend a token on the wrong season.** It added a
+  tier of XP to whatever season sub-document was stored. For a player whose
+  pass was left over from an earlier season, that was the old season, which
+  the next claim wiped, token and all. The stale season is now reset first,
+  and the grant requires the current season.
+
 ## [4.13.10] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

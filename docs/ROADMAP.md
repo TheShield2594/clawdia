@@ -22,7 +22,7 @@ coverage, which is [#873](https://github.com/TheShield2594/clawdia/issues/873):
 audit coverage is widest exactly where the risk is not.
 
 So net-new game features wait, and every currency-mutation path gets the
-treatment the nine long-stable subsystems got. Eighteen passes have landed under
+treatment the nine long-stable subsystems got. Nineteen passes have landed under
 that decision already — `/duel` escrow and the `/heist` and `/syndicate` crew
 splits in v4.5.2, the casino's progressive jackpot in v4.6.0, `/gift` and
 `/market` in v4.6.1, the casino's hand payouts in v4.7.0, the core currency
@@ -39,8 +39,8 @@ of the casino (`confirmBet`, the bet guards, the crash restart refund and the
 leaderboard writes) in v4.13.4, `/explore`'s event-currency drop in
 v4.13.5, and the items, effects and server shop (`/use`, `/shop buy`, the event
 shop's effect purchases) in v4.13.6, the effect consumers in v4.13.7, and the
-map views in v4.13.8, the `/explore` views in v4.13.9, and the season pass's views in v4.13.10 —
-and between them they found the same defect on
+map views in v4.13.8, the `/explore` views in v4.13.9, the season pass's views in v4.13.10, and season XP,
+tier claims and mission progress in v4.13.11 — and between them they found the same defect on
 path after path: a
 credit or grant written without reading the write back and without a key to
 replay it. That is
@@ -96,7 +96,7 @@ each pass found; its
 [Not yet reviewed](AUDIT_LOG.md#not-yet-reviewed) section is the queue. That list
 is long and mostly unordered, deliberately — it is a survey, not a plan. The
 order this roadmap commits to, within the economy, is money-moving first.
-Eighteen passes have landed against it — `/duel` escrow and the crew splits, the
+Nineteen passes have landed against it — `/duel` escrow and the crew splits, the
 progressive jackpot, `/gift` and `/market`, the casino's hand payouts and crash
 refunds, the core currency commands, the gathering-loop payouts (`hunt`,
 `fish`, `mine`, `explore`, plus the `/explore` relic and `/use` loot-box item
@@ -118,13 +118,7 @@ could fail — and **the effect consumers**, which turned out to be every
 `save()` of a user: `activeEffects` is now kept out of `save()` by the model and
 charges are committed as guarded writes — which leaves:
 
-1. **mission progress and season XP through snapshot saves** (pass 18's bound).
-   The grind commands and `claim-mission` advance `seasonMissions` and grant
-   `season` XP on the loaded document and `save()` both back whole, over any
-   mission `/crime`, `/quiz`, `/casino` or a duel advanced atomically in
-   between. The coins are keyed (pass 7); progress and XP can be lost. This is
-   the pass-15 effects shape on two other arrays, and wants the same fix.
-2. the rest of the non-payout surface: the gathering surface pass 9 did not need
+1. the rest of the non-payout surface: the gathering surface pass 9 did not need
    to touch. The map views, `/explore`'s views and the season pass's views are
    done (passes 16–18). Every currency credit found so far is keyed, but pass 14
    found one in an area the roadmap had listed as non-payout, so "nothing
