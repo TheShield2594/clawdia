@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and fifteen passes over the
+long-stable, low-churn subsystems have been audited, and sixteen passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -16,8 +16,8 @@ tournament's entry fee, and `/forge`), the `/pet` command's payouts, the
 quest-reward credit at every caller, and the rest of the casino (`confirmBet`,
 the bet guards, the crash restart refund, and the games' leaderboard and stat
 writes), `/explore`'s event-currency drop, and the items, effects and server
-shop (`/use`, `effectsService`, `/inventory`, `/shop buy`), and the effect
-consumers (#873). The majority of the
+shop (`/use`, `effectsService`, `/inventory`, `/shop buy`), the effect
+consumers, and the map views (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -1813,6 +1813,63 @@ and the read-only uses in `gift.js`, `trade.js`, `balance.js`, `rank.js`,
 
 ---
 
+## Economy — The Map Views
+
+**Status: Audited — all findings resolved** ✓
+
+The sixteenth pass of the economy audit #873: `/explore map` and `/mine map`,
+the "map view" the not-yet-reviewed list carried for the gathering commands.
+Both are **read-only**. Neither handler writes to the database.
+`ensureExploreData`, `ensureMineData` and `attachGrind` normalise the loaded
+document in memory, and nothing saves it. So this pass had no money-moving
+path to find. It checked what a read-only view can still get wrong:
+
+- **Overflowing Discord's limits.** discord.js throws on an over-long embed
+  rather than truncating it, which is how one long event-shop blurb once took
+  down a whole page.
+- **Disagreeing with the command it describes.**
+- **Showing one member's data under another's name.**
+
+**Files reviewed/fixed:**
+- `src/commands/economy/explore/map.js`
+- `src/commands/economy/mine/map.js`
+- `src/services/exploreService.js` (`renderMap`)
+- `src/services/mineService.js` (`renderMineMap`, `getRaidableMaterials`)
+- `tests/mineMapCommand.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | `/mine map`'s "you haven't started mining yet" prompt fired only when there was no user document at all. Every member who has chatted has one, so the gate almost never fired: a player who had never dug got a blank 10×10 grid, a pickaxe in the middle and "0/100 cells explored" | Gated on `mining.totalMines`, which every dig increments whether it succeeds or fails. This is the same gate `/explore map` puts on `totalExpeditions`. `mineMapCommand.test.js` adds the case (a user document with no digs gets the prompt, not the grid), which fails against the old gate; the render tests' fixture now carries one dig | `mine/map.js`, `tests/` |
+
+**Reviewed and found sound**, recorded so the next pass does not re-derive it:
+
+- **Neither view writes anything.** The in-memory normalisation is never saved,
+  so it cannot flatten a concurrent write (the pass-15 hazard).
+- **Discord limits.** `/explore map`'s description has one entry per region.
+  With every one of the 10 regions charted, surveyed and in season, under each
+  of the five seasonal events, it measures about 1,300 characters against the
+  4,096 limit. `/mine map`'s grid is a fixed 10×10. Its "Exposed to Raiders"
+  field is capped at five materials (`RAID_MAX_MATERIAL_TYPES`), whose longest
+  display name is 14 characters, against the 1,024 limit.
+- **The map agrees with the raid.** "Exposed to Raiders" is
+  `getRaidableMaterials`, the same list `/mine raid`'s `planRaidHaul` takes from,
+  with the same `RAID_MAX_PER_MATERIAL` ceiling it quotes. The Mine Lock line
+  reads the same `mineLockActive` flag the raid claims. `/mine shop use
+  item:mine_lock`, the command it tells players to run, exists with that option
+  and choice.
+- **Depth.** `activeDepth` is stored as a depth id, and `DEPTHS` is keyed by id.
+- **Whose map it is.** Both render only the invoking member's own data under
+  their own name. `explore/index.js` exports `handleMap` "for sibling
+  commands", but nothing outside `explore/` calls it.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -1822,7 +1879,7 @@ wide, and it is widest exactly where the risk is.
 
 **Economy** — the largest uncovered area:
 
-- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. `/explore`'s while-an-event-runs **event-currency drop** is audited above (pass 13). Still not reviewed: prestige (reviewed sound in pass 7) and the map view
+- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. `/explore`'s while-an-event-runs **event-currency drop** is audited above (pass 13). The map views (`/explore map`, `/mine map`) are audited above (pass 16). Still not reviewed: prestige (reviewed sound in pass 7), and the rest of `explore/`'s views (travel, profile, journal, regions, relics)
 - `pet` (`petService.js`, `pet/`) — the `/pet` command's **PvP-battle winner payout, the battle escrow refunds and the adopt-fee refund** are audited above (pass 10, which also split `pet.js` into the `pet/` folder), alongside the pet **drops** the gathering runs grant, found sound in pass 9. The Pet-of-the-Week reward was reviewed and found sound. The pet-care **quest credits** (`/pet feed`, `play`, `rest` and the battle care rewards) are audited above (pass 11), keyed alongside every other caller of the shared `awardQuest` hook
 - `use` / items / effects — audited above: the seasonal loot-box item grant (pass 6), and `effectsService.js`, `use.js`, `inventory.js` and `/shop buy` (pass 14). The effect **consumers** (`/rob`, `/crime`, `/hunt`, the gathering yield charges, `messageCreate`'s streak shield) and every other reader and writer of `activeEffects` are audited above (pass 15). `shop.js`'s view and trends builders were read for writes only
 - casino (`src/games/casino/*`, `casino.js`) — the progressive jackpot (pass 2),
@@ -1860,5 +1917,6 @@ gathering-loop payouts on 2026-09-18; the progression and group/PvP payouts on
 commands' non-payout surface on 2026-09-22; the `/pet` command's payouts on
 2026-09-22; the quest-reward credit on 2026-09-22; the rest of the casino on
 2026-09-22; the `/explore` event-currency drop on 2026-09-23; the items, effects and
-server shop on 2026-09-23; and the effect consumers on 2026-09-23. "Not yet reviewed" carries no review
+server shop on 2026-09-23; the effect consumers on 2026-09-23; and the map views
+on 2026-09-23. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*

@@ -18,13 +18,18 @@ async function handleMap(interaction) {
     }
 
     const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-    if (!user) {
+    await attachGrind(user);
+    // Gated on having dug, not on having a user document (#873, pass 16): every
+    // member who has chatted has one, so the old `!user` check almost never
+    // fired and a player who had never mined got a blank grid, a pickaxe in the
+    // middle and "0/100 cells explored" instead of being pointed at /mine dig —
+    // the same gate /explore map puts on totalExpeditions.
+    if (!user?.mining?.totalMines) {
         return interaction.reply({
             content: "You haven't started mining yet! Use `/mine dig` to begin.",
             flags: MessageFlags.Ephemeral
         });
     }
-    await attachGrind(user);
     ensureMineData(user);
     const m = user.mining;
 
