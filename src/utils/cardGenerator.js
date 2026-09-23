@@ -23,6 +23,7 @@ const { ensureFontsRegistered } = require('./registerFonts');
 // The encode must not be the synchronous one (#592). See canvasEncode.js and
 // the note at the top of this file.
 const { encodeCanvas } = require('./canvasEncode');
+const { achievementTier } = require('./achievementTier');
 
 ensureFontsRegistered();
 
@@ -534,17 +535,11 @@ function _drawAchievementIcon(ctx, x, y, size, tierColor) {
     px([[13,1],[14,2],[13,3],[12,2]], goldLight);
 }
 
-function _achTier(xpReward) {
-    if (!xpReward || xpReward <= 50)  return { label: 'Bronze',   color: '#cd7f32' };
-    if (xpReward <= 200)              return { label: 'Silver',   color: '#c0c0c0' };
-    if (xpReward <= 500)              return { label: 'Gold',     color: '#ffd700' };
-    return                                   { label: 'Platinum', color: '#e5e4e2' };
-}
-
 /**
- * The 520×110 achievement toast. The XP reward picks the tier, which picks the
- * colour. The icon slot shows the achievement's badge art when one is passed,
- * and otherwise the pixel trophy tinted to the tier.
+ * The 520×110 achievement toast. The XP reward picks the rarity tier
+ * (src/utils/achievementTier.js), which sets the label and stripe colour. The
+ * icon slot shows the achievement's badge art when one is passed, and otherwise
+ * the pixel trophy tinted to the tier.
  *
  * @param {string} text the achievement's name
  * @param {string} description
@@ -556,7 +551,7 @@ async function createAchievementCard(text, description, xpReward, iconArt = null
     const W = 520, H = 110, ICON_SIZE = 58, PAD = 16;
     const canvas = createCanvas(W, H);
     const ctx    = canvas.getContext('2d');
-    const tier   = _achTier(xpReward);
+    const tier   = achievementTier(xpReward);
 
     ctx.fillStyle = '#3c3c3c';
     ctx.fillRect(0, 0, W, H);

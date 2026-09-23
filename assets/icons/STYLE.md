@@ -348,9 +348,9 @@ Price text across every banner is gold `#f1c40f`.
   `ACHIEVEMENT_STYLE`/`achievementPrompt` in `build-manifest.mjs`: a round medal
   badge with one symbolic subject inside, on top of the B3 rim + flat shading,
   under a bundle-only `achievement:<id>` namespace. Rarity comes from `xpReward`
-  on the same breakpoints as `getTierColor()` (`src/services/achievementService.js`),
-  which lines up with the rim palette; no built-in achievement currently falls in
-  the Epic band. The Bronze/Silver/Gold ladders (hunter, angler, miner, gambler)
+  via the shared scale in `src/utils/achievementTier.js` — the same one that sets
+  the unlock card's tier label/stripe and the embed colour — in the rim palette's
+  hexes; no built-in achievement currently falls in the Epic band. The Bronze/Silver/Gold ladders (hunter, angler, miner, gambler)
   share one silhouette per ladder via `*_BADGE(metal)` so later tiers match.
   Secret achievements get art too, but it must only render **after** the
   achievement is earned — never in a locked list or on the dashboard.

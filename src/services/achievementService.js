@@ -4,6 +4,7 @@ const { ACHIEVEMENTS } = require('../data/achievements');
 const { delay } = require('../utils/delay');
 const { createAchievementCard } = require('../utils/cardGenerator');
 const { getAchievementArt } = require('../utils/achievementArt');
+const { achievementTier } = require('../utils/achievementTier');
 const COLORS = require('../utils/embedColors');
 
 /**
@@ -108,13 +109,9 @@ async function checkAndAwardAtomic(User, filter, user, guildSettings) {
     return wrote > 0 ? newlyEarned : [];
 }
 
-// XP → embed color tier
+// Embed colour from the shared rarity scale, so it matches the card and badge rim.
 function getTierColor(xpReward) {
-    if (!xpReward || xpReward <= 50)  return 0x9e9e9e; // common
-    if (xpReward <= 200)              return 0x4caf50; // uncommon
-    if (xpReward <= 500)              return 0x2196f3; // rare
-    if (xpReward <= 999)              return 0x9c27b0; // epic
-    return 0xFFD700;                                    // legendary
+    return parseInt(achievementTier(xpReward).color.slice(1), 16);
 }
 
 // XP + secret flag → announcement tier

@@ -422,8 +422,9 @@ explore.RELIC_LIST.forEach((r) => add(`relic:${r.slug}`, RELIC_RARITY[r.rarity],
 // warning"), so they don't fit the single-object item framing. They get a round
 // medal-badge emblem with one symbolic subject inside — the achievement analog
 // of the zone/region "round scene emblem" — on top of the B3 rim + flat shading.
-// Rarity comes from xpReward on the same breakpoints as getTierColor() in
-// src/services/achievementService.js, which lines up with the rim palette.
+// Rarity comes from xpReward via the shared scale in src/utils/achievementTier.js
+// (also the unlock card's label and the embed colour), which lines up with the
+// rim palette.
 // Subjects are filled in as they're generated (issue: remaining achievement
 // icons). Secret achievements do get art, but it must only ever render after the
 // achievement is earned — a locked list or dashboard must not show it.
@@ -433,13 +434,10 @@ const ACHIEVEMENT_STYLE = (rarityName) => {
     return `Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick ${rim} rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size.`;
 };
 const achievementPrompt = (subject, rarityName) => `Achievement badge icon: ${subject} ${ACHIEVEMENT_STYLE(rarityName)}`;
-const achievementRarity = (xp) => {
-    if (!xp || xp <= 50) return 'Common';
-    if (xp <= 200) return 'Uncommon';
-    if (xp <= 500) return 'Rare';
-    if (xp <= 999) return 'Epic';
-    return 'Legendary';
-};
+// The shared achievement rarity scale (src/utils/achievementTier.js): the same
+// one the unlock card and embed colour use, so the rim always matches them.
+const { achievementTier } = require('../../src/utils/achievementTier.js');
+const achievementRarity = (xp) => achievementTier(xp).label;
 // Bronze/Silver/Gold ladders share one silhouette (STYLE.md §4): only the
 // metal changes, so later tiers match the ones already generated.
 const MINER_BADGE   = (metal) => `a crossed pair of iron pickaxes behind a large raw ${metal} nugget glinting in a rocky cave wall.`;

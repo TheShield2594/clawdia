@@ -30,11 +30,13 @@ describe('the achievement badge catalogue', () => {
         for (const key of achievementKeys(Object.keys(iconMap.items))) expect(prompted.has(key)).toBe(true);
     });
 
-    test('the rim follows the same xpReward breakpoints as the unlock embed colour', () => {
-        const rarity = xp => (!xp || xp <= 50 ? 'Common' : xp <= 200 ? 'Uncommon' : xp <= 500 ? 'Rare' : xp <= 999 ? 'Epic' : 'Legendary');
+    test('the rim is the shared tier scale the card label and embed colour use', () => {
+        const { achievementTier } = require('../src/utils/achievementTier');
         for (const m of manifest.filter(e => e.key.startsWith('achievement:'))) {
             const def = ACHIEVEMENTS.find(a => `achievement:${a.id}` === m.key);
-            expect(m.rarity).toBe(rarity(def.xpReward));
+            const tier = achievementTier(def.xpReward);
+            expect(m.rarity).toBe(tier.label);
+            expect(m.rimHex.toUpperCase()).toBe(tier.color.toUpperCase());
         }
     });
 });
@@ -108,5 +110,18 @@ describe('createAchievementCard icon slot', () => {
         expect(trophy).not.toEqual([255, 0, 255, 255]);
         const broken = await slotPixel(await createAchievementCard('Legend', 'Reach level 100', 1500, Buffer.from('not a png')));
         expect(broken).toEqual(trophy);
+    });
+});
+
+describe('achievementTier', () => {
+    const { achievementTier } = require('../src/utils/achievementTier');
+
+    test('one Common→Legendary scale on the xpReward breakpoints', () => {
+        const label = xp => achievementTier(xp).label;
+        expect([undefined, 0, 50].map(label)).toEqual(['Common', 'Common', 'Common']);
+        expect([51, 200].map(label)).toEqual(['Uncommon', 'Uncommon']);
+        expect([201, 500].map(label)).toEqual(['Rare', 'Rare']);
+        expect([501, 999].map(label)).toEqual(['Epic', 'Epic']);
+        expect([1000, 2000].map(label)).toEqual(['Legendary', 'Legendary']);
     });
 });
