@@ -21,4 +21,15 @@ async function loadAiItems(itemIds) {
     }
 }
 
-module.exports = { loadAiItems };
+/**
+ * A describer for a batch of item ids: `describeItem` with the guild's shop
+ * list and the AiItem documents for any forged ids, looked up once for the
+ * whole batch rather than once per label.
+ */
+async function itemDescriber(itemIds, shopItems = []) {
+    const { describeItem } = require('./itemDisplay');
+    const aiItems = await loadAiItems(itemIds);
+    return id => describeItem(id, { shopItems, aiItem: aiItems[id] });
+}
+
+module.exports = { loadAiItems, itemDescriber };

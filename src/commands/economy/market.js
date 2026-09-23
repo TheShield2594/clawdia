@@ -17,8 +17,10 @@ const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { isSoulbound } = require('../../data/soulboundItems');
-const { describeItem } = require('../../utils/itemDisplay');
-const { loadAiItems } = require('../../utils/aiItemLookup');
+// Every label in this file goes through a batch describer, so a forged item
+// reads as its name rather than `ai_1787098249128_rg760`.
+const { itemDescriber } = require('../../utils/aiItemLookup');
+const { recordSale, priceSnapshot, shortHint, priceCheck } = require('../../services/marketPriceService');
 
 const MAX_LISTINGS_PER_USER = 5;
 // The slots a seller's listings occupy, 1-based. Each listing carries the one it
@@ -37,17 +39,6 @@ const SORT_PRICE  = 'price';
 // The forge mints Legendary, a tier above the shop's five; rank it on top
 // rather than letting it fall to the bottom with the unknowns.
 const RARITY_RANK = Object.fromEntries([...RARITY_ORDER, 'Legendary'].map((r, i) => [r, i]));
-
-/**
- * A describer for a batch of item ids: the guild's shop names plus the AiItem
- * documents for any forged ids, looked up once for the batch. Every label in
- * this file goes through one of these, so a forged item reads as its name
- * rather than `ai_1787098249128_rg760`.
- */
-async function itemDescriber(itemIds, shopItems = []) {
-    const aiItems = await loadAiItems(itemIds);
-    return id => describeItem(id, { shopItems, aiItem: aiItems[id] });
-}
 
 /** `🍀 **Lucky Charm**` — how an item is named inside a sentence. */
 const itemLabel = meta => `${meta.emoji} **${meta.name}**`;
@@ -152,16 +143,26 @@ async function inventoryChoices(interaction, typed) {
         getGuildSettings(interaction.guild.id),
     ]);
     const held     = (seller?.inventory ?? []).filter(e => e.quantity > 0 && !isSoulbound(e.itemId));
-    const describe = await itemDescriber(held.map(e => e.itemId), guildSettings?.shop ?? []);
+    const heldIds  = held.map(e => e.itemId);
+    const currency = guildSettings?.economy?.currency || '💰';
+    // The seller's price comes next, so the price hint belongs here.
+    const [describe, prices] = await Promise.all([
+        itemDescriber(heldIds, guildSettings?.shop ?? []),
+        priceSnapshot(interaction.guild.id, heldIds, { excludeSellerId: interaction.user.id }),
+    ]);
 
     const items = held
         .map(e => ({ quantity: e.quantity, ...describe(e.itemId) }))
         .filter(i => !typed || i.name.toLowerCase().includes(typed) || i.itemId.toLowerCase().includes(typed));
 
-    return rankByName(items, typed).slice(0, 25).map(i => ({
-        name: `${i.emoji} ${i.name} — ${i.quantity} held${i.rarity ? ` · ${i.rarityEmoji} ${i.rarity}` : ''}`.slice(0, 100),
-        value: i.itemId.slice(0, 100),
-    }));
+    return rankByName(items, typed).slice(0, 25).map(i => {
+        // Hint before rarity: the rarity is what the 100-char cap should cut.
+        const tags = [shortHint(prices.get(i.itemId), i, currency), i.rarity && `${i.rarityEmoji} ${i.rarity}`].filter(Boolean);
+        return {
+            name: `${i.emoji} ${i.name} — ${i.quantity} held${tags.map(t => ` · ${t}`).join('')}`.slice(0, 100),
+            value: i.itemId.slice(0, 100),
+        };
+    });
 }
 
 /** The items that actually have listings, for the `/market browse` filter. */
@@ -251,7 +252,8 @@ async function handleList(interaction, currency) {
     // past and refused it several lines later with the wrong reason.
     const itemId = (stack ?? owned[0]).itemId;
     const guildSettings = await getGuildSettings(interaction.guild.id);
-    const label  = itemLabel((await itemDescriber([itemId], guildSettings?.shop ?? []))(itemId));
+    const meta   = (await itemDescriber([itemId], guildSettings?.shop ?? []))(itemId);
+    const label  = itemLabel(meta);
 
     if (isSoulbound(itemId)) {
         return interaction.reply({ content: `${label} is soulbound and cannot be listed.`, flags: MessageFlags.Ephemeral });
@@ -379,6 +381,12 @@ async function handleList(interaction, currency) {
             { name: 'Fee Note',   value: `5% market fee deducted on sale`, inline: true },
         )
         .setTimestamp();
+
+    // Advice while cancelling is still free; own listings excluded, so this one
+    // is not reported back as the "cheapest other listing".
+    const snapshot = (await priceSnapshot(interaction.guild.id, [itemId], { excludeSellerId: interaction.user.id })).get(itemId);
+    const check = priceCheck(snapshot, meta, currency, price);
+    if (check) embed.addFields({ name: '💡 Price Check', value: check, inline: false });
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
@@ -736,6 +744,8 @@ async function handleBuy(interaction, currency) {
             });
         }
         logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'market_buy', amount: -totalCost, balance: buyer.balance, note: listing.itemId });
+        // Price history for the /market list hint — the sale is final by here.
+        recordSale({ guildId: interaction.guild.id, itemId: listing.itemId, quantity: listing.quantity, pricePerUnit: listing.pricePerUnit });
 
         // The buyer's side of the trade is complete whatever happened above, so
         // this is still a success — but the receipt does not claim the seller
