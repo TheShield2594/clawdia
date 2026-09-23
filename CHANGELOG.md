@@ -14,6 +14,25 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.9] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 17 (#873) — `/explore`'s remaining views: `travel`,
+`profile`, `journal`, `regions` and `relics`. Four of them are read-only and
+were found sound. `travel` is the one that takes coins, and its refund had the
+gap pass 9 closed on `/forge`.
+
+- **`/explore travel`'s toll refund wrote nothing down when it failed.** When
+  the save that opens a route failed, the toll came back through a bare `$inc`.
+  It read its own result back, so it never promised a refund that hadn't
+  happened, but it had no key and no owed record. A refund that missed told the
+  player "tell an admin — it is recoverable" over nothing an admin or
+  `payouts:replay` could act on. A refund whose response was lost told them the
+  coins were gone when they had come back. The refund now goes through
+  `creditCoinsOrOwe` under `exploreUnlockRefundPayoutKey`, and the reply is
+  worded from the outcome: refunded, recorded as owed, or neither.
+
 ## [4.13.8] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and sixteen passes over the
+long-stable, low-churn subsystems have been audited, and seventeen passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -17,7 +17,7 @@ quest-reward credit at every caller, and the rest of the casino (`confirmBet`,
 the bet guards, the crash restart refund, and the games' leaderboard and stat
 writes), `/explore`'s event-currency drop, and the items, effects and server
 shop (`/use`, `effectsService`, `/inventory`, `/shop buy`), the effect
-consumers, and the map views (#873). The majority of the
+consumers, the map views, and the `/explore` views (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -1870,6 +1870,76 @@ path to find. It checked what a read-only view can still get wrong:
 
 ---
 
+## Economy — The /explore Views
+
+**Status: Audited — all findings resolved** ✓
+
+The seventeenth pass of the economy audit #873: the rest of `explore/` that
+pass 13 and pass 16 left. That is `travel`, `profile`, `journal`, `regions` and
+`relics`. (`go` was covered by passes 6 and 13, `map` by pass 16, and
+`prestige` was reviewed sound in pass 7.) `travel` is the only one that moves
+coins. The other four are views, and were checked the way pass 16 checked the
+maps: Discord limits, whose data they show, and whether they write anything.
+
+**Files reviewed/fixed:**
+- `src/commands/economy/explore/travel.js`
+- `src/commands/economy/explore/profile.js`
+- `src/commands/economy/explore/journal.js`
+- `src/commands/economy/explore/regions.js`
+- `src/commands/economy/explore/relics.js`
+- `src/commands/economy/explore/shared.js`, `index.js`
+- `src/utils/payoutKey.js`
+- `tests/pass17ExploreViews.test.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | `/explore travel`'s toll refund, which runs when the save that opens the route fails, was a bare `$inc` with no key and no owed record. Pass 6 found it honest: it read `matchedCount` back and only promised a refund that landed. What it did not do was write anything down. A refund that missed told the player "tell an admin — it is recoverable" when nothing existed for an admin or `payouts:replay` to recover from. A refund whose response was lost told them the coins were gone when they had come back. This is the pass-9 `/forge` finding, on the one explore path that takes coins | The refund goes through `creditCoinsOrOwe` under `exploreUnlockRefundPayoutKey(interaction.id)`: keyed, retried, and recorded as an owed `coins` payload when it will not land. The reply is worded from the outcome (refunded, recorded as owed, or neither). A failed save on a route already open, where nothing was charged, no longer mentions coins | `explore/travel.js`, `payoutKey.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 2 | `/explore travel` had no tests | `tests/pass17ExploreViews.test.js` drives it against `fakeCollection` with the payout-key guard evaluated for real: the toll charged once on success; a failed save refunded under the key; a refund that will not land recorded as owed; one that can be neither returned nor recorded worded as such; and no refund when nothing was charged. Four of the five fail against the old code | `tests/` |
+
+**Reviewed and found sound**, recorded so the next pass does not re-derive it:
+
+- **The toll's forward direction.** It is a guarded `balance: { $gte }` debit,
+  read back, with the authoritative balance kept off the save. It is logged only
+  after the save lands.
+- **Travel versus a running expedition.** `exploration` is saved wholesale on
+  its `GrindProfile` (`utils/grindProfile.js`), so a toll paid during an
+  expedition's 20 s encounter prompt could in principle be erased by the
+  expedition's later save. It cannot happen for one player, because `go` and
+  `travel` share the per-user economy lock (`withEconomyLock`; only the five
+  read-only views skip it).
+- **`profile`, `journal`, `regions` and `relics` write nothing.** They load, run
+  `ensureExploreData`/`applyDailyReset` in memory and render. `regions` loads
+  through `loadContext`, whose `$setOnInsert` upsert can create an empty user
+  document for a first-time viewer, which is harmless.
+- **Discord limits.**
+  - `regions` peaks at about 1,760 of 4,096 description characters, with all 10
+    regions at their longest status lines.
+  - `journal` pages ten entries at a time through `chunkByLength`.
+  - `relics` drops lore before relics to fit its description, and trims its
+    missing-relics field to a 900-character budget. Its worst case totals about
+    5,600 of the 6,000 characters an embed may hold.
+- **Whose data it shows.** `profile` and `relics` take a `user` option and
+  render that member's data under that member's name. `journal`, `regions` and
+  `travel` act on the caller only. `publicProfile.enabled` governs the public
+  web page, not in-server inspection, which `/hunt` and `/fish` allow too.
+- **Another member's stamina** is shown as last saved: `profile` applies stamina
+  regen only when the member views their own profile. `/hunt` and `/fish`
+  profiles do the same, so this is a consistent existing choice across the
+  grind profiles and was left alone.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -1879,7 +1949,7 @@ wide, and it is widest exactly where the risk is.
 
 **Economy** — the largest uncovered area:
 
-- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. `/explore`'s while-an-event-runs **event-currency drop** is audited above (pass 13). The map views (`/explore map`, `/mine map`) are audited above (pass 16). Still not reviewed: prestige (reviewed sound in pass 7), and the rest of `explore/`'s views (travel, profile, journal, regions, relics)
+- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. `/explore`'s while-an-event-runs **event-currency drop** is audited above (pass 13). The map views (`/explore map`, `/mine map`) are audited above (pass 16). The rest of `explore/`'s views (travel, profile, journal, regions, relics) are audited above (pass 17). Prestige was reviewed sound in pass 7
 - `pet` (`petService.js`, `pet/`) — the `/pet` command's **PvP-battle winner payout, the battle escrow refunds and the adopt-fee refund** are audited above (pass 10, which also split `pet.js` into the `pet/` folder), alongside the pet **drops** the gathering runs grant, found sound in pass 9. The Pet-of-the-Week reward was reviewed and found sound. The pet-care **quest credits** (`/pet feed`, `play`, `rest` and the battle care rewards) are audited above (pass 11), keyed alongside every other caller of the shared `awardQuest` hook
 - `use` / items / effects — audited above: the seasonal loot-box item grant (pass 6), and `effectsService.js`, `use.js`, `inventory.js` and `/shop buy` (pass 14). The effect **consumers** (`/rob`, `/crime`, `/hunt`, the gathering yield charges, `messageCreate`'s streak shield) and every other reader and writer of `activeEffects` are audited above (pass 15). `shop.js`'s view and trends builders were read for writes only
 - casino (`src/games/casino/*`, `casino.js`) — the progressive jackpot (pass 2),
@@ -1917,6 +1987,6 @@ gathering-loop payouts on 2026-09-18; the progression and group/PvP payouts on
 commands' non-payout surface on 2026-09-22; the `/pet` command's payouts on
 2026-09-22; the quest-reward credit on 2026-09-22; the rest of the casino on
 2026-09-22; the `/explore` event-currency drop on 2026-09-23; the items, effects and
-server shop on 2026-09-23; the effect consumers on 2026-09-23; and the map views
-on 2026-09-23. "Not yet reviewed" carries no review
+server shop on 2026-09-23; the effect consumers on 2026-09-23; the map views
+on 2026-09-23; and the `/explore` views on 2026-09-23. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*
