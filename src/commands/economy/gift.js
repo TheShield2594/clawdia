@@ -8,7 +8,7 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { describeItem } = require('../../utils/itemDisplay');
-const { loadAiItems } = require('../../utils/aiItems');
+const { loadAiItems } = require('../../utils/aiItemLookup');
 const { ownedBy } = require('../../utils/collectorOwner');
 const {
     BUDGETS, giftLimits, budgetState, spendBudgetGuarded, spendBudgetPipelineGuarded,
@@ -20,7 +20,7 @@ const { NOT_FROZEN } = require('../../utils/economyFreeze');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
 const { giftItemRollbackPayoutKey } = require('../../utils/payoutKey');
 const { isSoulbound } = require('../../data/soulboundItems');
-const { resolveEffectType } = require('../../services/effectsService');
+const { resolveEffectType, isActiveEffect } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 
 // Add `qty` of `itemId` to a user's inventory without reading it first. The
@@ -39,7 +39,10 @@ const addInventoryItem = (userId, guildId, itemId, qty, options = {}) =>
  * and then refused on submit is worse than one that was never offered.
  */
 function giftableEntries(user, { shopItems = [], aiItems = {} } = {}) {
-    const activeTypes = new Set((user?.activeEffects ?? []).map(e => e.type));
+    // Only effects still live: an expired one that was never pruned must not
+    // lock the matching item out of the picker.
+    const now = Date.now();
+    const activeTypes = new Set((user?.activeEffects ?? []).filter(e => isActiveEffect(e, now)).map(e => e.type));
     return (user?.inventory ?? [])
         .filter(e => e.quantity > 0)
         .filter(e => !isSoulbound(e.itemId))
@@ -389,7 +392,7 @@ module.exports = {
 
         // Cannot gift actively equipped effects
         const effectType = resolveEffectType(itemId);
-        if (effectType && (sender.activeEffects || []).some(e => e.type === effectType)) {
+        if (effectType && (sender.activeEffects || []).some(e => e.type === effectType && isActiveEffect(e))) {
             return deny(`You can't gift ${label} while it's active as an effect. Wait for it to expire first.`);
         }
 

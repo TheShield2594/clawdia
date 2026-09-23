@@ -63,7 +63,8 @@ Economy audit, pass 21 (#873) — the rest of `/market` and `/gift`, and
   now idle time, and a settle in flight writes its own outcome.
 - **`/market browse` rated relics, guild shop items and forged items by their
   asking price**, so a Common listed dear showed, and sorted, as Mythic. The
-  rarity and name now come from the item (`views/marketView.js`).
+  `/market` split on main fixed this too; the fixes below were carried onto
+  its `market/` folder.
 - **Expired listings stayed buyable** until the sweep reached them, for as long
   as a backlog lasted. Buyers' reads now filter to live listings.
 - **`/gift` and `/bank transfer` would send to someone who had left the
@@ -307,7 +308,8 @@ spends an item or currency before doing a write that can fail.
   `itemId` and the dashboard generates one (`item_…`), so the lookup missed. The
   item was spent and no role was granted. `/use` now matches on `itemId` first.
   A role that `roles.add` refuses no longer destroys the item: it is given back
-  under `useItemRestorePayoutKey` and the player is told why.
+  and the player is told why (under `useRoleRefundPayoutKey`, from the `/use`
+  rework this pass was merged with).
 - **`/eventshop`'s currency debit could match two different entries.** Its
   guard was `'eventCurrency.currencyId': id, 'eventCurrency.amount': { $gte:
   cost }`, and without `$elemMatch` each condition could be met by a different

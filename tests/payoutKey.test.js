@@ -22,7 +22,7 @@ const { grantInventoryItem } = require('../src/utils/inventoryGrant');
 const {
     payoutKeyAppendExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
-    gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey,
+    gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, useRoleRefundPayoutKey, shopRefundPayoutKey,
     syndicateFoundRefundPayoutKey, tournamentPrizePayoutKey,
     seasonTierCoinPayoutKey, seasonTierItemPayoutKey,
     seasonClaimAllCoinsPayoutKey, seasonMissionCoinPayoutKey,
@@ -312,6 +312,11 @@ describe('key construction', () => {
 
     test('a loot-box prize is keyed by the open', () => {
         expect(lootBoxItemPayoutKey('i3')).toBe('lootbox:i3:item');
+    });
+
+    test('a /use role item handed back is keyed by the use', () => {
+        expect(useRoleRefundPayoutKey('i3')).toBe('use:i3:role-refund');
+        expect(useRoleRefundPayoutKey('i3')).not.toBe(lootBoxItemPayoutKey('i3'));
     });
 
     test('a shop refund is keyed by the purchase interaction', () => {
