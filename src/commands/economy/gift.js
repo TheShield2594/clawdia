@@ -8,12 +8,13 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { describeItem } = require('../../utils/itemDisplay');
+const { loadAiItems } = require('../../utils/aiItems');
 const { ownedBy } = require('../../utils/collectorOwner');
 const {
     BUDGETS, giftLimits, budgetState, spendBudgetGuarded, spendBudgetPipelineGuarded,
 } = require('../../utils/giftCaps');
 const {
-    accountAgeRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
+    accountAgeRefusal, nonMemberRefusal, frozenRefusal, coinBudgets, commitCoinTransfer, transferRefusal,
 } = require('../../utils/coinTransfer');
 const { NOT_FROZEN } = require('../../utils/economyFreeze');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
@@ -28,26 +29,6 @@ const COLORS = require('../../utils/embedColors');
 // passed through so a budget can be spent in the same write.
 const addInventoryItem = (userId, guildId, itemId, qty, options = {}) =>
     grantInventoryItem(userId, guildId, itemId, qty, options);
-
-/**
- * Load the AiItem rows for whichever of `itemIds` are forged (`ai_`) ids.
- *
- * Returns a plain `itemId -> doc` map, `{}` when there is nothing to look up or
- * the query fails. A missing name is cosmetic — `describeItem` falls back to the
- * id — so this must never be the reason a gift is refused.
- */
-async function loadAiItems(itemIds) {
-    const forged = [...new Set(itemIds.filter(id => id.startsWith('ai_')))];
-    if (!forged.length) return {};
-    try {
-        const AiItem = require('../../models/AiItem');
-        const docs = await AiItem.find({ itemId: { $in: forged } }, 'itemId name emoji rarity lore').lean();
-        return Object.fromEntries(docs.map(d => [d.itemId, d]));
-    } catch (err) {
-        console.error('[gift] AiItem lookup failed:', err);
-        return {};
-    }
-}
 
 /**
  * Every inventory entry the sender is actually allowed to hand over, described
@@ -156,6 +137,7 @@ module.exports = {
                 // should have to know that the Pet Slot Expansion is spelled
                 // `pet_slot_expansion`, or retype a relic's name exactly.
                 .setDescription('Item to gift — start typing to pick from your inventory.')
+                .setMaxLength(100)
                 .setAutocomplete(true))
         .addIntegerOption(o =>
             o.setName('quantity')
@@ -230,7 +212,8 @@ module.exports = {
 
         if (target.id === interaction.user.id) return deny("You can't gift yourself.");
         if (target.bot)                        return deny("You can't gift a bot.");
-        const tooNew = accountAgeRefusal(interaction.user, target, { noun: 'gifts' });
+        const tooNew = accountAgeRefusal(interaction.user, target, { noun: 'gifts' })
+            ?? nonMemberRefusal(interaction.options.getMember('user'), target, { noun: 'gifts' });
         if (tooNew) return deny(tooNew);
 
         // The two halves of this command each ignore the other's options, and

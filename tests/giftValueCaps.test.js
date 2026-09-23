@@ -96,6 +96,7 @@ function buildExecute({ type = 'item', item = null, quantity = null, amount = nu
             guildId: 'g1',
             user: { id: 'sender', username: 'sender', createdTimestamp: OLD_ACCOUNT, displayAvatarURL: () => 'https://cdn.example/sender.png' },
             options: {
+                getMember: () => ({ id: 'recipient' }),
                 getUser: () => ({ id: 'recipient', username: 'recipient', bot: false, createdTimestamp: OLD_ACCOUNT, displayAvatarURL: () => 'https://cdn.example/recipient.png' }),
                 getString: (name) => (name === 'type' ? type : name === 'item' ? item : null),
                 getInteger: (name) => (name === 'quantity' ? quantity : name === 'amount' ? amount : null),

@@ -6,8 +6,6 @@ const {
 const User           = require('../../models/User');
 const MarketListing  = require('../../models/MarketListing');
 const Transaction    = require('../../models/Transaction');
-const { DEFAULT_SHOP_ITEMS, getItemLore, getItemRarity, RARITY_ORDER } = require('../../data/defaultShopItems');
-const { EFFECT_CONFIGS } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
 const { listingCancelPayoutKey, listingCreateRefundPayoutKey } = require('../../utils/payoutKey');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
@@ -19,8 +17,8 @@ const { ownedBy } = require('../../utils/collectorOwner');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { isSoulbound } = require('../../data/soulboundItems');
 const { describeItem } = require('../../utils/itemDisplay');
-
-const ITEM_META = Object.fromEntries(DEFAULT_SHOP_ITEMS.map(i => [i.itemId, i]));
+const { loadAiItems } = require('../../utils/aiItems');
+const { describeListing, byRarityThenPrice, formatListingLine } = require('../../views/marketView');
 
 const MAX_LISTINGS_PER_USER = 5;
 // The slots a seller's listings occupy, 1-based. Each listing carries the one it
@@ -36,7 +34,13 @@ const CONFIRM_BUY_THRESHOLD = 500;
 const SORT_RARITY = 'rarity';
 const SORT_PRICE  = 'price';
 
-const RARITY_RANK = Object.fromEntries(RARITY_ORDER.map((r, i) => [r, i]));
+// Browse loads at most this many listings, cheapest first.
+const BROWSE_LIMIT = 200;
+
+// A listing past its expiry is the sweep's to hand back, not anyone's to buy
+// (#873, pass 21). The sweep claims 50 a tick, so under a backlog an expired
+// listing could sit buyable for days; every read a buyer sees filters it out.
+const live = () => ({ expiresAt: { $gt: new Date() } });
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -49,6 +53,7 @@ module.exports = {
                     o.setName('item')
                         .setDescription('Item to sell — start typing to pick from your inventory.')
                         .setRequired(true)
+                        .setMaxLength(100)
                         .setAutocomplete(true))
                 .addIntegerOption(o =>
                     o.setName('quantity').setDescription('How many to sell.').setRequired(true).setMinValue(1))
@@ -61,6 +66,7 @@ module.exports = {
                     o.setName('item')
                         .setDescription('Filter by item — start typing to pick one that is actually listed.')
                         .setRequired(false)
+                        .setMaxLength(100)
                         .setAutocomplete(true)))
         .addSubcommand(sub =>
             sub.setName('buy')
@@ -153,7 +159,7 @@ async function inventoryChoices(interaction, typed) {
 /** The items that actually have listings, for the `/market browse` filter. */
 async function listedItemChoices(interaction, typed) {
     const [itemIds, guildSettings] = await Promise.all([
-        MarketListing.distinct('itemId', { guildId: interaction.guild.id }),
+        MarketListing.distinct('itemId', { guildId: interaction.guild.id, ...live() }),
         getGuildSettings(interaction.guild.id),
     ]);
     const shopItems = guildSettings?.shop ?? [];
@@ -174,9 +180,10 @@ async function listedItemChoices(interaction, typed) {
  * listing that would be refused on submit.
  */
 async function listingChoices(interaction, typed, sub) {
+    // A seller can still cancel an expired listing the sweep has not reached.
     const query = sub === 'cancel'
         ? { guildId: interaction.guild.id, sellerId: interaction.user.id }
-        : { guildId: interaction.guild.id, sellerId: { $ne: interaction.user.id } };
+        : { guildId: interaction.guild.id, sellerId: { $ne: interaction.user.id }, ...live() };
 
     const [listings, guildSettings] = await Promise.all([
         MarketListing.find(query).sort({ pricePerUnit: 1 }).limit(100).lean(),
@@ -439,25 +446,10 @@ async function fetchPageContext(slice, guildId, client) {
     return { repMap, tagMap };
 }
 
-// Formats a single listing line using pre-fetched context (no per-item DB/API calls)
-function formatLine(l, currency, repMap, tagMap) {
-    const sellerTag   = tagMap.get(l.sellerId) ?? 'Unknown';
-    const rep         = repMap.get(l.sellerId) ?? '🆕 first listing';
-    const totalPrice  = l.pricePerUnit * l.quantity;
-    const meta        = ITEM_META[l.itemId];
-    const effectCfg   = EFFECT_CONFIGS[l.itemId];
-    const itemEmoji   = effectCfg?.emoji ?? '';
-    const displayName = meta ? `${itemEmoji} ${meta.name}`.trim() : `\`${l.itemId}\``;
-    const loreText    = getItemLore(l.itemId);
-    const loreSuffix  = loreText ? `\n  *${loreText.slice(0, 80)}${loreText.length > 80 ? '…' : ''}*` : '';
-    const rarity      = getItemRarity(l.itemId, l.pricePerUnit);
-    return `\`${String(l._id).slice(-6)}\`  @${sellerTag} *(${rep})*\n**${l.quantity}x ${displayName}** — ${currency}${l.pricePerUnit.toLocaleString()}/ea  *(${currency}${totalPrice.toLocaleString()} total)*  · ${rarity}${loreSuffix}`;
-}
-
 async function handleBrowse(interaction, currency) {
     const filterItem = interaction.options.getString('item')?.trim() || null;
 
-    const query = { guildId: interaction.guild.id };
+    const query = { guildId: interaction.guild.id, ...live() };
     // Anchored and case-insensitive rather than an equality on the lowercased
     // string: a listed relic's itemId is "The Tenth Owl", so the old filter
     // matched nothing for exactly the items hardest to type. Escaped because the
@@ -472,8 +464,14 @@ async function handleBrowse(interaction, currency) {
         });
     }
 
-    // Fetch all listings (capped at 200 for performance) and sort client-side for rarity mode
-    const allListings = await MarketListing.find(query).sort({ pricePerUnit: 1 }).limit(200).lean();
+    // The cheapest BROWSE_LIMIT, sorted client-side for rarity mode. The footer
+    // says so when there are more: a count of the loaded page read as the whole
+    // market, and the listings past it never showed at all.
+    const allListings = await MarketListing.find(query).sort({ pricePerUnit: 1 }).limit(BROWSE_LIMIT).lean();
+    const context = {
+        shopItems: (await getGuildSettings(interaction.guild.id))?.shop ?? [],
+        aiItems:   await loadAiItems(allListings.map(l => l.itemId)),
+    };
 
     let sortMode = SORT_RARITY;
 
@@ -481,13 +479,7 @@ async function handleBrowse(interaction, currency) {
         if (sortMode === SORT_PRICE) {
             return [...allListings].sort((a, b) => a.pricePerUnit - b.pricePerUnit);
         }
-        // Rarity-first: group by tier ascending (Common first), then price within tier
-        return [...allListings].sort((a, b) => {
-            const ra = RARITY_RANK[getItemRarity(a.itemId, a.pricePerUnit)] ?? 0;
-            const rb = RARITY_RANK[getItemRarity(b.itemId, b.pricePerUnit)] ?? 0;
-            if (ra !== rb) return ra - rb;
-            return a.pricePerUnit - b.pricePerUnit;
-        });
+        return [...allListings].sort(byRarityThenPrice(context));
     }
 
     let page = 0;
@@ -501,14 +493,14 @@ async function handleBrowse(interaction, currency) {
 
         // Batch all DB/API calls for the page in two round-trips
         const { repMap, tagMap } = await fetchPageContext(slice, interaction.guild.id, interaction.client);
-        const lines = slice.map(l => formatLine(l, currency, repMap, tagMap));
+        const lines = slice.map(l => formatListingLine(l, { currency, repMap, tagMap, context }));
 
         const sortLabel = sortMode === SORT_RARITY ? '🏷️ Rarity sort' : '💰 Price sort';
         return new EmbedBuilder()
             .setColor(COLORS.INFO)
             .setTitle(title)
             .setDescription(lines.join('\n\n') || 'No listings.')
-            .setFooter({ text: `Page ${safePage + 1}/${totalPages} · ${sorted.length} listings · 5% fee · ${sortLabel}` })
+            .setFooter({ text: `Page ${safePage + 1}/${totalPages} · ${total > sorted.length ? `cheapest ${sorted.length} of ${total}` : total} listings · 5% fee · ${sortLabel}` })
             .setTimestamp();
     }
 
@@ -534,22 +526,28 @@ async function handleBrowse(interaction, currency) {
 
     const collector = msg.createMessageComponentCollector({
         componentType: ComponentType.Button,
-        filter: ownedBy(interaction.user.id, "This isn't your listing."),
+        filter: ownedBy(interaction.user.id, "This isn't your market view — run `/market browse` for your own."),
         time: 3 * 60_000,
     });
 
     collector.on('collect', async btn => {
-        await btn.deferUpdate();
-        if (btn.customId === `mkt_prev_${interaction.id}`) page = Math.max(0, page - 1);
-        else if (btn.customId === `mkt_next_${interaction.id}`) {
-            const tp = Math.ceil(sortedListings().length / PAGE_SIZE);
-            page = Math.min(tp - 1, page + 1);
-        } else if (btn.customId === `mkt_sort_${interaction.id}`) {
-            sortMode = sortMode === SORT_RARITY ? SORT_PRICE : SORT_RARITY;
-            page = 0;
+        // Caught: a page turn that fails (an expired token, a deleted message)
+        // was an unhandled rejection out of the collector.
+        try {
+            await btn.deferUpdate();
+            if (btn.customId === `mkt_prev_${interaction.id}`) page = Math.max(0, page - 1);
+            else if (btn.customId === `mkt_next_${interaction.id}`) {
+                const tp = Math.ceil(sortedListings().length / PAGE_SIZE);
+                page = Math.min(tp - 1, page + 1);
+            } else if (btn.customId === `mkt_sort_${interaction.id}`) {
+                sortMode = sortMode === SORT_RARITY ? SORT_PRICE : SORT_RARITY;
+                page = 0;
+            }
+            const updated = await buildEmbed();
+            await interaction.editReply({ embeds: [updated], components: buildComponents(page) });
+        } catch (err) {
+            console.error('[market browse] page turn failed:', err);
         }
-        const updated = await buildEmbed();
-        await interaction.editReply({ embeds: [updated], components: buildComponents(page) });
     });
 
     collector.on('end', () => {
@@ -562,7 +560,7 @@ async function handleBuy(interaction, currency) {
 
     let listing;
     try {
-        listing = await MarketListing.findOne({ _id: rawId, guildId: interaction.guild.id });
+        listing = await MarketListing.findOne({ _id: rawId, guildId: interaction.guild.id, ...live() });
     } catch {
         return interaction.reply({ content: 'Invalid listing ID.', flags: MessageFlags.Ephemeral });
     }
@@ -759,9 +757,10 @@ async function handleBuy(interaction, currency) {
 
     // Confirmation step for purchases over the threshold
     if (totalCost >= CONFIRM_BUY_THRESHOLD) {
-        const meta        = ITEM_META[listing.itemId];
-        const effectCfg   = EFFECT_CONFIGS[listing.itemId];
-        const displayName = meta ? `${effectCfg?.emoji ?? ''} ${meta.name}`.trim() : listing.itemId;
+        const { displayName } = describeListing(listing, {
+            shopItems: (await getGuildSettings(interaction.guild.id))?.shop ?? [],
+            aiItems:   await loadAiItems([listing.itemId]),
+        });
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('mkt_buy_confirm').setLabel('Confirm Purchase').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId('mkt_buy_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),

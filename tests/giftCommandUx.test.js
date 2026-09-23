@@ -74,6 +74,7 @@ function buildExecute({ item = null, type = 'item', quantity = null, amount = nu
                 displayAvatarURL: () => 'https://cdn.example/sender.png',
             },
             options: {
+                getMember: () => ({ id: 'recipient' }),
                 getUser: () => ({
                     id: 'recipient',
                     username: 'recipient',
