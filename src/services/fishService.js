@@ -343,12 +343,27 @@ function applyDurabilityLoss(rod, baseLoss) {
     updateRodStatus(rod);
 }
 
+/**
+ * True once shop repairs have ground a rod's durability ceiling below 20% of
+ * its original — the rule `/hunt` and `/mine` apply to their tools, since each
+ * repair takes 10% of the original off the ceiling.
+ *
+ * It used to be current durability under 20% of the ceiling, which is wear, not
+ * repairs: a rod fished down below a fifth, or given a small kit while broken,
+ * was condemned on the spot — never repairable again — and told it had been
+ * "repaired too many times" (#873). Derived rather than read off `rod.status`,
+ * so a rod that rule condemned is repairable again.
+ */
+function isCondemned(rod) {
+    if (!rod?.baseDurability) return false;
+    return rod.maxDurability / rod.baseDurability < 0.20;
+}
+
 function updateRodStatus(rod) {
     if (rod.currentDurability <= 0) { rod.status = 'broken'; return; }
+    if (isCondemned(rod))          { rod.status = 'condemned'; return; }
     const ratio = rod.currentDurability / rod.maxDurability;
-    if (ratio < 0.20)      rod.status = 'condemned';
-    else if (ratio < 0.50) rod.status = 'degraded';
-    else                   rod.status = 'good';
+    rod.status = ratio < 0.50 ? 'degraded' : 'good';
 }
 
 /**
@@ -361,7 +376,7 @@ function quoteRepair(rod, requestedAmount) {
     const rodData = ROD_BY_TIER[rod.tier];
     if (!rodData) throw new Error('Unknown rod tier');
 
-    if (rod.status === 'condemned') {
+    if (isCondemned(rod)) {
         return { error: 'This rod is condemned and cannot be repaired. Replace it.' };
     }
     // Compute post-degradation max FIRST so cost and restoredAmount are accurate
@@ -390,7 +405,7 @@ function applyRepair(rod, requestedAmount) {
 
     updateRodStatus(rod);
 
-    return { cost: quote.cost, restoredAmount: quote.restoredAmount, newStatus: rod.status, condemned: rod.status === 'condemned' };
+    return { cost: quote.cost, restoredAmount: quote.restoredAmount, newStatus: rod.status, condemned: isCondemned(rod) };
 }
 
 // ─── LEVEL / XP ──────────────────────────────────────────────────────────────
@@ -1337,6 +1352,7 @@ module.exports = {
     applyPayoutModifiers,
     applyDurabilityLoss,
     updateRodStatus,
+    isCondemned,
     quoteRepair,
     applyRepair,
     levelFromXp,

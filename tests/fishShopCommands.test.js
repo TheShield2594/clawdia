@@ -235,7 +235,9 @@ describe('shop list', () => {
         expect(page('upgrades').items[0].subline).toBe('~30% of rod');
         expect(page('bait').listText).toContain('`/fish shop buy item:worm_bait_pack`');
         expect(page('bait').items[0]).toMatchObject({ buyId: 'worm_bait_pack', price: 70 });
-        expect(page('consumables').items.map(i => i.buyId)).toEqual(Object.keys(CONSUMABLES));
+        // Hunter's Brew is crafted, not sold: it has no price (#873).
+        expect(page('consumables').items.map(i => i.buyId))
+            .toEqual(Object.keys(CONSUMABLES).filter(id => id !== 'hunters_brew'));
 
         expect(typeof page('bait').onBuy).toBe('function');
         expect(typeof page('consumables').onBuy).toBe('function');
@@ -264,6 +266,15 @@ describe('shop buy — refusals', () => {
         seedPlayer();
         const interaction = await run('buy', { options: { item: 'dynamite' } });
         expect(repliedText(interaction)).toBe('Unknown item.');
+    });
+
+    // It has no cost, so its total was NaN — and `balance < NaN` is never true,
+    // so the purchase went ahead to a `$gte: NaN` debit (#873).
+    test('refuses the crafted-only Hunter\'s Brew rather than pricing it at NaN', async () => {
+        seedPlayer();
+        const interaction = await run('buy', { options: { item: 'hunters_brew' } });
+        expect(repliedText(interaction)).toBe('Unknown item.');
+        expect(repliedText(interaction)).not.toContain('NaN');
     });
 
     test('not enough coins for the quantity asked', async () => {

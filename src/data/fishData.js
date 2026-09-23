@@ -148,6 +148,12 @@ const CONSUMABLES = {
     }
 };
 
+// The consumables the shop sells: those with a price. Hunter's Brew has none —
+// it is crafted from fish and hunt materials (FISH_CRAFT_RECIPES.hunters_brew)
+// — and listing it anyway put "undefined coins" in the shop and a NaN cost into
+// the purchase, whose balance check a NaN never fails (#873).
+const SHOP_CONSUMABLES = Object.values(CONSUMABLES).filter(c => Number.isFinite(c.cost) && c.cost > 0);
+
 // ─── LOCATIONS ────────────────────────────────────────────────────────────────
 
 const LOCATIONS = {
@@ -1271,6 +1277,7 @@ module.exports = {
     ROD_UPGRADES,
     BAIT_PACKS,
     CONSUMABLES,
+    SHOP_CONSUMABLES,
     LOCATIONS,
     LOCATION_LIST,
     FISH,

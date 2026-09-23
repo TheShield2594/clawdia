@@ -501,9 +501,11 @@ describe('shop repair — kits', () => {
         expect(repliedText(await kit('repair_kit_small'))).toContain("You don't have any **Small Repair Kit**");
     });
 
+    // Condemned by repairs: nine have ground the 80 ceiling down to 8, under a
+    // fifth of the original.
     test('on a condemned rod', async () => {
         seedPlayer({ fishing: {
-            ...equipped(rod('bamboo_rod', { currentDurability: 10, status: 'condemned' })),
+            ...equipped(rod('bamboo_rod', { currentDurability: 4, maxDurability: 8, repairCount: 9, status: 'condemned' })),
             consumables: { repair_kit_small: 1 },
         } });
         expect(repliedText(await kit('repair_kit_small'))).toBe('This rod is condemned and cannot be repaired.');
@@ -561,8 +563,20 @@ describe('shop repair — at the shop', () => {
     const worn = over => equipped(rod('bamboo_rod', { currentDurability: 30, status: 'degraded', ...over }));
 
     test('a condemned rod is refused by the quote', async () => {
-        seedPlayer({ fishing: worn({ currentDurability: 10, status: 'condemned' }) });
+        seedPlayer({ fishing: worn({ currentDurability: 4, maxDurability: 8, repairCount: 9, status: 'condemned' }) });
         expect(repliedText(await repair())).toBe('This rod is condemned and cannot be repaired. Replace it.');
+    });
+
+    // #873. Wear alone used to condemn a rod: under a fifth of its ceiling it was
+    // refused for good, whatever its repair count. Condemnation is the ceiling
+    // repairs wear down, as on /hunt and /mine — and a rod the old rule marked
+    // condemned is repairable again.
+    test('a rod worn low, or marked condemned by the old rule, can still be repaired', async () => {
+        seedPlayer({ fishing: worn({ currentDurability: 10, status: 'condemned' }) });
+        const reply = repliedText(await repair());
+        expect(reply).not.toContain('condemned');
+        expect(fishing().rods[0].currentDurability).toBeGreaterThan(10);
+        expect(fishing().rods[0].status).not.toBe('condemned');
     });
 
     test('a rod already at full durability', async () => {

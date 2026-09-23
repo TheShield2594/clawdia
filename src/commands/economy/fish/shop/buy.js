@@ -11,7 +11,7 @@ const {
 } = require('discord.js');
 const User = require('../../../../models/User');
 const { persistGrindIfNew } = require('../../../../utils/grindProfile');
-const { BAIT_PACKS, CONSUMABLES } = require('../../../../data/fishData');
+const { BAIT_PACKS, SHOP_CONSUMABLES } = require('../../../../data/fishData');
 const GrindProfile = require('../../../../models/GrindProfile');
 const { attachItemThumbnail } = require('../../../../utils/itemImageHelper');
 const COLORS = require('../../../../utils/embedColors');
@@ -56,7 +56,10 @@ async function handleBuy(interaction, user, currency, override = {}) {
     const f        = user.fishing;
 
     const baitPack   = BAIT_PACKS.find(p => p.id === itemId);
-    const consumable = baitPack ? null : CONSUMABLES[itemId];
+    // Only what the shop prices. A crafted-only consumable (Hunter's Brew) has
+    // no cost, and letting it through made the total NaN, which no balance
+    // check refuses (#873).
+    const consumable = baitPack ? null : SHOP_CONSUMABLES.find(c => c.id === itemId) ?? null;
     const itemDef    = baitPack ?? consumable;
 
     if (!itemDef) {

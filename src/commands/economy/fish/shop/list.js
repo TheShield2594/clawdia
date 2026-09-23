@@ -6,7 +6,7 @@ const {
     ROD_TIERS,
     ROD_UPGRADES,
     BAIT_PACKS,
-    CONSUMABLES,
+    SHOP_CONSUMABLES,
     LOCATION_LIST,
 } = require('../../../../data/fishData');
 const { runShopBrowse } = require('../../../../utils/shopBrowse');
@@ -50,14 +50,14 @@ function buildFishShopPages(user, currency) {
         `${p.emoji} **${p.name}** — ${currency}${p.cost} · \`/fish shop buy item:${p.id}\``
     ).join('\n');
 
-    const consumableItems = Object.values(CONSUMABLES).map(c => ({
+    const consumableItems = SHOP_CONSUMABLES.map(c => ({
         imageId: `fish:${c.id}`,
         name:    c.name,
         buyId:   c.id,
         price:   c.cost,
         emoji:   c.emoji
     }));
-    const consumableList = Object.values(CONSUMABLES).map(c =>
+    const consumableList = SHOP_CONSUMABLES.map(c =>
         `${c.emoji} **${c.name}** — ${currency}${c.cost} · \`/fish shop buy item:${c.id}\``
     ).join('\n');
 

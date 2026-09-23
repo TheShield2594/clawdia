@@ -16,7 +16,7 @@
 
 const { SlashCommandBuilder } = require('discord.js');
 const {
-    LOCATION_LIST, ROD_UPGRADES, BAIT_PACKS, CONSUMABLES, ROD_TIERS,
+    LOCATION_LIST, ROD_UPGRADES, BAIT_PACKS, CONSUMABLES, SHOP_CONSUMABLES, ROD_TIERS,
     FISH_CRAFT_RECIPES
 } = require('../../../data/fishData');
 const { handleCast } = require('./cast');
@@ -31,7 +31,7 @@ const LOCATION_CHOICES = LOCATION_LIST.map(l => ({ name: l.name, value: l.id }))
 
 const SHOP_CHOICES = [
     ...BAIT_PACKS.map(p => ({ name: `${p.emoji} ${p.name} — ${p.cost} coins`, value: p.id })),
-    ...Object.values(CONSUMABLES).map(c => ({ name: `${c.emoji} ${c.name} — ${c.cost} coins`, value: c.id }))
+    ...SHOP_CONSUMABLES.map(c => ({ name: `${c.emoji} ${c.name} — ${c.cost} coins`, value: c.id }))
 ];
 
 const USE_CHOICES = Object.values(CONSUMABLES)

@@ -5,6 +5,7 @@
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const {
     updateRodStatus,
+    isCondemned,
     durabilityBar,
     rodStatusEmoji,
     quoteRepair,
@@ -36,7 +37,7 @@ async function handleRepair(interaction, user, currency) {
         if (kitStock <= 0) {
             return interaction.reply({ content: `You don't have any **${kitName}**. Buy one with \`/fish shop buy\`.`, flags: MessageFlags.Ephemeral });
         }
-        if (rod.status === 'condemned') {
+        if (isCondemned(rod)) {
             return interaction.reply({ content: 'This rod is condemned and cannot be repaired.', flags: MessageFlags.Ephemeral });
         }
         if (rod.currentDurability >= rod.maxDurability && rod.status !== 'broken') {
