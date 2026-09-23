@@ -177,6 +177,16 @@ const JOBS = [
         fn: client => require('../rankedSeasonService').resolveRankedSeasons(client),
     },
     {
+        // Hands back duel stakes a restart stranded in escrow (#873). 'guild'
+        // scope: the duel's collectors lived on the shard that owns its guild,
+        // so only that shard can tell a stranded duel from a running one.
+        name: 'sweepStrandedDuels',
+        scope: SCOPE.GUILD,
+        service: 'duelEscrowSweep',
+        schedule: '*/5 * * * *',
+        fn: client => require('../duelEscrowSweep').sweepStrandedDuels(client),
+    },
+    {
         name: 'returnExpiredMarketListings',
         scope: SCOPE.DEPLOYMENT,
         service: 'marketService',

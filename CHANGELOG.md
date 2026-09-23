@@ -14,6 +14,24 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.15] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit (#873) — closes pass 22's open bound.
+
+- **A restart mid-duel no longer strands both stakes.** The stakes are taken
+  into escrow at accept, and the duel lives in memory until it settles. A
+  process that died in between refunded nothing and told nobody, and the escrow
+  keys are evicted after 24 hours. Each accepted duel is now noted in a new
+  `PendingDuel` collection before its stakes move. A new scheduler job,
+  `sweepStrandedDuels` (every five minutes, per shard), hands back the stakes
+  of any duel over ten minutes old that left no payout, refund or owed record.
+  A won duel, a tie, and a payout waiting for `payouts:replay` are left alone.
+  The reversal is the keyed `undoStake`, so no sweep can pay a stake twice.
+  Refunds are logged as `duel_refund`.
+- `tests/duelEscrowSweep.test.js` (13 tests).
+
 ## [4.13.14] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

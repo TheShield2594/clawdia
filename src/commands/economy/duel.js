@@ -16,6 +16,7 @@ const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { takeEscrow, refundEscrow, payWinner, refundNote } = require('../../utils/duelEscrow');
 const { frozenTargetNotice } = require('../../utils/economyFreeze');
+const { notePendingDuel } = require('../../services/duelEscrowSweep');
 
 const DUEL_COOLDOWN_MS = 5 * 60_000;
 const ACCEPT_TIMEOUT_MS = 60_000;
@@ -626,6 +627,9 @@ async function runChallenge(interaction, isRanked) {
                 });
             }
 
+            // Noted before the stakes move, so a restart anywhere past this
+            // point leaves a record the stranded-stake sweep can settle.
+            await notePendingDuel({ duelId, guildId: interaction.guild.id, challengerId: interaction.user.id, opponentId: target.id, amount });
             const escrow = await takeEscrow(interaction.user.id, target.id, interaction.guild.id, amount, duelId);
             if (!escrow.success) {
                 // Cooldown was claimed but escrow failed — revert the claim
