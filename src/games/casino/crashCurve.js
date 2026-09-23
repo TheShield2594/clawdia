@@ -15,12 +15,16 @@ const GROWTH = 1.12;
  * game deals is 99.00×. It is left in as the guard it is; raise the instant-bust
  * floor and it starts doing work. tests/casinoPayoutTables.test.js pins both.
  *
+ * The 1.00× floor does bind. For r above ~0.995, 0.99/r lands in (0.99, 0.995)
+ * and rounds to 0.99 — a round that busts below the multiplier it starts at,
+ * about one roll in two hundred. It used to come out as 0.99×.
+ *
  * `rng` returns a float in [0, 1) — Math.random by default.
  */
 function generateCrashPoint(rng = Math.random) {
     const r = rng();
     if (r < 0.01) return 1.00;
-    return Math.min(100.00, parseFloat((0.99 / r).toFixed(2)));
+    return Math.min(100.00, Math.max(1.00, parseFloat((0.99 / r).toFixed(2))));
 }
 
 /** The multiplier after `tick` ticks — 1.12^tick, to two places. */
