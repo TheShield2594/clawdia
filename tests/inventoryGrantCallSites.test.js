@@ -290,10 +290,11 @@ describe('the sweep is actually sweeping', () => {
         // nothing, must fail here rather than pass by finding zero problems.
         // (The floor was 13; #873 pass 7 moved `/season`'s tier grant to
         // `grantItemsOrOwe`, and #873 pass 8 moved the four save-based event
-        // activities' bonus-item grants to it too, leaving 8 bare
-        // `grantInventoryItem` call sites across 7 files.)
-        expect(GRANTS.length).toBeGreaterThanOrEqual(8);
-        expect(new Set(GRANTS.map(c => c.file)).size).toBeGreaterThanOrEqual(7);
+        // activities' bonus-item grants to it too, and #873 pass 14 moved
+        // `/shop buy`'s grant, leaving 7 bare `grantInventoryItem` call sites
+        // across 6 files.)
+        expect(GRANTS.length).toBeGreaterThanOrEqual(7);
+        expect(new Set(GRANTS.map(c => c.file)).size).toBeGreaterThanOrEqual(6);
     });
 
     it('covers services and commands alike, not just one folder', () => {

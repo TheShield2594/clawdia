@@ -22,7 +22,7 @@ coverage, which is [#873](https://github.com/TheShield2594/clawdia/issues/873):
 audit coverage is widest exactly where the risk is not.
 
 So net-new game features wait, and every currency-mutation path gets the
-treatment the nine long-stable subsystems got. Thirteen passes have landed under
+treatment the nine long-stable subsystems got. Fourteen passes have landed under
 that decision already — `/duel` escrow and the `/heist` and `/syndicate` crew
 splits in v4.5.2, the casino's progressive jackpot in v4.6.0, `/gift` and
 `/market` in v4.6.1, the casino's hand payouts in v4.7.0, the core currency
@@ -36,8 +36,10 @@ credits, `/forge`, and a tournament entry fee that was minted rather than taken)
 in v4.13.1, the `/pet` command's PvP-battle payouts and adopt refund in
 v4.13.2, the quest-reward credit keyed at every caller in v4.13.3, and the rest
 of the casino (`confirmBet`, the bet guards, the crash restart refund and the
-leaderboard writes) in v4.13.4, and `/explore`'s event-currency drop in
-v4.13.5 — and between them they found the same defect on
+leaderboard writes) in v4.13.4, `/explore`'s event-currency drop in
+v4.13.5, and the items, effects and server shop (`/use`, `/shop buy`, the event
+shop's effect purchases) in v4.13.6 — and between them they found the same
+defect on
 path after path: a
 credit or grant written without reading the write back and without a key to
 replay it. That is
@@ -93,7 +95,7 @@ each pass found; its
 [Not yet reviewed](AUDIT_LOG.md#not-yet-reviewed) section is the queue. That list
 is long and mostly unordered, deliberately — it is a survey, not a plan. The
 order this roadmap commits to, within the economy, is money-moving first.
-Thirteen passes have landed against it — `/duel` escrow and the crew splits, the
+Fourteen passes have landed against it — `/duel` escrow and the crew splits, the
 progressive jackpot, `/gift` and `/market`, the casino's hand payouts and crash
 refunds, the core currency commands, the gathering-loop payouts (`hunt`,
 `fish`, `mine`, `explore`, plus the `/explore` relic and `/use` loot-box item
@@ -106,14 +108,25 @@ PvP-battle payouts and adopt refund, and the **quest-reward credit keyed at
 every caller** (`awardQuest` through `onMessage`/`onReaction`/`onCommandUse`/
 `onEconomyEarn`/`onPetCare`), and **the rest of the casino** (`confirmBet`, the
 bet guards re-asked on every replay, the crash restart refund that had never
-run, and the leaderboard and stat writes), and `/explore`'s **event-currency
-drop**, the one credit pass 8 deferred — which leaves:
+run, and the leaderboard and stat writes), `/explore`'s **event-currency
+drop**, the one credit pass 8 deferred, and **the items, effects and server
+shop** — `/shop buy`'s refunds (the last bare coin credits, missed because the
+earlier passes covered the grind shops but not the server shop), and the `/use`
+and event-shop paths that spent an item or currency before a `save()` that
+could fail — which leaves:
 
-1. the money-moving credits are done; what is unreviewed is non-payout surface —
-   `effects` and the rest of `use`/`inventory`/`shop`, the gathering surface pass
-   9 did not need to touch, the map view, and the season pass's non-reward surface
+1. **the effect consumers.** `/rob`, `/crime`, `/hunt`, the gathering yield
+   charges and `messageCreate`'s streak shield spend an effect charge through
+   the flow's `save()`, a snapshot of the whole `activeEffects` array that can
+   overwrite an effect activated in between. Pass 14 made activation atomic and
+   recorded this as its bound. It is effects rather than coins, and it needs an
+   atomic charge decrement at each consumer.
+2. the rest of the non-payout surface: the gathering surface pass 9 did not need
+   to touch, the map view, and the season pass's non-reward surface
    (view/leaderboard/history/admin). Every currency credit found so far is
-   keyed; nothing money-moving is known to be left
+   keyed, but pass 14 found one in an area the roadmap had listed as
+   non-payout, so "nothing money-moving is left" is a finding to re-check on
+   each pass rather than a settled result
 
 Everything outside the economy stays in the audit log's list and is not sequenced
 ahead of any of the above.

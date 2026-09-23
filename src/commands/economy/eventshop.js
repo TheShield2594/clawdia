@@ -8,7 +8,7 @@ const {
     getEventCurrencyId,
     getEventCurrencyBalance,
 } = require('../../services/seasonalEventService');
-const { addEffect, resolveEffectType } = require('../../services/effectsService');
+const { activateEffect, hasEffect, resolveEffectType, EFFECT_CONFIGS } = require('../../services/effectsService');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { creditEventCurrencyOrOwe } = require('../../utils/creditOrOwe');
 const { eventShopRefundPayoutKey } = require('../../utils/payoutKey');
@@ -147,7 +147,26 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
     const totalCost = shopItem.cost * qty;
 
     // Fast pre-check on balance (stale read; the atomic step below is authoritative)
+    // An effect item starts on purchase, and effects do not stack — a second
+    // copy replaces the first. Buying five charged for five and ran one (#873,
+    // pass 14), so an effect is sold one at a time, and not while it is already
+    // running; both are refused before anything is charged.
+    const effectType = EFFECT_ITEMS.has(shopItem.itemId)
+        ? (resolveEffectType(shopItem.name) ?? shopItem.itemId)
+        : null;
+    if (effectType && qty > 1) {
+        return interaction.editReply({
+            content: `🛒 **${shopItem.name}** starts as soon as you buy it and doesn't stack, so it can only be bought one at a time.`,
+        });
+    }
+
     const userPre = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+    if (effectType && userPre && hasEffect(userPre, effectType)) {
+        const cfg = EFFECT_CONFIGS[effectType];
+        return interaction.editReply({
+            content: `🛒 **${cfg?.label ?? shopItem.name}** is already active on you. Buy another once it runs out.`,
+        });
+    }
     const preBalance = getEventCurrencyBalance(userPre, currencyId);
     if (preBalance < totalCost) {
         return interaction.editReply({
@@ -172,13 +191,21 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
         }
     }
 
-    // Step 2: Atomically deduct currency; revert stock if this fails
+    // Step 2: Atomically deduct currency; revert stock if this fails.
+    //
+    // `$elemMatch`, not two dotted conditions (#873, pass 14). Written as
+    // `'eventCurrency.currencyId': id, 'eventCurrency.amount': { $gte: cost }`,
+    // each condition could be met by a *different* entry, so a player holding
+    // enough of an earlier event's currency passed the balance guard for this
+    // one — the check read above was the only thing stopping an overdraft, and
+    // two purchases racing past it could both land and drive the balance
+    // negative. Bound to one element, the guard is about the currency spent,
+    // and the positional `$` names that element unambiguously.
     const charged = await User.findOneAndUpdate(
         {
             userId: interaction.user.id,
             guildId: interaction.guild.id,
-            'eventCurrency.currencyId': currencyId,
-            'eventCurrency.amount': { $gte: totalCost }
+            eventCurrency: { $elemMatch: { currencyId, amount: { $gte: totalCost } } },
         },
         { $inc: { 'eventCurrency.$.amount': -totalCost } },
         { new: true }
@@ -220,13 +247,19 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
         return refund;
     };
 
-    if (EFFECT_ITEMS.has(shopItem.itemId)) {
-        const effectType = resolveEffectType(shopItem.name) ?? shopItem.itemId;
-        for (let i = 0; i < qty; i++) addEffect(user, effectType);
+    if (effectType) {
+        // One guarded write rather than addEffect + save(): the save wrote the
+        // whole activeEffects array back from the snapshot read at the charge,
+        // over any effect a concurrent command consumed or started in between
+        // (#873, pass 14). A refusal here means the effect started since the
+        // check above — a double-click — so the purchase is unwound.
         try {
-            await user.save();
+            const activation = await activateEffect(
+                User, { userId: interaction.user.id, guildId: interaction.guild.id }, effectType,
+            );
+            if (activation.status !== 'activated') throw new Error(`effect ${effectType} not activated (${activation.status})`);
         } catch (err) {
-            console.error('[eventshop] effect grant save failed:', err.message);
+            console.error('[eventshop] effect grant failed:', err.message);
             return interaction.editReply({ content: purchaseFailedMessage(await revertPurchase(), currency) });
         }
     } else {

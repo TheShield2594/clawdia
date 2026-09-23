@@ -1055,6 +1055,41 @@ function petAdoptRefundPayoutKey(interactionId) {
     return `pet:adopt:${interactionId}:refund`;
 }
 
+/**
+ * The item a `/shop buy` purchase stocks into the buyer's bag (#873, pass 14).
+ *
+ * The server shop debited atomically and then granted with a bare
+ * `grantInventoryItem`: unkeyed, so a failure could not be told from a grant
+ * that committed and lost its response, and a grant that failed was followed by
+ * an unread refund. Keyed, the grant is exactly-once and is recorded as owed
+ * when it will not land, so the buyer is owed the item they paid for rather
+ * than refunded over a grant that may have happened.
+ *
+ * Keyed by the interaction that ran the purchase — the slash command, or the
+ * browse view's buy button — because each is one purchase; the same item bought
+ * again is a new interaction and grants separately. A namespace apart from
+ * `shopGrantPayoutKey`, which the gathering shops stamp on a GrindProfile.
+ */
+function serverShopGrantPayoutKey(interactionId) {
+    return `servershop:${interactionId}:grant`;
+}
+
+/**
+ * The coins a `/shop buy` purchase hands back when it cannot complete (#873,
+ * pass 14) — the stock sold out between the charge and the decrement, the item
+ * could not be granted or recorded, or something threw after the charge.
+ *
+ * Each was a bare `$inc` that read nothing back under a reply saying the coins
+ * had been refunded (and a throw after the charge refunded nothing at all) —
+ * the pass-3 `/market` unwind shape, in the one storefront every server has.
+ * Keyed by the interaction like the grant beside it; only one of the unwinds
+ * can run for a given purchase, so they share one key.
+ */
+function serverShopRefundPayoutKey(interactionId) {
+    return `servershop:${interactionId}:refund`;
+}
+
+
 module.exports = {
     gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, useRoleRefundPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
     questClaimPayoutKey, questRewardPayoutKey, tournamentEntryRefundPayoutKey, forgeRefundPayoutKey,
@@ -1073,6 +1108,7 @@ module.exports = {
     jackpotPayoutKey, casinoPayoutKey,
     eventActivityPayoutKey, eventShopRefundPayoutKey,
     petBattlePayoutKey, petBattleRefundPayoutKey, petAdoptRefundPayoutKey,
+    serverShopGrantPayoutKey, serverShopRefundPayoutKey,
     payoutKeyGuard, payoutKeyAppendExpr, eventCurrencyCreditExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, creditEventCurrencyOnce, isDuplicateKeyError,
     RETENTION_DAYS, RETENTION_MS, KEY_CAP,

@@ -4,7 +4,7 @@ const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const {
     EFFECT_CONFIGS,
     resolveEffectType,
-    addEffect,
+    activateEffect,
     hasEffect,
     timeRemaining,
     isActiveEffect,
@@ -331,23 +331,26 @@ module.exports = {
                 });
             }
 
-            // Atomically consume one item (quantity must be > 0)
-            const user = await User.findOneAndUpdate(
-                { ...userFilter, inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } } },
-                { $inc: { 'inventory.$.quantity': -1 } },
-                { new: true }
-            );
+            // Consume the item and start the effect in one guarded write (#873,
+            // pass 14). This used to consume atomically and then add the effect
+            // to the loaded document and save() it: a save that failed left the
+            // item spent with no effect running, a save that landed wrote the
+            // whole activeEffects array back from its snapshot, and two clicks
+            // could both pass the "already active" read above and spend two
+            // items on one effect.
+            const activation = await activateEffect(User, userFilter, effectType, { consumeItemId: canonicalId });
 
-            if (!user) {
-                return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
+            if (activation.status !== 'activated') {
+                // Either the item went, or the effect started, since the read
+                // above — a double-click lands here. Nothing was consumed.
+                return interaction.reply({
+                    content: `Couldn't activate **${cfg.emoji} ${cfg.label}** — it may already be active, or you no longer have one.`,
+                    flags: MessageFlags.Ephemeral,
+                });
             }
 
-            const effect = addEffect(user, effectType);
-            // The save is here for the effect, not the inventory — unmark the
-            // array so it is not written back wholesale alongside it.
+            const { doc: user, effect } = activation;
             user.inventory = user.inventory.filter(e => e.quantity > 0);
-            user.unmarkModified('inventory');
-            await user.save();
             await dropEmptyInventorySlots();
 
             const embed = new EmbedBuilder()
@@ -558,23 +561,6 @@ module.exports = {
                 });
             }
 
-            // Consume the scroll and remove the record in one conditional write so a
-            // double-click can't revive the same pet twice.
-            const user = await User.findOneAndUpdate(
-                {
-                    ...userFilter,
-                    inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } },
-                    'deceasedPets._id': fallen._id,
-                },
-                // arrayFilters rather than the positional `$`: the query touches two
-                // arrays here, which makes `$` ambiguous about which one it indexes.
-                { $inc: { 'inventory.$[inv].quantity': -1 }, $pull: { deceasedPets: { _id: fallen._id } } },
-                { new: true, arrayFilters: [{ 'inv.itemId': canonicalId, 'inv.quantity': { $gt: 0 } }] }
-            );
-            if (!user) {
-                return interaction.reply({ content: "Couldn't use the scroll — try again.", flags: MessageFlags.Ephemeral });
-            }
-
             const now = new Date();
             const revived = {
                 ...(fallen.toObject ? fallen.toObject() : fallen),
@@ -588,12 +574,37 @@ module.exports = {
             };
             delete revived._id;
             delete revived.diedAt;
-            user.pets.push(revived);
-            // The save is here for the pet — keep the inventory array out of it.
+
+            // Consume the scroll, remove the record and bring the pet back in one
+            // conditional write, so a double-click can't revive the same pet twice
+            // and no failure can land between the three (#873, pass 14). The pet
+            // used to be pushed onto the loaded document and save()d after the
+            // scroll and the record were already gone: a save that failed lost the
+            // pet for good, and one that landed wrote the whole `pets` array back
+            // from its snapshot over any feed, battle or adoption in between. The
+            // `$ne` re-asserts the "no second copy" check above inside the write.
+            const user = await User.findOneAndUpdate(
+                {
+                    ...userFilter,
+                    inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } },
+                    'deceasedPets._id': fallen._id,
+                    'pets.petId': { $ne: fallen.petId },
+                },
+                // arrayFilters rather than the positional `$`: the query touches
+                // several arrays here, which makes `$` ambiguous about which one
+                // it indexes.
+                {
+                    $inc:  { 'inventory.$[inv].quantity': -1 },
+                    $pull: { deceasedPets: { _id: fallen._id } },
+                    $push: { pets: revived },
+                },
+                { new: true, arrayFilters: [{ 'inv.itemId': canonicalId, 'inv.quantity': { $gt: 0 } }] }
+            );
+            if (!user) {
+                return interaction.reply({ content: "Couldn't use the scroll — try again.", flags: MessageFlags.Ephemeral });
+            }
+
             user.inventory = user.inventory.filter(e => e.quantity > 0);
-            user.unmarkModified('inventory');
-            user.markModified('pets');
-            await user.save();
             await dropEmptyInventorySlots();
 
             const def  = PET_DEFINITIONS[fallen.petId];
