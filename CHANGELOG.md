@@ -14,6 +14,63 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.6] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 14 (#873) — the item and effect surface: `/shop buy`,
+`/use`, `effectsService`, `/inventory`, and the event shop's effect purchases.
+The roadmap had these down as non-payout surface. They were not: the server
+shop's refunds were the last bare coin credits left, and each of the other paths
+spends an item or currency before doing a write that can fail.
+
+- **`/shop buy` refunded with writes it never read.** When the stock sold out
+  between the charge and the decrement, or the item could not be granted, the
+  coins went back through a bare `$inc` under a reply saying "your coins have
+  been refunded", whether or not it matched a document, with nothing recorded
+  when it did not. Both refunds now go through `creditCoinsOrOwe` under
+  `serverShopRefundPayoutKey`, and the reply is worded from the outcome.
+- **A `/shop buy` that threw after the charge refunded nothing.** A rejection
+  from the stock write or the grant reached the outer `catch`, which told a
+  charged buyer "Something went wrong... please try again". Both now refund.
+- **The `/shop buy` grant was unkeyed.** A failed grant could not be told from
+  one that committed and lost its response, so the refund after it could pay a
+  buyer back for an item they had. It now goes through `grantItemsOrOwe` under
+  `serverShopGrantPayoutKey`: exactly-once, and recorded as owed when it will
+  not land, in which case the purchase stands and the buyer is told the item is
+  owed. It refunds only when the grant neither landed nor could be recorded.
+- **`/use` could spend an effect item without starting the effect.** It
+  consumed the item atomically, then added the effect to the loaded document and
+  `save()`d it. A failed save left the item gone and no effect running. A save
+  that landed wrote the whole `activeEffects` array back from its snapshot. Two
+  clicks could both pass the "already active" read and spend two items on one
+  effect. The new `effectsService.activateEffect` consumes the item and pushes
+  the effect in one write, filtered on the effect not already running.
+- **`/use revive_scroll` could lose the pet.** The scroll and the grave record
+  went in one write, then the pet was pushed with a `save()`. A failed save lost
+  the pet for good. The pet now goes back in the same write, which also checks
+  that no copy of it is already on the roster.
+- **`/use` never granted the role for items made in the dashboard.** It looked
+  the shop entry up by display name, but `/shop buy` stocks an item under its
+  `itemId` and the dashboard generates one (`item_…`), so the lookup missed. The
+  item was spent and no role was granted. `/use` now matches on `itemId` first.
+  A role that `roles.add` refuses no longer destroys the item: it is given back
+  under `useItemRestorePayoutKey` and the player is told why.
+- **`/eventshop`'s currency debit could match two different entries.** Its
+  guard was `'eventCurrency.currencyId': id, 'eventCurrency.amount': { $gte:
+  cost }`, and without `$elemMatch` each condition could be met by a different
+  entry. So a player holding enough of an earlier event's currency passed the
+  balance guard for this one, and two purchases racing past the read-side check
+  could both land and drive the balance negative. The guard is now bound to one
+  entry. Pass 8 recorded this debit as sound; that is corrected in the audit log.
+- **`/eventshop` charged for effects it did not grant.** Effects don't stack, so
+  buying five boosters charged for five and ran one. Effect items are now sold
+  one at a time and refused while the same effect is running, both before
+  anything is charged. The effect is started with `activateEffect` rather than
+  a snapshot `save()`.
+- `/shop buy` no longer shows "Role Granted" for a role it could not add. The
+  item is still in the bag, and the receipt says to `/use` it to try again.
+
 ## [4.13.5] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

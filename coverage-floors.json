@@ -497,7 +497,6 @@
         "src/utils/paginator.js",
         "src/utils/progressBar.js",
         "src/utils/shopBanner.js",
-        "src/utils/shopBrowse.js",
         "src/utils/starterKit.js",
         "src/utils/wealthMilestone.js",
         "src/views/heistView.js",

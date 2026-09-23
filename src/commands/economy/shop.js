@@ -16,7 +16,9 @@ const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { hasDefaultItemImage } = require('../../utils/defaultItemImages');
 const { runShopBrowse } = require('../../utils/shopBrowse');
 const { logTransaction } = require('../../utils/logTransaction');
-const { grantInventoryItem } = require('../../utils/inventoryGrant');
+const { creditCoinsOrOwe, grantItemsOrOwe } = require('../../utils/creditOrOwe');
+const { serverShopGrantPayoutKey, serverShopRefundPayoutKey } = require('../../utils/payoutKey');
+const { shopRefundMessage } = require('../../utils/grindShop');
 const { ensurePricingFields, trendBucket } = require('../../utils/dynamicPricing');
 const { hasUnlock } = require('../../utils/prestige');
 const COLORS = require('../../utils/embedColors');
@@ -626,6 +628,27 @@ async function buyShopItem(interaction, { guildSettings, currency, viewerPrestig
                     return reply({ content: `You no longer have enough ${currency} for this purchase.`, embeds: [], components: [] });
                 }
 
+                // From here the buyer has paid. Every way out that does not end
+                // with the item in their bag (or owed to them) has to give the
+                // coins back, and has to say what the refund actually did (#873,
+                // pass 14): each unwind below used to be a bare `$inc` that read
+                // nothing back under a reply that said "refunded", and a throw
+                // from the stock write or the grant skipped the refund entirely
+                // and told a charged buyer to try again.
+                const buyer = { userId: interaction.user.id, guildId: interaction.guild.id };
+                const refundCharge = () => creditCoinsOrOwe(buyer, freshTotal, {
+                    payoutKey: serverShopRefundPayoutKey(interaction.id),
+                    service:   'shop',
+                    jobName:   'purchaseRefund',
+                });
+                // Stock is guild inventory rather than player value, so putting
+                // it back stays a best-effort `$inc` — a shelf mis-counted by
+                // `quantity` is not a coin-integrity failure.
+                const restoreStock = () => Guild.updateOne(
+                    { guildId: interaction.guild.id, shop: { $elemMatch: { _id: freshItem._id } } },
+                    { $inc: { 'shop.$.stock': quantity } }
+                ).catch(err => console.error('[shop] stock restore failed:', err));
+
                 // Atomically decrement stock if limited; refund on sell-out race.
                 // $elemMatch binds both predicates to the SAME array element so
                 // the positional update can't accidentally decrement a different
@@ -633,29 +656,34 @@ async function buyShopItem(interaction, { guildSettings, currency, viewerPrestig
                 // Guarding on `>= quantity` makes the whole batch all-or-nothing —
                 // a concurrent buyer can't leave this one partially filled.
                 if (freshItem.stock > 0) {
-                    const stockResult = await Guild.findOneAndUpdate(
-                        {
-                            guildId: interaction.guild.id,
-                            shop: { $elemMatch: { _id: freshItem._id, stock: { $gte: quantity } } },
-                        },
-                        { $inc: { 'shop.$.stock': -quantity } }
-                    );
+                    let stockResult;
+                    try {
+                        stockResult = await Guild.findOneAndUpdate(
+                            {
+                                guildId: interaction.guild.id,
+                                shop: { $elemMatch: { _id: freshItem._id, stock: { $gte: quantity } } },
+                            },
+                            { $inc: { 'shop.$.stock': -quantity } }
+                        );
+                    } catch (err) {
+                        console.error('[shop] stock decrement failed:', err);
+                        return reply({
+                            content: shopRefundMessage(await refundCharge(), {
+                                action: 'Purchase failed', currency, amount: freshTotal,
+                            }),
+                            embeds: [], components: [],
+                        });
+                    }
                     if (!stockResult) {
-                        try {
-                            await User.findOneAndUpdate(
-                                { userId: interaction.user.id, guildId: interaction.guild.id },
-                                { $inc: { balance: freshTotal } }
-                            );
-                            return reply({
-                                content: quantity > 1
-                                    ? `There aren't ${quantity} left in stock anymore. Your coins have been refunded.`
-                                    : 'That item just sold out. Your coins have been refunded.',
-                                embeds: [], components: []
-                            });
-                        } catch (refundErr) {
-                            console.error('[shop] refund failed after sell-out:', refundErr);
-                            return reply({ content: 'That item just sold out and the automatic refund failed — please contact support.', embeds: [], components: [] });
-                        }
+                        return reply({
+                            content: shopRefundMessage(await refundCharge(), {
+                                action: quantity > 1
+                                    ? `There aren't ${quantity} left in stock anymore`
+                                    : 'That item just sold out',
+                                currency, amount: freshTotal,
+                            }),
+                            embeds: [], components: [],
+                        });
                     }
                 }
 
@@ -672,38 +700,67 @@ async function buyShopItem(interaction, { guildSettings, currency, viewerPrestig
                 // Use the item's canonical itemId if set, otherwise fall back to its name
                 const inventoryId = freshItem.itemId || freshItem.name;
 
-                // Inventory upsert in a single atomic aggregation-pipeline update:
-                // when the itemId exists, bump its quantity by the amount bought;
-                // otherwise append a new entry. Done in one call so concurrent buys
-                // can't race between an unsuccessful $inc and a guarded $push and
-                // lose units.
-                const stockedUser = await grantInventoryItem(
-                    interaction.user.id, interaction.guild.id, inventoryId, quantity
-                ).catch(err => {
-                    console.error('[shop] inventory grant failed:', err);
-                    return null;
+                // Keyed and never throwing (#873, pass 14). The bare grant it
+                // replaces could not tell a failure from a write that committed
+                // and lost its response, so refunding after it risked paying the
+                // buyer back for an item they had. Keyed, a retry is a no-op once
+                // the grant has landed, and a grant that still will not land is
+                // recorded as owed — the buyer keeps what they paid for rather
+                // than being refunded over it.
+                const grant = await grantItemsOrOwe(buyer, inventoryId, quantity, {
+                    payoutKey: serverShopGrantPayoutKey(interaction.id),
+                    service:   'shop',
+                    jobName:   'purchaseGrant',
+                    extra:     { itemName: freshItem.name, charged: freshTotal },
                 });
 
-                if (!stockedUser) {
-                    // Roll back the charge and the stock we just took so the buyer
-                    // isn't left paying for items they never received.
-                    await User.updateOne(
-                        { userId: interaction.user.id, guildId: interaction.guild.id },
-                        { $inc: { balance: freshTotal } }
-                    ).catch(err => console.error('[shop] refund after failed grant:', err));
-                    if (freshItem.stock > 0) {
-                        await Guild.updateOne(
-                            { guildId: interaction.guild.id, 'shop._id': freshItem._id },
-                            { $inc: { 'shop.$.stock': quantity } }
-                        ).catch(err => console.error('[shop] stock restore after failed grant:', err));
-                    }
-                    return reply({ content: 'Purchase failed — your coins have been refunded. Please try again.', embeds: [], components: [] });
+                if (!grant.granted && !grant.owed) {
+                    // Neither in the bag nor written down anywhere, so the charge
+                    // is the only record of the purchase: give it back, and the
+                    // stock with it.
+                    const refund = await refundCharge();
+                    if (freshItem.stock > 0) await restoreStock();
+                    return reply({
+                        content: shopRefundMessage(refund, { action: 'Purchase failed', currency, amount: freshTotal }),
+                        embeds: [], components: [],
+                    });
                 }
 
-                const ownedNow = stockedUser.inventory?.find(s => s.itemId === inventoryId)?.quantity ?? quantity;
+                if (!grant.granted) {
+                    // Owed: the item is recorded for `payouts:replay`, so the
+                    // purchase stands — no refund, and the stock stays taken, so
+                    // the ledger records it like any other purchase.
+                    logTransaction({
+                        userId:  interaction.user.id,
+                        guildId: interaction.guild.id,
+                        type:    'shop_buy',
+                        amount:  -freshTotal,
+                        balance: chargedUser.balance,
+                        note:    inventoryId,
+                    });
+                    const boughtLabel = quantity > 1 ? `${quantity}× **${freshItem.name}**` : `**${freshItem.name}**`;
+                    return reply({
+                        content:
+                            `You bought ${boughtLabel} for ${currency}${freshTotal.toLocaleString()}, but it couldn't be ` +
+                            'added to your inventory just now. It has been recorded as owed and will arrive once the ' +
+                            'problem clears — tell an admin if it does not.',
+                        embeds: [], components: [],
+                    });
+                }
 
+                const stockedUser = grant.doc;
+                // `doc` is null when the grant turned out to have landed on an earlier
+                // attempt, so the count falls back to what was bought.
+                const ownedNow = stockedUser?.inventory?.find(s => s.itemId === inventoryId)?.quantity ?? quantity;
+
+                // The item is in the bag either way, and `/use` grants its role,
+                // so a failed add is recoverable — but the receipt must not say
+                // "Role Granted" over a role that was not (#873, pass 14).
+                let roleGranted = false;
                 if (freshItem.roleId) {
-                    await interaction.member.roles.add(freshItem.roleId).catch(console.error);
+                    roleGranted = await interaction.member.roles.add(freshItem.roleId)
+                        .then(() => true)
+                        .catch(err => { console.error('[shop] role grant failed:', err); return false; });
                 }
 
                 logTransaction({
@@ -731,8 +788,13 @@ async function buyShopItem(interaction, { guildSettings, currency, viewerPrestig
                 }
                 successEmbed.addFields({ name: 'In Inventory', value: `${ownedNow.toLocaleString()}× ${freshItem.name}`, inline: true });
 
-                if (freshItem.roleId) {
+                if (roleGranted) {
                     successEmbed.addFields({ name: 'Role Granted', value: `<@&${freshItem.roleId}>`, inline: true });
+                } else if (freshItem.roleId) {
+                    successEmbed.addFields({
+                        name:  'Role Not Granted Yet',
+                        value: `The <@&${freshItem.roleId}> role couldn't be added just now. Run \`/use ${inventoryId}\` to try again, or ask an admin to check the bot's role permissions.`,
+                    });
                 }
 
                 const successImg = await getItemImageAttachment(shopIconId(freshItem), interaction.guildId, { label: freshItem.name }).catch(() => null);

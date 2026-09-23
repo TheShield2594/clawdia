@@ -107,14 +107,17 @@ describe('an active-effect item', () => {
         expect(mockUsers.get(USER_ID).activeEffects.map(e => e.type)).toContain('lucky_charm');
     });
 
-    it('consumes it as a compare-and-set on the slot, not a read then a save', async () => {
+    it('consumes it and starts the effect in one compare-and-set, not a read then a save', async () => {
         seedUser({ inventory: [{ itemId: 'lucky_charm', quantity: 3 }] });
         seedGuild();
 
         await run('lucky_charm');
 
-        const consume = mockUsers.writes.find(w => w.update?.$inc?.['inventory.$.quantity'] === -1);
+        // The effect rides the same write (#873, pass 14), so the slot is
+        // addressed by arrayFilters rather than the positional `$`.
+        const consume = mockUsers.writes.find(w => w.update?.$inc?.['inventory.$[inv].quantity'] === -1);
         expect(consume.query.inventory.$elemMatch).toEqual({ itemId: 'lucky_charm', quantity: { $gt: 0 } });
+        expect(consume.update.$push.activeEffects).toMatchObject({ type: 'lucky_charm' });
     });
 
     it('refuses while the same effect is already running, and consumes nothing', async () => {

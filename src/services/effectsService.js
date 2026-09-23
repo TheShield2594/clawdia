@@ -101,6 +101,63 @@ function addEffect(user, type) {
     return effect;
 }
 
+/**
+ * Start an effect in the database, in one guarded write — optionally consuming
+ * the inventory item that pays for it in the same write (#873, pass 14).
+ *
+ * `addEffect` above mutates a loaded document for its caller to `save()`, and
+ * `save()` writes `activeEffects` back as a `$set` of the array as it was read.
+ * `/use` consumed the item atomically and then did exactly that, so a save that
+ * failed left the item spent and no effect running, and one that landed wrote
+ * back a snapshot over any effect change made in between. This is the same
+ * thing as a single update:
+ *
+ *   1. `$pull` this type's spent or expired entries. That only removes what
+ *      `pruneEffects` would drop on the next read anyway, so it is safe on its
+ *      own even if step 2 then refuses.
+ *   2. Push the fresh effect, filtered on no entry of this type being left. A
+ *      live one means it is already running, and the write matches nothing, so
+ *      two clicks cannot both activate one effect and spend two items for it.
+ *      With `consumeItemId`, the item's decrement rides the same filter, so
+ *      the item goes exactly when the effect starts and never otherwise.
+ *
+ * `arrayFilters` rather than the positional `$` for the decrement: the filter
+ * names two arrays, which makes `$` ambiguous about which one it indexes.
+ *
+ * @returns {Promise<{status: 'activated'|'refused'|'unknown', doc: ?object, effect: ?object}>}
+ *   `refused` means the effect is already running, or (with `consumeItemId`)
+ *   the item is gone; nothing was written beyond the stale-entry prune.
+ */
+async function activateEffect(Model, filter, type, { consumeItemId = null, now = Date.now() } = {}) {
+    const cfg = EFFECT_CONFIGS[type];
+    if (!cfg) return { status: 'unknown', doc: null, effect: null };
+
+    const at = new Date(now);
+    await Model.updateOne(
+        filter,
+        { $pull: { activeEffects: { type, $or: [{ charges: 0 }, { expiresAt: { $lte: at } }] } } },
+    );
+
+    const effect = {
+        type,
+        expiresAt: cfg.durationMs ? new Date(now + cfg.durationMs) : null,
+        charges:   cfg.charges,
+    };
+    const query   = { ...filter, 'activeEffects.type': { $ne: type } };
+    const update  = { $push: { activeEffects: effect } };
+    const options = { new: true };
+    if (consumeItemId) {
+        query.inventory = { $elemMatch: { itemId: consumeItemId, quantity: { $gt: 0 } } };
+        update.$inc = { 'inventory.$[inv].quantity': -1 };
+        options.arrayFilters = [{ 'inv.itemId': consumeItemId, 'inv.quantity': { $gt: 0 } }];
+    }
+
+    const doc = await Model.findOneAndUpdate(query, update, options);
+    return doc
+        ? { status: 'activated', doc, effect }
+        : { status: 'refused', doc: null, effect: null };
+}
+
 // Consume one charge; removes effect if charges reach 0.
 // No-op for unlimited-charge effects (charges === -1).
 function consumeEffect(user, type) {
@@ -224,6 +281,7 @@ module.exports = {
     hasEffect,
     getEffect,
     addEffect,
+    activateEffect,
     consumeEffect,
     refundEffectCharge,
     timeRemaining,

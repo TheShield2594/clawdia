@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and thirteen passes over the
+long-stable, low-churn subsystems have been audited, and fourteen passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -15,7 +15,8 @@ repair/upgrade/unlock shop refunds, the quest-claim credits, the fishing
 tournament's entry fee, and `/forge`), the `/pet` command's payouts, the
 quest-reward credit at every caller, and the rest of the casino (`confirmBet`,
 the bet guards, the crash restart refund, and the games' leaderboard and stat
-writes), and `/explore`'s event-currency drop (#873). The majority of the
+writes), `/explore`'s event-currency drop, and the items, effects and server
+shop (`/use`, `effectsService`, `/inventory`, `/shop buy`) (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -1153,6 +1154,9 @@ not re-derive it:
   `findOneAndUpdate` guarded on `'eventCurrency.amount': { $gte: totalCost }`
   with its result read back — the sound compare-and-set. So is the stock
   decrement that precedes it (`$elemMatch` on `itemId` + `stock: { $gte: qty }`).
+  *Corrected by pass 14 (Economy — Items, Effects and the Server Shop): the
+  guard's two dotted conditions were not bound to one array element, so the
+  `$gte` could be met by another event's currency. It is an `$elemMatch` now.*
 - **The stock revert** on a failed grant stays a best-effort `$inc` with
   `.catch`: it moves guild inventory, not player value, and mis-counting one
   shelf by `qty` is not a coin-integrity failure — deliberately not keyed.
@@ -1610,6 +1614,114 @@ With this, every event-currency credit in the bot goes through the keyed helper.
 
 ---
 
+## Economy — Items, Effects and the Server Shop
+
+**Status: Audited — all findings resolved** ✓
+
+The fourteenth pass of the economy audit #873. The roadmap filed this as
+non-payout surface (`effects` and the rest of `use`/`inventory`/`shop`). It was
+not. `/shop buy`, the one storefront every server has, still refunded through
+two bare `$inc`s. That was the last unkeyed coin credit, and the earlier passes
+had missed it because they went through the grind shops and not the server shop
+beside them. The rest of the findings have the same shape as every earlier
+pass: something is spent in a guarded write, and then a second write that can
+fail has to deliver what was paid for. Here the second write was a `save()`, and
+a failed save lost an item, an effect, or a pet.
+
+Scope, stated so the next pass does not assume more was covered:
+`effectsService.js` (whole file), `use.js` (whole file), `inventory.js` (whole
+file), `shop.js`'s purchase path (`buyShopItem`), and the effect branch and the
+debit of `eventshop.js`. `shop.js`'s view and trends builders were read for
+writes only. The effect **consumers** (the `/rob` padlock, the lifesaver in
+`/crime` and `/hunt`, the streak shield in `messageCreate`, the gathering yield
+charges) were not changed; see the bound below.
+
+**Files reviewed/fixed:**
+- `src/services/effectsService.js` (`activateEffect` added)
+- `src/commands/economy/use.js`
+- `src/commands/economy/shop.js`
+- `src/commands/economy/eventshop.js`
+- `src/commands/economy/inventory.js` (read-only; no change)
+- `src/utils/payoutKey.js`
+- `tests/pass14ItemsAndEffects.test.js` (added)
+- `tests/economyUseCommand.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | `/shop buy`'s two refunds — the stock sold out between the charge and the decrement, or the item could not be granted — were bare `$inc`s that read nothing back, under a reply saying "Your coins have been refunded" whether or not the write matched a document. Nothing was recorded when it did not. This is the pass-3 `/market` unwind shape, in the server shop, which the pass-6 and pass-9 grind-shop fixes did not reach | Both go through `creditCoinsOrOwe` under `serverShopRefundPayoutKey(interaction.id)` (keyed, retried, recorded as owed when it will not land). The reply comes from `shopRefundMessage`, the three-way wording the grind shops use | `shop.js`, `payoutKey.js` |
+| 2 | A `/shop buy` that threw after the charge refunded nothing. A rejection from the stock decrement or the grant escaped `doPurchase` to the outer `catch`, which told the buyer "Something went wrong... please try again" with the coins already taken | The stock decrement's rejection is caught and refunded through the same keyed credit. The grant can no longer reject (finding 3) | `shop.js` |
+| 3 | The `/shop buy` grant was a bare `grantInventoryItem` with no key. A failure could not be told from a write that committed and lost its response, so the refund after it risked paying the buyer back for an item they had, and a grant that failed left no owed record | The grant goes through `grantItemsOrOwe` under `serverShopGrantPayoutKey(interaction.id)`. A retry is a no-op once it has landed. A grant that still will not land is recorded as an owed `items` payload: the purchase stands, nothing is refunded, and the buyer is told the item is owed. It refunds (and puts the stock back) only when the grant neither landed nor could be recorded | `shop.js`, `payoutKey.js` |
+| 4 | `/use` on an effect item consumed the item atomically, then added the effect to the loaded document and `save()`d it. A save that failed left the item spent and no effect running, and the player got a generic error. A save that landed wrote the whole `activeEffects` array back from the snapshot, over any effect another command had consumed or started in between. The "already active" check was a read, so two clicks could both pass it and spend two items on one effect | New `effectsService.activateEffect`. It prunes this type's spent or expired entries, then consumes the item and pushes the effect in one `findOneAndUpdate`, filtered on the item being held and on no entry of this type remaining. The item goes exactly when the effect starts. A double-click's second write matches nothing and spends nothing | `effectsService.js`, `use.js` |
+| 5 | `/use revive_scroll` spent the scroll and removed the grave record in one write, then pushed the pet onto the loaded document and `save()`d it. A save that failed lost the pet permanently: the scroll was gone, the record was gone, and the pet was on no roster. A save that landed wrote the whole `pets` array back from its snapshot | The pet is `$push`ed in the same write that spends the scroll and pulls the record. That write also carries `'pets.petId': { $ne: petId }`, so the "no second copy" rule is enforced in the write as well as the read | `use.js` |
+| 6 | `/use` looked a role item's shop entry up by display name. `/shop buy` stocks an item under its `itemId`, and the dashboard gives every item it creates a generated one (`item_…`), so for any dashboard-made role item the lookup missed: `/use` spent the item, granted nothing, and replied "Item consumed from your inventory". Separately, a `roles.add` that threw (a role above the bot's, or no Manage Roles permission) left the item spent behind a generic error | The entry is matched on `itemId` first, with the name kept as the fallback for items stocked under their name before the shop had ids. A rejected `roles.add` gives the item back through `grantItemsOrOwe` under `useItemRestorePayoutKey`, and the player is told why, and whether the item came back or is owed | `use.js`, `payoutKey.js` |
+| 7 | `/eventshop`'s currency debit was guarded on `'eventCurrency.currencyId': id, 'eventCurrency.amount': { $gte: cost }`. Without `$elemMatch`, each condition can be met by a different array element, so a player holding enough of an earlier event's currency passed the balance guard for this one. Only the read-side check stood between a purchase and an overdraft, and two purchases racing past it could both land and drive the current currency negative. The positional `$` in the update was ambiguous for the same reason. Pass 8 recorded this debit as sound | The guard is `eventCurrency: { $elemMatch: { currencyId, amount: { $gte: cost } } }`, so the balance checked is the one spent and `$` names that entry. `pass14ItemsAndEffects.test.js` races two purchases against 100 snowflakes and 500 candy: one lands, one is refused, and the candy is untouched | `eventshop.js` |
+| 8 | `/eventshop` charged for `quantity` copies of an effect item and then called `addEffect` `quantity` times. Effects don't stack (`addEffect` replaces), so buying five boosters charged for five and ran one | Effect items are refused before any charge at `quantity > 1`, or while the same effect is running. The purchase starts the effect with `activateEffect` rather than a snapshot `save()`, and a refusal there (a double-click) unwinds the purchase through the existing keyed refund | `eventshop.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 9 | `/shop buy` added the item's role with `.catch(console.error)` and then showed "Role Granted" on the receipt regardless | The receipt shows "Role Granted" only when the add resolved. Otherwise a "Role Not Granted Yet" field tells the buyer to `/use` the item (which finding 6 made work for dashboard items) or ask an admin to check the bot's role permissions | `shop.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 10 | Nothing drove `/shop buy`'s unwinds, the effect activation's race, the revive's single write, a dashboard role item, or the event shop's effect and debit paths | `tests/pass14ItemsAndEffects.test.js` (21 tests) drives them against `fakeCollection`, which evaluates the payout-key guard, `$elemMatch`, `arrayFilters` and `$pull` for real. It covers the keyed grant and each refund, a stock write that throws, an owed grant that does not also refund, two racing activations that spend one item, the revive with no `save()`, the restore of a refused role item (granted and owed), and the event-currency race. `economyUseCommand.test.js`'s compare-and-set assertion now expects the effect to ride the consuming write | `tests/` |
+
+**Reviewed and found sound**, recorded so the next pass does not re-derive it:
+
+- **`inventory.js`** is read-only: `pruneEffects` runs in memory for display and
+  nothing is saved.
+- **`/use`'s single-write branches.** The streak freeze, the black-market
+  contract, the stamina upgrade and the pet-slot expansion each consume and
+  apply in one `findOneAndUpdate` with the cap in the filter. The seasonal loot
+  box's grant was keyed in pass 6.
+- **`/shop buy`'s forward direction.** The quote is re-read and never charged
+  above what the buyer was shown, the charge is a guarded `balance: { $gte }`
+  compare-and-set, and the stock decrement is an all-or-nothing `$elemMatch`
+  with `stock: { $gte: quantity }`. The stock restore stays a best-effort `$inc`
+  because it moves guild inventory, not player value, as pass 8 decided for the
+  event shop.
+- **`effectsService`'s in-memory helpers** (`pruneEffects`, `hasEffect`,
+  `consumeEffect`, `refundEffectCharge`, the multiplier getters) are pure
+  functions of the document they are given.
+
+**The bounds this pass leaves open:**
+
+- **Effect consumers still write `activeEffects` from a snapshot.** `/rob`,
+  `/crime`, `/hunt`, the gathering yield charges and `messageCreate`'s streak
+  shield spend a charge with `consumeEffect` on the loaded document and persist
+  it through the flow's `save()`, which is a `$set` of the whole array. An
+  activation now lands atomically, but a consumer's save that lands after it
+  can still overwrite it. The window is the consumer's own flow (seconds, or
+  longer for an interactive run), and the loss is an effect, not coins. Fixing
+  it means an atomic charge decrement at each consumer, which is a
+  cross-command change and wants its own pass.
+- **`/use revive_scroll`'s slot check is read-side only.** An adoption landing
+  between the read and the write can put the player one pet over capacity. No
+  value is lost, and the capacity rule (rare companions are exempt) is not
+  expressible as a simple filter.
+- **A role item is still spent when the member already has the role.**
+  `economyUseCommand.test.js` pins this as the intended trade, so it was left.
+- **`/shop`'s default-item seeding** writes the guild's whole `shop` array with
+  `save()` the first time a guild opens the shop and again after the dashboard
+  adds an item without pricing fields. A concurrent purchase's stock decrement
+  in that window can be overwritten. It is guild inventory, not player value.
+- **A `/shop buy` grant that is neither landed nor recorded is refunded.** If
+  every grant attempt threw on a write that in fact committed, *and* the owed
+  record then also failed, the buyer keeps the item and gets the coins back.
+  That needs the database to be failing writes in both places, and in that
+  state the refund most likely fails too, which the reply reports.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -1621,7 +1733,7 @@ wide, and it is widest exactly where the risk is.
 
 - `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. `/explore`'s while-an-event-runs **event-currency drop** is audited above (pass 13). Still not reviewed: prestige (reviewed sound in pass 7) and the map view
 - `pet` (`petService.js`, `pet/`) — the `/pet` command's **PvP-battle winner payout, the battle escrow refunds and the adopt-fee refund** are audited above (pass 10, which also split `pet.js` into the `pet/` folder), alongside the pet **drops** the gathering runs grant, found sound in pass 9. The Pet-of-the-Week reward was reviewed and found sound. The pet-care **quest credits** (`/pet feed`, `play`, `rest` and the battle care rewards) are audited above (pass 11), keyed alongside every other caller of the shared `awardQuest` hook
-- `use` / items / effects — the seasonal loot-box item grant is audited above (pass 6); `effectsService.js`, `inventory.js`, `shop.js` and the rest of `use.js` are not
+- `use` / items / effects — audited above: the seasonal loot-box item grant (pass 6), and `effectsService.js`, `use.js`, `inventory.js` and `/shop buy` (pass 14). The effect **consumers** that spend a charge through the flow's `save()` (`/rob`, `/crime`, `/hunt`, the gathering yield charges, `messageCreate`'s streak shield) are not reviewed; pass 14 records them as a bound. `shop.js`'s view and trends builders were read for writes only
 - casino (`src/games/casino/*`, `casino.js`) — the progressive jackpot (pass 2),
   the hand payouts (pass 4), and `confirmBet`, the bet guards, the crash restart
   refund and the games' leaderboard and stat writes (pass 12) are audited above;
@@ -1631,7 +1743,7 @@ wide, and it is widest exactly where the risk is.
 - core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market.js` and `gift.js` have had their unwind paths audited (pass 3), the rest of both commands has not
 - group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is not reviewed
 - progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (the view/leaderboard/history/admin flows) is not reviewed
-- seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. Not reviewed: the event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end scheduler in `seasonalEventService.js`) and the shop's browse/balance reads, none of which move player currency. `/explore`'s event-currency drop is audited above (pass 13)
+- seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. Not reviewed: the event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end scheduler in `seasonalEventService.js`) and the shop's browse/balance reads, none of which move player currency. `/explore`'s event-currency drop is audited above (pass 13). The `/eventshop` debit guard and its effect purchases are audited above (pass 14)
 
 **Everything else uncovered:**
 
@@ -1656,5 +1768,6 @@ gathering-loop payouts on 2026-09-18; the progression and group/PvP payouts on
 2026-09-19; the seasonal-event currency on 2026-09-20; the gathering
 commands' non-payout surface on 2026-09-22; the `/pet` command's payouts on
 2026-09-22; the quest-reward credit on 2026-09-22; the rest of the casino on
-2026-09-22; and the `/explore` event-currency drop on 2026-09-23. "Not yet reviewed" carries no review
+2026-09-22; the `/explore` event-currency drop on 2026-09-23; and the items, effects and
+server shop on 2026-09-23. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*

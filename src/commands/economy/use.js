@@ -4,13 +4,13 @@ const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const {
     EFFECT_CONFIGS,
     resolveEffectType,
-    addEffect,
+    activateEffect,
     hasEffect,
     timeRemaining,
 } = require('../../services/effectsService');
 const { getItemLore } = require('../../data/defaultShopItems');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
-const { lootBoxItemPayoutKey } = require('../../utils/payoutKey');
+const { lootBoxItemPayoutKey, useItemRestorePayoutKey } = require('../../utils/payoutKey');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
 const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../services/petService');
 const { MAX_STAMINA_UPGRADES } = require('../../data/crossSystemData');
@@ -104,23 +104,26 @@ module.exports = {
                 });
             }
 
-            // Atomically consume one item (quantity must be > 0)
-            const user = await User.findOneAndUpdate(
-                { ...userFilter, inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } } },
-                { $inc: { 'inventory.$.quantity': -1 } },
-                { new: true }
-            );
+            // Consume the item and start the effect in one guarded write (#873,
+            // pass 14). This used to consume atomically and then add the effect
+            // to the loaded document and save() it: a save that failed left the
+            // item spent with no effect running, a save that landed wrote the
+            // whole activeEffects array back from its snapshot, and two clicks
+            // could both pass the "already active" read above and spend two
+            // items on one effect.
+            const activation = await activateEffect(User, userFilter, effectType, { consumeItemId: canonicalId });
 
-            if (!user) {
-                return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
+            if (activation.status !== 'activated') {
+                // Either the item went, or the effect started, since the read
+                // above — a double-click lands here. Nothing was consumed.
+                return interaction.reply({
+                    content: `Couldn't activate **${cfg.emoji} ${cfg.label}** — it may already be active, or you no longer have one.`,
+                    flags: MessageFlags.Ephemeral,
+                });
             }
 
-            const effect = addEffect(user, effectType);
-            // The save is here for the effect, not the inventory — unmark the
-            // array so it is not written back wholesale alongside it.
+            const { doc: user, effect } = activation;
             user.inventory = user.inventory.filter(e => e.quantity > 0);
-            user.unmarkModified('inventory');
-            await user.save();
             await dropEmptyInventorySlots();
 
             const embed = new EmbedBuilder()
@@ -338,23 +341,6 @@ module.exports = {
                 });
             }
 
-            // Consume the scroll and remove the record in one conditional write so a
-            // double-click can't revive the same pet twice.
-            const user = await User.findOneAndUpdate(
-                {
-                    ...userFilter,
-                    inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } },
-                    'deceasedPets._id': fallen._id,
-                },
-                // arrayFilters rather than the positional `$`: the query touches two
-                // arrays here, which makes `$` ambiguous about which one it indexes.
-                { $inc: { 'inventory.$[inv].quantity': -1 }, $pull: { deceasedPets: { _id: fallen._id } } },
-                { new: true, arrayFilters: [{ 'inv.itemId': canonicalId, 'inv.quantity': { $gt: 0 } }] }
-            );
-            if (!user) {
-                return interaction.reply({ content: "Couldn't use the scroll — try again.", flags: MessageFlags.Ephemeral });
-            }
-
             const now = new Date();
             const revived = {
                 ...(fallen.toObject ? fallen.toObject() : fallen),
@@ -368,12 +354,37 @@ module.exports = {
             };
             delete revived._id;
             delete revived.diedAt;
-            user.pets.push(revived);
-            // The save is here for the pet — keep the inventory array out of it.
+
+            // Consume the scroll, remove the record and bring the pet back in one
+            // conditional write, so a double-click can't revive the same pet twice
+            // and no failure can land between the three (#873, pass 14). The pet
+            // used to be pushed onto the loaded document and save()d after the
+            // scroll and the record were already gone: a save that failed lost the
+            // pet for good, and one that landed wrote the whole `pets` array back
+            // from its snapshot over any feed, battle or adoption in between. The
+            // `$ne` re-asserts the "no second copy" check above inside the write.
+            const user = await User.findOneAndUpdate(
+                {
+                    ...userFilter,
+                    inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } },
+                    'deceasedPets._id': fallen._id,
+                    'pets.petId': { $ne: fallen.petId },
+                },
+                // arrayFilters rather than the positional `$`: the query touches
+                // several arrays here, which makes `$` ambiguous about which one
+                // it indexes.
+                {
+                    $inc:  { 'inventory.$[inv].quantity': -1 },
+                    $pull: { deceasedPets: { _id: fallen._id } },
+                    $push: { pets: revived },
+                },
+                { new: true, arrayFilters: [{ 'inv.itemId': canonicalId, 'inv.quantity': { $gt: 0 } }] }
+            );
+            if (!user) {
+                return interaction.reply({ content: "Couldn't use the scroll — try again.", flags: MessageFlags.Ephemeral });
+            }
+
             user.inventory = user.inventory.filter(e => e.quantity > 0);
-            user.unmarkModified('inventory');
-            user.markModified('pets');
-            await user.save();
             await dropEmptyInventorySlots();
 
             const def  = PET_DEFINITIONS[fallen.petId];
@@ -458,7 +469,14 @@ module.exports = {
         }
 
         // ── Generic (role-granting) items ─────────────────────────────────────
-        const shopItem = guildSettings?.shop?.find(s => s.name.toLowerCase() === itemName.toLowerCase());
+        // By the stored id first: `/shop buy` stocks an item under its `itemId`,
+        // and an item made in the dashboard is given a generated one
+        // (`item_…`), so its inventory entry never matched the display name and
+        // `/use` spent it without granting the role it was bought for (#873,
+        // pass 14). The name stays as the fallback for items stocked before the
+        // shop carried ids, which were stored under their name.
+        const shopItem = guildSettings?.shop?.find(s => s.itemId && s.itemId.toLowerCase() === canonicalId.toLowerCase())
+            ?? guildSettings?.shop?.find(s => s.name.toLowerCase() === itemName.toLowerCase());
 
         // Atomically consume one item before side-effects (role grant)
         const user = await User.findOneAndUpdate(
@@ -477,8 +495,31 @@ module.exports = {
         if (shopItem?.roleId) {
             const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
             if (member && !member.roles.cache.has(shopItem.roleId)) {
-                await member.roles.add(shopItem.roleId, `Used shop item: ${shopItem.name}`);
-                roleGranted = true;
+                try {
+                    await member.roles.add(shopItem.roleId, `Used shop item: ${shopItem.name}`);
+                    roleGranted = true;
+                } catch (err) {
+                    // The item is already spent, and the role is the only thing
+                    // it does — a role above the bot's, or a missing Manage
+                    // Roles permission, used to leave the item gone and the
+                    // player looking at a generic error (#873, pass 14). Give it
+                    // back through the keyed grant, and say what happened.
+                    console.error(`[use] role grant failed for ${shopItem.roleId}:`, err?.message);
+                    const restore = await grantItemsOrOwe(
+                        { userId: userFilter.userId, guildId: userFilter.guildId },
+                        canonicalId, 1,
+                        { payoutKey: useItemRestorePayoutKey(interaction.id), service: 'use', jobName: 'roleItemRestore' },
+                    );
+                    const itemNote = restore.granted
+                        ? 'The item is back in your inventory.'
+                        : restore.owed
+                            ? "The item couldn't be returned just now and has been recorded as owed — it'll reappear once the problem clears."
+                            : "The item couldn't be returned or recorded — please contact a server admin.";
+                    return interaction.reply({
+                        content: `Couldn't give you the role for **${shopItem.name}** — ask an admin to check the bot's role permissions. ${itemNote}`,
+                        flags: MessageFlags.Ephemeral,
+                    });
+                }
             }
         }
 
