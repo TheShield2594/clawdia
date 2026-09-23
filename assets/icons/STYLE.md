@@ -358,10 +358,13 @@ Price text across every banner is gold `#f1c40f`.
   a 5-icon pilot (`first_steps`, `clean_record`, `miner_gold`, `level_100`,
   `century`), then every Legendary, every secret and every Rare (30). Job ids +
   urls in `icons.map.json` (now 346 items). The remaining 37 Common/Uncommon
-  badges are tracked in a GitHub issue. **Not wired into the app yet** — next is
-  baking them and showing them in the 58px icon slot of `createAchievementCard`
-  (`src/utils/cardGenerator.js`) and as embed thumbnails, with the pixel trophy
-  / emoji as fallback.
+  badges are tracked in issue #1108. **Wired in** via
+  `src/utils/achievementArt.js` (built-in definitions only, so a custom
+  achievement reusing a built-in id never borrows its badge): the badge fills
+  the 58px icon slot of `createAchievementCard` on the unlock reveal, and is the
+  embed thumbnail on the `/achievements pin` confirmation and on rare/legendary
+  unlock broadcasts (never on the redacted secret broadcast). Anything without
+  a baked badge keeps the pixel trophy / emoji.
 - **2026-09-22** — Added **10 explore regions + 25 explore relics**: regions
   under an `explore:` namespace (the "round scene emblem" framing shared with
   hunt zones / fish locations / mine depths; core five laddered Common→Legendary

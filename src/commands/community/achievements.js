@@ -1,10 +1,11 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 const User = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { ACHIEVEMENTS } = require('../../data/achievements');
 const COLORS = require('../../utils/embedColors');
+const { getAchievementArt } = require('../../utils/achievementArt');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { attachGrind } = require('../../utils/grindProfile');
 
@@ -346,12 +347,18 @@ async function handlePin(interaction, guildSettings) {
         { $set: { pinnedAchievement: achievementId } }
     );
 
-    return interaction.reply({
-        embeds: [new EmbedBuilder()
-            .setColor(COLORS.SUCCESS)
-            .setTitle('📌 Featured Achievement Set!')
-            .setDescription(`${def.emoji} **${def.name}** — ${def.description}\n\nThis achievement will now be displayed prominently on your profile.`)
-        ],
-        flags: MessageFlags.Ephemeral,
-    });
+    const embed = new EmbedBuilder()
+        .setColor(COLORS.SUCCESS)
+        .setTitle('📌 Featured Achievement Set!')
+        .setDescription(`${def.emoji} **${def.name}** — ${def.description}\n\nThis achievement will now be displayed prominently on your profile.`);
+
+    // Pinning requires having earned it, so a secret's badge is safe to show.
+    const files = [];
+    const art = getAchievementArt(def);
+    if (art) {
+        embed.setThumbnail('attachment://achievement-badge.png');
+        files.push(new AttachmentBuilder(art, { name: 'achievement-badge.png', description: `Achievement badge: ${def.name}` }));
+    }
+
+    return interaction.reply({ embeds: [embed], files, flags: MessageFlags.Ephemeral });
 }

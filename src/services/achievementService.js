@@ -3,6 +3,7 @@
 const { ACHIEVEMENTS } = require('../data/achievements');
 const { delay } = require('../utils/delay');
 const { createAchievementCard } = require('../utils/cardGenerator');
+const { getAchievementArt } = require('../utils/achievementArt');
 const COLORS = require('../utils/embedColors');
 
 /**
@@ -125,8 +126,9 @@ function getAnnounceTier(def) {
     return 'legendary';
 }
 
-// Rank order for non-secret tiers only (secret is handled orthogonally)
-const ANNOUNCE_TIER_ORDER = { none: 0, rare: 1, legendary: 2 };
+// Rank order for non-secret tiers. A 'secret' threshold ranks above them all,
+// so only secret unlocks (which bypass the threshold) broadcast under it.
+const ANNOUNCE_TIER_ORDER = { none: 0, rare: 1, legendary: 2, secret: 3 };
 
 function tierMeetsThreshold(tier, threshold) {
     // Secret achievements always broadcast regardless of threshold
@@ -138,13 +140,13 @@ function tierMeetsThreshold(tier, threshold) {
 /**
  * Send a server-wide announcement for notable achievement unlocks.
  * Tiers: rare = brief mention, secret = redacted, legendary = fancy bordered.
- * Uses the same announcementChannelId as the per-user reveal to avoid needing
- * a separate dashboard field; skips broadcast if both channels are identical
- * (prevent duplicate when the reveal channel IS the announce channel).
+ * Posts to `broadcastChannelId`, a channel separate from the per-user reveal;
+ * unset means no broadcast, and it is skipped when it is the reveal channel so
+ * the same unlock never posts twice there.
  * Respects `achievementAnnounceThreshold` guild setting ('rare'|'secret'|'legendary').
  */
 async function broadcastAchievementUnlock(client, guildSettings, mention, def, revealChannelId) {
-    const channelId = guildSettings.achievements?.announcementChannelId;
+    const channelId = guildSettings.achievements?.broadcastChannelId;
     if (!channelId) return;
 
     // Skip broadcast if it would post to the same channel as the per-user reveal
@@ -159,7 +161,7 @@ async function broadcastAchievementUnlock(client, guildSettings, mention, def, r
     const channel = guild.channels.cache.get(channelId);
     if (!channel?.isTextBased()) return;
 
-    const { EmbedBuilder } = require('discord.js');
+    const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 
     let embed;
     if (tier === 'legendary') {
@@ -190,74 +192,92 @@ async function broadcastAchievementUnlock(client, guildSettings, mention, def, r
             .setTimestamp();
     }
 
-    channel.send({ embeds: [embed] }).catch(() => null);
+    // Badge art as the thumbnail — except for the secret tier, whose broadcast
+    // is deliberately redacted and must not give the achievement away.
+    const files = [];
+    const art = tier === 'secret' ? null : getAchievementArt(def);
+    if (art) {
+        embed.setThumbnail('attachment://achievement-badge.png');
+        files.push(new AttachmentBuilder(art, {
+            name: 'achievement-badge.png',
+            description: `Achievement badge: ${def.name}`,
+        }));
+    }
+
+    await channel.send({ embeds: [embed], files }).catch(() => null);
 }
 
 /**
- * Post achievement unlock announcements to the configured channel.
- * Each achievement is revealed in two steps (mystery → reveal) with an 800ms gap,
- * and multiple unlocks are staggered with 400ms between them.
+ * The per-user reveal of one unlock in the reveal channel: a mystery beat, then
+ * after 800ms the reveal embed with the achievement card.
+ */
+async function revealAchievement(channel, ach, mention) {
+    const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+
+    // Step 1 — mystery beat
+    const mysteryEmbed = new EmbedBuilder()
+        .setColor(COLORS.INFO)
+        .setTitle('🏅 Achievement Unlocked...')
+        .setDescription('???');
+
+    const msg = await channel.send({ embeds: [mysteryEmbed] }).catch(() => null);
+    if (!msg) return;
+
+    await delay(800);
+
+    // Step 2 — reveal with canvas image
+    const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
+    const rewards = [];
+    if (ach.xpReward)   rewards.push(`+${ach.xpReward} XP`);
+    if (ach.coinReward) rewards.push(`+${ach.coinReward.toLocaleString()} coins`);
+    const rewardLine = rewards.length ? `${separator}\n  ${rewards.join('  ·  ')}\n${separator}` : separator;
+
+    const revealEmbed = new EmbedBuilder()
+        .setColor(getTierColor(ach.xpReward))
+        .setTitle('🏅 Achievement Unlocked!')
+        .setDescription(
+            `${ach.emoji || ''} **${ach.name}**\n\n${ach.description}\n\n${rewardLine}\n  ${mention}`
+        )
+        .setFooter({ text: 'Use /achievements to view all achievements' });
+
+    // Attach the Minecraft-style canvas card, with the badge art in its icon slot
+    let files = [];
+    try {
+        const buf = await createAchievementCard(ach.name, ach.description, ach.xpReward, getAchievementArt(ach));
+        revealEmbed.setImage('attachment://achievement.png');
+        files = [new AttachmentBuilder(buf, {
+            name: 'achievement.png',
+            description: `Achievement card: ${ach.name} — ${ach.description}`,
+        })];
+    } catch { /* non-critical — send embed without card */ }
+
+    await msg.edit({ embeds: [revealEmbed], files }).catch(() => null);
+}
+
+/**
+ * Announce achievement unlocks: the per-user reveal in `announcementChannelId`
+ * (every unlock), and the server-wide broadcast in `broadcastChannelId` (notable
+ * unlocks only). Each is independent — either channel can be set without the
+ * other. Multiple unlocks are staggered with 400ms between them.
  */
 async function announceAchievements(client, guildSettings, user, member, achievements) {
-    const channelId = guildSettings.achievements?.announcementChannelId;
-    if (!channelId) return;
+    const revealChannelId = guildSettings.achievements?.announcementChannelId ?? null;
+    if (!revealChannelId && !guildSettings.achievements?.broadcastChannelId) return;
 
     const guild = client.guilds.cache.get(guildSettings.guildId);
     if (!guild) return;
 
-    const channel = guild.channels.cache.get(channelId);
-    if (!channel) return;
-
-    const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+    const revealChannel = revealChannelId ? guild.channels.cache.get(revealChannelId) : null;
     const mention = member?.displayName ? `${member.displayName} (<@${user.userId}>)` : `<@${user.userId}>`;
 
     for (let i = 0; i < achievements.length; i++) {
         if (i > 0) await delay(400);
 
         const ach = achievements[i];
-        const tierColor = getTierColor(ach.xpReward);
-
-        // Step 1 — mystery beat
-        const mysteryEmbed = new EmbedBuilder()
-            .setColor(COLORS.INFO)
-            .setTitle('🏅 Achievement Unlocked...')
-            .setDescription('???');
-
-        const msg = await channel.send({ embeds: [mysteryEmbed] }).catch(() => null);
-        if (!msg) continue;
-
-        await delay(800);
-
-        // Step 2 — reveal with canvas image
-        const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
-        const rewards = [];
-        if (ach.xpReward)   rewards.push(`+${ach.xpReward} XP`);
-        if (ach.coinReward) rewards.push(`+${ach.coinReward.toLocaleString()} coins`);
-        const rewardLine = rewards.length ? `${separator}\n  ${rewards.join('  ·  ')}\n${separator}` : separator;
-
-        const revealEmbed = new EmbedBuilder()
-            .setColor(tierColor)
-            .setTitle('🏅 Achievement Unlocked!')
-            .setDescription(
-                `${ach.emoji || ''} **${ach.name}**\n\n${ach.description}\n\n${rewardLine}\n  ${mention}`
-            )
-            .setFooter({ text: 'Use /achievements to view all achievements' });
-
-        // Attach the Minecraft-style canvas card
-        let files = [];
-        try {
-            const buf = await createAchievementCard(ach.name, ach.description, ach.xpReward);
-            revealEmbed.setImage('attachment://achievement.png');
-            files = [new AttachmentBuilder(buf, {
-                name: 'achievement.png',
-                description: `Achievement card: ${ach.name} — ${ach.description}`,
-            })];
-        } catch { /* non-critical — send embed without card */ }
-
-        await msg.edit({ embeds: [revealEmbed], files }).catch(() => null);
+        if (revealChannel) await revealAchievement(revealChannel, ach, mention);
 
         // Server-wide broadcast for notable unlocks (fire-and-forget, skips if same channel)
-        broadcastAchievementUnlock(client, guildSettings, mention, ach, channelId).catch(() => null);
+        broadcastAchievementUnlock(client, guildSettings, mention, ach, revealChannelId).catch(() => null);
     }
 }
 
