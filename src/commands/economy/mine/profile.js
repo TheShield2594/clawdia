@@ -22,6 +22,7 @@ const GrindProfile = require('../../../models/GrindProfile');
 const { MAX_MINER_LEVEL, MAX_MINE_PRESTIGE, PRESTIGE_BADGES } = require('./shared');
 const { buildXpBar, prestigeBonusLines } = require('./embeds');
 const COLORS = require('../../../utils/embedColors');
+const { checkGrandPrestige } = require('../../../services/grandPrestigeService');
 
 async function handlePrestige(interaction) {
     const guildSettings = await getGuildSettings(interaction.guild.id);
@@ -161,6 +162,10 @@ async function handlePrestige(interaction) {
                 m.prestige = prestige + 1;
                 m.level    = 1;
                 m.xp       = 0;
+
+                // /mine prestige never checked Grand Master, so a player who
+                // finished Diamond on /mine last could never earn it (#873, pass 20).
+                checkGrandPrestige(interaction.client, user.userId, user.guildId, interaction.guild);
 
                 const embed = new EmbedBuilder()
                     .setColor(COLORS.WARN)
