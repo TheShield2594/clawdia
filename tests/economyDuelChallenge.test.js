@@ -37,6 +37,9 @@ jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 // pays the arena district's +15% bonus.
 jest.mock('../src/services/districtService', () => ({ isDistrictActive: jest.fn(() => false) }));
 jest.mock('../src/services/seasonMissionService', () => ({ advanceMissions: jest.fn(async () => {}) }));
+// Every accepted duel is noted for the stranded-stake sweep; the note is not
+// what these tests are about.
+jest.mock('../src/models/PendingDuel', () => ({ create: jest.fn(async () => ({})) }));
 
 const duel = require('../src/commands/economy/duel');
 const { claimDuelCooldown, revertDuelCooldown } = duel.__test__;

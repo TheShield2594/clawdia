@@ -127,8 +127,9 @@ on an offer that had since changed — and **the heist, syndicate and duel
 lobbies**, where a ranked duel played past the season's end cost the leader
 their prize — which leaves:
 
-1. the rest of the non-payout surface: the seasonal-event definition surface,
-   and a sweep for duel stakes a restart strands (pass 22's open bound). The
+1. the rest of the non-payout surface: the seasonal-event definition surface
+   (pass 22's open bound, duel stakes a restart strands, is closed in
+   v4.13.15). The
    gathering commands, the map views, `/explore`'s views, the season pass,
    `/market`, `/gift` and `/trade`, and the group lobbies are done (passes
    16–22). Every

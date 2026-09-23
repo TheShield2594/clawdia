@@ -2278,13 +2278,23 @@ Three patterns come up again and again:
 
 **The bound this pass leaves open:**
 
-- **A restart mid-duel strands both stakes.** The stakes are escrowed at
-  accept, and the duel lives only in its collectors. Nothing reconciles an
-  escrow whose duel never settled, and the debit keys that record it are evicted
-  after 24 hours. A sweep has to tell a stranded escrow from a settled one,
-  including a payout recorded as owed, or it would refund a duel that was
-  already paid. That is a change to pass 1's escrow, not a lobby fix, so it is
-  its own task.
+- **A restart mid-duel strands both stakes — closed in 4.13.15.** The stakes
+  are escrowed at accept, and the duel lives only in its collectors, so a
+  process that died in between settled nothing, and the debit keys that record
+  the escrow are evicted after 24 hours. Every accepted duel now leaves a
+  `PendingDuel`, written before either stake moves. `sweepStrandedDuels`
+  (`services/duelEscrowSweep.js`, every five minutes, per shard) judges entries
+  older than ten minutes. A duel counts as settled if either player holds a
+  `duel:{duelId}:…` payout or refund key, or an owed-payout record is filed
+  under one. That is how a won duel is told apart from a stranded one: the
+  loser's escrow stands for good after a win. Only a duel with none of these has
+  its standing escrow entries reversed, through the keyed `undoStake`, which
+  cannot mint or pay twice. The refund is logged as `duel_refund`, and nobody is
+  told on Discord. `tests/duelEscrowSweep.test.js` (13 tests) covers:
+  - a stranded pair refunded once across repeated and racing sweeps;
+  - a won duel, a tie, and a payout recorded as owed, each left alone;
+  - a young entry and another shard's guild, each left alone;
+  - a half-finished `takeEscrow` rollback, completed.
 - **Smaller notes, not fixed:**
   - A duel that expires unplayed still costs both players the five-minute
     cooldown.
