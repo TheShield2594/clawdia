@@ -6,7 +6,8 @@
  *
  * One entry per catalogue key: 83 shop-browse activity ids + 35 guild shop
  * items + 144 catch/kill/mine results (caught fish, hunted animals, mined ores)
- * + 14 pet species (issue #1082) + 10 explore regions + 25 explore relics. Each
+ * + 14 pet species (issue #1082) + 10 explore regions + 25 explore relics
+ * + a 5-icon achievement badge pilot (`achievement:<id>`). Each
  * entry carries the storage key, the on-disk filename, the item's rarity, the
  * rim colour that rarity maps to, and the finished Higgsfield prompt.
  *
@@ -416,6 +417,52 @@ seasonalRegions.forEach((r) => add(`explore:${r.id}`, 'Rare', REGION_SUBJECT[r.i
 // Relics: single-object icons, rarity from the relic's own tier.
 explore.RELIC_LIST.forEach((r) => add(`relic:${r.slug}`, RELIC_RARITY[r.rarity], RELIC_SUBJECT[r.slug]));
 
+// --- achievement badges (pilot) ----------------------------------------------
+// Achievements are often abstract ("have 100 coins", "30 days without a
+// warning"), so they don't fit the single-object item framing. They get a round
+// medal-badge emblem with one symbolic subject inside — the achievement analog
+// of the zone/region "round scene emblem" — on top of the B3 rim + flat shading.
+// Rarity comes from xpReward on the same breakpoints as getTierColor() in
+// src/services/achievementService.js, which lines up with the rim palette.
+// Only the pilot subjects are listed so far; secret achievements are excluded
+// (their art would give the secret away before it's earned).
+const { ACHIEVEMENTS } = require('../../src/data/achievements.js');
+const ACHIEVEMENT_STYLE = (rarityName) => {
+    const rim = RARITY[rarityName].word;
+    return `Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick ${rim} rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size.`;
+};
+const achievementPrompt = (subject, rarityName) => `Achievement badge icon: ${subject} ${ACHIEVEMENT_STYLE(rarityName)}`;
+const achievementRarity = (xp) => {
+    if (!xp || xp <= 50) return 'Common';
+    if (xp <= 200) return 'Uncommon';
+    if (xp <= 500) return 'Rare';
+    if (xp <= 999) return 'Epic';
+    return 'Legendary';
+};
+const ACHIEVEMENT_SUBJECT = {
+    first_steps:  'a small stack of three gold coins beside a single green banknote, a modest first fortune.',
+    clean_record: 'a white dove in flight carrying a green olive sprig over a blank rolled parchment scroll.',
+    miner_gold:   'a crossed pair of iron pickaxes behind a large raw gold nugget glinting in a rocky cave wall.',
+    level_100:    'a laurel-wreathed star with five points radiating light beams, a legend\'s crest.',
+    century:      'a tall roaring flame rising from a golden torch, embers swirling around it like an unbroken streak.',
+};
+const ACHIEVEMENT_IDS = new Set(ACHIEVEMENTS.map((a) => a.id));
+Object.entries(ACHIEVEMENT_SUBJECT).forEach(([id, subject]) => {
+    const def = ACHIEVEMENTS.find((a) => a.id === id);
+    if (!def) throw new Error(`no achievement ${id}`);
+    if (def.secret) throw new Error(`secret achievement ${id} must not get art`);
+    const rarityName = achievementRarity(def.xpReward);
+    manifest.push({
+        index: index++,
+        key: `achievement:${id}`,
+        file: `achievement__${id}.png`,
+        rarity: rarityName,
+        rim: RARITY[rarityName].word,
+        rimHex: RARITY[rarityName].hex,
+        prompt: achievementPrompt(subject, rarityName),
+    });
+});
+
 // --- validate against the game registries -----------------------------------
 // Every namespaced key must be a known game key: a shop-browse gear id or a
 // catch/kill/mine result id (both uploadable), or a pet species / explore region
@@ -424,7 +471,10 @@ explore.RELIC_LIST.forEach((r) => add(`relic:${r.slug}`, RELIC_RARITY[r.rarity],
 // included here but not in `isUploadableItemId`: their art ships only as a baked
 // default, never a per-guild upload.
 const { ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS, PET_ITEM_IDS, EXPLORE_ITEM_IDS } = require('../../src/data/activityItems.js');
-const knownKeys = new Set([...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS, ...PET_ITEM_IDS, ...EXPLORE_ITEM_IDS]);
+const knownKeys = new Set([
+    ...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS, ...PET_ITEM_IDS, ...EXPLORE_ITEM_IDS,
+    ...[...ACHIEVEMENT_IDS].map((id) => `achievement:${id}`),
+]);
 // Every prompt ends with the shared B3 style block; "rarity rim," is the phrase
 // both the item and the pet-portrait style blocks carry, so its absence means a
 // prompt was never assembled.

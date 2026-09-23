@@ -2797,5 +2797,50 @@
     "rim": "amethyst-purple",
     "rimHex": "#9B59B6",
     "prompt": "Game item icon: a sliver of pale antler carved with frost patterns, radiating faint cold blue light. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 311,
+    "key": "achievement:first_steps",
+    "file": "achievement__first_steps.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a small stack of three gold coins beside a single green banknote, a modest first fortune. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 312,
+    "key": "achievement:clean_record",
+    "file": "achievement__clean_record.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a white dove in flight carrying a green olive sprig over a blank rolled parchment scroll. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 313,
+    "key": "achievement:miner_gold",
+    "file": "achievement__miner_gold.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Achievement badge icon: a crossed pair of iron pickaxes behind a large raw gold nugget glinting in a rocky cave wall. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 314,
+    "key": "achievement:level_100",
+    "file": "achievement__level_100.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Achievement badge icon: a laurel-wreathed star with five points radiating light beams, a legend's crest. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 315,
+    "key": "achievement:century",
+    "file": "achievement__century.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Achievement badge icon: a tall roaring flame rising from a golden torch, embers swirling around it like an unbroken streak. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   }
 ]

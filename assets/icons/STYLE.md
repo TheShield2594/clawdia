@@ -343,6 +343,21 @@ Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
 
+- **2026-09-23** — **Achievement badge pilot** (5 icons). Achievements are often
+  abstract ("have 100 coins", "30 days without a warning"), so they get their own
+  `ACHIEVEMENT_STYLE`/`achievementPrompt` in `build-manifest.mjs`: a round medal
+  badge with one symbolic subject inside, on top of the B3 rim + flat shading,
+  under a bundle-only `achievement:<id>` namespace. Rarity comes from `xpReward`
+  on the same breakpoints as `getTierColor()` (`src/services/achievementService.js`),
+  which lines up with the rim palette; no built-in achievement currently falls in
+  the Epic band. Secret achievements are excluded (art would spoil them). Pilot:
+  `first_steps` (Common), `clean_record` (Uncommon), `miner_gold` (Rare),
+  `level_100` and `century` (Legendary), all on `gpt_image_2_5` at
+  `quality: high` against the steel_rifle anchor; job ids + urls in
+  `icons.map.json` (now 316 items). **Not wired into the app yet** — next step is
+  to bake them and judge them in the 58px icon slot of `createAchievementCard`
+  (`src/utils/cardGenerator.js`) before generating the remaining achievements.
+
 - **2026-09-22** — Added **10 explore regions + 25 explore relics**: regions
   under an `explore:` namespace (the "round scene emblem" framing shared with
   hunt zones / fish locations / mine depths; core five laddered Common→Legendary

@@ -4,7 +4,7 @@
     "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
     "style": "B3 (rarity rim, flat 2-tone, no gloss)",
     "date": "2026-09-21",
-    "count": 311,
+    "count": 316,
     "resultsAdded": {
       "date": "2026-09-21",
       "count": 144,
@@ -22,6 +22,12 @@
       "count": 35,
       "quality": "high",
       "note": "explore regions (10) and relics (25)"
+    },
+    "achievementPilotAdded": {
+      "date": "2026-09-23",
+      "count": 5,
+      "quality": "high",
+      "note": "achievement badge pilot (one per rarity used + abstract subjects); not yet wired into the app"
     }
   },
   "items": {
@@ -3445,6 +3451,61 @@
       "model": "gpt_image_2_5",
       "date": "2026-09-22",
       "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260922_142624_904a53fa-b8d3-41cd-9471-6d59d8ba72b7.png"
+    },
+    "achievement:first_steps": {
+      "file": "achievement__first_steps.png",
+      "jobId": "2d45e4be-4ecc-49ad-a939-1e43354b89bf",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-23",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260923_125319_2d45e4be-4ecc-49ad-a939-1e43354b89bf.png"
+    },
+    "achievement:clean_record": {
+      "file": "achievement__clean_record.png",
+      "jobId": "7d9602e1-ee11-41e8-be59-b0ec4371889a",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-23",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260923_125318_7d9602e1-ee11-41e8-be59-b0ec4371889a.png"
+    },
+    "achievement:miner_gold": {
+      "file": "achievement__miner_gold.png",
+      "jobId": "7f78cd60-9f22-4549-8caf-944c072778ad",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-23",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260923_125357_7f78cd60-9f22-4549-8caf-944c072778ad.png"
+    },
+    "achievement:level_100": {
+      "file": "achievement__level_100.png",
+      "jobId": "f379a8df-fe14-479a-bd33-73da2d17a4ab",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-23",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260923_125318_f379a8df-fe14-479a-bd33-73da2d17a4ab.png"
+    },
+    "achievement:century": {
+      "file": "achievement__century.png",
+      "jobId": "d748cb93-10c7-4fd1-a848-18abf6a0cfd5",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-23",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260923_125318_d748cb93-10c7-4fd1-a848-18abf6a0cfd5.png"
     }
   }
 }
