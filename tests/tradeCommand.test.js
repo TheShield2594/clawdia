@@ -21,7 +21,12 @@ jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 jest.mock('../src/utils/guildSettingsCache', () => ({ getGuildSettings: jest.fn(async () => ({})) }));
 const mockResolveEffectType = jest.fn(() => null);
-jest.mock('../src/services/effectsService', () => ({ resolveEffectType: (...a) => mockResolveEffectType(...a) }));
+jest.mock('../src/services/effectsService', () => ({
+    resolveEffectType: (...a) => mockResolveEffectType(...a),
+    // The real rule for "still active" — the trade check asks it, and a stub
+    // would decide the test instead of the code.
+    isActiveEffect: jest.requireActual('../src/services/effectsService').isActiveEffect,
+}));
 
 const { __test__ } = require('../src/commands/economy/trade');
 const { resolveItemForTrade, finalizeTrade, sideEmpty } = __test__;
@@ -69,6 +74,15 @@ describe('resolveItemForTrade', () => {
         mockResolveEffectType.mockReturnValue('boost');
         const res = resolveItemForTrade({ inventory: [{ itemId: 'booster', quantity: 1 }], activeEffects: [{ type: 'boost' }] }, 'booster', 1, {});
         expect(res.error).toMatch(/active as an effect/);
+    });
+
+    test('does not refuse over an effect that has expired but was never pruned', () => {
+        mockResolveEffectType.mockReturnValue('boost');
+        const res = resolveItemForTrade({
+            inventory: [{ itemId: 'booster', quantity: 1 }],
+            activeEffects: [{ type: 'boost', expiresAt: new Date(Date.now() - 60_000), charges: -1 }],
+        }, 'booster', 1, {});
+        expect(res.error).toBeUndefined();
     });
 });
 
