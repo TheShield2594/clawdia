@@ -91,6 +91,21 @@ function leadingEmoji(str) {
 }
 
 /**
+ * Retired inventory ids and the catalogue item they now stand for. /daily used
+ * to drop its boosters as `coin_booster` / `xp_booster`; stacks of those still
+ * sit in bags, activate as the 2x boosters (effectsService maps them), and
+ * should read as them rather than as a bare id behind a 🎁.
+ */
+const LEGACY_ITEM_ALIASES = { coin_booster: 'coin_booster_2x', xp_booster: 'xp_booster_2x' };
+
+/** The built-in catalogue row for an id, following a legacy alias if it has one. */
+function findDefaultRow(itemId) {
+    const lower = String(itemId ?? '').toLowerCase();
+    const target = LEGACY_ITEM_ALIASES[lower] ?? lower;
+    return DEFAULT_SHOP_ITEMS.find(s => s.itemId.toLowerCase() === target || s.name.toLowerCase() === target) ?? null;
+}
+
+/**
  * The guild's own shop row for an item, matched case-insensitively on either
  * field: shop.js stores an item under `itemId || name`, so an admin-made item
  * can be sitting in an inventory under its display name.
@@ -162,7 +177,7 @@ function describeItem(itemId, { shopItems = [], aiItem = null } = {}) {
     // instead of `pet_food`.
     const lower = id.toLowerCase();
     const shopItem = findShopRow(id, shopItems)
-        ?? DEFAULT_SHOP_ITEMS.find(s => s.itemId.toLowerCase() === lower || s.name.toLowerCase() === lower);
+        ?? findDefaultRow(id);
 
     const eventItem = shopItem ? null : EVENT_ITEMS.get(lower);
     if (eventItem) {
@@ -200,4 +215,4 @@ function describeItem(itemId, { shopItems = [], aiItem = null } = {}) {
     };
 }
 
-module.exports = { describeItem, findShopRow, RARITY_EMOJIS, RARITY_HEX, FORGE_COST_BY_RARITY };
+module.exports = { describeItem, findShopRow, findDefaultRow, LEGACY_ITEM_ALIASES, RARITY_EMOJIS, RARITY_HEX, FORGE_COST_BY_RARITY };
