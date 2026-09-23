@@ -117,6 +117,84 @@ router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, checkWriteRa
     }
 });
 
+const MAX_KEYWORDS = 20;
+const MAX_KEYWORD_LENGTH = 60;
+const MAX_TEMPLATE_LENGTH = 500;
+
+// A keyword list from the request: trimmed, blanks dropped, duplicates (in any
+// case) dropped. Returns an error string for anything that is not a list of
+// short strings.
+function parseKeywords(value, name) {
+    if (value === undefined || value === null) return { keywords: [] };
+    if (!Array.isArray(value) || value.some(k => typeof k !== 'string')) return { error: `${name} must be a list of words` };
+    const keywords = [];
+    const seen = new Set();
+    for (const raw of value) {
+        const keyword = raw.trim();
+        if (!keyword || seen.has(keyword.toLowerCase())) continue;
+        if (keyword.length > MAX_KEYWORD_LENGTH) return { error: `Each keyword can be at most ${MAX_KEYWORD_LENGTH} characters` };
+        seen.add(keyword.toLowerCase());
+        keywords.push(keyword);
+    }
+    if (keywords.length > MAX_KEYWORDS) return { error: `At most ${MAX_KEYWORDS} keywords per list` };
+    return { keywords };
+}
+
+// Sets one feed's delivery options: keyword filters, a role to ping, and the
+// message line posted above each item's embed.
+//
+// The feed is addressed by position like the delete route is, and the caller
+// also sends the URL it believes is there. Two admins editing at once is the
+// case: a position that has shifted under this one refers to someone else's
+// feed, and saving filters onto the wrong feed is silent.
+router.patch('/guild/:guildId/rss/:index', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId, index } = req.params;
+    const position = Number(index);
+    if (!Number.isInteger(position) || position < 0) {
+        return res.status(400).json({ error: 'index must be a non-negative integer' });
+    }
+
+    const body = req.body || {};
+    const include = parseKeywords(body.includeKeywords, 'includeKeywords');
+    if (include.error) return res.status(400).json({ error: include.error });
+    const exclude = parseKeywords(body.excludeKeywords, 'excludeKeywords');
+    if (exclude.error) return res.status(400).json({ error: exclude.error });
+
+    const roleId = body.mentionRoleId || null;
+    if (roleId !== null && !isValidDiscordId(roleId)) {
+        return res.status(400).json({ error: 'mentionRoleId must be a role ID' });
+    }
+    // The @everyone role shares the guild's ID. A feed that pings the whole
+    // server on every post is not a setting this page offers.
+    if (roleId === guildId) return res.status(400).json({ error: 'A feed cannot ping @everyone' });
+
+    const template = body.messageTemplate ?? '';
+    if (typeof template !== 'string') return res.status(400).json({ error: 'messageTemplate must be text' });
+    if (template.trim().length > MAX_TEMPLATE_LENGTH) {
+        return res.status(400).json({ error: `The message can be at most ${MAX_TEMPLATE_LENGTH} characters` });
+    }
+
+    try {
+        const guildSettings = await Guild.findOne({ guildId });
+        if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
+        const feed = (guildSettings.rssFeeds || [])[position];
+        if (!feed || (typeof body.url === 'string' && body.url !== feed.url)) {
+            return res.status(409).json({ error: 'The feed list has changed. Reload the page and try again.' });
+        }
+
+        feed.includeKeywords = include.keywords;
+        feed.excludeKeywords = exclude.keywords;
+        feed.mentionRoleId = roleId;
+        feed.messageTemplate = template.trim() || null;
+        await guildSettings.save();
+
+        res.json({ success: true, feeds: rssFeedRows(guildSettings.rssFeeds) });
+    } catch (error) {
+        console.error('RSS update error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 const dailyNewsInFlight = new Set();
 // Sends the configured daily news digest now, refusing while one is already in flight.
 router.post('/guild/:guildId/dailynews/trigger', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {

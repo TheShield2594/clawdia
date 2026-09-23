@@ -144,6 +144,76 @@ describe('POST /guild/:guildId/rss/add', () => {
     });
 });
 
+describe('PATCH /guild/:guildId/rss/:index', () => {
+    const ROLE_ID = '222333444555666777';
+    const patchFeed = (index, body) => request(app).patch(`/api/v1/guild/g1/rss/${index}`).send(body);
+
+    beforeEach(() => {
+        doc = makeDoc([feed('a'), feed('b')]);
+        Guild.findOne.mockResolvedValue(doc);
+    });
+
+    it('saves the options onto the feed at that position and answers with the list', async () => {
+        const res = await patchFeed(1, {
+            url: feed('b').url,
+            includeKeywords: [' rust ', 'Rust', '', 'wasm'],
+            excludeKeywords: ['sponsored'],
+            mentionRoleId: ROLE_ID,
+            messageTemplate: '  New: {title}  ',
+        });
+
+        expect(res.status).toBe(200);
+        // Trimmed, blanks and case-insensitive duplicates dropped.
+        expect(doc.rssFeeds[1]).toMatchObject({
+            includeKeywords: ['rust', 'wasm'],
+            excludeKeywords: ['sponsored'],
+            mentionRoleId: ROLE_ID,
+            messageTemplate: 'New: {title}',
+        });
+        expect(res.body.feeds[1].summary).toBe('Only: rust, wasm · Skips: sponsored · Custom message');
+        expect(doc.rssFeeds[0]).toEqual(feed('a'));
+    });
+
+    it('clears the options when they are sent empty', async () => {
+        doc.rssFeeds[0] = { ...feed('a'), includeKeywords: ['x'], mentionRoleId: ROLE_ID, messageTemplate: 'hi' };
+
+        const res = await patchFeed(0, { url: feed('a').url, includeKeywords: [], mentionRoleId: '', messageTemplate: '' });
+
+        expect(res.status).toBe(200);
+        expect(doc.rssFeeds[0]).toMatchObject({ includeKeywords: [], mentionRoleId: null, messageTemplate: null });
+    });
+
+    it('refuses when the feed at that position is not the one the page meant', async () => {
+        // Another admin removed a feed in the meantime and the list shifted.
+        const res = await patchFeed(0, { url: feed('b').url, includeKeywords: ['x'] });
+
+        expect(res.status).toBe(409);
+        expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['a keyword list that is not a list', { includeKeywords: 'rust' }],
+        ['too many keywords', { excludeKeywords: Array.from({ length: 21 }, (_, i) => `k${i}`) }],
+        ['an over-long keyword', { includeKeywords: ['x'.repeat(61)] }],
+        ['a role that is not an ID', { mentionRoleId: 'admins' }],
+        ['the @everyone role', { mentionRoleId: '123456789012345678' }],
+        ['an over-long message', { messageTemplate: 'x'.repeat(501) }],
+        ['a message that is not text', { messageTemplate: { $gt: '' } }],
+    ])('refuses %s', async (_label, body) => {
+        // In this suite the guild is g1; the @everyone case needs the guild's own ID.
+        const guildId = body.mentionRoleId === '123456789012345678' ? '123456789012345678' : 'g1';
+        const res = await request(app).patch(`/api/v1/guild/${guildId}/rss/0`).send({ url: feed('a').url, ...body });
+
+        expect(res.status).toBe(400);
+        expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('answers a position past the end as a changed list', async () => {
+        const res = await patchFeed(5, { includeKeywords: [] });
+        expect(res.status).toBe(409);
+    });
+});
+
 describe('DELETE /guild/:guildId/rss/:index', () => {
     it('removes the feed at that position and answers with what is left', async () => {
         doc = makeDoc([feed('a'), feed('b'), feed('c')]);

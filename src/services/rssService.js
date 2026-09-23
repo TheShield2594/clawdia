@@ -366,6 +366,69 @@ function buildItemEmbed(item, date, parsedFeed, feedUrl) {
     return embed;
 }
 
+// ── Per-subscription options ────────────────────────────────────────────────
+
+function keywordPattern(keyword) {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Whole words, in any script: "art" must not match "start", and \b only
+    // knows ASCII letters.
+    return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu');
+}
+
+function keywordList(value) {
+    return Array.isArray(value) ? value.filter(k => typeof k === 'string' && k.trim()).map(k => k.trim()) : [];
+}
+
+/**
+ * Whether an item passes a subscription's keyword filters. Matched as whole
+ * words, ignoring case, against the headline, the text and the item's
+ * categories. With include keywords, one of them has to appear; any exclude
+ * keyword that appears rules the item out.
+ */
+function itemPassesFilters(item, feed) {
+    const include = keywordList(feed.includeKeywords);
+    const exclude = keywordList(feed.excludeKeywords);
+    if (!include.length && !exclude.length) return true;
+
+    const categories = Array.isArray(item.categories) ? item.categories.map(feedText) : [];
+    const haystack = [feedText(item.title), feedText(item.contentSnippet), ...categories].join('\n');
+    if (include.length && !include.some(k => keywordPattern(k).test(haystack))) return false;
+    return !exclude.some(k => keywordPattern(k).test(haystack));
+}
+
+const MESSAGE_CONTENT_LIMIT = 2000;
+
+/**
+ * The message an item is sent as: its embed, plus — when the subscription has
+ * them — the role ping and the admin's message line, with {title}, {link},
+ * {feed} and {author} filled in.
+ *
+ * Mentions are locked to the one role the admin chose. The message line mixes
+ * admin text with feed text, and neither an "@everyone" in a template nor a
+ * "<@&id>" in some headline may ping anybody.
+ */
+function itemMessage(feed, item, parsedFeed, embed) {
+    const roleId = typeof feed.mentionRoleId === 'string' && /^\d{17,20}$/.test(feed.mentionRoleId) ? feed.mentionRoleId : null;
+    const parts = [];
+    if (roleId) parts.push(`<@&${roleId}>`);
+
+    const template = typeof feed.messageTemplate === 'string' ? feed.messageTemplate.trim() : '';
+    if (template) {
+        const values = {
+            title: escapeMarkdown(feedText(item.title)),
+            link: embed.data.url || '',
+            feed: escapeMarkdown(feedText(parsedFeed.title)),
+            author: escapeMarkdown(articleByline(item)),
+        };
+        parts.push(template.replace(/\{(title|link|feed|author)\}/g, (_, key) => values[key]));
+    }
+
+    const message = { embeds: [embed], allowedMentions: { parse: [], roles: roleId ? [roleId] : [] } };
+    const content = truncate(parts.join(' '), MESSAGE_CONTENT_LIMIT);
+    if (content) message.content = content;
+    return message;
+}
+
 // A feed that publishes a burst between two sweeps posts at most this many of
 // them, newest kept. The rest of the burst is still recorded as seen: a channel
 // is not a backfill target, and the alternative — posting all of them — is a
@@ -408,7 +471,6 @@ function unseenEntries(feed, entries) {
  */
 async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
     const fresh = unseenEntries(feed, entries);
-    const toPost = fresh.slice(-MAX_ITEMS_PER_SWEEP);
 
     // Only what was actually handled is recorded, never more. A batch that
     // stops half way must not repost the half that landed on the next sweep,
@@ -416,7 +478,16 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
     const handled = new Set();
     let delivered = 0;
 
-    if (fresh.length) {
+    // An item the filters rule out is handled by not posting it. Taken out
+    // before the per-sweep cap, so filtered items do not use up its slots.
+    const wanted = [];
+    for (const entry of fresh) {
+        if (itemPassesFilters(entry.item, feed)) wanted.push(entry);
+        else handled.add(entry.key);
+    }
+    const toPost = wanted.slice(-MAX_ITEMS_PER_SWEEP);
+
+    if (toPost.length) {
         try {
             const channel = await fetchSendableChannel(client, feed.channelId);
 
@@ -432,16 +503,17 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
                 // is the item that is wrong, and it will be just as wrong on the
                 // next sweep. A failed *send* is different — that throws below
                 // and leaves the item unrecorded.
-                let embed;
+                let message;
                 try {
-                    embed = buildItemEmbed(entry.item, entry.date, parsedFeed, feed.url);
+                    const embed = buildItemEmbed(entry.item, entry.date, parsedFeed, feed.url);
+                    message = itemMessage(feed, entry.item, parsedFeed, embed);
                 } catch (error) {
                     console.error(`Skipping an RSS item from ${feed.url} that could not be rendered:`, error.message);
                     handled.add(entry.key);
                     continue;
                 }
 
-                await channel.send({ embeds: [embed] });
+                await channel.send(message);
                 delivered++;
                 handled.add(entry.key);
             }
@@ -888,6 +960,6 @@ module.exports = {
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, RSS_FETCH_CONCURRENCY,
         dailyNewsDue, runDueDailyNews, DAILY_NEWS_REFIRE_GUARD_MS,
         feedEntries, itemKey, MAX_ITEMS_PER_SWEEP, SEEN_IDS_MIN, BACKDATE_GRACE_MS,
-        buildItemEmbed, EMBED_TITLE_LIMIT,
+        buildItemEmbed, EMBED_TITLE_LIMIT, itemPassesFilters, itemMessage,
     },
 };

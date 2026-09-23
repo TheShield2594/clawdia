@@ -247,6 +247,63 @@ describe('RSS feeds', () => {
         expect(apiResponses['/rss/add'].calls).toHaveLength(2);
     });
 
+    it('edits a feed\'s options in place, and redraws from the answer', async () => {
+        const stored = [
+            { url: 'https://a.example/feed', channelId: CHANNEL_ID },
+            { url: 'https://b.example/feed', channelId: CHANNEL_ID, includeKeywords: ['rust'] },
+        ];
+        window.renderRssFeeds(rssFeedRows(stored));
+
+        document.querySelectorAll('#rss-feeds [data-action="rss-edit"]')[1]
+            .dispatchEvent(new window.Event('click', { bubbles: true }));
+
+        // Opens under the row it belongs to, starting from what is saved.
+        const editor = document.querySelector('#rss-feeds .rss-feed-editor');
+        expect(editor.previousElementSibling.querySelector('.url').textContent).toBe('https://b.example/feed');
+        expect(document.getElementById('rss-edit-include').value).toBe('rust');
+
+        document.getElementById('rss-edit-include').value = 'rust, wasm';
+        document.getElementById('rss-edit-exclude').value = 'sponsored';
+        document.getElementById('rss-edit-role').value = ROLE_ID;
+        document.getElementById('rss-edit-template').value = 'New: {title}';
+
+        const saved = [stored[0], { ...stored[1], includeKeywords: ['rust', 'wasm'], excludeKeywords: ['sponsored'], mentionRoleId: ROLE_ID, messageTemplate: 'New: {title}' }];
+        apiResponses['/rss/1'] = { calls: [], body: { success: true, feeds: rssFeedRows(saved) } };
+        clickAction('rss-edit-save');
+        await settle();
+
+        const call = apiResponses['/rss/1'].calls[0];
+        expect(call.init.method).toBe('PATCH');
+        // The URL rides along so a list that shifted underneath is refused.
+        expect(JSON.parse(call.init.body)).toEqual({
+            url: 'https://b.example/feed',
+            includeKeywords: ['rust', 'wasm'],
+            excludeKeywords: ['sponsored'],
+            mentionRoleId: ROLE_ID,
+            messageTemplate: 'New: {title}',
+        });
+
+        expect(document.querySelector('#rss-feeds .rss-feed-editor')).toBeNull();
+        const row = document.querySelectorAll('#rss-feeds .list-item')[1];
+        expect(row.querySelector('.rss-feed-target').textContent).toBe('→ #general · pings @Member');
+        expect(row.querySelector('.rss-feed-options').textContent).toBe('Only: rust, wasm · Skips: sponsored · Custom message');
+
+        const expected = serverRendered('rss', { settings: { ...BASE_SETTINGS, rssFeeds: saved }, rssFeedRows: rssFeedRows(saved) });
+        expect(markup(document.getElementById('rss-feeds'))).toBe(markup(expected.querySelector('#rss-feeds')));
+    });
+
+    it('closes the editor on Cancel, and a second Edit on the same row', () => {
+        window.renderRssFeeds(rssFeedRows([{ url: FEED_URL, channelId: CHANNEL_ID }]));
+
+        clickAction('rss-edit');
+        clickAction('rss-edit-cancel');
+        expect(document.querySelector('#rss-feeds .rss-feed-editor')).toBeNull();
+
+        clickAction('rss-edit');
+        clickAction('rss-edit');
+        expect(document.querySelector('#rss-feeds .rss-feed-editor')).toBeNull();
+    });
+
     it('puts a feed URL in as text, never as markup', () => {
         window.renderRssFeeds([{ url: '<img src=x onerror=alert(1)>', channelId: CHANNEL_ID }]);
         const url = document.querySelector('#rss-feeds .url');

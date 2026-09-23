@@ -189,12 +189,21 @@ function rssFeedRow(feed, index) {
     url.className = 'url';
     url.textContent = feed.url;
 
+    const options = feed.options || {};
     const target = document.createElement('small');
     target.className = 'rss-feed-target';
-    target.textContent = '→ #' + (BOOT.channelNames[feed.channelId] || 'unknown');
+    target.textContent = '→ #' + (BOOT.channelNames[feed.channelId] || 'unknown')
+        + (options.mentionRoleId ? ' · pings @' + (BOOT.roleNames[options.mentionRoleId] || 'unknown role') : '');
 
     main.appendChild(url);
     main.appendChild(target);
+
+    if (feed.summary) {
+        const summary = document.createElement('small');
+        summary.className = 'rss-feed-options';
+        summary.textContent = feed.summary;
+        main.appendChild(summary);
+    }
 
     // Worded by the server (lib/rssFeedRows.js); only the tone picks a class,
     // and only from the three the stylesheet knows.
@@ -206,21 +215,37 @@ function rssFeedRow(feed, index) {
         main.appendChild(status);
     }
 
+    const actions = document.createElement('div');
+    actions.className = 'rss-feed-actions';
+
+    const editButton = document.createElement('button');
+    editButton.className = 'btn btn-sm';
+    editButton.dataset.action = 'rss-edit';
+    editButton.dataset.index = String(index);
+    editButton.textContent = 'Edit';
+
     const remove = document.createElement('button');
     remove.className = 'btn btn-danger btn-sm';
     remove.dataset.action = 'rss-remove';
     remove.dataset.index = String(index);
     remove.textContent = 'Remove';
 
+    actions.appendChild(editButton);
+    actions.appendChild(remove);
     row.appendChild(main);
-    row.appendChild(remove);
+    row.appendChild(actions);
     return row;
 }
+
+// The feeds the list was last drawn from, so an editor opens on what the
+// server last said rather than on whatever the row's text happens to show.
+let _rssFeeds = null;
 
 function renderRssFeeds(feeds) {
     const list = document.getElementById('rss-feeds');
     if (!list) return;
 
+    _rssFeeds = feeds;
     list.textContent = '';
 
     if (!feeds.length) {
@@ -282,6 +307,141 @@ async function addRssFeed() {
     }
 }
 
+// ── A feed's options ───────────────────────────────────────────────────
+// Opened under the row by its Edit button and built here rather than in the
+// template: it is not part of the row, so it has no server-rendered twin to
+// keep in step with.
+
+function rssEditorField(labelText, control, hint) {
+    const field = document.createElement('div');
+    field.className = 'field';
+    const label = document.createElement('label');
+    label.className = 'field-label';
+    label.htmlFor = control.id;
+    label.textContent = labelText;
+    field.appendChild(label);
+    field.appendChild(control);
+    if (hint) {
+        const small = document.createElement('small');
+        small.textContent = hint;
+        field.appendChild(small);
+    }
+    return field;
+}
+
+function rssTextInput(id, value, placeholder) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = id;
+    input.value = value;
+    input.placeholder = placeholder;
+    return input;
+}
+
+// Feeds as the page first rendered them, before any API response redrew the
+// list: the same rows the template drew, from the page's bootstrap.
+function rssFeedsFromPage() {
+    return boot('rssFeedRows');
+}
+
+function openRssEditor(index) {
+    const list = document.getElementById('rss-feeds');
+    const feeds = _rssFeeds || rssFeedsFromPage();
+    const feed = feeds[index];
+    const row = list && list.querySelectorAll('.list-item')[index];
+    if (!feed || !row) return;
+
+    // One editor at a time: a second would be a second form for the same list.
+    const open = list.querySelector('.rss-feed-editor');
+    if (open) {
+        const same = open.dataset.index === String(index);
+        open.remove();
+        if (same) return;
+    }
+
+    const options = feed.options || {};
+    const editor = document.createElement('div');
+    editor.className = 'rss-feed-editor';
+    editor.dataset.index = String(index);
+
+    const include = rssTextInput('rss-edit-include', (options.includeKeywords || []).join(', '), 'e.g. rust, webassembly');
+    const exclude = rssTextInput('rss-edit-exclude', (options.excludeKeywords || []).join(', '), 'e.g. sponsored, podcast');
+    const template = rssTextInput('rss-edit-template', options.messageTemplate || '', 'e.g. New from {feed}: {title}');
+
+    const role = document.createElement('select');
+    role.id = 'rss-edit-role';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = 'Nobody';
+    role.appendChild(none);
+    (BOOT.roles || []).forEach(function(r) {
+        if (r.id === BOOT.guildId) return; // @everyone — the API refuses it
+        const option = document.createElement('option');
+        option.value = r.id;
+        option.textContent = '@' + r.name;
+        option.selected = r.id === options.mentionRoleId;
+        role.appendChild(option);
+    });
+
+    editor.appendChild(rssEditorField('Only post items mentioning', include, 'Comma-separated. Whole words, any case, in the headline, text or categories. Leave empty to post everything.'));
+    editor.appendChild(rssEditorField('Skip items mentioning', exclude, 'Comma-separated.'));
+    editor.appendChild(rssEditorField('Ping a role', role, 'The role has to be mentionable, or the bot needs permission to mention it.'));
+    editor.appendChild(rssEditorField('Message above each post', template, 'Optional. {title}, {link}, {feed} and {author} are filled in.'));
+
+    // Static markup, nothing interpolated: the feed these save to is the
+    // editor's own data-index.
+    const actions = document.createElement('div');
+    actions.className = 'actions-row';
+    actions.innerHTML = '<button class="btn btn-primary btn-sm" type="button" data-action="rss-edit-save">Save</button>'
+        + '<button class="btn btn-sm" type="button" data-action="rss-edit-cancel">Cancel</button>';
+    editor.appendChild(actions);
+
+    row.after(editor);
+    include.focus();
+}
+
+function splitKeywords(text) {
+    return text.split(',').map(function(k) { return k.trim(); }).filter(Boolean);
+}
+
+let _rssEditInFlight = false;
+
+async function saveRssEditor(index) {
+    if (_rssEditInFlight) return;
+    const feeds = _rssFeeds || rssFeedsFromPage();
+    const feed = feeds[index];
+    if (!feed) return;
+    _rssEditInFlight = true;
+    try {
+        const response = await apiFetch(`/api/v1/guild/${BOOT.guildId}/rss/${index}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: feed.url,
+                includeKeywords: splitKeywords(document.getElementById('rss-edit-include').value),
+                excludeKeywords: splitKeywords(document.getElementById('rss-edit-exclude').value),
+                mentionRoleId: document.getElementById('rss-edit-role').value || null,
+                messageTemplate: document.getElementById('rss-edit-template').value,
+            })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.ok) {
+            renderRssFeeds(data.feeds || []);
+            toast('Feed updated', 'success');
+        } else toast(data.error || 'Failed to update the feed', 'error');
+    } catch (error) {
+        console.error(error);
+        toast('An error occurred', 'error');
+    } finally {
+        _rssEditInFlight = false;
+    }
+}
+
+function closeRssEditor() {
+    const open = document.querySelector('#rss-feeds .rss-feed-editor');
+    if (open) open.remove();
+}
+
 async function deleteRssFeed(index) {
     const ok = await showConfirm({ title: 'Remove RSS feed', body: 'Remove this RSS feed? The bot will stop posting new articles from it.', okText: 'Remove feed' });
     if (!ok) return;
@@ -325,5 +485,8 @@ registerPanelActions({
         // The rows are redrawn from the API after every mutation (#689), so a
         // row rendered a moment ago by renderRssFeeds has no listener of its own.
         'rss-remove':    (el, d) => deleteRssFeed(Number(d.index)),
+        'rss-edit':      (el, d) => openRssEditor(Number(d.index)),
+        'rss-edit-save': el => saveRssEditor(Number(el.closest('.rss-feed-editor').dataset.index)),
+        'rss-edit-cancel': () => closeRssEditor(),
     },
 });

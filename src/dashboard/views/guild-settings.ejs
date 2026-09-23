@@ -344,6 +344,7 @@
             roles:                  <%- jsonForScript(roles || []) %>,
             roleNames:              <%- jsonForScript(Object.fromEntries((roles || []).map(r => [r.id, r.name]))) %>,
             dailyNewsProfiles:      <%- jsonForScript(settings.dailyNewsProfiles || []) %>,
+            rssFeedRows:            <%- jsonForScript(locals.rssFeedRows || []) %>,
             escalationLadder:       <%- jsonForScript(settings.moderation?.escalation?.ladder || []) %>,
             commandPolicyRules:     <%- jsonForScript(settings.commandPolicies?.rules || []) %>,
             commandPolicyCooldowns: <%- jsonForScript(settings.commandPolicies?.cooldownOverrides || []) %>,

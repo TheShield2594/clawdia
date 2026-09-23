@@ -52,7 +52,7 @@ jest.mock('../src/models/Guild', () => ({
 
 const Guild = require('../src/models/Guild');
 const { checkRssFeeds, __test__ } = require('../src/services/rssService');
-const { feedFailCounts, feedLastFailTime, feedValidators, DEAD_FEED_THRESHOLD, RSS_FETCH_CONCURRENCY, MAX_ITEMS_PER_SWEEP, itemKey, SEEN_IDS_MIN } = __test__;
+const { feedFailCounts, feedLastFailTime, feedValidators, DEAD_FEED_THRESHOLD, RSS_FETCH_CONCURRENCY, MAX_ITEMS_PER_SWEEP, itemKey, SEEN_IDS_MIN, itemPassesFilters } = __test__;
 
 function rssXml({ title = 'Feed', itemTitle = 'Post', link = 'https://example.com/post', pubDate = 'Wed, 20 Aug 2025 12:00:00 GMT' } = {}) {
     return rssXmlItems([{ title: itemTitle, link, pubDate }], title);
@@ -662,5 +662,109 @@ describe('feed health', () => {
         const $set = Guild.updateOne.mock.calls[0][1].$set;
         expect($set['rssFeeds.$.lastPostedAt']).toEqual(expect.any(Date));
         expect($set['rssFeeds.$.title']).toBe('Renamed Feed');
+    });
+});
+
+
+// ── Per-subscription options ────────────────────────────────────────────────
+
+describe('keyword filters', () => {
+    const url = 'https://example.com/rss';
+    const items = [
+        { title: 'Rust 1.90 released', link: 'https://example.com/rust', pubDate: 'Wed, 20 Aug 2025 10:00:00 GMT' },
+        { title: 'Starting a garden', link: 'https://example.com/garden', pubDate: 'Wed, 20 Aug 2025 11:00:00 GMT' },
+        { title: 'Sponsored: Rust hosting', link: 'https://example.com/ad', pubDate: 'Wed, 20 Aug 2025 12:00:00 GMT' },
+    ];
+    const filtered = options => [{ guildId: 'g1', rssFeeds: [{
+        _id: 'f1', url, channelId: 'c1', title: 'Feed', lastPublished: new Date('2025-08-19T00:00:00Z'), seenIds: [], ...options,
+    }] }];
+    const titles = client => client.send.mock.calls.map(c => c[0].embeds[0].data.title);
+
+    beforeEach(() => mockFeedBodies.set(url, rssXmlItems(items)));
+
+    test('include keywords post only items mentioning one, as whole words', async () => {
+        mockGuilds = filtered({ includeKeywords: ['RUST', 'art'] });
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        // "art" does not match "Starting".
+        expect(titles(client)).toEqual(['Rust 1.90 released', 'Sponsored: Rust hosting']);
+    });
+
+    test('exclude keywords win over include keywords', async () => {
+        mockGuilds = filtered({ includeKeywords: ['rust'], excludeKeywords: ['sponsored'] });
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        expect(titles(client)).toEqual(['Rust 1.90 released']);
+    });
+
+    test('filtered-out items are recorded, so they are not reconsidered', async () => {
+        mockGuilds = filtered({ excludeKeywords: ['sponsored', 'garden'] });
+
+        await checkRssFeeds(makeClient());
+
+        const seen = Guild.updateOne.mock.calls[0][1].$set['rssFeeds.$.seenIds'];
+        expect(seen).toEqual(expect.arrayContaining(items.map(i => itemKey({ link: i.link }))));
+    });
+
+    test('filtered-out items do not use up the per-sweep cap', async () => {
+        const burst = Array.from({ length: MAX_ITEMS_PER_SWEEP + 3 }, (_, i) => ({
+            title: i < 3 ? `keep ${i}` : `drop ${i}`,
+            link: `https://example.com/${i}`,
+            pubDate: new Date(Date.UTC(2025, 7, 20, 23 - i)).toUTCString(), // keepers are the oldest
+        }));
+        mockFeedBodies.set(url, rssXmlItems(burst));
+        mockGuilds = filtered({ includeKeywords: ['keep'] });
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        expect(titles(client).sort()).toEqual(['keep 0', 'keep 1', 'keep 2']);
+    });
+
+    test('matches an item\'s categories too', () => {
+        expect(itemPassesFilters({ title: 'Release notes', categories: ['WebAssembly'] }, { includeKeywords: ['webassembly'] })).toBe(true);
+        expect(itemPassesFilters({ title: 'Release notes', categories: ['JS'] }, { includeKeywords: ['webassembly'] })).toBe(false);
+    });
+
+    test('takes a keyword with punctuation literally', () => {
+        expect(itemPassesFilters({ title: 'Why C++ is fast' }, { includeKeywords: ['c++'] })).toBe(true);
+        expect(itemPassesFilters({ title: 'Why C is fast' }, { includeKeywords: ['c++'] })).toBe(false);
+    });
+});
+
+describe('the message an item is sent as', () => {
+    const url = 'https://example.com/rss';
+    const ROLE = '222333444555666777';
+    const send = async options => {
+        mockFeedBodies.set(url, rssXmlItems([
+            { title: 'Hello &lt;@&amp;999999999999999999&gt; @everyone', link: 'https://example.com/a', pubDate: 'Wed, 20 Aug 2025 12:00:00 GMT' },
+        ], 'Example_Feed'));
+        mockGuilds = [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url, channelId: 'c1', lastPublished: null, ...options }] }];
+        const client = makeClient();
+        await checkRssFeeds(client);
+        return client.send.mock.calls[0][0];
+    };
+
+    test('is the embed alone by default, and pings nobody', async () => {
+        const message = await send({});
+        expect(message.content).toBeUndefined();
+        expect(message.allowedMentions).toEqual({ parse: [], roles: [] });
+    });
+
+    test('pings the chosen role, and only it', async () => {
+        const message = await send({ mentionRoleId: ROLE });
+        expect(message.content).toBe(`<@&${ROLE}>`);
+        expect(message.allowedMentions).toEqual({ parse: [], roles: [ROLE] });
+    });
+
+    test('fills in the admin\'s message line', async () => {
+        const message = await send({ messageTemplate: 'New from {feed}: {title} {link}' });
+        expect(message.content).toBe('New from Example\\_Feed: Hello <@&999999999999999999> @everyone https://example.com/a');
+        // The feed's own "@everyone" and role mention are text, not pings.
+        expect(message.allowedMentions).toEqual({ parse: [], roles: [] });
     });
 });

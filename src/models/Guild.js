@@ -378,7 +378,15 @@ const guildSchema = new Schema({
         title: { type: String, default: null },
         lastPostedAt: { type: Date, default: null },
         lastError: { type: String, default: null },
-        failingSince: { type: Date, default: null }
+        failingSince: { type: Date, default: null },
+        // Per-subscription delivery options, set from the dashboard. An item
+        // posts only if it matches one of `includeKeywords` (when there are
+        // any) and none of `excludeKeywords`; `mentionRoleId` is pinged and
+        // `messageTemplate` rendered as the message text above the embed.
+        includeKeywords: { type: [String], default: undefined },
+        excludeKeywords: { type: [String], default: undefined },
+        mentionRoleId: { type: String, default: null },
+        messageTemplate: { type: String, default: null }
     }],
 
     // Social-media notifications (YouTube, Reddit, X, Instagram, TikTok). Each

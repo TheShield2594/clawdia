@@ -41,15 +41,45 @@ function feedStatus(feed) {
     return { tone: 'idle', text: 'Waiting for the first new post' };
 }
 
+const keywords = value => (Array.isArray(value) ? value.filter(k => typeof k === 'string' && k) : []);
+
+/**
+ * The subscription's delivery options, for the row's editor to start from.
+ *
+ * @returns {{ includeKeywords: string[], excludeKeywords: string[], mentionRoleId: ?string, messageTemplate: string }}
+ */
+function feedOptions(feed) {
+    return {
+        includeKeywords: keywords(feed.includeKeywords),
+        excludeKeywords: keywords(feed.excludeKeywords),
+        mentionRoleId: feed.mentionRoleId || null,
+        messageTemplate: feed.messageTemplate || '',
+    };
+}
+
+// One line saying which options are set, or '' when none are. The role ping
+// is not in it: that needs the role's name, which each renderer looks up from
+// its own role list, as it does for the channel.
+function optionsSummary(options) {
+    const parts = [];
+    if (options.includeKeywords.length) parts.push(`Only: ${options.includeKeywords.join(', ')}`);
+    if (options.excludeKeywords.length) parts.push(`Skips: ${options.excludeKeywords.join(', ')}`);
+    if (options.messageTemplate) parts.push('Custom message');
+    return parts.join(' · ');
+}
+
 /**
  * @param {Array<object>} [rssFeeds] the guild's `rssFeeds`
- * @returns {Array<{ url: string, channelId: string, title?: string, status: { tone: string, text: string } }>}
+ * @returns {Array<{ url: string, channelId: string, title?: string,
+ *   status: { tone: string, text: string }, options: object, summary: string }>}
  */
 function rssFeedRows(rssFeeds) {
     return (rssFeeds || []).map(feed => {
         const row = { url: feed.url, channelId: feed.channelId };
         if (feed.title) row.title = feed.title;
         row.status = feedStatus(feed);
+        row.options = feedOptions(feed);
+        row.summary = optionsSummary(row.options);
         return row;
     });
 }
