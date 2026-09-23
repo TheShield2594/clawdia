@@ -8,7 +8,7 @@ const dns = require('dns');
 const http = require('http');
 const { EventEmitter } = require('events');
 
-const { isPrivateIp, resolveAndPin, safeFetchFeed } = require('../src/utils/safeFeedFetch');
+const { isPrivateIp, resolveAndPin, safeFetchFeed, fetchFeedConditional } = require('../src/utils/safeFeedFetch');
 
 describe('isPrivateIp', () => {
     const blocked = [
@@ -370,5 +370,79 @@ describe('safeFetchFeed', () => {
         } finally {
             jest.useRealTimers();
         }
+    });
+});
+
+describe('fetchFeedConditional', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    // Records the headers each request sent and answers with `response`.
+    function serve(response) {
+        jest.spyOn(dns, 'lookup').mockImplementation((host, opts, cb) =>
+            cb(null, [{ address: '93.184.216.34' }]));
+        const sent = [];
+        jest.spyOn(http, 'request').mockImplementation((opts, cb) => {
+            sent.push(opts.headers);
+            const req = new EventEmitter();
+            req.end = () => setImmediate(() => {
+                const res = new EventEmitter();
+                res.statusCode = response.statusCode || 200;
+                res.headers = response.headers || {};
+                res.destroy = jest.fn();
+                cb(res);
+                setImmediate(() => {
+                    if (response.body) res.emit('data', Buffer.from(response.body));
+                    res.emit('end');
+                });
+            });
+            req.destroy = jest.fn();
+            return req;
+        });
+        return sent;
+    }
+
+    it('hands back the validators a full response carried', async () => {
+        serve({ body: '<rss/>', headers: { etag: '"abc"', 'last-modified': 'Wed, 20 Aug 2025 12:00:00 GMT' } });
+
+        await expect(fetchFeedConditional('http://example.com/feed')).resolves.toEqual({
+            body: '<rss/>',
+            validators: { etag: '"abc"', lastModified: 'Wed, 20 Aug 2025 12:00:00 GMT' },
+        });
+    });
+
+    it('answers null validators when the server sent neither', async () => {
+        serve({ body: '<rss/>' });
+        await expect(fetchFeedConditional('http://example.com/feed')).resolves.toEqual({ body: '<rss/>', validators: null });
+    });
+
+    it('sends them back, and takes a 304 as "unchanged"', async () => {
+        const sent = serve({ statusCode: 304 });
+
+        const result = await fetchFeedConditional('http://example.com/feed', { etag: '"abc"', lastModified: 'Wed, 20 Aug 2025 12:00:00 GMT' });
+
+        expect(result).toEqual({ notModified: true });
+        expect(sent[0]['If-None-Match']).toBe('"abc"');
+        expect(sent[0]['If-Modified-Since']).toBe('Wed, 20 Aug 2025 12:00:00 GMT');
+    });
+
+    it('treats a 304 to an unconditional request as the error it is', async () => {
+        serve({ statusCode: 304 });
+        await expect(fetchFeedConditional('http://example.com/feed')).rejects.toThrow(/HTTP 304/);
+    });
+
+    it('never echoes a validator carrying a control character', async () => {
+        const sent = serve({ body: '<rss/>', headers: { etag: '"a"\r\nX-Injected: 1' } });
+
+        const first = await fetchFeedConditional('http://example.com/feed');
+        await fetchFeedConditional('http://example.com/feed', { etag: '"a"\r\nX-Injected: 1' });
+
+        expect(first.validators).toBeNull();
+        expect(sent[1]['If-None-Match']).toBeUndefined();
+    });
+
+    it('leaves plain safeFetchFeed unconditional', async () => {
+        const sent = serve({ body: '<rss/>', headers: { etag: '"abc"' } });
+        await expect(safeFetchFeed('http://example.com/feed')).resolves.toBe('<rss/>');
+        expect(sent[0]['If-None-Match']).toBeUndefined();
     });
 });

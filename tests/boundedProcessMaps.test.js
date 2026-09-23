@@ -18,7 +18,7 @@ jest.mock('../src/models/User', () => ({ findOne: jest.fn(), create: jest.fn() }
 jest.mock('../src/utils/guildSettingsCache', () => ({ getGuildSettings: jest.fn(async () => null) }));
 jest.mock('../src/services/rivalryService', () => ({ checkRivalry: jest.fn() }));
 jest.mock('../src/services/tempVoiceService', () => ({ handleVoiceStateUpdate: jest.fn() }));
-jest.mock('../src/utils/safeFeedFetch', () => ({ safeFetchFeed: jest.fn() }));
+jest.mock('../src/utils/safeFeedFetch', () => ({ safeFetchFeed: jest.fn(), fetchFeedConditional: jest.fn() }));
 
 const voiceStateUpdate = require('../src/events/voiceStateUpdate');
 const chatEventService = require('../src/services/chatEventService');

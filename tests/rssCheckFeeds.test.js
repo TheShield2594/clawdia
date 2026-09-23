@@ -12,8 +12,11 @@ let mockConcurrent = 0;
 let mockMaxConcurrent = 0;
 let mockFeedBodies = new Map(); // url -> xml string or Error
 
-jest.mock('../src/utils/safeFeedFetch', () => ({
-    safeFetchFeed: jest.fn(async url => {
+let mockValidators = new Map(); // url -> validators the fixture answers with
+let mockUnchanged = new Set();  // urls that answer 304 when asked conditionally
+const mockConditionalCalls = []; // [url, validators sent]
+jest.mock('../src/utils/safeFeedFetch', () => {
+    const safeFetchFeed = jest.fn(async url => {
         mockFetches.push(url);
         mockConcurrent++;
         mockMaxConcurrent = Math.max(mockMaxConcurrent, mockConcurrent);
@@ -26,8 +29,19 @@ jest.mock('../src/utils/safeFeedFetch', () => ({
         if (body instanceof Error) throw body;
         if (body === undefined) throw new Error(`no fixture for ${url}`);
         return body;
-    }),
-}));
+    });
+    return {
+        safeFetchFeed,
+        fetchFeedConditional: jest.fn(async (url, validators) => {
+            mockConditionalCalls.push([url, validators]);
+            if (validators && mockUnchanged.has(url)) {
+                mockFetches.push(url);
+                return { notModified: true };
+            }
+            return { body: await safeFetchFeed(url), validators: mockValidators.get(url) || null };
+        }),
+    };
+});
 
 let mockGuilds = [];
 jest.mock('../src/models/Guild', () => ({
@@ -38,7 +52,7 @@ jest.mock('../src/models/Guild', () => ({
 
 const Guild = require('../src/models/Guild');
 const { checkRssFeeds, __test__ } = require('../src/services/rssService');
-const { feedFailCounts, feedLastFailTime, DEAD_FEED_THRESHOLD, RSS_FETCH_CONCURRENCY, MAX_ITEMS_PER_SWEEP, itemKey, SEEN_IDS_MIN } = __test__;
+const { feedFailCounts, feedLastFailTime, feedValidators, DEAD_FEED_THRESHOLD, RSS_FETCH_CONCURRENCY, MAX_ITEMS_PER_SWEEP, itemKey, SEEN_IDS_MIN } = __test__;
 
 function rssXml({ title = 'Feed', itemTitle = 'Post', link = 'https://example.com/post', pubDate = 'Wed, 20 Aug 2025 12:00:00 GMT' } = {}) {
     return rssXmlItems([{ title: itemTitle, link, pubDate }], title);
@@ -72,6 +86,10 @@ beforeEach(() => {
     mockConcurrent = 0;
     mockMaxConcurrent = 0;
     mockFeedBodies = new Map();
+    mockValidators = new Map();
+    mockUnchanged = new Set();
+    mockConditionalCalls.length = 0;
+    feedValidators.clear();
     mockGuilds = [];
     feedFailCounts.clear();
     feedLastFailTime.clear();
@@ -481,5 +499,95 @@ describe('with item keys recorded', () => {
         const seen = Guild.updateOne.mock.calls[0][1].$set['rssFeeds.$.seenIds'];
         expect(seen).toHaveLength(items.length);
         expect(seen).toContain(key(items[0].link));
+    });
+});
+
+
+// ── Conditional requests ────────────────────────────────────────────────────
+//
+// Every feed used to be downloaded and parsed in full every five minutes,
+// changed or not.
+
+describe('conditional fetches', () => {
+    const url = 'https://example.com/rss';
+    const validators = { etag: '"v1"', lastModified: null };
+    const subscribed = () => [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url, channelId: 'c1', lastPublished: null }] }];
+
+    beforeEach(() => {
+        mockFeedBodies.set(url, rssXml());
+        mockValidators.set(url, validators);
+        mockUnchanged.add(url);
+    });
+
+    test('the next sweep sends back the validators the feed answered with', async () => {
+        mockGuilds = subscribed();
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+        await checkRssFeeds(client);
+
+        expect(mockConditionalCalls.map(c => c[1])).toEqual([undefined, validators]);
+    });
+
+    test('a feed that answers 304 is not delivered, and counts as unchanged', async () => {
+        mockGuilds = subscribed();
+        const client = makeClient();
+        await checkRssFeeds(client);
+        client.send.mockClear();
+        Guild.updateOne.mockClear();
+        const log = jest.spyOn(console, 'log');
+
+        await checkRssFeeds(client);
+
+        expect(client.send).not.toHaveBeenCalled();
+        expect(Guild.updateOne).not.toHaveBeenCalled();
+        expect(log).toHaveBeenCalledWith(expect.stringContaining('1 unchanged'));
+    });
+
+    test('an item still owed to a channel keeps the next fetch unconditional', async () => {
+        // A 304 skips delivery, so holding validators here would leave the
+        // item waiting until the feed next changed.
+        mockGuilds = subscribed();
+        const client = makeClient();
+        client.send.mockRejectedValueOnce(new Error('rate limited'));
+
+        await checkRssFeeds(client);
+        await checkRssFeeds(client);
+
+        expect(mockConditionalCalls.map(c => c[1])).toEqual([undefined, undefined]);
+        expect(client.send).toHaveBeenCalledTimes(2);
+    });
+
+    test('an unreachable channel keeps the next fetch unconditional too', async () => {
+        mockGuilds = subscribed();
+        const client = makeClient();
+        client.channels.fetch.mockRejectedValueOnce(new Error('500'));
+
+        await checkRssFeeds(client);
+
+        expect(feedValidators.has(url)).toBe(false);
+    });
+
+    test('a failed fetch forgets the validators', async () => {
+        mockGuilds = subscribed();
+        await checkRssFeeds(makeClient());
+        expect(feedValidators.has(url)).toBe(true);
+
+        mockUnchanged.clear();
+        mockFeedBodies.set(url, new Error('HTTP 500'));
+        await checkRssFeeds(makeClient());
+
+        expect(feedValidators.has(url)).toBe(false);
+    });
+
+    test('validators for a URL nothing subscribes to any more are dropped', async () => {
+        mockGuilds = subscribed();
+        await checkRssFeeds(makeClient());
+        expect(feedValidators.has(url)).toBe(true);
+
+        mockGuilds = [];
+        await checkRssFeeds(makeClient());
+
+        expect(feedValidators.size).toBe(0);
     });
 });

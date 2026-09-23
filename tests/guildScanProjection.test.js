@@ -109,7 +109,10 @@ describe('the RSS feed check', () => {
         });
         // Feed URLs are operator-supplied, so the real fetch is the SSRF-safe one;
         // it has its own suite, and this one must not reach the network.
-        jest.doMock('../src/utils/safeFeedFetch', () => ({ safeFetchFeed: jest.fn().mockResolvedValue('<rss/>') }));
+        jest.doMock('../src/utils/safeFeedFetch', () => ({
+            safeFetchFeed: jest.fn().mockResolvedValue('<rss/>'),
+            fetchFeedConditional: jest.fn().mockResolvedValue({ body: '<rss/>', validators: null }),
+        }));
         jest.doMock('../src/models/Guild', () => ({ find: jest.fn(), updateOne: jest.fn() }));
         jest.doMock('../src/utils/jobRunner', () => ({ runJob: jest.fn() }));
 

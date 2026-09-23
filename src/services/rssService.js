@@ -4,7 +4,7 @@ const { EmbedBuilder, escapeMarkdown } = require('discord.js');
 const cron = require('node-cron');
 const crypto = require('crypto');
 
-const { safeFetchFeed } = require('../utils/safeFeedFetch');
+const { safeFetchFeed, fetchFeedConditional } = require('../utils/safeFeedFetch');
 const { runJob } = require('../utils/jobRunner');
 const { handlesGuild } = require('../utils/sharding');
 const COLORS = require('../utils/embedColors');
@@ -25,6 +25,25 @@ const DAILY_NEWS_REFIRE_GUARD_MS = 23 * 60 * 60 * 1000;
 async function parseFeedUrl(url) {
     return parser.parseString(await safeFetchFeed(url));
 }
+
+// ETag / Last-Modified per feed URL, from the last sweep that fetched it. With
+// them the next sweep asks "changed since?" and an unchanged feed answers 304:
+// nothing downloaded, nothing parsed. Most feeds are unchanged most of the
+// five-minute ticks, so this is most of the sweep's traffic.
+//
+// Only held while every subscription to the URL is fully caught up. A 304
+// skips delivery entirely, so a feed with an item still owed to some channel
+// (a send that failed, a channel briefly unreachable) must be fetched in full
+// again, or that item would wait until the feed next changed.
+const feedValidators = new Map();
+
+// The sweep's fetch. Resolves null for a feed unchanged since the last sweep.
+async function fetchSweepFeed(url) {
+    const result = await fetchFeedConditional(url, feedValidators.get(url));
+    if (result.notModified) return null;
+    return { parsedFeed: await parser.parseString(result.body), validators: result.validators };
+}
+
 const runtimeTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // Consecutive failure counts per feed URL. Feeds are skipped after DEAD_FEED_THRESHOLD failures,
@@ -351,7 +370,8 @@ function unseenEntries(feed, entries) {
  * contained here so one guild's deleted channel does not stop the fan-out to
  * the others.
  *
- * Returns the number of items posted, for the sweep's summary line.
+ * Returns `{ delivered, complete }`: the number of items posted, for the
+ * sweep's summary line, and whether nothing is left owed to this subscription.
  */
 async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
     const fresh = unseenEntries(feed, entries);
@@ -372,7 +392,7 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
             // `channels.fetch` failing with nothing in the cache looks exactly
             // like a deleted one. Leaving it costs a no-op re-check each sweep
             // while the channel is really gone, the cheaper of the two mistakes.
-            if (!channel) return 0;
+            if (!channel) return { delivered: 0, complete: false };
 
             for (const entry of toPost) {
                 // An item the builder still refuses is skipped, not retried: it
@@ -401,13 +421,14 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
         }
     }
 
-    await recordSeen(guild, feed, entries, fresh, handled);
-    return delivered;
+    const recorded = await recordSeen(guild, feed, entries, fresh, handled);
+    return { delivered, complete: recorded && fresh.every(entry => handled.has(entry.key)) };
 }
 
 // Writes back what this sweep learned about one subscription: every key the
 // feed lists except the fresh ones that did not get through, and the newest
-// date handled. Nothing is written when neither changed.
+// date handled. Nothing is written when neither changed. Returns false when the
+// write failed.
 async function recordSeen(guild, feed, entries, fresh, handled) {
     const pending = new Set(fresh.filter(e => !handled.has(e.key)).map(e => e.key));
     const previous = Array.isArray(feed.seenIds) ? feed.seenIds : [];
@@ -433,14 +454,16 @@ async function recordSeen(guild, feed, entries, fresh, handled) {
         $set['rssFeeds.$.lastPublished'] = cursor;
     }
 
-    if (!Object.keys($set).length) return;
+    if (!Object.keys($set).length) return true;
     try {
         // Targets the one subdocument rather than rewriting the whole rssFeeds
         // array, which is also what `guild.save()` on a projected document
         // could not do.
         await Guild.updateOne({ guildId: guild.guildId, 'rssFeeds._id': feed._id }, { $set });
+        return true;
     } catch (error) {
         console.error(`Error recording RSS progress for ${feed.url} in guild ${guild.guildId}:`, error);
+        return false;
     }
 }
 
@@ -490,27 +513,36 @@ async function checkRssFeeds(client) {
         let posted = 0;
         let failed = 0;
         let skipped = 0;
+        let unchanged = 0;
         const worker = async () => {
             while (next < urls.length) {
                 const url = urls[next++];
                 if (shouldSkipDeadFeed(url)) { skipped++; continue; }
 
-                let parsedFeed;
+                let fetched;
                 try {
-                    parsedFeed = await parseFeedUrl(url);
+                    fetched = await fetchSweepFeed(url);
                     recordFeedSuccess(url);
                 } catch (error) {
+                    feedValidators.delete(url);
                     recordFeedFailure(url, error);
                     failed++;
                     continue;
                 }
+                if (!fetched) { unchanged++; continue; }
 
-                const entries = feedEntries(parsedFeed);
-                if (!entries.length) continue;
-
-                for (const { guild, feed } of subscriptionsByUrl.get(url)) {
-                    posted += await deliverFeedUpdate(client, guild, feed, parsedFeed, entries);
+                const entries = feedEntries(fetched.parsedFeed);
+                let complete = true;
+                if (entries.length) {
+                    for (const { guild, feed } of subscriptionsByUrl.get(url)) {
+                        const result = await deliverFeedUpdate(client, guild, feed, fetched.parsedFeed, entries);
+                        posted += result.delivered;
+                        if (!result.complete) complete = false;
+                    }
                 }
+
+                if (complete && fetched.validators) feedValidators.set(url, fetched.validators);
+                else feedValidators.delete(url);
             }
         };
 
@@ -522,7 +554,13 @@ async function checkRssFeeds(client) {
         // indistinguishable from "nothing new was published" from the outside,
         // and the per-feed errors say what broke without ever saying how much
         // of the sweep it was.
-        console.log(`[RSS] Sweep: ${urls.length} feed(s), ${posted} posted, ${failed} failed, ${skipped} parked.`);
+        console.log(`[RSS] Sweep: ${urls.length} feed(s), ${posted} posted, ${unchanged} unchanged, ${failed} failed, ${skipped} parked.`);
+
+        // A URL no subscription on this shard polls any more has no use for
+        // its validators.
+        for (const url of feedValidators.keys()) {
+            if (!subscriptionsByUrl.has(url)) feedValidators.delete(url);
+        }
     } catch (error) {
         console.error('Error checking RSS feeds:', error);
     } finally {
@@ -776,7 +814,7 @@ function scheduleDailyNews(client) {
 module.exports = {
     checkRssFeeds, scheduleDailyNews, sendDailyNews,
     __test__: {
-        feedFailCounts, feedLastFailTime, shouldSkipDeadFeed,
+        feedFailCounts, feedLastFailTime, shouldSkipDeadFeed, feedValidators,
         pruneFeedFailureState, DEAD_FEED_STATE_TTL_MS,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, RSS_FETCH_CONCURRENCY,
         dailyNewsDue, runDueDailyNews, DAILY_NEWS_REFIRE_GUARD_MS,

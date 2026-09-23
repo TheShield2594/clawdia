@@ -9,13 +9,17 @@
 // sanitising builder and the skip that backs it up.
 
 let mockFeedBodies = new Map();
-jest.mock('../src/utils/safeFeedFetch', () => ({
-    safeFetchFeed: jest.fn(async url => {
+jest.mock('../src/utils/safeFeedFetch', () => {
+    const safeFetchFeed = jest.fn(async url => {
         const body = mockFeedBodies.get(url);
         if (body === undefined) throw new Error(`no fixture for ${url}`);
         return body;
-    }),
-}));
+    });
+    return {
+        safeFetchFeed,
+        fetchFeedConditional: jest.fn(async url => ({ body: await safeFetchFeed(url), validators: null })),
+    };
+});
 
 let mockGuilds = [];
 jest.mock('../src/models/Guild', () => ({
