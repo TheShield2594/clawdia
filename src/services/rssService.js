@@ -1,14 +1,18 @@
 const Parser = require('rss-parser');
 const Guild = require('../models/Guild');
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, escapeMarkdown } = require('discord.js');
 const cron = require('node-cron');
+const crypto = require('crypto');
 
-const { safeFetchFeed } = require('../utils/safeFeedFetch');
+const { safeFetchFeed, fetchFeedConditional } = require('../utils/safeFeedFetch');
 const { runJob } = require('../utils/jobRunner');
 const { handlesGuild } = require('../utils/sharding');
 const COLORS = require('../utils/embedColors');
+const { MEDIA_CUSTOM_FIELDS, articleImage, articleByline } = require('../utils/feedMedia');
 
-const parser = new Parser();
+// With Media RSS mapped: without it rss-parser drops <media:content> and
+// <media:thumbnail>, which is how most news sites attach an article's picture.
+const parser = new Parser({ customFields: MEDIA_CUSTOM_FIELDS });
 
 // A daily-news send claims its slot for this long. 23h rather than 24 so a
 // send that fired late (catch-up after downtime) does not push the next
@@ -24,6 +28,25 @@ const DAILY_NEWS_REFIRE_GUARD_MS = 23 * 60 * 60 * 1000;
 async function parseFeedUrl(url) {
     return parser.parseString(await safeFetchFeed(url));
 }
+
+// ETag / Last-Modified per feed URL, from the last sweep that fetched it. With
+// them the next sweep asks "changed since?" and an unchanged feed answers 304:
+// nothing downloaded, nothing parsed. Most feeds are unchanged most of the
+// five-minute ticks, so this is most of the sweep's traffic.
+//
+// Only held while every subscription to the URL is fully caught up. A 304
+// skips delivery entirely, so a feed with an item still owed to some channel
+// (a send that failed, a channel briefly unreachable) must be fetched in full
+// again, or that item would wait until the feed next changed.
+const feedValidators = new Map();
+
+// The sweep's fetch. Resolves null for a feed unchanged since the last sweep.
+async function fetchSweepFeed(url) {
+    const result = await fetchFeedConditional(url, feedValidators.get(url));
+    if (result.notModified) return null;
+    return { parsedFeed: await parser.parseString(result.body), validators: result.validators };
+}
+
 const runtimeTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // Consecutive failure counts per feed URL. Feeds are skipped after DEAD_FEED_THRESHOLD failures,
@@ -200,105 +223,388 @@ async function fetchSendableChannel(client, channelId) {
 
     return channel;
 }
+// What a subscription remembers having seen. Dates alone were not enough to
+// tell "new" from "old": two posts sharing a timestamp lost the second, a post
+// back-dated past the cursor was never posted, an old post re-dated by an edit
+// was posted again, and a feed that carries no dates at all posted nothing.
+// Each item is keyed by its guid (Atom: id), falling back to its link and then
+// its title and date — hashed, because a guild document holds a list of these
+// per subscription and raw permalinks run to hundreds of bytes each.
+function itemKey(item) {
+    const raw = feedText(item.guid) || feedText(item.id) || feedText(item.link)
+        || `${feedText(item.title)}|${feedText(item.pubDate || item.isoDate)}`;
+    return crypto.createHash('sha256').update(raw).digest('base64url').slice(0, 16);
+}
+
 // Most feeds list newest first, but nothing in RSS or Atom requires it, and a
 // feed that lists oldest first pinned `items[0]` to an article that never
-// changes — so the sweep advanced its cursor once and then had nothing new to
-// say for the rest of the feed's life. Order is taken from the dates, not from
-// the document.
+// changes. Order is taken from the dates, not from the document: dated items
+// oldest first, then any undated ones, which are taken as newer than every
+// dated item and — lacking anything better — in reverse document order.
 //
-// An item whose pubDate does not parse is dropped rather than posted: its date
-// is both the "is this new" test and the embed's timestamp, and
-// `setTimestamp(new Date('...'))` on an unparseable one throws RangeError —
-// which, on a feed being seen for the first time, aborted the delivery before
-// the cursor was written and so repeated on every sweep, forever.
-function datedItems(parsedFeed) {
-    return (parsedFeed.items || [])
-        .map(item => ({ item, date: new Date(item.pubDate || item.isoDate) }))
-        .filter(entry => !Number.isNaN(entry.date.getTime()))
-        .sort((a, b) => a.date - b.date);
+// An unparseable date is kept as null rather than passed on: it is also the
+// embed's timestamp, and `setTimestamp(new Date('...'))` throws RangeError.
+function feedEntries(parsedFeed) {
+    const dated = [];
+    const undated = [];
+    const keys = new Set();
+    for (const item of parsedFeed.items || []) {
+        const key = itemKey(item);
+        if (keys.has(key)) continue;
+        keys.add(key);
+        const date = new Date(item.pubDate || item.isoDate);
+        if (Number.isNaN(date.getTime())) undated.push({ item, key, date: null });
+        else dated.push({ item, key, date });
+    }
+    dated.sort((a, b) => a.date - b.date);
+    return dated.concat(undated.reverse());
+}
+
+// How many item keys a subscription keeps. At least a feed's whole current
+// window, so nothing still listed can come back as "new"; beyond that, enough
+// history that an item which briefly drops off the feed and returns is still
+// recognised.
+const SEEN_IDS_MIN = 200;
+
+// An unseen item dated this far before the newest one already posted is
+// recorded as seen but not posted. Real back-dating (a post scheduled
+// yesterday and published today) sits well inside it; a feed that changes how
+// it writes its guids, which makes every item look unseen at once, does not.
+const BACKDATE_GRACE_MS = 24 * 60 * 60 * 1000;
+
+// Embed limits discord.js enforces at build time. Anything past them throws
+// from the builder, and a throw inside the delivery loop leaves the cursor
+// short of the item — so one over-long title used to be retried every sweep
+// for good, holding back everything the feed published after it.
+const EMBED_TITLE_LIMIT = 256;
+const EMBED_AUTHOR_LIMIT = 256;
+const EMBED_FOOTER_LIMIT = 2048;
+// Enough for the standfirst of most articles — a headline alone rarely says
+// whether a post is worth a click — without turning a channel into a wall.
+const ITEM_SNIPPET_LIMIT = 350;
+
+function truncate(text, max) {
+    return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+// rss-parser hands back whatever the XML held: usually a string, but an
+// element with attributes arrives as `{ _: 'text', $: {...} }`.
+function feedText(value) {
+    if (typeof value === 'string') return value.trim();
+    if (value && typeof value._ === 'string') return value._.trim();
+    return '';
+}
+
+// An absolute http(s) URL, or null. Feeds routinely carry root-relative links
+// ("/2025/08/post") and the odd `javascript:` or empty one; the builder rejects
+// all of them, so they are resolved against the feed or dropped here instead.
+function absoluteHttpUrl(raw, base) {
+    const text = feedText(raw);
+    if (!text) return null;
+    try {
+        const url = new URL(text, base);
+        return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+    } catch {
+        return null;
+    }
+}
+
+// Relative item links resolve against the site the feed describes, falling
+// back to the feed's own URL when its <link> is missing or unusable.
+function feedBaseUrl(parsedFeed, feedUrl) {
+    return absoluteHttpUrl(parsedFeed.link, feedUrl) || feedUrl;
+}
+
+/**
+ * The embed for one feed item.
+ *
+ * Laid out the way Discord unfurls an article link: the feed's name and logo
+ * as the author line, the headline linking to the article, a few lines of
+ * text, the article's own picture shown large, and the byline in the footer.
+ * It used to be a headline, 200 characters and the feed's logo, so every post
+ * from a feed looked the same until it was read.
+ *
+ * Built only from values the builder accepts — text truncated to Discord's
+ * limits, every URL resolved to absolute http(s) or left off — so no item can
+ * make it throw.
+ */
+function buildItemEmbed(item, date, parsedFeed, feedUrl) {
+    const base = feedBaseUrl(parsedFeed, feedUrl);
+    const embed = new EmbedBuilder()
+        .setColor(COLORS.INFO)
+        .setTitle(truncate(feedText(item.title) || 'New Post', EMBED_TITLE_LIMIT));
+
+    // A headline and a picture are a complete post; filler text is not
+    // better than none.
+    const snippet = truncate(feedText(item.contentSnippet), ITEM_SNIPPET_LIMIT);
+    if (snippet) embed.setDescription(snippet);
+
+    // Undated items are posted too, just without a timestamp.
+    if (date) embed.setTimestamp(date);
+
+    const link = absoluteHttpUrl(item.link, base);
+    if (link) embed.setURL(link);
+
+    const feedName = truncate(feedText(parsedFeed.title), EMBED_AUTHOR_LIMIT);
+    const logo = absoluteHttpUrl(parsedFeed.image?.url, base);
+    if (feedName) {
+        const author = { name: feedName };
+        const site = absoluteHttpUrl(parsedFeed.link, feedUrl);
+        if (site) author.url = site;
+        if (logo) author.iconURL = logo;
+        embed.setAuthor(author);
+    } else if (logo) {
+        embed.setThumbnail(logo);
+    }
+
+    const image = articleImage(item, base);
+    if (image) embed.setImage(image);
+
+    const byline = articleByline(item);
+    if (byline) embed.setFooter({ text: truncate(`By ${byline}`, EMBED_FOOTER_LIMIT) });
+
+    return embed;
+}
+
+// ── Per-subscription options ────────────────────────────────────────────────
+
+function keywordPattern(keyword) {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Whole words, in any script: "art" must not match "start", and \b only
+    // knows ASCII letters.
+    return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu');
+}
+
+function keywordList(value) {
+    return Array.isArray(value) ? value.filter(k => typeof k === 'string' && k.trim()).map(k => k.trim()) : [];
+}
+
+/**
+ * Whether an item passes a subscription's keyword filters. Matched as whole
+ * words, ignoring case, against the headline, the text and the item's
+ * categories. With include keywords, one of them has to appear; any exclude
+ * keyword that appears rules the item out.
+ */
+function itemPassesFilters(item, feed) {
+    const include = keywordList(feed.includeKeywords);
+    const exclude = keywordList(feed.excludeKeywords);
+    if (!include.length && !exclude.length) return true;
+
+    const categories = Array.isArray(item.categories) ? item.categories.map(feedText) : [];
+    const haystack = [feedText(item.title), feedText(item.contentSnippet), ...categories].join('\n');
+    if (include.length && !include.some(k => keywordPattern(k).test(haystack))) return false;
+    return !exclude.some(k => keywordPattern(k).test(haystack));
+}
+
+const MESSAGE_CONTENT_LIMIT = 2000;
+
+/**
+ * The message an item is sent as: its embed, plus — when the subscription has
+ * them — the role ping and the admin's message line, with {title}, {link},
+ * {feed} and {author} filled in.
+ *
+ * Mentions are locked to the one role the admin chose. The message line mixes
+ * admin text with feed text, and neither an "@everyone" in a template nor a
+ * "<@&id>" in some headline may ping anybody.
+ */
+function itemMessage(feed, item, parsedFeed, embed) {
+    const roleId = typeof feed.mentionRoleId === 'string' && /^\d{17,20}$/.test(feed.mentionRoleId) ? feed.mentionRoleId : null;
+    const parts = [];
+    if (roleId) parts.push(`<@&${roleId}>`);
+
+    const template = typeof feed.messageTemplate === 'string' ? feed.messageTemplate.trim() : '';
+    if (template) {
+        const values = {
+            title: escapeMarkdown(feedText(item.title)),
+            link: embed.data.url || '',
+            feed: escapeMarkdown(feedText(parsedFeed.title)),
+            author: escapeMarkdown(articleByline(item)),
+        };
+        parts.push(template.replace(/\{(title|link|feed|author)\}/g, (_, key) => values[key]));
+    }
+
+    const message = { embeds: [embed], allowedMentions: { parse: [], roles: roleId ? [roleId] : [] } };
+    const content = truncate(parts.join(' '), MESSAGE_CONTENT_LIMIT);
+    if (content) message.content = content;
+    return message;
 }
 
 // A feed that publishes a burst between two sweeps posts at most this many of
-// them, newest kept. The cursor still advances past the whole burst: a channel
+// them, newest kept. The rest of the burst is still recorded as seen: a channel
 // is not a backfill target, and the alternative — posting all of them — is a
 // feed that reposts its archive the first time it is polled after an outage.
 const MAX_ITEMS_PER_SWEEP = 5;
 
-/**
- * Delivers a freshly-parsed feed to one guild's subscription: sends what is new
- * for that guild and advances its lastPublished cursor. Per-subscription
- * failures are contained here so one guild's deleted channel does not stop the
- * fan-out to the others.
- *
- * Returns the number of items posted, for the sweep's summary line.
- */
-async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
+// Which of a feed's entries this subscription has not posted yet.
+//
+// A subscription saved before item keys existed has no `seenIds` (the field has
+// no default, so absent and "seen nothing" stay distinguishable). It keeps the
+// old date rule for one more sweep, which also records every key the feed
+// currently lists; from then on keys decide. Without that step every existing
+// subscription would read its whole feed as unseen on the first sweep after
+// an upgrade.
+function unseenEntries(feed, entries) {
+    if (Array.isArray(feed.seenIds)) {
+        const seen = new Set(feed.seenIds);
+        const floor = feed.lastPublished ? new Date(feed.lastPublished).getTime() - BACKDATE_GRACE_MS : -Infinity;
+        return entries.filter(e => !seen.has(e.key) && (!e.date || e.date.getTime() > floor));
+    }
+    if (feed.lastPublished) {
+        return entries.filter(e => e.date && e.date > feed.lastPublished);
+    }
     // First sight of a feed posts its newest item and nothing else. Without
     // that, subscribing to a feed would empty its whole archive into the
-    // channel.
-    const fresh = feed.lastPublished
-        ? entries.filter(entry => entry.date > feed.lastPublished)
-        : entries.slice(-1);
-    if (!fresh.length) return 0;
+    // channel. A dated item is preferred: in a feed where most items carry a
+    // date, the odd undated one is no evidence of being the newest.
+    const newestDated = entries.filter(e => e.date).slice(-1);
+    return newestDated.length ? newestDated : entries.slice(-1);
+}
 
-    const toPost = fresh.slice(-MAX_ITEMS_PER_SWEEP);
+/**
+ * Delivers a freshly-parsed feed to one guild's subscription: sends what is new
+ * for that guild and records it as seen. Per-subscription failures are
+ * contained here so one guild's deleted channel does not stop the fan-out to
+ * the others.
+ *
+ * Returns `{ delivered, complete }`: the number of items posted, for the
+ * sweep's summary line, and whether nothing is left owed to this subscription.
+ */
+async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
+    const fresh = unseenEntries(feed, entries);
 
-    // The cursor is moved to what was actually delivered, never past it. A
-    // batch that stops half way must not repost the half that landed on the
-    // next sweep, and must not skip the half that did not.
+    // Only what was actually handled is recorded, never more. A batch that
+    // stops half way must not repost the half that landed on the next sweep,
+    // and must not skip the half that did not.
+    const handled = new Set();
     let delivered = 0;
-    let cursor = null;
 
-    try {
-        const channel = await fetchSendableChannel(client, feed.channelId);
+    // An item the filters rule out is handled by not posting it. Taken out
+    // before the per-sweep cap, so filtered items do not use up its slots.
+    const wanted = [];
+    for (const entry of fresh) {
+        if (itemPassesFilters(entry.item, feed)) wanted.push(entry);
+        else handled.add(entry.key);
+    }
+    const toPost = wanted.slice(-MAX_ITEMS_PER_SWEEP);
 
-        // No channel is not a delivery. Advancing the cursor here would drop
-        // the whole burst for good on a channel that was only briefly
-        // unreachable — `channels.fetch` failing with nothing in the cache
-        // looks exactly like a deleted one. Leaving it where it is costs a
-        // no-op re-check each sweep while the channel is really gone, which is
-        // the cheaper of the two mistakes.
-        if (!channel) return 0;
+    if (toPost.length) {
+        try {
+            const channel = await fetchSendableChannel(client, feed.channelId);
 
-        for (const { item, date } of toPost) {
-            const embed = new EmbedBuilder()
-                .setColor(COLORS.INFO)
-                .setTitle(item.title || 'New Post')
-                .setURL(item.link)
-                .setDescription(item.contentSnippet?.substring(0, 200) || 'No description available')
-                .setTimestamp(date);
+            // No channel is not a delivery. Recording the burst here would drop
+            // it for good on a channel that was only briefly unreachable —
+            // `channels.fetch` failing with nothing in the cache looks exactly
+            // like a deleted one. Leaving it costs a no-op re-check each sweep
+            // while the channel is really gone, the cheaper of the two mistakes.
+            if (!channel) return { delivered: 0, complete: false };
 
-            if (parsedFeed.image?.url) {
-                embed.setThumbnail(parsedFeed.image.url);
+            for (const entry of toPost) {
+                // An item the builder still refuses is skipped, not retried: it
+                // is the item that is wrong, and it will be just as wrong on the
+                // next sweep. A failed *send* is different — that throws below
+                // and leaves the item unrecorded.
+                let message;
+                try {
+                    const embed = buildItemEmbed(entry.item, entry.date, parsedFeed, feed.url);
+                    message = itemMessage(feed, entry.item, parsedFeed, embed);
+                } catch (error) {
+                    console.error(`Skipping an RSS item from ${feed.url} that could not be rendered:`, error.message);
+                    handled.add(entry.key);
+                    continue;
+                }
+
+                await channel.send(message);
+                delivered++;
+                handled.add(entry.key);
             }
 
-            await channel.send({ embeds: [embed] });
-            delivered++;
-            cursor = date;
-        }
-
-        // The whole batch landed, so the cursor may also skip whatever the
-        // per-sweep cap left behind — those are not coming.
-        cursor = fresh[fresh.length - 1].date;
-    } catch (error) {
-        console.error(`Error delivering RSS update for ${feed.url} to guild ${guild.guildId}:`, error);
-    }
-
-    if (cursor) {
-        try {
-            // Targets the one subdocument rather than rewriting the whole
-            // rssFeeds array, which is also what `guild.save()` on a
-            // projected document could not do.
-            await Guild.updateOne(
-                { guildId: guild.guildId, 'rssFeeds._id': feed._id },
-                { $set: { 'rssFeeds.$.lastPublished': cursor } }
-            );
+            // The whole batch landed, so whatever the per-sweep cap left
+            // behind may be recorded too — those are not coming.
+            for (const entry of fresh) handled.add(entry.key);
         } catch (error) {
-            console.error(`Error advancing the RSS cursor for ${feed.url} in guild ${guild.guildId}:`, error);
+            console.error(`Error delivering RSS update for ${feed.url} to guild ${guild.guildId}:`, error);
         }
     }
 
-    return delivered;
+    const recorded = await recordSeen(guild, feed, entries, fresh, handled, {
+        title: truncate(feedText(parsedFeed.title), FEED_TITLE_LIMIT),
+        posted: delivered > 0,
+    });
+    return { delivered, complete: recorded && fresh.every(entry => handled.has(entry.key)) };
+}
+
+// Writes back what this sweep learned about one subscription: every key the
+// feed lists except the fresh ones that did not get through, the newest date
+// handled, and — for the dashboard — the feed's title, when it last posted,
+// and that it is no longer failing. Nothing is written when none of it
+// changed, so an idle feed costs no write per sweep. Returns false when the
+// write failed.
+async function recordSeen(guild, feed, entries, fresh, handled, { title, posted }) {
+    const pending = new Set(fresh.filter(e => !handled.has(e.key)).map(e => e.key));
+    const previous = Array.isArray(feed.seenIds) ? feed.seenIds : [];
+    const previousSet = new Set(previous);
+
+    const current = entries.map(e => e.key).filter(key => !pending.has(key));
+    const nextSeen = [...new Set(current.concat(previous))]
+        .slice(0, Math.max(SEEN_IDS_MIN, current.length));
+
+    const $set = {};
+    if (!Array.isArray(feed.seenIds) || nextSeen.some(key => !previousSet.has(key))) {
+        $set['rssFeeds.$.seenIds'] = nextSeen;
+    }
+
+    // lastPublished is still kept: it is the backdating floor above and what a
+    // subscription saved before item keys is judged by. It only ever moves
+    // forward — a back-dated item that was posted does not pull it back.
+    let cursor = null;
+    for (const entry of fresh) {
+        if (handled.has(entry.key) && entry.date && (!cursor || entry.date > cursor)) cursor = entry.date;
+    }
+    if (cursor && (!feed.lastPublished || cursor > new Date(feed.lastPublished))) {
+        $set['rssFeeds.$.lastPublished'] = cursor;
+    }
+
+    if (title && title !== feed.title) $set['rssFeeds.$.title'] = title;
+    if (posted) $set['rssFeeds.$.lastPostedAt'] = new Date();
+    // A good fetch ends a failure: the dashboard stops showing the error.
+    if (feed.lastError || feed.failingSince) {
+        $set['rssFeeds.$.lastError'] = null;
+        $set['rssFeeds.$.failingSince'] = null;
+    }
+
+    if (!Object.keys($set).length) return true;
+    try {
+        // Targets the one subdocument rather than rewriting the whole rssFeeds
+        // array, which is also what `guild.save()` on a projected document
+        // could not do.
+        await Guild.updateOne({ guildId: guild.guildId, 'rssFeeds._id': feed._id }, { $set });
+        return true;
+    } catch (error) {
+        console.error(`Error recording RSS progress for ${feed.url} in guild ${guild.guildId}:`, error);
+        return false;
+    }
+}
+
+const FEED_TITLE_LIMIT = 200;
+const FEED_ERROR_LIMIT = 200;
+
+// Puts a failed fetch where an admin will see it: on each subscription to the
+// URL, as the error and the time it started failing. Written only when that
+// changes — the first failure, or a different error — not on every failing
+// sweep, and `failingSince` keeps the first failure's time.
+async function recordFeedFailureOnSubscriptions(url, subscriptions, error) {
+    const message = truncate(feedText(error?.message) || 'Could not fetch or read the feed.', FEED_ERROR_LIMIT);
+    const now = new Date();
+    for (const { guild, feed } of subscriptions) {
+        if (feed.lastError === message && feed.failingSince) continue;
+        const $set = { 'rssFeeds.$.lastError': message };
+        if (!feed.failingSince) $set['rssFeeds.$.failingSince'] = now;
+        try {
+            await Guild.updateOne({ guildId: guild.guildId, 'rssFeeds._id': feed._id }, { $set });
+        } catch (writeError) {
+            console.error(`Error recording RSS failure for ${url} in guild ${guild.guildId}:`, writeError);
+        }
+    }
 }
 
 /**
@@ -347,27 +653,37 @@ async function checkRssFeeds(client) {
         let posted = 0;
         let failed = 0;
         let skipped = 0;
+        let unchanged = 0;
         const worker = async () => {
             while (next < urls.length) {
                 const url = urls[next++];
                 if (shouldSkipDeadFeed(url)) { skipped++; continue; }
 
-                let parsedFeed;
+                let fetched;
                 try {
-                    parsedFeed = await parseFeedUrl(url);
+                    fetched = await fetchSweepFeed(url);
                     recordFeedSuccess(url);
                 } catch (error) {
+                    feedValidators.delete(url);
                     recordFeedFailure(url, error);
+                    await recordFeedFailureOnSubscriptions(url, subscriptionsByUrl.get(url), error);
                     failed++;
                     continue;
                 }
+                if (!fetched) { unchanged++; continue; }
 
-                const entries = datedItems(parsedFeed);
-                if (!entries.length) continue;
-
+                // Delivered even when the feed lists nothing: an empty feed
+                // is still a good fetch, which clears a recorded failure.
+                const entries = feedEntries(fetched.parsedFeed);
+                let complete = true;
                 for (const { guild, feed } of subscriptionsByUrl.get(url)) {
-                    posted += await deliverFeedUpdate(client, guild, feed, parsedFeed, entries);
+                    const result = await deliverFeedUpdate(client, guild, feed, fetched.parsedFeed, entries);
+                    posted += result.delivered;
+                    if (!result.complete) complete = false;
                 }
+
+                if (complete && fetched.validators) feedValidators.set(url, fetched.validators);
+                else feedValidators.delete(url);
             }
         };
 
@@ -379,7 +695,13 @@ async function checkRssFeeds(client) {
         // indistinguishable from "nothing new was published" from the outside,
         // and the per-feed errors say what broke without ever saying how much
         // of the sweep it was.
-        console.log(`[RSS] Sweep: ${urls.length} feed(s), ${posted} posted, ${failed} failed, ${skipped} parked.`);
+        console.log(`[RSS] Sweep: ${urls.length} feed(s), ${posted} posted, ${unchanged} unchanged, ${failed} failed, ${skipped} parked.`);
+
+        // A URL no subscription on this shard polls any more has no use for
+        // its validators.
+        for (const url of feedValidators.keys()) {
+            if (!subscriptionsByUrl.has(url)) feedValidators.delete(url);
+        }
     } catch (error) {
         console.error('Error checking RSS feeds:', error);
     } finally {
@@ -387,6 +709,21 @@ async function checkRssFeeds(client) {
         // is keyed on age alone and needs nothing the sweep produced.
         pruneFeedFailureState();
     }
+}
+
+// Feed text is dropped into Markdown, where a stray `]`, `*` or `_` in a
+// headline closes the link or bolds the rest of the digest. escapeMarkdown
+// does not cover the link brackets, so those are escaped here — in one pass
+// with backslashes, before anything else adds a backslash, so a headline's own
+// `\` cannot escape the one added before its `]` and leave the `]` live.
+// escapeMarkdown's own backslash pass is off: it would double these.
+function digestText(text) {
+    return escapeMarkdown(String(text).replace(/[\\[\]]/g, '\\$&'), { escape: false });
+}
+
+// A `)` in the URL ends a Markdown link early.
+function digestLink(url) {
+    return url.replace(/\(/g, '%28').replace(/\)/g, '%29');
 }
 
 async function sendDailyNewsForProfile(client, guild, profile) {
@@ -406,13 +743,14 @@ async function sendDailyNewsForProfile(client, guild, profile) {
         try {
             const parsedFeed = await parseFeedUrl(feedUrl);
             recordFeedSuccess(feedUrl);
+            const base = feedBaseUrl(parsedFeed, feedUrl);
             const feedItems = parsedFeed.items
                 .map(item => ({
-                    title: item.title,
-                    link: item.link,
-                    normalizedLink: normalizeArticleLink(item.link),
+                    title: feedText(item.title) || 'Untitled',
+                    link: absoluteHttpUrl(item.link, base),
+                    normalizedLink: normalizeArticleLink(absoluteHttpUrl(item.link, base) || ''),
                     description: item.contentSnippet?.substring(0, 150) || 'No description',
-                    source: parsedFeed.title || 'Unknown Source',
+                    source: feedText(parsedFeed.title) || 'Unknown Source',
                     date: new Date(item.pubDate || item.isoDate)
                 }))
                 .filter(item => Number.isNaN(item.date.getTime()) || item.date.getTime() >= cutoffMs)
@@ -460,8 +798,10 @@ async function sendDailyNewsForProfile(client, guild, profile) {
     let description = '';
     for (let i = 0; i < Math.min(uniqueItems.length, 10); i++) {
         const item = uniqueItems[i];
-        description += `\n**${i + 1}. [${item.title}](${item.link})**\n`;
-        description += `*${item.source}* • ${item.description}\n`;
+        const title = digestText(item.title);
+        const heading = item.link ? `[${title}](${digestLink(item.link)})` : title;
+        description += `\n**${i + 1}. ${heading}**\n`;
+        description += `*${digestText(item.source)}* • ${digestText(item.description)}\n`;
     }
 
     if (description.length > 4000) {
@@ -619,10 +959,11 @@ function scheduleDailyNews(client) {
 module.exports = {
     checkRssFeeds, scheduleDailyNews, sendDailyNews,
     __test__: {
-        feedFailCounts, feedLastFailTime, shouldSkipDeadFeed,
+        feedFailCounts, feedLastFailTime, shouldSkipDeadFeed, feedValidators,
         pruneFeedFailureState, DEAD_FEED_STATE_TTL_MS,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, RSS_FETCH_CONCURRENCY,
         dailyNewsDue, runDueDailyNews, DAILY_NEWS_REFIRE_GUARD_MS,
-        datedItems, MAX_ITEMS_PER_SWEEP,
+        feedEntries, itemKey, MAX_ITEMS_PER_SWEEP, SEEN_IDS_MIN, BACKDATE_GRACE_MS,
+        buildItemEmbed, EMBED_TITLE_LIMIT, itemPassesFilters, itemMessage,
     },
 };

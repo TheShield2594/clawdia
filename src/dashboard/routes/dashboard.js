@@ -21,6 +21,7 @@ const { hasManagePermission, verifyLiveGuildAccess } = require('../lib/permissio
 const { CHANNEL_TYPES } = require('../../bot/gateway');
 const { PANELS, DEFAULT_PANEL, isPanel } = require('../lib/panels');
 const { groupReactionRolePanels } = require('../lib/reactionRolePanels');
+const { rssFeedRows } = require('../lib/rssFeedRows');
 
 async function getManageableGuilds(req) {
     const manageable = req.user.guilds.filter(hasManagePermission);
@@ -223,6 +224,8 @@ async function buildGuildSettingsLocals(req) {
             // after a create or delete without reloading the page, and two
             // groupings would be two things to keep in step.
             reactionRolePanels: groupReactionRolePanels(safeSettings.reactionRoles),
+            // Same reasoning: the RSS routes answer with this shape too.
+            rssFeedRows: rssFeedRows(safeSettings.rssFeeds),
             defaultJobs: DEFAULT_JOBS,
             defaultTiers: DEFAULT_TIERS,
             builtinAchievements,

@@ -127,8 +127,39 @@ async function resolveAndPin(hostname, allowPrivate = false) {
 // endpoint, an internal host — is still blocked. DNS pinning and the TLS/cert
 // validation below are untouched.
 async function safeFetchFeed(urlStr, options = {}) {
-    const tls = require('tls');
     const opts = typeof options === 'number' ? { maxRedirects: options } : (options || {});
+    return (await fetchFeedResponse(urlStr, { ...opts, validators: null })).body;
+}
+
+// A cache validator as the server sent it, or null for anything that should
+// not be echoed back in a request header: missing, oversized, or carrying a
+// control character (which Node would refuse to send anyway, as a throw).
+function cleanValidator(value) {
+    if (typeof value !== 'string' || !value || value.length > 512) return null;
+    // eslint-disable-next-line no-control-regex
+    return /[\x00-\x1f\x7f]/.test(value) ? null : value;
+}
+
+/**
+ * Fetch a feed conditionally. `validators` is what a previous fetch of the same
+ * URL returned — `{ etag, lastModified }` — and is sent as If-None-Match /
+ * If-Modified-Since. A feed that has not changed answers 304 with no body, and
+ * this resolves `{ notModified: true }` without downloading or parsing
+ * anything. Otherwise it resolves `{ body, validators }`, the latter to hand
+ * back on the next call (null when the server sent neither header).
+ *
+ * Same guarantees as safeFetchFeed; `options` is the same shape.
+ */
+async function fetchFeedConditional(urlStr, validators, options = {}) {
+    const result = await fetchFeedResponse(urlStr, { ...options, validators: validators || null });
+    if (result.notModified) return { notModified: true };
+    const etag = cleanValidator(result.etag);
+    const lastModified = cleanValidator(result.lastModified);
+    return { body: result.body, validators: etag || lastModified ? { etag, lastModified } : null };
+}
+
+async function fetchFeedResponse(urlStr, opts) {
+    const tls = require('tls');
     const maxRedirects = Number.isInteger(opts.maxRedirects) ? opts.maxRedirects : 5;
 
     let allowedOrigin = null;
@@ -181,6 +212,10 @@ async function safeFetchFeed(urlStr, options = {}) {
                 'Accept-Encoding': 'identity',
                 Host: current.hostname, // required when connecting directly to a pinned IP
             };
+            const etag = cleanValidator(opts.validators?.etag);
+            const lastModified = cleanValidator(opts.validators?.lastModified);
+            if (etag) commonHeaders['If-None-Match'] = etag;
+            if (lastModified) commonHeaders['If-Modified-Since'] = lastModified;
 
             let req;
             if (current.protocol === 'https:') {
@@ -212,6 +247,14 @@ async function safeFetchFeed(urlStr, options = {}) {
             }
 
             function handleResponse(res) {
+                // Only meaningful as an answer to a conditional request; a 304
+                // to a request that sent no validator falls through and fails
+                // as the non-2xx it is.
+                if (res.statusCode === 304 && (etag || lastModified)) {
+                    res.destroy();
+                    return succeed({ notModified: true });
+                }
+
                 if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
                     const loc = res.headers.location;
                     res.destroy();
@@ -240,7 +283,11 @@ async function safeFetchFeed(urlStr, options = {}) {
                     }
                     chunks.push(c);
                 });
-                res.on('end', () => succeed({ body: Buffer.concat(chunks).toString('utf8') }));
+                res.on('end', () => succeed({
+                    body: Buffer.concat(chunks).toString('utf8'),
+                    etag: res.headers.etag,
+                    lastModified: res.headers['last-modified'],
+                }));
                 res.on('error', fail);
             }
 
@@ -266,9 +313,9 @@ async function safeFetchFeed(urlStr, options = {}) {
             current = new URL(result.redirect, current.href);
             continue;
         }
-        return result.body;
+        return result;
     }
     throw new Error('Too many redirects.');
 }
 
-module.exports = { safeFetchFeed, isPrivateIp, resolveAndPin };
+module.exports = { safeFetchFeed, fetchFeedConditional, isPrivateIp, resolveAndPin };

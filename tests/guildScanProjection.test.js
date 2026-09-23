@@ -98,6 +98,9 @@ describe('the RSS feed check', () => {
                 setDescription() { return this; }
                 setTimestamp() { return this; }
                 setThumbnail() { return this; }
+                setAuthor() { return this; }
+                setImage() { return this; }
+                setFooter() { return this; }
             },
         }));
         jest.doMock('rss-parser', () => class {
@@ -109,7 +112,10 @@ describe('the RSS feed check', () => {
         });
         // Feed URLs are operator-supplied, so the real fetch is the SSRF-safe one;
         // it has its own suite, and this one must not reach the network.
-        jest.doMock('../src/utils/safeFeedFetch', () => ({ safeFetchFeed: jest.fn().mockResolvedValue('<rss/>') }));
+        jest.doMock('../src/utils/safeFeedFetch', () => ({
+            safeFetchFeed: jest.fn().mockResolvedValue('<rss/>'),
+            fetchFeedConditional: jest.fn().mockResolvedValue({ body: '<rss/>', validators: null }),
+        }));
         jest.doMock('../src/models/Guild', () => ({ find: jest.fn(), updateOne: jest.fn() }));
         jest.doMock('../src/utils/jobRunner', () => ({ runJob: jest.fn() }));
 
@@ -169,6 +175,10 @@ describe('the RSS feed check', () => {
 
         await checkRssFeeds({ channels: { fetch: jest.fn().mockResolvedValue(null) } });
 
-        expect(Guild.updateOne).not.toHaveBeenCalled();
+        // The subscription predates item keys, so the feed's keys are recorded
+        // — but the date is not touched.
+        for (const [, update] of Guild.updateOne.mock.calls) {
+            expect(update.$set).not.toHaveProperty(['rssFeeds.$.lastPublished']);
+        }
     });
 });

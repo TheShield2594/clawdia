@@ -162,11 +162,18 @@ describe('rss-parser stays watched (#954)', () => {
             // local first — so an argument is either the call itself or an
             // identifier this file assigns from it. `parseString(rawBody)`
             // after a bare fetch is the regression, and it is one line.
+            //
+            // fetchFeedConditional is the same guarded fetch — it and
+            // safeFetchFeed share one implementation — answering with
+            // `{ body }` rather than the bare string, so its result is read as
+            // `<local>.body`.
             for (const argument of parseStringArguments(src)) {
-                if (/\bsafeFetchFeed\s*\(/.test(argument)) continue;
-                expect([file, argument]).toEqual([file, expect.stringMatching(/^[A-Za-z_$][\w$]*$/)]);
+                if (/\b(?:safeFetchFeed|fetchFeedConditional)\s*\(/.test(argument)) continue;
+                expect([file, argument]).toEqual([file, expect.stringMatching(/^[A-Za-z_$][\w$]*(?:\.body)?$/)]);
+                const local = argument.replace(/\.body$/, '');
+                const guard = argument.endsWith('.body') ? 'fetchFeedConditional' : 'safeFetchFeed';
                 const assignment = new RegExp(
-                    `\\b(?:const|let|var)\\s+${argument}\\s*=\\s*await\\s+safeFetchFeed\\s*\\(`);
+                    `\\b(?:const|let|var)\\s+${local}\\s*=\\s*await\\s+${guard}\\s*\\(`);
                 expect([file, argument, assignment.test(src)]).toEqual([file, argument, true]);
             }
         }

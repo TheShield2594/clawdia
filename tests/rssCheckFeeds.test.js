@@ -12,8 +12,11 @@ let mockConcurrent = 0;
 let mockMaxConcurrent = 0;
 let mockFeedBodies = new Map(); // url -> xml string or Error
 
-jest.mock('../src/utils/safeFeedFetch', () => ({
-    safeFetchFeed: jest.fn(async url => {
+let mockValidators = new Map(); // url -> validators the fixture answers with
+let mockUnchanged = new Set();  // urls that answer 304 when asked conditionally
+const mockConditionalCalls = []; // [url, validators sent]
+jest.mock('../src/utils/safeFeedFetch', () => {
+    const safeFetchFeed = jest.fn(async url => {
         mockFetches.push(url);
         mockConcurrent++;
         mockMaxConcurrent = Math.max(mockMaxConcurrent, mockConcurrent);
@@ -26,8 +29,19 @@ jest.mock('../src/utils/safeFeedFetch', () => ({
         if (body instanceof Error) throw body;
         if (body === undefined) throw new Error(`no fixture for ${url}`);
         return body;
-    }),
-}));
+    });
+    return {
+        safeFetchFeed,
+        fetchFeedConditional: jest.fn(async (url, validators) => {
+            mockConditionalCalls.push([url, validators]);
+            if (validators && mockUnchanged.has(url)) {
+                mockFetches.push(url);
+                return { notModified: true };
+            }
+            return { body: await safeFetchFeed(url), validators: mockValidators.get(url) || null };
+        }),
+    };
+});
 
 let mockGuilds = [];
 jest.mock('../src/models/Guild', () => ({
@@ -38,7 +52,7 @@ jest.mock('../src/models/Guild', () => ({
 
 const Guild = require('../src/models/Guild');
 const { checkRssFeeds, __test__ } = require('../src/services/rssService');
-const { feedFailCounts, feedLastFailTime, DEAD_FEED_THRESHOLD, RSS_FETCH_CONCURRENCY, MAX_ITEMS_PER_SWEEP } = __test__;
+const { feedFailCounts, feedLastFailTime, feedValidators, DEAD_FEED_THRESHOLD, RSS_FETCH_CONCURRENCY, MAX_ITEMS_PER_SWEEP, itemKey, SEEN_IDS_MIN, itemPassesFilters } = __test__;
 
 function rssXml({ title = 'Feed', itemTitle = 'Post', link = 'https://example.com/post', pubDate = 'Wed, 20 Aug 2025 12:00:00 GMT' } = {}) {
     return rssXmlItems([{ title: itemTitle, link, pubDate }], title);
@@ -72,6 +86,10 @@ beforeEach(() => {
     mockConcurrent = 0;
     mockMaxConcurrent = 0;
     mockFeedBodies = new Map();
+    mockValidators = new Map();
+    mockUnchanged = new Set();
+    mockConditionalCalls.length = 0;
+    feedValidators.clear();
     mockGuilds = [];
     feedFailCounts.clear();
     feedLastFailTime.clear();
@@ -100,7 +118,7 @@ test('a URL shared by many guilds is fetched once and delivered to each', async 
     expect(Guild.updateOne).toHaveBeenCalledTimes(3);
     expect(Guild.updateOne).toHaveBeenCalledWith(
         { guildId: 'g2', 'rssFeeds._id': 'f2' },
-        { $set: { 'rssFeeds.$.lastPublished': expect.any(Date) } }
+        { $set: expect.objectContaining({ 'rssFeeds.$.lastPublished': expect.any(Date) }) }
     );
 });
 
@@ -118,7 +136,9 @@ test('fetches run in parallel but never more than the pool size at once', async 
     expect(mockMaxConcurrent).toBeLessThanOrEqual(RSS_FETCH_CONCURRENCY);
 });
 
-test('an item no newer than lastPublished sends and writes nothing', async () => {
+test('an item no newer than lastPublished sends nothing and leaves the date alone', async () => {
+    // A subscription from before item keys: judged by date this once, and the
+    // feed's current keys recorded so keys decide from the next sweep on.
     const url = 'https://example.com/rss';
     mockFeedBodies.set(url, rssXml({ pubDate: 'Wed, 20 Aug 2025 12:00:00 GMT' }));
     mockGuilds = [{
@@ -130,10 +150,13 @@ test('an item no newer than lastPublished sends and writes nothing', async () =>
     await checkRssFeeds(client);
 
     expect(client.send).not.toHaveBeenCalled();
-    expect(Guild.updateOne).not.toHaveBeenCalled();
+    expect(Guild.updateOne).toHaveBeenCalledWith(
+        { guildId: 'g1', 'rssFeeds._id': 'f1' },
+        { $set: expect.objectContaining({ 'rssFeeds.$.seenIds': [itemKey({ link: 'https://example.com/post' })] }) }
+    );
 });
 
-test('an unparseable pubDate on a cursored feed skips rather than posting', async () => {
+test('an unparseable pubDate on a subscription from before item keys is recorded, not posted', async () => {
     const url = 'https://example.com/rss';
     mockFeedBodies.set(url, rssXml({ pubDate: 'not a date' }));
     mockGuilds = [{
@@ -145,7 +168,7 @@ test('an unparseable pubDate on a cursored feed skips rather than posting', asyn
     await checkRssFeeds(client);
 
     expect(client.send).not.toHaveBeenCalled();
-    expect(Guild.updateOne).not.toHaveBeenCalled();
+    expect(Guild.updateOne.mock.calls[0][1].$set).not.toHaveProperty(['rssFeeds.$.lastPublished']);
 });
 
 test('a feed that keeps failing is marked dead and skipped on the next sweep', async () => {
@@ -173,11 +196,15 @@ test('one guild whose delivery blows up does not stop the fan-out to the rest', 
 
     await checkRssFeeds(client);
 
-    // g1's send failed, but g2 was still delivered and cursored.
-    expect(Guild.updateOne).toHaveBeenCalledTimes(1);
+    // g1's send failed, but g2 was still delivered and cursored. g1 records
+    // only that it has been looked at — its one item is still owed.
+    expect(Guild.updateOne).toHaveBeenCalledWith(
+        { guildId: 'g1', 'rssFeeds._id': 'f1' },
+        { $set: expect.objectContaining({ 'rssFeeds.$.seenIds': [] }) }
+    );
     expect(Guild.updateOne).toHaveBeenCalledWith(
         { guildId: 'g2', 'rssFeeds._id': 'f2' },
-        { $set: { 'rssFeeds.$.lastPublished': expect.any(Date) } }
+        { $set: expect.objectContaining({ 'rssFeeds.$.lastPublished': expect.any(Date) }) }
     );
 });
 
@@ -205,7 +232,7 @@ test('a feed listed oldest-first posts its newest item, not its first', async ()
     expect(client.send.mock.calls[0][0].embeds[0].data.title).toBe('Newest');
     expect(Guild.updateOne).toHaveBeenCalledWith(
         { guildId: 'g1', 'rssFeeds._id': 'f1' },
-        { $set: { 'rssFeeds.$.lastPublished': new Date('2025-08-20T12:00:00Z') } }
+        { $set: expect.objectContaining({ 'rssFeeds.$.lastPublished': new Date('2025-08-20T12:00:00Z') }) }
     );
 });
 
@@ -261,7 +288,7 @@ test('a burst larger than the per-sweep cap posts the newest and cursors past th
     expect(titles[titles.length - 1]).toBe(`item${items.length - 1}`);
     expect(Guild.updateOne).toHaveBeenCalledWith(
         { guildId: 'g1', 'rssFeeds._id': 'f1' },
-        { $set: { 'rssFeeds.$.lastPublished': new Date(Date.UTC(2025, 7, 20, items.length - 1)) } }
+        { $set: expect.objectContaining({ 'rssFeeds.$.lastPublished': new Date(Date.UTC(2025, 7, 20, items.length - 1)) }) }
     );
 });
 
@@ -284,7 +311,8 @@ test('an unparseable pubDate on a fresh feed is skipped, not retried forever', a
     expect(Guild.updateOne).toHaveBeenCalledTimes(1);
 });
 
-test('a feed with no usable dates at all posts nothing and raises nothing', async () => {
+test('a feed with no usable dates at all still posts, going by item keys', async () => {
+    // It used to post nothing, ever: the date was the only test of "new".
     const url = 'https://example.com/rss';
     mockFeedBodies.set(url, rssXmlItems([
         { title: 'Undated', link: 'https://example.com/undated', pubDate: null },
@@ -294,8 +322,12 @@ test('a feed with no usable dates at all posts nothing and raises nothing', asyn
 
     await checkRssFeeds(client);
 
-    expect(client.send).not.toHaveBeenCalled();
-    expect(Guild.updateOne).not.toHaveBeenCalled();
+    expect(client.send).toHaveBeenCalledTimes(1);
+    expect(client.send.mock.calls[0][0].embeds[0].data.timestamp).toBeUndefined();
+    expect(Guild.updateOne).toHaveBeenCalledWith(
+        { guildId: 'g1', 'rssFeeds._id': 'f1' },
+        { $set: expect.objectContaining({ 'rssFeeds.$.seenIds': [itemKey({ link: 'https://example.com/undated' })] }) }
+    );
 });
 
 
@@ -327,7 +359,7 @@ test('a batch that fails half way cursors to the last item that landed', async (
     expect(Guild.updateOne).toHaveBeenCalledTimes(1);
     expect(Guild.updateOne).toHaveBeenCalledWith(
         { guildId: 'g1', 'rssFeeds._id': 'f1' },
-        { $set: { 'rssFeeds.$.lastPublished': new Date('2025-08-18T12:00:00Z') } }
+        { $set: expect.objectContaining({ 'rssFeeds.$.lastPublished': new Date('2025-08-18T12:00:00Z') }) }
     );
 });
 
@@ -355,4 +387,384 @@ test('a sweep with no configured feeds still reports itself', async () => {
     await checkRssFeeds(makeClient());
 
     expect(log).toHaveBeenCalledWith(expect.stringContaining('[RSS] Sweep: 0 feed(s)'));
+});
+
+
+// ── Item keys ───────────────────────────────────────────────────────────────
+//
+// The cursor date used to be the only test of "new". Each of these is a feed
+// that date alone got wrong: a lost post, a missed post, or a repost.
+
+describe('with item keys recorded', () => {
+    const url = 'https://example.com/rss';
+    const key = link => itemKey({ link });
+    const keyed = (seenIds, lastPublished = new Date('2025-08-20T12:00:00Z')) =>
+        [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url, channelId: 'c1', lastPublished, seenIds, title: 'Feed' }] }];
+    const titles = client => client.send.mock.calls.map(c => c[0].embeds[0].data.title);
+
+    test('a second post sharing the cursor\'s timestamp is not lost', async () => {
+        mockFeedBodies.set(url, rssXmlItems([
+            { title: 'First', link: 'https://example.com/1', pubDate: 'Wed, 20 Aug 2025 12:00:00 GMT' },
+            { title: 'Twin', link: 'https://example.com/2', pubDate: 'Wed, 20 Aug 2025 12:00:00 GMT' },
+        ]));
+        mockGuilds = keyed([key('https://example.com/1')]);
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        expect(titles(client)).toEqual(['Twin']);
+    });
+
+    test('a post back-dated a few hours behind the cursor is still posted', async () => {
+        mockFeedBodies.set(url, rssXmlItems([
+            { title: 'Seen', link: 'https://example.com/1', pubDate: 'Wed, 20 Aug 2025 12:00:00 GMT' },
+            { title: 'Scheduled', link: 'https://example.com/2', pubDate: 'Wed, 20 Aug 2025 06:00:00 GMT' },
+        ]));
+        mockGuilds = keyed([key('https://example.com/1')]);
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        expect(titles(client)).toEqual(['Scheduled']);
+        // The date only moves forward.
+        expect(Guild.updateOne.mock.calls[0][1].$set).not.toHaveProperty(['rssFeeds.$.lastPublished']);
+    });
+
+    test('unseen items far older than the cursor are recorded, not posted', async () => {
+        // What a feed changing its guid scheme looks like: its whole archive
+        // is suddenly "unseen".
+        mockFeedBodies.set(url, rssXmlItems([
+            { title: 'Archive', link: 'https://example.com/old', pubDate: 'Mon, 11 Aug 2025 12:00:00 GMT' },
+        ]));
+        mockGuilds = keyed([]);
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        expect(client.send).not.toHaveBeenCalled();
+        expect(Guild.updateOne).toHaveBeenCalledWith(
+            { guildId: 'g1', 'rssFeeds._id': 'f1' },
+            { $set: { 'rssFeeds.$.seenIds': [key('https://example.com/old')] } }
+        );
+    });
+
+    test('an old post re-dated by an edit is not posted again', async () => {
+        mockFeedBodies.set(url, rssXmlItems([
+            { title: 'Edited', link: 'https://example.com/1', pubDate: 'Fri, 22 Aug 2025 12:00:00 GMT' },
+        ]));
+        mockGuilds = keyed([key('https://example.com/1')]);
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        expect(client.send).not.toHaveBeenCalled();
+        expect(Guild.updateOne).not.toHaveBeenCalled();
+    });
+
+    test('a guid wins over the link as the item\'s identity', async () => {
+        mockFeedBodies.set(url, `<?xml version="1.0"?><rss version="2.0"><channel><title>F</title>
+<item><title>Moved</title><link>https://example.com/new-slug</link><guid isPermaLink="false">post-42</guid><pubDate>Thu, 21 Aug 2025 12:00:00 GMT</pubDate></item>
+</channel></rss>`);
+        mockGuilds = keyed([itemKey({ guid: 'post-42' })]);
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        expect(client.send).not.toHaveBeenCalled();
+    });
+
+    test('an item whose send failed is still owed on the next sweep', async () => {
+        mockFeedBodies.set(url, rssXmlItems([
+            { title: 'New', link: 'https://example.com/2', pubDate: 'Thu, 21 Aug 2025 12:00:00 GMT' },
+        ]));
+        mockGuilds = keyed([]);
+        const client = makeClient();
+        client.send.mockRejectedValueOnce(new Error('rate limited'));
+
+        await checkRssFeeds(client);
+
+        expect(Guild.updateOne).not.toHaveBeenCalled();
+    });
+
+    test('the recorded keys are bounded but always cover the whole feed', async () => {
+        const items = Array.from({ length: SEEN_IDS_MIN + 50 }, (_, i) => ({
+            title: `i${i}`, link: `https://example.com/${i}`, pubDate: 'Wed, 20 Aug 2025 12:00:00 GMT',
+        }));
+        mockFeedBodies.set(url, rssXmlItems(items));
+        const history = Array.from({ length: SEEN_IDS_MIN }, (_, i) => `old-${i}`);
+        mockGuilds = keyed(history.concat(items.slice(1).map(i => key(i.link))));
+
+        await checkRssFeeds(makeClient());
+
+        const seen = Guild.updateOne.mock.calls[0][1].$set['rssFeeds.$.seenIds'];
+        expect(seen).toHaveLength(items.length);
+        expect(seen).toContain(key(items[0].link));
+    });
+});
+
+
+// ── Conditional requests ────────────────────────────────────────────────────
+//
+// Every feed used to be downloaded and parsed in full every five minutes,
+// changed or not.
+
+describe('conditional fetches', () => {
+    const url = 'https://example.com/rss';
+    const validators = { etag: '"v1"', lastModified: null };
+    const subscribed = () => [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url, channelId: 'c1', lastPublished: null }] }];
+
+    beforeEach(() => {
+        mockFeedBodies.set(url, rssXml());
+        mockValidators.set(url, validators);
+        mockUnchanged.add(url);
+    });
+
+    test('the next sweep sends back the validators the feed answered with', async () => {
+        mockGuilds = subscribed();
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+        await checkRssFeeds(client);
+
+        expect(mockConditionalCalls.map(c => c[1])).toEqual([undefined, validators]);
+    });
+
+    test('a feed that answers 304 is not delivered, and counts as unchanged', async () => {
+        mockGuilds = subscribed();
+        const client = makeClient();
+        await checkRssFeeds(client);
+        client.send.mockClear();
+        Guild.updateOne.mockClear();
+        const log = jest.spyOn(console, 'log');
+
+        await checkRssFeeds(client);
+
+        expect(client.send).not.toHaveBeenCalled();
+        expect(Guild.updateOne).not.toHaveBeenCalled();
+        expect(log).toHaveBeenCalledWith(expect.stringContaining('1 unchanged'));
+    });
+
+    test('an item still owed to a channel keeps the next fetch unconditional', async () => {
+        // A 304 skips delivery, so holding validators here would leave the
+        // item waiting until the feed next changed.
+        mockGuilds = subscribed();
+        const client = makeClient();
+        client.send.mockRejectedValueOnce(new Error('rate limited'));
+
+        await checkRssFeeds(client);
+        await checkRssFeeds(client);
+
+        expect(mockConditionalCalls.map(c => c[1])).toEqual([undefined, undefined]);
+        expect(client.send).toHaveBeenCalledTimes(2);
+    });
+
+    test('an unreachable channel keeps the next fetch unconditional too', async () => {
+        mockGuilds = subscribed();
+        const client = makeClient();
+        client.channels.fetch.mockRejectedValueOnce(new Error('500'));
+
+        await checkRssFeeds(client);
+
+        expect(feedValidators.has(url)).toBe(false);
+    });
+
+    test('a failed fetch forgets the validators', async () => {
+        mockGuilds = subscribed();
+        await checkRssFeeds(makeClient());
+        expect(feedValidators.has(url)).toBe(true);
+
+        mockUnchanged.clear();
+        mockFeedBodies.set(url, new Error('HTTP 500'));
+        await checkRssFeeds(makeClient());
+
+        expect(feedValidators.has(url)).toBe(false);
+    });
+
+    test('validators for a URL nothing subscribes to any more are dropped', async () => {
+        mockGuilds = subscribed();
+        await checkRssFeeds(makeClient());
+        expect(feedValidators.has(url)).toBe(true);
+
+        mockGuilds = [];
+        await checkRssFeeds(makeClient());
+
+        expect(feedValidators.size).toBe(0);
+    });
+});
+
+
+// ── Feed health on the subscription ─────────────────────────────────────────
+//
+// A feed that stopped working used to say so only in the bot's console. The
+// sweep now records it where the dashboard reads it.
+
+describe('feed health', () => {
+    const url = 'https://example.com/rss';
+    const sub = extra => [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url, channelId: 'c1', lastPublished: null, title: 'Feed', ...extra }] }];
+
+    test('a failed fetch records the error and when the failure began', async () => {
+        mockFeedBodies.set(url, new Error('Feed request failed with HTTP 404.'));
+        mockGuilds = sub();
+
+        await checkRssFeeds(makeClient());
+
+        expect(Guild.updateOne).toHaveBeenCalledWith(
+            { guildId: 'g1', 'rssFeeds._id': 'f1' },
+            { $set: { 'rssFeeds.$.lastError': 'Feed request failed with HTTP 404.', 'rssFeeds.$.failingSince': expect.any(Date) } }
+        );
+    });
+
+    test('the same error again writes nothing', async () => {
+        mockFeedBodies.set(url, new Error('Feed request failed with HTTP 404.'));
+        mockGuilds = sub({ lastError: 'Feed request failed with HTTP 404.', failingSince: new Date('2026-09-01T00:00:00Z') });
+
+        await checkRssFeeds(makeClient());
+
+        expect(Guild.updateOne).not.toHaveBeenCalled();
+    });
+
+    test('a different error updates the message but keeps when the failure began', async () => {
+        mockFeedBodies.set(url, new Error('Feed request failed with HTTP 500.'));
+        mockGuilds = sub({ lastError: 'Feed request failed with HTTP 404.', failingSince: new Date('2026-09-01T00:00:00Z') });
+
+        await checkRssFeeds(makeClient());
+
+        expect(Guild.updateOne).toHaveBeenCalledWith(
+            { guildId: 'g1', 'rssFeeds._id': 'f1' },
+            { $set: { 'rssFeeds.$.lastError': 'Feed request failed with HTTP 500.' } }
+        );
+    });
+
+    test('the next good fetch clears the failure, even with nothing new to post', async () => {
+        mockFeedBodies.set(url, rssXml());
+        mockGuilds = [{ guildId: 'g1', rssFeeds: [{
+            _id: 'f1', url, channelId: 'c1', title: 'Feed', lastPublished: new Date('2025-08-21T00:00:00Z'),
+            seenIds: [itemKey({ link: 'https://example.com/post' })],
+            lastError: 'Feed request failed with HTTP 404.', failingSince: new Date('2026-09-01T00:00:00Z'),
+        }] }];
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        expect(client.send).not.toHaveBeenCalled();
+        expect(Guild.updateOne).toHaveBeenCalledWith(
+            { guildId: 'g1', 'rssFeeds._id': 'f1' },
+            { $set: { 'rssFeeds.$.lastError': null, 'rssFeeds.$.failingSince': null } }
+        );
+    });
+
+    test('a post records when it happened, and the feed\'s name is kept current', async () => {
+        mockFeedBodies.set(url, rssXml({ title: 'Renamed Feed' }));
+        mockGuilds = sub();
+
+        await checkRssFeeds(makeClient());
+
+        const $set = Guild.updateOne.mock.calls[0][1].$set;
+        expect($set['rssFeeds.$.lastPostedAt']).toEqual(expect.any(Date));
+        expect($set['rssFeeds.$.title']).toBe('Renamed Feed');
+    });
+});
+
+
+// ── Per-subscription options ────────────────────────────────────────────────
+
+describe('keyword filters', () => {
+    const url = 'https://example.com/rss';
+    const items = [
+        { title: 'Rust 1.90 released', link: 'https://example.com/rust', pubDate: 'Wed, 20 Aug 2025 10:00:00 GMT' },
+        { title: 'Starting a garden', link: 'https://example.com/garden', pubDate: 'Wed, 20 Aug 2025 11:00:00 GMT' },
+        { title: 'Sponsored: Rust hosting', link: 'https://example.com/ad', pubDate: 'Wed, 20 Aug 2025 12:00:00 GMT' },
+    ];
+    const filtered = options => [{ guildId: 'g1', rssFeeds: [{
+        _id: 'f1', url, channelId: 'c1', title: 'Feed', lastPublished: new Date('2025-08-19T00:00:00Z'), seenIds: [], ...options,
+    }] }];
+    const titles = client => client.send.mock.calls.map(c => c[0].embeds[0].data.title);
+
+    beforeEach(() => mockFeedBodies.set(url, rssXmlItems(items)));
+
+    test('include keywords post only items mentioning one, as whole words', async () => {
+        mockGuilds = filtered({ includeKeywords: ['RUST', 'art'] });
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        // "art" does not match "Starting".
+        expect(titles(client)).toEqual(['Rust 1.90 released', 'Sponsored: Rust hosting']);
+    });
+
+    test('exclude keywords win over include keywords', async () => {
+        mockGuilds = filtered({ includeKeywords: ['rust'], excludeKeywords: ['sponsored'] });
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        expect(titles(client)).toEqual(['Rust 1.90 released']);
+    });
+
+    test('filtered-out items are recorded, so they are not reconsidered', async () => {
+        mockGuilds = filtered({ excludeKeywords: ['sponsored', 'garden'] });
+
+        await checkRssFeeds(makeClient());
+
+        const seen = Guild.updateOne.mock.calls[0][1].$set['rssFeeds.$.seenIds'];
+        expect(seen).toEqual(expect.arrayContaining(items.map(i => itemKey({ link: i.link }))));
+    });
+
+    test('filtered-out items do not use up the per-sweep cap', async () => {
+        const burst = Array.from({ length: MAX_ITEMS_PER_SWEEP + 3 }, (_, i) => ({
+            title: i < 3 ? `keep ${i}` : `drop ${i}`,
+            link: `https://example.com/${i}`,
+            pubDate: new Date(Date.UTC(2025, 7, 20, 23 - i)).toUTCString(), // keepers are the oldest
+        }));
+        mockFeedBodies.set(url, rssXmlItems(burst));
+        mockGuilds = filtered({ includeKeywords: ['keep'] });
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        expect(titles(client).sort()).toEqual(['keep 0', 'keep 1', 'keep 2']);
+    });
+
+    test('matches an item\'s categories too', () => {
+        expect(itemPassesFilters({ title: 'Release notes', categories: ['WebAssembly'] }, { includeKeywords: ['webassembly'] })).toBe(true);
+        expect(itemPassesFilters({ title: 'Release notes', categories: ['JS'] }, { includeKeywords: ['webassembly'] })).toBe(false);
+    });
+
+    test('takes a keyword with punctuation literally', () => {
+        expect(itemPassesFilters({ title: 'Why C++ is fast' }, { includeKeywords: ['c++'] })).toBe(true);
+        expect(itemPassesFilters({ title: 'Why C is fast' }, { includeKeywords: ['c++'] })).toBe(false);
+    });
+});
+
+describe('the message an item is sent as', () => {
+    const url = 'https://example.com/rss';
+    const ROLE = '222333444555666777';
+    const send = async options => {
+        mockFeedBodies.set(url, rssXmlItems([
+            { title: 'Hello &lt;@&amp;999999999999999999&gt; @everyone', link: 'https://example.com/a', pubDate: 'Wed, 20 Aug 2025 12:00:00 GMT' },
+        ], 'Example_Feed'));
+        mockGuilds = [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url, channelId: 'c1', lastPublished: null, ...options }] }];
+        const client = makeClient();
+        await checkRssFeeds(client);
+        return client.send.mock.calls[0][0];
+    };
+
+    test('is the embed alone by default, and pings nobody', async () => {
+        const message = await send({});
+        expect(message.content).toBeUndefined();
+        expect(message.allowedMentions).toEqual({ parse: [], roles: [] });
+    });
+
+    test('pings the chosen role, and only it', async () => {
+        const message = await send({ mentionRoleId: ROLE });
+        expect(message.content).toBe(`<@&${ROLE}>`);
+        expect(message.allowedMentions).toEqual({ parse: [], roles: [ROLE] });
+    });
+
+    test('fills in the admin\'s message line', async () => {
+        const message = await send({ messageTemplate: 'New from {feed}: {title} {link}' });
+        expect(message.content).toBe('New from Example\\_Feed: Hello <@&999999999999999999> @everyone https://example.com/a');
+        // The feed's own "@everyone" and role mention are text, not pings.
+        expect(message.allowedMentions).toEqual({ parse: [], roles: [] });
+    });
 });

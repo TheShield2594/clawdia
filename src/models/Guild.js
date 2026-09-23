@@ -364,7 +364,29 @@ const guildSchema = new Schema({
     rssFeeds: [{
         url: { type: String, required: true },
         channelId: { type: String, required: true },
-        lastPublished: { type: Date, default: null }
+        lastPublished: { type: Date, default: null },
+        // Hashed keys (guid, else link) of the items this subscription has
+        // already handled — see rssService.itemKey. Deliberately no default:
+        // a subscription saved before this field existed is told apart by its
+        // absence and migrated on its next sweep rather than reading its whole
+        // feed as unseen.
+        seenIds: { type: [String], default: undefined },
+        // What the dashboard shows for the subscription. `title` is the feed's
+        // own name; `lastError` and `failingSince` are set by the poller while
+        // the feed is failing and cleared by its next good fetch, so a feed
+        // that stopped working says so where an admin will see it.
+        title: { type: String, default: null },
+        lastPostedAt: { type: Date, default: null },
+        lastError: { type: String, default: null },
+        failingSince: { type: Date, default: null },
+        // Per-subscription delivery options, set from the dashboard. An item
+        // posts only if it matches one of `includeKeywords` (when there are
+        // any) and none of `excludeKeywords`; `mentionRoleId` is pinged and
+        // `messageTemplate` rendered as the message text above the embed.
+        includeKeywords: { type: [String], default: undefined },
+        excludeKeywords: { type: [String], default: undefined },
+        mentionRoleId: { type: String, default: null },
+        messageTemplate: { type: String, default: null }
     }],
 
     // Social-media notifications (YouTube, Reddit, X, Instagram, TikTok). Each

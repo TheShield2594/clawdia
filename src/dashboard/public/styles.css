@@ -791,6 +791,18 @@ textarea { resize: vertical; min-height: 80px; }
    would have to reproduce line for line. */
 .rss-feed-main { min-width: 0; flex: 1; }
 .rss-feed-target { color: var(--text-mute); font-size: 0.78rem; }
+.rss-feed-title { font-weight: 600; overflow-wrap: anywhere; }
+.rss-feed-status { display: block; font-size: 0.78rem; margin-top: 0.15rem; color: var(--text-mute); overflow-wrap: anywhere; }
+.rss-feed-status--error { color: var(--danger); }
+.rss-feed-options { display: block; font-size: 0.78rem; margin-top: 0.15rem; color: var(--text-mute); overflow-wrap: anywhere; }
+.rss-feed-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+/* Two buttons beside the text leave a phone a column a word wide; below it,
+   they sit under the feed instead. */
+@media (max-width: 520px) {
+    .list-item:has(> .rss-feed-actions) { flex-wrap: wrap; }
+    .list-item:has(> .rss-feed-actions) > .rss-feed-main { flex-basis: 100%; }
+}
+.rss-feed-editor { margin: -0.25rem 0 0.75rem; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-1); }
 .rr-panel-mappings { margin-top: .35rem; display: flex; flex-wrap: wrap; gap: .35rem; }
 .rr-panel-message-id { margin-top: .4rem; font-size: .78rem; color: var(--text-dim); }
 

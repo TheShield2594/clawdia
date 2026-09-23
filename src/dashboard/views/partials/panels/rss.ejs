@@ -18,19 +18,28 @@
                             reloading the whole page for one row (#689). Keep the markup
                             below and renderRssFeeds() in step. -%>
                         <div id="rss-feeds" style="margin-bottom:1.5rem;">
-                            <% if ((settings.rssFeeds || []).length === 0) { %>
+                            <% if ((locals.rssFeedRows || []).length === 0) { %>
                                 <div class="empty-state" style="padding:2rem 1.5rem;">
                                     <h3>No feeds yet</h3>
                                     <p>Add your first RSS feed below.</p>
                                 </div>
                             <% } %>
-                            <% (settings.rssFeeds || []).forEach((feed, index) => { %>
+                            <%# Rows come from lib/rssFeedRows.js, which the RSS routes
+                                answer with too, so the status line reads the same after
+                                an add or remove as after a reload. -%>
+                            <% (locals.rssFeedRows || []).forEach((feed, index) => { %>
                                 <div class="list-item">
                                     <div class="rss-feed-main">
+                                        <% if (feed.title) { %><div class="rss-feed-title"><%= feed.title %></div><% } %>
                                         <div class="url"><%= feed.url %></div>
-                                        <small class="rss-feed-target">→ #<%= channels.find(c => c.id === feed.channelId)?.name || 'unknown' %></small>
+                                        <small class="rss-feed-target">→ #<%= channels.find(c => c.id === feed.channelId)?.name || 'unknown' %><% if (feed.options.mentionRoleId) { %> · pings @<%= roles.find(r => r.id === feed.options.mentionRoleId)?.name || 'unknown role' %><% } %></small>
+                                        <% if (feed.summary) { %><small class="rss-feed-options"><%= feed.summary %></small><% } %>
+                                        <small class="rss-feed-status rss-feed-status--<%= feed.status.tone %>"><%= feed.status.text %></small>
                                     </div>
-                                    <button class="btn btn-danger btn-sm" data-action="rss-remove" data-index="<%= index %>">Remove</button>
+                                    <div class="rss-feed-actions">
+                                        <button class="btn btn-sm" data-action="rss-edit" data-index="<%= index %>">Edit</button>
+                                        <button class="btn btn-danger btn-sm" data-action="rss-remove" data-index="<%= index %>">Remove</button>
+                                    </div>
                                 </div>
                             <% }); %>
                         </div>

@@ -26,6 +26,7 @@ const { safeFetchFeed } = require('../utils/safeFeedFetch');
 const { handlesGuild } = require('../utils/sharding');
 const { getProvider, getBridgeOrigin, twitterBridgeFeedUrl, X_USERNAME } = require('./socialProviders');
 const { fetchTweetDetails, fetchProfileTimeline, isXApiEnabled, formatDuration } = require('./xEnrichment');
+const { isHttpUrl, discordSafeImageUrl, inlineImageUrls } = require('../utils/feedMedia');
 
 const Parser = require('rss-parser');
 const parser = new Parser();
@@ -129,10 +130,6 @@ const DESCRIPTION_LIMIT = 700;
 const TITLE_LIMIT = 256;
 const AUTHOR_LIMIT = 256;
 
-function isHttpUrl(url) {
-    return typeof url === 'string' && /^https?:\/\//i.test(url);
-}
-
 // The raw content fields a bridge might carry a post's body in, richest first.
 // rss-parser maps <content:encoded> and <description> to both `content` and (once
 // stripped) `contentSnippet`, and Atom's <summary> to `summary`; the X/Instagram
@@ -154,91 +151,6 @@ function postText(item) {
         if (typeof raw === 'string' && raw.trim() && !raw.includes('<')) return raw.trim();
     }
     return '';
-}
-
-// The value of a quoted attribute inside one tag string, read by plain string
-// scanning. Deliberately not a regex: a tag-matching regex is unreliable HTML
-// filtering (CodeQL js/bad-tag-filter), and this codebase leaves real parsing to
-// rss-parser. Returns null when the attribute is absent or unquoted.
-function readTagAttr(tag, name) {
-    const lower = tag.toLowerCase();
-    for (let at = lower.indexOf(name); at !== -1; at = lower.indexOf(name, at + name.length)) {
-        // The name must start at an attribute boundary, or `data-src`/`x-src`
-        // would satisfy a search for `src` and hand back the wrong URL.
-        const before = at > 0 ? tag[at - 1] : '<';
-        if (before !== '<' && before !== ' ' && before !== '\t' && before !== '\n' && before !== '\r') continue;
-        let i = at + name.length;
-        while (i < tag.length && (tag[i] === ' ' || tag[i] === '\t' || tag[i] === '\n' || tag[i] === '\r')) i++;
-        if (tag[i] !== '=') continue; // e.g. matched "srcset" — keep looking for "src"
-        i++;
-        while (i < tag.length && (tag[i] === ' ' || tag[i] === '\t' || tag[i] === '\n' || tag[i] === '\r')) i++;
-        const quote = tag[i];
-        if (quote !== '"' && quote !== "'") return null;
-        const end = tag.indexOf(quote, i + 1);
-        return end === -1 ? null : decodeAttrEntities(tag.slice(i + 1, end));
-    }
-    return null;
-}
-
-// An attribute value as the browser would read it. RSSHub escapes the `&` in a
-// photo URL's query (`?format=jpg&amp;name=orig`) when the description is not
-// CDATA-wrapped, and that literal `&amp;` in an embed image URL is a request
-// Discord's proxy cannot resolve — an embed with a picture that never appears.
-function decodeAttrEntities(value) {
-    return value
-        .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
-        .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
-        .replace(/&quot;/g, '"')
-        .replace(/&apos;/g, "'")
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&');
-}
-
-// X photos arrive at `name=orig` — the uploaded original, which can be a 4096px
-// PNG of many megabytes. Discord's image proxy gives up on those and the embed
-// renders with no picture at all, so ask X's CDN for its 2048px `large` variant,
-// which is what x.com itself shows.
-function discordSafeImageUrl(url) {
-    if (!isHttpUrl(url)) return url;
-    let parsed;
-    try { parsed = new URL(url); } catch { return url; }
-    if (!/(^|\.)twimg\.com$/i.test(parsed.hostname)) return url;
-    if (parsed.searchParams.get('name') === 'orig') {
-        parsed.searchParams.set('name', 'large');
-        return parsed.toString();
-    }
-    const suffixed = /^(.*\.(?:jpe?g|png|webp|gif)):orig$/i.exec(parsed.pathname);
-    if (suffixed) {
-        parsed.pathname = `${suffixed[1]}:large`;
-        return parsed.toString();
-    }
-    return url;
-}
-
-// Every inline picture in an HTML fragment, in document order: an <img>'s src,
-// and a <video>'s poster — which is all RSSHub's X route gives a video or GIF
-// tweet, and which the <img>-only scan this replaced missed entirely, leaving
-// those tweets as an embed with no body and no picture. Located by scanning
-// rather than a tag-matching regex (see readTagAttr).
-function inlineImageUrls(html) {
-    const urls = [];
-    const lower = html.toLowerCase();
-    let start = 0;
-    for (;;) {
-        const img = lower.indexOf('<img', start);
-        const video = lower.indexOf('<video', start);
-        if (img === -1 && video === -1) break;
-        const isVideo = img === -1 || (video !== -1 && video < img);
-        const at = isVideo ? video : img;
-        const close = html.indexOf('>', at);
-        const tag = close === -1 ? html.slice(at) : html.slice(at, close + 1);
-        const src = readTagAttr(tag, isVideo ? 'poster' : 'src');
-        if (isHttpUrl(src) && !urls.includes(src)) urls.push(src);
-        if (close === -1) break;
-        start = close + 1;
-    }
-    return urls;
 }
 
 // The post's own media, to show large, in the order the post shows it. A bridge
