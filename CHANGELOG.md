@@ -14,6 +14,52 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.7] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 15 (#873) — the effect consumers, the bound pass 14 left.
+Pass 14 made activating an effect a single guarded write. Everything that
+*spent* an effect still persisted it through `save()`, and the audit found the
+snapshot write was wider than the consumers.
+
+- **Any `save()` could write the whole effects array back from its snapshot.**
+  `pruneEffects` reassigns `activeEffects` whenever an entry has expired, so
+  every flow that merely checked an effect (a coin booster, a knife, a lucky
+  charm) and then saved wrote back the array it had read. That erased whatever
+  had changed since: an activation from `/use` or `/eventshop`, a charge spent
+  elsewhere, a `/war` booster. `optimisticConcurrency` does not catch this,
+  because atomic updates don't bump `__v`. The `User` model's pre-save hook now
+  keeps `activeEffects` out of every save of an existing document. The charges
+  a flow spends in memory (`consumeEffect`, `refundEffectCharge`) are recorded
+  and committed by the post-save hook as guarded `$inc`s. This covers the
+  gathering yield charges, `/hunt`'s lifesaver, the streak shield, and the
+  fish-escape and cave-in refunds.
+- **`/rob` wrote the victim's whole effects array from a snapshot.**
+  `saveRobState` `$set` `activeEffects` as read at the start of the command,
+  after the suspense delays, on every rob that reached it. A shield or cloak the
+  victim activated mid-heist was erased. It no longer writes the array.
+- **`/rob` spent the padlock in memory.** The padlock charge was spent on the
+  loaded document and persisted by that snapshot, and nothing checked that it
+  was still there. It is now claimed inside the robbery's own compare-and-set,
+  so the bank is protected exactly when a padlock is actually spent. A padlock
+  gone since the read calls the rob off.
+- **`/rob`'s fine absorbers skipped the cooldown check.** Phantom token, ghost
+  ledger and lifesaver spent a charge in memory and then called `robber.save()`,
+  which set `lastRob` without the compare-and-set. So two parallel failed robs
+  could both pass the cooldown and both be absorbed by one charge. The charge
+  and the cooldown now land in one write. An absorber gone since the read falls
+  through to the ordinary fine.
+- **`/crime`'s lifesaver** was persisted with a `$set` of the whole effects
+  array read when the command started. It is now claimed with
+  `spendEffectCharge` at the decision, and a lifesaver gone since the read
+  falls through to the normal fine.
+
+`EFFECT_CONFIGS` moves to `src/data/effectConfigs.js`, and the spend
+persistence to `src/models/effectSpends.js`, so the model's hooks can use them
+without requiring a service. `effectsService` re-exports both, so callers are
+unchanged.
+
 ## [4.13.6] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

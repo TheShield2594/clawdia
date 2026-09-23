@@ -318,7 +318,10 @@ describe('getting caught', () => {
         rolls([], 0.99);
         seedUser({
             balance: 10_000,
-            activeEffects: [{ type: 'lifesaver', expiresAt: new Date(Date.now() + 3_600_000) }],
+            // The shape `/use` writes: a lifesaver has one charge and no expiry.
+            // Its charge is claimed in a guarded write now (#873, pass 15), so
+            // the fixture has to carry one to spend.
+            activeEffects: [{ type: 'lifesaver', expiresAt: null, charges: 1 }],
         });
         seedGuild();
 
@@ -326,6 +329,7 @@ describe('getting caught', () => {
 
         expect(repliedText(interaction)).toContain('Saved by the Lifesaver');
         expect(mockUsers.get(USER_ID).balance).toBe(10_000);
+        expect(mockUsers.get(USER_ID).activeEffects).toEqual([]);
         expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ type: 'crime_lifesaver', amount: 0 }));
     });
 

@@ -1,30 +1,5 @@
-// Configuration for every usable item effect
-const EFFECT_CONFIGS = {
-    shield:             { label: 'Shield',            emoji: '🛡️',   durationMs: 12 * 3_600_000, charges: -1 },
-    padlock:            { label: 'Padlock',            emoji: '🔒',   durationMs: null,            charges: 1  },
-    lucky_charm:        { label: 'Lucky Charm',        emoji: '🍀',   durationMs: 2  * 3_600_000, charges: -1 },
-    lifesaver:          { label: 'Lifesaver',          emoji: '🛟',   durationMs: null,            charges: 1  },
-    invisibility_cloak: { label: 'Invisibility Cloak', emoji: '🧥',   durationMs: 6  * 3_600_000, charges: -1 },
-    knife:              { label: 'Knife',              emoji: '🔪',   durationMs: 1  * 3_600_000, charges: -1 },
-    robbery_bag:        { label: 'Robbery Bag',        emoji: '💼',   durationMs: 1  * 3_600_000, charges: -1 },
-    streak_shield:      { label: 'Streak Shield',      emoji: '🔥🛡️', durationMs: null,            charges: 1  },
-
-    // ── Booster effects ───────────────────────────────────────────────────────
-    coin_booster_2x:    { label: '2x Coin Booster',   emoji: '💰🚀', durationMs: 1  * 3_600_000, charges: -1 },
-    xp_booster_2x:      { label: '2x XP Booster',     emoji: '⭐🚀', durationMs: 1  * 3_600_000, charges: -1 },
-    lucky_streak:       { label: 'Lucky Streak',       emoji: '🎯',   durationMs: 30 * 60_000,     charges: -1 },
-    salary_raise:       { label: 'Salary Raise',       emoji: '📈',   durationMs: 2  * 3_600_000, charges: -1 },
-
-    // ── P8 Black Market effects ───────────────────────────────────────────────
-    obsidian_crown:     { label: 'Obsidian Crown',      emoji: '👑',   durationMs: 2  * 3_600_000, charges: -1 },
-    voidsteel_cache:    { label: 'Voidsteel Cache',     emoji: '🌌',   durationMs: null,            charges: 10 },
-    ghost_ledger:       { label: 'Ghost Ledger',        emoji: '📒',   durationMs: null,            charges: 3  },
-
-    // ── Black Market effects (P1+) ────────────────────────────────────────────
-    silvered_talisman:  { label: 'Silvered Talisman',   emoji: '🪙',   durationMs: null,            charges: 5  },
-    phantom_token:      { label: 'Phantom Token',       emoji: '👻',   durationMs: null,            charges: 1  },
-    // black_market_contract is permanent (stored on user.crimeContractStacks) — no activeEffects entry
-};
+const { EFFECT_CONFIGS } = require('../data/effectConfigs');
+const { recordEffectSpend, detachEffectWrites, applyEffectSpends } = require('../models/effectSpends');
 
 // Maps item IDs (as stored in inventory) to effect type keys.
 // Snake_case keys are the canonical IDs; legacy space/title-case entries
@@ -158,8 +133,53 @@ async function activateEffect(Model, filter, type, { consumeItemId = null, now =
         : { status: 'refused', doc: null, effect: null };
 }
 
+// Charge spends made on a loaded document (`consumeEffect`,
+// `refundEffectCharge` below) are never persisted by `save()`: the User model's
+// save hooks keep `activeEffects` out of it and commit the recorded spends as
+// guarded writes afterwards (#873, pass 15). The mechanics live in
+// src/models/effectSpends.js, below the model that needs them.
+
+/**
+ * Spend one charge of `type` in a single guarded write, for a flow that decides
+ * under its own compare-and-set (`/rob`, `/crime`) and so can claim the charge
+ * at the moment it acts on it rather than after a save.
+ *
+ * `cond` and `update` are merged into the same write — `/rob` uses them to put
+ * its cooldown claim in the filter, so the charge and the attempt it absorbs
+ * land together or not at all. An unlimited effect (charges -1) is only checked
+ * for being live.
+ *
+ * @returns {Promise<?object>} the post-image when the charge was spent, else null.
+ */
+async function spendEffectCharge(Model, filter, type, { cond = {}, update = {}, now = Date.now() } = {}) {
+    const cfg = EFFECT_CONFIGS[type];
+    if (!cfg) return null;
+    // Live: no expiry, or one still ahead. `$not: { $lte }` matches both, null included.
+    const live = { type, expiresAt: { $not: { $lte: new Date(now) } } };
+    const charged = cfg.charges !== -1;
+    const doc = await Model.findOneAndUpdate(
+        {
+            ...filter,
+            ...cond,
+            activeEffects: { $elemMatch: charged ? { ...live, charges: { $gt: 0 } } : live },
+        },
+        charged
+            ? { ...update, $inc: { ...(update.$inc ?? {}), 'activeEffects.$.charges': -1 } }
+            : update,
+        { new: true },
+    );
+    if (doc && charged) {
+        await Model.updateOne(filter, { $pull: { activeEffects: { type, charges: 0 } } })
+            .catch(err => console.error(`[effects] pruning spent ${type} failed:`, err?.message));
+    }
+    return doc;
+}
+
 // Consume one charge; removes effect if charges reach 0.
 // No-op for unlimited-charge effects (charges === -1).
+//
+// In memory only: the charge is recorded for the post-save hook to commit as a
+// guarded `$inc` (see `applyEffectSpends` above), never persisted by `save()`.
 function consumeEffect(user, type) {
     pruneEffects(user);
     const idx = user.activeEffects.findIndex(e => e.type === type);
@@ -167,6 +187,7 @@ function consumeEffect(user, type) {
     const effect = user.activeEffects[idx];
     if (effect.charges > 0) {
         effect.charges -= 1;
+        recordEffectSpend(user, type, 1);
         if (effect.charges === 0) user.activeEffects.splice(idx, 1);
     }
     return true;
@@ -181,6 +202,7 @@ function refundEffectCharge(user, type) {
     if (!cfg || cfg.charges === -1) return false;
     pruneEffects(user);
     const effect = user.activeEffects.find(e => e.type === type);
+    recordEffectSpend(user, type, -1);
     if (effect) {
         effect.charges = Math.min(cfg.charges, effect.charges + 1);
     } else {
@@ -283,6 +305,9 @@ module.exports = {
     addEffect,
     activateEffect,
     consumeEffect,
+    detachEffectWrites,
+    applyEffectSpends,
+    spendEffectCharge,
     refundEffectCharge,
     timeRemaining,
     getCoinMultiplier,

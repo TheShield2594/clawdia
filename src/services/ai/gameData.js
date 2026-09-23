@@ -116,7 +116,8 @@ const NOT_CONTENT = new Map([
     ['soulboundItems', 'an id list marking items as untradeable, with nothing to describe'],
     ['seasonPass', 'generated tier rewards, described by /season view against a live season'],
     ['seasonMissions', 'mission templates filled in per day, described by /season missions'],
-    ['featuredRotation', 'the pools today\'s /featured rotation is drawn from, not content of its own']
+    ['featuredRotation', 'the pools today\'s /featured rotation is drawn from, not content of its own'],
+    ['effectConfigs', 'effect durations and charge counts keyed by id; the shop items that grant them already carry the descriptions']
 ]);
 
 // ─── ONE RECORD ───────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
-const { hasEffect, consumeEffect } = require('../../services/effectsService');
+const { hasEffect, spendEffectCharge } = require('../../services/effectsService');
 const { getMerchantCoinBonus } = require('../../services/synergyService');
 const { advanceMissions } = require('../../services/seasonMissionService');
 const { attachGrind } = require('../../utils/grindProfile');
@@ -419,13 +419,20 @@ module.exports = {
                     ? `\n> 🔥 *${wantedHours % 1 === 0 ? wantedHours : wantedHours.toFixed(1)}h heat from ${execMethod.label} — wanted until <t:${Math.floor(wantedUntil.getTime() / 1000)}:R>*`
                     : '';
 
-                const lifesaverActive = hasEffect(user, 'lifesaver');
+                // Claimed in one guarded write, at the moment it is acted on
+                // (#873, pass 15). The charge used to be spent on the loaded
+                // document and persisted by a `$set` of the whole
+                // `activeEffects` array read when the command started — over any
+                // effect activated or spent in between — with nothing in the
+                // filter to say the lifesaver was still there. A lifesaver that
+                // has gone since the read falls through to the normal fine.
+                const lifesaverActive = hasEffect(user, 'lifesaver')
+                    && !!(await spendEffectCharge(User, userFilter, 'lifesaver'));
                 if (lifesaverActive) {
-                    consumeEffect(user, 'lifesaver');
                     const wouldHaveLost = isCriticalFailure
                         ? Math.floor(user.balance * (DEATH_LOSS_MIN + secureRandom() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN)))
                         : Math.floor((crime.minFine + secureRandom() * (crime.maxFine - crime.minFine)) * execMethod.fineMult);
-                    const lifesaverSet = { lastCrime: crimeTime, activeEffects: user.activeEffects };
+                    const lifesaverSet = { lastCrime: crimeTime };
                     if (wantedUntil) lifesaverSet.wantedUntil = wantedUntil;
                     await User.findOneAndUpdate(
                         userFilter,

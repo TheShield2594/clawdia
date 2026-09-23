@@ -1,4 +1,5 @@
 const { Schema, model } = require('mongoose');
+const { detachEffectWrites, applyEffectSpends } = require('./effectSpends');
 
 // How many starved pets are retained for revival, most recent first.
 const DECEASED_PET_LIMIT = 5;
@@ -459,10 +460,29 @@ userSchema.index({ guildId: 1, joinedAt: -1 });               // retention cohor
 userSchema.pre('save', function() {
     this.updatedAt = Date.now();
 
+    // `activeEffects` is never written by save() (#873, pass 15). save() would
+    // `$set` the array as this document read it — and `pruneEffects` reassigns
+    // it whenever an entry has expired, so any flow that merely checked an
+    // effect wrote it back too — erasing whatever an atomic activation, spend
+    // or `/war` booster did in between. `optimisticConcurrency` cannot catch
+    // that: atomic updates do not bump `__v`. The flow's charge spends are held
+    // for the post-save hook below instead.
+    this.$locals.pendingEffectSpends = detachEffectWrites(this);
+
     const ids = (this.achievements || []).map(a => a.id);
     if (new Set(ids).size !== ids.length) {
         throw new Error('User achievements contains duplicate id values');
     }
+});
+
+// Commit the charge spends the pre-save hook held back, now that the save has
+// landed — save first, then spend, as utils/balanceDelta.js does for coins, so a
+// save that fails spends nothing. `applyEffectSpends` never throws.
+userSchema.post('save', async function() {
+    const spends = this.$locals.pendingEffectSpends;
+    if (!spends) return;
+    this.$locals.pendingEffectSpends = null;
+    await applyEffectSpends(this.constructor, { userId: this.userId, guildId: this.guildId }, spends);
 });
 
 module.exports = model('User', userSchema);

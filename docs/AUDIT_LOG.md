@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and fourteen passes over the
+long-stable, low-churn subsystems have been audited, and fifteen passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -16,7 +16,8 @@ tournament's entry fee, and `/forge`), the `/pet` command's payouts, the
 quest-reward credit at every caller, and the rest of the casino (`confirmBet`,
 the bet guards, the crash restart refund, and the games' leaderboard and stat
 writes), `/explore`'s event-currency drop, and the items, effects and server
-shop (`/use`, `effectsService`, `/inventory`, `/shop buy`) (#873). The majority of the
+shop (`/use`, `effectsService`, `/inventory`, `/shop buy`), and the effect
+consumers (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -1722,6 +1723,96 @@ charges) were not changed; see the bound below.
 
 ---
 
+## Economy — The Effect Consumers
+
+**Status: Audited — all findings resolved** ✓
+
+The fifteenth pass of the economy audit #873, and the bound pass 14 left. Pass
+14 made *activating* an effect a single guarded write. Everything that *spends*
+one (`/rob`, `/crime`, `/hunt`, the gathering yield charges, `messageCreate`'s
+streak shield) still spent it on a loaded document and persisted it through
+`save()`. Two things made this worse than pass 14 described:
+
+- **It was not only the consumers.** `pruneEffects` reassigns `activeEffects`
+  whenever an entry has expired, and Mongoose then writes the whole array on
+  the next `save()`. So every flow that merely checked an effect and saved did
+  it too.
+- **`optimisticConcurrency` does not protect it.** Every `User` save is checked
+  against `__v`, which looks like protection. But atomic updates (pass 14's
+  activation, `/war`'s booster `$push`) don't bump `__v`, so the snapshot save
+  erased them with no error.
+
+Scope: every reader and writer of `activeEffects` in `src/` — the model,
+`effectsService.js`, `rob/attempt.js`, `crime.js`, `grindEngine.js`
+(`claimGatheringYield`), `huntService.js`, `fishService.js`
+(`revertEscapedCast`), `mine/dig.js`, `messageCreate.js`, `warService.js`,
+and the read-only uses in `gift.js`, `trade.js`, `balance.js`, `rank.js`,
+`profile.js` and `inventory.js`.
+
+**Files reviewed/fixed:**
+- `src/models/User.js` (save hooks)
+- `src/models/effectSpends.js` (added)
+- `src/data/effectConfigs.js` (added; `EFFECT_CONFIGS` moved down a layer)
+- `src/services/effectsService.js`
+- `src/commands/economy/rob/attempt.js`
+- `src/commands/economy/crime.js`
+- `tests/pass15EffectConsumers.test.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | Any `save()` of a user could write `activeEffects` back as the flow read it. `pruneEffects` (inside every `hasEffect`/`getEffect`) reassigns the array whenever an entry has expired, so a flow that checked a coin booster, a knife or a lucky charm and then saved `$set` the whole array. That erased an activation (pass 14's `/use` and `/eventshop`), a charge spent elsewhere, or a `/war` booster that landed in between. `optimisticConcurrency` let it through because atomic updates don't bump `__v`. Verified against the real model: an expired-entry prune and a last-charge spend each produce a whole-array `$set` | The `User` pre-save hook strips every `activeEffects` path from the save of an existing document (`detachEffectWrites`). Nothing in `src/` legitimately persisted the array through `save()` any more: `addEffect` has no caller, and activation and the `/war` booster are atomic updates. A new document's insert is left whole | `User.js`, `effectSpends.js` |
+| 2 | The charges flows spend in memory (the gathering yield charges in `claimGatheringYield`, `/hunt`'s death-save lifesaver, `messageCreate`'s streak shield, and the fish-escape and cave-in refunds) were persisted by that same snapshot save | `consumeEffect` and `refundEffectCharge` record the net change on the document's `$locals`. The post-save hook commits it with `applyEffectSpends`: a `$inc` guarded on the entry still holding that many charges, then a `$pull` of the emptied entry. A net refund goes back on the live entry (capped at full) or re-adds the effect. Save first, spend after, so a save that fails spends nothing. A spend and its refund in one flow net to no write. It never throws | `effectsService.js`, `effectSpends.js`, `User.js` |
+| 3 | `/rob`'s `saveRobState` `$set` the victim's whole `activeEffects` as read at the start of the command, after the ~1.6 s suspense delays, on every rob that reached it, successful or not. A shield or cloak the victim activated mid-heist was erased, and a charge spent elsewhere was handed back | The victim write no longer mentions the array | `rob/attempt.js` |
+| 4 | `/rob`'s padlock was spent on the loaded document and persisted by that snapshot. Nothing in the victim write's filter checked the padlock was still there, so the bank could be protected by a padlock that had already been spent | The padlock charge is claimed inside the victim's own compare-and-set: `$elemMatch` on a charge in the filter, `$inc 'activeEffects.$.charges': -1` in the same update. The bank is protected exactly when a padlock is spent. A padlock gone since the read makes the write miss, and the rob is called off and rolled back like any other victim-side change | `rob/attempt.js` |
+| 5 | `/rob`'s fine absorbers (phantom token, ghost ledger, lifesaver) spent a charge in memory and then called `robber.save()`, which wrote `lastRob` without the compare-and-set every other outcome uses. Two parallel failed robs could both pass the cooldown and both be absorbed by one charge | New `claimRobAbsorber`: `spendEffectCharge` with the `lastRob` compare-and-set in its filter and the new `lastRob` in its update, so the charge and the cooldown land together or not at all. A lost compare-and-set reports the duplicate attempt. An absorber gone since the read falls through to the ordinary fine. The ghost ledger's "uses left" is read off the claim's post-image | `rob/attempt.js`, `effectsService.js` |
+| 6 | `/crime`'s lifesaver was spent in memory and persisted with `$set: { activeEffects: user.activeEffects }`, the array as read when the command started, with no check that the lifesaver was still there | Claimed with `spendEffectCharge` at the decision. A lifesaver gone since the read falls through to the normal fine, and the lifesaver branch's update no longer mentions the array | `crime.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 7 | The hooks need `EFFECT_CONFIGS`, which lived in a service, and `layers/no-upward-require` forbids a model requiring one | `EFFECT_CONFIGS` moves to `src/data/effectConfigs.js` and the spend persistence to `src/models/effectSpends.js` (the `itemImageKeys.js` precedent for a helper beside the models). `effectsService` re-exports both; no caller changes | `effectConfigs.js`, `effectSpends.js`, `effectsService.js` |
+| 8 | Nothing pinned any of this | `tests/pass15EffectConsumers.test.js` (23 tests). It runs the real schema's pre- and post-save hooks on real `User` documents and asserts the resulting update. It drives `applyEffectSpends` and `spendEffectCharge` against `fakeCollection`, and drives `/rob` end to end: the victim's mid-heist shield survives, the padlock is spent in the protecting write, a vanished padlock calls the rob off, the absorber is spent with the cooldown, two parallel failed robs spend one charge, and a vanished absorber falls through to the fine. The `/rob` tests fail against the old code, and the hook tests fail with the pre-save hook disabled | `tests/` |
+
+**Reviewed and found sound**, recorded so the next pass does not re-derive it:
+
+- **`warService`'s booster** is a `$push` in an update, so it is atomic already.
+  The snapshot saves were what could erase it.
+- **`gift.js`, `trade.js`, `balance.js`, `rank.js`, `profile.js`,
+  `inventory.js`** only read `activeEffects`.
+- **The fish-escape and cave-in refunds** run on the same document as the spend
+  they reverse, so the two net to nothing and no write is made.
+
+**The bounds this pass leaves open:**
+
+- **The gathering flows still decide in memory.** A yield charge, `/hunt`'s
+  lifesaver or the streak shield is acted on during the run and committed after
+  the save. If another flow spends that same charge in between, the commit
+  finds it gone and logs it instead of driving it negative: the run got the
+  benefit once without paying for it. That is bounded to one charge per race
+  and goes in the player's favour. Claiming it atomically at the decision would
+  need the synchronous service code to await a write mid-roll.
+- **The post-save spend is not keyed.** It makes one attempt and never retries,
+  so it cannot spend twice. A failure leaves the charge unspent, logged.
+- **Expired entries** of a type that is never activated again stay in the
+  stored array, because only reads prune them now. They are ignored on every
+  read, and `activateEffect` clears them for its own type.
+- **`/rob`'s cloak and shield paths** still `robber.save()` just the cooldown,
+  without the compare-and-set. No coins or effects move there.
+- **A charged effect stored without a `charges` count** reads back as the schema
+  default, -1 (unlimited). The old in-memory spend therefore never used it up;
+  the guarded claim refuses it, because it has no charge to spend. Every writer
+  (`addEffect` before, `activateEffect` now) has always set the count, so no such
+  entry should exist. One would show as active but not absorb anything.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -1733,7 +1824,7 @@ wide, and it is widest exactly where the risk is.
 
 - `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. `/explore`'s while-an-event-runs **event-currency drop** is audited above (pass 13). Still not reviewed: prestige (reviewed sound in pass 7) and the map view
 - `pet` (`petService.js`, `pet/`) — the `/pet` command's **PvP-battle winner payout, the battle escrow refunds and the adopt-fee refund** are audited above (pass 10, which also split `pet.js` into the `pet/` folder), alongside the pet **drops** the gathering runs grant, found sound in pass 9. The Pet-of-the-Week reward was reviewed and found sound. The pet-care **quest credits** (`/pet feed`, `play`, `rest` and the battle care rewards) are audited above (pass 11), keyed alongside every other caller of the shared `awardQuest` hook
-- `use` / items / effects — audited above: the seasonal loot-box item grant (pass 6), and `effectsService.js`, `use.js`, `inventory.js` and `/shop buy` (pass 14). The effect **consumers** that spend a charge through the flow's `save()` (`/rob`, `/crime`, `/hunt`, the gathering yield charges, `messageCreate`'s streak shield) are not reviewed; pass 14 records them as a bound. `shop.js`'s view and trends builders were read for writes only
+- `use` / items / effects — audited above: the seasonal loot-box item grant (pass 6), and `effectsService.js`, `use.js`, `inventory.js` and `/shop buy` (pass 14). The effect **consumers** (`/rob`, `/crime`, `/hunt`, the gathering yield charges, `messageCreate`'s streak shield) and every other reader and writer of `activeEffects` are audited above (pass 15). `shop.js`'s view and trends builders were read for writes only
 - casino (`src/games/casino/*`, `casino.js`) — the progressive jackpot (pass 2),
   the hand payouts (pass 4), and `confirmBet`, the bet guards, the crash restart
   refund and the games' leaderboard and stat writes (pass 12) are audited above;
@@ -1768,6 +1859,6 @@ gathering-loop payouts on 2026-09-18; the progression and group/PvP payouts on
 2026-09-19; the seasonal-event currency on 2026-09-20; the gathering
 commands' non-payout surface on 2026-09-22; the `/pet` command's payouts on
 2026-09-22; the quest-reward credit on 2026-09-22; the rest of the casino on
-2026-09-22; the `/explore` event-currency drop on 2026-09-23; and the items, effects and
-server shop on 2026-09-23. "Not yet reviewed" carries no review
+2026-09-22; the `/explore` event-currency drop on 2026-09-23; the items, effects and
+server shop on 2026-09-23; and the effect consumers on 2026-09-23. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*
