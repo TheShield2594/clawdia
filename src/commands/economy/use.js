@@ -301,16 +301,10 @@ module.exports = {
         // Refused before anything is written. The generic branch at the bottom
         // used to swallow these — a relic, a forged item or a bag of pet food
         // would be "used" into nothing.
+        // No settings (a guild that never saved any) means no custom shop, so
+        // an unknown item there is refused like any other. A settings read that
+        // fails throws out of the Promise.all above, before anything is spent.
         const status = useStatus(canonicalId, preview, { shopItems });
-        // With no settings to read, a custom shop item is indistinguishable from
-        // an unknown one; say the shop could not be read rather than that the
-        // item is useless.
-        if (!status.usable && status.unknown && !guildSettings) {
-            return interaction.reply({
-                content: "Couldn't load this server's shop just now, so nothing was used. Try again in a moment.",
-                flags: MessageFlags.Ephemeral,
-            });
-        }
         if (!status.usable) {
             let shown = item;
             if (item.kind === 'forged') {
@@ -688,32 +682,37 @@ module.exports = {
         // ── Generic (role-granting) items ─────────────────────────────────────
         const shopItem = findShopRow(canonicalId, shopItems);
 
+        // A role item is acknowledged privately *before* the lock, as /gift is:
+        // a second press can wait out the first one's forced member fetch,
+        // write, roles.add and possibly a refund, and an unacknowledged wait
+        // past three seconds ends in "the application did not respond".
+        // Refusals and refund notes stay private in that reply; the success
+        // card goes out publicly as a follow-up.
+        const isRoleItem = Boolean(shopItem?.roleId);
+        if (isRoleItem) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
         const redeem = async () => {
             // The role is checked before anything is spent, against a fresh fetch
             // (`force`): a cached member can predate a role another bot or an
             // admin just gave, and would let the item be spent on a no-op.
             let member = null;
-            if (shopItem?.roleId) {
+            if (isRoleItem) {
                 member = await interaction.guild.members.fetch({ user: interaction.user.id, force: true }).catch(() => null);
                 if (!member) {
-                    return interaction.reply({
+                    return interaction.editReply({
                         content: `Couldn't check your roles just now, so nothing was used. Try again in a moment.`,
-                        flags: MessageFlags.Ephemeral,
                     });
                 }
                 if (member.roles.cache.has(shopItem.roleId)) {
-                    return interaction.reply({
+                    return interaction.editReply({
                         content: `You already have <@&${shopItem.roleId}>, so **${shopItem.name ?? item.name}** would do nothing. Nothing was used.`,
-                        flags: MessageFlags.Ephemeral,
                         allowedMentions: { parse: [] },
                     });
                 }
+            } else {
+                // Acknowledged before the write, like the role path above.
+                await interaction.deferReply();
             }
-
-            // Acknowledged before the writes and the role call: those, plus a
-            // rate-limited roles.add or a refund, can outrun Discord's three
-            // seconds, and the player must hear what happened to their item.
-            await interaction.deferReply();
 
             // Atomically consume one item before side-effects (role grant)
             const user = await User.findOneAndUpdate(
@@ -768,13 +767,17 @@ module.exports = {
             // `user` is the post-decrement document — no second subtraction.
             embed.addFields(leftField(user, canonicalId));
 
+            if (isRoleItem) {
+                await interaction.editReply({ content: `✅ Used **${shopItem.name ?? item.name}**.` });
+                return interaction.followUp({ embeds: [embed] });
+            }
             return interaction.editReply({ embeds: [embed] });
         };
 
         // One role redemption per member at a time: two quick /use presses on a
         // stack of two would otherwise both pass the has-role check and spend
         // the second item on a role the first had just granted.
-        return shopItem?.roleId
+        return isRoleItem
             ? withUserLock(`use-role:${userFilter.guildId}:${userFilter.userId}`, redeem)
             : redeem();
     }

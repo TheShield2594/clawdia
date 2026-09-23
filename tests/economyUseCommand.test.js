@@ -406,7 +406,12 @@ describe('a plain shop item', () => {
         await use.execute(interaction);
 
         expect(interaction.guild.members.fetch).toHaveBeenCalledWith({ user: USER_ID, force: true });
-        expect(interaction.deferReply).toHaveBeenCalled();
+        // Private acknowledgement first, before any of the slow work…
+        expect(interaction.deferReply).toHaveBeenCalledWith({ flags: expect.any(Number) });
+        expect(interaction.deferReply.mock.invocationCallOrder[0])
+            .toBeLessThan(interaction.guild.members.fetch.mock.invocationCallOrder[0]);
+        // …and the result announced publicly.
+        expect(interaction.followUp).toHaveBeenCalledWith(expect.objectContaining({ embeds: expect.any(Array) }));
     });
 
     it('redeems a custom shop item with no role', async () => {
@@ -433,13 +438,15 @@ describe('items nothing in the game handles', () => {
             expect(mockUsers.writes).toEqual([]);
         });
 
-    it("says the shop couldn't be read, rather than calling a custom item useless", async () => {
+    it('refuses an unknown item in a guild that has never saved settings', async () => {
         seedUser({ inventory: [{ itemId: 'shoutout_ticket', quantity: 1 }] });
-        // No guild row at all, so the settings lookup comes back empty.
+        // No guild row at all: getGuildSettings answers null, which means "no
+        // custom shop", not "the read failed".
 
         const interaction = await run('shoutout_ticket');
 
-        expect(repliedText(interaction)).toContain("Couldn't load this server's shop");
+        expect(repliedText(interaction)).toContain('Nothing was consumed');
+        expect(repliedText(interaction)).not.toContain("Couldn't load");
         expect(slot('shoutout_ticket').quantity).toBe(1);
         expect(mockUsers.writes).toEqual([]);
     });
