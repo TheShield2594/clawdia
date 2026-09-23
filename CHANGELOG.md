@@ -14,6 +14,29 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.5] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 13 (#873) — `/explore`'s event-currency drop, the one
+event-currency credit pass 8 left unkeyed. Pass 8 deferred it because
+`explore.js` was over its file-size ceiling; the command has since been split
+into `explore/`, so the keyed helper can now be used here.
+
+- **The expedition's event-currency drop rode the expedition's `save()`.**
+  While a seasonal event runs, `/explore go` drops a handful of the event
+  currency. It was added to the in-memory user with `addEventCurrency` and
+  written by the expedition's save — a snapshot `$set` of the whole
+  `eventCurrency` array, so an `/eventshop` spend that landed during the
+  expedition (which can wait up to 20 seconds on the encounter prompt) was
+  flattened and the spent currency came back for free. It also carried no key,
+  so a drop that failed to write had nothing for `payouts:replay` to settle. The
+  drop is now only rolled during the run and credited after the expedition is
+  written, through `creditEventCurrencyOrOwe` under
+  `gatherPayoutKey('explore', interaction.id, 'eventCurrency')`: exactly-once,
+  recorded as owed when it will not land, and struck through in the haul with a
+  "Not Yet Delivered" note rather than announced as gained.
+
 ## [4.13.4] - 2026-09-22
 
 Migrations through `026_backfill_shop_item_ids`.

@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and twelve passes over the
+long-stable, low-churn subsystems have been audited, and thirteen passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -15,7 +15,7 @@ repair/upgrade/unlock shop refunds, the quest-claim credits, the fishing
 tournament's entry fee, and `/forge`), the `/pet` command's payouts, the
 quest-reward credit at every caller, and the rest of the casino (`confirmBet`,
 the bet guards, the crash restart refund, and the games' leaderboard and stat
-writes) (#873). The majority of the
+writes), and `/explore`'s event-currency drop (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -1554,6 +1554,62 @@ not re-derive it:
 
 ---
 
+## Economy — The /explore Event-Currency Drop
+
+**Status: Audited — all findings resolved** ✓
+
+The thirteenth pass of the economy audit #873, and a short one: the one
+event-currency credit pass 8 deliberately left unkeyed. Pass 8 built the keyed
+event-currency helper (`creditEventCurrencyOnce` / `creditEventCurrencyOrOwe`)
+and moved every seasonal-event activity onto it, but left `/explore`'s
+while-an-event-runs drop riding the expedition's `save()`, because `explore.js`
+was frozen at its `command-file-size` ceiling and detaching the credit would have
+grown it. The command has since been split into `explore/` (the drop lives in
+`explore/go.js`, 737 lines against a 900-line cap), so the blocker is gone and
+the fix is the mechanical follow-up pass 8 described.
+
+Scope, stated so the next pass does not assume more was covered: this pass
+audited the **event-currency drop** in `/explore go` and nothing else in the
+expedition. The run's coin credits (`find`, `encounter`) and the relic grant were
+keyed in pass 6 and are not re-audited; the rest of `explore/` (the map view,
+travel, the profile and journal views) stays under
+[Not yet reviewed](#not-yet-reviewed).
+
+**Files reviewed/fixed:**
+- `src/commands/economy/explore/go.js`
+- `tests/gatheringPayoutRecovery.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | The drop was added to the in-memory user with `addEventCurrency` and persisted by the expedition's second `save()` — a snapshot `$set` of the whole `eventCurrency` array as read at load. The expedition can sit up to 20 seconds on the encounter prompt before that save, so an `/eventshop` purchase that debited the currency in between was flattened, and the spent currency came back for free. The same write carried no key: a drop that failed to write had no owed record, and the embed announced it as gained regardless | The drop is only rolled during the run. After the expedition's save, it is credited through `creditEventCurrencyOrOwe` under `gatherPayoutKey('explore', interaction.id, 'eventCurrency')` — an atomic, keyed bump of the one entry, exactly-once, recorded as a replayable owed `eventCurrency` payload when it will not land. The haul line strikes the drop through when it did not land, and a "⚠️ Event Currency Not Yet Delivered" field tells an owed drop from one that could not be recorded | `explore/go.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 2 | Nothing held `/explore` to the keyed drop | `gatheringPayoutRecovery.test.js` adds the `eventCurrency` key to `/explore`'s call-site list and asserts the drop no longer uses `addEventCurrency`, goes through `creditEventCurrencyOrOwe`, runs after the expedition's save, and words the owed and unrecorded cases differently. The helper's own behaviour (exactly-once, owed, replay) is covered by pass 8's `eventCurrencyPayoutRecovery.test.js` | `tests/` |
+
+**Reviewed and found sound**, recorded so the next pass does not re-derive it:
+
+- **Ordering.** The credit runs after the expedition's save has succeeded, so an
+  expedition that fails to write (a version conflict, or any other save error,
+  both of which return early) pays no drop.
+- **A brand-new player.** The first expedition inserts the user document on that
+  save, so the keyed credit that follows always has a document to match.
+- **`addEventCurrency`** now has no caller in `src/commands/`; it stays in
+  `seasonalEventService.js` for its unit tests and read-side use, as pass 8
+  already noted.
+
+With this, every event-currency credit in the bot goes through the keyed helper.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -1563,7 +1619,7 @@ wide, and it is widest exactly where the risk is.
 
 **Economy** — the largest uncovered area:
 
-- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. Still not reviewed: prestige (reviewed sound in pass 7) and the map view. `/explore`'s while-an-event-runs **event-currency drop** is the one event-currency credit pass 8 did not key (it rides the expedition `save()` and `explore.js` is at its file-size ceiling) — the keyed helper now exists, so it is a follow-up once explore is split
+- `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. `/explore`'s while-an-event-runs **event-currency drop** is audited above (pass 13). Still not reviewed: prestige (reviewed sound in pass 7) and the map view
 - `pet` (`petService.js`, `pet/`) — the `/pet` command's **PvP-battle winner payout, the battle escrow refunds and the adopt-fee refund** are audited above (pass 10, which also split `pet.js` into the `pet/` folder), alongside the pet **drops** the gathering runs grant, found sound in pass 9. The Pet-of-the-Week reward was reviewed and found sound. The pet-care **quest credits** (`/pet feed`, `play`, `rest` and the battle care rewards) are audited above (pass 11), keyed alongside every other caller of the shared `awardQuest` hook
 - `use` / items / effects — the seasonal loot-box item grant is audited above (pass 6); `effectsService.js`, `inventory.js`, `shop.js` and the rest of `use.js` are not
 - casino (`src/games/casino/*`, `casino.js`) — the progressive jackpot (pass 2),
@@ -1575,7 +1631,7 @@ wide, and it is widest exactly where the risk is.
 - core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market.js` and `gift.js` have had their unwind paths audited (pass 3), the rest of both commands has not
 - group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is not reviewed
 - progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (the view/leaderboard/history/admin flows) is not reviewed
-- seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. Not reviewed: the event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end scheduler in `seasonalEventService.js`) and the shop's browse/balance reads, none of which move player currency; and `/explore`'s event-currency drop, noted under the gathering bullet above
+- seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. Not reviewed: the event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end scheduler in `seasonalEventService.js`) and the shop's browse/balance reads, none of which move player currency. `/explore`'s event-currency drop is audited above (pass 13)
 
 **Everything else uncovered:**
 
@@ -1599,6 +1655,6 @@ payouts on 2026-09-08; the core currency commands on 2026-09-17; the
 gathering-loop payouts on 2026-09-18; the progression and group/PvP payouts on
 2026-09-19; the seasonal-event currency on 2026-09-20; the gathering
 commands' non-payout surface on 2026-09-22; the `/pet` command's payouts on
-2026-09-22; the quest-reward credit on 2026-09-22; and the rest of the casino on
-2026-09-22. "Not yet reviewed" carries no review
+2026-09-22; the quest-reward credit on 2026-09-22; the rest of the casino on
+2026-09-22; and the `/explore` event-currency drop on 2026-09-23. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*
