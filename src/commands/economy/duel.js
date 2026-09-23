@@ -15,6 +15,7 @@ const { START_ELO, tierFor, applyElo, makeSeasonId } = require('../../utils/duel
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { takeEscrow, refundEscrow, payWinner, refundNote } = require('../../utils/duelEscrow');
+const { frozenTargetNotice } = require('../../utils/economyFreeze');
 
 const DUEL_COOLDOWN_MS = 5 * 60_000;
 const ACCEPT_TIMEOUT_MS = 60_000;
@@ -180,18 +181,19 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
                 User.findOne({ userId: loserId,  guildId }).select('ranked').lean(),
             ]);
             const kFactor = guildDoc?.rankedDuels?.kFactor ?? 32;
-            // Detect if the stored season is already past its end date. When that
-            // happens (the scheduler hasn't yet rolled the season over) we tag this
-            // match against the *next* season id and initialize the season-scoped
-            // counters with $set rather than $inc, so an in-flight match never
-            // bumps a counter from the prior season.
-            const storedSeasonId = guildDoc?.rankedDuels?.currentSeasonId
+            // The match counts toward the season still stored, even when it
+            // finished just past that season's end (#873, pass 22). It used to be
+            // tagged with the *next* season's id and have its season counters
+            // `$set` to 1/0 — but the rollover picks the ended season's prize
+            // winners from players still tagged with that season, so a leader
+            // who played in the few minutes before the sweep ran was dropped
+            // from their own season's top three, and the prize went to the next
+            // player down. New ranked challenges are refused in that window
+            // (`seasonClosing`); a duel already under way when it opened is
+            // counted in the season it was fought in, and the rollover resets it
+            // with everyone else.
+            const seasonId = guildDoc?.rankedDuels?.currentSeasonId
                 ?? makeSeasonId(guildDoc?.rankedDuels?.seasonNumber ?? 1);
-            const seasonExpired  = guildDoc?.rankedDuels?.seasonEndsAt
-                && new Date(guildDoc.rankedDuels.seasonEndsAt).getTime() <= Date.now();
-            const seasonId       = seasonExpired
-                ? makeSeasonId((guildDoc?.rankedDuels?.seasonNumber ?? 1) + 1)
-                : storedSeasonId;
             const wElo = winnerDoc?.ranked?.elo ?? START_ELO;
             const lElo = loserDoc?.ranked?.elo  ?? START_ELO;
             const { winnerNewElo, loserNewElo, winnerDelta, loserDelta } = applyElo(wElo, lElo, kFactor);
@@ -205,22 +207,10 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
             baseLoserInc.$set['ranked.elo']          = loserNewElo;
             baseLoserInc.$set['ranked.currentSeasonId'] = seasonId;
 
-            if (seasonExpired) {
-                // First match of a new season — initialize seasonal counters rather
-                // than carrying over the prior season's totals via $inc.
-                baseWinnerInc.$set['ranked.seasonRankedWins']   = 1;
-                baseWinnerInc.$set['ranked.seasonRankedLosses'] = 0;
-                baseWinnerInc.$set['ranked.seasonPeakElo']      = winnerNewElo;
+            baseWinnerInc.$inc['ranked.seasonRankedWins']   = 1;
+            baseWinnerInc.$set['ranked.seasonPeakElo']      = Math.max(winnerDoc?.ranked?.seasonPeakElo ?? START_ELO, winnerNewElo);
 
-                baseLoserInc.$set['ranked.seasonRankedWins']    = 0;
-                baseLoserInc.$set['ranked.seasonRankedLosses']  = 1;
-                baseLoserInc.$set['ranked.seasonPeakElo']       = loserNewElo;
-            } else {
-                baseWinnerInc.$inc['ranked.seasonRankedWins']   = 1;
-                baseWinnerInc.$set['ranked.seasonPeakElo']      = Math.max(winnerDoc?.ranked?.seasonPeakElo ?? START_ELO, winnerNewElo);
-
-                baseLoserInc.$inc['ranked.seasonRankedLosses']  = 1;
-            }
+            baseLoserInc.$inc['ranked.seasonRankedLosses']  = 1;
 
             const winnerTier = tierFor(winnerNewElo);
             const loserTier  = tierFor(loserNewElo);
@@ -498,6 +488,16 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
     });
 }
 
+/**
+ * The stored ranked season has passed its end and the scheduler has not rolled
+ * it over yet (it sweeps every ten minutes). New ranked challenges wait out that
+ * window, so none is fought for a season whose prizes are being decided.
+ */
+function seasonClosing(guildSettings, now = Date.now()) {
+    const endsAt = guildSettings?.rankedDuels?.seasonEndsAt;
+    return Boolean(endsAt) && new Date(endsAt).getTime() <= now;
+}
+
 async function runChallenge(interaction, isRanked) {
     const guildSettings = await getGuildSettings(interaction.guild.id);
 
@@ -509,6 +509,9 @@ async function runChallenge(interaction, isRanked) {
     }
     if (isRanked && guildSettings?.rankedDuels?.enabled === false) {
         return interaction.reply({ content: 'Ranked duels are disabled on this server.', flags: MessageFlags.Ephemeral });
+    }
+    if (isRanked && seasonClosing(guildSettings)) {
+        return interaction.reply({ content: 'This ranked season has ended and its results are being tallied — ranked duels reopen in a few minutes.', flags: MessageFlags.Ephemeral });
     }
 
     const currency = guildSettings?.economy?.currency    || '💰';
@@ -549,6 +552,12 @@ async function runChallenge(interaction, isRanked) {
 
     if (challenger.balance < amount) {
         return interaction.reply({ content: `You don't have enough ${currency}. Wallet: **${currency}${challenger.balance.toLocaleString()}**`, flags: MessageFlags.Ephemeral });
+    }
+    // Said now, by name (#873, pass 22). The escrow's freeze guard refuses a
+    // frozen opponent at accept either way, but reported it as "no longer has
+    // enough" — after the challenge had been posted and accepted.
+    if (opponent.economyFrozen) {
+        return interaction.reply({ content: frozenTargetNotice(`**${target.username}**`), flags: MessageFlags.Ephemeral });
     }
 
     const duelId = `${interaction.user.id}_${Date.now()}`;
@@ -701,8 +710,14 @@ async function runRankView(interaction) {
     const sL = userDoc?.ranked?.seasonRankedLosses ?? 0;
     const titles = userDoc?.ranked?.seasonalTitles ?? [];
 
-    // Server rank (1-indexed) based on current ELO
-    const higher = await User.countDocuments({ guildId, 'ranked.elo': { $gt: elo } });
+    // Server rank (1-indexed) based on current ELO, among players on the ladder
+    // — the leaderboard's filter (#873, pass 22). Every document carries the
+    // 1000 default, so a player who dropped below it was ranked behind every
+    // member who had never duelled.
+    const higher = await User.countDocuments({
+        guildId, 'ranked.elo': { $gt: elo },
+        $or: [{ 'ranked.rankedWins': { $gt: 0 } }, { 'ranked.rankedLosses': { $gt: 0 } }],
+    });
     const rankPosition = higher + 1;
 
     const guildSettings = await getGuildSettings(guildId);

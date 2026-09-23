@@ -86,7 +86,7 @@ function setPath(doc, path, value) {
     cur[last] = value;
 }
 
-const OPERATORS = new Set(['$gte', '$gt', '$lte', '$lt', '$ne', '$in', '$nin', '$eq', '$elemMatch', '$exists', '$not']);
+const OPERATORS = new Set(['$gte', '$gt', '$lte', '$lt', '$ne', '$in', '$nin', '$eq', '$elemMatch', '$exists', '$not', '$size', '$regex', '$options']);
 
 /** One `{ field: condition }` clause. Records the positional index for `$elemMatch`. */
 function matchesField(doc, field, condition, state) {
@@ -104,6 +104,13 @@ function matchesField(doc, field, condition, state) {
                 case '$in':  if (!anyMatch(value, v => operand.some(o => equals(v, o)))) return false; break;
                 case '$nin': if (anyMatch(value, v => operand.some(o => equals(v, o)))) return false; break;
                 case '$exists': if ((value !== undefined) !== operand) return false; break;
+                case '$size':   if (!Array.isArray(value) || value.length !== operand) return false; break;
+                case '$regex': {
+                    const re = operand instanceof RegExp ? operand : new RegExp(operand, condition.$options ?? '');
+                    if (!anyMatch(value, v => typeof v === 'string' && re.test(v))) return false;
+                    break;
+                }
+                case '$options': break; // read with $regex
                 // `{ field: { $not: { $gt: x } } }`. Mongo's `$not` also
                 // matches a document where the field is absent, which is what
                 // falling through to matchesField gives: a missing value fails
@@ -142,6 +149,9 @@ function matchesField(doc, field, condition, state) {
     // An array-crossing path matches when any element does; a scalar `null`
     // condition also matches a field that is simply absent, as Mongo's does.
     if (Array.isArray(value) && field.includes('.')) return value.some(v => equals(v, condition ?? null));
+    // A scalar against an array field matches membership, as Mongo's does:
+    // `{ pendingInvites: userId }` is "the invite list holds this user".
+    if (Array.isArray(value) && !Array.isArray(condition)) return value.some(v => equals(v, condition ?? null));
     return equals(value, condition ?? null);
 }
 
@@ -396,6 +406,15 @@ function fakeCollection(name, defaults = {}, { unique = ['userId', 'guildId'] } 
             return inserted
                 ? { matchedCount: 0, modifiedCount: 0, upsertedCount: 1 }
                 : { matchedCount: 1, modifiedCount: 1, upsertedCount: 0 };
+        }),
+
+        updateMany: jest.fn(async (query = {}, update = {}, options = {}) => {
+            const hits = docs.filter(doc => matches(doc, query, { positional: {} }));
+            for (const doc of hits) {
+                applyUpdate(doc, update, { inserted: false, positional: {}, arrayFilters: options.arrayFilters });
+                writes.push({ op: 'updateMany', query, update, doc: doc.userId ?? doc.guildId });
+            }
+            return { matchedCount: hits.length, modifiedCount: hits.length, upsertedCount: 0 };
         }),
 
         findOneAndDelete: jest.fn(async (query = {}) => {

@@ -26,6 +26,8 @@ const {
     computeSyndicateOutcome,
 } = require('../../services/syndicateService');
 const { hasUnlock } = require('../../utils/prestige');
+const { claimSeat, releaseSeat, disbandIfAlone } = require('../../services/syndicateMembership');
+const { isEconomyFrozen, FROZEN_NOTICE } = require('../../utils/economyFreeze');
 const COLORS = require('../../utils/embedColors');
 
 const CREATION_COST    = 50_000;
@@ -296,6 +298,10 @@ async function handleSyndicateButton(interaction, client) {
         if (!userDoc?.syndicateId || userDoc.syndicateId !== heist.syndicateId) {
             return interaction.reply({ content: 'Only members of this syndicate can join.', flags: MessageFlags.Ephemeral });
         }
+        // A button passes no command gate, so the freeze is asked here (#873).
+        if (await isEconomyFrozen({ userId: interaction.user.id, guildId })) {
+            return interaction.reply({ content: FROZEN_NOTICE, flags: MessageFlags.Ephemeral });
+        }
 
         const result = joinSyndicateLobby(guildId, interaction.user.id, interaction.user.username, role);
         if (!result.ok) {
@@ -492,15 +498,13 @@ async function executeJoin(interaction) {
         return interaction.reply({ content: `**${synDoc.name}** is invite-only. Ask the leader to send you an invite.`, flags: MessageFlags.Ephemeral });
     }
 
-    synDoc.memberIds.push(interaction.user.id);
-    if (inInvites) synDoc.pendingInvites = synDoc.pendingInvites.filter(id => id !== interaction.user.id);
-    await synDoc.save();
-
-    await User.findOneAndUpdate(
-        { userId: interaction.user.id, guildId: interaction.guild.id },
-        { $set: { syndicateId: synDoc.syndicateId } },
-        { upsert: true }
-    );
+    // The checks above only word the refusal; the seat is claimed in one guarded write (#873, pass 22).
+    const seat = await claimSeat(synDoc, interaction.user.id, interaction.guild.id, memberCap);
+    if (!seat.ok) {
+        const why = seat.reason === 'elsewhere' ? 'You joined another syndicate in the meantime.' : `**${synDoc.name}** filled up or stopped admitting you just now.`;
+        return interaction.reply({ content: why, flags: MessageFlags.Ephemeral });
+    }
+    synDoc.memberIds = seat.doc.memberIds;
 
     const embed = new EmbedBuilder()
         .setColor(COLORS.RARE)
@@ -530,15 +534,14 @@ async function executeLeave(interaction) {
                 flags: MessageFlags.Ephemeral,
             });
         }
-        // Last member — auto-disband
-        await Syndicate.deleteOne({ syndicateId: synDoc.syndicateId });
-        await User.findOneAndUpdate({ userId: interaction.user.id, guildId: interaction.guild.id }, { $set: { syndicateId: null } });
+        // Last member — auto-disband, unless somebody joined since the read.
+        if (!await disbandIfAlone(synDoc.syndicateId, interaction.guild.id, interaction.user.id)) {
+            return interaction.reply({ content: `Someone just joined **${synDoc.name}** — kick them first to disband.`, flags: MessageFlags.Ephemeral });
+        }
         return interaction.reply({ content: `**${synDoc.name}** has been disbanded.`, flags: MessageFlags.Ephemeral });
     }
 
-    synDoc.memberIds = synDoc.memberIds.filter(id => id !== interaction.user.id);
-    await synDoc.save();
-    await User.findOneAndUpdate({ userId: interaction.user.id, guildId: interaction.guild.id }, { $set: { syndicateId: null } });
+    await releaseSeat(synDoc.syndicateId, interaction.guild.id, interaction.user.id);
 
     return interaction.reply({ content: `You have left **${synDoc.name}**.`, flags: MessageFlags.Ephemeral });
 }
@@ -580,6 +583,7 @@ async function executeInvite(interaction) {
 
     return interaction.reply({
         content: `<@${target.id}> has been invited to **${synDoc.name}**. They can accept with \`/syndicate join ${synDoc.name}\`.`,
+        allowedMentions: { users: [target.id] },
     });
 }
 
@@ -601,15 +605,9 @@ async function executeKick(interaction) {
         return interaction.reply({ content: `<@${target.id}> is not a member of your syndicate.`, flags: MessageFlags.Ephemeral });
     }
 
-    synDoc.memberIds = synDoc.memberIds.filter(id => id !== target.id);
-    await synDoc.save();
+    await releaseSeat(synDoc.syndicateId, interaction.guild.id, target.id);
 
-    await User.findOneAndUpdate(
-        { userId: target.id, guildId: interaction.guild.id },
-        { $set: { syndicateId: null } }
-    );
-
-    return interaction.reply({ content: `<@${target.id}> has been kicked from **${synDoc.name}**.` });
+    return interaction.reply({ content: `<@${target.id}> has been kicked from **${synDoc.name}**.`, allowedMentions: { users: [target.id] } });
 }
 
 async function executeOpen(interaction) {
@@ -762,7 +760,9 @@ async function executeHeist(interaction, guildDoc, client) {
 
     const embed = buildLobbyEmbed(heist, synDoc.name, target);
     const rows  = buildLobbyRows(heist.heistId, heist);
-    const msg   = await interaction.reply({ embeds: [embed], components: rows, fetchReply: true });
+    // A failed reply left the lobby holding the guild's heist slot until a restart (#873).
+    const msg   = await interaction.reply({ embeds: [embed], components: rows, fetchReply: true })
+        .catch(err => { clearSyndicateHeist(interaction.guild.id); throw err; });
     heist.lobbyMessage = msg;
 
     // Periodic countdown refresh
@@ -873,8 +873,8 @@ async function executeSabotage(interaction, _guildDoc) {
     const rivalDoc = await Syndicate.findOne({ syndicateId: activeHeist.syndicateId, guildId: interaction.guild.id }, 'name').lean();
     const rivalName = rivalDoc?.name ?? 'Unknown Syndicate';
 
-    // Deduct heat from saboteur's syndicate
-    synDoc.heat = Math.max(0, effectiveHeat - SABOTAGE_HEAT_COST);
+    // From the stored heat: reads apply the decay, so storing the decayed figure took it twice (#873).
+    synDoc.heat = Math.max(0, (synDoc.heat ?? 0) - SABOTAGE_HEAT_COST);
     await synDoc.save();
 
     // Apply sabotage to the rival heist

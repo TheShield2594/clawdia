@@ -5,6 +5,7 @@ const {
     getHeist,
     createLobby,
     startLobbyCountdown,
+    clearHeist,
 } = require('../../services/heistService');
 const { buildLobbyEmbed, buildLobbyRows } = require('../../views/heistView');
 
@@ -92,25 +93,38 @@ module.exports = {
                 lobbyDurationSeconds,
                 maxPayout,
             });
+            // Another start won the slot while this one was reading.
+            if (!heist) {
+                return interaction.reply({ content: 'A heist is already in progress in this server.', flags: MessageFlags.Ephemeral });
+            }
 
-            // Stamp lastHeist on initiator
-            await User.findOneAndUpdate(
-                { userId: interaction.user.id, guildId: interaction.guild.id },
-                { $set: { lastHeist: new Date() } },
-                { upsert: true }
-            );
+            // A failure between claiming the slot and starting the countdown
+            // left the lobby in the map with nothing to ever close it, and every
+            // later `/heist start` in the guild was told one was in progress
+            // until the bot restarted (#873, pass 22).
+            try {
+                // Stamp lastHeist on initiator
+                await User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    { $set: { lastHeist: new Date() } },
+                    { upsert: true }
+                );
 
-            const embed  = buildLobbyEmbed(heist);
-            const rows   = buildLobbyRows(heist.heistId, heist);
-            const msg    = await interaction.reply({ embeds: [embed], components: rows, fetchReply: true });
-            heist.lobbyMessage = msg;
+                const embed  = buildLobbyEmbed(heist);
+                const rows   = buildLobbyRows(heist.heistId, heist);
+                const msg    = await interaction.reply({ embeds: [embed], components: rows, fetchReply: true });
+                heist.lobbyMessage = msg;
 
-            // The countdown, the DM'd skill checks and the resolution are the
-            // heist itself, not the slash command that opened it (#614).
-            startLobbyCountdown(client, heist, msg, {
-                minPlayers: guildDoc.heist?.minPlayers ?? 2,
-                lobbyDurationSeconds,
-            });
+                // The countdown, the DM'd skill checks and the resolution are the
+                // heist itself, not the slash command that opened it (#614).
+                startLobbyCountdown(client, heist, msg, {
+                    minPlayers: guildDoc.heist?.minPlayers ?? 2,
+                    lobbyDurationSeconds,
+                });
+            } catch (err) {
+                clearHeist(interaction.guild.id, heist);
+                throw err;
+            }
         }
     },
 };

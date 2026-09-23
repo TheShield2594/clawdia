@@ -14,6 +14,37 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.14] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 22 (#873) — the heist, syndicate and duel lobbies.
+
+- **A ranked duel finished after the season ended took the leader out of that
+  season's prizes.** The match was tagged with the next season, and the
+  rollover picks prize winners from players still tagged with the ended one.
+  Matches now count toward the stored season, and new ranked challenges wait
+  for the rollover.
+- **Two `/heist start`s could overwrite each other's lobby.** The first
+  lobby's timer then cleared or closed the second, and that crew was failed and
+  fined. A failed start or reply also wedged the guild's slot until a restart,
+  for both kinds of heist. Lobbies are now claimed atomically and free only
+  their own slot.
+- **Heist jail, the heist cooldown and the freeze only stopped *starting* a
+  heist.** Joining by button bypassed all three. Joins now check them, and the
+  whole crew goes on cooldown, not only the initiator.
+- **Syndicate membership is written in guarded single updates**
+  (`services/syndicateMembership.js`). Two joins could exceed the member cap,
+  a join racing `/syndicate create` left the player unable to manage the
+  syndicate they founded, and a leader disbanding could strand a member who
+  had just joined.
+- **Syndicate names could ping @everyone** from the public invite and kick
+  replies. **Sabotage took its heat decay twice.**
+- `/duel rank` counts only ladder players, and a challenge to a frozen member
+  is refused by name.
+- `tests/pass22Lobbies.test.js` (22 tests). The fake store gains
+  `updateMany`, `$size`, `$regex` and array-membership matching.
+
 ## [4.13.13] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.
