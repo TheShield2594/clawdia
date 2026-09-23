@@ -8,6 +8,7 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { describeItem } = require('../../utils/itemDisplay');
+const { loadAiItems } = require('../../utils/aiItemLookup');
 const { ownedBy } = require('../../utils/collectorOwner');
 const {
     BUDGETS, giftLimits, budgetState, spendBudgetGuarded, spendBudgetPipelineGuarded,
@@ -28,26 +29,6 @@ const COLORS = require('../../utils/embedColors');
 // passed through so a budget can be spent in the same write.
 const addInventoryItem = (userId, guildId, itemId, qty, options = {}) =>
     grantInventoryItem(userId, guildId, itemId, qty, options);
-
-/**
- * Load the AiItem rows for whichever of `itemIds` are forged (`ai_`) ids.
- *
- * Returns a plain `itemId -> doc` map, `{}` when there is nothing to look up or
- * the query fails. A missing name is cosmetic — `describeItem` falls back to the
- * id — so this must never be the reason a gift is refused.
- */
-async function loadAiItems(itemIds) {
-    const forged = [...new Set(itemIds.filter(id => id.startsWith('ai_')))];
-    if (!forged.length) return {};
-    try {
-        const AiItem = require('../../models/AiItem');
-        const docs = await AiItem.find({ itemId: { $in: forged } }, 'itemId name emoji rarity lore').lean();
-        return Object.fromEntries(docs.map(d => [d.itemId, d]));
-    } catch (err) {
-        console.error('[gift] AiItem lookup failed:', err);
-        return {};
-    }
-}
 
 /**
  * Every inventory entry the sender is actually allowed to hand over, described

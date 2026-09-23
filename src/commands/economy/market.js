@@ -6,8 +6,7 @@ const {
 const User           = require('../../models/User');
 const MarketListing  = require('../../models/MarketListing');
 const Transaction    = require('../../models/Transaction');
-const { DEFAULT_SHOP_ITEMS, getItemLore, getItemRarity, RARITY_ORDER } = require('../../data/defaultShopItems');
-const { EFFECT_CONFIGS } = require('../../services/effectsService');
+const { RARITY_ORDER } = require('../../data/defaultShopItems');
 const { logTransaction } = require('../../utils/logTransaction');
 const { listingCancelPayoutKey, listingCreateRefundPayoutKey } = require('../../utils/payoutKey');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
@@ -19,8 +18,7 @@ const { ownedBy } = require('../../utils/collectorOwner');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { isSoulbound } = require('../../data/soulboundItems');
 const { describeItem } = require('../../utils/itemDisplay');
-
-const ITEM_META = Object.fromEntries(DEFAULT_SHOP_ITEMS.map(i => [i.itemId, i]));
+const { loadAiItems } = require('../../utils/aiItemLookup');
 
 const MAX_LISTINGS_PER_USER = 5;
 // The slots a seller's listings occupy, 1-based. Each listing carries the one it
@@ -36,7 +34,23 @@ const CONFIRM_BUY_THRESHOLD = 500;
 const SORT_RARITY = 'rarity';
 const SORT_PRICE  = 'price';
 
-const RARITY_RANK = Object.fromEntries(RARITY_ORDER.map((r, i) => [r, i]));
+// The forge mints Legendary, a tier above the shop's five; rank it on top
+// rather than letting it fall to the bottom with the unknowns.
+const RARITY_RANK = Object.fromEntries([...RARITY_ORDER, 'Legendary'].map((r, i) => [r, i]));
+
+/**
+ * A describer for a batch of item ids: the guild's shop names plus the AiItem
+ * documents for any forged ids, looked up once for the batch. Every label in
+ * this file goes through one of these, so a forged item reads as its name
+ * rather than `ai_1787098249128_rg760`.
+ */
+async function itemDescriber(itemIds, shopItems = []) {
+    const aiItems = await loadAiItems(itemIds);
+    return id => describeItem(id, { shopItems, aiItem: aiItems[id] });
+}
+
+/** `🍀 **Lucky Charm**` — how an item is named inside a sentence. */
+const itemLabel = meta => `${meta.emoji} **${meta.name}**`;
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -137,15 +151,15 @@ async function inventoryChoices(interaction, typed) {
         User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'inventory').lean(),
         getGuildSettings(interaction.guild.id),
     ]);
-    const shopItems = guildSettings?.shop ?? [];
+    const held     = (seller?.inventory ?? []).filter(e => e.quantity > 0 && !isSoulbound(e.itemId));
+    const describe = await itemDescriber(held.map(e => e.itemId), guildSettings?.shop ?? []);
 
-    const items = (seller?.inventory ?? [])
-        .filter(e => e.quantity > 0 && !isSoulbound(e.itemId))
-        .map(e => ({ quantity: e.quantity, ...describeItem(e.itemId, { shopItems }) }))
+    const items = held
+        .map(e => ({ quantity: e.quantity, ...describe(e.itemId) }))
         .filter(i => !typed || i.name.toLowerCase().includes(typed) || i.itemId.toLowerCase().includes(typed));
 
     return rankByName(items, typed).slice(0, 25).map(i => ({
-        name: `${i.emoji} ${i.name} — ${i.quantity} held`.slice(0, 100),
+        name: `${i.emoji} ${i.name} — ${i.quantity} held${i.rarity ? ` · ${i.rarityEmoji} ${i.rarity}` : ''}`.slice(0, 100),
         value: i.itemId.slice(0, 100),
     }));
 }
@@ -156,10 +170,10 @@ async function listedItemChoices(interaction, typed) {
         MarketListing.distinct('itemId', { guildId: interaction.guild.id }),
         getGuildSettings(interaction.guild.id),
     ]);
-    const shopItems = guildSettings?.shop ?? [];
+    const describe = await itemDescriber(itemIds, guildSettings?.shop ?? []);
 
     const items = itemIds
-        .map(id => describeItem(id, { shopItems }))
+        .map(describe)
         .filter(i => !typed || i.name.toLowerCase().includes(typed) || i.itemId.toLowerCase().includes(typed));
 
     return rankByName(items, typed).slice(0, 25).map(i => ({
@@ -182,11 +196,11 @@ async function listingChoices(interaction, typed, sub) {
         MarketListing.find(query).sort({ pricePerUnit: 1 }).limit(100).lean(),
         getGuildSettings(interaction.guild.id),
     ]);
-    const shopItems = guildSettings?.shop ?? [];
-    const currency  = guildSettings?.economy?.currency ?? '';
+    const describe = await itemDescriber(listings.map(l => l.itemId), guildSettings?.shop ?? []);
+    const currency = guildSettings?.economy?.currency ?? '';
 
     return listings
-        .map(l => ({ listing: l, ...describeItem(l.itemId, { shopItems }) }))
+        .map(l => ({ listing: l, ...describe(l.itemId) }))
         .filter(i => !typed
             || i.name.toLowerCase().includes(typed)
             || String(i.listing._id).toLowerCase().startsWith(typed))
@@ -236,14 +250,16 @@ async function handleList(interaction, currency) {
     // — including the soulbound test, which on the raw string let `Lifesaver`
     // past and refused it several lines later with the wrong reason.
     const itemId = (stack ?? owned[0]).itemId;
+    const guildSettings = await getGuildSettings(interaction.guild.id);
+    const label  = itemLabel((await itemDescriber([itemId], guildSettings?.shop ?? []))(itemId));
 
     if (isSoulbound(itemId)) {
-        return interaction.reply({ content: `\`${itemId}\` is soulbound and cannot be listed.`, flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: `${label} is soulbound and cannot be listed.`, flags: MessageFlags.Ephemeral });
     }
 
     if (!stack) {
         const held = owned.reduce((n, i) => n + i.quantity, 0);
-        return interaction.reply({ content: `You don't have ${qty}x \`${itemId}\` in your inventory — you hold ${held}.`, flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: `You don't have ${qty}x ${label} in your inventory — you hold ${held}.`, flags: MessageFlags.Ephemeral });
     }
 
     // The friendly refusal, before any stock moves: a seller who is already full
@@ -273,7 +289,7 @@ async function handleList(interaction, currency) {
         { new: true },
     );
     if (!debited) {
-        return interaction.reply({ content: `You don't have ${qty}x \`${itemId}\` in your inventory.`, flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: `You don't have ${qty}x ${label} in your inventory.`, flags: MessageFlags.Ephemeral });
     }
     // Drop inventory stacks the decrement above emptied. Advisory: a failure
     // leaves an empty stack, not wrong quantities.
@@ -356,7 +372,7 @@ async function handleList(interaction, currency) {
     const embed = new EmbedBuilder()
         .setColor(COLORS.INFO)
         .setTitle('📦 Item Listed!')
-        .setDescription(`**${qty}x \`${itemId}\`** listed for **${currency}${price.toLocaleString()}** per unit.`)
+        .setDescription(`**${qty}x** ${label} listed for **${currency}${price.toLocaleString()}** per unit.`)
         .addFields(
             { name: 'Listing ID', value: `\`${listing._id}\``, inline: false },
             { name: 'Expires',    value: `<t:${Math.floor(listing.expiresAt.getTime() / 1000)}:R>`, inline: true },
@@ -440,18 +456,15 @@ async function fetchPageContext(slice, guildId, client) {
 }
 
 // Formats a single listing line using pre-fetched context (no per-item DB/API calls)
-function formatLine(l, currency, repMap, tagMap) {
+function formatLine(l, currency, repMap, tagMap, describe) {
     const sellerTag   = tagMap.get(l.sellerId) ?? 'Unknown';
     const rep         = repMap.get(l.sellerId) ?? '🆕 first listing';
     const totalPrice  = l.pricePerUnit * l.quantity;
-    const meta        = ITEM_META[l.itemId];
-    const effectCfg   = EFFECT_CONFIGS[l.itemId];
-    const itemEmoji   = effectCfg?.emoji ?? '';
-    const displayName = meta ? `${itemEmoji} ${meta.name}`.trim() : `\`${l.itemId}\``;
-    const loreText    = getItemLore(l.itemId);
+    const meta        = describe(l.itemId);
+    const loreText    = meta.lore;
     const loreSuffix  = loreText ? `\n  *${loreText.slice(0, 80)}${loreText.length > 80 ? '…' : ''}*` : '';
-    const rarity      = getItemRarity(l.itemId, l.pricePerUnit);
-    return `\`${String(l._id).slice(-6)}\`  @${sellerTag} *(${rep})*\n**${l.quantity}x ${displayName}** — ${currency}${l.pricePerUnit.toLocaleString()}/ea  *(${currency}${totalPrice.toLocaleString()} total)*  · ${rarity}${loreSuffix}`;
+    const rarity      = meta.rarity ? `${meta.rarityEmoji} ${meta.rarity}`.trim() : '';
+    return `\`${String(l._id).slice(-6)}\`  @${sellerTag} *(${rep})*\n**${l.quantity}x** ${itemLabel(meta)} — ${currency}${l.pricePerUnit.toLocaleString()}/ea  *(${currency}${totalPrice.toLocaleString()} total)*${rarity ? `  · ${rarity}` : ''}${loreSuffix}`;
 }
 
 async function handleBrowse(interaction, currency) {
@@ -474,6 +487,9 @@ async function handleBrowse(interaction, currency) {
 
     // Fetch all listings (capped at 200 for performance) and sort client-side for rarity mode
     const allListings = await MarketListing.find(query).sort({ pricePerUnit: 1 }).limit(200).lean();
+    const guildSettings = await getGuildSettings(interaction.guild.id);
+    const describe = await itemDescriber(allListings.map(l => l.itemId), guildSettings?.shop ?? []);
+    const rank = l => RARITY_RANK[describe(l.itemId).rarity] ?? 0;
 
     let sortMode = SORT_RARITY;
 
@@ -483,15 +499,16 @@ async function handleBrowse(interaction, currency) {
         }
         // Rarity-first: group by tier ascending (Common first), then price within tier
         return [...allListings].sort((a, b) => {
-            const ra = RARITY_RANK[getItemRarity(a.itemId, a.pricePerUnit)] ?? 0;
-            const rb = RARITY_RANK[getItemRarity(b.itemId, b.pricePerUnit)] ?? 0;
+            const ra = rank(a);
+            const rb = rank(b);
             if (ra !== rb) return ra - rb;
             return a.pricePerUnit - b.pricePerUnit;
         });
     }
 
     let page = 0;
-    const title = filterItem ? `📦 Marketplace — ${filterItem}` : `📦 Server Marketplace`;
+    const filterMeta = filterItem ? describe(allListings[0]?.itemId ?? filterItem) : null;
+    const title = filterMeta ? `📦 Marketplace — ${filterMeta.emoji} ${filterMeta.name}` : `📦 Server Marketplace`;
 
     async function buildEmbed() {
         const sorted     = sortedListings();
@@ -501,7 +518,7 @@ async function handleBrowse(interaction, currency) {
 
         // Batch all DB/API calls for the page in two round-trips
         const { repMap, tagMap } = await fetchPageContext(slice, interaction.guild.id, interaction.client);
-        const lines = slice.map(l => formatLine(l, currency, repMap, tagMap));
+        const lines = slice.map(l => formatLine(l, currency, repMap, tagMap, describe));
 
         const sortLabel = sortMode === SORT_RARITY ? '🏷️ Rarity sort' : '💰 Price sort';
         return new EmbedBuilder()
@@ -574,6 +591,8 @@ async function handleBuy(interaction, currency) {
         return interaction.reply({ content: "You can't buy your own listing.", flags: MessageFlags.Ephemeral });
     }
 
+    const guildSettings  = await getGuildSettings(interaction.guild.id);
+    const label          = itemLabel((await itemDescriber([listing.itemId], guildSettings?.shop ?? []))(listing.itemId));
     const totalCost      = listing.pricePerUnit * listing.quantity;
     const feeAmount      = Math.floor(totalCost * MARKET_FEE_RATE);
     const sellerReceives = totalCost - feeAmount;
@@ -727,7 +746,7 @@ async function handleBuy(interaction, currency) {
             embeds: [new EmbedBuilder()
                 .setColor(COLORS.SUCCESS)
                 .setTitle('✅ Purchase Complete!')
-                .setDescription(`You bought **${listing.quantity}x \`${listing.itemId}\`** for **${currency}${totalCost.toLocaleString()}**.`)
+                .setDescription(`You bought **${listing.quantity}x** ${label} for **${currency}${totalCost.toLocaleString()}**.`)
                 .addFields(
                     { name: 'Fee Burned', value: `${currency}${feeAmount.toLocaleString()}`, inline: true },
                     sellerPaid
@@ -759,9 +778,6 @@ async function handleBuy(interaction, currency) {
 
     // Confirmation step for purchases over the threshold
     if (totalCost >= CONFIRM_BUY_THRESHOLD) {
-        const meta        = ITEM_META[listing.itemId];
-        const effectCfg   = EFFECT_CONFIGS[listing.itemId];
-        const displayName = meta ? `${effectCfg?.emoji ?? ''} ${meta.name}`.trim() : listing.itemId;
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('mkt_buy_confirm').setLabel('Confirm Purchase').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId('mkt_buy_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
@@ -769,7 +785,7 @@ async function handleBuy(interaction, currency) {
         const confirmEmbed = new EmbedBuilder()
             .setColor(COLORS.WARN)
             .setTitle('🛒 Confirm Market Purchase')
-            .setDescription(`Buy **${listing.quantity}x ${displayName}** for **${currency}${totalCost.toLocaleString()}**?`)
+            .setDescription(`Buy **${listing.quantity}x** ${label} for **${currency}${totalCost.toLocaleString()}**?`)
             .addFields(
                 { name: 'Price/ea',    value: `${currency}${listing.pricePerUnit.toLocaleString()}`, inline: true },
                 { name: 'Fee (5%)',    value: `${currency}${feeAmount.toLocaleString()}`,             inline: true },
@@ -862,10 +878,12 @@ async function handleCancel(interaction, _currency) {
         });
     }
 
+    const guildSettings = await getGuildSettings(interaction.guild.id);
+    const label = itemLabel((await itemDescriber([listing.itemId], guildSettings?.shop ?? []))(listing.itemId));
     const embed = new EmbedBuilder()
         .setColor('#e67e22')
         .setTitle('↩️ Listing Cancelled')
-        .setDescription(`Returned **${listing.quantity}x \`${listing.itemId}\`** to your inventory.`)
+        .setDescription(`Returned **${listing.quantity}x** ${label} to your inventory.`)
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });

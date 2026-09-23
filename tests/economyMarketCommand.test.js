@@ -34,6 +34,11 @@ jest.mock('../src/utils/inventoryGrant', () => ({
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 // An ambiguous listing claim is filed as a plain FailedJob rather than an owed
 // payout, so it reaches an operator without `payouts:replay` acting on it.
+// Forged items are named from their AiItem document; the picker test seeds one.
+const mockAiItems = [];
+jest.mock('../src/models/AiItem', () => ({
+    find: jest.fn(() => ({ lean: async () => mockAiItems })),
+}));
 jest.mock('../src/models/FailedJob', () => ({ create: jest.fn(async () => ({})) }));
 
 const market = require('../src/commands/economy/market');
@@ -454,6 +459,23 @@ describe('the option pickers', () => {
         expect(choices.map(c => c.value)).toEqual(['lucky_charm']);
         expect(choices[0].name).toContain('Lucky Charm');
         expect(choices[0].name).toContain('5 held');
+    });
+
+    it('names forged and event items instead of showing their ids', async () => {
+        seedGuild();
+        mockAiItems.splice(0, mockAiItems.length,
+            { itemId: 'ai_1787098249128_rg760', name: 'Ember of the Last Oath', emoji: '🔥', rarity: 'Epic' });
+        seedUser(BUYER_ID, { inventory: [
+            { itemId: 'ai_1787098249128_rg760', quantity: 1 },
+            { itemId: 'seashell', quantity: 2 },
+        ] });
+
+        const choices = await autocomplete('list', 'item');
+        mockAiItems.length = 0;
+
+        const byValue = Object.fromEntries(choices.map(c => [c.value, c.name]));
+        expect(byValue.ai_1787098249128_rg760).toBe('🔥 Ember of the Last Oath — 1 held · 🟣 Epic');
+        expect(byValue.seashell).toBe('🐚 Seashell — 2 held · ⚪ Common');
     });
 
     it('offers only items that are actually listed, for browse', async () => {

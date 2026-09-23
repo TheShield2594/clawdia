@@ -24,6 +24,11 @@ jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/models/Guild', () => mockGuilds.model);
 jest.mock('../src/utils/guildSettingsCache', () =>
     require('./helpers/guildSettingsCacheMock')());
+jest.mock('../src/models/AiItem', () => ({
+    find: jest.fn(() => ({ lean: async () => [
+        { itemId: 'ai_1787098249128_rg760', name: 'Ember of the Last Oath', emoji: '🔥', rarity: 'Epic' },
+    ] })),
+}));
 jest.mock('../src/utils/inventoryGrant', () => ({
     grantInventoryItem: jest.fn(async () => true),
     inventoryAddExpr: jest.fn(() => ({})),
@@ -368,6 +373,18 @@ describe('an item /use has nothing to do with', () => {
         expect(repliedText(interaction)).toContain(hint);
         expect(repliedText(interaction)).toContain('Nothing was consumed');
         expect(slot(itemId).quantity).toBe(2);
+        expect(mockUsers.writes).toEqual([]);
+    });
+
+    it('names a forged item by its forged name and points at the market', async () => {
+        seedUser({ inventory: [{ itemId: 'ai_1787098249128_rg760', quantity: 1 }] });
+        seedGuild();
+
+        const interaction = await run('ai_1787098249128_rg760');
+
+        expect(repliedText(interaction)).toContain('🔥 Ember of the Last Oath');
+        expect(repliedText(interaction)).toContain('/market list');
+        expect(slot('ai_1787098249128_rg760').quantity).toBe(1);
         expect(mockUsers.writes).toEqual([]);
     });
 });

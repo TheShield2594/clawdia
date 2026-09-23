@@ -11,6 +11,7 @@ const {
 const { DEFAULT_SHOP_ITEMS } = require('../../data/defaultShopItems');
 const { getRelicMeta } = require('../../data/exploreData');
 const { describeItem } = require('../../utils/itemDisplay');
+const { loadAiItems } = require('../../utils/aiItemLookup');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
 const { lootBoxItemPayoutKey } = require('../../utils/payoutKey');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
@@ -143,10 +144,10 @@ function useStatus(itemId, user, { shopItems = [] } = {}) {
     if (USED_ELSEWHERE[lower]) return { usable: false, redirect: USED_ELSEWHERE[lower] };
 
     if (getRelicMeta(itemId)) {
-        return { usable: false, redirect: "It's a relic from `/explore` — a collectible, not a consumable. Admire it in `/explore relics`, or trade it with `/market list`." };
+        return { usable: false, redirect: "It's a relic from `/explore` — a collectible, not a consumable. Admire it in `/explore relics`, or sell it to another player with `/market list`." };
     }
     if (lower.startsWith('ai_')) {
-        return { usable: false, redirect: "It's a forged collectible — it counts toward your `/showcase` and can be traded with `/market list`, but there's nothing to activate." };
+        return { usable: false, redirect: "It's a forged collectible — there's nothing to activate, but it counts toward your `/showcase`, and you can sell it to another player with `/market list` or hand it over with `/gift`." };
     }
     const event = EVENT_COLLECTIBLES.get(lower);
     if (event) {
@@ -291,10 +292,8 @@ module.exports = {
         if (!status.usable) {
             let shown = item;
             if (item.kind === 'forged') {
-                const aiItem = await require('../../models/AiItem')
-                    .findOne({ itemId: canonicalId }, 'itemId name emoji rarity lore').lean()
-                    .catch(() => null);
-                shown = describeItem(canonicalId, { shopItems, aiItem });
+                const aiItems = await loadAiItems([canonicalId]);
+                shown = describeItem(canonicalId, { shopItems, aiItem: aiItems[canonicalId] });
             }
             const embed = new EmbedBuilder()
                 .setColor(shown.color ?? COLORS.NEUTRAL)
