@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and twenty-one passes over the
+long-stable, low-churn subsystems have been audited, and twenty-two passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -19,8 +19,9 @@ writes), `/explore`'s event-currency drop, and the items, effects and server
 shop (`/use`, `effectsService`, `/inventory`, `/shop buy`), the effect
 consumers, the map views, the `/explore` views, the season pass's
 non-reward surface, season XP, tier claims and mission progress, and the
-gathering commands' profiles, inventories and prestige, and the rest of
-`/market` and `/gift` with `/trade` (#873). The majority of the
+gathering commands' profiles, inventories and prestige, the rest of
+`/market` and `/gift` with `/trade`, and the heist, syndicate and duel
+lobbies (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -2205,6 +2206,94 @@ pays the seller, and refusing it after the buyer confirmed would be worse.
 
 ---
 
+## Economy — The Heist, Syndicate and Duel Lobbies
+
+**Status: Audited — all findings resolved, one bound open** ✓
+
+The twenty-second pass of the economy audit #873. Pass 1 audited the escrow and
+crew payouts of `/duel`, `/heist` and `/syndicate`, and pass 7 audited a
+syndicate's founding refund and the war resolution. This pass covers everything
+around them:
+
+- the heist lobby and its skill checks;
+- syndicate membership, sabotage and the syndicate heist lobby;
+- the duel challenge flow, ranked seasons and the rank view.
+
+Three patterns come up again and again:
+
+- a check read from a document, then a write that does not repeat it;
+- an in-memory lobby that a failure could leave holding the guild's only slot;
+- buttons, which skip the economy command gate.
+
+**Files reviewed/fixed:**
+- `src/commands/economy/heist.js`, `src/services/heistService.js`
+- `src/commands/economy/syndicate.js`, `src/services/syndicateMembership.js` (added)
+- `src/commands/economy/duel.js`
+- `src/services/syndicateService.js`, `src/services/rankedSeasonService.js`, `src/views/heistView.js`, `src/utils/duelEscrow.js` (reviewed)
+- `tests/helpers/fakeCollection.js`
+- `tests/pass22Lobbies.test.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | **A ranked duel played after the season ended cost the leader their prize.** Between `seasonEndsAt` and the scheduler's rollover (a sweep every ten minutes), `finalizeDuel` tagged a finished match with the *next* season's id and `$set` its season counters to 1/0. The rollover picks the ended season's top three from players still tagged with that season. A leader who played in that window was left out of their own season's ranking, and the Champion prize (50,000 by default) and title went to the next player down | A match counts toward the season still stored, with `$inc`. New ranked challenges are refused while the season waits for its rollover (`seasonClosing`), so a duel only lands in that window if it was already under way when the season ended | `duel.js` |
+| 2 | **Two `/heist start`s could overwrite each other's lobby.** The command checked for a running heist, read the database, then called `createLobby`, which replaced whatever was in the map. The first lobby's timer then called `clearHeist`/`endLobby` by guild id and acted on the *second*. It could delete the second lobby, leaving its crew's skill checks answering "expired" and their timers failing and fining the whole crew, or close a third lobby and wedge the guild | `createLobby` re-checks the slot with no await between the check and the set, and returns null when the slot is taken. `clearHeist` and `endLobby` take the heist they belong to and only free the slot while it still holds that heist | `heistService.js`, `heist.js` |
+| 3 | **A failed start or reply wedged the guild's heist slot until a restart.** Both `/heist start` and `/syndicate heist` put the lobby in the map before the reply that posts it, and neither command defers. A database error or a missed three-second window left the lobby with no timer. Every later start in that guild was then told a heist was in progress, for as long as the process ran | The slot is freed when anything between claiming it and starting the countdown throws | `heist.js`, `syndicate.js` |
+| 4 | **Heist jail, the heist cooldown and the economy freeze only stopped a player from *starting* a heist.** A join is a button, and buttons skip the command gate. A jailed member could join the next heist someone else started and be paid out of jail. A frozen member could join either kind of heist lobby and earn a crew share. Only the initiator was stamped with `lastHeist`, so two members could alternate starting and joining and neither ever waited | `joinRefusal` checks freeze, jail and cooldown on every heist join. The syndicate lobby's join checks the freeze. Closing a heist lobby stamps the cooldown on the whole crew | `heistService.js`, `syndicate.js` |
+| 5 | **A syndicate could go over its member cap.** `/syndicate join` checked the cap on the roster it had loaded, then `save()`d a `$push`. Mongoose writes a push without a version check, so two joins for the last seat both landed | `claimSeat`: one `findOneAndUpdate` whose filter holds the check. There must be no `cap`-th member yet, the player must not already be on the roster, and the syndicate must be open or have invited them | `syndicateMembership.js`, `syndicate.js` |
+| 6 | **A player could end up leading a syndicate they could not manage.** The join's `User` write was an unconditional `$set`. A `/syndicate create` landing between the join's check and that write left the player as leader of the syndicate they had just paid 50,000 to found, while `User.syndicateId` pointed at the one they joined. Every leader action looks the syndicate up through that pointer, so the founded one could no longer be invited to, heisted or disbanded. Leave and kick cleared the pointer unconditionally, which could wipe a pointer to a syndicate the player had joined since. A leader leaving alone deleted the syndicate without checking the roster again, stranding a member who joined in between | The pointer is only set while the player is in no syndicate, and the seat is given back when it is not. Leave and kick `$pull` from the roster and clear only a pointer that still names this syndicate. Disbanding deletes only while the leader is the one member left | `syndicateMembership.js`, `syndicate.js` |
+| 7 | **A syndicate name could ping @everyone.** Names are only length-checked (2–32 characters), and the invite and kick replies are public and carry the name in their content. The client sets no default `allowedMentions`, so a syndicate called `@everyone` or `<@&role>` pinged on every invite and kick | Both replies allow only the one user they name | `syndicate.js` |
+| 8 | **Sabotage took its heat decay twice.** Heat is stored raw and decayed on read from `lastHeistAt`. Sabotage stored the *decayed* figure minus the cost without moving `lastHeistAt`, so the next read decayed it again. With 60 stored and three days since the last heist, sabotage showed 30 → 10 but left 0 | Heat is deducted from the stored value | `syndicate.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 9 | `/duel rank` counted every member at the default 1000 ELO as ranked above a player who had dropped below it. It showed "#4,812" to someone who was #2 of 2 on the ladder | The count uses the leaderboard's filter: players with at least one ranked win or loss | `duel.js` |
+| 10 | A challenge to a frozen member was posted and accepted, then cancelled by the escrow with "no longer has enough" | Refused at challenge time, naming the freeze | `duel.js` |
+| 11 | The heist skill-check button trusted the user id in its custom id. This was not exploitable (the buttons exist only in that player's DMs), and it is a one-line check | Only the player it names can answer it | `heistService.js` |
+| 12 | A heist lobby cancelled for lack of crew accepted joins during the edit that announced the cancellation | The slot is freed before the edit | `heistService.js` |
+| 13 | Nothing pinned any of this, and the fake store had no `updateMany`, `$size` or `$regex`, and did not match a scalar against an array field | All four added to `fakeCollection`. `tests/pass22Lobbies.test.js` (22 tests) drives the heist button route, `/heist start`, `/syndicate join`/`kick`/`heist`/`sabotage` and the syndicate join button, `/duel ranked`/`casual`/`rank`, and `finalizeDuel` across a season boundary. It also unit-tests the new membership service. Every test that drives a command fails against the old code | `tests/` |
+
+**Reviewed and found sound**, recorded so the next pass does not re-derive it:
+
+- **`/duel`'s challenge flow.** Accept and decline answer only to the target,
+  the move buttons only to the two players, and a stranger's press is turned
+  away inside the collector's filter without using up its `max: 1`.
+  `claimDuelCooldown` is a conditional write that stamps both players, so it
+  also serves as a five-minute lock: nobody is in two duels at once. The same
+  lock is why the ELO read-then-`$set` cannot lose an update.
+- **The heist and syndicate lobbies' own joins.** `joinLobby` and
+  `joinSyndicateLobby` check role, duplicate and phase and then set, with no
+  await in between. A stale lobby's button is refused by its id.
+- **Skill checks.** Each answers once. A second resolution returns on
+  `resolving`, and every timer is cancelled on clear.
+- **`rivalryService.js`** belongs to the level leaderboard, not duels, and moves
+  nothing.
+
+**The bound this pass leaves open:**
+
+- **A restart mid-duel strands both stakes.** The stakes are escrowed at
+  accept, and the duel lives only in its collectors. Nothing reconciles an
+  escrow whose duel never settled, and the debit keys that record it are evicted
+  after 24 hours. A sweep has to tell a stranded escrow from a settled one,
+  including a payout recorded as owed, or it would refund a duel that was
+  already paid. That is a change to pass 1's escrow, not a lobby fix, so it is
+  its own task.
+- **Smaller notes, not fixed:**
+  - A duel that expires unplayed still costs both players the five-minute
+    cooldown.
+  - A syndicate whose leader is erased under GDPR has no leader and no way to
+    transfer the role.
+  - `syndicates.heistCooldownHours` in the guild settings is never read.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -2224,7 +2313,7 @@ wide, and it is widest exactly where the risk is.
   games' odds and house edges beyond what pass 4 needed for the payouts, and the
   rendering (embeds, animations, the paytables)
 - core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market/` and `gift.js` have had their unwind paths audited (pass 3), and the rest of both, with `trade.js` and its escrow, is audited above (pass 21)
-- group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is not reviewed
+- group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is audited above (pass 22)
 - progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (view, missions, leaderboard, me, history, event, admin start/end) is audited above (pass 18). Season XP, tier claims and mission progress are committed as guarded writes rather than through `save()` (pass 19)
 - seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. Not reviewed: the event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end scheduler in `seasonalEventService.js`) and the shop's browse/balance reads, none of which move player currency. `/explore`'s event-currency drop is audited above (pass 13). The `/eventshop` debit guard and its effect purchases are audited above (pass 14)
 
@@ -2256,5 +2345,6 @@ server shop on 2026-09-23; the effect consumers on 2026-09-23; the map views
 on 2026-09-23; the `/explore` views on 2026-09-23; the season pass's
 non-reward surface on 2026-09-23; season XP, tier claims and mission
 progress on 2026-09-23; the gathering commands' remaining surface on
-2026-09-23; and the player market, gifts and trades on 2026-09-23. "Not yet reviewed" carries no review
+2026-09-23; the player market, gifts and trades on 2026-09-23; and the heist,
+syndicate and duel lobbies on 2026-09-23. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*

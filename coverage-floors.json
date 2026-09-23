@@ -507,7 +507,6 @@
         "src/migrations/025_social_feeds_index.js",
         "src/models/Poll.js",
         "src/services/districtService.js",
-        "src/services/syndicateService.js",
         "src/utils/bigWinLogger.js",
         "src/utils/canvasFilters.js",
         "src/utils/imageRateLimit.js",
@@ -516,7 +515,6 @@
         "src/utils/shopBanner.js",
         "src/utils/starterKit.js",
         "src/utils/wealthMilestone.js",
-        "src/views/heistView.js",
         "src/views/pollView.js"
     ],
     "unguarded": {

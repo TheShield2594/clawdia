@@ -17,6 +17,8 @@ const { logTransaction } = require('../utils/logTransaction');
 const { debitUpTo } = require('../utils/balanceDebit');
 const { creditCoinsOrOwe } = require('../utils/creditOrOwe');
 const { crewSharePayoutKey } = require('../utils/payoutKey');
+const { FROZEN_NOTICE } = require('../utils/economyFreeze');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { ROLES, TARGETS } = require('../data/heistData');
 const { makeSkillRow, buildLobbyEmbed, buildLobbyRows } = require('../views/heistView');
 const COLORS = require('../utils/embedColors');
@@ -57,6 +59,11 @@ function createLobby({ guildId, channelId, initiatorId, target, lobbyDurationSec
     // One heist per guild only holds while one shard handles that guild; see
     // src/utils/sharding.js (#732).
     assertGuildAffinity(guildId, 'heist lobby');
+    // Checked here, with no await between it and the set (#873, pass 22). The
+    // command's own check runs before its database reads, so two `/heist start`
+    // calls could both pass it and the second lobby replaced the first — whose
+    // timer then cleared or closed the second one. Null means one is running.
+    if (activeHeists.has(guildId)) return null;
     activeHeists.set(guildId, state);
     return state;
 }
@@ -76,22 +83,58 @@ function joinLobby(guildId, userId, username, role) {
     return { ok: true };
 }
 
-function endLobby(guildId) {
-    const heist = activeHeists.get(guildId);
+/**
+ * Close `own`'s lobby, or the guild's current one when none is named. A timer
+ * passes its own heist, so it can never close a different lobby that has since
+ * taken the guild's slot (#873, pass 22).
+ */
+function endLobby(guildId, own = null) {
+    const heist = own ?? activeHeists.get(guildId);
     if (!heist) return null;
     heist.phase = 'active';
     return heist;
 }
 
-function clearHeist(guildId) {
-    const heist = activeHeists.get(guildId);
+/**
+ * Cancel a heist's timers and free the guild's slot — but only the slot `own`
+ * still holds, when a heist is named: a lobby's timer clearing "the guild's
+ * heist" deleted whichever heist was there by then.
+ */
+function clearHeist(guildId, own = null) {
+    const heist = own ?? activeHeists.get(guildId);
     if (heist) {
         // Cancel any outstanding skill check timers
         for (const timer of Object.values(heist.skillTimers || {})) {
             clearTimeout(timer);
         }
+        heist.phase = 'ended';
     }
-    activeHeists.delete(guildId);
+    if (!own || activeHeists.get(guildId) === own) activeHeists.delete(guildId);
+}
+
+/**
+ * Why `userId` may not join a heist, or null when they may (#873, pass 22).
+ *
+ * A join is a button, and buttons do not pass the economy command gate — so the
+ * freeze, the jail a failed heist hands out, and the heist cooldown all stopped
+ * a player *starting* a heist and none of them stopped one joining somebody
+ * else's. A jailed member could ride the next heist out of jail, and two members
+ * could take turns starting and joining to skip the cooldown between them.
+ */
+async function joinRefusal(guildId, userId) {
+    const [doc, guildDoc] = await Promise.all([
+        User.findOne({ userId, guildId }, 'economyFrozen heistJailedUntil lastHeist').lean(),
+        getGuildSettings(guildId),
+    ]);
+    if (doc?.economyFrozen) return FROZEN_NOTICE;
+    if (doc?.heistJailedUntil && new Date(doc.heistJailedUntil) > new Date()) {
+        return `You're in jail until <t:${Math.floor(new Date(doc.heistJailedUntil).getTime() / 1000)}:R> and can't join a heist.`;
+    }
+    const cooldownMs = (guildDoc?.heist?.cooldownHours ?? 6) * 3_600_000;
+    if (doc?.lastHeist && Date.now() - new Date(doc.lastHeist).getTime() < cooldownMs) {
+        return `You're on heist cooldown until <t:${Math.floor((new Date(doc.lastHeist).getTime() + cooldownMs) / 1000)}:R>.`;
+    }
+    return null;
 }
 
 // ── Skill check generators ─────────────────────────────────────────────────
@@ -272,7 +315,7 @@ async function resolveHeist(client, heist) {
         await runResolution(client, heist);
     } catch (err) {
         console.error(`[heist] resolution failed for guild ${heist.guildId}:`, err);
-        clearHeist(heist.guildId);
+        clearHeist(heist.guildId, heist);
     }
 }
 
@@ -373,7 +416,7 @@ async function runResolution(client, heist) {
         }
     } catch {}
 
-    clearHeist(guildId);
+    clearHeist(guildId, heist);
 }
 
 async function handleHeistButton(interaction, client) {
@@ -400,6 +443,14 @@ async function handleHeistButton(interaction, client) {
             return interaction.reply({ content: 'This heist lobby is no longer active.', flags: MessageFlags.Ephemeral });
         }
 
+        const refusal = await joinRefusal(guildId, interaction.user.id);
+        if (refusal) return interaction.reply({ content: refusal, flags: MessageFlags.Ephemeral });
+
+        // Re-checked after the read: the lobby may have closed, or been
+        // replaced, while it was out.
+        if (getHeist(guildId) !== heist) {
+            return interaction.reply({ content: 'This heist lobby is no longer active.', flags: MessageFlags.Ephemeral });
+        }
         const result = joinLobby(guildId, interaction.user.id, interaction.user.username, role);
         if (!result.ok) {
             return interaction.reply({ content: result.reason, flags: MessageFlags.Ephemeral });
@@ -435,6 +486,10 @@ async function handleHeistButton(interaction, client) {
 
         if (!heist || !heist.players.has(userId)) {
             return interaction.reply({ content: 'This skill check has expired.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+        // The id names whose check this is; only they answer it.
+        if (interaction.user.id !== userId) {
+            return interaction.reply({ content: "This isn't your skill check.", flags: MessageFlags.Ephemeral }).catch(() => {});
         }
 
         const player = heist.players.get(userId);
@@ -494,15 +549,23 @@ function startLobbyCountdown(client, heist, msg, { minPlayers = 2, lobbyDuration
         if (heist.phase !== 'lobby') return;
 
         if (heist.players.size < minPlayers) {
+            // Cleared before the edit, so nobody joins during its round trip.
+            clearHeist(heist.guildId, heist);
             await msg.edit({
                 embeds: [new EmbedBuilder().setColor(COLORS.ERROR).setTitle('❌ Heist Cancelled').setDescription(`Not enough crew members joined (need at least ${minPlayers}). Heist called off.`).setTimestamp()],
                 components: []
             }).catch(() => {});
-            clearHeist(heist.guildId);
             return;
         }
 
-        endLobby(heist.guildId);
+        endLobby(heist.guildId, heist);
+        // The whole crew is on the heist cooldown, not only whoever started it
+        // (#873, pass 22): a joiner was never stamped, so members could take
+        // turns starting and joining and never wait.
+        await User.updateMany(
+            { guildId: heist.guildId, userId: { $in: [...heist.players.keys()] } },
+            { $set: { lastHeist: new Date() } },
+        ).catch(err => console.error('[heist] crew cooldown stamp failed:', err.message));
         await msg.edit({
             embeds: [new EmbedBuilder().setColor(COLORS.RARE).setTitle('🔓 Heist Begins!').setDescription('The lobby is closed. Skill checks are being sent to each crew member via DM…\nResults will be posted here when everyone responds or time runs out.').setTimestamp()],
             components: []
@@ -552,6 +615,7 @@ module.exports = {
     activeHeists,
     getHeist,
     createLobby,
+    joinRefusal,
     joinLobby,
     endLobby,
     clearHeist,
