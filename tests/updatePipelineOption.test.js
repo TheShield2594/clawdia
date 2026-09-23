@@ -154,6 +154,25 @@ function optsIn(node, optedIn = new Set()) {
     return false;
 }
 
+/**
+ * A call to a function that builds a pipeline — `missionAdvancePipeline(event,
+ * step)`, `seasonXpPipeline(grant)`. Named `…Pipeline` by convention, which is
+ * the only thing a static scan can go on.
+ *
+ * `advanceMissions` passed `missionAdvancePipeline(...)` straight to
+ * `findOneAndUpdate` without the opt-in, and neither the literal nor the
+ * variable check above could see it, so every mission `/crime`, `/quiz`,
+ * `/casino` and a duel advanced threw before it ran — swallowed by the callers'
+ * `.catch`, so those missions never moved (#873, pass 19).
+ */
+function isPipelineBuilderCall(node) {
+    if (node?.type !== 'CallExpression') return false;
+    const name = node.callee.type === 'Identifier' ? node.callee.name
+        : node.callee.type === 'MemberExpression' && !node.callee.computed ? node.callee.property.name
+        : null;
+    return typeof name === 'string' && /Pipeline$/.test(name);
+}
+
 function pipelineUpdates() {
     const found = [];
     for (const file of sourceFiles(SRC)) {
@@ -171,7 +190,8 @@ function pipelineUpdates() {
 
             const update = node.arguments[1];
             const isPipeline = update?.type === 'ArrayExpression' ||
-                (update?.type === 'Identifier' && pipelines.has(update.name));
+                (update?.type === 'Identifier' && pipelines.has(update.name)) ||
+                isPipelineBuilderCall(update);
             if (!isPipeline) continue;
             if (callee.object.type === 'Identifier' && native.has(callee.object.name)) continue;
 
@@ -201,6 +221,11 @@ describe('aggregation-pipeline updates opt in to Mongoose 9', () => {
         const byVariable = updates.map(u => u.where).filter(where =>
             where.includes('routes/api/economy.js') || where.includes('routes/api/leveling.js'));
         expect(byVariable.length).toBe(2);
+    });
+
+    it('sees a pipeline built by a `…Pipeline(...)` call', () => {
+        const built = updates.map(u => u.where).filter(where => where.includes('seasonMissionService.js'));
+        expect(built.length).toBeGreaterThanOrEqual(1);
     });
 
     it('sets `updatePipeline: true` on every one of them', () => {

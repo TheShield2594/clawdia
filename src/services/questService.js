@@ -1,3 +1,4 @@
+const { recordSeasonXp } = require('../models/seasonWrites');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 
 // difficulty → reward multiplier
@@ -356,6 +357,19 @@ async function awardQuest(user, questDef, guildSettings) {
 async function awardSeasonXp(user, xp, guildSettings) {
     const season = guildSettings?.season;
     if (!season?.enabled || !season.seasonId) return 0;
+    // Recorded before the in-memory cap: the User model's post-save hook grants
+    // it server-side against the stored week (models/seasonWrites.js), so a
+    // save no longer writes back a snapshot of the season over a /season unlock
+    // or a Tier Skip Token that landed in between (#873, pass 19). The copy
+    // below still answers the caller's "how much did that grant".
+    if (xp > 0) {
+        recordSeasonXp(user, xp, {
+            seasonId:  season.seasonId,
+            weeklyCap: season.weeklyXpCap || 0,
+            xpPerTier: season.xpPerTier || 100,
+            maxTiers:  season.maxTiers || 50,
+        });
+    }
     if (user.season?.seasonId !== season.seasonId) {
         user.season = { seasonId: season.seasonId, xp: 0, tier: 0, claimedTiers: [], premium: false, claimedPremiumTiers: [], weekXp: 0, weekStart: null };
     }

@@ -43,7 +43,11 @@ function recordEffectSpend(user, type, n) {
  */
 function detachEffectWrites(doc) {
     if (!doc || doc.isNew) return null;
-    for (const path of doc.directModifiedPaths?.() ?? []) {
+    // Default-state paths too (#873, pass 19): a document stored without
+    // `activeEffects` loads with the default `[]` filled in, and saved it over
+    // an effect activated in between. models/seasonWrites.js found it.
+    const defaults = doc.$__?.activePaths?.getStatePaths?.('default') ?? {};
+    for (const path of new Set([...(doc.directModifiedPaths?.() ?? []), ...Object.keys(defaults)])) {
         if (path === 'activeEffects' || path.startsWith('activeEffects.')) doc.unmarkModified(path);
     }
     const spends = doc.$locals?.[SPENDS_KEY];

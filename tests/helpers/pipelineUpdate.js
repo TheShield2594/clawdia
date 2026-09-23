@@ -127,6 +127,17 @@ function evaluate(expr, doc, vars = {}) {
             if (a === null || a === undefined || b === null || b === undefined) return null;
             return a - b;
         }
+        // Null propagates, as Mongo's arithmetic does. The season-XP pipeline
+        // derives the tier with these (#873, pass 19).
+        case '$divide': {
+            const [a, b] = args();
+            if (a === null || a === undefined || b === null || b === undefined) return null;
+            return a / b;
+        }
+        case '$floor': {
+            const [a] = args();
+            return a === null || a === undefined ? null : Math.floor(a);
+        }
         case '$max':
             return args().reduce((best, n) => (n === null || n === undefined ? best : Math.max(best, n)), -Infinity);
         // Mongo's `$min` ignores null operands rather than propagating them,

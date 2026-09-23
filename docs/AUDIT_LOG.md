@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and eighteen passes over the
+long-stable, low-churn subsystems have been audited, and nineteen passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -17,8 +17,8 @@ quest-reward credit at every caller, and the rest of the casino (`confirmBet`,
 the bet guards, the crash restart refund, and the games' leaderboard and stat
 writes), `/explore`'s event-currency drop, and the items, effects and server
 shop (`/use`, `effectsService`, `/inventory`, `/shop buy`), the effect
-consumers, the map views, the `/explore` views, and the season pass's
-non-reward surface (#873). The majority of the
+consumers, the map views, the `/explore` views, the season pass's
+non-reward surface, and season XP, tier claims and mission progress (#873). The majority of the
 codebase, and most of the economy, has never been audited; see
 [Not yet reviewed](#not-yet-reviewed) for the full list.
 
@@ -2011,6 +2011,76 @@ the codebase carry.
 
 ---
 
+## Economy — Season XP, Tier Claims and Mission Progress
+
+**Status: Audited — all findings resolved** ✓
+
+The nineteenth pass of the economy audit #873, and the bound pass 18 left.
+Season XP (`awardSeasonXp`, reached from every quest reward and from
+`claim-mission`), tier claims (`/season claim`, `claim-all`) and daily-mission
+progress (`recordMissionProgress`, from `/hunt`, `/fish`, `/mine`, `/explore`,
+`/work` and `/daily`) were all written by mutating the loaded document and
+letting `save()` persist it. That is the pass-15 effects shape on two more
+fields. Following the atomic path those snapshot saves could overwrite turned up
+a worse finding: the atomic path had never worked at all.
+
+Scope: every reader and writer of `season`, `seasonMissions` and
+`seasonMissionsDate` in `src/`. That covers `questService.awardSeasonXp`,
+`seasonMissionService` (`ensureMissions`, `recordMissionProgress`,
+`advanceMissions`), the claim, `claim-all`, `claim-mission`, `tier-skip` and
+`unlock` handlers, the pass-18 view helpers, and the economy-season resolver's
+reads.
+
+**Files reviewed/fixed:**
+- `src/models/seasonWrites.js` (added)
+- `src/models/User.js` (save hooks)
+- `src/models/effectSpends.js` (default-state paths)
+- `src/services/seasonMissionService.js`
+- `src/services/questService.js`
+- `src/commands/economy/season.js`
+- `tests/updatePipelineOption.test.js`, `tests/helpers/pipelineUpdate.js`, `tests/helpers/fakeCollection.js`
+- `tests/pass19SeasonWrites.test.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | **`/crime`, `/quiz`, `/casino` and duel wins never advanced a mission.** `advanceMissions` passed `missionAdvancePipeline(...)` to `findOneAndUpdate` without Mongoose 9's `updatePipeline: true`. Mongoose throws synchronously on an array update without that opt-in, so the write never reached the server, and all four callers swallowed the rejection in `.catch(console.error)`. Any daily mission whose event was `crime`, `quiz`, `casino` or `duel_win` sat at 0 forever and could not be claimed. Reproduced against the real `User` model. `tests/updatePipelineOption.test.js` exists to catch exactly this, but it only recognised a pipeline written as an array literal or held in a variable, not one returned by a builder call | `updatePipeline: true` on the call. The sweep now also treats a call to a `…Pipeline(...)` builder as a pipeline, and on its first run it found this call and the two new ones below, which would otherwise have shipped the same bug. It has a test of its own | `seasonMissionService.js`, `updatePipelineOption.test.js` |
+| 2 | **A save could erase a `/season unlock`.** `/season claim` and `claim-all` marked the whole `season` sub-document modified, so their `save()` wrote it back as the handler had read it. An unlock that landed in between, which sets `season.premium` in the same write that takes the coins, was overwritten with `premium: false`: the coins were spent and the premium track was gone. The same snapshot saves carried season XP from every quest reward and mission progress from the grind commands, over a Tier Skip Token's atomic XP and over any mission advanced atomically. `optimisticConcurrency` does not catch it, because atomic updates don't bump `__v` | New `models/seasonWrites.js`, the pass-15 shape. The `User` pre-save hook detaches `season`, `seasonMissions` and `seasonMissionsDate` from every save of an existing document. The in-memory writers record operations instead, and the post-save hook commits them as guarded writes, in order: the stale-season reset; the day's hand, under the guarded rollover so a hand another command dealt first stands; mission advances, through the same `missionAdvancePipeline`; XP grants, through a pipeline that resets a stale season, rolls the weekly window, caps the grant against the *stored* week and recomputes the tier; and tier claims, as an `$addToSet` on the current season. `/season claim-mission` claims its slot in its own guarded write (`claimMissionSlot`: same day's hand, same mission, not yet claimed). Save first, commit after; the commits never throw | `seasonWrites.js`, `User.js`, `questService.js`, `seasonMissionService.js`, `season.js` |
+| 3 | **A document stored without these fields saved their defaults.** Mongoose fills a schema default on load and saves it: the path is in the "default" state, not "modified", so detaching `directModifiedPaths()` alone missed it. Every user an upsert created has no `seasonMissions` until their first deal, so any save wrote `seasonMissions: []` over a hand another command had just dealt. Pass 15's `activeEffects` detach had the same gap | Both detach functions include default-state paths (`pendingPaths`) | `seasonWrites.js`, `effectSpends.js` |
+| 4 | **`/season tier-skip` could spend a token on the wrong season.** It consumed the token and `$inc`ed `season.xp` on whatever season sub-document was stored. Its `normalizeSeason` ran in memory and was never saved. For a player whose pass was left over from an earlier season, the XP landed on the old season, which the next claim reset, token and all | The stale season is reset first (`resetStaleSeason`), and the grant's filter requires `season.seasonId` to be the current one | `season.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 5 | Nothing pinned any of this, and the test harness could not express it: the pipeline evaluator lacked `$floor`/`$divide`, and the fake store's `$addToSet` ignored `$each` | Both helpers extended. `tests/pass19SeasonWrites.test.js` (18 tests) runs the real schema's hooks on real `User` documents (XP, mission progress, a whole-season `markModified`, and default-state paths all stay out of the save) and drives `applySeasonWrites` against `fakeCollection`. It covers: an unlock surviving an XP grant; the cap applied against the stored week; week rollover; a stale season reset; an advance added to atomic progress; a hand dealt by another command kept; tier claims; the mission-slot claim; `advanceMissions`' opt-in, checked against the real model; and `tier-skip` across a season boundary. 7 of the 18 fail against the old code; the rest exercise the new module directly | `tests/` |
+
+**Reviewed and found sound**, recorded so the next pass does not re-derive it:
+
+- **`/season unlock`**: a guarded debit and `$set` of `premium` in one write,
+  plus a guarded reset of a stale season. It was the victim here, not a cause.
+- **The coin and item rewards** of `claim`, `claim-all` and `claim-mission`,
+  keyed since pass 7. A claim whose post-save `$addToSet` fails leaves the tier
+  unmarked, but claiming again pays nothing twice.
+
+**The bounds this pass leaves open:**
+
+- **What a player is told can differ from what is stored.** A grind command
+  reports "mission complete" from its in-memory copy, and `awardSeasonXp`
+  returns the in-memory capped amount. The server applies the grant against
+  the stored copy, which is the one that counts, and can land slightly
+  differently when something else wrote in between.
+- **The post-save commits make one attempt and are not keyed.** A commit that
+  fails is logged and that progress or XP is lost. Before this pass, the whole
+  save conflicted or overwrote in the same situation.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -2031,7 +2101,7 @@ wide, and it is widest exactly where the risk is.
   rendering (embeds, animations, the paytables)
 - core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market.js` and `gift.js` have had their unwind paths audited (pass 3), the rest of both commands has not
 - group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is not reviewed
-- progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (view, missions, leaderboard, me, history, event, admin start/end) is audited above (pass 18). Mission progress and season XP from the grind commands still persist through snapshot saves (pass 18's bound)
+- progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (view, missions, leaderboard, me, history, event, admin start/end) is audited above (pass 18). Season XP, tier claims and mission progress are committed as guarded writes rather than through `save()` (pass 19)
 - seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. Not reviewed: the event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end scheduler in `seasonalEventService.js`) and the shop's browse/balance reads, none of which move player currency. `/explore`'s event-currency drop is audited above (pass 13). The `/eventshop` debit guard and its effect purchases are audited above (pass 14)
 
 **Everything else uncovered:**
@@ -2059,6 +2129,7 @@ commands' non-payout surface on 2026-09-22; the `/pet` command's payouts on
 2026-09-22; the quest-reward credit on 2026-09-22; the rest of the casino on
 2026-09-22; the `/explore` event-currency drop on 2026-09-23; the items, effects and
 server shop on 2026-09-23; the effect consumers on 2026-09-23; the map views
-on 2026-09-23; the `/explore` views on 2026-09-23; and the season pass's
-non-reward surface on 2026-09-23. "Not yet reviewed" carries no review
+on 2026-09-23; the `/explore` views on 2026-09-23; the season pass's
+non-reward surface on 2026-09-23; and season XP, tier claims and mission
+progress on 2026-09-23. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*
