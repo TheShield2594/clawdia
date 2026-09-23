@@ -14,6 +14,38 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.17] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit (#873), pass 24: the casino's odds. Every game's return to
+player was measured — exactly where the maths allows, by simulating the real
+hand flow where the player decides — and five paid out more than they took.
+
+- **Crash's auto cash-out paid targets the round never reached** (about 109% of
+  the stake at any target up to 5×). It ran before the crash check, at the
+  tick's own multiplier; it now pays the target, and only when the target is at
+  or below the crash point. The crash curve is 0.99/(1 − r), floored, so the
+  advertised 1% edge holds at every target — it was 11% at 10× and 51% at 50×.
+- **Three Card Monte showed every swap**, so following along won every round;
+  its "tell" was right 60% of the time. The swaps are no longer shown and the
+  tell is gone.
+- **Higher-or-lower paid a flat +0.5× per correct call** (about 115% on the
+  first call alone). Each call is now priced by its odds and returns 95%, and a
+  lapse pays what the session is worth.
+- **Slots paid two-of-a-kind at half the row** (about 157% a spin); it pays a
+  quarter now, about 90% overall.
+- **Blackjack's insurance prompt told the player the hole card** (+2.3% a
+  hand). Insurance is offered on every ace, before the peek.
+- **`/casino poker` is now Casino Hold'em.** The dealer "AI" it replaced paid
+  about 121% to a player who only checked, and refunded the whole stake on a
+  timeout at any street. Ante, see the flop, fold or call twice the ante; the
+  dealer qualifies with a pair of fours; a timeout folds.
+- Keno (92%), dice (95%), coinflip (97.5%) and roulette (97.3%) were measured
+  and are unchanged.
+- `tests/pass24CasinoOdds.test.js` (8 tests) and `tests/casinoHoldem.test.js`
+  (9 tests).
+
 ## [4.13.16] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.
