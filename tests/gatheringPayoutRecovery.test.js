@@ -176,7 +176,11 @@ describe('the gathering commands key their payouts', () => {
         ['hunt', [`gatherPayoutKey('hunt', interaction.id, 'run')`, `gatherPayoutKey('hunt', interaction.id, 'apex')`]],
         ['fish', [`gatherPayoutKey('fish', interaction.id, 'run')`, `gatherPayoutKey('fish', interaction.id, 'boss')`]],
         ['mine', [`gatherPayoutKey('mine', interaction.id, 'run')`]],
-        ['explore', [`gatherPayoutKey('explore', interaction.id, 'find')`, `gatherPayoutKey('explore', interaction.id, 'encounter')`]],
+        ['explore', [
+            `gatherPayoutKey('explore', interaction.id, 'find')`,
+            `gatherPayoutKey('explore', interaction.id, 'encounter')`,
+            `gatherPayoutKey('explore', interaction.id, 'eventCurrency')`,
+        ]],
     ];
 
     test.each(cases)('/%s builds a gatherPayoutKey for every credit it makes', (command, keys) => {
@@ -228,6 +232,23 @@ describe('the detached item grants say when a prize is only owed', () => {
         expect(src).toMatch(/relicOwed/);
         // Three-way: owed and unrecorded read differently.
         expect(src).toMatch(/please contact a server admin/);
+    });
+
+    // Pass 8's one deferred event-currency credit (#873, pass 13): the drop
+    // rode the expedition's save() as a snapshot of the whole array, unkeyed.
+    test('the event-currency drop is credited through the keyed helper, not the save', () => {
+        const src = read('explore/go.js');
+        expect(src).not.toMatch(/addEventCurrency/);
+        expect(src).toMatch(/creditEventCurrencyOrOwe\(balanceFilter, eventDrop\.currencyId, eventDrop\.amount/);
+        expect(src).toMatch(/Event Currency Not Yet Delivered/);
+        // Three-way: owed and unrecorded read differently.
+        expect(src).toMatch(/eventDrop\.owed === 'owed'/);
+        // Credited after the expedition's own write, so a run that fails to
+        // save pays no drop.
+        const save = src.indexOf('await user.save();\n            const paid = await commitBalanceDelta(User, balanceFilter, user, encounterDelta');
+        const credit = src.indexOf('creditEventCurrencyOrOwe(balanceFilter');
+        expect(save).toBeGreaterThan(-1);
+        expect(credit).toBeGreaterThan(save);
     });
 
     test('a loot-box prize that could not be granted is shown as owed', () => {

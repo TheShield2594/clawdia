@@ -10,6 +10,7 @@ const { persistGrindIfNew } = require('../../../utils/grindProfile');
 const { isVersionError } = require('../../../utils/versionRetry');
 const { detachBalanceDelta, commitBalanceDelta } = require('../../../utils/balanceDelta');
 const { gatherPayoutKey } = require('../../../utils/payoutKey');
+const { creditEventCurrencyOrOwe } = require('../../../utils/creditOrOwe');
 const {
     LIMITS, TIER_COLORS, REGIONS, REGION_LIST, FOOTER_LINES, INJURY_LINES, relicSlug,
 } = require('../../../data/exploreData');
@@ -29,7 +30,7 @@ const { recordMissionProgress } = require('../../../services/seasonMissionServic
 const { applyXpGain, announceLevelUp } = require('../../../services/levelingService');
 const {
     getEventXpMultiplier, getEventCoinMultiplier,
-    hasActiveEvent, getEventCurrencyId, addEventCurrency,
+    hasActiveEvent, getEventCurrencyId,
 } = require('../../../services/seasonalEventService');
 const { SEASONAL_EVENTS } = require('../../../data/seasonalEvents');
 const { buildCooldownEmbed } = require('../../../utils/cooldownEmbed');
@@ -316,14 +317,17 @@ async function handleGo(interaction) {
 
         // ── Cross-system rewards ──────────────────────────────────────────────────
         // Seasonal event currency: a real handful in the seasonal region, loose
-        // change anywhere else while an event runs.
+        // change anywhere else while an event runs. Only rolled here — it does
+        // not ride the save below, which would write the whole `eventCurrency`
+        // array as a snapshot `$set` (flattening an `/eventshop` spend that
+        // landed in between) with no key to replay it. It is credited through
+        // the keyed helper once the expedition is written (#873, pass 13).
         let eventDrop = null;
         const currencyId = getEventCurrencyId(guildSettings);
         if (currencyId && hasActiveEvent(guildSettings)) {
             const range = region.eventCurrency ?? { min: 1, max: 2 };
             const amount = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-            addEventCurrency(user, currencyId, amount);
-            eventDrop = { currencyId, amount };
+            eventDrop = { currencyId, amount, owed: null };
         }
 
         // Lantern Owl: +15% Explorer XP (only while its hunger holds). Applied
@@ -382,6 +386,17 @@ async function handleGo(interaction) {
             return interaction.editReply({ content: 'Something went wrong writing your expedition down. Try again.', embeds: [], components: [] });
         }
 
+        // After the save, so a run that fails to write pays no drop. Never
+        // throws: a drop that will not land is recorded as owed, not raised.
+        if (eventDrop) {
+            const drop = await creditEventCurrencyOrOwe(balanceFilter, eventDrop.currencyId, eventDrop.amount, {
+                payoutKey: gatherPayoutKey('explore', interaction.id, 'eventCurrency'),
+                service:   'explore',
+                jobName:   'eventCurrency',
+            });
+            if (!drop.credited) eventDrop.owed = drop.owed ? 'owed' : 'lost';
+        }
+
         if (newAchievements.length) {
             announceAchievements(interaction.client, guildSettings, user, interaction.member, newAchievements)
                 .catch(err => console.error('[explore] announceAchievements error:', err));
@@ -432,6 +447,15 @@ async function handleGo(interaction) {
                      + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
                      + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
                 inline: false,
+            });
+        }
+
+        if (eventDrop?.owed) {
+            embed.addFields({
+                name: '⚠️ Event Currency Not Yet Delivered',
+                value: eventDrop.owed === 'owed'
+                    ? "This expedition's event currency couldn't be delivered just now and has been recorded as owed — it'll arrive once the problem clears. Tell an admin if it doesn't."
+                    : "This expedition's event currency couldn't be delivered and could not be recorded — please contact a server admin.",
             });
         }
 
@@ -645,7 +669,10 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
     if (mainXp > 0)         gains.push(`+${mainXp} XP`);
     if (eventDrop) {
         const def = Object.values(SEASONAL_EVENTS).find(s => s.currency?.id === eventDrop.currencyId);
-        gains.push(`+${eventDrop.amount} ${def?.currency?.emoji ?? '🎟️'} ${def?.currency?.name ?? eventDrop.currencyId}`);
+        const dropLabel = `${eventDrop.amount} ${def?.currency?.emoji ?? '🎟️'} ${def?.currency?.name ?? eventDrop.currencyId}`;
+        // Only announce the drop as gained once the credit landed (#873, pass 13).
+        if (!eventDrop.owed) gains.push(`+${dropLabel}`);
+        else gains.push(`~~+${dropLabel}~~ *(${eventDrop.owed === 'owed' ? 'owed' : 'not delivered'})*`);
     }
     if (gains.length) embed.addFields({ name: '🎒 The Haul', value: gains.join('  ·  '), inline: false });
 
