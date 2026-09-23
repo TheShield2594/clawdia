@@ -98,6 +98,9 @@ describe('the RSS feed check', () => {
                 setDescription() { return this; }
                 setTimestamp() { return this; }
                 setThumbnail() { return this; }
+                setAuthor() { return this; }
+                setImage() { return this; }
+                setFooter() { return this; }
             },
         }));
         jest.doMock('rss-parser', () => class {

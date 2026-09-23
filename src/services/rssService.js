@@ -8,8 +8,11 @@ const { safeFetchFeed, fetchFeedConditional } = require('../utils/safeFeedFetch'
 const { runJob } = require('../utils/jobRunner');
 const { handlesGuild } = require('../utils/sharding');
 const COLORS = require('../utils/embedColors');
+const { MEDIA_CUSTOM_FIELDS, articleImage, articleByline } = require('../utils/feedMedia');
 
-const parser = new Parser();
+// With Media RSS mapped: without it rss-parser drops <media:content> and
+// <media:thumbnail>, which is how most news sites attach an article's picture.
+const parser = new Parser({ customFields: MEDIA_CUSTOM_FIELDS });
 
 // A daily-news send claims its slot for this long. 23h rather than 24 so a
 // send that fired late (catch-up after downtime) does not push the next
@@ -274,7 +277,11 @@ const BACKDATE_GRACE_MS = 24 * 60 * 60 * 1000;
 // short of the item — so one over-long title used to be retried every sweep
 // for good, holding back everything the feed published after it.
 const EMBED_TITLE_LIMIT = 256;
-const ITEM_SNIPPET_LIMIT = 200;
+const EMBED_AUTHOR_LIMIT = 256;
+const EMBED_FOOTER_LIMIT = 2048;
+// Enough for the standfirst of most articles — a headline alone rarely says
+// whether a post is worth a click — without turning a channel into a wall.
+const ITEM_SNIPPET_LIMIT = 350;
 
 function truncate(text, max) {
     return text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -309,17 +316,28 @@ function feedBaseUrl(parsedFeed, feedUrl) {
 }
 
 /**
- * The embed for one feed item, built only from values the builder accepts:
- * the title is truncated, the link resolved to an absolute http(s) URL or left
- * off, and a feed logo that is not a usable URL is dropped rather than failing
- * every item the feed publishes.
+ * The embed for one feed item.
+ *
+ * Laid out the way Discord unfurls an article link: the feed's name and logo
+ * as the author line, the headline linking to the article, a few lines of
+ * text, the article's own picture shown large, and the byline in the footer.
+ * It used to be a headline, 200 characters and the feed's logo, so every post
+ * from a feed looked the same until it was read.
+ *
+ * Built only from values the builder accepts — text truncated to Discord's
+ * limits, every URL resolved to absolute http(s) or left off — so no item can
+ * make it throw.
  */
 function buildItemEmbed(item, date, parsedFeed, feedUrl) {
     const base = feedBaseUrl(parsedFeed, feedUrl);
     const embed = new EmbedBuilder()
         .setColor(COLORS.INFO)
-        .setTitle(truncate(feedText(item.title) || 'New Post', EMBED_TITLE_LIMIT))
-        .setDescription(truncate(feedText(item.contentSnippet), ITEM_SNIPPET_LIMIT) || 'No description available');
+        .setTitle(truncate(feedText(item.title) || 'New Post', EMBED_TITLE_LIMIT));
+
+    // A headline and a picture are a complete post; filler text is not
+    // better than none.
+    const snippet = truncate(feedText(item.contentSnippet), ITEM_SNIPPET_LIMIT);
+    if (snippet) embed.setDescription(snippet);
 
     // Undated items are posted too, just without a timestamp.
     if (date) embed.setTimestamp(date);
@@ -327,8 +345,23 @@ function buildItemEmbed(item, date, parsedFeed, feedUrl) {
     const link = absoluteHttpUrl(item.link, base);
     if (link) embed.setURL(link);
 
-    const thumbnail = absoluteHttpUrl(parsedFeed.image?.url, base);
-    if (thumbnail) embed.setThumbnail(thumbnail);
+    const feedName = truncate(feedText(parsedFeed.title), EMBED_AUTHOR_LIMIT);
+    const logo = absoluteHttpUrl(parsedFeed.image?.url, base);
+    if (feedName) {
+        const author = { name: feedName };
+        const site = absoluteHttpUrl(parsedFeed.link, feedUrl);
+        if (site) author.url = site;
+        if (logo) author.iconURL = logo;
+        embed.setAuthor(author);
+    } else if (logo) {
+        embed.setThumbnail(logo);
+    }
+
+    const image = articleImage(item, base);
+    if (image) embed.setImage(image);
+
+    const byline = articleByline(item);
+    if (byline) embed.setFooter({ text: truncate(`By ${byline}`, EMBED_FOOTER_LIMIT) });
 
     return embed;
 }

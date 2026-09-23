@@ -132,6 +132,36 @@ describe('the sweep with items the builder used to reject', () => {
     });
 });
 
+describe('the article embed', () => {
+    test('carries the feed as author, the article\'s picture, and the byline', async () => {
+        mockFeedBodies.set(FEED_URL, `<?xml version="1.0"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<channel><title>Example News</title><link>https://example.com/</link>
+<image><url>https://example.com/logo.png</url><title>x</title><link>https://example.com/</link></image>
+<item><title>Headline</title><link>/story</link><description>The standfirst.</description>
+<dc:creator>Jane Doe</dc:creator><media:content url="/img/story.jpg" medium="image"/>
+<pubDate>Wed, 20 Aug 2025 12:00:00 GMT</pubDate></item>
+</channel></rss>`);
+        mockGuilds = [{ guildId: 'g1', rssFeeds: [{ _id: 'f1', url: FEED_URL, channelId: 'c1', lastPublished: null }] }];
+        const client = makeClient();
+
+        await checkRssFeeds(client);
+
+        const data = client.send.mock.calls[0][0].embeds[0].data;
+        expect(data.author).toEqual({ name: 'Example News', url: 'https://example.com/', icon_url: 'https://example.com/logo.png' });
+        // Relative media URLs resolve against the site, like links do.
+        expect(data.image).toEqual({ url: 'https://example.com/img/story.jpg' });
+        expect(data.footer).toEqual({ text: 'By Jane Doe' });
+        expect(data.description).toBe('The standfirst.');
+        expect(data.thumbnail).toBeUndefined();
+    });
+
+    test('posts no filler text for an item with none', () => {
+        const embed = buildItemEmbed({ title: 'Photo', link: 'https://example.com/p' }, DATE, { title: 'F' }, FEED_URL);
+        expect(embed.data.description).toBeUndefined();
+    });
+});
+
 describe('the daily digest', () => {
     test('escapes Markdown in headlines and links only to absolute URLs', async () => {
         const recent = new Date(Date.now() - 60 * 60 * 1000).toUTCString();
