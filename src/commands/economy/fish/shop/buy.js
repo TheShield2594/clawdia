@@ -11,7 +11,7 @@ const {
 } = require('discord.js');
 const User = require('../../../../models/User');
 const { persistGrindIfNew } = require('../../../../utils/grindProfile');
-const { BAIT_PACKS, CONSUMABLES } = require('../../../../data/fishData');
+const { BAIT_PACKS, SHOP_CONSUMABLES } = require('../../../../data/fishData');
 const GrindProfile = require('../../../../models/GrindProfile');
 const { attachItemThumbnail } = require('../../../../utils/itemImageHelper');
 const COLORS = require('../../../../utils/embedColors');
@@ -56,7 +56,10 @@ async function handleBuy(interaction, user, currency, override = {}) {
     const f        = user.fishing;
 
     const baitPack   = BAIT_PACKS.find(p => p.id === itemId);
-    const consumable = baitPack ? null : CONSUMABLES[itemId];
+    // Only what the shop prices. A crafted-only consumable (Hunter's Brew) has
+    // no cost, and letting it through made the total NaN, which no balance
+    // check refuses (#873).
+    const consumable = baitPack ? null : SHOP_CONSUMABLES.find(c => c.id === itemId) ?? null;
     const itemDef    = baitPack ?? consumable;
 
     if (!itemDef) {
@@ -123,6 +126,9 @@ async function handleBuy(interaction, user, currency, override = {}) {
             return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
         }
 
+        // Set once coins have moved, so a failure after that never tells the
+        // player to "try again" — which would charge them a second time.
+        let charged = false;
         try {
             await btn.deferUpdate();
 
@@ -137,8 +143,9 @@ async function handleBuy(interaction, user, currency, override = {}) {
                     { new: true }
                 );
                 if (!updated) {
-                    return interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
+                    return await interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
                 }
+                charged = true;
 
                 const grantKey = shopGrantPayoutKey(interaction.id);
                 const identity = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' };
@@ -159,16 +166,16 @@ async function handleBuy(interaction, user, currency, override = {}) {
 
                 const state = await resolveShopGrant({ result: profUpdated, threw, identity, key: grantKey });
                 if (state === 'unresolved') {
-                    return interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
+                    return await interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
                 }
                 if (state === 'absent') {
                     const refund = await refundPurchase(interaction, totalCost);
-                    return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
+                    return await interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
                 }
 
                 f.bait[baitPack.baitType] = profUpdated?.data?.bait?.[baitPack.baitType]
                     ?? (f.bait[baitPack.baitType] ?? 0) + addedQty;
-                return interaction.editReply({
+                return await interaction.editReply({
                     embeds: [
                         new EmbedBuilder()
                             .setColor(COLORS.SUCCESS)
@@ -196,8 +203,9 @@ async function handleBuy(interaction, user, currency, override = {}) {
                 { new: true }
             );
             if (!updated) {
-                return interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
+                return await interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
             }
+            charged = true;
 
             const grantKey = shopGrantPayoutKey(interaction.id);
             const identity = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' };
@@ -218,17 +226,17 @@ async function handleBuy(interaction, user, currency, override = {}) {
 
             const state = await resolveShopGrant({ result: profUpdated, threw, identity, key: grantKey });
             if (state === 'unresolved') {
-                return interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
+                return await interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
             }
             if (state === 'absent') {
                 const refund = await refundPurchase(interaction, totalCost);
-                return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
+                return await interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
             }
 
             f.consumables[itemId] = profUpdated?.data?.consumables?.[itemId]
                 ?? (f.consumables[itemId] ?? 0) + quantity;
 
-            return interaction.editReply({
+            return await interaction.editReply({
                 embeds: [
                     new EmbedBuilder()
                         .setColor(COLORS.SUCCESS)
@@ -245,8 +253,15 @@ async function handleBuy(interaction, user, currency, override = {}) {
                 components: []
             });
         } catch (err) {
+            // Every reply above is awaited so a failed one lands here rather than
+            // escaping the collector as an unhandled rejection (#873). Nothing
+            // here refunds or re-charges; once coins have moved, the message
+            // points at the inventory instead of inviting a second purchase.
             console.error('[fishshop buy] purchase error:', err);
-            interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
+            const content = charged
+                ? 'Your purchase may have gone through. Check your balance and inventory before you try again.'
+                : 'Something went wrong. Please try again.';
+            interaction.editReply({ content, embeds: [], components: [] }).catch(() => {});
         }
     });
 

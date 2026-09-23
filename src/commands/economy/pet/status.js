@@ -33,7 +33,11 @@ async function executeStatus(interaction) {
         resolveUser(interaction),
         getGuildSettings(interaction.guild.id),
     ]);
-    await syncHungerAndRunaway(user, interaction);
+    const sync = await syncHungerAndRunaway(user, interaction);
+    if (sync?.saveError) {
+        console.error('[pet] status save error:', sync.saveError);
+        return interaction.editReply('Something went wrong updating your pets. Please try again.');
+    }
 
     if (!user.pets || user.pets.length === 0) {
         return interaction.editReply('You have no pets. Use `/pet adopt` to get one!');

@@ -14,6 +14,107 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.18] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+The coverage ratchet (#998), and the defects its new suites found (#873).
+
+- **Coverage floors re-measured and raised.** 41 directory floors rise to what
+  the audit's suites now cover, and the global Jest threshold goes from
+  51/41/53/52 to 63/54/62/65. `fish/shop` and `pet`, the last two economy
+  directories with a branch floor of 0, get suites of their own (100 and 116
+  tests) and floors of 92 and 82. No economy directory is left `unguarded`.
+- **Hunter's Brew is no longer on sale.** It is crafted and has no price; the
+  shop listed it at "undefined coins" and priced a purchase at NaN, which no
+  balance check refuses.
+- **Wear no longer condemns a fishing rod.** A rod under a fifth of its
+  ceiling was condemned outright and told it had been "repaired too many
+  times". Condemnation now follows `/hunt` and `/mine`: the ninth repair,
+  when the ceiling is worn under a fifth of the original. Rods the old rule
+  condemned can be repaired again.
+- **A starved pet's death is announced once.** It is saved before it is
+  announced; `/pet feed`'s early returns used to skip the save, so the death
+  was announced on every run.
+- **A wagered pet battle respects the level-gap limit at Accept,** for the
+  pets that will actually fight, and is cancelled with both stakes refunded
+  when they are over it.
+- `/fish shop buy` awaits its result replies, so a failed one is caught, and
+  once the player has been charged it points them at their inventory rather
+  than inviting a second purchase.
+- From review of #1138:
+  - `/casino poker`'s Play Again checks the full stake (ante plus call) before
+    taking the ante, as the command does.
+  - Blackjack's insurance prompt has a No Insurance button, and says so when
+    the balance cannot cover the side bet.
+  - A slots pair that returns less than the stake counts as a loss for the
+    lucky saves, the Hot Reel streak and the result card, and a coin booster
+    no longer deepens it. Slots returns about 92.5%.
+  - Two first-ever `/event start`s on a guild with no document can no longer
+    replace each other.
+  - A pet death whose save fails is answered by the command's own
+    edit-conflict or error reply.
+  - Rods the old wear rule condemned stop showing as condemned when fishing
+    data loads.
+
+## [4.13.17] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit (#873), pass 24: the casino's odds. Every game's return to
+player was measured — exactly where the maths allows, by simulating the real
+hand flow where the player decides — and five paid out more than they took.
+
+- **Crash's auto cash-out paid targets the round never reached** (about 109% of
+  the stake at any target up to 5×). It ran before the crash check, at the
+  tick's own multiplier; it now pays the target, and only when the target is at
+  or below the crash point. The crash curve is 0.99/(1 − r), floored, so the
+  advertised 1% edge holds at every target — it was 11% at 10× and 51% at 50×.
+- **Three Card Monte showed every swap**, so following along won every round;
+  its "tell" was right 60% of the time. The swaps are no longer shown and the
+  tell is gone.
+- **Higher-or-lower paid a flat +0.5× per correct call** (about 115% on the
+  first call alone). Each call is now priced by its odds and returns 95%, and a
+  lapse pays what the session is worth.
+- **Slots paid two-of-a-kind at half the row** (about 157% a spin); it pays a
+  quarter now, about 92.5% overall.
+- **Blackjack's insurance prompt told the player the hole card** (+2.3% a
+  hand). Insurance is offered on every ace, before the peek.
+- **`/casino poker` is now Casino Hold'em.** The dealer "AI" it replaced paid
+  about 121% to a player who only checked, and refunded the whole stake on a
+  timeout at any street. Ante, see the flop, fold or call twice the ante; the
+  dealer qualifies with a pair of fours; a timeout folds.
+- Keno (92%), dice (95%), coinflip (97.5%) and roulette (97.3%) were measured
+  and are unchanged.
+- `tests/pass24CasinoOdds.test.js` (8 tests) and `tests/casinoHoldem.test.js`
+  (9 tests).
+
+## [4.13.16] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit (#873), pass 23: the seasonal-event definition surface.
+
+- **The hourly event sweep no longer overwrites an event an admin just
+  started.** It wrote from a snapshot taken at the top of the hour with an
+  unguarded `$set`, so an `/event start` landing in between was cleared (over an
+  expired event) or replaced by the seasonal event (over none). Every sweep
+  write is now guarded on the event it read, and a write that misses announces
+  nothing.
+- **`/event end` on a seasonal event now lasts.** The sweep's next hourly tick
+  used to start the same event again and announce it. Ending the calendar's
+  current event now holds its auto-start off until the window closes (new
+  `Guild.eventAutoStartSkip`); `/event start` can still run it on purpose.
+- **`/event start` and `/event end` write only over the event they read.** Two
+  starts racing both passed the check and the later one won; an end racing a
+  new start cleared the new event. Both now report the race instead. An ended
+  event is announced where its start was.
+- One guild's failed write no longer stops the sweep for every guild after it.
+- Event names are capped at 100 characters, and a longer stored name is
+  shortened wherever it is shown, instead of failing the command on Discord's
+  256-character title limit.
+- `tests/pass23EventDefinitions.test.js` (17 tests).
+
 ## [4.13.15] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

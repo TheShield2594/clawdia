@@ -307,9 +307,9 @@
         }
       },
       "poker": {
-        "description": "Texas Hold'em: vence a la IA con rangos preflop y decisiones por probabilidad del bote",
+        "description": "Casino Hold'em: apuesta el ante, mira el flop y retírate o iguala el doble para ganar al crupier",
         "options": {
-          "bet": { "description": "Cantidad a apostar (mín. 10)" }
+          "bet": { "description": "El ante (mín. 10); igualar cuesta el doble" }
         }
       },
       "roulette": {

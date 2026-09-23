@@ -130,6 +130,12 @@ async function resolveUser(interaction) {
     return attachGrind(user);
 }
 
+/**
+ * Applies hunger decay and moves any pet that starved to the memorial, saving
+ * and announcing the deaths.
+ * @returns {Promise<{saveError: Error}|undefined>} `saveError` when a death could
+ *   not be saved — nothing was announced, and the caller answers the error.
+ */
 async function syncHungerAndRunaway(user, interaction) {
     if (!user.pets || user.pets.length === 0) return;
 
@@ -161,6 +167,20 @@ async function syncHungerAndRunaway(user, interaction) {
     user.markModified('pets');
 
     if (ranAwayPets.length > 0) {
+        // Store the death before announcing it. Callers used to save after
+        // their own checks, and every early return skipped that save — so
+        // `/pet feed` on a starved pet announced it, returned "You have no pets
+        // to feed!", and announced it again on every run after (#873). A save
+        // that fails announces nothing: the death is found again and announced
+        // once on the next command. The error goes back to the caller, which
+        // answers it the way it answers its own save failures (an edit
+        // conflict, or a generic apology).
+        try {
+            await user.save();
+        } catch (err) {
+            return { saveError: err };
+        }
+
         const names = ranAwayPets.map(p => {
             const def = PET_DEFINITIONS[p.petId];
             return `${def?.emoji ?? '🐾'} **${p.name || def?.name || p.petId}**`;

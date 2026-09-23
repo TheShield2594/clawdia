@@ -14,81 +14,27 @@ const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
 const { getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { buildDeck, handStr, compareTuple, bestHand, rankHand } = require('./pokerHands');
 const {
-    RANK,
-    buildDeck,
-    cardStr,
-    handStr,
-    compareTuple,
-    bestHand,
-    compareHands,
-} = require('./pokerHands');
-const {
-    pokerFoldWinPayout,
-    pokerPotPayout,
-    pokerShowdownPayout,
-} = require('./settlement');
+    ANTE_PAYTABLE, CALL_MULTIPLE, anteOdds, dealerQualifies, paytableName, settleCalled,
+} = require('./holdemRules');
+const { boostedPayout } = require('./settlement');
+
+// /casino poker is Casino Hold'em: ante, see your two cards and the flop, then
+// fold or call twice the ante; the dealer qualifies with a pair of fours. The
+// rules and the odds live in holdemRules.js.
+//
+// It replaced a heads-up game against a dealer "AI" that paid back about 121%
+// of every stake to a player who only checked, and refunded the whole stake on
+// a timeout after the river was out (#873, pass 24). A timeout here is a fold:
+// the flop has been seen by then, and handing the ante back would be a free
+// look at every hand.
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
+const DECISION_MS = 30_000;
 
-// ── Dealer AI ────────────────────────────────────────────────────────────────
-
-// Pre-flop hand category based on hole cards.
-function preFlopCategory(hole) {
-    const [c1, c2] = [...hole].sort((a, b) => RANK[b.value] - RANK[a.value]);
-    const r1     = RANK[c1.value];
-    const r2     = RANK[c2.value];
-    const suited = c1.suit === c2.suit;
-    const isPair = r1 === r2;
-
-    if (isPair) {
-        if (r1 >= RANK['J']) return 'monster';  // JJ–AA
-        if (r1 >= RANK['9']) return 'premium';  // 99–TT
-        if (r1 >= RANK['6']) return 'playable'; // 66–88
-        return 'weak';                           // 22–55
-    }
-    if (r1 === RANK['A'] && r2 === RANK['K'])                       return 'monster';  // AK
-    if (r1 === RANK['A'] && r2 >= RANK['J'])                        return 'premium';  // AQ, AJ
-    if (r1 === RANK['A'] && r2 === RANK['10'] && suited)            return 'premium';  // ATs
-    if (r1 === RANK['A'] && r2 >= RANK['8'])                        return 'playable'; // A8–AT
-    if (r1 === RANK['K'] && r2 >= RANK['Q'])                        return 'playable'; // KQ, KQs
-    if (r1 === RANK['K'] && r2 >= RANK['J'] && suited)              return 'playable'; // KJs
-    if (suited && r1 - r2 <= 2 && r2 >= RANK['7'])                  return 'playable'; // suited connectors
-    return 'weak';
-}
-
-// Dealer pre-flop action: raise / check / fold
-function dealerPreFlopAction(category) {
-    const r = Math.random();
-    switch (category) {
-        case 'monster':  return 'raise';
-        case 'premium':  return r < 0.60 ? 'raise' : 'check';
-        case 'playable': return r < 0.25 ? 'fold'  : 'check';
-        default:         return r < 0.60 ? 'fold'  : 'check';
-    }
-}
-
-// Post-flop equity estimate (0–1) for dealer's hand relative to player.
-// Returns dealer's approximate chance of winning based on current board.
-function dealerPostFlopEquity(dealerHole, playerHole, community) {
-    const dBest = bestHand([...dealerHole, ...community]);
-    const pBest = bestHand([...playerHole, ...community]);
-    const cmp   = compareTuple(dBest, pBest);
-    // compareTuple can return unbounded values; use sign only
-    if (cmp > 0) return 0.65; // dealer ahead
-    if (cmp === 0) return 0.50; // tied
-    return 0.35; // player ahead
-}
-
-// Dealer post-flop decision: fold or continue (check/raise).
-// Folds if equity < potOdds threshold (simplified pot-odds calculation).
-function dealerPostFlopAction(equity, pot, callAmount) {
-    const potOdds = callAmount / (pot + callAmount);
-    if (equity < potOdds - 0.05) return 'fold'; // not getting the right price
-    if (equity > 0.70) return 'raise';
-    return 'check';
-}
+const PAYTABLE_LINE = ANTE_PAYTABLE.map(row => `${row.name} ${row.pays}:1`).join(' · ') + ' · otherwise 1:1';
 
 function embedAuthor(interaction) {
     return {
@@ -97,26 +43,39 @@ function embedAuthor(interaction) {
     };
 }
 
+/** Everything a hand needs to be staked in full: the ante and the call. */
+const fullStake = ante => ante * (1 + CALL_MULTIPLE);
+
 // ── Game flow ────────────────────────────────────────────────────────────────
 
-// releaseLock is called at every terminal point of a hand (dealer/player
-// fold at any street, showdown, or a timeout refund) — "Play Again" starts
-// a brand-new hand with its own atomic debit, so it isn't passed releaseLock.
-async function playPoker(interaction, bet, releaseLock, onWager) {
+// releaseLock is called at every terminal point of a hand (fold, timeout,
+// showdown, error) — "Play Again" starts a brand-new hand with its own atomic
+// debit, so it isn't passed releaseLock.
+async function playPoker(interaction, ante, releaseLock, onWager) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     const handId = newHandId();
     let debited = null;
     let settled = false;
-    // Hoisted out of the `try` so the rollback at the bottom can see it. Every
-    // raise the player makes goes through `placeWager` and adds to this, and
-    // the rollback refunded a flat `bet` — so a hand that errored after two
-    // raises returned the opening bet and quietly kept the rest.
-    let playerStake = bet;
+    // What the player has put in: the ante, then the call. The rollback at the
+    // bottom returns exactly this.
+    let playerStake = ante;
 
     try {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
-        debited = await placeWager(userFilter, bet, { onWager });
+        // Asked here, before the ante, so "Play Again" asks it too: a player
+        // down to less than the full stake after a hand used to ante into one
+        // they could only fold.
+        const wallet = await User.findOne(userFilter);
+        if ((wallet?.balance ?? 0) < fullStake(ante)) {
+            releaseLock?.();
+            return interaction.editReply({
+                content: `A **${ante.toLocaleString()}** ante needs **${fullStake(ante).toLocaleString()}** coins to play out — the ante plus a call of twice it. Your balance: **${(wallet?.balance ?? 0).toLocaleString()}**`,
+                embeds: [], components: [],
+            });
+        }
+
+        debited = await placeWager(userFilter, ante, { onWager });
 
         if (!debited) {
             releaseLock?.();
@@ -126,560 +85,120 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             });
         }
 
-        const delay = ms => new Promise(r => setTimeout(r, ms));
-        const deck  = buildDeck();
-
+        const deck = buildDeck();
         const playerHole = [deck.pop(), deck.pop()];
         const dealerHole = [deck.pop(), deck.pop()];
         const community  = [deck.pop(), deck.pop(), deck.pop(), deck.pop(), deck.pop()];
+        const flop       = community.slice(0, 3);
+        const call       = ante * CALL_MULTIPLE;
+        const gameId     = `poker_${interaction.id}_${Date.now()}`;
 
-        // Dealer antes the same as the player — pot starts at 2× bet
-        let pot         = bet * 2; // player ante + dealer ante (simulated house money)
-        let folded      = false;
-
-        const dealerCategory = preFlopCategory(dealerHole);
-
-        // Dealer acts pre-flop before player sees their choice
-        const dealerPreAction = dealerPreFlopAction(dealerCategory);
-        const dealerRaised = dealerPreAction === 'raise';
-
-        // If dealer folds pre-flop (very weak hand), player wins immediately
-        if (dealerPreAction === 'fold') {
-            settled = true;
-            const coinMult   = getCoinMultiplier(debited);
-            const serverMult = getServerCoinMultiplier(guildSettings);
-            const totalMult  = coinMult * serverMult;
-            // A flat 3:2 on the opening bet — a small consolation for a hand
-            // that ended before it started.
-            const winAmount  = pokerFoldWinPayout(bet, totalMult);
-
-            const foldWin = await payHand(userFilter, winAmount,
-                { game: 'poker', handId, phase: 'fold-win' });
-            releaseLock?.();
-
-            return interaction.editReply({
-                embeds: [new EmbedBuilder()
-                    .setAuthor(embedAuthor(interaction))
-                    .setThumbnail(THUMB)
-                    .setColor(COLORS.SUCCESS)
-                    .setTitle('♠ Poker — Dealer Folded Pre-Flop!')
-                    .setDescription(
-                        `The dealer peeked at their hand (**${handStr(dealerHole)}**) and folded immediately.\n\n` +
-                        `🏆 You collect the early pot!`,
-                    )
-                    .addFields(
-                        { name: '🃏 Dealer Hand',  value: handStr(dealerHole),                          inline: true },
-                        { name: '🏆 Payout',       value: `**${winAmount.toLocaleString()}** coins`,    inline: true },
-                        { name: '📊 Net',          value: `**+${(winAmount - bet).toLocaleString()}** coins`, inline: true },
-                        { name: '💰 Balance',      value: `**${(await settledBalance(userFilter, foldWin.balance)).toLocaleString()}** coins`, inline: true },
-                    )
-                    .setFooter({ text: 'Dealer had a weak hand — quick win!' })
-                    .setTimestamp()],
-                components: [],
-            });
-        }
-
-        if (dealerRaised) {
-            // Dealer raised → pot grows; player must call or fold
-            pot += bet; // dealer's raise into pot
-        }
-
-        const gameId = `poker_${interaction.id}_${Date.now()}`;
-
-        // ── Pre-flop: show player their hand and dealer's decision ──────────────
-        const dealerLine = dealerRaised
-            ? `🤖 **Dealer raised!** (pot is now **${pot.toLocaleString()}** coins — call or fold)`
-            : `🤖 Dealer checks.`;
-
-        const preFlopActions = dealerRaised
-            ? [
-                new ButtonBuilder().setCustomId(`pk_call_${gameId}`).setLabel(`Call (${bet.toLocaleString()})`).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`pk_fold_${gameId}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
-              ]
-            : [
-                new ButtonBuilder().setCustomId(`pk_check_${gameId}`).setLabel('Check').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId(`pk_raise_${gameId}`).setLabel(`Raise (${bet.toLocaleString()})`).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`pk_fold_${gameId}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
-              ];
+        // The player's hand so far: their two cards and the flop, exactly five.
+        const soFar = rankHand([...playerHole, ...flop]);
 
         await interaction.editReply({
             embeds: [new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
                 .setColor(COLORS.INFO)
-                .setTitle('♠ Poker — Pre-Flop')
+                .setTitle("♠ Casino Hold'em — The Flop")
+                .setDescription(`Fold and lose the ante, or call **${call.toLocaleString()}** coins (${CALL_MULTIPLE}× the ante) to see the turn, the river and the dealer's cards.`)
                 .addFields(
-                    { name: '🃏 Your Hand',    value: handStr(playerHole), inline: false },
-                    { name: '🤖 Dealer',       value: dealerLine,          inline: false },
-                    { name: '🎴 Community',    value: '🂠  🂠  🂠  🂠  🂠',  inline: false },
-                    { name: '💰 Pot',          value: `**${pot.toLocaleString()}** coins`, inline: true },
-                    { name: '💵 Your Stake',   value: `**${playerStake.toLocaleString()}** coins`, inline: true },
+                    { name: '🃏 Your Hand',  value: handStr(playerHole), inline: true },
+                    { name: '🤖 Dealer',     value: '🂠  🂠',             inline: true },
+                    { name: '🎴 Flop',       value: `${handStr(flop)}  🂠  🂠`, inline: false },
+                    { name: '📈 You Have',   value: paytableName(soFar), inline: true },
+                    { name: '💵 Ante',       value: `**${ante.toLocaleString()}** coins`, inline: true },
                 )
-                .setFooter({ text: dealerRaised ? 'Dealer has a strong hand — call or fold!' : 'Check free · Raise doubles action' })],
-            components: [new ActionRowBuilder().addComponents(...preFlopActions)],
+                .setFooter({ text: `Dealer qualifies with a pair of 4s · Ante pays: ${PAYTABLE_LINE} · 30s, then the hand folds` })],
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`pk_call_${gameId}`).setLabel(`Call (${call.toLocaleString()})`).setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`pk_fold_${gameId}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
+            )],
         });
 
-        const msg1 = await interaction.fetchReply();
-        let preFlopAction;
+        const message = await interaction.fetchReply();
+        let action = 'timeout';
         try {
-            const r = await msg1.awaitMessageComponent({
+            const r = await message.awaitMessageComponent({
                 filter: ownedBy(interaction.user.id, i => i.customId.endsWith(gameId), "This isn't your hand."),
-                time: 30_000,
+                time: DECISION_MS,
             });
             await r.deferUpdate();
-            preFlopAction = r.customId.split('_')[1]; // check / raise / call / fold
+            action = r.customId.split('_')[1]; // call / fold
         } catch {
-            settled = true;
-            const lapsed = await payHand(userFilter, bet,
-                { game: 'poker', handId, phase: 'timeout:preflop' });
-            releaseLock?.();
-            return interaction.editReply({ content: `⏱️ Time's up! Bet refunded.${payoutNote(lapsed)}`, embeds: [], components: [] }).catch(() => {});
+            // Timed out: a fold, below.
         }
 
-        if (preFlopAction === 'fold') {
-            folded = true;
-        } else if (preFlopAction === 'call' || preFlopAction === 'raise') {
-            // Player calls dealer raise or makes their own raise
-            const extraBet = bet;
-            // More money on a hand already counted — no onWager, or calling a
-            // dealer raise would score as another game played.
-            const raised = await placeWager(userFilter, extraBet);
+        let called = false;
+        let shortOfCall = false;
+        if (action === 'call') {
+            // More money on a hand already counted — no onWager, or a call
+            // would score as a second game played.
+            const raised = await placeWager(userFilter, call);
             if (raised) {
                 debited = raised;
-                playerStake += extraBet;
-                pot += extraBet * (preFlopAction === 'raise' ? 2 : 1);
-            } else if (preFlopAction === 'call') {
-                // Can't afford to call dealer's raise → forced fold
-                folded = true;
+                playerStake += call;
+                called = true;
+            } else {
+                shortOfCall = true;
             }
-            // 'raise' with insufficient funds silently becomes a check
         }
 
-        if (folded) {
+        if (!called) {
             settled = true;
             releaseLock?.();
-            const foldEmbed = new EmbedBuilder()
-                .setAuthor(embedAuthor(interaction))
-                .setThumbnail(THUMB)
-                .setColor(COLORS.ERROR)
-                .setTitle('♠ Poker — Folded')
-                .setDescription(`You folded. The dealer had: **${handStr(dealerHole)}**`)
-                .addFields({ name: '💰 Balance', value: `**${debited.balance.toLocaleString()}** coins` })
-                .setTimestamp();
-            return interaction.editReply({ embeds: [foldEmbed], components: [] });
-        }
-
-        // ── Flop ────────────────────────────────────────────────────────────────
-        const flop    = community.slice(0, 3);
-        const flopStr = handStr(flop);
-
-        // Dealer evaluates post-flop equity and decides action
-        const equity       = dealerPostFlopEquity(dealerHole, playerHole, flop);
-        const dFlopAction  = dealerPostFlopAction(equity, pot, bet);
-        const dealerFlopLine = dFlopAction === 'fold'
-            ? `🤖 **Dealer folds!** (equity too low to continue)`
-            : dFlopAction === 'raise'
-            ? `🤖 **Dealer bets** — they like their hand! (${(equity * 100).toFixed(0)}% equity)`
-            : `🤖 Dealer checks. (${(equity * 100).toFixed(0)}% equity)`;
-
-        if (dFlopAction === 'fold') {
-            // Dealer folds on the flop — player wins the pot
-            settled = true;
-            const coinMult   = getCoinMultiplier(debited);
-            const serverMult = getServerCoinMultiplier(guildSettings);
-            const totalMult  = coinMult * serverMult;
-            const winPayout  = pokerPotPayout(playerStake, pot, totalMult);
-
-            const potWin = await payHand(userFilter, winPayout,
-                { game: 'poker', handId, phase: 'pot-win:flop' });
-            releaseLock?.();
-
+            const why = shortOfCall ? `You couldn't cover the **${call.toLocaleString()}** call, so the hand folded.`
+                : action === 'fold' ? 'You folded.'
+                : "⏱️ Time's up — the hand folded.";
             return interaction.editReply({
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
                     .setThumbnail(THUMB)
-                    .setColor(COLORS.SUCCESS)
-                    .setTitle('♠ Poker — Dealer Folded on the Flop!')
-                    .setDescription(
-                        `**Flop:** ${flopStr}\n\n` +
-                        `The dealer checked their pot odds and folded. You win!\n\n` +
-                        `**Dealer's hand:** ${handStr(dealerHole)} → *${bestHand([...dealerHole, ...flop])?.name}*`,
-                    )
-                    .addFields(
-                        { name: '🃏 Your Hand',  value: handStr(playerHole),          inline: true },
-                        { name: '🏆 Payout',     value: `**${winPayout.toLocaleString()}** coins`, inline: true },
-                        { name: '📊 Net',        value: `**+${(winPayout - playerStake).toLocaleString()}** coins${payoutNote(potWin)}`, inline: true },
-                    )
-                    .setFooter({ text: 'Dealer\'s pot odds didn\'t justify calling' })
+                    .setColor(COLORS.ERROR)
+                    .setTitle("♠ Casino Hold'em — Folded")
+                    .setDescription(`${why} The ante of **${ante.toLocaleString()}** coins is lost.\nThe dealer had **${handStr(dealerHole)}** · the board was **${handStr(community)}**`)
+                    .addFields({ name: '💰 Balance', value: `**${(await settledBalance(userFilter, debited.balance)).toLocaleString()}** coins` })
                     .setTimestamp()],
                 components: [],
             });
-        }
-
-        if (dFlopAction === 'raise') pot += bet; // dealer bets into the pot
-
-        const flopRound = `flopround_${Date.now()}`;
-        const flopActions = dFlopAction === 'raise'
-            ? [
-                new ButtonBuilder().setCustomId(`pk_call_${flopRound}`).setLabel(`Call (${bet.toLocaleString()})`).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`pk_fold_${flopRound}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
-              ]
-            : [
-                new ButtonBuilder().setCustomId(`pk_check_${flopRound}`).setLabel('Check').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId(`pk_raise_${flopRound}`).setLabel(`Raise (${Math.min(bet, debited.balance).toLocaleString()})`).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`pk_fold_${flopRound}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
-              ];
-
-        await interaction.editReply({
-            embeds: [new EmbedBuilder()
-                .setAuthor(embedAuthor(interaction))
-                .setThumbnail(THUMB)
-                .setColor(COLORS.INFO)
-                .setTitle('♠ Poker — The Flop')
-                .addFields(
-                    { name: '🃏 Your Hand',  value: handStr(playerHole),          inline: false },
-                    { name: '🤖 Dealer',     value: dealerFlopLine,               inline: false },
-                    { name: '🎴 Community',  value: `${flopStr}  🂠  🂠`,          inline: false },
-                    { name: '💰 Pot',        value: `**${pot.toLocaleString()}** coins`, inline: true },
-                )
-                .setFooter({ text: 'Check or Raise · Fold to surrender' })],
-            components: [new ActionRowBuilder().addComponents(...flopActions)],
-        });
-        await delay(200);
-
-        const msg2 = await interaction.fetchReply();
-        let flopAction;
-        try {
-            const r = await msg2.awaitMessageComponent({
-                filter: ownedBy(interaction.user.id, i => i.customId.endsWith(flopRound), "This isn't your hand."),
-                time: 30_000,
-            });
-            await r.deferUpdate();
-            flopAction = r.customId.split('_')[1];
-        } catch {
-            settled = true;
-            const lapsedStreet = await payHand(userFilter, playerStake,
-                { game: 'poker', handId, phase: 'timeout:flop' });
-            releaseLock?.();
-            return interaction.editReply({ content: `⏱️ Time's up! Bet refunded.${payoutNote(lapsedStreet)}`, embeds: [], components: [] }).catch(() => {});
-        }
-
-        if (flopAction === 'fold') {
-            folded = true;
-        } else if (flopAction === 'call' || flopAction === 'raise') {
-            const raiseAmt = Math.min(bet, debited.balance);
-            if (raiseAmt > 0) {
-                const raised = await placeWager(userFilter, raiseAmt);
-                if (raised) {
-                    debited = raised;
-                    playerStake += raiseAmt;
-                    pot += raiseAmt * (flopAction === 'raise' ? 2 : 1);
-                } else if (flopAction === 'call') {
-                    // Can't afford to call dealer's bet → forced fold
-                    folded = true;
-                }
-            } else if (flopAction === 'call') {
-                // Zero balance → can't call → forced fold
-                folded = true;
-            }
-        }
-
-        if (folded) {
-            settled = true;
-            releaseLock?.();
-            const foldEmbed = new EmbedBuilder()
-                .setAuthor(embedAuthor(interaction))
-                .setThumbnail(THUMB)
-                .setColor(COLORS.ERROR)
-                .setTitle('♠ Poker — Folded')
-                .setDescription(`You folded. The dealer had: **${handStr(dealerHole)}**\nCommunity: **${flopStr} (+ 2 more)**`)
-                .addFields({ name: '💰 Balance', value: `**${debited.balance.toLocaleString()}** coins` })
-                .setTimestamp();
-            return interaction.editReply({ embeds: [foldEmbed], components: [] });
-        }
-
-        // ── Turn ─────────────────────────────────────────────────────────────
-        await delay(400);
-
-        const turnCard  = community[3];
-        const turnStr   = cardStr(turnCard);
-        const turnBoard = [...flop, turnCard];
-
-        const turnEquity      = dealerPostFlopEquity(dealerHole, playerHole, turnBoard);
-        const dTurnAction     = dealerPostFlopAction(turnEquity, pot, bet);
-        const dealerTurnLine  = dTurnAction === 'fold'
-            ? '🤖 **Dealer folds!** (not getting the right price)'
-            : dTurnAction === 'raise'
-            ? `🤖 **Dealer bets** — they like the turn! (${(turnEquity * 100).toFixed(0)}% equity)`
-            : `🤖 Dealer checks. (${(turnEquity * 100).toFixed(0)}% equity)`;
-
-        if (dTurnAction === 'fold') {
-            settled = true;
-            const coinMult   = getCoinMultiplier(debited);
-            const serverMult = getServerCoinMultiplier(guildSettings);
-            const totalMult  = coinMult * serverMult;
-            const winPayout  = pokerPotPayout(playerStake, pot, totalMult);
-            const potWin = await payHand(userFilter, winPayout,
-                { game: 'poker', handId, phase: 'pot-win:turn' });
-            releaseLock?.();
-            return interaction.editReply({
-                embeds: [new EmbedBuilder()
-                    .setAuthor(embedAuthor(interaction))
-                    .setThumbnail(THUMB)
-                    .setColor(COLORS.SUCCESS)
-                    .setTitle('♠ Poker — Dealer Folded on the Turn!')
-                    .setDescription(`**Turn:** ${turnStr}\n\nThe dealer couldn't justify calling. You win!\n\n**Dealer's hand:** ${handStr(dealerHole)} → *${bestHand([...dealerHole, ...turnBoard])?.name}*`)
-                    .addFields(
-                        { name: '🃏 Your Hand',  value: handStr(playerHole),           inline: true },
-                        { name: '🏆 Payout',     value: `**${winPayout.toLocaleString()}** coins`, inline: true },
-                        { name: '📊 Net',        value: `**+${(winPayout - playerStake).toLocaleString()}** coins${payoutNote(potWin)}`, inline: true },
-                    )
-                    .setFooter({ text: "Dealer's pot odds didn't justify calling the turn" })
-                    .setTimestamp()],
-                components: [],
-            });
-        }
-
-        if (dTurnAction === 'raise') pot += bet;
-
-        const turnRound = `turnround_${Date.now()}`;
-        const turnActions = dTurnAction === 'raise'
-            ? [
-                new ButtonBuilder().setCustomId(`pk_call_${turnRound}`).setLabel(`Call (${bet.toLocaleString()})`).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`pk_fold_${turnRound}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
-              ]
-            : [
-                new ButtonBuilder().setCustomId(`pk_check_${turnRound}`).setLabel('Check').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId(`pk_raise_${turnRound}`).setLabel(`Raise (${Math.min(bet, debited.balance).toLocaleString()})`).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`pk_fold_${turnRound}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
-              ];
-
-        await interaction.editReply({
-            embeds: [new EmbedBuilder()
-                .setAuthor(embedAuthor(interaction))
-                .setThumbnail(THUMB)
-                .setColor(COLORS.INFO)
-                .setTitle('♠ Poker — The Turn')
-                .addFields(
-                    { name: '🃏 Your Hand',  value: handStr(playerHole),                     inline: false },
-                    { name: '🤖 Dealer',     value: dealerTurnLine,                           inline: false },
-                    { name: '🎴 Community',  value: `${flopStr}  ${turnStr}  🂠`,             inline: false },
-                    { name: '💰 Pot',        value: `**${pot.toLocaleString()}** coins`,      inline: true },
-                )
-                .setFooter({ text: 'Check or Raise · Fold to surrender' })],
-            components: [new ActionRowBuilder().addComponents(...turnActions)],
-        });
-        await delay(200);
-
-        const msg3 = await interaction.fetchReply();
-        let turnAction;
-        try {
-            const r = await msg3.awaitMessageComponent({
-                filter: ownedBy(interaction.user.id, i => i.customId.endsWith(turnRound), "This isn't your hand."),
-                time: 30_000,
-            });
-            await r.deferUpdate();
-            turnAction = r.customId.split('_')[1];
-        } catch {
-            settled = true;
-            const lapsedStreet = await payHand(userFilter, playerStake,
-                { game: 'poker', handId, phase: 'timeout:turn' });
-            releaseLock?.();
-            return interaction.editReply({ content: `⏱️ Time's up! Bet refunded.${payoutNote(lapsedStreet)}`, embeds: [], components: [] }).catch(() => {});
-        }
-
-        if (turnAction === 'fold') {
-            folded = true;
-        } else if (turnAction === 'call' || turnAction === 'raise') {
-            const raiseAmt = Math.min(bet, debited.balance);
-            if (raiseAmt > 0) {
-                const raised = await placeWager(userFilter, raiseAmt);
-                if (raised) {
-                    debited = raised;
-                    playerStake += raiseAmt;
-                    pot += raiseAmt * (turnAction === 'raise' ? 2 : 1);
-                } else if (turnAction === 'call') {
-                    folded = true;
-                }
-            } else if (turnAction === 'call') {
-                folded = true;
-            }
-        }
-
-        if (folded) {
-            settled = true;
-            releaseLock?.();
-            const foldEmbed = new EmbedBuilder()
-                .setAuthor(embedAuthor(interaction))
-                .setThumbnail(THUMB)
-                .setColor(COLORS.ERROR)
-                .setTitle('♠ Poker — Folded')
-                .setDescription(`You folded. The dealer had: **${handStr(dealerHole)}**\nCommunity: **${flopStr}  ${turnStr} (+ 1 more)**`)
-                .addFields({ name: '💰 Balance', value: `**${debited.balance.toLocaleString()}** coins` })
-                .setTimestamp();
-            return interaction.editReply({ embeds: [foldEmbed], components: [] });
-        }
-
-        // ── River ─────────────────────────────────────────────────────────────
-        await delay(400);
-
-        const riverCard = community[4];
-        const riverStr  = cardStr(riverCard);
-        const riverBoard = [...turnBoard, riverCard];
-
-        const riverEquity      = dealerPostFlopEquity(dealerHole, playerHole, riverBoard);
-        const dRiverAction     = dealerPostFlopAction(riverEquity, pot, bet);
-        const dealerRiverLine  = dRiverAction === 'fold'
-            ? '🤖 **Dealer folds!** (river missed them)'
-            : dRiverAction === 'raise'
-            ? `🤖 **Dealer bets** — they like the river! (${(riverEquity * 100).toFixed(0)}% equity)`
-            : `🤖 Dealer checks. (${(riverEquity * 100).toFixed(0)}% equity)`;
-
-        if (dRiverAction === 'fold') {
-            settled = true;
-            const coinMult   = getCoinMultiplier(debited);
-            const serverMult = getServerCoinMultiplier(guildSettings);
-            const totalMult  = coinMult * serverMult;
-            const winPayout  = pokerPotPayout(playerStake, pot, totalMult);
-            const potWin = await payHand(userFilter, winPayout,
-                { game: 'poker', handId, phase: 'pot-win:river' });
-            releaseLock?.();
-            return interaction.editReply({
-                embeds: [new EmbedBuilder()
-                    .setAuthor(embedAuthor(interaction))
-                    .setThumbnail(THUMB)
-                    .setColor(COLORS.SUCCESS)
-                    .setTitle('♠ Poker — Dealer Folded on the River!')
-                    .setDescription(`**River:** ${riverStr}\n\nThe dealer missed the river and folded. You win!\n\n**Dealer's hand:** ${handStr(dealerHole)} → *${bestHand([...dealerHole, ...riverBoard])?.name}*`)
-                    .addFields(
-                        { name: '🃏 Your Hand',  value: handStr(playerHole),           inline: true },
-                        { name: '🏆 Payout',     value: `**${winPayout.toLocaleString()}** coins`, inline: true },
-                        { name: '📊 Net',        value: `**+${(winPayout - playerStake).toLocaleString()}** coins${payoutNote(potWin)}`, inline: true },
-                    )
-                    .setFooter({ text: "Dealer missed the river — their loss, your gain" })
-                    .setTimestamp()],
-                components: [],
-            });
-        }
-
-        if (dRiverAction === 'raise') pot += bet;
-
-        const riverRound = `riverround_${Date.now()}`;
-        const riverActions = dRiverAction === 'raise'
-            ? [
-                new ButtonBuilder().setCustomId(`pk_call_${riverRound}`).setLabel(`Call (${bet.toLocaleString()})`).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`pk_fold_${riverRound}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
-              ]
-            : [
-                new ButtonBuilder().setCustomId(`pk_check_${riverRound}`).setLabel('Check').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId(`pk_raise_${riverRound}`).setLabel(`Raise (${Math.min(bet, debited.balance).toLocaleString()})`).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`pk_fold_${riverRound}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
-              ];
-
-        await interaction.editReply({
-            embeds: [new EmbedBuilder()
-                .setAuthor(embedAuthor(interaction))
-                .setThumbnail(THUMB)
-                .setColor(COLORS.INFO)
-                .setTitle('♠ Poker — The River')
-                .addFields(
-                    { name: '🃏 Your Hand',  value: handStr(playerHole),                     inline: false },
-                    { name: '🤖 Dealer',     value: dealerRiverLine,                          inline: false },
-                    { name: '🎴 Community',  value: `${flopStr}  ${turnStr}  ${riverStr}`,   inline: false },
-                    { name: '💰 Pot',        value: `**${pot.toLocaleString()}** coins`,      inline: true },
-                )
-                .setFooter({ text: 'Last chance — Check, Raise, or Fold before showdown' })],
-            components: [new ActionRowBuilder().addComponents(...riverActions)],
-        });
-        await delay(200);
-
-        const msg4 = await interaction.fetchReply();
-        let riverAction;
-        try {
-            const r = await msg4.awaitMessageComponent({
-                filter: ownedBy(interaction.user.id, i => i.customId.endsWith(riverRound), "This isn't your hand."),
-                time: 30_000,
-            });
-            await r.deferUpdate();
-            riverAction = r.customId.split('_')[1];
-        } catch {
-            settled = true;
-            const lapsedStreet = await payHand(userFilter, playerStake,
-                { game: 'poker', handId, phase: 'timeout:river' });
-            releaseLock?.();
-            return interaction.editReply({ content: `⏱️ Time's up! Bet refunded.${payoutNote(lapsedStreet)}`, embeds: [], components: [] }).catch(() => {});
-        }
-
-        if (riverAction === 'fold') {
-            folded = true;
-        } else if (riverAction === 'call' || riverAction === 'raise') {
-            const raiseAmt = Math.min(bet, debited.balance);
-            if (raiseAmt > 0) {
-                const raised = await placeWager(userFilter, raiseAmt);
-                if (raised) {
-                    debited = raised;
-                    playerStake += raiseAmt;
-                    pot += raiseAmt * (riverAction === 'raise' ? 2 : 1);
-                } else if (riverAction === 'call') {
-                    folded = true;
-                }
-            } else if (riverAction === 'call') {
-                folded = true;
-            }
-        }
-
-        if (folded) {
-            settled = true;
-            releaseLock?.();
-            const foldEmbed = new EmbedBuilder()
-                .setAuthor(embedAuthor(interaction))
-                .setThumbnail(THUMB)
-                .setColor(COLORS.ERROR)
-                .setTitle('♠ Poker — Folded')
-                .setDescription(`You folded on the river. The dealer had: **${handStr(dealerHole)}**\nCommunity: **${flopStr}  ${turnStr}  ${riverStr}**`)
-                .addFields({ name: '💰 Balance', value: `**${debited.balance.toLocaleString()}** coins` })
-                .setTimestamp();
-            return interaction.editReply({ embeds: [foldEmbed], components: [] });
         }
 
         // ── Showdown ──────────────────────────────────────────────────────────
-        await delay(400);
+        const playerBest = bestHand([...playerHole, ...community]);
+        const dealerBest = bestHand([...dealerHole, ...community]);
+        let { outcome, gross } = settleCalled(ante, playerBest, dealerBest, compareTuple(playerBest, dealerBest));
 
-        const playerAll = [...playerHole, ...community];
-        const dealerAll = [...dealerHole, ...community];
-        const { result, playerHand, dealerHand } = compareHands(playerAll, dealerAll);
-
-        const coinMult      = getCoinMultiplier(debited);
-        const serverMult    = getServerCoinMultiplier(guildSettings);
-        const totalCoinMult = coinMult * serverMult;
-        const streakBonus   = getLuckyStreakBonus(debited);
-
-        // The lucky streak turns a loss into a push before the payout is
-        // computed, so the settled outcome is what both the money and the embed
-        // are read off.
-        let outcome = result;
-        if (result === 'lose' && luckySaveEligible(playerStake) && streakBonus > 0 && Math.random() < streakBonus) {
+        // The lucky streak turns a loss into a push, stakes returned, before the
+        // payout is computed, so the embed reads off the settled outcome.
+        const streakBonus = getLuckyStreakBonus(debited);
+        if (outcome === 'lose' && luckySaveEligible(playerStake) && streakBonus > 0 && Math.random() < streakBonus) {
             outcome = 'push';
+            gross   = playerStake;
         }
 
-        const adjustedPayout = pokerShowdownPayout(outcome, playerStake, totalCoinMult);
+        const totalCoinMult = getCoinMultiplier(debited) * getServerCoinMultiplier(guildSettings);
+        const payout = boostedPayout(playerStake, gross, totalCoinMult);
 
-        const showdown = await payHand(userFilter, adjustedPayout,
-            { game: 'poker', handId, phase: 'showdown' });
+        const showdown = await payHand(userFilter, payout, { game: 'poker', handId, phase: 'showdown' });
         settled = true;
         releaseLock?.();
 
-        const net    = adjustedPayout - playerStake;
+        const net    = payout - playerStake;
         const netStr = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
+        const qualifies = dealerQualifies(dealerBest);
 
-        let color, title;
-        if (outcome === 'win')       { color = '#2ecc71'; title = '♠ Poker — You Win!'; }
-        else if (outcome === 'push') { color = '#f39c12'; title = '♠ Poker — Split Pot'; }
-        else                         { color = '#e74c3c'; title = '♠ Poker — Dealer Wins'; }
+        const verdict = {
+            'no-qualify': { color: '#2ecc71', title: "♠ Casino Hold'em — Dealer Doesn't Qualify",
+                line: `The dealer needs a pair of 4s. The ante pays **${anteOdds(playerBest)}:1** and the call is returned.` },
+            win:  { color: '#2ecc71', title: "♠ Casino Hold'em — You Win!",
+                line: `The ante pays **${anteOdds(playerBest)}:1** and the call pays 1:1.` },
+            push: { color: '#f39c12', title: "♠ Casino Hold'em — Push", line: 'Both bets are returned.' },
+            lose: { color: '#e74c3c', title: "♠ Casino Hold'em — Dealer Wins", line: 'The ante and the call are lost.' },
+        }[outcome];
 
-        const communityStr = `${flopStr}  ${turnStr}  ${riverStr}`;
         let boostNote = '';
-        if (totalCoinMult > 1.0 && adjustedPayout > playerStake) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
+        if (totalCoinMult > 1.0 && payout > playerStake) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
 
         const replayId = `poker_replay_${interaction.id}_${Date.now()}`;
 
@@ -687,19 +206,22 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             embeds: [new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor(color)
-                .setTitle(title)
-                .setDescription(`**Your best hand:** ${playerHand.name}\n**Dealer's best hand:** ${dealerHand.name}${boostNote}`)
+                .setColor(verdict.color)
+                .setTitle(verdict.title)
+                .setDescription(
+                    `**Your best hand:** ${paytableName(playerBest)}\n` +
+                    `**Dealer's best hand:** ${paytableName(dealerBest)}${qualifies ? '' : ' *(does not qualify)*'}\n\n` +
+                    `${verdict.line}${boostNote}`)
                 .addFields(
-                    { name: '🃏 Your Hole Cards',   value: handStr(playerHole),    inline: true },
-                    { name: '🤖 Dealer Hole Cards',  value: handStr(dealerHole),    inline: true },
-                    { name: '🎴 Community',           value: communityStr,            inline: false },
-                    { name: '💰 Pot',                value: `**${pot.toLocaleString()}** coins`, inline: true },
-                    { name: adjustedPayout > 0 ? '🏆 Payout' : '💀 Lost', value: adjustedPayout > 0 ? `${adjustedPayout.toLocaleString()} coins` : `${playerStake.toLocaleString()} coins`, inline: true },
-                    { name: '📊 Net',                value: `**${netStr}** coins`,   inline: true },
-                    { name: '💰 Balance',            value: `**${(await settledBalance(userFilter, showdown.balance)).toLocaleString()}** coins`, inline: true },
+                    { name: '🃏 Your Hole Cards',   value: handStr(playerHole), inline: true },
+                    { name: '🤖 Dealer Hole Cards', value: handStr(dealerHole), inline: true },
+                    { name: '🎴 Board',              value: handStr(community),  inline: false },
+                    { name: '💵 Staked',            value: `**${playerStake.toLocaleString()}** coins`, inline: true },
+                    { name: payout > 0 ? '🏆 Payout' : '💀 Lost', value: `${(payout > 0 ? payout : playerStake).toLocaleString()} coins`, inline: true },
+                    { name: '📊 Net',               value: `**${netStr}** coins`, inline: true },
+                    { name: '💰 Balance',           value: `**${(await settledBalance(userFilter, showdown.balance)).toLocaleString()}** coins`, inline: true },
                 )
-                .setFooter({ text: 'Texas Hold\'em · Best 5 of 7 · Dealer AI uses pre-flop ranges + pot odds' })
+                .setFooter({ text: `Casino Hold'em · Best 5 of 7 · Ante pays: ${PAYTABLE_LINE}` })
                 .setTimestamp()],
             components: [new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(replayId).setLabel('♠ Play Again').setStyle(ButtonStyle.Primary),
@@ -714,10 +236,10 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
         }).on('collect', async i => {
             // A new hand answers to the settings as they are now, not as they
             // were when the first one was typed.
-            const refused = await replayRefusal(interaction.guild.id, bet);
+            const refused = await replayRefusal(interaction.guild.id, ante);
             if (refused) return refuseReplay(i, interaction, refused);
             await i.deferUpdate();
-            await playPoker(interaction, bet, null, onWager);
+            await playPoker(interaction, ante, null, onWager);
         }).on('end', (_, reason) => {
             if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
         });
@@ -740,12 +262,12 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
 
 module.exports = {
     name: 'poker',
-    description: 'Texas Hold\'em — beat the dealer AI using pre-flop ranges and pot-odds decisions',
+    description: "Casino Hold'em — ante, see the flop, then fold or call 2× to beat the dealer",
     cooldown: 5,
     configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
-                .setDescription(`Amount to bet (min ${MIN_BET})`)
+                .setDescription(`The ante (min ${MIN_BET}); calling costs twice it`)
                 .setRequired(true)
                 .setMinValue(MIN_BET)
                 .setMaxValue(1_000_000_000)),
@@ -757,7 +279,9 @@ module.exports = {
             return interaction.reply({ content: 'Casino games are disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
-        const bet          = interaction.options.getInteger('bet');
+        // The `bet` option is the ante; the call is twice it.
+        const bet     = interaction.options.getInteger('bet');
+        const ante    = bet;
         const refusal = casinoRefusal(guildSettings, bet);
         if (refusal) {
             releaseLock?.();
@@ -765,18 +289,22 @@ module.exports = {
         }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
 
-        if ((user?.balance ?? 0) < bet) {
+        // A hand can cost the ante and a call of twice it, and a player who
+        // cannot cover the call can only fold. Asked up front, so nobody antes
+        // into a hand they cannot finish.
+        const needed = fullStake(ante);
+        if ((user?.balance ?? 0) < needed) {
             releaseLock?.();
             const currency = guildSettings?.economy?.currency || '💰';
             return interaction.reply({
-                content: `You don't have enough ${currency}. Your balance: **${currency}${(user?.balance ?? 0).toLocaleString()}**`,
+                content: `A **${ante.toLocaleString()}** ante needs **${currency}${needed.toLocaleString()}** to play out — the ante plus a call of twice it. Your balance: **${currency}${(user?.balance ?? 0).toLocaleString()}**`,
                 flags: MessageFlags.Ephemeral,
             });
         }
 
-        const { shouldProceed: pkProceed, alreadyReplied: pkReplied } = await confirmBet(interaction, bet, user.balance, 'Poker', guildSettings);
+        const { shouldProceed: pkProceed, alreadyReplied: pkReplied } = await confirmBet(interaction, ante, user.balance, 'Poker', guildSettings);
         if (!pkProceed) { releaseLock?.(); return; }
         if (!pkReplied) await interaction.deferReply();
-        await playPoker(interaction, bet, releaseLock, onWager);
+        await playPoker(interaction, ante, releaseLock, onWager);
     },
 };

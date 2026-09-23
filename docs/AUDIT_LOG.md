@@ -2304,14 +2304,179 @@ Three patterns come up again and again:
 
 ---
 
+## Economy — The Seasonal-Event Definition Surface
+
+**Status: Audited — all findings resolved** ✓
+
+The twenty-third pass of the economy audit #873. Pass 8 audited the
+seasonal-event currency, pass 13 `/explore`'s event drop and pass 14 the event
+shop's debit and effect purchases. This pass covers what decides *which* event
+is running:
+
+- `/event start`, `/event end` and `/event status` (`event/manage.js`);
+- the hourly auto-start/auto-end sweep (`seasonalEventService.checkSeasonalEvents`);
+- `/eventshop`'s browse and balance reads.
+
+None of it moves player currency, but it sets the coin and XP multipliers every
+earning command pays at, and which event currency the activities and the shop
+use. Every write here replaces `activeEvent` whole, and none of them was guarded
+on the event it had read.
+
+**Files reviewed/fixed:**
+- `src/services/seasonalEventService.js`
+- `src/commands/economy/event/manage.js`, `src/commands/economy/event/index.js`
+- `src/commands/economy/eventshop.js`, `src/commands/economy/season.js` (the event title)
+- `src/models/Guild.js` (`eventAutoStartSkip`, added)
+- `src/data/seasonalEvents.js` (reviewed)
+- `tests/pass23EventDefinitions.test.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 1 | The hourly sweep wrote from a snapshot taken at the top of the hour, with an unguarded `$set` of `activeEvent`. An admin's `/event start` landing between the read and the write was lost: over an expired event, the sweep's clear erased the new one; over no event, the sweep's auto-start replaced it with the seasonal event and its multipliers. Either way the sweep then announced a start or end that was not what happened | Every sweep write is guarded on the event it read (`sameEventFilter`: the type and `startedAt`, or no event at all). A write that misses changed nothing and announces nothing | `seasonalEventService.js` |
+| 2 | `/event end` on the seasonal event the calendar is running lasted until the sweep's next hourly tick, which saw no event inside the window and started the same event again, multipliers and "Has Begun!" announcement included. An admin could not end a seasonal event for more than an hour | `/event end` leaves `eventAutoStartSkip` (`{ eventId, until }`, the window's end) when it ends the calendar's current event, and the sweep does not auto-start that event while it holds. It is outside `activeEvent`, which every start and end replaces whole. `/event start` can still run the event again on purpose, and the hold lapses with the window | `manage.js`, `seasonalEventService.js`, `Guild.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 3 | `/event start` read the guild uncached so that a second start could not pass the same check, but the write after it was still an unguarded `$set`. Two starts, or a start racing the sweep's auto-start, both passed, and the later one replaced the earlier | The write is guarded on the event that was read: none, or the expired one being replaced. A miss is reported as another event having started. A guild with no document still upserts, and a racing insert's E11000 is reported the same way | `manage.js` |
+| 4 | `/event end` cleared whatever `activeEvent` held by the time it wrote, so an end racing a new start cleared an event nobody had asked to end, and reported ending the old one | Guarded the same way; a miss ends nothing and says so. An ended event is now announced where its start was, as the sweep's own ends are | `manage.js` |
+| 5 | One guild whose sweep write threw aborted the loop, so every guild after it missed its start or end until the next hour | Each guild runs in its own `try`, and a failure is logged | `seasonalEventService.js` |
+| 6 | An event name had no length limit. It is echoed into embed titles (the start reply, `/event status`, both announcements, `/eventshop browse`, `/season event`), which Discord rejects past 256 characters, and discord.js throws rather than truncating. `/event start` wrote the event first, so an over-long name started the event and then failed the command | The `name` option is capped at 100 characters, and stored names are shortened wherever they render (`eventLabel`), the pass-18 `seasonLabel` shape | `index.js`, `seasonalEventService.js`, `manage.js`, `eventshop.js`, `season.js` |
+
+`/event start` also projected only `activeEvent`, so its fallback to the
+economy announcement channel always read `undefined` and stored `null`. The read
+now projects `economy.announcementChannelId` too. Nothing visible changes, since
+the announcements fall back to the same channel at send time.
+
+`tests/pass23EventDefinitions.test.js` (17 tests) drives the sweep and the
+commands against the fake store, with the racing write injected between each
+one's read and its write. 10 of the 17 fail against the old code; the rest pin
+behaviour that has to keep holding (an untouched expired event still clears, a
+first-ever start still upserts, ending a custom event holds nothing off).
+`tests/seasonalEventRewards.test.js`'s projection assertion gains the new field.
+
+---
+
+### Reviewed and found sound
+
+- **The multiplier readers** (`getEventCoinMultiplier`, `getEventXpMultiplier`,
+  `hasActiveEvent`, `getEventCrossSystemType`) each treat an event past its
+  `endsAt` as over, so an expired event pays nothing extra in the up-to-an-hour
+  before the sweep clears it.
+- **The calendar.** No window crosses a year or a month, so
+  `getSeasonalEndDate`'s current-year date is right, and
+  `tests/seasonalEventWindows.test.js` walks every window at both edges.
+- **Shard scoping.** The sweep checks `handlesGuild` before it writes, so two
+  shards never both start or end one guild's event.
+- **`/event status`** and **`/eventshop balance`** only read, and the balance is
+  the caller's own, shown ephemerally. `/eventshop browse` already capped each
+  item's name and blurb.
+- **An event ending mid-purchase.** `/eventshop`'s stock restores match on the
+  item and miss harmlessly once the shop is cleared; the currency refund is keyed
+  on the user (pass 8).
+
+**Recorded, not changed:** event-currency balances outlive their event. That is
+the existing design: `/season event` shows them, and each event has its own
+currency id.
+
+---
+
+## Economy — The Casino's Odds
+
+**Status: Audited — all findings resolved** ✓
+
+The twenty-fourth pass of the economy audit #873, over what the casino passes
+before it did not ask: whether the number a game credits is one the house can
+afford. Passes 2, 4 and 12 audited *how* each payout is credited. This one
+**measured each game's return to player** (RTP: coins credited ÷ coins staked)
+against the comments that claim it: exactly where the maths is closed-form,
+and by simulation of the command's real flow where the player makes decisions.
+Blackjack and poker were simulated over 1–4 million hands each.
+
+| Game | Before | After |
+|---|---|---|
+| crash, auto cash-out at ≤5× | ~109% | 99% |
+| crash, cash-out at 10× / 50× | 89% / 49% (advertised: 99%) | 99% |
+| Three Card Monte | every round won by following the swaps | 93% |
+| higher-or-lower, simple strategy | ~115% | ≤ 95% a guess |
+| slots (Hot Reel and free spins included) | ~157% | ~92.5% |
+| blackjack, insuring only on the peek prompt | ~102% | ~99.9% (basic strategy) |
+| poker, checking to the river | ~121% | 97.4% calling every hand |
+| keno, dice, coinflip, roulette | 92%, 95%, 97.5%, 97.3% | unchanged — sound |
+
+**Files reviewed/fixed:**
+- `src/games/casino/crash.js`, `crashCurve.js`
+- `src/games/casino/cupgame.js`
+- `src/games/casino/higherlower.js`, `higherlowerOdds.js`
+- `src/games/casino/slots.js`, `slotsReels.js`
+- `src/games/casino/blackjack.js`
+- `src/games/casino/poker.js` (rewritten), `holdemRules.js` (added), `settlement.js`
+- `src/games/casino/{keno,kenoPaytable,dice,diceOdds,coinflip,coinflipOdds,roulette}.js` (reviewed)
+- `tests/pass24CasinoOdds.test.js`, `tests/casinoHoldem.test.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 1 | **Crash's auto cash-out paid targets the round never reached.** The tick ran auto cash-outs before its crash check, at the tick's own multiplier. On the tick that busted the round, every target that tick passed was paid — above the crash point, and above the target. Measured: about 109% of the stake at any target up to 5× | Auto cash-outs pay their **target**, only when it is at or below the crash point. A crashing tick never becomes the multiplier on show, so a Cash Out pressed while the tick awaits cannot be paid at it either | `crash.js` |
+| 2 | **Three Card Monte was solved.** It showed the Queen's starting position and then every swap ("cards 2 ↔ 3"), so a player who followed along won every round: 2.8×, doubling over four rounds, with no risk. Its "tell", meant as flavour at "EV ≈ +0.12", named the Queen 40% of the time and a random card otherwise — right 60% of the time, worth 1.68× the stake | The swaps are shown as "Swap k/n" only; one unseen random swap already leaves the Queen equally likely under each card, so the stated 1-in-3 holds. The tell is removed | `cupgame.js` |
+| 3 | **Higher-or-lower added a flat +0.5× per correct call whatever the odds.** Calling the likelier side wins 77% of non-tie draws on average (every draw off an ace or a king), so the first call alone returned about 115% of the stake | Every call is priced by its odds: a win multiplies the session by 0.95 ÷ the call's chance (ties aside, since a tie pushes). Every call returns 95% off any card; the best any strategy does from a fresh hand is the stake back. A lapse on the question screen pays what the session is worth (it paid the bare stake, mid-streak too). A coin booster no longer multiplies a "profit" below the stake | `higherlowerOdds.js`, `higherlower.js` |
+| 4 | **Slots paid about 157% of every stake.** Nearly half of all spins (47.8%) are a two-of-a-kind, and at half the three-of-a-kind row they alone returned 1.30× the stake | Two-of-a-kind pays a quarter of the row. The whole loop, Hot Reel and free spins included, returns about 92.5%; the paytable embed says so. A pair that returns less than the stake counts as a loss for the lucky saves, the Hot Reel streak and the result card, and a coin booster no longer multiplies its negative profit | `slotsReels.js`, `slots.js` |
+| 5 | **Blackjack's insurance prompt told the player the hole card.** Insurance was offered at the peek only when the dealer *had* blackjack; an ace without one went straight to the table, where a second Insurance button could only lose. Insuring only on the prompt paid 2:1 every time — about +2.3% a hand, a player edge (102%) | Insurance is offered on every ace up-card, before the peek. The table no longer offers it | `blackjack.js` |
+| 6 | **Poker paid about 121% to a player who only checked.** The dealer "AI" folded ~53% of hands pre-flop without looking at the player (paying 1.5×); its post-flop fold could never trigger (pot odds are at most 1/3 and the fold needed equity below that less 0.05) and its bet never did, so it called every raise; its displayed "equity" compared the two made hands, so on the river it printed the showdown result; and a timeout at any street refunded the whole stake, raises included. Exploited, about 150%, with no losing hands | Rewritten as **Casino Hold'em** (the owner chose this over disabling or patching): ante, see two cards and the flop, fold or call 2× the ante; the dealer qualifies with a pair of fours; the ante pays by the standard paytable. No dealer decisions to exploit, and a timeout folds. The ante must be coverable three times over up front | `poker.js`, `holdemRules.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 7 | **Crash's advertised 1% edge held only at low targets.** The crash point was 0.99/r with the bottom 1% of rolls busting instantly — and those are the rolls 0.99/r maps *above* 99×, so the instant bust came off the top of the curve. P(crash ≥ m) was 0.99/m − 0.01: a 10× cash-out returned 89%, a 50× one 49%. It also rounded to the nearest cent, so a round that busted at 1.995× paid a 2.00× target | The crash point is 0.99/(1 − r), floored to the cent, between 1.00× and 100×: P(crash ≥ m) = 0.99/m, 99% at every target | `crashCurve.js` |
+| 8 | A manual crash cash-out re-read the live multiplier after its write, so its reply could announce a later multiplier than the one paid | The multiplier is read once | `crash.js` |
+
+---
+
+### Reviewed and found sound
+
+- **Keno** returns 92.3% exactly (hypergeometric over the paytable), as its
+  comment says. **Dice** returns 95% on every call and die size; **coinflip**
+  97.5%; **roulette** is single-zero European, 97.3%.
+- **Blackjack** otherwise: basic strategy returns 99.93% (single deck,
+  dealer stands on soft 17, 3:2 naturals, one split, no double after split).
+  Its timeouts stand the hand rather than refunding it.
+- **Lucky effects** (charm re-spins, streak saves, crash's +20% for a
+  low-stakes host) are a deliberate, stake-capped player edge and were left.
+
+**Recorded, not changed:**
+- Blackjack pays a natural's 3:2 floored on odd bets, and a player's
+  multi-card 21 pushes against a dealer natural under a ten, where a casino
+  would take it. Both are small.
+- The casino has no single RTP target. After this pass every game sits between
+  92% (keno) and 99.9% (blackjack), which is a spread worth deciding on
+  deliberately rather than a defect.
+
+---
+
 ## Not yet reviewed
 
-Nothing below has been audited. Several of these are the highest-churn areas of
-the codebase — the economy alone is roughly a third of `src/` and takes the bulk
-of ongoing rework — so the gap between what this file covers and what ships is
-wide, and it is widest exactly where the risk is.
+The economy list below maps which pass of #873 audited each area; the
+"Everything else uncovered" list after it has not been audited. The economy
+alone is roughly a third of `src/` and takes the bulk of ongoing rework, which
+is why it was audited first, and why it stays listed here.
 
-**Economy** — the largest uncovered area:
+**Economy** — every area below has now been audited, across passes 1–24 of the
+economy audit; the list stays as the map of which pass covered what. It is still the
+highest-churn code in the repository, so a change to it is a reason to re-check
+rather than a settled result:
 
 - `hunt`, `mine`, `fish`, `explore` — the run and bonus **payouts** and the shop-purchase **refunds** are audited above (pass 6); the **repair/upgrade/unlock shop refunds**, the **quest-claim credits**, `craft.js`, `forge.js`, and the **tournament flow** (the entry fee) are audited above (pass 9); the `/mine raid` transfer, the craft/forge grants and the pet drops that ride the run's `save()` were reviewed there and found sound; the **quest-reward credit** these runs fold into their keyed delta is audited above (pass 11), which keyed the same credit at every other caller. `/explore`'s while-an-event-runs **event-currency drop** is audited above (pass 13). The map views (`/explore map`, `/mine map`) are audited above (pass 16). The rest of `explore/`'s views (travel, profile, journal, regions, relics) are audited above (pass 17). The `/hunt`, `/fish` and `/mine` profiles, inventories and prestige are audited above (pass 20); pass 7 had found prestige moved no currency
 - `pet` (`petService.js`, `pet/`) — the `/pet` command's **PvP-battle winner payout, the battle escrow refunds and the adopt-fee refund** are audited above (pass 10, which also split `pet.js` into the `pet/` folder), alongside the pet **drops** the gathering runs grant, found sound in pass 9. The Pet-of-the-Week reward was reviewed and found sound. The pet-care **quest credits** (`/pet feed`, `play`, `rest` and the battle care rewards) are audited above (pass 11), keyed alongside every other caller of the shared `awardQuest` hook
@@ -2319,13 +2484,14 @@ wide, and it is widest exactly where the risk is.
 - casino (`src/games/casino/*`, `casino.js`) — the progressive jackpot (pass 2),
   the hand payouts (pass 4), and `confirmBet`, the bet guards, the crash restart
   refund and the games' leaderboard and stat writes (pass 12) are audited above;
-  the stakes go through `placeWager`, which #785 covered. Not reviewed: the
-  games' odds and house edges beyond what pass 4 needed for the payouts, and the
-  rendering (embeds, animations, the paytables)
+  the stakes go through `placeWager`, which #785 covered. The games' odds and
+  house edges, and the rendering that decides them (the Monte swaps, the
+  blackjack peek prompt, poker's equity line, the paytables), are audited above
+  (pass 24)
 - core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market/` and `gift.js` have had their unwind paths audited (pass 3), and the rest of both, with `trade.js` and its escrow, is audited above (pass 21)
 - group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is audited above (pass 22)
 - progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (view, missions, leaderboard, me, history, event, admin start/end) is audited above (pass 18). Season XP, tier claims and mission progress are committed as guarded writes rather than through `save()` (pass 19)
-- seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. Not reviewed: the event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end scheduler in `seasonalEventService.js`) and the shop's browse/balance reads, none of which move player currency. `/explore`'s event-currency drop is audited above (pass 13). The `/eventshop` debit guard and its effect purchases are audited above (pass 14)
+- seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. The event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end sweep in `seasonalEventService.js`) and the shop's browse/balance reads are audited above (pass 23). `/explore`'s event-currency drop is audited above (pass 13). The `/eventshop` debit guard and its effect purchases are audited above (pass 14)
 
 **Everything else uncovered:**
 
@@ -2355,6 +2521,8 @@ server shop on 2026-09-23; the effect consumers on 2026-09-23; the map views
 on 2026-09-23; the `/explore` views on 2026-09-23; the season pass's
 non-reward surface on 2026-09-23; season XP, tier claims and mission
 progress on 2026-09-23; the gathering commands' remaining surface on
-2026-09-23; the player market, gifts and trades on 2026-09-23; and the heist,
-syndicate and duel lobbies on 2026-09-23. "Not yet reviewed" carries no review
-date, because nothing in it has been reviewed.*
+2026-09-23; the player market, gifts and trades on 2026-09-23; the heist,
+syndicate and duel lobbies on 2026-09-23; the seasonal-event definition
+surface on 2026-09-23; and the casino's odds on 2026-09-23. The "Everything
+else uncovered" list carries no review date, because nothing in it has been
+reviewed.*

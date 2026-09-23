@@ -6,25 +6,32 @@
 
 const GROWTH = 1.12;
 
+const MAX_CRASH = 100.00;
+
 /**
- * Where the round busts. 1% of rounds bust instantly at 1.00×; the rest follow
- * 0.99/r, which is the 1% house edge.
+ * Where the round busts: 0.99 / (1 − r), floored to two places, never below
+ * 1.00× and never above MAX_CRASH.
  *
- * The 100× cap never binds — 0.99/r only reaches 100 at r <= 0.0099, and
- * everything below 0.01 has already returned 1.00 — so the largest round the
- * game deals is 99.00×. It is left in as the guard it is; raise the instant-bust
- * floor and it starts doing work. tests/casinoPayoutTables.test.js pins both.
+ * That makes P(crash ≥ m) = 0.99 / m for every two-place target m, so a cash-out
+ * at any multiplier returns 99% of the stake on average — the one-percent edge
+ * the game advertises, at 1.5× and at 50× alike. About 2% of rounds land on
+ * 1.00× and bust before the first tick: the 1% below 1.00× the formula floors
+ * up, and the 1% that would have busted between 1.00× and 1.01×.
  *
- * The 1.00× floor does bind. For r above ~0.995, 0.99/r lands in (0.99, 0.995)
- * and rounds to 0.99 — a round that busts below the multiplier it starts at,
- * about one roll in two hundred. It used to come out as 0.99×.
+ * It used to be 0.99 / r with the bottom 1% of rolls busting instantly. Those
+ * rolls are the ones 0.99 / r maps to *above* 99×, so the instant bust came out
+ * of the top of the curve rather than off every target evenly: P(crash ≥ m)
+ * was 0.99 / m − 0.01, and a player cashing at 10× got back 89%, at 50× 49%
+ * (#873, pass 24). It also rounded to the nearest cent rather than down, so a
+ * round that busted at 1.995× paid a 2.00× target.
  *
  * `rng` returns a float in [0, 1) — Math.random by default.
  */
 function generateCrashPoint(rng = Math.random) {
-    const r = rng();
-    if (r < 0.01) return 1.00;
-    return Math.min(100.00, Math.max(1.00, parseFloat((0.99 / r).toFixed(2))));
+    const raw = 0.99 / (1 - rng());
+    // The epsilon keeps a quotient that is a whole cent in exact arithmetic
+    // (0.99 / 0.495 = 2) from flooring a cent short on its float error.
+    return Math.min(MAX_CRASH, Math.max(1.00, Math.floor(raw * 100 + 1e-9) / 100));
 }
 
 /** The multiplier after `tick` ticks — 1.12^tick, to two places. */
@@ -42,4 +49,4 @@ function multLabel(m) {
     return m >= 10 ? m.toFixed(1) + 'x' : m.toFixed(2) + 'x';
 }
 
-module.exports = { GROWTH, generateCrashPoint, multiplierAt, ticksUntilCrash, multLabel };
+module.exports = { GROWTH, MAX_CRASH, generateCrashPoint, multiplierAt, ticksUntilCrash, multLabel };

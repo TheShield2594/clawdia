@@ -71,8 +71,19 @@ function spinEmbed(display, bet, stage, interaction, jackpotPool) {
         );
 }
 
+/**
+ * Whether a spin lost the player money. At TWO_OF_A_KIND_RATE a Cherry or Lemon
+ * pair pays back less than the stake, so it is a loss for everything that asks
+ * — the lucky saves, the Hot Reel streak and the result card — though it still
+ * returns part of the bet (#873, pass 24).
+ */
+function isNetLoss(result, bet) {
+    return result.outcome === 'lose' || (result.outcome === 'two' && result.payout < bet);
+}
+
 function resultEmbed(reels, result, bet, balance, interaction, jackpotPool, note = '') {
     const { payout, outcome, symbol, wildCount, multFactor } = result;
+    const partialLoss = outcome === 'two' && isNetLoss(result, bet);
     const display = reels.map(s => s.emoji).join('  ┃  ');
     const net     = payout - bet;
     const netStr  = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
@@ -81,7 +92,9 @@ function resultEmbed(reels, result, bet, balance, interaction, jackpotPool, note
         jackpot: { color: '#FF00FF', title: '🎰 ✨ J A C K P O T ✨ 🎰', line: '🃏🃏🃏 **TRIPLE WILD — JACKPOT!** 🎉🎊🎉\n*The reels went absolutely wild!*' },
         mult3:   { color: '#00FFFF', title: '🎰 ⚡ Triple Boost! ⚡',     line: `⚡⚡⚡ **TRIPLE MULTIPLIER BONUS!**\n*${randomFrom(SLOTS_WIN_LINES)}*` },
         three:   { color: '#00FF00', title: `🎰 🏆 Three ${symbol?.name ?? ''}s!`, line: `${symbol?.emoji.repeat(3)} **THREE OF A KIND!**\n*${randomFrom(SLOTS_WIN_LINES)}*` },
-        two:     { color: '#FFAA00', title: '🎰 Two of a Kind',           line: `${symbol?.emoji.repeat(2)} **Two ${symbol?.name ?? ''}s** — partial win!\n*${randomFrom(SLOTS_WIN_LINES)}*` },
+        two:     partialLoss
+            ? { color: '#FF4444', title: '🎰 Two of a Kind',       line: `${symbol?.emoji.repeat(2)} **Two ${symbol?.name ?? ''}s** — part of your bet back.` }
+            : { color: '#FFAA00', title: '🎰 Two of a Kind',       line: `${symbol?.emoji.repeat(2)} **Two ${symbol?.name ?? ''}s** — partial win!\n*${randomFrom(SLOTS_WIN_LINES)}*` },
         push:    { color: '#f39c12', title: '🎰 🎯 Lucky Streak Fired!',   line: '🎯 **Your Lucky Streak fired!** Bet returned — spin again!' },
         scatter: { color: '#ff69b4', title: '🌸 Scatter — Free Spins!',   line: '🌸 **Scatter symbols triggered!** Free spins incoming…' },
         lose:    { color: '#FF4444', title: '🎰 No Match',                line: `💨 *${randomFrom(SLOTS_LOSE_LINES)}*` },
@@ -93,7 +106,7 @@ function resultEmbed(reels, result, bet, balance, interaction, jackpotPool, note
     if (multFactor > 1 && outcome !== 'mult3')  extras += `\n> ⚡ *${multFactor}x Boost applied!*`;
 
     const payoutVal = payout > 0 ? payout : bet;
-    const payoutLabel = payout > 0 ? '🏆 Payout' : '💀 Lost';
+    const payoutLabel = payout > 0 ? (partialLoss ? '💰 Returned' : '🏆 Payout') : '💀 Lost';
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
@@ -172,12 +185,12 @@ function paytableEmbed() {
             { name: '​', value: '​', inline: false },
             { name: '🃏🃏🃏 Triple Wild', value: '🏆 **JACKPOT — wins the whole progressive pool** (`/casino jackpot`)', inline: true },
             { name: '⚡⚡⚡ Triple Boost', value: '**4× bet**', inline: true },
-            { name: 'Two of a Kind', value: 'Half of the 3-of-a-kind payout', inline: false },
+            { name: 'Two of a Kind', value: 'A quarter of the 3-of-a-kind payout', inline: false },
             { name: '🌸🌸 Two Scatters', value: '**3 free spins** (no bet deducted)', inline: true },
             { name: '🌸🌸🌸 Three Scatters', value: '**5 free spins** with **1.5× multiplier**', inline: true },
             { name: '🔥 Hot Reel', value: 'After 3 losses in a row, reel 1 locks to a high-value symbol', inline: false },
         )
-        .setFooter({ text: 'Two-of-a-kind pays 50% of the three-of-a-kind rate for that symbol • a Wild beside two different symbols completes the better-paying one' });
+        .setFooter({ text: 'Two-of-a-kind pays 25% of the three-of-a-kind rate for that symbol • a Wild beside two different symbols completes the better-paying one' });
 }
 
 module.exports = {
@@ -282,13 +295,13 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
 
         // Lucky Charm: on loss, 20% chance to re-spin (low-stakes bets only)
         const luckySavable = luckySaveEligible(bet);
-        if (result.outcome === 'lose' && luckySavable && luckyActive && Math.random() < 0.20) {
+        if (isNetLoss(result, bet) && luckySavable && luckyActive && Math.random() < 0.20) {
             reels  = [spinReel(), spinReel(), spinReel()];
             result = evaluate(reels, bet);
             charmTriggered = true;
         }
         // Lucky Streak: on remaining loss, convert to a push (bet returned)
-        if (result.outcome === 'lose' && luckySavable && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+        if (isNetLoss(result, bet) && luckySavable && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
             result = { ...result, outcome: 'push', payout: bet };
         }
 
@@ -350,7 +363,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         // ── Update loss streak ──────────────────────────────────────────────────
         // A hot-reel spin reset it when it claimed the streak, and a loss on one
         // does not count toward the next — so it writes nothing more.
-        const isWin = result.outcome !== 'lose';
+        const isWin = !isNetLoss(result, bet);
         if (isWin || !hotReelTriggered) {
             await User.updateOne(userFilter, isWin
                 ? { $set: { 'casinoStats.slotsLossStreak': 0 } }
@@ -362,7 +375,9 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         // is exempt: the pool is a fixed pot of coins other players paid in, not a
         // multiple of this bet, and running a booster over it mints the difference.
         let adjustedPayout = result.payout;
-        if (result.payout > 0 && totalCoinMult > 1.0 && !jackpotWon) {
+        // Profit only: a pair that returns less than the stake has none, and
+        // multiplying its negative "profit" deepened the loss.
+        if (result.payout > bet && totalCoinMult > 1.0 && !jackpotWon) {
             adjustedPayout = bet + Math.round((result.payout - bet) * totalCoinMult);
         }
 

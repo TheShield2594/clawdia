@@ -139,7 +139,13 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
                     .setColor(COLORS.INFO)
                     .setTitle(`🃏 Three Card Monte${roundLabel} — Shuffling…`)
                     .setDescription(
-                        `Swap ${step + 1}/${steps} — cards **${a + 1}** ↔ **${b + 1}**\n\n` +
+                        // Which two cards swapped is not shown. It was, beside
+                        // the Queen's starting position, so a player who
+                        // followed along found her every round — 2.8× a round,
+                        // doubling, at no risk (#873, pass 24). One unseen
+                        // random swap already leaves her equally likely under
+                        // each card, so the 1-in-3 the footer states holds.
+                        `Swap ${step + 1}/${steps}…\n\n` +
                         `> ${HIDDEN}   ${HIDDEN}   ${HIDDEN}\n` +
                         `> 1️⃣  ·  2️⃣  ·  3️⃣`,
                     )
@@ -149,12 +155,11 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
             await delay(550);
         }
 
-        // Weakly correlated "tell": right slightly above chance (40%), giving
-        // EV ≈ +0.12 at 2.8× payout — flavor hint, not a profitable signal.
-        const tellCard = Math.random() < 0.40 ? queenPos : Math.floor(Math.random() * 3);
-        const tellText = Math.random() < 0.40
-            ? `\n\n👁️ *You notice card **${tellCard + 1}** seems slightly warped…*`
-            : '';
+        // There used to be a "tell" here: a card named as "slightly warped",
+        // meant as flavour at "EV ≈ +0.12". It named the Queen 40% of the time
+        // and a random card otherwise — so it was right 60% of the time, and
+        // following it paid 1.68× the stake (#873, pass 24). Removed rather than
+        // weakened: a tell at exactly chance tells the player nothing.
 
         const gameId = `monte_${interaction.id}_${Date.now()}`;
 
@@ -165,7 +170,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
                 .setColor('#f1c40f')
                 .setTitle(`🃏 Three Card Monte${roundLabel} — Find the Queen!`)
                 .setDescription(
-                    `Shuffling done! Where's the Queen?${tellText}\n\n` +
+                    `Shuffling done! Where's the Queen?\n\n` +
                     `> ${HIDDEN}   ${HIDDEN}   ${HIDDEN}\n` +
                     `> 1️⃣  ·  2️⃣  ·  3️⃣`,
                 )

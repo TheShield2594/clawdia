@@ -31,82 +31,100 @@
             "lines": 24
         },
         "src/commands/economy": {
-            "statements": 35,
-            "branches": 20,
-            "functions": 37,
-            "lines": 36
+            "statements": 58,
+            "branches": 41,
+            "functions": 53,
+            "lines": 60
         },
         "src/commands/economy/event": {
-            "statements": 23,
-            "branches": 0,
-            "functions": 47,
-            "lines": 25
+            "statements": 40,
+            "branches": 24,
+            "functions": 60,
+            "lines": 40
+        },
+        "src/commands/economy/explore": {
+            "statements": 25,
+            "branches": 8,
+            "functions": 23,
+            "lines": 27
         },
         "src/commands/economy/fish": {
-            "statements": 31,
-            "branches": 18,
+            "statements": 34,
+            "branches": 22,
             "functions": 42,
-            "lines": 30
+            "lines": 34
         },
         "src/commands/economy/fish/shop": {
-            "statements": 13,
-            "branches": 0,
-            "functions": 0,
-            "lines": 14
+            "statements": 96,
+            "branches": 92,
+            "functions": 94,
+            "lines": 96
         },
         "src/commands/economy/hunt": {
-            "statements": 43,
-            "branches": 32,
-            "functions": 55,
-            "lines": 44
+            "statements": 56,
+            "branches": 43,
+            "functions": 67,
+            "lines": 57
         },
         "src/commands/economy/hunt/shop": {
-            "statements": 27,
+            "statements": 28,
             "branches": 7,
             "functions": 17,
-            "lines": 28
+            "lines": 29
+        },
+        "src/commands/economy/market": {
+            "statements": 89,
+            "branches": 73,
+            "functions": 85,
+            "lines": 90
         },
         "src/commands/economy/mine": {
-            "statements": 32,
-            "branches": 23,
-            "functions": 41,
-            "lines": 33
+            "statements": 38,
+            "branches": 29,
+            "functions": 50,
+            "lines": 38
         },
         "src/commands/economy/mine/shop": {
-            "statements": 27,
+            "statements": 28,
             "branches": 6,
             "functions": 11,
-            "lines": 28
+            "lines": 29
+        },
+        "src/commands/economy/pet": {
+            "statements": 96,
+            "branches": 82,
+            "functions": 79,
+            "lines": 96
         },
         "src/commands/economy/rob": {
-            "statements": 50,
-            "branches": 34,
-            "functions": 34,
-            "lines": 50
+            "statements": 56,
+            "branches": 44,
+            "functions": 41,
+            "lines": 57
         },
         "src/commands/fun": {
-            "statements": 29,
-            "branches": 16,
-            "functions": 37,
-            "lines": 29
+            "statements": 31,
+            "branches": 24,
+            "functions": 41,
+            "lines": 31
         },
         "src/commands/leveling": {
             "statements": 41,
             "branches": 24,
-            "functions": 40,
+            "functions": 45,
             "lines": 42
         },
         "src/commands/moderation": {
-            "statements": 71,
-            "branches": 62,
-            "functions": 74,
-            "lines": 73
+            "statements": 73,
+            "branches": 65,
+            "functions": 76,
+            "lines": 75
         },
         "src/commands/utility": {
-            "statements": 20,
+            "statements": 22,
             "branches": 0,
-            "functions": 49,
-            "lines": 21
+            "functions": 50,
+            "lines": 23
         },
         "src/config": {
             "statements": 94,
@@ -121,10 +139,10 @@
             "lines": 83
         },
         "src/dashboard/lib": {
-            "statements": 90,
+            "statements": 92,
             "branches": 83,
-            "functions": 89,
-            "lines": 92
+            "functions": 90,
+            "lines": 94
         },
         "src/dashboard/public": {
             "statements": 0,
@@ -133,22 +151,22 @@
             "lines": 0
         },
         "src/dashboard/routes": {
-            "statements": 81,
-            "branches": 63,
-            "functions": 75,
-            "lines": 83
+            "statements": 82,
+            "branches": 72,
+            "functions": 77,
+            "lines": 84
         },
         "src/dashboard/routes/api": {
-            "statements": 69,
-            "branches": 66,
-            "functions": 66,
-            "lines": 70
+            "statements": 73,
+            "branches": 69,
+            "functions": 70,
+            "lines": 74
         },
         "src/data": {
-            "statements": 77,
+            "statements": 78,
             "branches": 57,
-            "functions": 64,
-            "lines": 78
+            "functions": 67,
+            "lines": 79
         },
         "src/events": {
             "statements": 62,
@@ -157,10 +175,10 @@
             "lines": 66
         },
         "src/games/casino": {
-            "statements": 40,
-            "branches": 30,
-            "functions": 45,
-            "lines": 40
+            "statements": 67,
+            "branches": 53,
+            "functions": 64,
+            "lines": 68
         },
         "src/migrations": {
             "statements": 56,
@@ -169,22 +187,22 @@
             "lines": 58
         },
         "src/models": {
-            "statements": 79,
-            "branches": 13,
-            "functions": 67,
-            "lines": 83
+            "statements": 83,
+            "branches": 58,
+            "functions": 81,
+            "lines": 87
         },
         "src/services": {
-            "statements": 66,
-            "branches": 57,
-            "functions": 63,
-            "lines": 69
+            "statements": 73,
+            "branches": 64,
+            "functions": 70,
+            "lines": 76
         },
         "src/services/ai": {
-            "statements": 83,
-            "branches": 74,
+            "statements": 84,
+            "branches": 75,
             "functions": 80,
-            "lines": 86
+            "lines": 87
         },
         "src/services/ai/mcp": {
             "statements": 92,
@@ -195,8 +213,8 @@
         "src/services/ai/providers": {
             "statements": 92,
             "branches": 80,
-            "functions": 93,
-            "lines": 93
+            "functions": 94,
+            "lines": 94
         },
         "src/services/dm": {
             "statements": 94,
@@ -217,34 +235,16 @@
             "lines": 65
         },
         "src/utils": {
-            "statements": 74,
-            "branches": 72,
+            "statements": 81,
+            "branches": 74,
             "functions": 80,
-            "lines": 75
+            "lines": 82
         },
         "src/views": {
-            "statements": 62,
-            "branches": 52,
-            "functions": 52,
-            "lines": 65
-        },
-        "src/commands/economy/explore": {
-            "statements": 15,
-            "branches": 0,
-            "functions": 19,
-            "lines": 16
-        },
-        "src/commands/economy/pet": {
-            "statements": 17,
-            "branches": 0,
-            "functions": 21,
-            "lines": 19
-        },
-        "src/commands/economy/market": {
-            "statements": 89,
-            "branches": 69,
-            "functions": 84,
-            "lines": 90
+            "statements": 71,
+            "branches": 57,
+            "functions": 69,
+            "lines": 74
         }
     },
     "neverExecuted": [
@@ -280,7 +280,7 @@
         },
         "src/commands/economy/crime.js": {
             "statements": 88,
-            "branches": 63,
+            "branches": 64,
             "functions": 80,
             "lines": 93
         },
@@ -291,22 +291,22 @@
             "lines": 64
         },
         "src/commands/economy/duel.js": {
-            "statements": 47,
-            "branches": 36,
-            "functions": 40,
-            "lines": 48
+            "statements": 62,
+            "branches": 50,
+            "functions": 42,
+            "lines": 63
         },
         "src/commands/economy/gift.js": {
-            "statements": 88,
-            "branches": 69,
+            "statements": 89,
+            "branches": 71,
             "functions": 86,
-            "lines": 91
+            "lines": 92
         },
         "src/commands/economy/invest.js": {
             "statements": 93,
             "branches": 84,
-            "functions": 86,
-            "lines": 93
+            "functions": 87,
+            "lines": 94
         },
         "src/commands/economy/market/buy.js": {
             "statements": 95,
@@ -327,10 +327,10 @@
             "lines": 92
         },
         "src/commands/economy/trade.js": {
-            "statements": 25,
-            "branches": 24,
-            "functions": 16,
-            "lines": 26
+            "statements": 82,
+            "branches": 69,
+            "functions": 53,
+            "lines": 85
         },
         "src/commands/economy/work.js": {
             "statements": 83,
@@ -340,7 +340,7 @@
         },
         "src/games/casino/crashRefund.js": {
             "statements": 97,
-            "branches": 80,
+            "branches": 82,
             "functions": 97,
             "lines": 97
         },
@@ -370,19 +370,19 @@
         },
         "src/utils/balanceDelta.js": {
             "statements": 97,
-            "branches": 73,
+            "branches": 75,
             "functions": 97,
             "lines": 97
         },
         "src/utils/coinTransfer.js": {
             "statements": 95,
-            "branches": 81,
+            "branches": 82,
             "functions": 97,
             "lines": 94
         },
         "src/utils/creditOrOwe.js": {
             "statements": 97,
-            "branches": 80,
+            "branches": 82,
             "functions": 97,
             "lines": 97
         },
@@ -423,10 +423,10 @@
             "lines": 97
         },
         "src/utils/tradeEscrow.js": {
-            "statements": 82,
-            "branches": 71,
-            "functions": 84,
-            "lines": 86
+            "statements": 89,
+            "branches": 81,
+            "functions": 88,
+            "lines": 92
         }
     },
     "loadedButNeverRun": [
@@ -445,13 +445,6 @@
         "src/commands/economy/feed.js",
         "src/commands/economy/fish/craft.js",
         "src/commands/economy/fish/quests.js",
-        "src/commands/economy/fish/shop/buy.js",
-        "src/commands/economy/fish/shop/list.js",
-        "src/commands/economy/fish/shop/repair.js",
-        "src/commands/economy/fish/shop/rod.js",
-        "src/commands/economy/fish/shop/unlock.js",
-        "src/commands/economy/fish/shop/upgrade.js",
-        "src/commands/economy/fish/shop/use.js",
         "src/commands/economy/fish/tournament.js",
         "src/commands/economy/hunt/quests.js",
         "src/commands/economy/hunt/shop/buy.js",
@@ -470,13 +463,6 @@
         "src/commands/economy/mine/shop/unlock.js",
         "src/commands/economy/mine/shop/upgrade.js",
         "src/commands/economy/mine/shop/use.js",
-        "src/commands/economy/pet/adopt.js",
-        "src/commands/economy/pet/autocomplete.js",
-        "src/commands/economy/pet/battle.js",
-        "src/commands/economy/pet/feed.js",
-        "src/commands/economy/pet/leaderboard.js",
-        "src/commands/economy/pet/release.js",
-        "src/commands/economy/pet/status.js",
         "src/commands/economy/rob/status.js",
         "src/commands/economy/rob/trap.js",
         "src/commands/economy/synergies.js",
@@ -510,7 +496,6 @@
         "src/utils/bigWinLogger.js",
         "src/utils/canvasFilters.js",
         "src/utils/imageRateLimit.js",
-        "src/utils/paginator.js",
         "src/utils/progressBar.js",
         "src/utils/shopBanner.js",
         "src/utils/starterKit.js",
@@ -521,25 +506,12 @@
         "src/commands/admin": [
             "branches"
         ],
-        "src/commands/economy/event": [
-            "branches"
-        ],
-        "src/commands/economy/fish/shop": [
-            "branches",
-            "functions"
-        ],
         "src/commands/utility": [
             "branches"
         ],
         "src/dashboard/public": [
             "statements",
             "lines"
-        ],
-        "src/commands/economy/explore": [
-            "branches"
-        ],
-        "src/commands/economy/pet": [
-            "branches"
         ]
     }
 }

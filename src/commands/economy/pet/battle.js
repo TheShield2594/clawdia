@@ -111,7 +111,13 @@ async function executeBattle(interaction) {
     const currency = guildSettings?.economy?.currency ?? '💰';
 
     const user = await resolveUser(interaction);
-    await syncHungerAndRunaway(user, interaction);
+    const sync = await syncHungerAndRunaway(user, interaction);
+    if (sync?.saveError) {
+        if (isVersionError(sync.saveError)) {
+            return interaction.reply({ content: 'Edit conflict — please try again.', flags: MessageFlags.Ephemeral });
+        }
+        throw sync.saveError;
+    }
     await user.save().catch(() => {});
 
     const mine = resolvePetRef(user?.pets, petRef);
@@ -310,6 +316,14 @@ async function pvpBattle(interaction, ctx) {
         if (!aPet || !bPet) return refundAndCancel('A pet is no longer available');
         if (!petUsable(aPet).ok || !petUsable(bPet).ok) return refundAndCancel('A pet is no longer battle-ready');
         if (onBattleCooldown(aPet) || onBattleCooldown(bPet)) return refundAndCancel('A pet is now recovering from a recent battle');
+        // The wager's level-gap limit, asked again of the pets that will
+        // actually fight. The defender is re-picked here — the one named in the
+        // challenge may have gone hungry, or either pet levelled since — and the
+        // limit used to be checked only at the challenge, so a wager could be
+        // fought across any gap (#873).
+        if (bet > 0 && Math.abs((aPet.level ?? 1) - (bPet.level ?? 1)) > BATTLE_MAX_LEVEL_GAP) {
+            return refundAndCancel(`The pets that would fight are now more than ${BATTLE_MAX_LEVEL_GAP} levels apart, the limit for a wagered battle`);
+        }
 
         // Pre-battle snapshots for consistent result rendering (applyPetXp below mutates levels)
         const aSnap = petSnapshot(aPet), bSnap = petSnapshot(bPet);

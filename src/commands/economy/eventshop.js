@@ -7,6 +7,7 @@ const {
     hasActiveEvent,
     getEventCurrencyId,
     getEventCurrencyBalance,
+    eventLabel,
 } = require('../../services/seasonalEventService');
 const { activateEffect, hasEffect, resolveEffectType, EFFECT_CONFIGS } = require('../../services/effectsService');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
@@ -115,7 +116,7 @@ async function handleBrowse(interaction, ev, def, currency) {
 
         return new EmbedBuilder()
             .setColor(ev.color ?? '#5865F2')
-            .setTitle(`${ev.emoji ?? '🛒'} ${ev.name} — Event Shop`)
+            .setTitle(`${ev.emoji ?? '🛒'} ${eventLabel(ev)} — Event Shop`)
             .setDescription(fitDescription(lines, { separator: '\n\n' }).text)
             .addFields({
                 name: `${currency.emoji} Your Balance`,

@@ -12,6 +12,7 @@ const {
     executeCast,
     quoteRepair,
     applyRepair,
+    updateRodStatus,
 } = require('../src/services/fishService');
 const { addEffect, consumeEffect, refundEffectCharge, getEffect, EFFECT_CONFIGS } = require('../src/services/effectsService');
 const { LOCATIONS, LIMITS, ROD_TIERS } = require('../src/data/fishData');
@@ -469,12 +470,46 @@ describe('quoteRepair', () => {
     });
 
     test('a condemned rod is refused without being mutated', () => {
-        const rod = { ...worn(), status: 'condemned' };
+        // Nine repairs have ground the 80 ceiling to 8, under a fifth.
+        const rod = { ...worn(), currentDurability: 4, maxDurability: 8, repairCount: 9, status: 'condemned' };
         const before = JSON.stringify(rod);
 
         expect(quoteRepair(rod, null).error).toBeTruthy();
         expect(applyRepair(rod, null).error).toBeTruthy();
         expect(JSON.stringify(rod)).toBe(before);
+    });
+
+    // #873. Condemnation is the ceiling repairs wear down, not current wear.
+    test('wear alone never condemns a rod', () => {
+        const rod = worn();
+        updateRodStatus(rod);                      // 10 of 80: an eighth, still repairable
+        expect(rod.status).toBe('degraded');
+        expect(quoteRepair(rod, null).error).toBeUndefined();
+    });
+
+    test('a small repair on a broken rod leaves it repairable', () => {
+        const rod = { ...worn(), currentDurability: 0, status: 'broken' };
+        applyRepair(rod, 20);
+        expect(rod.status).not.toBe('condemned');
+        expect(quoteRepair(rod, null).error).toBeUndefined();
+    });
+
+    test('loading fishing data clears a condemnation the old wear rule left behind', () => {
+        const user = makeUser();
+        user.fishing.rods[0] = { ...user.fishing.rods[0], currentDurability: 10, status: 'condemned' };
+        ensureFishingData(user);
+        expect(user.fishing.rods[0].status).toBe('degraded');
+    });
+
+    test('the ninth repair condemns it, as on /hunt and /mine', () => {
+        const rod = worn();
+        for (let i = 0; i < 8; i++) {
+            expect(applyRepair(rod, null).condemned).toBe(false);
+            rod.currentDurability = 1;
+        }
+        expect(applyRepair(rod, null).condemned).toBe(true);
+        expect(rod.status).toBe('condemned');
+        expect(quoteRepair(rod, null).error).toBeTruthy();
     });
 });
 

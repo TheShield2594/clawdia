@@ -314,7 +314,7 @@ describe('the hourly sweep', () => {
 
         await checkSeasonalEvents(client);
 
-        expect(Guild.find).toHaveBeenCalledWith({}, 'guildId activeEvent economy.announcementChannelId');
+        expect(Guild.find).toHaveBeenCalledWith({}, 'guildId activeEvent eventAutoStartSkip economy.announcementChannelId');
     });
 
     test('announces the start in the guild economy channel', async () => {

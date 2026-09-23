@@ -162,48 +162,9 @@ function rouletteSettlement(bet, payoutOdds, won) {
     return { profit, credit: won ? bet + profit : 0 };
 }
 
-// ── Poker ────────────────────────────────────────────────────────────────────
-
-/**
- * What the player is credited when the dealer folds before the flop.
- *
- * The gross is a flat 3:2 on the opening bet — a small consolation for a hand
- * that ended before it started — and the boost applies to the half-bet of
- * profit only, not to the whole 1.5x.
- */
-function pokerFoldWinPayout(bet, coinMultiplier) {
-    return boostedPayout(bet, Math.floor(bet * 1.5), coinMultiplier);
-}
-
-/**
- * What the player is credited when the dealer folds on the flop, turn or river:
- * the pot, with only the part of it above their own stake boosted.
- *
- * The pot opens at twice the bet and every raise the player makes adds at least
- * as much to the pot as to their stake, so the pot always exceeds the stake and
- * this is always a win.
- */
-function pokerPotPayout(playerStake, pot, coinMultiplier) {
-    return boostedPayout(playerStake, pot, coinMultiplier);
-}
-
-/**
- * The showdown payout before any booster, for a compared hand.
- *
- * A win returns double the stake, a push returns it, a loss returns nothing —
- * unless the lucky streak saved it, which the caller decides (it is a random
- * roll) and passes in as an already-resolved outcome of 'push'.
- */
-function pokerShowdownGross(outcome, playerStake) {
-    if (outcome === 'win')  return playerStake * 2;
-    if (outcome === 'push') return playerStake;
-    return 0;
-}
-
-/** The showdown payout with the booster applied to the winnings. */
-function pokerShowdownPayout(outcome, playerStake, coinMultiplier) {
-    return boostedPayout(playerStake, pokerShowdownGross(outcome, playerStake), coinMultiplier);
-}
+// Poker settles through holdemRules.js, which is Casino Hold'em's paytable, and
+// boosts through boostedPayout above. The old heads-up game's fold, pot and
+// showdown helpers went with it (#873, pass 24).
 
 module.exports = {
     boostedPayout,
@@ -216,8 +177,4 @@ module.exports = {
     insuranceProfit,
     insuranceCost,
     rouletteSettlement,
-    pokerFoldWinPayout,
-    pokerPotPayout,
-    pokerShowdownGross,
-    pokerShowdownPayout,
 };

@@ -894,6 +894,15 @@ const guildSchema = new Schema({
         }]
     },
 
+    // Set by `/event end` when it ends the seasonal event the calendar is
+    // running, so the hourly sweep does not start that event again before its
+    // window closes (#873, pass 23). Outside `activeEvent` because every start
+    // and end replaces that sub-document whole.
+    eventAutoStartSkip: {
+        eventId: { type: String, default: null },
+        until:   { type: Date, default: null }
+    },
+
     season: {
         enabled: { type: Boolean, default: false },
         seasonId: { type: String, default: null },

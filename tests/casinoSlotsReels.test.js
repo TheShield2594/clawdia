@@ -50,12 +50,12 @@ describe('win tiers', () => {
         expect(evaluate([Star, Star, Star], BET)).toMatchObject({ outcome: 'three', payout: 2_500, symbol: Star });
     });
 
-    it('pays two of a kind at half that row, floored', () => {
-        expect(evaluate([Cherry, Cherry, Scatter], BET)).toMatchObject({ outcome: 'two', payout: 100 });
-        expect(evaluate([Bell, Bell, Scatter], BET)).toMatchObject({ outcome: 'two', payout: 400 });
-        // 15 × 0.5 × 3 = 22.5. The floor is what stops a partial win minting a
+    it('pays two of a kind at a quarter of that row, floored', () => {
+        expect(evaluate([Cherry, Cherry, Scatter], BET)).toMatchObject({ outcome: 'two', payout: 50 });
+        expect(evaluate([Bell, Bell, Scatter], BET)).toMatchObject({ outcome: 'two', payout: 200 });
+        // 15 × 0.25 × 3 = 11.25. The floor is what stops a partial win minting a
         // coin the player never staked.
-        expect(evaluate([Diamond, Diamond, Scatter], 3).payout).toBe(22);
+        expect(evaluate([Diamond, Diamond, Scatter], 3).payout).toBe(11);
     });
 
     it('pays three multipliers a flat 4× and nothing from the stack on top', () => {
@@ -80,7 +80,7 @@ describe('wild substitution', () => {
 
     it('completes a single regular into two of a kind, not three', () => {
         expect(evaluate([Wild, Wild, Lemon], BET)).toMatchObject({ outcome: 'three', payout: 300, symbol: Lemon, wildCount: 2 });
-        expect(evaluate([Wild, Lemon, Scatter], BET)).toMatchObject({ outcome: 'two', payout: 150, symbol: Lemon, wildCount: 1 });
+        expect(evaluate([Wild, Lemon, Scatter], BET)).toMatchObject({ outcome: 'two', payout: 75, symbol: Lemon, wildCount: 1 });
     });
 
     it('reports the wild count on every hand it assisted', () => {
@@ -93,16 +93,30 @@ describe('wild substitution', () => {
 
 describe('wild and multiplier stacking', () => {
     it('multiplies a wild-completed three of a kind', () => {
-        expect(evaluate([Wild, Bell, Boost], BET)).toMatchObject({ outcome: 'two', payout: 800, multFactor: 2 });
+        expect(evaluate([Wild, Bell, Boost], BET)).toMatchObject({ outcome: 'two', payout: 400, multFactor: 2 });
         expect(evaluate([Wild, Bell, Bell], BET).payout).toBe(800);
     });
 
-    it('multiplies a two of a kind after the half rate, not before', () => {
-        // floor(100 × 5 × 0.5 × 2) = 500. Halving the multiplied figure and
-        // multiplying the halved one agree here; the order is pinned so a
-        // rewrite that flips them still has to keep the floor last.
-        expect(evaluate([Grape, Grape, Boost], BET)).toMatchObject({ outcome: 'two', payout: 500, multFactor: 2 });
-        expect(evaluate([Grape, Grape, Boost], 3).payout).toBe(15);
+    it('multiplies a two of a kind after the rate, not before', () => {
+        // floor(100 × 5 × 0.25 × 2) = 250. The order is pinned so a rewrite
+        // that flips it still has to keep the floor last: floor(3 × 5 × 0.25)
+        // × 2 would be 6, and the stake of 3 pays floor(7.5) = 7.
+        expect(evaluate([Grape, Grape, Boost], BET)).toMatchObject({ outcome: 'two', payout: 250, multFactor: 2 });
+        expect(evaluate([Grape, Grape, Boost], 3).payout).toBe(7);
+    });
+
+    // #873, pass 24. At half the row, two-of-a-kind alone returned 1.30× the
+    // stake and a spin paid back about 153% before free spins and the Hot Reel.
+    // Every other game in the casino keeps an edge; this is the line that says
+    // slots does too. Exact, over all 729 weighted reel combinations.
+    it('returns less than the stake on an ordinary spin', () => {
+        let rtp = 0;
+        for (const a of SYMBOLS) for (const b of SYMBOLS) for (const c of SYMBOLS) {
+            const p = (a.weight * b.weight * c.weight) / TOTAL_WEIGHT ** 3;
+            rtp += p * evaluate([a, b, c], 1_000).payout / 1_000;
+        }
+        expect(rtp).toBeGreaterThan(0.80);
+        expect(rtp).toBeLessThan(0.92);
     });
 });
 
@@ -112,9 +126,9 @@ describe('the 1-wild-2-different tie-break', () => {
     // kind, and which it completes used to fall out of the insertion order of
     // a frequency object — whichever of the two sat on the lower reel.
     it('pays the higher-paying symbol, whichever reel it landed on', () => {
-        expect(evaluate([Wild, Cherry, Star], BET)).toMatchObject({ outcome: 'two', symbol: Star, payout: 1_250 });
-        expect(evaluate([Wild, Star, Cherry], BET)).toMatchObject({ outcome: 'two', symbol: Star, payout: 1_250 });
-        expect(evaluate([Star, Wild, Cherry], BET)).toMatchObject({ outcome: 'two', symbol: Star, payout: 1_250 });
+        expect(evaluate([Wild, Cherry, Star], BET)).toMatchObject({ outcome: 'two', symbol: Star, payout: 625 });
+        expect(evaluate([Wild, Star, Cherry], BET)).toMatchObject({ outcome: 'two', symbol: Star, payout: 625 });
+        expect(evaluate([Star, Wild, Cherry], BET)).toMatchObject({ outcome: 'two', symbol: Star, payout: 625 });
     });
 
     it('does not depend on the order of the symbol table', () => {
@@ -130,7 +144,7 @@ describe('the 1-wild-2-different tie-break', () => {
 
     it('still prefers the larger group over the better-paying one', () => {
         // Two cherries beat one star: count first, payout only as the tie-break.
-        expect(evaluate([Cherry, Cherry, Star], BET)).toMatchObject({ outcome: 'two', symbol: Cherry, payout: 100 });
+        expect(evaluate([Cherry, Cherry, Star], BET)).toMatchObject({ outcome: 'two', symbol: Cherry, payout: 50 });
     });
 
     it('picks nothing when there is no regular to play for', () => {
