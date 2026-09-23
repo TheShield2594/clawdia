@@ -14,6 +14,25 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.8] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit, pass 16 (#873) — the map views, `/explore map` and `/mine map`.
+Both are read-only: neither writes to the database, and the service functions
+they call normalise the loaded document in memory without saving it. The pass
+checked what a read-only view can still get wrong. Can a description or field
+outgrow Discord's limits? Can the map disagree with the command it describes?
+Can it show one member's data under another's name? It found one thing.
+
+- **`/mine map` showed a blank grid to players who had never mined.** Its "you
+  haven't started mining yet" prompt only fired when there was no user document
+  at all, and every member who has chatted has one. So a player who had never
+  dug got an empty map, a pickaxe in the middle and "0/100 cells explored"
+  instead of a pointer to `/mine dig`. It is now gated on having dug
+  (`mining.totalMines`), the same way `/explore map` gates on
+  `totalExpeditions`.
+
 ## [4.13.7] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

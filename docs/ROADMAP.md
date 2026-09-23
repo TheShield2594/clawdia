@@ -22,7 +22,7 @@ coverage, which is [#873](https://github.com/TheShield2594/clawdia/issues/873):
 audit coverage is widest exactly where the risk is not.
 
 So net-new game features wait, and every currency-mutation path gets the
-treatment the nine long-stable subsystems got. Fifteen passes have landed under
+treatment the nine long-stable subsystems got. Sixteen passes have landed under
 that decision already — `/duel` escrow and the `/heist` and `/syndicate` crew
 splits in v4.5.2, the casino's progressive jackpot in v4.6.0, `/gift` and
 `/market` in v4.6.1, the casino's hand payouts in v4.7.0, the core currency
@@ -38,8 +38,8 @@ v4.13.2, the quest-reward credit keyed at every caller in v4.13.3, and the rest
 of the casino (`confirmBet`, the bet guards, the crash restart refund and the
 leaderboard writes) in v4.13.4, `/explore`'s event-currency drop in
 v4.13.5, and the items, effects and server shop (`/use`, `/shop buy`, the event
-shop's effect purchases) in v4.13.6, and the effect consumers in v4.13.7 — and
-between them they found the same defect on
+shop's effect purchases) in v4.13.6, the effect consumers in v4.13.7, and the
+map views in v4.13.8 — and between them they found the same defect on
 path after path: a
 credit or grant written without reading the write back and without a key to
 replay it. That is
@@ -95,7 +95,7 @@ each pass found; its
 [Not yet reviewed](AUDIT_LOG.md#not-yet-reviewed) section is the queue. That list
 is long and mostly unordered, deliberately — it is a survey, not a plan. The
 order this roadmap commits to, within the economy, is money-moving first.
-Fifteen passes have landed against it — `/duel` escrow and the crew splits, the
+Sixteen passes have landed against it — `/duel` escrow and the crew splits, the
 progressive jackpot, `/gift` and `/market`, the casino's hand payouts and crash
 refunds, the core currency commands, the gathering-loop payouts (`hunt`,
 `fish`, `mine`, `explore`, plus the `/explore` relic and `/use` loot-box item
@@ -118,8 +118,9 @@ could fail — and **the effect consumers**, which turned out to be every
 charges are committed as guarded writes — which leaves:
 
 1. the rest of the non-payout surface: the gathering surface pass 9 did not need
-   to touch, the map view, and the season pass's non-reward surface
-   (view/leaderboard/history/admin). Every currency credit found so far is
+   to touch (the map views are done — pass 16), `/explore`'s remaining views
+   (travel, profile, journal, regions, relics), and the season pass's
+   non-reward surface (view/leaderboard/history/admin). Every currency credit found so far is
    keyed, but pass 14 found one in an area the roadmap had listed as
    non-payout, so "nothing money-moving is left" is a finding to re-check on
    each pass rather than a settled result

@@ -30,7 +30,9 @@ function seedUser(mining = {}) {
     const user = {
         userId: 'user-1',
         guildId: 'guild-1',
-        mining: { ...mining },
+        // One dig on record: the map is gated on having mined at all (#873,
+        // pass 16), and these tests are about what it renders once it opens.
+        mining: { totalMines: 1, ...mining },
         markModified: jest.fn(),
         save: jest.fn().mockResolvedValue(undefined),
     };
@@ -65,6 +67,16 @@ describe('the gates before the map', () => {
         const interaction = makeInteraction();
         await handleMap(interaction);
         expect(repliedText(interaction)).toContain("haven't started mining yet");
+    });
+
+    test('a member with a user document but no digs is pointed at /mine dig, not shown a blank grid', async () => {
+        // Anyone who has chatted has a user document, so this is the common
+        // case the old `!user` gate missed.
+        seedUser({ totalMines: 0 });
+        const interaction = makeInteraction();
+        await handleMap(interaction);
+        expect(repliedText(interaction)).toContain("haven't started mining yet");
+        expect(repliedText(interaction)).not.toContain('cells explored');
     });
 });
 
