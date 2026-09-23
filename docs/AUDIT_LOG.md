@@ -2304,6 +2304,90 @@ Three patterns come up again and again:
 
 ---
 
+## Economy — The Seasonal-Event Definition Surface
+
+**Status: Audited — all findings resolved** ✓
+
+The twenty-third pass of the economy audit #873. Pass 8 audited the
+seasonal-event currency, pass 13 `/explore`'s event drop and pass 14 the event
+shop's debit and effect purchases. This pass covers what decides *which* event
+is running:
+
+- `/event start`, `/event end` and `/event status` (`event/manage.js`);
+- the hourly auto-start/auto-end sweep (`seasonalEventService.checkSeasonalEvents`);
+- `/eventshop`'s browse and balance reads.
+
+None of it moves player currency, but it sets the coin and XP multipliers every
+earning command pays at, and which event currency the activities and the shop
+use. Every write here replaces `activeEvent` whole, and none of them was guarded
+on the event it had read.
+
+**Files reviewed/fixed:**
+- `src/services/seasonalEventService.js`
+- `src/commands/economy/event/manage.js`, `src/commands/economy/event/index.js`
+- `src/commands/economy/eventshop.js`, `src/commands/economy/season.js` (the event title)
+- `src/models/Guild.js` (`eventAutoStartSkip`, added)
+- `src/data/seasonalEvents.js` (reviewed)
+- `tests/pass23EventDefinitions.test.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 1 | The hourly sweep wrote from a snapshot taken at the top of the hour, with an unguarded `$set` of `activeEvent`. An admin's `/event start` landing between the read and the write was lost: over an expired event, the sweep's clear erased the new one; over no event, the sweep's auto-start replaced it with the seasonal event and its multipliers. Either way the sweep then announced a start or end that was not what happened | Every sweep write is guarded on the event it read (`sameEventFilter`: the type and `startedAt`, or no event at all). A write that misses changed nothing and announces nothing | `seasonalEventService.js` |
+| 2 | `/event end` on the seasonal event the calendar is running lasted until the sweep's next hourly tick, which saw no event inside the window and started the same event again, multipliers and "Has Begun!" announcement included. An admin could not end a seasonal event for more than an hour | `/event end` leaves `eventAutoStartSkip` (`{ eventId, until }`, the window's end) when it ends the calendar's current event, and the sweep does not auto-start that event while it holds. It is outside `activeEvent`, which every start and end replaces whole. `/event start` can still run the event again on purpose, and the hold lapses with the window | `manage.js`, `seasonalEventService.js`, `Guild.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 3 | `/event start` read the guild uncached so that a second start could not pass the same check, but the write after it was still an unguarded `$set`. Two starts, or a start racing the sweep's auto-start, both passed, and the later one replaced the earlier | The write is guarded on the event that was read: none, or the expired one being replaced. A miss is reported as another event having started. A guild with no document still upserts, and a racing insert's E11000 is reported the same way | `manage.js` |
+| 4 | `/event end` cleared whatever `activeEvent` held by the time it wrote, so an end racing a new start cleared an event nobody had asked to end, and reported ending the old one | Guarded the same way; a miss ends nothing and says so. An ended event is now announced where its start was, as the sweep's own ends are | `manage.js` |
+| 5 | One guild whose sweep write threw aborted the loop, so every guild after it missed its start or end until the next hour | Each guild runs in its own `try`, and a failure is logged | `seasonalEventService.js` |
+| 6 | An event name had no length limit. It is echoed into embed titles (the start reply, `/event status`, both announcements, `/eventshop browse`, `/season event`), which Discord rejects past 256 characters, and discord.js throws rather than truncating. `/event start` wrote the event first, so an over-long name started the event and then failed the command | The `name` option is capped at 100 characters, and stored names are shortened wherever they render (`eventLabel`), the pass-18 `seasonLabel` shape | `index.js`, `seasonalEventService.js`, `manage.js`, `eventshop.js`, `season.js` |
+
+`/event start` also projected only `activeEvent`, so its fallback to the
+economy announcement channel always read `undefined` and stored `null`. The read
+now projects `economy.announcementChannelId` too. Nothing visible changes, since
+the announcements fall back to the same channel at send time.
+
+`tests/pass23EventDefinitions.test.js` (17 tests) drives the sweep and the
+commands against the fake store, with the racing write injected between each
+one's read and its write. 10 of the 17 fail against the old code; the rest pin
+behaviour that has to keep holding (an untouched expired event still clears, a
+first-ever start still upserts, ending a custom event holds nothing off).
+`tests/seasonalEventRewards.test.js`'s projection assertion gains the new field.
+
+---
+
+### Reviewed and found sound
+
+- **The multiplier readers** (`getEventCoinMultiplier`, `getEventXpMultiplier`,
+  `hasActiveEvent`, `getEventCrossSystemType`) each treat an event past its
+  `endsAt` as over, so an expired event pays nothing extra in the up-to-an-hour
+  before the sweep clears it.
+- **The calendar.** No window crosses a year or a month, so
+  `getSeasonalEndDate`'s current-year date is right, and
+  `tests/seasonalEventWindows.test.js` walks every window at both edges.
+- **Shard scoping.** The sweep checks `handlesGuild` before it writes, so two
+  shards never both start or end one guild's event.
+- **`/event status`** and **`/eventshop balance`** only read, and the balance is
+  the caller's own, shown ephemerally. `/eventshop browse` already capped each
+  item's name and blurb.
+- **An event ending mid-purchase.** `/eventshop`'s stock restores match on the
+  item and miss harmlessly once the shop is cleared; the currency refund is keyed
+  on the user (pass 8).
+
+**Recorded, not changed:** event-currency balances outlive their event. That is
+the existing design: `/season event` shows them, and each event has its own
+currency id.
+
+---
+
 ## Not yet reviewed
 
 Nothing below has been audited. Several of these are the highest-churn areas of
@@ -2325,7 +2409,7 @@ wide, and it is widest exactly where the risk is.
 - core currency: `rob.js` is reviewed (pass 1); `balance`, `bank`, `daily`, `work`, `jobs`, `crime` and `invest` are audited above (pass 5); `market/` and `gift.js` have had their unwind paths audited (pass 3), and the rest of both, with `trade.js` and its escrow, is audited above (pass 21)
 - group and PvP systems: the reward payouts are audited above (pass 7) — a syndicate's founding refund, the fishing-tournament prize, and the war resolution (`war.js`, `tournamentService.js`, the founding refund in `syndicate.js`), alongside the escrow and crew payouts from pass 1. `rivalryService.js` and `syndicateService.js` were found to move no currency; the non-payout remainder of `heistService.js`, `syndicateService.js` and `duel.js` (lobby state, skill checks, ELO) is audited above (pass 22)
 - progression: the season-pass **coin and item reward payouts** — `/season claim`, `claim-all`, `claim-mission` and `tier-skip` — are audited above (pass 7); `prestige.js`/`utils/prestige.js`, `synergyService.js`, `synergies.js` and `dailychallenge.js` were reviewed and found to have no unkeyed currency-mutation path. `season.js`'s non-reward surface (view, missions, leaderboard, me, history, event, admin start/end) is audited above (pass 18). Season XP, tier claims and mission progress are committed as guarded writes rather than through `save()` (pass 19)
-- seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. Not reviewed: the event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end scheduler in `seasonalEventService.js`) and the shop's browse/balance reads, none of which move player currency. `/explore`'s event-currency drop is audited above (pass 13). The `/eventshop` debit guard and its effect purchases are audited above (pass 14)
+- seasonal events — the event-currency and coin credits, the bonus item grants and the `/eventshop` refund are audited above (pass 8): `eventshop.js` and the five activity commands (`event/{snowball,trickortreat,sandcastle,lovenote,trackhunt}.js`) now key every credit through the new event-currency helper. The event *definition* surface (`/event start`/`end`/`status` in `event/manage.js`, the auto-start/auto-end sweep in `seasonalEventService.js`) and the shop's browse/balance reads are audited above (pass 23). `/explore`'s event-currency drop is audited above (pass 13). The `/eventshop` debit guard and its effect purchases are audited above (pass 14)
 
 **Everything else uncovered:**
 
@@ -2355,6 +2439,7 @@ server shop on 2026-09-23; the effect consumers on 2026-09-23; the map views
 on 2026-09-23; the `/explore` views on 2026-09-23; the season pass's
 non-reward surface on 2026-09-23; season XP, tier claims and mission
 progress on 2026-09-23; the gathering commands' remaining surface on
-2026-09-23; the player market, gifts and trades on 2026-09-23; and the heist,
-syndicate and duel lobbies on 2026-09-23. "Not yet reviewed" carries no review
+2026-09-23; the player market, gifts and trades on 2026-09-23; the heist,
+syndicate and duel lobbies on 2026-09-23; and the seasonal-event definition
+surface on 2026-09-23. "Not yet reviewed" carries no review
 date, because nothing in it has been reviewed.*

@@ -14,6 +14,32 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.16] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+Economy audit (#873), pass 23: the seasonal-event definition surface.
+
+- **The hourly event sweep no longer overwrites an event an admin just
+  started.** It wrote from a snapshot taken at the top of the hour with an
+  unguarded `$set`, so an `/event start` landing in between was cleared (over an
+  expired event) or replaced by the seasonal event (over none). Every sweep
+  write is now guarded on the event it read, and a write that misses announces
+  nothing.
+- **`/event end` on a seasonal event now lasts.** The sweep's next hourly tick
+  used to start the same event again and announce it. Ending the calendar's
+  current event now holds its auto-start off until the window closes (new
+  `Guild.eventAutoStartSkip`); `/event start` can still run it on purpose.
+- **`/event start` and `/event end` write only over the event they read.** Two
+  starts racing both passed the check and the later one won; an end racing a
+  new start cleared the new event. Both now report the race instead. An ended
+  event is announced where its start was.
+- One guild's failed write no longer stops the sweep for every guild after it.
+- Event names are capped at 100 characters, and a longer stored name is
+  shortened wherever it is shown, instead of failing the command on Discord's
+  256-character title limit.
+- `tests/pass23EventDefinitions.test.js` (17 tests).
+
 ## [4.13.15] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

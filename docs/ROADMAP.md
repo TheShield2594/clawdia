@@ -22,7 +22,7 @@ coverage, which is [#873](https://github.com/TheShield2594/clawdia/issues/873):
 audit coverage is widest exactly where the risk is not.
 
 So net-new game features wait, and every currency-mutation path gets the
-treatment the nine long-stable subsystems got. Twenty-two passes have landed under
+treatment the nine long-stable subsystems got. Twenty-three passes have landed under
 that decision already — `/duel` escrow and the `/heist` and `/syndicate` crew
 splits in v4.5.2, the casino's progressive jackpot in v4.6.0, `/gift` and
 `/market` in v4.6.1, the casino's hand payouts in v4.7.0, the core currency
@@ -42,8 +42,8 @@ shop's effect purchases) in v4.13.6, the effect consumers in v4.13.7, and the
 map views in v4.13.8, the `/explore` views in v4.13.9, the season pass's views in v4.13.10, season XP,
 tier claims and mission progress in v4.13.11, and the gathering commands'
 profiles, inventories and prestige in v4.13.12, and the rest of `/market` and
-`/gift` with `/trade` in v4.13.13, and the heist, syndicate and duel lobbies in
-v4.13.14 — and between them they found the same defect on
+`/gift` with `/trade` in v4.13.13, the heist, syndicate and duel lobbies in
+v4.13.14, and the seasonal-event definition surface in v4.13.16 — and between them they found the same defect on
 path after path: a
 credit or grant written without reading the write back and without a key to
 replay it. That is
@@ -99,7 +99,7 @@ each pass found; its
 [Not yet reviewed](AUDIT_LOG.md#not-yet-reviewed) section is the queue. That list
 is long and mostly unordered, deliberately — it is a survey, not a plan. The
 order this roadmap commits to, within the economy, is money-moving first.
-Twenty-two passes have landed against it — `/duel` escrow and the crew splits, the
+Twenty-three passes have landed against it — `/duel` escrow and the crew splits, the
 progressive jackpot, `/gift` and `/market`, the casino's hand payouts and crash
 refunds, the core currency commands, the gathering-loop payouts (`hunt`,
 `fish`, `mine`, `explore`, plus the `/explore` relic and `/use` loot-box item
@@ -125,18 +125,21 @@ profile from a button collector running outside the economy lock — and **the
 player market, gifts and trades**, where `/trade` counted a confirmation pressed
 on an offer that had since changed — and **the heist, syndicate and duel
 lobbies**, where a ranked duel played past the season's end cost the leader
-their prize — which leaves:
+their prize — and **the seasonal-event definition surface**, where the hourly
+sweep and `/event start`/`end` each wrote `activeEvent` over whatever another
+had just written, and `/event end` on a seasonal event lasted an hour — which
+leaves:
 
-1. the rest of the non-payout surface: the seasonal-event definition surface
-   (pass 22's open bound, duel stakes a restart strands, is closed in
-   v4.13.15). The
-   gathering commands, the map views, `/explore`'s views, the season pass,
-   `/market`, `/gift` and `/trade`, and the group lobbies are done (passes
-   16–22). Every
-   currency credit found so far is keyed, but pass 14
-   found one in an area the roadmap had listed as non-payout, so "nothing
-   money-moving is left" is a finding to re-check on each pass rather than a
-   settled result
+1. nothing on the economy's non-payout surface. The gathering commands, the map
+   views, `/explore`'s views, the season pass, `/market`, `/gift` and `/trade`,
+   the group lobbies and the seasonal-event definitions are done (passes
+   16–23). What the audit log still lists for the economy is the casino's odds
+   and rendering, which move nothing. Every currency credit found so far is
+   keyed, but pass 14 found one in an area the roadmap had listed as
+   non-payout, so "nothing money-moving is left" is a finding to re-check
+   whenever the economy changes rather than a settled result
+2. the coverage-floor ratchet (#998), which the money-first order never
+   reached as a side effect
 
 Everything outside the economy stays in the audit log's list and is not sequenced
 ahead of any of the above.

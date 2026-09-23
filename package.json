@@ -1,6 +1,6 @@
 {
   "name": "clawdia",
-  "version": "4.13.15",
+  "version": "4.13.16",
   "description": "Clawdia — a chill, self-hosted Discord bot with a full-featured admin dashboard",
   "main": "src/index.js",
   "scripts": {

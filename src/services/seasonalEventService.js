@@ -3,6 +3,18 @@ const { SEASONAL_EVENTS, getActiveSeasonalEvent } = require('../data/seasonalEve
 const COLORS = require('../utils/embedColors');
 const { handlesGuild } = require('../utils/sharding');
 
+// An event's name is echoed into embed titles, which Discord caps at 256
+// characters, and discord.js throws rather than truncating. `/event start`'s
+// `name` option had no limit (#873, pass 23); it is capped at input now, and
+// this is the backstop for a name stored before that.
+const EVENT_NAME_MAX = 100;
+
+/** An event's display name, cut to EVENT_NAME_MAX. */
+function eventLabel(event) {
+    const label = String(event?.name || 'Event');
+    return label.length > EVENT_NAME_MAX ? `${label.slice(0, EVENT_NAME_MAX - 1)}…` : label;
+}
+
 /**
  * Check all guilds for seasonal event auto-start/auto-end and apply changes.
  * Called hourly by the cron scheduler.
@@ -13,8 +25,9 @@ async function checkSeasonalEvents(client) {
 
     // Hourly, across every guild. Projected because a full Guild document drags in
     // the 3000-entry analytics.commandUsage array and the shop's image Buffers, and
-    // this job reads none of it — only the active event and where to announce it.
-    const guilds = await Guild.find({}, 'guildId activeEvent economy.announcementChannelId').lean();
+    // this job reads none of it — only the active event, the one seasonal event an
+    // admin ended early, and where to announce it.
+    const guilds = await Guild.find({}, 'guildId activeEvent eventAutoStartSkip economy.announcementChannelId').lean();
 
     for (const guild of guilds) {
         // Per-guild job. Checked before the writes below rather than relying on
@@ -25,61 +38,108 @@ async function checkSeasonalEvents(client) {
         const discordGuild = client.guilds.cache.get(guild.guildId);
         if (!discordGuild) continue;
 
-        const active = guild.activeEvent;
-
-        // Auto-end expired custom/admin events
-        if (active?.type && active.endsAt && new Date(active.endsAt) <= now) {
-            await Guild.findOneAndUpdate(
-                { guildId: guild.guildId },
-                { $set: { activeEvent: buildClearedEvent() } }
-            );
-            await announceEventEnd(discordGuild, active, guild);
-            continue;
-        }
-
-        // Auto-start seasonal event if none is running
-        if (!active?.type && currentSeasonal) {
-            const eventDef = SEASONAL_EVENTS[currentSeasonal.id];
-            const endsAt = getSeasonalEndDate(eventDef.autoStart);
-
-            const newEvent = {
-                type:           eventDef.id,
-                name:           eventDef.name,
-                emoji:          eventDef.emoji,
-                color:          eventDef.color,
-                startedAt:      now,
-                endsAt,
-                coinMultiplier: eventDef.coinMultiplier,
-                xpMultiplier:   eventDef.xpMultiplier,
-                startedBy:      'auto',
-                announcementChannelId: guild.activeEvent?.announcementChannelId ?? null,
-                eventShop:      eventDef.shop.map(s => ({
-                    itemId:      s.itemId,
-                    name:        s.name,
-                    description: s.description,
-                    emoji:       s.emoji,
-                    cost:        s.cost,
-                    stock:       -1
-                }))
-            };
-
-            await Guild.findOneAndUpdate(
-                { guildId: guild.guildId },
-                { $set: { activeEvent: newEvent } }
-            );
-
-            await announceEventStart(discordGuild, newEvent, guild);
-        }
-
-        // Auto-end a running seasonal event when the date range has passed
-        if (active?.type && active.startedBy === 'auto' && !currentSeasonal) {
-            await Guild.findOneAndUpdate(
-                { guildId: guild.guildId },
-                { $set: { activeEvent: buildClearedEvent() } }
-            );
-            await announceEventEnd(discordGuild, active, guild);
+        // One guild's failed write must not cost every guild after it its
+        // start or end until the next hour (#873, pass 23).
+        try {
+            await sweepGuild(guild, discordGuild, currentSeasonal, now);
+        } catch (err) {
+            console.error(`[seasonalEvents] sweep failed for guild ${guild.guildId}:`, err);
         }
     }
+}
+
+async function sweepGuild(guild, discordGuild, currentSeasonal, now) {
+    const active = guild.activeEvent;
+
+    // Every write below is guarded on the event this sweep read (#873, pass
+    // 23). The read is a snapshot taken at the top of the hour, and an admin's
+    // /event start or /event end can land between it and the write: unguarded,
+    // the sweep cleared an event an admin had just started over an expired
+    // one, or started the seasonal event over one an admin had just started.
+    // A write that misses changed nothing, so it announces nothing either.
+
+    // Auto-end expired custom/admin events
+    if (active?.type && active.endsAt && new Date(active.endsAt) <= now) {
+        const ended = await Guild.findOneAndUpdate(
+            { guildId: guild.guildId, ...sameEventFilter(active) },
+            { $set: { activeEvent: buildClearedEvent() } }
+        );
+        if (ended) await announceEventEnd(discordGuild, active, guild);
+        return;
+    }
+
+    // Auto-start seasonal event if none is running, unless an admin ended this
+    // one early. /event end used to last until the next hourly tick, which
+    // started the same event again and announced it as new.
+    if (!active?.type && currentSeasonal && !isAutoStartSkipped(guild, currentSeasonal.id, now)) {
+        const eventDef = SEASONAL_EVENTS[currentSeasonal.id];
+        const endsAt = getSeasonalEndDate(eventDef.autoStart);
+
+        const newEvent = {
+            type:           eventDef.id,
+            name:           eventDef.name,
+            emoji:          eventDef.emoji,
+            color:          eventDef.color,
+            startedAt:      now,
+            endsAt,
+            coinMultiplier: eventDef.coinMultiplier,
+            xpMultiplier:   eventDef.xpMultiplier,
+            startedBy:      'auto',
+            announcementChannelId: guild.activeEvent?.announcementChannelId ?? null,
+            eventShop:      eventDef.shop.map(s => ({
+                itemId:      s.itemId,
+                name:        s.name,
+                description: s.description,
+                emoji:       s.emoji,
+                cost:        s.cost,
+                stock:       -1
+            }))
+        };
+
+        const started = await Guild.findOneAndUpdate(
+            { guildId: guild.guildId, 'activeEvent.type': null },
+            { $set: { activeEvent: newEvent } }
+        );
+
+        if (started) await announceEventStart(discordGuild, newEvent, guild);
+    }
+
+    // Auto-end a running seasonal event when the date range has passed
+    if (active?.type && active.startedBy === 'auto' && !currentSeasonal) {
+        const ended = await Guild.findOneAndUpdate(
+            { guildId: guild.guildId, ...sameEventFilter(active) },
+            { $set: { activeEvent: buildClearedEvent() } }
+        );
+        if (ended) await announceEventEnd(discordGuild, active, guild);
+    }
+}
+
+/**
+ * The filter that matches a guild only while it still runs `event` — the one a
+ * caller read. `startedAt` is what tells two runs of the same type apart; a
+ * cleared or never-set event is `type: null`, which also matches a guild
+ * document written before `activeEvent` existed.
+ */
+function sameEventFilter(event) {
+    if (!event?.type) return { 'activeEvent.type': null };
+    return { 'activeEvent.type': event.type, 'activeEvent.startedAt': event.startedAt ?? null };
+}
+
+/** Whether an admin ended `eventId` early during the window that is still running. */
+function isAutoStartSkipped(guild, eventId, now = new Date()) {
+    const skip = guild?.eventAutoStartSkip;
+    return Boolean(skip?.eventId === eventId && skip.until && new Date(skip.until) > now);
+}
+
+/**
+ * The marker `/event end` leaves when it ends the seasonal event the calendar
+ * is running, so the hourly sweep does not start it again until its window is
+ * over. Null when the ended event is not the calendar's current one.
+ */
+function autoStartSkipFor(event) {
+    const current = getActiveSeasonalEvent();
+    if (!current || event?.type !== current.id) return null;
+    return { eventId: current.id, until: getSeasonalEndDate(current.autoStart) };
 }
 
 /**
@@ -195,7 +255,7 @@ async function announceEventStart(discordGuild, eventData, guildDoc) {
         const { EmbedBuilder } = require('discord.js');
         const embed = new EmbedBuilder()
             .setColor(eventData.color ?? '#5865F2')
-            .setTitle(`${eventData.emoji ?? '🎉'} ${eventData.name} Has Begun!`)
+            .setTitle(`${eventData.emoji ?? '🎉'} ${eventLabel(eventData)} Has Begun!`)
             .setDescription(buildEventDescription(eventData))
             .setTimestamp();
         await channel.send({ embeds: [embed] });
@@ -211,7 +271,7 @@ async function announceEventEnd(discordGuild, eventData, guildDoc) {
         const { EmbedBuilder } = require('discord.js');
         const embed = new EmbedBuilder()
             .setColor(COLORS.NEUTRAL)
-            .setTitle(`${eventData.emoji ?? '🎉'} ${eventData.name} Has Ended`)
+            .setTitle(`${eventData.emoji ?? '🎉'} ${eventLabel(eventData)} Has Ended`)
             .setDescription('Thank you for participating! The event has concluded.')
             .setTimestamp();
         await channel.send({ embeds: [embed] });
@@ -238,4 +298,9 @@ module.exports = {
     getEventCurrencyBalance,
     spendEventCurrency,
     buildClearedEvent,
+    sameEventFilter,
+    autoStartSkipFor,
+    announceEventEnd,
+    eventLabel,
+    EVENT_NAME_MAX,
 };

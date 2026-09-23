@@ -5,7 +5,7 @@ const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const SeasonRecord = require('../../models/SeasonRecord');
 const { ensureMissions: ensureMissionsShared, withTodaysMissions } = require('../../services/seasonMissionService');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
-const { getEventCurrencyBalance } = require('../../services/seasonalEventService');
+const { getEventCurrencyBalance, eventLabel } = require('../../services/seasonalEventService');
 const { progressBar } = require('../../utils/progressBar');
 const { isVersionError } = require('../../utils/versionRetry');
 const { rewardReveal } = require('../../utils/rewardReveal');
@@ -818,7 +818,7 @@ async function executeSeasonEvent(interaction) {
 
     const embed = new EmbedBuilder()
         .setColor(activeEvent.color ?? '#5865F2')
-        .setTitle(`${activeEvent.emoji ?? '🎉'} ${activeEvent.name}`)
+        .setTitle(`${activeEvent.emoji ?? '🎉'} ${eventLabel(activeEvent)}`)
         .setDescription(descLines.join('\n') || null)
         .addFields(
             { name: `${currency.emoji} Your ${currency.name}`, value: `**${balance.toLocaleString()}**`, inline: true },

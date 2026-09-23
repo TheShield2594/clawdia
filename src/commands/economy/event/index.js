@@ -23,7 +23,7 @@
 // the siblings here never register as commands of their own.
 
 const { SlashCommandBuilder } = require('discord.js');
-const { EVENT_TYPE_CHOICES, handleStart, handleEnd, handleStatus, requireManageGuild } = require('./manage');
+const { EVENT_TYPE_CHOICES, EVENT_NAME_MAX, handleStart, handleEnd, handleStatus, requireManageGuild } = require('./manage');
 const { handleSnowball } = require('./snowball');
 const { handleSandcastle } = require('./sandcastle');
 const { handleTrickOrTreat } = require('./trickortreat');
@@ -93,6 +93,7 @@ module.exports = {
                 .addStringOption(o =>
                     o.setName('name')
                         .setDescription('Custom event name (for "custom" type or override)')
+                        .setMaxLength(EVENT_NAME_MAX)
                         .setRequired(false))
                 .addNumberOption(o =>
                     o.setName('coin_multiplier')

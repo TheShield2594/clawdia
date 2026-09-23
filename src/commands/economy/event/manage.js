@@ -13,7 +13,9 @@ const { EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js'
 const Guild = require('../../../models/Guild');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { SEASONAL_EVENTS } = require('../../../data/seasonalEvents');
-const { buildClearedEvent } = require('../../../services/seasonalEventService');
+const {
+    buildClearedEvent, sameEventFilter, autoStartSkipFor, announceEventEnd, eventLabel, EVENT_NAME_MAX,
+} = require('../../../services/seasonalEventService');
 const COLORS = require('../../../utils/embedColors');
 
 const EVENT_TYPE_CHOICES = [
@@ -44,7 +46,7 @@ async function handleStatus(interaction) {
 
     const embed = new EmbedBuilder()
         .setColor(ev.color ?? '#5865F2')
-        .setTitle(`${ev.emoji ?? '🎉'} ${ev.name}`)
+        .setTitle(`${ev.emoji ?? '🎉'} ${eventLabel(ev)}`)
         .addFields(
             { name: 'Started', value: `<t:${Math.floor(new Date(ev.startedAt) / 1000)}:R>`, inline: true },
             { name: 'Ends',    value: ev.endsAt ? `<t:${Math.floor(new Date(ev.endsAt) / 1000)}:R>` : 'Ongoing', inline: true },
@@ -75,12 +77,14 @@ async function handleStart(interaction) {
     // between the two — long enough for a second /event start to pass the same
     // check. The projection is what made the cached read worth having, so the
     // read stays narrow either way.
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'activeEvent').lean();
+    const guildSettings = await Guild.findOne(
+        { guildId: interaction.guild.id }, 'activeEvent economy.announcementChannelId'
+    ).lean();
     const current = guildSettings?.activeEvent;
 
     if (current?.type && !(current.endsAt && new Date(current.endsAt) <= new Date())) {
         return interaction.editReply({
-            content: `There is already an active event: **${current.name}**. Use \`/event end\` first.`
+            content: `There is already an active event: **${eventLabel(current)}**. Use \`/event end\` first.`
         });
     }
 
@@ -121,18 +125,37 @@ async function handleStart(interaction) {
         eventShop:      shop
     };
 
-    await Guild.findOneAndUpdate(
-        { guildId: interaction.guild.id },
-        {
-            $set: { activeEvent: newEvent },
-            $setOnInsert: { guildId: interaction.guild.id, name: interaction.guild.name }
-        },
-        { upsert: true }
-    );
+    // The uncached read above is still a read: a second /event start, or the
+    // hourly sweep starting the seasonal event, could pass the same check and
+    // land first, and an unguarded $set then replaced that event (#873, pass
+    // 23). The write is guarded on the event that was read — none, or the
+    // expired one — and a miss means something else started in between.
+    // A guild with no document yet upserts, and a racing insert answers E11000.
+    let started;
+    try {
+        started = await Guild.findOneAndUpdate(
+            guildSettings
+                ? { guildId: interaction.guild.id, ...sameEventFilter(current) }
+                : { guildId: interaction.guild.id },
+            {
+                $set: { activeEvent: newEvent },
+                $setOnInsert: { guildId: interaction.guild.id, name: interaction.guild.name }
+            },
+            { upsert: !guildSettings, new: true }
+        );
+    } catch (err) {
+        if (err?.code !== 11000) throw err;
+        started = null;
+    }
+    if (!started) {
+        return interaction.editReply({
+            content: 'Another event was started while this one was being set up. Check `/event status`.'
+        });
+    }
 
     const embed = new EmbedBuilder()
         .setColor(newEvent.color)
-        .setTitle(`${newEvent.emoji} Event Started: ${eventName}`)
+        .setTitle(`${newEvent.emoji} Event Started: ${eventLabel(newEvent)}`)
         .addFields(
             { name: 'Duration',       value: `${durationHours} hours`, inline: true },
             { name: 'Ends',           value: `<t:${Math.floor(endsAt / 1000)}:R>`, inline: true },
@@ -149,7 +172,7 @@ async function handleStart(interaction) {
     if (announceCh?.isTextBased()) {
         const announceEmbed = new EmbedBuilder()
             .setColor(newEvent.color)
-            .setTitle(`${newEvent.emoji} ${eventName} Has Begun!`)
+            .setTitle(`${newEvent.emoji} ${eventLabel(newEvent)} Has Begun!`)
             .setDescription(buildStartDescription(newEvent, def))
             .setTimestamp();
         announceCh.send({ embeds: [announceEmbed] }).catch(() => {});
@@ -162,23 +185,45 @@ async function handleEnd(interaction) {
     await interaction.deferReply();
 
     // Uncached and projected, for the reason handleStart gives.
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'activeEvent').lean();
+    const guildSettings = await Guild.findOne(
+        { guildId: interaction.guild.id }, 'activeEvent economy.announcementChannelId'
+    ).lean();
     const current = guildSettings?.activeEvent;
 
     if (!current?.type) {
         return interaction.editReply({ content: 'There is no active event to end.' });
     }
 
-    await Guild.findOneAndUpdate(
-        { guildId: interaction.guild.id },
-        { $set: { activeEvent: buildClearedEvent() } }
+    // Ending the seasonal event the calendar is running used to last until the
+    // sweep's next hourly tick, which started the same event again and
+    // announced it as new (#873, pass 23). The marker holds it off until its
+    // window closes; `/event start` can still run it again on purpose.
+    const skip = autoStartSkipFor(current);
+    const $set = { activeEvent: buildClearedEvent() };
+    if (skip) $set.eventAutoStartSkip = skip;
+
+    // Guarded on the event that was read, so an end racing a new start (an
+    // admin's, or the sweep's) cannot clear an event nobody asked to end.
+    const ended = await Guild.findOneAndUpdate(
+        { guildId: interaction.guild.id, ...sameEventFilter(current) },
+        { $set }
     );
+    if (!ended) {
+        return interaction.editReply({
+            content: 'The event changed while this was running, so nothing was ended. Check `/event status`.'
+        });
+    }
+
+    // The sweep announces an event it ends; one ended here was announced
+    // starting and would otherwise never be announced over.
+    await announceEventEnd(interaction.guild, current, guildSettings);
 
     return interaction.editReply({
         embeds: [new EmbedBuilder()
             .setColor(COLORS.NEUTRAL)
             .setTitle('Event Ended')
-            .setDescription(`**${current.name}** has been ended early by ${interaction.user}.`)
+            .setDescription(`**${eventLabel(current)}** has been ended early by ${interaction.user}.`
+                + (skip ? '\nIt won\'t start again on its own this season; use `/event start` to run it again.' : ''))
             .setTimestamp()]
     });
 }
@@ -195,7 +240,7 @@ function buildStartDescription(ev, def) {
 
 // EVENT_TYPE_CHOICES is the option list for `/event start`; index.js needs it
 // to build the command.
-module.exports = { EVENT_TYPE_CHOICES, handleStart, handleEnd, handleStatus, requireManageGuild };
+module.exports = { EVENT_TYPE_CHOICES, EVENT_NAME_MAX, handleStart, handleEnd, handleStatus, requireManageGuild };
 
 /**
  * The gate on the two subcommands that change what event is running.
