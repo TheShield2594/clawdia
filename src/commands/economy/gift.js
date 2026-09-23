@@ -8,6 +8,7 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { describeItem } = require('../../utils/itemDisplay');
+const { loadAiItems } = require('../../utils/aiItemLookup');
 const { ownedBy } = require('../../utils/collectorOwner');
 const {
     BUDGETS, giftLimits, budgetState, spendBudgetGuarded, spendBudgetPipelineGuarded,
@@ -19,7 +20,7 @@ const { NOT_FROZEN } = require('../../utils/economyFreeze');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
 const { giftItemRollbackPayoutKey } = require('../../utils/payoutKey');
 const { isSoulbound } = require('../../data/soulboundItems');
-const { resolveEffectType } = require('../../services/effectsService');
+const { resolveEffectType, isActiveEffect } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 
 // Add `qty` of `itemId` to a user's inventory without reading it first. The
@@ -30,26 +31,6 @@ const addInventoryItem = (userId, guildId, itemId, qty, options = {}) =>
     grantInventoryItem(userId, guildId, itemId, qty, options);
 
 /**
- * Load the AiItem rows for whichever of `itemIds` are forged (`ai_`) ids.
- *
- * Returns a plain `itemId -> doc` map, `{}` when there is nothing to look up or
- * the query fails. A missing name is cosmetic — `describeItem` falls back to the
- * id — so this must never be the reason a gift is refused.
- */
-async function loadAiItems(itemIds) {
-    const forged = [...new Set(itemIds.filter(id => id.startsWith('ai_')))];
-    if (!forged.length) return {};
-    try {
-        const AiItem = require('../../models/AiItem');
-        const docs = await AiItem.find({ itemId: { $in: forged } }, 'itemId name emoji rarity lore').lean();
-        return Object.fromEntries(docs.map(d => [d.itemId, d]));
-    } catch (err) {
-        console.error('[gift] AiItem lookup failed:', err);
-        return {};
-    }
-}
-
-/**
  * Every inventory entry the sender is actually allowed to hand over, described
  * for display.
  *
@@ -58,7 +39,10 @@ async function loadAiItems(itemIds) {
  * and then refused on submit is worse than one that was never offered.
  */
 function giftableEntries(user, { shopItems = [], aiItems = {} } = {}) {
-    const activeTypes = new Set((user?.activeEffects ?? []).map(e => e.type));
+    // Only effects still live: an expired one that was never pruned must not
+    // lock the matching item out of the picker.
+    const now = Date.now();
+    const activeTypes = new Set((user?.activeEffects ?? []).filter(e => isActiveEffect(e, now)).map(e => e.type));
     return (user?.inventory ?? [])
         .filter(e => e.quantity > 0)
         .filter(e => !isSoulbound(e.itemId))
@@ -406,7 +390,7 @@ module.exports = {
 
         // Cannot gift actively equipped effects
         const effectType = resolveEffectType(itemId);
-        if (effectType && (sender.activeEffects || []).some(e => e.type === effectType)) {
+        if (effectType && (sender.activeEffects || []).some(e => e.type === effectType && isActiveEffect(e))) {
             return deny(`You can't gift ${label} while it's active as an effect. Wait for it to expire first.`);
         }
 

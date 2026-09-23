@@ -55,7 +55,8 @@ spends an item or currency before doing a write that can fail.
   `itemId` and the dashboard generates one (`item_…`), so the lookup missed. The
   item was spent and no role was granted. `/use` now matches on `itemId` first.
   A role that `roles.add` refuses no longer destroys the item: it is given back
-  under `useItemRestorePayoutKey` and the player is told why.
+  and the player is told why (under `useRoleRefundPayoutKey`, from the `/use`
+  rework this pass was merged with).
 - **`/eventshop`'s currency debit could match two different entries.** Its
   guard was `'eventCurrency.currencyId': id, 'eventCurrency.amount': { $gte:
   cost }`, and without `$elemMatch` each condition could be met by a different

@@ -60,20 +60,33 @@ const ITEM_TO_EFFECT = {
     'xp booster':         'xp_booster_2x',
     'lucky streak':       'lucky_streak',
     'salary raise':       'salary_raise',
+
+    // /daily's drop table hands these out under their short ids. Nothing ever
+    // mapped them, so a dropped booster could not be activated at all — and
+    // /use, finding no handler, would consume it for nothing.
+    'coin_booster':       'coin_booster_2x',
+    'xp_booster':         'xp_booster_2x',
 };
 
 function resolveEffectType(itemName) {
     return ITEM_TO_EFFECT[itemName.toLowerCase()] ?? null;
 }
 
+/**
+ * Whether one stored effect is still live: charges left and not expired. The
+ * one definition of "active" — pruneEffects filters on it, and read-only
+ * callers (the /use picker, over a lean document) test it without mutating.
+ */
+function isActiveEffect(effect, now = Date.now()) {
+    if (effect.charges === 0) return false;
+    if (effect.expiresAt && new Date(effect.expiresAt).getTime() <= now) return false;
+    return true;
+}
+
 function pruneEffects(user) {
     if (!user.activeEffects) { user.activeEffects = []; return; }
     const now = Date.now();
-    user.activeEffects = user.activeEffects.filter(e => {
-        if (e.charges === 0) return false;
-        if (e.expiresAt && new Date(e.expiresAt).getTime() <= now) return false;
-        return true;
-    });
+    user.activeEffects = user.activeEffects.filter(e => isActiveEffect(e, now));
 }
 
 function hasEffect(user, type) {
@@ -277,6 +290,7 @@ function getPublicProtectionStatus(user) {
 module.exports = {
     EFFECT_CONFIGS,
     resolveEffectType,
+    isActiveEffect,
     pruneEffects,
     hasEffect,
     getEffect,

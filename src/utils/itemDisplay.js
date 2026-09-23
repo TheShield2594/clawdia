@@ -19,6 +19,7 @@
 
 const { DEFAULT_SHOP_ITEMS, getItemLore, getItemRarity } = require('../data/defaultShopItems');
 const { getRelicMeta } = require('../data/exploreData');
+const { SEASONAL_EVENTS } = require('../data/seasonalEvents');
 
 // Matches /shop's rarity swatches so an item wears the same colour wherever it
 // is named.
@@ -63,11 +64,56 @@ const FORGE_COST_BY_RARITY = {
 // shop's five so one embed doesn't have to know which vocabulary it was handed.
 const RELIC_RARITY_LABELS = { common: 'Common', uncommon: 'Uncommon', rare: 'Rare', epic: 'Epic', legendary: 'Mythic' };
 
+// Seasonal event items — the loot boxes, everything they can roll and each
+// event shop's stock — keyed by lowercased id. Consulted only after the shop
+// catalogues, so an event that sells a booster still names it the shop's way.
+// Without this a Seashell sat in every picker as a bare `seashell` behind a
+// generic 🎁.
+const EVENT_ITEMS = new Map();
+for (const ev of Object.values(SEASONAL_EVENTS)) {
+    const entries = [
+        ...(ev.lootBox ? [{ ...ev.lootBox, rarity: ev.lootBox.rarity ?? 'rare' }] : []),
+        ...(ev.lootBox?.items ?? []),
+        ...(ev.shop ?? []),
+    ];
+    for (const item of entries) {
+        const key = String(item.itemId ?? '').toLowerCase();
+        if (key && !EVENT_ITEMS.has(key)) EVENT_ITEMS.set(key, { ...item, event: ev });
+    }
+}
+const EVENT_RARITY_LABELS = { common: 'Common', uncommon: 'Uncommon', rare: 'Rare', epic: 'Epic', legendary: 'Legendary' };
+
 /** The leading emoji of a shop description (`'🔒 Protects…'` → `'🔒'`), if any. */
 function leadingEmoji(str) {
     if (!str) return '';
     const m = String(str).match(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic})/u);
     return m ? m[0] : '';
+}
+
+/**
+ * Retired inventory ids and the catalogue item they now stand for. /daily used
+ * to drop its boosters as `coin_booster` / `xp_booster`; stacks of those still
+ * sit in bags, activate as the 2x boosters (effectsService maps them), and
+ * should read as them rather than as a bare id behind a 🎁.
+ */
+const LEGACY_ITEM_ALIASES = { coin_booster: 'coin_booster_2x', xp_booster: 'xp_booster_2x' };
+
+/** The built-in catalogue row for an id, following a legacy alias if it has one. */
+function findDefaultRow(itemId) {
+    const lower = String(itemId ?? '').toLowerCase();
+    const target = LEGACY_ITEM_ALIASES[lower] ?? lower;
+    return DEFAULT_SHOP_ITEMS.find(s => s.itemId.toLowerCase() === target || s.name.toLowerCase() === target) ?? null;
+}
+
+/**
+ * The guild's own shop row for an item, matched case-insensitively on either
+ * field: shop.js stores an item under `itemId || name`, so an admin-made item
+ * can be sitting in an inventory under its display name.
+ */
+function findShopRow(itemId, shopItems = []) {
+    const lower = String(itemId ?? '').toLowerCase();
+    return shopItems.find(s =>
+        (s.itemId ?? '').toLowerCase() === lower || (s.name ?? '').toLowerCase() === lower) ?? null;
 }
 
 /**
@@ -130,9 +176,25 @@ function describeItem(itemId, { shopItems = [], aiItem = null } = {}) {
     // loads guild settings), so a default item still reads as "Pet Food" there
     // instead of `pet_food`.
     const lower = id.toLowerCase();
-    const shopItem = shopItems.find(s =>
-        (s.itemId ?? '').toLowerCase() === lower || (s.name ?? '').toLowerCase() === lower)
-        ?? DEFAULT_SHOP_ITEMS.find(s => s.itemId.toLowerCase() === lower || s.name.toLowerCase() === lower);
+    const shopItem = findShopRow(id, shopItems)
+        ?? findDefaultRow(id);
+
+    const eventItem = shopItem ? null : EVENT_ITEMS.get(lower);
+    if (eventItem) {
+        const eventRarity = EVENT_RARITY_LABELS[eventItem.rarity] ?? 'Common';
+        return {
+            itemId: id,
+            name: eventItem.name ?? id,
+            emoji: eventItem.emoji ?? eventItem.event.emoji ?? '🎁',
+            rarity: eventRarity,
+            rarityEmoji: RARITY_EMOJIS[eventRarity] ?? '',
+            color: RARITY_HEX[eventRarity],
+            lore: eventItem.description ?? '',
+            // Priced in the event's own currency, not coins — nothing to report.
+            value: 0,
+            kind: 'event',
+        };
+    }
 
     const rarity = shopItem
         ? getItemRarity(shopItem.itemId ?? id, shopItem.price ?? 0)
@@ -153,4 +215,4 @@ function describeItem(itemId, { shopItems = [], aiItem = null } = {}) {
     };
 }
 
-module.exports = { describeItem, RARITY_EMOJIS, RARITY_HEX, FORGE_COST_BY_RARITY };
+module.exports = { describeItem, findShopRow, findDefaultRow, LEGACY_ITEM_ALIASES, RARITY_EMOJIS, RARITY_HEX, FORGE_COST_BY_RARITY };
