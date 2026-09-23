@@ -833,6 +833,18 @@ function lootBoxItemPayoutKey(interactionId) {
 }
 
 /**
+ * A role-granting shop item handed back when `/use` spent it and the role could
+ * not be added (Discord refused: missing permission, role above the bot's).
+ *
+ * The item is consumed atomically before the role is added, so a failed add
+ * would otherwise leave the player with neither. Keyed by the interaction, like
+ * the loot-box prize beside it.
+ */
+function useRoleRefundPayoutKey(interactionId) {
+    return `use:${interactionId}:role-refund`;
+}
+
+/**
  * A shop purchase's coins coming back when the item could not be granted (#873).
  *
  * The gathering shops debit atomically against the balance, then grant the bait,
@@ -1044,7 +1056,7 @@ function petAdoptRefundPayoutKey(interactionId) {
 }
 
 module.exports = {
-    gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
+    gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, useRoleRefundPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
     questClaimPayoutKey, questRewardPayoutKey, tournamentEntryRefundPayoutKey, forgeRefundPayoutKey,
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
     marketSalePayoutKey, listingPurchasePayoutKey, listingCancelPayoutKey,

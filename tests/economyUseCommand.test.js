@@ -327,7 +327,7 @@ describe('a plain shop item', () => {
         expect(add).toHaveBeenCalledWith('role-9', expect.stringContaining('vip_pass'));
     });
 
-    it('does not re-add a role the member already has', async () => {
+    it('refuses a role item the member already has, and spends nothing', async () => {
         seedUser({ inventory: [{ itemId: 'vip_pass', quantity: 1 }] });
         seedGuild({ shop: [{ name: 'vip_pass', roleId: 'role-9' }] });
 
@@ -340,20 +340,71 @@ describe('a plain shop item', () => {
         await use.execute(interaction);
 
         expect(add).not.toHaveBeenCalled();
-        // The item is still spent — that is the trade, and it is the branch a
-        // refund bug would hide in.
-        expect(slot('vip_pass')).toBeUndefined();
+        expect(repliedText(interaction)).toContain('already have');
+        expect(slot('vip_pass').quantity).toBe(1);
+        expect(mockUsers.writes).toEqual([]);
     });
 
-    it('still works with no shop configured at all', async () => {
-        seedUser({ inventory: [{ itemId: 'mystery_thing', quantity: 1 }] });
+    it('spends nothing when the member cannot be fetched', async () => {
+        seedUser({ inventory: [{ itemId: 'vip_pass', quantity: 1 }] });
+        seedGuild({ shop: [{ name: 'vip_pass', roleId: 'role-9' }] });
+
+        const interaction = await run('vip_pass');   // the harness fetch resolves null
+
+        expect(repliedText(interaction)).toContain("Couldn't check your roles");
+        expect(slot('vip_pass').quantity).toBe(1);
+        expect(mockUsers.writes).toEqual([]);
+    });
+
+    it('hands the item back when Discord refuses the role', async () => {
+        seedUser({ inventory: [{ itemId: 'vip_pass', quantity: 1 }] });
+        seedGuild({ shop: [{ name: 'vip_pass', roleId: 'role-9' }] });
+
+        const interaction = makeInteraction({ options: { item: 'vip_pass' } });
+        interaction.guild.members.fetch = jest.fn().mockResolvedValue({
+            roles: { cache: { has: () => false }, add: jest.fn().mockRejectedValue(new Error('Missing Permissions')) },
+        });
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await use.execute(interaction);
+        errorSpy.mockRestore();
+
+        expect(grantInventoryItem).toHaveBeenCalledWith(USER_ID, GUILD_ID, 'vip_pass', 1, expect.anything());
+        expect(repliedText(interaction)).toContain('was returned');
+    });
+
+    it('redeems a custom shop item with no role', async () => {
+        seedUser({ inventory: [{ itemId: 'shoutout_ticket', quantity: 1 }] });
+        seedGuild({ shop: [{ name: 'shoutout_ticket', description: 'Redeem for a shoutout.' }] });
+
+        const interaction = await run('shoutout_ticket');
+
+        expect(repliedText(interaction)).toContain('Used: shoutout_ticket');
+        expect(slot('shoutout_ticket')).toBeUndefined();
+    });
+});
+
+describe('items nothing in the game handles', () => {
+    it.each(['mystery_thing', 'shift_booster', 'career_badge'])(
+        'refuses %s rather than consuming it for nothing', async itemId => {
+            seedUser({ inventory: [{ itemId, quantity: 1 }] });
+            seedGuild();
+
+            const interaction = await run(itemId);
+
+            expect(repliedText(interaction)).toContain('Nothing was consumed');
+            expect(slot(itemId).quantity).toBe(1);
+            expect(mockUsers.writes).toEqual([]);
+        });
+
+    it('activates the boosters /daily drops under their short ids', async () => {
+        seedUser({ inventory: [{ itemId: 'coin_booster', quantity: 1 }] });
         seedGuild();
 
-        const interaction = await run('mystery_thing');
+        const interaction = await run('coin_booster');
 
-        expect(repliedText(interaction)).toContain('Used: mystery_thing');
-        expect(slot('mystery_thing')).toBeUndefined();
-        expect(grantInventoryItem).not.toHaveBeenCalled();
+        expect(repliedText(interaction)).toContain('Activated: 2x Coin Booster');
+        expect(mockUsers.get(USER_ID).activeEffects.map(e => e.type)).toContain('coin_booster_2x');
     });
 });
 
@@ -476,6 +527,17 @@ describe('autocomplete', () => {
         expect(ready.value).toBe('xp_booster_2x');
         expect(running.value).toBe('coin_booster_2x');
         expect(running.name).toMatch(/active · \d+m left$/);
+    });
+
+    it('marks a role item the member already has as blocked', async () => {
+        seedUser({ inventory: [{ itemId: 'vip_pass', quantity: 1 }] });
+        seedGuild({ shop: [{ name: 'vip_pass', roleId: 'role-9' }] });
+
+        const interaction = makeInteraction({ options: { focused: '' } });
+        interaction.member = { roles: { cache: { has: id => id === 'role-9' } } };
+        await use.autocomplete(interaction);
+
+        expect(interaction.respond.mock.calls[0][0][0].name).toContain('you already have the role');
     });
 
     it('answers with nothing rather than throwing when the lookup fails', async () => {

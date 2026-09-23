@@ -7,13 +7,14 @@ const {
     addEffect,
     hasEffect,
     timeRemaining,
+    isActiveEffect,
 } = require('../../services/effectsService');
 const { DEFAULT_SHOP_ITEMS } = require('../../data/defaultShopItems');
 const { getRelicMeta } = require('../../data/exploreData');
-const { describeItem } = require('../../utils/itemDisplay');
+const { describeItem, findShopRow } = require('../../utils/itemDisplay');
 const { loadAiItems } = require('../../utils/aiItemLookup');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
-const { lootBoxItemPayoutKey } = require('../../utils/payoutKey');
+const { lootBoxItemPayoutKey, useRoleRefundPayoutKey } = require('../../utils/payoutKey');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
 const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../services/petService');
 const { MAX_STAMINA_UPGRADES } = require('../../data/crossSystemData');
@@ -59,14 +60,12 @@ const relativeTime = date => `<t:${Math.floor(new Date(date).getTime() / 1000)}:
 
 /**
  * The running effect of `type`, if any. Unlike `hasEffect` this never prunes
- * (and so never mutates) the user — autocomplete reads a lean document.
+ * (and so never mutates) the user — autocomplete reads a lean document — but it
+ * asks effectsService what "active" means, so the two cannot disagree.
  */
 function runningEffect(user, type) {
     const now = Date.now();
-    return (user?.activeEffects ?? []).find(e =>
-        e.type === type
-        && e.charges !== 0
-        && !(e.expiresAt && new Date(e.expiresAt).getTime() <= now));
+    return (user?.activeEffects ?? []).find(e => e.type === type && isActiveEffect(e, now));
 }
 
 /** How a running effect reads in a one-line status. */
@@ -76,17 +75,10 @@ function runningLabel(effect) {
     return 'armed';
 }
 
-/** The guild's shop row for an item — matched on id or name, as /shop stores either. */
-function findShopItem(itemId, shopItems = []) {
-    const lower = itemId.toLowerCase();
-    return shopItems.find(s =>
-        (s.itemId ?? '').toLowerCase() === lower || (s.name ?? '').toLowerCase() === lower);
-}
-
 /** The catalogue description with its leading emoji stripped, for an embed body. */
 function describeEffect(itemId, shopItems) {
     const lower = itemId.toLowerCase();
-    const row = findShopItem(itemId, shopItems)
+    const row = findShopRow(itemId, shopItems)
         ?? DEFAULT_SHOP_ITEMS.find(s => s.itemId.toLowerCase() === lower);
     return (row?.description ?? '')
         .replace(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic}|\uFE0F|\u200D)+\s*/u, '')
@@ -107,10 +99,14 @@ function describeEffect(itemId, shopItems) {
  *                     Still offered, with `status` saying why, sorted last.
  *   status          → the short tag the dropdown shows after the quantity.
  *
- * Anything unrecognised stays usable: a custom guild item whose shop row was
- * since deleted is still the admin's to hand out and redeem.
+ * Only the guild's own shop items fall through to the generic "redeem" path.
+ * Anything else nothing recognises — a /work find, a drop from a system that
+ * never got a handler — is refused rather than consumed for nothing.
+ *
+ * `hasRole(roleId)` answers whether the member already holds a role, when the
+ * caller can tell; a role item they already have is blocked, not spent.
  */
-function useStatus(itemId, user, { shopItems = [] } = {}) {
+function useStatus(itemId, user, { shopItems = [], hasRole = () => false } = {}) {
     const lower = itemId.toLowerCase();
 
     const effectType = resolveEffectType(itemId);
@@ -154,8 +150,12 @@ function useStatus(itemId, user, { shopItems = [] } = {}) {
         return { usable: false, redirect: `It's a ${event.emoji} ${event.name} keepsake — a collectible for your \`/showcase\` or the \`/market\`, not a consumable.` };
     }
 
-    const shopItem = findShopItem(itemId, shopItems);
-    if (shopItem?.roleId) return { usable: true, ready: true, status: 'grants a role' };
+    const shopItem = findShopRow(itemId, shopItems);
+    if (shopItem?.roleId) {
+        return hasRole(shopItem.roleId)
+            ? { usable: true, ready: false, status: 'you already have the role' }
+            : { usable: true, ready: true, status: 'grants a role' };
+    }
 
     // A built-in item with no handler above (badges, frames, titles…) does its
     // job by being owned. Spending it would only throw it away.
@@ -163,7 +163,10 @@ function useStatus(itemId, user, { shopItems = [] } = {}) {
         return { usable: false, redirect: 'It works just by being in your bag — there is nothing to activate, and using it would only throw it away.' };
     }
 
-    return { usable: true, ready: true, status: 'redeem' };
+    // A custom item the server's admins sell: theirs to define, so /use redeems it.
+    if (shopItem) return { usable: true, ready: true, status: 'redeem' };
+
+    return { usable: false, redirect: "Nothing in the game activates it — it's a keepsake. Keep it, hand it over with `/gift`, or sell it with `/market list`." };
 }
 
 /** How many of an item are left after a use, from the post-update document. */
@@ -199,6 +202,9 @@ module.exports = {
                 getGuildSettings(interaction.guild.id),
             ]);
             const shopItems = guildSettings?.shop ?? [];
+            // The member is on the autocomplete interaction; if its roles are not
+            // there, say "no" and let execute do the authoritative check.
+            const hasRole = roleId => Boolean(interaction.member?.roles?.cache?.has?.(roleId));
 
             // Only what /use can actually do something with. Pet food, relics,
             // forged items and event keepsakes live in the same bag but belong
@@ -209,7 +215,7 @@ module.exports = {
                 .map(e => ({
                     quantity: e.quantity,
                     item: describeItem(e.itemId, { shopItems }),
-                    status: useStatus(e.itemId, user, { shopItems }),
+                    status: useStatus(e.itemId, user, { shopItems, hasRole }),
                 }))
                 .filter(c => c.status.usable);
 
@@ -664,7 +670,29 @@ module.exports = {
         }
 
         // ── Generic (role-granting) items ─────────────────────────────────────
-        const shopItem = findShopItem(canonicalId, shopItems);
+        const shopItem = findShopRow(canonicalId, shopItems);
+
+        // The role is checked before anything is spent. This used to consume the
+        // item first and only then look at the member, so a player who already
+        // had the role — or one whose member record could not be fetched — lost
+        // the item and got nothing for it.
+        let member = null;
+        if (shopItem?.roleId) {
+            member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+            if (!member) {
+                return interaction.reply({
+                    content: `Couldn't check your roles just now, so nothing was used. Try again in a moment.`,
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+            if (member.roles.cache.has(shopItem.roleId)) {
+                return interaction.reply({
+                    content: `You already have <@&${shopItem.roleId}>, so **${shopItem.name ?? item.name}** would do nothing. Nothing was used.`,
+                    flags: MessageFlags.Ephemeral,
+                    allowedMentions: { parse: [] },
+                });
+            }
+        }
 
         // Atomically consume one item before side-effects (role grant)
         const user = await User.findOneAndUpdate(
@@ -680,11 +708,27 @@ module.exports = {
         await dropEmptyInventorySlots();
 
         let roleGranted = false;
-        if (shopItem?.roleId) {
-            const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-            if (member && !member.roles.cache.has(shopItem.roleId)) {
+        if (member) {
+            try {
                 await member.roles.add(shopItem.roleId, `Used shop item: ${shopItem.name}`);
                 roleGranted = true;
+            } catch (err) {
+                // Discord refused (missing permission, role above the bot's). The
+                // item is already spent, so it goes back — keyed, and recorded as
+                // owed if even that will not land.
+                console.error('[use] role grant failed, returning the item:', err?.message ?? err);
+                const refund = await grantItemsOrOwe(
+                    { userId: userFilter.userId, guildId: userFilter.guildId },
+                    canonicalId, 1,
+                    { payoutKey: useRoleRefundPayoutKey(interaction.id), service: 'use', jobName: 'roleRefund' },
+                );
+                return interaction.reply({
+                    content: refund.granted
+                        ? `Couldn't give you <@&${shopItem.roleId}> — the bot may lack permission. Your **${item.name}** was returned; let an admin know.`
+                        : `Couldn't give you <@&${shopItem.roleId}>, and returning your **${item.name}** failed${refund.owed ? ' — it is recorded as owed and will come back' : ''}. Please tell an admin.`,
+                    flags: MessageFlags.Ephemeral,
+                    allowedMentions: { parse: [] },
+                });
             }
         }
 
@@ -699,8 +743,6 @@ module.exports = {
 
         if (roleGranted) {
             embed.addFields({ name: '🎭 Role Granted', value: `<@&${shopItem.roleId}>`, inline: true });
-        } else if (shopItem?.roleId) {
-            embed.addFields({ name: '🎭 Role', value: `You already have <@&${shopItem.roleId}>`, inline: true });
         }
 
         // `user` is the post-decrement document — no second subtraction.

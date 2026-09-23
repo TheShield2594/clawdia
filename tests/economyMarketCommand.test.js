@@ -143,7 +143,7 @@ describe('the price hint', () => {
     it('shows what an item last sold for in the list picker', async () => {
         seedGuild();
         seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 5 }] });
-        mockSales.push({ _id: 'lucky_charm', lastPrice: 3200, lastSoldAt: new Date(), prices: [3200, 3000, 3400] });
+        mockSales.push({ _id: 'lucky_charm', lastPrice: 3200, lastSoldAt: new Date(), prices: [3200, 3000] });
 
         const responses = [];
         await market.autocomplete({
@@ -177,6 +177,32 @@ describe('the price hint', () => {
         expect(byValue.lucky_charm).toContain('listed from 💰900');
         // Their own padlock listing is not the going rate — the shop price is.
         expect(byValue.padlock).toContain('shop price 💰5,000');
+    });
+
+    it('looks up prices only for the rows the picker shows, with a bounded group', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: Array.from({ length: 30 }, (_, i) => ({ itemId: `custom_${i}`, quantity: 1 })) });
+
+        await market.autocomplete({
+            guild: { id: GUILD_ID },
+            user: { id: BUYER_ID },
+            options: { getSubcommand: () => 'list', getFocused: d => (d ? { name: 'item', value: '' } : '') },
+            respond: async () => {},
+        });
+
+        const pipeline = MarketSale.aggregate.mock.calls[0][0];
+        expect(pipeline[0].$match.itemId.$in).toHaveLength(25);
+        expect(pipeline.find(stage => stage.$group).$group.prices).toEqual({ $firstN: { input: '$pricePerUnit', n: 10 } });
+    });
+
+    it('acknowledges /market list before its database work, privately', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 5 }] });
+
+        const interaction = await run({ subcommand: 'list', options: { item: 'lucky_charm', quantity: 1, price: 100 } });
+
+        expect(interaction.deferReply).toHaveBeenCalledWith({ flags: expect.any(Number) });
+        expect(repliedText(interaction)).toContain('Item Listed');
     });
 
     it('puts a price check on the listing receipt, and warns about an outlier', async () => {

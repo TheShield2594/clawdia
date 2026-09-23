@@ -91,6 +91,17 @@ function leadingEmoji(str) {
 }
 
 /**
+ * The guild's own shop row for an item, matched case-insensitively on either
+ * field: shop.js stores an item under `itemId || name`, so an admin-made item
+ * can be sitting in an inventory under its display name.
+ */
+function findShopRow(itemId, shopItems = []) {
+    const lower = String(itemId ?? '').toLowerCase();
+    return shopItems.find(s =>
+        (s.itemId ?? '').toLowerCase() === lower || (s.name ?? '').toLowerCase() === lower) ?? null;
+}
+
+/**
  * Describe one inventory item.
  *
  * @param {string} itemId    the id as stored in `user.inventory`
@@ -150,8 +161,7 @@ function describeItem(itemId, { shopItems = [], aiItem = null } = {}) {
     // loads guild settings), so a default item still reads as "Pet Food" there
     // instead of `pet_food`.
     const lower = id.toLowerCase();
-    const shopItem = shopItems.find(s =>
-        (s.itemId ?? '').toLowerCase() === lower || (s.name ?? '').toLowerCase() === lower)
+    const shopItem = findShopRow(id, shopItems)
         ?? DEFAULT_SHOP_ITEMS.find(s => s.itemId.toLowerCase() === lower || s.name.toLowerCase() === lower);
 
     const eventItem = shopItem ? null : EVENT_ITEMS.get(lower);
@@ -190,4 +200,4 @@ function describeItem(itemId, { shopItems = [], aiItem = null } = {}) {
     };
 }
 
-module.exports = { describeItem, RARITY_EMOJIS, RARITY_HEX, FORGE_COST_BY_RARITY };
+module.exports = { describeItem, findShopRow, RARITY_EMOJIS, RARITY_HEX, FORGE_COST_BY_RARITY };

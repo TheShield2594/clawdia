@@ -88,9 +88,10 @@ module.exports = {
         const currency = guildSettings?.economy?.currency || '💰';
         const sub      = interaction.options.getSubcommand();
 
-        if (sub === 'list')   return handleList(interaction, currency);
-        if (sub === 'browse') return handleBrowse(interaction, currency);
-        if (sub === 'buy')    return handleBuy(interaction, currency);
-        if (sub === 'cancel') return handleCancel(interaction, currency);
+        // The settings are passed on, not re-read by each handler.
+        if (sub === 'list')   return handleList(interaction, currency, guildSettings);
+        if (sub === 'browse') return handleBrowse(interaction, currency, guildSettings);
+        if (sub === 'buy')    return handleBuy(interaction, currency, guildSettings);
+        if (sub === 'cancel') return handleCancel(interaction, currency, guildSettings);
     },
 };

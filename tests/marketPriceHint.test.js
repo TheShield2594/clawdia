@@ -15,6 +15,11 @@ const forged = { kind: 'forged', value: 5000 };
 const event  = { kind: 'event', value: 0 };
 
 describe('shortHint', () => {
+    it('leads with the median once there are enough sales to have one', () => {
+        // One planted sale at 50,000 among ordinary ones does not set the headline.
+        expect(shortHint({ lastPrice: 50_000, medianPrice: 3100, sales: 5 }, forged, '💰')).toBe('sells for ~💰3,100');
+    });
+
     it('prefers the last sale, then the cheapest listing, then the game price', () => {
         expect(shortHint({ lastPrice: 3200, lowestListed: 900 }, forged, '💰')).toBe('last sold 💰3,200');
         expect(shortHint({ lastPrice: null, lowestListed: 900 }, forged, '💰')).toBe('listed from 💰900');

@@ -29,17 +29,19 @@ async function inventoryChoices(interaction, typed) {
     const held     = (seller?.inventory ?? []).filter(e => e.quantity > 0 && !isSoulbound(e.itemId));
     const heldIds  = held.map(e => e.itemId);
     const currency = guildSettings?.economy?.currency || '💰';
-    // The seller's price comes next, so the price hint belongs here.
-    const [describe, prices] = await Promise.all([
-        itemDescriber(heldIds, guildSettings?.shop ?? []),
-        priceSnapshot(interaction.guild.id, heldIds, { excludeSellerId: interaction.user.id }),
-    ]);
+    const describe = await itemDescriber(heldIds, guildSettings?.shop ?? []);
 
     const items = held
         .map(e => ({ quantity: e.quantity, ...describe(e.itemId) }))
         .filter(i => !typed || i.name.toLowerCase().includes(typed) || i.itemId.toLowerCase().includes(typed));
+    const shown = rankByName(items, typed).slice(0, 25);
 
-    return rankByName(items, typed).slice(0, 25).map(i => {
+    // The seller's price comes next, so the price hint belongs here — looked up
+    // for the (at most 25) rows actually shown, not the whole bag, since this
+    // runs on every keystroke.
+    const prices = await priceSnapshot(interaction.guild.id, shown.map(i => i.itemId), { excludeSellerId: interaction.user.id });
+
+    return shown.map(i => {
         // Hint before rarity: the rarity is what the 100-char cap should cut.
         const tags = [shortHint(prices.get(i.itemId), i, currency), i.rarity && `${i.rarityEmoji} ${i.rarity}`].filter(Boolean);
         return {

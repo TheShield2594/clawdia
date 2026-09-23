@@ -9,7 +9,6 @@ const MarketListing = require('../../../models/MarketListing');
 const Transaction = require('../../../models/Transaction');
 const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
-const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { itemDescriber } = require('../../../utils/aiItemLookup');
 const { PAGE_SIZE, SORT_RARITY, SORT_PRICE, RARITY_RANK, itemLabel } = require('./shared');
 
@@ -50,7 +49,7 @@ function formatLine(l, currency, repMap, tagMap, describe) {
     return `\`${String(l._id).slice(-6)}\`  @${sellerTag} *(${rep})*\n**${l.quantity}x** ${itemLabel(meta)} — ${currency}${l.pricePerUnit.toLocaleString()}/ea  *(${currency}${totalPrice.toLocaleString()} total)*${rarity ? `  · ${rarity}` : ''}${loreSuffix}`;
 }
 
-async function handleBrowse(interaction, currency) {
+async function handleBrowse(interaction, currency, guildSettings) {
     const filterItem = interaction.options.getString('item')?.trim() || null;
 
     const query = { guildId: interaction.guild.id };
@@ -70,9 +69,14 @@ async function handleBrowse(interaction, currency) {
 
     // Fetch all listings (capped at 200 for performance) and sort client-side for rarity mode
     const allListings = await MarketListing.find(query).sort({ pricePerUnit: 1 }).limit(200).lean();
-    const guildSettings = await getGuildSettings(interaction.guild.id);
     const describe = await itemDescriber(allListings.map(l => l.itemId), guildSettings?.shop ?? []);
-    const rank = l => RARITY_RANK[describe(l.itemId).rarity] ?? 0;
+    // Ranked once per distinct item, not inside the comparator: describeItem
+    // scans the shop catalogues, and the list is re-sorted on every page turn.
+    const rankById = new Map();
+    for (const l of allListings) {
+        if (!rankById.has(l.itemId)) rankById.set(l.itemId, RARITY_RANK[describe(l.itemId).rarity] ?? 0);
+    }
+    const rank = l => rankById.get(l.itemId);
 
     let sortMode = SORT_RARITY;
 
