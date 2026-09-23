@@ -55,10 +55,10 @@
             "lines": 34
         },
         "src/commands/economy/fish/shop": {
-            "statements": 14,
-            "branches": 0,
-            "functions": 0,
-            "lines": 14
+            "statements": 96,
+            "branches": 92,
+            "functions": 94,
+            "lines": 96
         },
         "src/commands/economy/hunt": {
             "statements": 56,
@@ -91,10 +91,10 @@
             "lines": 29
         },
         "src/commands/economy/pet": {
-            "statements": 18,
-            "branches": 0,
-            "functions": 21,
-            "lines": 19
+            "statements": 96,
+            "branches": 82,
+            "functions": 79,
+            "lines": 96
         },
         "src/commands/economy/rob": {
             "statements": 56,
@@ -176,7 +176,7 @@
         },
         "src/games/casino": {
             "statements": 67,
-            "branches": 52,
+            "branches": 53,
             "functions": 64,
             "lines": 68
         },
@@ -194,7 +194,7 @@
         },
         "src/services": {
             "statements": 73,
-            "branches": 63,
+            "branches": 64,
             "functions": 70,
             "lines": 76
         },
@@ -445,13 +445,6 @@
         "src/commands/economy/feed.js",
         "src/commands/economy/fish/craft.js",
         "src/commands/economy/fish/quests.js",
-        "src/commands/economy/fish/shop/buy.js",
-        "src/commands/economy/fish/shop/list.js",
-        "src/commands/economy/fish/shop/repair.js",
-        "src/commands/economy/fish/shop/rod.js",
-        "src/commands/economy/fish/shop/unlock.js",
-        "src/commands/economy/fish/shop/upgrade.js",
-        "src/commands/economy/fish/shop/use.js",
         "src/commands/economy/fish/tournament.js",
         "src/commands/economy/hunt/quests.js",
         "src/commands/economy/hunt/shop/buy.js",
@@ -470,13 +463,6 @@
         "src/commands/economy/mine/shop/unlock.js",
         "src/commands/economy/mine/shop/upgrade.js",
         "src/commands/economy/mine/shop/use.js",
-        "src/commands/economy/pet/adopt.js",
-        "src/commands/economy/pet/autocomplete.js",
-        "src/commands/economy/pet/battle.js",
-        "src/commands/economy/pet/feed.js",
-        "src/commands/economy/pet/leaderboard.js",
-        "src/commands/economy/pet/release.js",
-        "src/commands/economy/pet/status.js",
         "src/commands/economy/rob/status.js",
         "src/commands/economy/rob/trap.js",
         "src/commands/economy/synergies.js",
@@ -518,13 +504,6 @@
     ],
     "unguarded": {
         "src/commands/admin": [
-            "branches"
-        ],
-        "src/commands/economy/fish/shop": [
-            "branches",
-            "functions"
-        ],
-        "src/commands/economy/pet": [
             "branches"
         ],
         "src/commands/utility": [

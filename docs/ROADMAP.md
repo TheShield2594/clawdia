@@ -140,8 +140,11 @@ leaves:
    pass has found money moving in an area this roadmap had called non-payout,
    so "nothing money-moving is left" is a finding to re-check whenever the
    economy changes rather than a settled result
-2. the coverage-floor ratchet (#998), which the money-first order never
-   reached as a side effect
+2. nothing on the coverage floors either: they were re-measured after pass 24
+   and ratcheted (#998) — 41 directory floors raised, the global threshold from
+   51/41/53/52 to 63/54/62/65 — and the last two economy directories with a
+   branch floor of 0, `fish/shop` and `pet`, earned floors of 92 and 82 from
+   suites of their own. No economy directory is left on the `unguarded` list
 
 Everything outside the economy stays in the audit log's list and is not sequenced
 ahead of any of the above.
