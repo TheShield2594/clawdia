@@ -10,7 +10,7 @@
 const { EmbedBuilder, MessageFlags } = require('discord.js');
 const User  = require('../../../models/User');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
-const { hasEffect, consumeEffect, timeRemaining } = require('../../../services/effectsService');
+const { hasEffect, spendEffectCharge, timeRemaining } = require('../../../services/effectsService');
 const { checkAndAward, announceAchievements } = require('../../../services/achievementService');
 const { getTotalBonus } = require('../../../services/petService');
 const { randomFrom, ROB_WIN_LINES, ROB_FAIL_LINES } = require('../../../utils/copyLines');
@@ -30,7 +30,7 @@ const TRAP_FINE_MULTIPLIER = 2;            // trap doubles the normal fine
 // then atomically apply victim balance changes via $inc with $gte guards. Victim
 // immunity is re-checked atomically to catch races between pre-flight and commit.
 // If the victim update fails, roll back the robber.
-async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victimOrigBalance, victimOrigBank) {
+async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victimOrigBalance, victimOrigBank, victimEffectSpend = null) {
     const robberCond = { userId: robber.userId, guildId: robber.guildId };
     if (robberSnapshot.lastRob) {
         robberCond.lastRob = robberSnapshot.lastRob;
@@ -84,10 +84,16 @@ async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victim
             { lastRobbedAt: { $lte: new Date(Date.now() - VICTIM_IMMUNITY_MS) } },
         ];
 
+        // No `activeEffects` here (#873, pass 15). This used to `$set` the
+        // victim's whole effects array as read when the command started — after
+        // the suspense delays — so a shield, cloak or padlock the victim
+        // activated during the heist was erased, and a charge spent elsewhere
+        // was handed back. The one effect a rob spends, the padlock, is claimed
+        // in this same write instead: the filter requires a charge to be left,
+        // so the bank is protected exactly when a padlock is actually spent.
         const update = {
             $set: {
                 lastRobbedAt:       victim.lastRobbedAt ?? new Date(),
-                activeEffects:      victim.activeEffects,
                 'trap.setAt':       victim.trap?.setAt       ?? null,
                 'trap.expiresAt':   victim.trap?.expiresAt   ?? null,
             },
@@ -95,9 +101,19 @@ async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victim
         const incFields = {};
         if (balDelta  !== 0) incFields.balance = balDelta;
         if (bankDelta !== 0) incFields.bank    = bankDelta;
+        if (victimEffectSpend) {
+            cond.activeEffects = { $elemMatch: { type: victimEffectSpend, charges: { $gt: 0 } } };
+            incFields['activeEffects.$.charges'] = -1;
+        }
         if (Object.keys(incFields).length) update.$inc = incFields;
 
         const res = await User.findOneAndUpdate(cond, update);
+        if (res && victimEffectSpend) {
+            await User.updateOne(
+                { userId: victim.userId, guildId: victim.guildId },
+                { $pull: { activeEffects: { type: victimEffectSpend, charges: 0 } } },
+            ).catch(err => console.error('[rob] pruning a spent effect failed:', err));
+        }
         if (!res) {
             throw Object.assign(
                 new Error('[rob] victim balance changed between read and write'),
@@ -148,6 +164,37 @@ async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victim
         }
         throw victimErr;
     }
+}
+
+/**
+ * Claim one charge of a fine absorber and the robber's cooldown in one write
+ * (#873, pass 15): the `lastRob` compare-and-set `saveRobState` uses, plus a
+ * charge of `type` left in the filter.
+ *
+ * @returns {Promise<?object>} the robber's post-image when both landed; null
+ *   when the charge has gone since the read (the caller then fines as usual).
+ * @throws the duplicate-attempt error `saveRobState` throws when the cooldown
+ *   compare-and-set lost to a parallel rob.
+ */
+async function claimRobAbsorber(robber, robberSnapshot, type) {
+    const filter = { userId: robber.userId, guildId: robber.guildId };
+    const cond = robberSnapshot.lastRob
+        ? { lastRob: robberSnapshot.lastRob }
+        : { $or: [{ lastRob: null }, { lastRob: { $exists: false } }] };
+    const claimed = await spendEffectCharge(User, filter, type, {
+        cond,
+        update: { $set: { lastRob: robber.lastRob } },
+    });
+    if (claimed) return claimed;
+
+    const current = await User.findOne(filter, { lastRob: 1 }).lean();
+    if (String(current?.lastRob ?? '') !== String(robberSnapshot.lastRob ?? '')) {
+        throw Object.assign(
+            new Error('[rob] duplicate rob attempt — cooldown already applied'),
+            { robberCooldownConflict: true }
+        );
+    }
+    return null;
 }
 
 async function execute(interaction) {
@@ -297,7 +344,6 @@ async function execute(interaction) {
                 victim.bank = Math.max(0, victim.bank - (stolen - fromWallet));
             }
             victim.lastRobbedAt = new Date();
-            if (padlockActive) consumeEffect(victim, 'padlock');
 
             // ── Trap check (atomic consume to prevent double-trigger) ─────
             const trapConsumed = await User.findOneAndUpdate(
@@ -322,7 +368,7 @@ async function execute(interaction) {
             }
 
             const robAchievements = await checkAndAward(robber, guildSettings).catch(() => []);
-            await saveRobState(robber, victim, robberSnapshot, trapSnapshot, victimOrigBalance, victimOrigBank);
+            await saveRobState(robber, victim, robberSnapshot, trapSnapshot, victimOrigBalance, victimOrigBank, padlockActive ? 'padlock' : null);
             if (robAchievements.length) {
                 announceAchievements(interaction.client, guildSettings, robber, interaction.member, robAchievements).catch(() => null);
             }
@@ -391,56 +437,62 @@ async function execute(interaction) {
             const fine = Math.floor(robber.balance * failFineRate);
             const paid = Math.min(fine, robber.balance);
 
-            // Phantom Token (1 charge) or Ghost Ledger (3 charges): absorb fine silently
-            const fineAbsorber = hasEffect(robber, 'phantom_token') ? 'phantom_token'
-                : hasEffect(robber, 'ghost_ledger') ? 'ghost_ledger' : null;
-            if (fineAbsorber) {
-                consumeEffect(robber, fineAbsorber);
-                victim.lastRobbedAt = new Date();
-                await robber.save();
-                await User.updateOne(
-                    { userId: victim.userId, guildId: victim.guildId },
-                    { $set: { lastRobbedAt: victim.lastRobbedAt } }
-                );
-                const absorberCfg = fineAbsorber === 'phantom_token'
-                    ? { emoji: '👻', label: 'Phantom Token', chargesKey: null }
-                    : { emoji: '📒', label: 'Ghost Ledger',  chargesKey: 'ghost_ledger' };
-                const chargesLeft = absorberCfg.chargesKey
-                    ? ((robber.activeEffects ?? []).find(e => e.type === absorberCfg.chargesKey)?.charges ?? 0)
-                    : 0;
-                const chargeStr = chargesLeft > 0 ? ` (${chargesLeft} uses left)` : '';
-                embed = new EmbedBuilder()
-                    .setColor('#2c3e50')
-                    .setTitle(`${absorberCfg.emoji} ${absorberCfg.label} — Fine Erased`)
-                    .setDescription(`**${target.username}** caught you, but the fine never made it to the books.${chargeStr}`)
-                    .addFields(
-                        { name: 'Fine Erased',  value: `${currency}${paid.toLocaleString()}`,           inline: true },
-                        { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
-                    )
-                    .setFooter({ text: 'Cooldown: 1h' })
-                    .setTimestamp();
-            // Lifesaver: absorbs the failure fine — no coins lost
-            } else if (hasEffect(robber, 'lifesaver')) {
-                consumeEffect(robber, 'lifesaver');
-                victim.lastRobbedAt = new Date();
-                await robber.save();
-                // Only persist lastRobbedAt — victim.activeEffects was not modified
-                // in this path, so writing it would silently clobber concurrent changes.
-                await User.updateOne(
-                    { userId: victim.userId, guildId: victim.guildId },
-                    { $set: { lastRobbedAt: victim.lastRobbedAt } }
-                );
+            // Phantom Token (1 charge), Ghost Ledger (3 charges) or Lifesaver:
+            // absorb the fine.
+            //
+            // The charge is claimed in the same write as the robber's cooldown,
+            // under the same `lastRob` compare-and-set every other outcome goes
+            // through (#873, pass 15). This used to spend the charge on the
+            // loaded document and `robber.save()` it — a save that wrote
+            // `lastRob` with no compare-and-set, so two parallel failed robs could
+            // both pass the cooldown and both be absorbed by one charge, and that
+            // wrote the whole effects array back from its snapshot. Now either
+            // both land or neither does. A charge that has gone since the read
+            // falls through to the ordinary fine below.
+            const absorberType = ['phantom_token', 'ghost_ledger', 'lifesaver'].find(t => hasEffect(robber, t)) ?? null;
+            let absorbed = null;
+            if (absorberType) {
+                absorbed = await claimRobAbsorber(robber, robberSnapshot, absorberType);
+            }
 
-                embed = new EmbedBuilder()
-                    .setColor('#e67e22')
-                    .setTitle('🛟 Lifesaver Activated!')
-                    .setDescription(`**${target.username}** caught you in the act, but your **Lifesaver** protected you from the **${currency}${paid.toLocaleString()}** fine! (consumed)`)
-                    .addFields(
-                        { name: 'Fine Absorbed', value: `${currency}${paid.toLocaleString()}`,        inline: true },
-                        { name: 'Your Balance',  value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
-                    )
-                    .setFooter({ text: 'Cooldown: 1h' })
-                    .setTimestamp();
+            if (absorbed) {
+                victim.lastRobbedAt = new Date();
+                await User.updateOne(
+                    { userId: victim.userId, guildId: victim.guildId },
+                    { $set: { lastRobbedAt: victim.lastRobbedAt } }
+                );
+                if (absorberType === 'lifesaver') {
+                    embed = new EmbedBuilder()
+                        .setColor('#e67e22')
+                        .setTitle('🛟 Lifesaver Activated!')
+                        .setDescription(`**${target.username}** caught you in the act, but your **Lifesaver** protected you from the **${currency}${paid.toLocaleString()}** fine! (consumed)`)
+                        .addFields(
+                            { name: 'Fine Absorbed', value: `${currency}${paid.toLocaleString()}`,        inline: true },
+                            { name: 'Your Balance',  value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
+                        )
+                        .setFooter({ text: 'Cooldown: 1h' })
+                        .setTimestamp();
+                } else {
+                    const absorberCfg = absorberType === 'phantom_token'
+                        ? { emoji: '👻', label: 'Phantom Token' }
+                        : { emoji: '📒', label: 'Ghost Ledger' };
+                    // Read off the claim's post-image, not the loaded document —
+                    // the stored count is the one that was actually spent from.
+                    const chargesLeft = absorberType === 'ghost_ledger'
+                        ? ((absorbed.activeEffects ?? []).find(e => e.type === 'ghost_ledger')?.charges ?? 0)
+                        : 0;
+                    const chargeStr = chargesLeft > 0 ? ` (${chargesLeft} uses left)` : '';
+                    embed = new EmbedBuilder()
+                        .setColor('#2c3e50')
+                        .setTitle(`${absorberCfg.emoji} ${absorberCfg.label} — Fine Erased`)
+                        .setDescription(`**${target.username}** caught you, but the fine never made it to the books.${chargeStr}`)
+                        .addFields(
+                            { name: 'Fine Erased',  value: `${currency}${paid.toLocaleString()}`,           inline: true },
+                            { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
+                        )
+                        .setFooter({ text: 'Cooldown: 1h' })
+                        .setTimestamp();
+                }
             } else {
                 robber.balance = Math.max(0, robber.balance - paid);
                 robber.failedRobs = (robber.failedRobs || 0) + 1;
