@@ -140,7 +140,7 @@ async function handleBuy(interaction, user, currency, override = {}) {
                     { new: true }
                 );
                 if (!updated) {
-                    return interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
+                    return await interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
                 }
 
                 const grantKey = shopGrantPayoutKey(interaction.id);
@@ -162,16 +162,16 @@ async function handleBuy(interaction, user, currency, override = {}) {
 
                 const state = await resolveShopGrant({ result: profUpdated, threw, identity, key: grantKey });
                 if (state === 'unresolved') {
-                    return interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
+                    return await interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
                 }
                 if (state === 'absent') {
                     const refund = await refundPurchase(interaction, totalCost);
-                    return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
+                    return await interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
                 }
 
                 f.bait[baitPack.baitType] = profUpdated?.data?.bait?.[baitPack.baitType]
                     ?? (f.bait[baitPack.baitType] ?? 0) + addedQty;
-                return interaction.editReply({
+                return await interaction.editReply({
                     embeds: [
                         new EmbedBuilder()
                             .setColor(COLORS.SUCCESS)
@@ -199,7 +199,7 @@ async function handleBuy(interaction, user, currency, override = {}) {
                 { new: true }
             );
             if (!updated) {
-                return interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
+                return await interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
             }
 
             const grantKey = shopGrantPayoutKey(interaction.id);
@@ -221,17 +221,17 @@ async function handleBuy(interaction, user, currency, override = {}) {
 
             const state = await resolveShopGrant({ result: profUpdated, threw, identity, key: grantKey });
             if (state === 'unresolved') {
-                return interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
+                return await interaction.editReply({ content: unresolvedMessage(currency, totalCost), embeds: [], components: [] });
             }
             if (state === 'absent') {
                 const refund = await refundPurchase(interaction, totalCost);
-                return interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
+                return await interaction.editReply({ content: refundMessage(refund, currency, totalCost), embeds: [], components: [] });
             }
 
             f.consumables[itemId] = profUpdated?.data?.consumables?.[itemId]
                 ?? (f.consumables[itemId] ?? 0) + quantity;
 
-            return interaction.editReply({
+            return await interaction.editReply({
                 embeds: [
                     new EmbedBuilder()
                         .setColor(COLORS.SUCCESS)
@@ -248,6 +248,10 @@ async function handleBuy(interaction, user, currency, override = {}) {
                 components: []
             });
         } catch (err) {
+            // Every reply above is awaited so a failed one lands here rather than
+            // escaping the collector as an unhandled rejection (#873). Nothing
+            // here refunds or re-charges, so reaching it after a completed
+            // purchase costs nothing but the message.
             console.error('[fishshop buy] purchase error:', err);
             interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
         }

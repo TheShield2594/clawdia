@@ -14,6 +14,33 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.13.18] - 2026-09-23
+
+Migrations through `026_backfill_shop_item_ids`.
+
+The coverage ratchet (#998), and the defects its new suites found (#873).
+
+- **Coverage floors re-measured and raised.** 41 directory floors rise to what
+  the audit's suites now cover, and the global Jest threshold goes from
+  51/41/53/52 to 63/54/62/65. `fish/shop` and `pet`, the last two economy
+  directories with a branch floor of 0, get suites of their own (100 and 116
+  tests) and floors of 92 and 82. No economy directory is left `unguarded`.
+- **Hunter's Brew is no longer on sale.** It is crafted and has no price; the
+  shop listed it at "undefined coins" and priced a purchase at NaN, which no
+  balance check refuses.
+- **Wear no longer condemns a fishing rod.** A rod under a fifth of its
+  ceiling was condemned outright and told it had been "repaired too many
+  times". Condemnation now follows `/hunt` and `/mine`: the ninth repair,
+  when the ceiling is worn under a fifth of the original. Rods the old rule
+  condemned can be repaired again.
+- **A starved pet's death is announced once.** It is saved before it is
+  announced; `/pet feed`'s early returns used to skip the save, so the death
+  was announced on every run.
+- **A wagered pet battle respects the level-gap limit at Accept,** for the
+  pets that will actually fight, and is cancelled with both stakes refunded
+  when they are over it.
+- `/fish shop buy` awaits its result replies, so a failed one is caught.
+
 ## [4.13.17] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

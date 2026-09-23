@@ -372,6 +372,27 @@ describe('shop buy — bait', () => {
         expect(embed.fields.find(f => f.name === 'Stock').value).toBe('50 worm bait');
     });
 
+    // #873. The result replies were returned without being awaited, so one that
+    // failed (an expired token) escaped the collector's try as an unhandled
+    // rejection instead of reaching its catch.
+    test('a result reply that fails is caught and logged, and the purchase stands', async () => {
+        seedPlayer({ fishing: { bait: { worm_bait: 10 } } });
+        const escaped = [];
+        const onUnhandled = reason => escaped.push(reason);
+        process.on('unhandledRejection', onUnhandled);
+        try {
+            await buy({ prepare: expiredToken });
+            await settle();
+        } finally {
+            process.off('unhandledRejection', onUnhandled);
+        }
+
+        expect(escaped).toEqual([]);
+        expect(console.error).toHaveBeenCalledWith('[fishshop buy] purchase error:', expect.any(Error));
+        expect(balance()).toBe(10_000 - 140);
+        expect(fishing().bait.worm_bait).toBe(50);
+    });
+
     test('a player who has never fished gets a profile written before the grant', async () => {
         mockUsers.seed({ userId: USER, guildId: GUILD, balance: 500, paidPayouts: [] });
         const interaction = await buy({ options: { item: 'worm_bait_pack' } });
