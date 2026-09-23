@@ -34,8 +34,21 @@ jest.mock('../src/utils/inventoryGrant', () => ({
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 // An ambiguous listing claim is filed as a plain FailedJob rather than an owed
 // payout, so it reaches an operator without `payouts:replay` acting on it.
+// Forged items are named from their AiItem document; the picker test seeds one.
+const mockAiItems = [];
+jest.mock('../src/models/AiItem', () => ({
+    find: jest.fn(() => ({ lean: async () => mockAiItems })),
+}));
+// Price history for the /market list hint. `aggregate` answers with whatever a
+// test parks in mockSales, already grouped the way the pipeline groups it.
+const mockSales = [];
+jest.mock('../src/models/MarketSale', () => ({
+    aggregate: jest.fn(async () => mockSales),
+    create: jest.fn(async () => ({})),
+}));
 jest.mock('../src/models/FailedJob', () => ({ create: jest.fn(async () => ({})) }));
 
+const MarketSale = require('../src/models/MarketSale');
 const market = require('../src/commands/economy/market');
 const { grantInventoryItem } = require('../src/utils/inventoryGrant');
 const { recordOwedPayout } = require('../src/utils/owedPayout');
@@ -123,6 +136,86 @@ beforeEach(() => {
 // in a full run, so the whole method table is snapshotted and put back.
 const pristineUserModel = { ...mockUsers.model };
 afterEach(() => { Object.assign(mockUsers.model, pristineUserModel); });
+
+beforeEach(() => { mockSales.length = 0; });
+
+describe('the price hint', () => {
+    it('shows what an item last sold for in the list picker', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 5 }] });
+        mockSales.push({ _id: 'lucky_charm', lastPrice: 3200, lastSoldAt: new Date(), prices: [3200, 3000, 3400] });
+
+        const responses = [];
+        await market.autocomplete({
+            guild: { id: GUILD_ID },
+            user: { id: BUYER_ID },
+            options: { getSubcommand: () => 'list', getFocused: d => (d ? { name: 'item', value: '' } : '') },
+            respond: async c => { responses.push(c); },
+        });
+
+        expect(responses[0][0].name).toContain('5 held · last sold 💰3,200');
+    });
+
+    it('falls back to the cheapest listing by someone else, then to the shop price', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [
+            { itemId: 'lucky_charm', quantity: 1 },
+            { itemId: 'padlock', quantity: 1 },
+        ] });
+        seedListing({ _id: 'theirs', sellerId: SELLER_ID, itemId: 'lucky_charm', pricePerUnit: 900 });
+        seedListing({ _id: 'mine', sellerId: BUYER_ID, itemId: 'padlock', pricePerUnit: 5, slot: 1 });
+
+        const responses = [];
+        await market.autocomplete({
+            guild: { id: GUILD_ID },
+            user: { id: BUYER_ID },
+            options: { getSubcommand: () => 'list', getFocused: d => (d ? { name: 'item', value: '' } : '') },
+            respond: async c => { responses.push(c); },
+        });
+
+        const byValue = Object.fromEntries(responses[0].map(c => [c.value, c.name]));
+        expect(byValue.lucky_charm).toContain('listed from 💰900');
+        // Their own padlock listing is not the going rate — the shop price is.
+        expect(byValue.padlock).toContain('shop price 💰5,000');
+    });
+
+    it('puts a price check on the listing receipt, and warns about an outlier', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { inventory: [{ itemId: 'lucky_charm', quantity: 5 }] });
+        mockSales.push({ _id: 'lucky_charm', lastPrice: 300, lastSoldAt: new Date(), prices: [300, 280, 320] });
+
+        const interaction = await run({ subcommand: 'list', options: { item: 'lucky_charm', quantity: 1, price: 5000 } });
+
+        const text = repliedText(interaction);
+        expect(text).toContain('Price Check');
+        expect(text).toContain('Median of the last 3 sales: **💰300**');
+        expect(text).toContain('Well above');
+    });
+
+    it('records each sale at its per-unit price', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 1000 });
+        seedUser(SELLER_ID, { balance: 0 });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(MarketSale.create).toHaveBeenCalledWith({
+            guildId: GUILD_ID, itemId: 'lucky_charm', quantity: 2, pricePerUnit: 100,
+        });
+    });
+
+    it('records nothing when the purchase does not go through', async () => {
+        seedGuild();
+        seedUser(BUYER_ID, { balance: 10 });
+        seedUser(SELLER_ID, { balance: 0 });
+        seedListing({ quantity: 2, pricePerUnit: 100 });
+
+        await run({ subcommand: 'buy', options: { listing_id: 'listing-1' } });
+
+        expect(MarketSale.create).not.toHaveBeenCalled();
+    });
+});
 
 describe('listing an item', () => {
     it('takes the stock out of the bag and creates the listing', async () => {
@@ -454,6 +547,23 @@ describe('the option pickers', () => {
         expect(choices.map(c => c.value)).toEqual(['lucky_charm']);
         expect(choices[0].name).toContain('Lucky Charm');
         expect(choices[0].name).toContain('5 held');
+    });
+
+    it('names forged and event items instead of showing their ids', async () => {
+        seedGuild();
+        mockAiItems.splice(0, mockAiItems.length,
+            { itemId: 'ai_1787098249128_rg760', name: 'Ember of the Last Oath', emoji: '🔥', rarity: 'Epic' });
+        seedUser(BUYER_ID, { inventory: [
+            { itemId: 'ai_1787098249128_rg760', quantity: 1 },
+            { itemId: 'seashell', quantity: 2 },
+        ] });
+
+        const choices = await autocomplete('list', 'item');
+        mockAiItems.length = 0;
+
+        const byValue = Object.fromEntries(choices.map(c => [c.value, c.name]));
+        expect(byValue.ai_1787098249128_rg760).toBe('🔥 Ember of the Last Oath — 1 held · forge cost 💰5,000 · 🟣 Epic');
+        expect(byValue.seashell).toBe('🐚 Seashell — 2 held · ⚪ Common');
     });
 
     it('offers only items that are actually listed, for browse', async () => {
