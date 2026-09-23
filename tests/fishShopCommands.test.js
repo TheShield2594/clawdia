@@ -393,6 +393,28 @@ describe('shop buy — bait', () => {
         expect(fishing().bait.worm_bait).toBe(50);
     });
 
+    // The charge landed, so "Please try again" would invite a second charge.
+    test('a result reply that fails after the charge points at the inventory, not a retry', async () => {
+        seedPlayer({ fishing: { bait: { worm_bait: 10 } } });
+        const failResultOnce = interaction => {
+            const real = interaction.editReply;
+            let failed = false;
+            interaction.editReply = jest.fn(async payload => {
+                if (!failed && payload?.embeds?.length && Array.isArray(payload.components) && payload.components.length === 0) {
+                    failed = true;
+                    throw new Error('Unknown interaction');
+                }
+                return real(payload);
+            });
+        };
+
+        const interaction = await buy({ prepare: failResultOnce });
+
+        expect(balance()).toBe(10_000 - 140);
+        expect(interaction.replies.at(-1).content)
+            .toBe('Your purchase may have gone through. Check your balance and inventory before you try again.');
+    });
+
     test('a player who has never fished gets a profile written before the grant', async () => {
         mockUsers.seed({ userId: USER, guildId: GUILD, balance: 500, paidPayouts: [] });
         const interaction = await buy({ options: { item: 'worm_bait_pack' } });

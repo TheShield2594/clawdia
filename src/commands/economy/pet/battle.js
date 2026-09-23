@@ -111,7 +111,13 @@ async function executeBattle(interaction) {
     const currency = guildSettings?.economy?.currency ?? '💰';
 
     const user = await resolveUser(interaction);
-    await syncHungerAndRunaway(user, interaction);
+    const sync = await syncHungerAndRunaway(user, interaction);
+    if (sync?.saveError) {
+        if (isVersionError(sync.saveError)) {
+            return interaction.reply({ content: 'Edit conflict — please try again.', flags: MessageFlags.Ephemeral });
+        }
+        throw sync.saveError;
+    }
     await user.save().catch(() => {});
 
     const mine = resolvePetRef(user?.pets, petRef);

@@ -494,6 +494,13 @@ describe('quoteRepair', () => {
         expect(quoteRepair(rod, null).error).toBeUndefined();
     });
 
+    test('loading fishing data clears a condemnation the old wear rule left behind', () => {
+        const user = makeUser();
+        user.fishing.rods[0] = { ...user.fishing.rods[0], currentDurability: 10, status: 'condemned' };
+        ensureFishingData(user);
+        expect(user.fishing.rods[0].status).toBe('degraded');
+    });
+
     test('the ninth repair condemns it, as on /hunt and /mine', () => {
         const rod = worn();
         for (let i = 0; i < 8; i++) {

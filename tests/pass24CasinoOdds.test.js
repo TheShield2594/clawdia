@@ -40,6 +40,12 @@ jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 // A stacked deck, when a test sets one: cards are dealt off the end, player
 // first, so the last four are player, player, dealer up-card, dealer hole card.
 let mockDeck = null;
+// Fixed reels, when a test sets them: spinReel hands them out in order.
+let mockReels = null;
+jest.mock('../src/games/casino/slotsReels', () => {
+    const actual = jest.requireActual('../src/games/casino/slotsReels');
+    return { ...actual, spinReel: (...args) => (mockReels?.length ? mockReels.shift() : actual.spinReel(...args)) };
+});
 jest.mock('../src/games/casino/blackjackHands', () => {
     const actual = jest.requireActual('../src/games/casino/blackjackHands');
     return { ...actual, buildDeck: (...args) => (mockDeck ? [...mockDeck] : actual.buildDeck(...args)) };
@@ -51,6 +57,8 @@ const crash = require('../src/games/casino/crash');
 const cupgame = require('../src/games/casino/cupgame');
 const higherlower = require('../src/games/casino/higherlower');
 const blackjack = require('../src/games/casino/blackjack');
+const slots = require('../src/games/casino/slots');
+const { SYMBOLS } = jest.requireActual('../src/games/casino/slotsReels');
 const { deleteLobby } = require('../src/utils/crashLobby');
 const { walletDoc, GUILD_ID, USER_ID, BET } = require('./helpers/casinoInteraction');
 const { makeInteraction } = require('./helpers/fakeInteraction');
@@ -226,10 +234,17 @@ describe('blackjack insurance', () => {
     // Dealt off the end: player 10 and 7, dealer A up and `hole` down.
     const deckWith = hole => [card('2'), card('3'), card('4'), hole, card('A'), card('7'), card('10')];
 
-    async function deal(hole) {
+    async function deal(hole, press = null) {
         mockDeck = deckWith(hole);
         jest.useFakeTimers();
-        const hand = makeInteraction({ options: { bet: BET }, userId: USER_ID, guildId: GUILD_ID });
+        let hand = null;
+        const shownId = prefix => hand?.replies.flatMap(r => r?.components ?? [])
+            .flatMap(row => row.components ?? []).map(c => c.data?.custom_id)
+            .filter(id => id?.startsWith(prefix)).at(-1);
+        hand = makeInteraction({
+            options: { bet: BET }, userId: USER_ID, guildId: GUILD_ID,
+            components: press ? [{ get customId() { return shownId(press); } }] : [],
+        });
         const run = blackjack.execute(hand, { releaseLock: jest.fn(), onWager: jest.fn() });
         for (let i = 0; i < 100; i++) await jest.advanceTimersByTimeAsync(250);
         await run;
@@ -242,5 +257,54 @@ describe('blackjack insurance', () => {
     test('is offered on an ace whether or not the dealer has blackjack', async () => {
         expect(await deal(card('9'))).toContain('Dealer shows an Ace');
         expect(await deal(card('K'))).toContain('Dealer shows an Ace');
+    }, 20_000);
+
+    test('can be declined without waiting out the prompt', async () => {
+        const shown = await deal(card('9'), 'bj_noins_');
+        expect(shown).toContain('🎲 Your turn');
+        expect(shown).not.toContain('insurance lost');
+    }, 20_000);
+
+    // The opening wager can leave too little for the side bet. The old table
+    // button said so; the prompt that replaced it went quiet.
+    test('says so when the balance cannot cover it', async () => {
+        const real = User.findOneAndUpdate.getMockImplementation();
+        User.findOneAndUpdate.mockImplementation((filter, update, opts) =>
+            (update?.$inc?.balance === -Math.floor(BET / 2) ? Promise.resolve(null) : real(filter, update, opts)));
+
+        expect(await deal(card('9'), 'bj_insurance_')).toContain('Not enough balance for insurance');
+        expect(await deal(card('K'), 'bj_insurance_')).toContain('Not enough balance for insurance');
+    }, 20_000);
+});
+
+// ── slots: a pair that returns less than the stake is a loss ─────────────────
+
+describe('slots below-stake pairs', () => {
+    const sym = name => SYMBOLS.find(x => x.name === name);
+
+    async function spin(reels, doc = {}) {
+        mockReels = [...reels];
+        User.findOne.mockImplementation(() => query(walletDoc(doc)));
+        // The wager's own write hands back the document the game reads effects off.
+        const real = User.findOneAndUpdate.getMockImplementation();
+        User.findOneAndUpdate.mockImplementation((filter, update, opts) =>
+            (Array.isArray(update) ? real(filter, update, opts) : Promise.resolve(walletDoc(doc))));
+        jest.useFakeTimers();
+        const hand = makeInteraction({ options: { bet: BET }, userId: USER_ID, guildId: GUILD_ID });
+        const run = slots.execute(hand, { releaseLock: jest.fn(), onWager: jest.fn() });
+        for (let i = 0; i < 100; i++) await jest.advanceTimersByTimeAsync(250);
+        await run;
+        mockReels = null;
+        return { hand, credits: keyedCredits().filter(c => c.key.startsWith('casino:slots:')) };
+    }
+
+    // A Cherry pair pays 100 × 2 × 0.25 = 50 on a 100 stake. The booster
+    // multiplied its "profit" of −50 into −100 and credited nothing.
+    test('a coin booster does not deepen the loss on a pair that returns less than the stake', async () => {
+        const booster = { activeEffects: [{ type: 'coin_booster_2x', expiresAt: new Date(Date.now() + 3.6e6) }] };
+        const { hand, credits } = await spin([sym('Cherry'), sym('Cherry'), sym('Lemon')], booster);
+
+        expect(credits.map(c => c.amount)).toEqual([50]);
+        expect(JSON.stringify(hand.replies)).toContain('part of your bet back');
     }, 20_000);
 });

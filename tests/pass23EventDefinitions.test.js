@@ -252,6 +252,18 @@ describe('/event start and /event end write only over the event they read', () =
         expect(stored().name).toBe('Next');
     });
 
+    test('two first-ever starts racing on a guild with no document: the second is refused', async () => {
+        interleave('findOne', () => mockGuilds.model.findOneAndUpdate(
+            { guildId: GUILD },
+            { $set: { activeEvent: customEvent({ name: 'First' }) }, $setOnInsert: { guildId: GUILD } },
+            { upsert: true }));
+
+        const interaction = await run('start', { type: 'custom', name: 'Second' });
+
+        expect(stored().name).toBe('First');
+        expect(shown(interaction)).toContain('Another event was started');
+    });
+
     test('a guild with no document yet is created with the event', async () => {
         await run('start', { type: 'custom', name: 'First Ever' });
 

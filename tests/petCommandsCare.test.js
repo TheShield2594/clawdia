@@ -562,6 +562,24 @@ describe('/pet feed', () => {
         expect(second.channel.sent).toHaveLength(0);
         expect(stored().deceasedPets).toHaveLength(1);
     });
+
+    // A death whose save loses a version race is neither stored nor announced,
+    // and the player gets feed's own edit-conflict reply rather than the
+    // command-wide apology.
+    test('a death whose save conflicts is not announced, and reads as an edit conflict', async () => {
+        const starvedSince = new Date(Date.now() - 5 * DAY);
+        seedUser({
+            pets: [makePet({ _id: 'p-gone', petId: 'cat', name: 'Ghost', hunger: 0, starving: true, starvingStartAt: starvedSince, lastDecayAt: starvedSince })],
+            inventory: [{ itemId: 'pet_food', quantity: 1 }],
+        });
+        mockAfterLoad = user => { user.save = jest.fn(async () => { throw versionError(); }); };
+
+        const interaction = await run('feed', { material: 'pet_food' });
+
+        expect(interaction.channel.sent).toHaveLength(0);
+        expect(textOf(interaction)).toContain('Edit conflict — please try again.');
+        expect(stored().pets.map(p => p._id)).toEqual(['p-gone']);
+    });
 });
 
 // ─── /pet release ───────────────────────────────────────────────────────────────

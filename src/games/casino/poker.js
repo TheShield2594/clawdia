@@ -63,6 +63,18 @@ async function playPoker(interaction, ante, releaseLock, onWager) {
     try {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
+        // Asked here, before the ante, so "Play Again" asks it too: a player
+        // down to less than the full stake after a hand used to ante into one
+        // they could only fold.
+        const wallet = await User.findOne(userFilter);
+        if ((wallet?.balance ?? 0) < fullStake(ante)) {
+            releaseLock?.();
+            return interaction.editReply({
+                content: `A **${ante.toLocaleString()}** ante needs **${fullStake(ante).toLocaleString()}** coins to play out — the ante plus a call of twice it. Your balance: **${(wallet?.balance ?? 0).toLocaleString()}**`,
+                embeds: [], components: [],
+            });
+        }
+
         debited = await placeWager(userFilter, ante, { onWager });
 
         if (!debited) {

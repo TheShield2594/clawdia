@@ -126,6 +126,9 @@ async function handleBuy(interaction, user, currency, override = {}) {
             return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
         }
 
+        // Set once coins have moved, so a failure after that never tells the
+        // player to "try again" — which would charge them a second time.
+        let charged = false;
         try {
             await btn.deferUpdate();
 
@@ -142,6 +145,7 @@ async function handleBuy(interaction, user, currency, override = {}) {
                 if (!updated) {
                     return await interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
                 }
+                charged = true;
 
                 const grantKey = shopGrantPayoutKey(interaction.id);
                 const identity = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' };
@@ -201,6 +205,7 @@ async function handleBuy(interaction, user, currency, override = {}) {
             if (!updated) {
                 return await interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
             }
+            charged = true;
 
             const grantKey = shopGrantPayoutKey(interaction.id);
             const identity = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' };
@@ -250,10 +255,13 @@ async function handleBuy(interaction, user, currency, override = {}) {
         } catch (err) {
             // Every reply above is awaited so a failed one lands here rather than
             // escaping the collector as an unhandled rejection (#873). Nothing
-            // here refunds or re-charges, so reaching it after a completed
-            // purchase costs nothing but the message.
+            // here refunds or re-charges; once coins have moved, the message
+            // points at the inventory instead of inviting a second purchase.
             console.error('[fishshop buy] purchase error:', err);
-            interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
+            const content = charged
+                ? 'Your purchase may have gone through. Check your balance and inventory before you try again.'
+                : 'Something went wrong. Please try again.';
+            interaction.editReply({ content, embeds: [], components: [] }).catch(() => {});
         }
     });
 

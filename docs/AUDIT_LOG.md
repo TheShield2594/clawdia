@@ -2406,7 +2406,7 @@ Blackjack and poker were simulated over 1–4 million hands each.
 | crash, cash-out at 10× / 50× | 89% / 49% (advertised: 99%) | 99% |
 | Three Card Monte | every round won by following the swaps | 93% |
 | higher-or-lower, simple strategy | ~115% | ≤ 95% a guess |
-| slots (Hot Reel and free spins included) | ~157% | ~90% |
+| slots (Hot Reel and free spins included) | ~157% | ~92.5% |
 | blackjack, insuring only on the peek prompt | ~102% | ~99.9% (basic strategy) |
 | poker, checking to the river | ~121% | 97.4% calling every hand |
 | keno, dice, coinflip, roulette | 92%, 95%, 97.5%, 97.3% | unchanged — sound |
@@ -2432,7 +2432,7 @@ Blackjack and poker were simulated over 1–4 million hands each.
 | 1 | **Crash's auto cash-out paid targets the round never reached.** The tick ran auto cash-outs before its crash check, at the tick's own multiplier. On the tick that busted the round, every target that tick passed was paid — above the crash point, and above the target. Measured: about 109% of the stake at any target up to 5× | Auto cash-outs pay their **target**, only when it is at or below the crash point. A crashing tick never becomes the multiplier on show, so a Cash Out pressed while the tick awaits cannot be paid at it either | `crash.js` |
 | 2 | **Three Card Monte was solved.** It showed the Queen's starting position and then every swap ("cards 2 ↔ 3"), so a player who followed along won every round: 2.8×, doubling over four rounds, with no risk. Its "tell", meant as flavour at "EV ≈ +0.12", named the Queen 40% of the time and a random card otherwise — right 60% of the time, worth 1.68× the stake | The swaps are shown as "Swap k/n" only; one unseen random swap already leaves the Queen equally likely under each card, so the stated 1-in-3 holds. The tell is removed | `cupgame.js` |
 | 3 | **Higher-or-lower added a flat +0.5× per correct call whatever the odds.** Calling the likelier side wins 77% of non-tie draws on average (every draw off an ace or a king), so the first call alone returned about 115% of the stake | Every call is priced by its odds: a win multiplies the session by 0.95 ÷ the call's chance (ties aside, since a tie pushes). Every call returns 95% off any card; the best any strategy does from a fresh hand is the stake back. A lapse on the question screen pays what the session is worth (it paid the bare stake, mid-streak too). A coin booster no longer multiplies a "profit" below the stake | `higherlowerOdds.js`, `higherlower.js` |
-| 4 | **Slots paid about 157% of every stake.** Nearly half of all spins (47.8%) are a two-of-a-kind, and at half the three-of-a-kind row they alone returned 1.30× the stake | Two-of-a-kind pays a quarter of the row. The whole loop, Hot Reel and free spins included, returns about 90%; the paytable embed says so | `slotsReels.js`, `slots.js` |
+| 4 | **Slots paid about 157% of every stake.** Nearly half of all spins (47.8%) are a two-of-a-kind, and at half the three-of-a-kind row they alone returned 1.30× the stake | Two-of-a-kind pays a quarter of the row. The whole loop, Hot Reel and free spins included, returns about 92.5%; the paytable embed says so. A pair that returns less than the stake counts as a loss for the lucky saves, the Hot Reel streak and the result card, and a coin booster no longer multiplies its negative profit | `slotsReels.js`, `slots.js` |
 | 5 | **Blackjack's insurance prompt told the player the hole card.** Insurance was offered at the peek only when the dealer *had* blackjack; an ace without one went straight to the table, where a second Insurance button could only lose. Insuring only on the prompt paid 2:1 every time — about +2.3% a hand, a player edge (102%) | Insurance is offered on every ace up-card, before the peek. The table no longer offers it | `blackjack.js` |
 | 6 | **Poker paid about 121% to a player who only checked.** The dealer "AI" folded ~53% of hands pre-flop without looking at the player (paying 1.5×); its post-flop fold could never trigger (pot odds are at most 1/3 and the fold needed equity below that less 0.05) and its bet never did, so it called every raise; its displayed "equity" compared the two made hands, so on the river it printed the showdown result; and a timeout at any street refunded the whole stake, raises included. Exploited, about 150%, with no losing hands | Rewritten as **Casino Hold'em** (the owner chose this over disabling or patching): ante, see two cards and the flop, fold or call 2× the ante; the dealer qualifies with a pair of fours; the ante pays by the standard paytable. No dealer decisions to exploit, and a timeout folds. The ante must be coverable three times over up front | `poker.js`, `holdemRules.js` |
 
@@ -2461,20 +2461,20 @@ Blackjack and poker were simulated over 1–4 million hands each.
   multi-card 21 pushes against a dealer natural under a ten, where a casino
   would take it. Both are small.
 - The casino has no single RTP target. After this pass every game sits between
-  90% (slots) and 99.9% (blackjack), which is a spread worth deciding on
+  92% (keno) and 99.9% (blackjack), which is a spread worth deciding on
   deliberately rather than a defect.
 
 ---
 
 ## Not yet reviewed
 
-Nothing below has been audited. Several of these are the highest-churn areas of
-the codebase — the economy alone is roughly a third of `src/` and takes the bulk
-of ongoing rework — so the gap between what this file covers and what ships is
-wide, and it is widest exactly where the risk is.
+The economy list below maps which pass of #873 audited each area; the
+"Everything else uncovered" list after it has not been audited. The economy
+alone is roughly a third of `src/` and takes the bulk of ongoing rework, which
+is why it was audited first, and why it stays listed here.
 
-**Economy** — every area below has now been audited, across passes 1–24 of
-#873; the list stays as the map of which pass covered what. It is still the
+**Economy** — every area below has now been audited, across passes 1–24 of the
+economy audit; the list stays as the map of which pass covered what. It is still the
 highest-churn code in the repository, so a change to it is a reason to re-check
 rather than a settled result:
 
@@ -2523,5 +2523,6 @@ non-reward surface on 2026-09-23; season XP, tier claims and mission
 progress on 2026-09-23; the gathering commands' remaining surface on
 2026-09-23; the player market, gifts and trades on 2026-09-23; the heist,
 syndicate and duel lobbies on 2026-09-23; the seasonal-event definition
-surface on 2026-09-23; and the casino's odds on 2026-09-23. "Not yet reviewed" carries no review
-date, because nothing in it has been reviewed.*
+surface on 2026-09-23; and the casino's odds on 2026-09-23. The "Everything
+else uncovered" list carries no review date, because nothing in it has been
+reviewed.*

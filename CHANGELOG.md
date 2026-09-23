@@ -39,7 +39,23 @@ The coverage ratchet (#998), and the defects its new suites found (#873).
 - **A wagered pet battle respects the level-gap limit at Accept,** for the
   pets that will actually fight, and is cancelled with both stakes refunded
   when they are over it.
-- `/fish shop buy` awaits its result replies, so a failed one is caught.
+- `/fish shop buy` awaits its result replies, so a failed one is caught, and
+  once the player has been charged it points them at their inventory rather
+  than inviting a second purchase.
+- From review of #1138:
+  - `/casino poker`'s Play Again checks the full stake (ante plus call) before
+    taking the ante, as the command does.
+  - Blackjack's insurance prompt has a No Insurance button, and says so when
+    the balance cannot cover the side bet.
+  - A slots pair that returns less than the stake counts as a loss for the
+    lucky saves, the Hot Reel streak and the result card, and a coin booster
+    no longer deepens it. Slots returns about 92.5%.
+  - Two first-ever `/event start`s on a guild with no document can no longer
+    replace each other.
+  - A pet death whose save fails is answered by the command's own
+    edit-conflict or error reply.
+  - Rods the old wear rule condemned stop showing as condemned when fishing
+    data loads.
 
 ## [4.13.17] - 2026-09-23
 
@@ -61,7 +77,7 @@ hand flow where the player decides — and five paid out more than they took.
   first call alone). Each call is now priced by its odds and returns 95%, and a
   lapse pays what the session is worth.
 - **Slots paid two-of-a-kind at half the row** (about 157% a spin); it pays a
-  quarter now, about 90% overall.
+  quarter now, about 92.5% overall.
 - **Blackjack's insurance prompt told the player the hole card** (+2.3% a
   hand). Insurance is offered on every ace, before the peek.
 - **`/casino poker` is now Casino Hold'em.** The dealer "AI" it replaced paid

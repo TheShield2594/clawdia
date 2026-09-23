@@ -44,6 +44,11 @@ function ensureFishingData(user) {
     if (!Array.isArray(f.unlockedLocations)) f.unlockedLocations = ['pond'];
     if (f.equippedRodIndex   == null) f.equippedRodIndex    = -1;
     if (!Array.isArray(f.rods))       f.rods                = [];
+    // A rod the old wear-based rule condemned (#873) is repairable again, and
+    // should stop showing as condemned before its next cast or repair.
+    for (const rod of f.rods) {
+        if (rod?.status === 'condemned' && !isCondemned(rod)) updateRodStatus(rod);
+    }
     if (!f.bait)         f.bait         = {};
     if (!f.consumables)  f.consumables  = {};
     if (f.activeBait           == null) f.activeBait           = null;

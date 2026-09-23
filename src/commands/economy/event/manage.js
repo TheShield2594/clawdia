@@ -130,23 +130,23 @@ async function handleStart(interaction) {
     // land first, and an unguarded $set then replaced that event (#873, pass
     // 23). The write is guarded on the event that was read — none, or the
     // expired one — and a miss means something else started in between.
-    // A guild with no document yet upserts, and a racing insert answers E11000.
-    let started;
-    try {
-        started = await Guild.findOneAndUpdate(
-            guildSettings
-                ? { guildId: interaction.guild.id, ...sameEventFilter(current) }
-                : { guildId: interaction.guild.id },
-            {
-                $set: { activeEvent: newEvent },
-                $setOnInsert: { guildId: interaction.guild.id, name: interaction.guild.name }
-            },
-            { upsert: !guildSettings, new: true }
-        );
-    } catch (err) {
-        if (err?.code !== 11000) throw err;
-        started = null;
+    //
+    // A guild with no document yet gets one first, with no event. Upserting the
+    // event itself on `{ guildId }` left two first-ever starts both matching
+    // that filter once the first had inserted, so the second replaced it. A
+    // racing insert answers E11000, which only means the document exists now.
+    if (!guildSettings) {
+        await Guild.updateOne(
+            { guildId: interaction.guild.id },
+            { $setOnInsert: { guildId: interaction.guild.id, name: interaction.guild.name } },
+            { upsert: true }
+        ).catch(err => { if (err?.code !== 11000) throw err; });
     }
+    const started = await Guild.findOneAndUpdate(
+        { guildId: interaction.guild.id, ...sameEventFilter(current) },
+        { $set: { activeEvent: newEvent } },
+        { new: true }
+    );
     if (!started) {
         return interaction.editReply({
             content: 'Another event was started while this one was being set up. Check `/event status`.'

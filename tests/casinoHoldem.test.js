@@ -165,6 +165,42 @@ describe('/casino poker', () => {
         expect(credits).toEqual([]);
     }, 20_000);
 
+    // "Play Again" skipped the full-stake check the command makes, so a player
+    // left with less than ante + call anted into a hand they could only fold.
+    test('Play Again refuses an ante the player can no longer follow with a call', async () => {
+        let settled = false;
+        User.findOne.mockImplementation(() => {
+            const doc = walletDoc(settled ? { balance: 250 } : {});
+            const q = Promise.resolve(doc);
+            q.lean = () => Promise.resolve(doc);
+            return q;
+        });
+        const realUpdate = User.findOneAndUpdate.getMockImplementation();
+        User.findOneAndUpdate.mockImplementation((filter, update, opts) => {
+            if (Array.isArray(update) && filter?.[FILTER_KEY]?.$ne) settled = true;
+            return realUpdate(filter, update, opts);
+        });
+        const antes = () => User.findOneAndUpdate.mock.calls
+            .filter(([, update]) => !Array.isArray(update) && update?.$inc?.balance === -100).length;
+
+        mockDeck = STACKED;
+        jest.useFakeTimers();
+        let hand = null;
+        const shown = prefix => hand?.replies.flatMap(r => r?.components ?? [])
+            .flatMap(row => row.components ?? []).map(b => b.data?.custom_id)
+            .filter(id => id?.startsWith(prefix)).at(-1);
+        hand = makeInteraction({
+            options: { bet: 100 }, userId: USER_ID, guildId: GUILD_ID,
+            components: ['pk_call_', 'poker_replay_'].map(p => ({ get customId() { return shown(p); } })),
+        });
+        const run = poker.execute(hand, { releaseLock: jest.fn(), onWager: jest.fn() });
+        for (let i = 0; i < 200; i++) await jest.advanceTimersByTimeAsync(250);
+        await run;
+
+        expect(antes()).toBe(1);
+        expect(JSON.stringify(hand.replies.at(-1))).toContain('needs **300** coins to play out');
+    }, 20_000);
+
     test('refuses an ante the player could not follow with a call', async () => {
         const hand = makeInteraction({ options: { bet: 4_000 }, userId: USER_ID, guildId: GUILD_ID });
         await poker.execute(hand, { releaseLock: jest.fn(), onWager: jest.fn() });

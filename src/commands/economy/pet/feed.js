@@ -31,7 +31,11 @@ async function executeFeed(interaction) {
     await interaction.deferReply();
 
     const [user, guildSettings] = await Promise.all([resolveUser(interaction), getGuildSettings(interaction.guild.id)]);
-    await syncHungerAndRunaway(user, interaction);
+    const sync = await syncHungerAndRunaway(user, interaction);
+    if (sync?.saveError) {
+        if (isVersionError(sync.saveError)) return interaction.editReply('Edit conflict — please try again.');
+        throw sync.saveError;
+    }
 
     if (!user.pets || user.pets.length === 0) return interaction.editReply('You have no pets to feed!');
     const target = resolvePetRef(user?.pets, petRef);

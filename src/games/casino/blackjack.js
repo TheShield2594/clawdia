@@ -275,12 +275,14 @@ module.exports = {
         // hole card, and insuring only on it paid 2:1 every time: about +2.3% of
         // every hand, a player edge (#873, pass 24).
         let peekInsuranceBet = 0;
+        let insuranceShort   = false;
         let prompted         = false;
         if (dealerShowsAce && insuranceCost > 0) {
             const peekRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(`bj_hit_${gameId}`).setLabel('Hit').setStyle(ButtonStyle.Primary).setDisabled(true),
                 new ButtonBuilder().setCustomId(`bj_stand_${gameId}`).setLabel('Stand').setStyle(ButtonStyle.Secondary).setDisabled(true),
                 new ButtonBuilder().setCustomId(`bj_insurance_${gameId}`).setLabel('🛡️ Insurance').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId(`bj_noins_${gameId}`).setLabel('No Insurance').setStyle(ButtonStyle.Secondary),
             );
             await sendInitial({
                 embeds: [buildEmbed(interaction, playerHand, dealerHand, bet, currency,
@@ -293,15 +295,22 @@ module.exports = {
             const peekMsg = await interaction.fetchReply();
             try {
                 const insI = await peekMsg.awaitMessageComponent({
-                    filter: ownedBy(interaction.user.id, i2 => i2.customId === `bj_insurance_${gameId}`, "This isn't your hand."),
+                    filter: ownedBy(interaction.user.id,
+                        i2 => [`bj_insurance_${gameId}`, `bj_noins_${gameId}`].includes(i2.customId),
+                        "This isn't your hand."),
                     time: 15_000,
                 });
                 await insI.deferUpdate();
-                const peekUpdated = await placeWager(
-                    { userId: interaction.user.id, guildId: interaction.guild.id },
-                    insuranceCost,
-                );
-                if (peekUpdated) peekInsuranceBet = insuranceCost;
+                // Declining goes straight on rather than waiting out the prompt,
+                // which every ace up-card now opens.
+                if (insI.customId === `bj_insurance_${gameId}`) {
+                    const peekUpdated = await placeWager(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        insuranceCost,
+                    );
+                    if (peekUpdated) peekInsuranceBet = insuranceCost;
+                    else insuranceShort = true;
+                }
             } catch {
                 // No insurance taken within timeout
             }
@@ -312,6 +321,7 @@ module.exports = {
         // Dealer peek: if dealer shows Ace and has natural blackjack, resolve before player acts
         if (dealerShowsAce && isNaturalBlackjack(dealerHand)) {
             let peekStatus = `❌ Dealer Blackjack! -${currency}${bet.toLocaleString()}`;
+            if (insuranceShort) peekStatus += '\n⚠️ Not enough balance for insurance';
             let peekCredit = 0;
             if (peekInsuranceBet > 0) {
                 peekCredit = insuranceCredit(peekInsuranceBet);
@@ -351,7 +361,9 @@ module.exports = {
 
         await show({
             embeds:     [buildEmbed(interaction, playerHand, dealerHand, bet, currency,
-                peekInsuranceBet > 0 ? '🛡️ No dealer blackjack — insurance lost · Your turn' : '🎲 Your turn',
+                peekInsuranceBet > 0 ? '🛡️ No dealer blackjack — insurance lost · Your turn'
+                    : insuranceShort ? '⚠️ Not enough balance for insurance · Your turn'
+                    : '🎲 Your turn',
                 '#5865F2', true)],
             components: buildButtons(gameId, false, currentOpts()),
         });

@@ -40,7 +40,7 @@ const FREE_SPIN_JACKPOT_MULT = 25;
 // It was 0.5. Nearly half of all spins are a two-of-a-kind (47.8%), so at half
 // the row they alone returned 1.30× the stake, and slots paid back about 157%
 // of everything wagered on it, Hot Reel and free spins included (#873, pass
-// 24). At a quarter the whole loop returns about 90% — beside keno's 92% and the
+// 24). At a quarter the whole loop returns about 92.5% — beside keno's 92% and the
 // cup game's 93%. tests/casinoSlotsReels.test.js pins the figure.
 const TWO_OF_A_KIND_RATE = 0.25;
 
