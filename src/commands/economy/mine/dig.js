@@ -344,6 +344,11 @@ async function handleDig(interaction) {
                 col.on('end', (_, reason) => { if (reason !== 'limit') resolve('abandon'); });
             });
 
+            // Strip the buttons as soon as the choice is locked in, the same way the
+            // hunt stealth prompt does — the final result edit only sets embeds, so
+            // leaving them here would keep dead buttons under the finished dig.
+            await interaction.editReply({ components: [] }).catch(() => {});
+
             if (caveInChoice === 'blast' && chargesAvailable > 0) {
                 // Deduct one blast charge and keep the payout
                 if (chargeType) {
