@@ -15,6 +15,7 @@ const express = require('express');
 const request = require('supertest');
 
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
+jest.mock('../src/utils/safeFeedFetch', () => ({ safeFetchFeed: jest.fn() }));
 jest.mock('../src/dashboard/lib/middleware', () => ({
     checkAuth: (req, _res, next) => { req.user = { id: 'admin-1', username: 'admin' }; next(); },
     checkGuildAccess: (_req, _res, next) => next(),
@@ -22,7 +23,10 @@ jest.mock('../src/dashboard/lib/middleware', () => ({
 }));
 
 const Guild = require('../src/models/Guild');
+const { safeFetchFeed } = require('../src/utils/safeFeedFetch');
 const rss = require('../src/dashboard/routes/api/rss');
+
+const FEED_XML = '<?xml version="1.0"?><rss version="2.0"><channel><title>Feed</title></channel></rss>';
 
 const CHANNEL_ID = '111222333444555666';
 const feed = name => ({ url: `https://${name}.example/feed.xml`, channelId: CHANNEL_ID });
@@ -40,6 +44,7 @@ beforeEach(() => {
     errors = jest.spyOn(console, 'error').mockImplementation(() => {});
     doc = makeDoc();
     Guild.findOne.mockResolvedValue(doc);
+    safeFetchFeed.mockResolvedValue(FEED_XML);
 
     app = express();
     app.use(express.json());
@@ -83,6 +88,56 @@ describe('POST /guild/:guildId/rss/add', () => {
         Guild.findOne.mockResolvedValue(null);
         const res = await addFeed({ url: 'https://a.example/feed.xml', channelId: CHANNEL_ID });
         expect(res.status).toBe(404);
+    });
+
+    it('refuses the same feed into the same channel twice, however it is spelled', async () => {
+        doc = makeDoc([{ url: 'https://a.example/', channelId: CHANNEL_ID }]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        const res = await addFeed({ url: 'HTTPS://A.example', channelId: CHANNEL_ID });
+
+        expect(res.status).toBe(409);
+        expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('allows the same feed into a different channel', async () => {
+        doc = makeDoc([feed('a')]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        const res = await addFeed({ url: feed('a').url, channelId: '999888777666555444' });
+
+        expect(res.status).toBe(200);
+        expect(doc.rssFeeds).toHaveLength(2);
+    });
+
+    it('refuses a feed past the per-guild limit', async () => {
+        doc = makeDoc(Array.from({ length: rss.MAX_RSS_FEEDS_PER_GUILD }, (_, i) => feed(`f${i}`)));
+        Guild.findOne.mockResolvedValue(doc);
+
+        const res = await addFeed({ url: 'https://new.example/feed.xml', channelId: CHANNEL_ID });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/at most/);
+        expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses a URL that does not answer with a feed, and says why', async () => {
+        safeFetchFeed.mockRejectedValue(new Error('Feed URL resolves to a private or reserved IP address.'));
+
+        const res = await addFeed({ url: 'https://a.example/feed.xml', channelId: CHANNEL_ID });
+
+        expect(res.status).toBe(422);
+        expect(res.body.error).toContain('private or reserved');
+        expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses a page that is not RSS or Atom', async () => {
+        safeFetchFeed.mockResolvedValue('<html><body>hello</body></html>');
+
+        const res = await addFeed({ url: 'https://a.example/', channelId: CHANNEL_ID });
+
+        expect(res.status).toBe(422);
+        expect(doc.save).not.toHaveBeenCalled();
     });
 });
 

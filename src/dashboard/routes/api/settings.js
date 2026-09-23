@@ -24,7 +24,10 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'starboard', 'eventLog', 'quests',
     'season', 'progressionTracks', 'commandPolicies',
     'suggestions', 'tickets', 'ai', 'tempVoice', 'bibleVerse',
-    'dailyNews', 'dailyNewsProfiles', 'rssFeeds',
+    // Not rssFeeds: the page manages those through the RSS routes, which
+    // enforce the per-guild limit, refuse duplicates and check the URL is a
+    // feed. A generic write here would skip all three.
+    'dailyNews', 'dailyNewsProfiles',
     'autoRoles', 'reactionRoles',
     'giveaways', 'notifications',
     'newspaper', 'heist', 'exploration',

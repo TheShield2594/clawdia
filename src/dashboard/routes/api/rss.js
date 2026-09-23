@@ -20,6 +20,28 @@ function feedList(guildSettings) {
     return (guildSettings.rssFeeds || []).map(feed => ({ url: feed.url, channelId: feed.channelId }));
 }
 
+// Every subscription is a fetch every five minutes for the life of the guild,
+// so a guild gets a bounded number of them rather than as many as an admin
+// cares to paste.
+const MAX_RSS_FEEDS_PER_GUILD = 25;
+
+// Two spellings of one URL (`HTTPS://Example.com` and `https://example.com/`)
+// are one feed.
+function sameFeedUrl(a, b) {
+    try {
+        return new URL(a).href === new URL(b).href;
+    } catch {
+        return a === b;
+    }
+}
+
+// Fetches and parses a feed through the SSRF-safe fetcher. Throws with a
+// message fit to show the admin when the URL is not a reachable RSS/Atom feed.
+const parser = new Parser();
+async function loadFeed(url) {
+    return parser.parseString(await safeFetchFeed(url));
+}
+
 
 // Checks that a URL is a fetchable RSS or Atom feed before it is subscribed to.
 // The one write on the router that had no rate limit, and the one that reaches
@@ -43,9 +65,7 @@ router.post('/guild/:guildId/validate-feed', checkAuth, checkGuildAccess, checkW
     }
 
     try {
-        const body = await safeFetchFeed(url);
-        const feedParser = new Parser();
-        const feed = await feedParser.parseString(body);
+        const feed = await loadFeed(url);
         return res.json({ valid: true, title: feed.title || '', itemCount: feed.items?.length ?? 0 });
     } catch (err) {
         return res.json({ valid: false, error: err.message || 'Could not fetch or parse feed. Check the URL and ensure it is a valid RSS/Atom feed.' });
@@ -74,7 +94,27 @@ router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, checkWriteRa
         const guildSettings = await Guild.findOne({ guildId });
         if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
 
-        guildSettings.rssFeeds.push({ url: url.trim(), channelId });
+        const feeds = guildSettings.rssFeeds || [];
+        const trimmed = url.trim();
+
+        if (feeds.length >= MAX_RSS_FEEDS_PER_GUILD) {
+            return res.status(400).json({ error: `A server can subscribe to at most ${MAX_RSS_FEEDS_PER_GUILD} feeds. Remove one to add another.` });
+        }
+        // The same feed twice into one channel is every article posted twice.
+        if (feeds.some(feed => feed.channelId === channelId && sameFeedUrl(feed.url, trimmed))) {
+            return res.status(409).json({ error: 'That channel is already subscribed to this feed.' });
+        }
+
+        // Checked here and not only by the page's Validate button, which is
+        // optional: a URL that is not a feed would otherwise be saved, fail
+        // every sweep, and never say so to anyone who could fix it.
+        try {
+            await loadFeed(trimmed);
+        } catch (err) {
+            return res.status(422).json({ error: `Could not read that feed: ${err.message || 'it is not a valid RSS or Atom feed.'}` });
+        }
+
+        guildSettings.rssFeeds.push({ url: trimmed, channelId });
         await guildSettings.save();
 
         res.json({ success: true, feeds: feedList(guildSettings) });
@@ -136,3 +176,4 @@ router.delete('/guild/:guildId/rss/:index', checkAuth, checkGuildAccess, checkWr
 });
 
 module.exports = router;
+module.exports.MAX_RSS_FEEDS_PER_GUILD = MAX_RSS_FEEDS_PER_GUILD;
