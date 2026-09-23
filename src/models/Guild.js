@@ -364,7 +364,13 @@ const guildSchema = new Schema({
     rssFeeds: [{
         url: { type: String, required: true },
         channelId: { type: String, required: true },
-        lastPublished: { type: Date, default: null }
+        lastPublished: { type: Date, default: null },
+        // Hashed keys (guid, else link) of the items this subscription has
+        // already handled — see rssService.itemKey. Deliberately no default:
+        // a subscription saved before this field existed is told apart by its
+        // absence and migrated on its next sweep rather than reading its whole
+        // feed as unseen.
+        seenIds: { type: [String], default: undefined }
     }],
 
     // Social-media notifications (YouTube, Reddit, X, Instagram, TikTok). Each

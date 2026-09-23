@@ -169,6 +169,10 @@ describe('the RSS feed check', () => {
 
         await checkRssFeeds({ channels: { fetch: jest.fn().mockResolvedValue(null) } });
 
-        expect(Guild.updateOne).not.toHaveBeenCalled();
+        // The subscription predates item keys, so the feed's keys are recorded
+        // — but the date is not touched.
+        for (const [, update] of Guild.updateOne.mock.calls) {
+            expect(update.$set).not.toHaveProperty(['rssFeeds.$.lastPublished']);
+        }
     });
 });

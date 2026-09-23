@@ -109,7 +109,7 @@ describe('the sweep with items the builder used to reject', () => {
         expect(client.send.mock.calls[1][0].embeds[0].data.url).toBe('https://example.com/after');
         expect(Guild.updateOne).toHaveBeenCalledWith(
             { guildId: 'g1', 'rssFeeds._id': 'f1' },
-            { $set: { 'rssFeeds.$.lastPublished': new Date('2025-08-20T12:00:00Z') } }
+            { $set: expect.objectContaining({ 'rssFeeds.$.lastPublished': new Date('2025-08-20T12:00:00Z') }) }
         );
     });
 

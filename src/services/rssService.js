@@ -2,6 +2,7 @@ const Parser = require('rss-parser');
 const Guild = require('../models/Guild');
 const { EmbedBuilder, escapeMarkdown } = require('discord.js');
 const cron = require('node-cron');
+const crypto = require('crypto');
 
 const { safeFetchFeed } = require('../utils/safeFeedFetch');
 const { runJob } = require('../utils/jobRunner');
@@ -200,23 +201,54 @@ async function fetchSendableChannel(client, channelId) {
 
     return channel;
 }
+// What a subscription remembers having seen. Dates alone were not enough to
+// tell "new" from "old": two posts sharing a timestamp lost the second, a post
+// back-dated past the cursor was never posted, an old post re-dated by an edit
+// was posted again, and a feed that carries no dates at all posted nothing.
+// Each item is keyed by its guid (Atom: id), falling back to its link and then
+// its title and date — hashed, because a guild document holds a list of these
+// per subscription and raw permalinks run to hundreds of bytes each.
+function itemKey(item) {
+    const raw = feedText(item.guid) || feedText(item.id) || feedText(item.link)
+        || `${feedText(item.title)}|${feedText(item.pubDate || item.isoDate)}`;
+    return crypto.createHash('sha256').update(raw).digest('base64url').slice(0, 16);
+}
+
 // Most feeds list newest first, but nothing in RSS or Atom requires it, and a
 // feed that lists oldest first pinned `items[0]` to an article that never
-// changes — so the sweep advanced its cursor once and then had nothing new to
-// say for the rest of the feed's life. Order is taken from the dates, not from
-// the document.
+// changes. Order is taken from the dates, not from the document: dated items
+// oldest first, then any undated ones, which are taken as newer than every
+// dated item and — lacking anything better — in reverse document order.
 //
-// An item whose pubDate does not parse is dropped rather than posted: its date
-// is both the "is this new" test and the embed's timestamp, and
-// `setTimestamp(new Date('...'))` on an unparseable one throws RangeError —
-// which, on a feed being seen for the first time, aborted the delivery before
-// the cursor was written and so repeated on every sweep, forever.
-function datedItems(parsedFeed) {
-    return (parsedFeed.items || [])
-        .map(item => ({ item, date: new Date(item.pubDate || item.isoDate) }))
-        .filter(entry => !Number.isNaN(entry.date.getTime()))
-        .sort((a, b) => a.date - b.date);
+// An unparseable date is kept as null rather than passed on: it is also the
+// embed's timestamp, and `setTimestamp(new Date('...'))` throws RangeError.
+function feedEntries(parsedFeed) {
+    const dated = [];
+    const undated = [];
+    const keys = new Set();
+    for (const item of parsedFeed.items || []) {
+        const key = itemKey(item);
+        if (keys.has(key)) continue;
+        keys.add(key);
+        const date = new Date(item.pubDate || item.isoDate);
+        if (Number.isNaN(date.getTime())) undated.push({ item, key, date: null });
+        else dated.push({ item, key, date });
+    }
+    dated.sort((a, b) => a.date - b.date);
+    return dated.concat(undated.reverse());
 }
+
+// How many item keys a subscription keeps. At least a feed's whole current
+// window, so nothing still listed can come back as "new"; beyond that, enough
+// history that an item which briefly drops off the feed and returns is still
+// recognised.
+const SEEN_IDS_MIN = 200;
+
+// An unseen item dated this far before the newest one already posted is
+// recorded as seen but not posted. Real back-dating (a post scheduled
+// yesterday and published today) sits well inside it; a feed that changes how
+// it writes its guids, which makes every item look unseen at once, does not.
+const BACKDATE_GRACE_MS = 24 * 60 * 60 * 1000;
 
 // Embed limits discord.js enforces at build time. Anything past them throws
 // from the builder, and a throw inside the delivery loop leaves the cursor
@@ -268,8 +300,10 @@ function buildItemEmbed(item, date, parsedFeed, feedUrl) {
     const embed = new EmbedBuilder()
         .setColor(COLORS.INFO)
         .setTitle(truncate(feedText(item.title) || 'New Post', EMBED_TITLE_LIMIT))
-        .setDescription(truncate(feedText(item.contentSnippet), ITEM_SNIPPET_LIMIT) || 'No description available')
-        .setTimestamp(date);
+        .setDescription(truncate(feedText(item.contentSnippet), ITEM_SNIPPET_LIMIT) || 'No description available');
+
+    // Undated items are posted too, just without a timestamp.
+    if (date) embed.setTimestamp(date);
 
     const link = absoluteHttpUrl(item.link, base);
     if (link) embed.setURL(link);
@@ -281,88 +315,133 @@ function buildItemEmbed(item, date, parsedFeed, feedUrl) {
 }
 
 // A feed that publishes a burst between two sweeps posts at most this many of
-// them, newest kept. The cursor still advances past the whole burst: a channel
+// them, newest kept. The rest of the burst is still recorded as seen: a channel
 // is not a backfill target, and the alternative — posting all of them — is a
 // feed that reposts its archive the first time it is polled after an outage.
 const MAX_ITEMS_PER_SWEEP = 5;
 
+// Which of a feed's entries this subscription has not posted yet.
+//
+// A subscription saved before item keys existed has no `seenIds` (the field has
+// no default, so absent and "seen nothing" stay distinguishable). It keeps the
+// old date rule for one more sweep, which also records every key the feed
+// currently lists; from then on keys decide. Without that step every existing
+// subscription would read its whole feed as unseen on the first sweep after
+// an upgrade.
+function unseenEntries(feed, entries) {
+    if (Array.isArray(feed.seenIds)) {
+        const seen = new Set(feed.seenIds);
+        const floor = feed.lastPublished ? new Date(feed.lastPublished).getTime() - BACKDATE_GRACE_MS : -Infinity;
+        return entries.filter(e => !seen.has(e.key) && (!e.date || e.date.getTime() > floor));
+    }
+    if (feed.lastPublished) {
+        return entries.filter(e => e.date && e.date > feed.lastPublished);
+    }
+    // First sight of a feed posts its newest item and nothing else. Without
+    // that, subscribing to a feed would empty its whole archive into the
+    // channel. A dated item is preferred: in a feed where most items carry a
+    // date, the odd undated one is no evidence of being the newest.
+    const newestDated = entries.filter(e => e.date).slice(-1);
+    return newestDated.length ? newestDated : entries.slice(-1);
+}
+
 /**
  * Delivers a freshly-parsed feed to one guild's subscription: sends what is new
- * for that guild and advances its lastPublished cursor. Per-subscription
- * failures are contained here so one guild's deleted channel does not stop the
- * fan-out to the others.
+ * for that guild and records it as seen. Per-subscription failures are
+ * contained here so one guild's deleted channel does not stop the fan-out to
+ * the others.
  *
  * Returns the number of items posted, for the sweep's summary line.
  */
 async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
-    // First sight of a feed posts its newest item and nothing else. Without
-    // that, subscribing to a feed would empty its whole archive into the
-    // channel.
-    const fresh = feed.lastPublished
-        ? entries.filter(entry => entry.date > feed.lastPublished)
-        : entries.slice(-1);
-    if (!fresh.length) return 0;
-
+    const fresh = unseenEntries(feed, entries);
     const toPost = fresh.slice(-MAX_ITEMS_PER_SWEEP);
 
-    // The cursor is moved to what was actually delivered, never past it. A
-    // batch that stops half way must not repost the half that landed on the
-    // next sweep, and must not skip the half that did not.
+    // Only what was actually handled is recorded, never more. A batch that
+    // stops half way must not repost the half that landed on the next sweep,
+    // and must not skip the half that did not.
+    const handled = new Set();
     let delivered = 0;
-    let cursor = null;
 
-    try {
-        const channel = await fetchSendableChannel(client, feed.channelId);
+    if (fresh.length) {
+        try {
+            const channel = await fetchSendableChannel(client, feed.channelId);
 
-        // No channel is not a delivery. Advancing the cursor here would drop
-        // the whole burst for good on a channel that was only briefly
-        // unreachable — `channels.fetch` failing with nothing in the cache
-        // looks exactly like a deleted one. Leaving it where it is costs a
-        // no-op re-check each sweep while the channel is really gone, which is
-        // the cheaper of the two mistakes.
-        if (!channel) return 0;
+            // No channel is not a delivery. Recording the burst here would drop
+            // it for good on a channel that was only briefly unreachable —
+            // `channels.fetch` failing with nothing in the cache looks exactly
+            // like a deleted one. Leaving it costs a no-op re-check each sweep
+            // while the channel is really gone, the cheaper of the two mistakes.
+            if (!channel) return 0;
 
-        for (const { item, date } of toPost) {
-            // An item the builder still refuses is skipped, not retried: it
-            // is the item that is wrong, and it will be just as wrong on the
-            // next sweep. A failed *send* is different — that throws below and
-            // leaves the cursor where it is.
-            let embed;
-            try {
-                embed = buildItemEmbed(item, date, parsedFeed, feed.url);
-            } catch (error) {
-                console.error(`Skipping an RSS item from ${feed.url} that could not be rendered:`, error.message);
-                cursor = date;
-                continue;
+            for (const entry of toPost) {
+                // An item the builder still refuses is skipped, not retried: it
+                // is the item that is wrong, and it will be just as wrong on the
+                // next sweep. A failed *send* is different — that throws below
+                // and leaves the item unrecorded.
+                let embed;
+                try {
+                    embed = buildItemEmbed(entry.item, entry.date, parsedFeed, feed.url);
+                } catch (error) {
+                    console.error(`Skipping an RSS item from ${feed.url} that could not be rendered:`, error.message);
+                    handled.add(entry.key);
+                    continue;
+                }
+
+                await channel.send({ embeds: [embed] });
+                delivered++;
+                handled.add(entry.key);
             }
 
-            await channel.send({ embeds: [embed] });
-            delivered++;
-            cursor = date;
-        }
-
-        // The whole batch landed, so the cursor may also skip whatever the
-        // per-sweep cap left behind — those are not coming.
-        cursor = fresh[fresh.length - 1].date;
-    } catch (error) {
-        console.error(`Error delivering RSS update for ${feed.url} to guild ${guild.guildId}:`, error);
-    }
-
-    if (cursor) {
-        try {
-            // Targets the one subdocument rather than rewriting the whole
-            // rssFeeds array, which is also what `guild.save()` on a
-            // projected document could not do.
-            await Guild.updateOne(
-                { guildId: guild.guildId, 'rssFeeds._id': feed._id },
-                { $set: { 'rssFeeds.$.lastPublished': cursor } }
-            );
+            // The whole batch landed, so whatever the per-sweep cap left
+            // behind may be recorded too — those are not coming.
+            for (const entry of fresh) handled.add(entry.key);
         } catch (error) {
-            console.error(`Error advancing the RSS cursor for ${feed.url} in guild ${guild.guildId}:`, error);
+            console.error(`Error delivering RSS update for ${feed.url} to guild ${guild.guildId}:`, error);
         }
     }
 
+    await recordSeen(guild, feed, entries, fresh, handled);
     return delivered;
+}
+
+// Writes back what this sweep learned about one subscription: every key the
+// feed lists except the fresh ones that did not get through, and the newest
+// date handled. Nothing is written when neither changed.
+async function recordSeen(guild, feed, entries, fresh, handled) {
+    const pending = new Set(fresh.filter(e => !handled.has(e.key)).map(e => e.key));
+    const previous = Array.isArray(feed.seenIds) ? feed.seenIds : [];
+    const previousSet = new Set(previous);
+
+    const current = entries.map(e => e.key).filter(key => !pending.has(key));
+    const nextSeen = [...new Set(current.concat(previous))]
+        .slice(0, Math.max(SEEN_IDS_MIN, current.length));
+
+    const $set = {};
+    if (!Array.isArray(feed.seenIds) || nextSeen.some(key => !previousSet.has(key))) {
+        $set['rssFeeds.$.seenIds'] = nextSeen;
+    }
+
+    // lastPublished is still kept: it is the backdating floor above and what a
+    // subscription saved before item keys is judged by. It only ever moves
+    // forward — a back-dated item that was posted does not pull it back.
+    let cursor = null;
+    for (const entry of fresh) {
+        if (handled.has(entry.key) && entry.date && (!cursor || entry.date > cursor)) cursor = entry.date;
+    }
+    if (cursor && (!feed.lastPublished || cursor > new Date(feed.lastPublished))) {
+        $set['rssFeeds.$.lastPublished'] = cursor;
+    }
+
+    if (!Object.keys($set).length) return;
+    try {
+        // Targets the one subdocument rather than rewriting the whole rssFeeds
+        // array, which is also what `guild.save()` on a projected document
+        // could not do.
+        await Guild.updateOne({ guildId: guild.guildId, 'rssFeeds._id': feed._id }, { $set });
+    } catch (error) {
+        console.error(`Error recording RSS progress for ${feed.url} in guild ${guild.guildId}:`, error);
+    }
 }
 
 /**
@@ -426,7 +505,7 @@ async function checkRssFeeds(client) {
                     continue;
                 }
 
-                const entries = datedItems(parsedFeed);
+                const entries = feedEntries(parsedFeed);
                 if (!entries.length) continue;
 
                 for (const { guild, feed } of subscriptionsByUrl.get(url)) {
@@ -701,6 +780,7 @@ module.exports = {
         pruneFeedFailureState, DEAD_FEED_STATE_TTL_MS,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, RSS_FETCH_CONCURRENCY,
         dailyNewsDue, runDueDailyNews, DAILY_NEWS_REFIRE_GUARD_MS,
-        datedItems, MAX_ITEMS_PER_SWEEP, buildItemEmbed, EMBED_TITLE_LIMIT,
+        feedEntries, itemKey, MAX_ITEMS_PER_SWEEP, SEEN_IDS_MIN, BACKDATE_GRACE_MS,
+        buildItemEmbed, EMBED_TITLE_LIMIT,
     },
 };
