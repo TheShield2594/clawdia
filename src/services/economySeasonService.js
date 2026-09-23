@@ -31,7 +31,21 @@ const { createSeasonRecapCard } = require('../utils/cardGenerator');
 const { postAnnouncement } = require('../utils/guildAnnounce');
 const { eventCommentary, addCommentary } = require('./commentaryService');
 const COLORS = require('../utils/embedColors');
+const { seasonLabel } = require('../utils/seasonLabel');
 
+/**
+ * Close out one guild's economy season: claim it, freeze the leaderboard, reset
+ * season coins, send the recaps and post the announcement.
+ *
+ * The one place a season ends. `/season end` calls this too (#873, pass 18): it
+ * used to carry its own copy of the ending without the claim, so an admin's end
+ * racing this sweep could run the freeze and the reset twice, and its closing
+ * `$set` — unguarded on which season it was clearing — could erase a season a
+ * second admin had started in between.
+ *
+ * @returns {Promise<false|{season: object, topUsers: object[]}>} false when
+ *   there was no season to end or another worker already claimed it.
+ */
 async function resolveOneSeason(client, guildDoc) {
     const guildId = guildDoc.guildId;
     const season = guildDoc.currentSeason;
@@ -117,15 +131,15 @@ async function resolveOneSeason(client, guildDoc) {
                     if (!member) continue;
 
                     const rank = rankMap.get(u.userId) ?? null;
-                    const buf  = await createSeasonRecapCard(u, season.name ?? season.id, rank, totalParticipants);
+                    const buf  = await createSeasonRecapCard(u, seasonLabel(season), rank, totalParticipants);
                     const file = new AttachmentBuilder(buf, {
                         name: 'season_recap.png',
-                        description: `${season.name ?? season.id} recap card for ${member.user.username}`
+                        description: `${seasonLabel(season)} recap card for ${member.user.username}`
                             + (rank ? `, finishing ${rank} of ${totalParticipants}.` : '.'),
                     });
 
                     await member.send({
-                        content: `🏁 **Your ${season.name ?? season.id} recap is here!** Screenshot and share it — see you next season!`,
+                        content: `🏁 **Your ${seasonLabel(season)} recap is here!** Screenshot and share it — see you next season!`,
                         files:   [file],
                     }).catch(() => {});
                 } catch { /* non-critical per-user failure */ }
@@ -148,7 +162,7 @@ async function resolveOneSeason(client, guildDoc) {
 
     const embed = new EmbedBuilder()
         .setColor(COLORS.PRIZE)
-        .setTitle(`🏁 Season Ended: ${season.name ?? season.id}`)
+        .setTitle(`🏁 Season Ended: ${seasonLabel(season)}`)
         .setDescription('The season leaderboard has been frozen and season coins have been reset.')
         .addFields({ name: '🏆 Final Top 3', value: winnerLines })
         .setTimestamp();
@@ -162,7 +176,7 @@ async function resolveOneSeason(client, guildDoc) {
     addCommentary(embed, await eventCommentary(guildDoc, {
         event: 'season',
         facts: {
-            season: season.name ?? season.id,
+            season: seasonLabel(season),
             'final podium': podium.length ? podium.join('; ') : 'nobody scored',
             'players who took part': totalParticipants,
             'winner\'s margin over second': topUsers.length > 1
@@ -172,7 +186,7 @@ async function resolveOneSeason(client, guildDoc) {
     }).catch(() => null));
 
     await postAnnouncement(client, guildId, announceChannelId, embed);
-    return true;
+    return { season, topUsers, announceChannelId };
 }
 
 /**
@@ -200,4 +214,4 @@ async function resolveExpiredSeasons(client) {
     }
 }
 
-module.exports = { resolveExpiredSeasons };
+module.exports = { resolveExpiredSeasons, resolveOneSeason };
