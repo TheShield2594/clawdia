@@ -32,17 +32,16 @@ module.exports = {
     // for the step summary below and for anything reading coverage later.
     coverageReporters: ['text-summary', 'json-summary', 'lcov'],
 
-    // Measured over the suite at the commit that raised these — 374 suites,
-    // 7,405 tests, integration excluded: statements 52.51, branches 42.72,
-    // functions 54.55, lines 53.84. Raised from 50/40/53/51 by the suites that
-    // came with #884 (the purchase primitive) and #886/#888/#900; the
-    // measurement excludes the three integration suites, so the number CI sees
-    // is this or better.
+    // Measured over the suite at the commit that raised these — 480 suites,
+    // 9,563 tests, integration excluded: statements 62.83, branches 53.23,
+    // functions 62.14, lines 64.41. Raised from 51/41/53/52 by the suites the
+    // economy audit (#873, passes 5–24) added; the measurement excludes the
+    // four integration suites, so the number CI sees is this or better.
     //
     // Each floor is the whole percent below its measurement, which is not the
     // arbitrary rounding it looks like: because the four denominators differ by
     // most of an order of magnitude, one percent of each works out at a comparable
-    // amount of actual code — 379 statements, 263 branches, 56 functions and 333
+    // amount of actual code — 471 statements, 324 branches, 74 functions and 411
     // lines of slack. That is more than an unrelated refactor moves and less
     // than a deleted test suite, which is the window a ratchet wants.
     //
@@ -53,10 +52,10 @@ module.exports = {
     // fail the run after the one that set it.
     coverageThreshold: {
         global: {
-            statements: 51,
-            branches: 41,
-            functions: 53,
-            lines: 52,
+            statements: 61,
+            branches: 52,
+            functions: 61,
+            lines: 63,
         },
     },
 };
