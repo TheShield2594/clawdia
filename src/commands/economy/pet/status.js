@@ -20,7 +20,7 @@ const {
     REST_DURATION_MS,
 } = require('../../../services/petService');
 const { generatePetSprite } = require('../../../utils/cardGenerator');
-const { hungerBar, buildNavComponents, renderPetStatus } = require('../../../services/petStatusView');
+const { hungerBar, buildNavComponents, renderPetStatus, renderPetCard } = require('../../../services/petStatusView');
 const { applyXpGain, announceLevelUp } = require('../../../services/levelingService');
 const { isVersionError } = require('../../../utils/versionRetry');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
@@ -68,10 +68,11 @@ async function executeStatus(interaction) {
 
     let currentIndex = 0;
     const ownerAvatarURL = interaction.user.displayAvatarURL();
+    const ownerName      = interaction.member?.displayName ?? interaction.user.username;
     const guildId = interaction.guild.id;
 
     const reply = await interaction.editReply(
-        await renderPetStatus(user.pets[currentIndex], currentIndex, user.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+        await renderPetStatus(user.pets[currentIndex], currentIndex, user.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
     );
 
     const collector = reply.createMessageComponentCollector({
@@ -99,13 +100,13 @@ async function executeStatus(interaction) {
         if (action === 'pet_prev') {
             currentIndex = Math.max(0, idx - 1);
             await btn.update(
-                await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+                await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             );
 
         } else if (action === 'pet_next') {
             currentIndex = Math.min(freshUser.pets.length - 1, idx + 1);
             await btn.update(
-                await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+                await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             );
 
         } else if (action === 'pet_play') {
@@ -171,7 +172,7 @@ async function executeStatus(interaction) {
                 : `✨ **+${petXpResult.gained} XP** for ${name}! *(You've had your play XP for this hour.)*`;
             await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n${xpLine}${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
             await interaction.editReply(
-                await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+                await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             ).catch(() => {});
 
         } else if (action === 'pet_rest') {
@@ -223,7 +224,7 @@ async function executeStatus(interaction) {
 
             await btn.reply({ content: `🛏️ **${name}** is now resting! Hunger will decay at half speed for **2 hours**.`, flags: MessageFlags.Ephemeral });
             await interaction.editReply(
-                await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+                await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             ).catch(() => {});
 
         } else if (action === 'pet_showcase') {
@@ -254,7 +255,7 @@ async function executeStatus(interaction) {
 
             const showcaseEmbed = new EmbedBuilder()
                 .setColor(getMoodColor(hunger))
-                .setTitle(`${def?.emoji ?? '🐾'} ${name}`)
+                .setTitle(`${getPetDisplay(pet).emoji} ${name}`)
                 .setAuthor({ name: `Owned by ${interaction.user.username}`, iconURL: ownerAvatarURL })
                 .setDescription(`*${getMoodLine(pet)}*${pet.potw ? '\n🌟 **Pet of the Week**' : ''}`)
                 .addFields(
@@ -266,18 +267,30 @@ async function executeStatus(interaction) {
                 .setFooter({ text: `${def?.name ?? pet.petId} • Use /pet status to check on yours!` })
                 .setTimestamp();
 
-            // Try to attach a pet sprite
+            // The companion card leads the showcase, as it does /pet status. The
+            // old emoji-on-a-circle sprite is only the fallback now, for when
+            // the card cannot be drawn.
             let files = [];
-            try {
-                const spriteBuf = await generatePetSprite(pet.petId, 80, pet.evolutionStage ?? 1);
-                if (spriteBuf) {
-                    showcaseEmbed.setThumbnail('attachment://pet_sprite.png');
-                    files = [new AttachmentBuilder(spriteBuf, {
-                        name: 'pet_sprite.png',
-                        description: `Pixel-art sprite of ${name}.`,
-                    })];
-                }
-            } catch { /* non-critical */ }
+            const card = await renderPetCard(pet, {
+                kicker:      `Showcased by ${ownerName}`,
+                footerLeft:  'Showcase',
+                footerRight: 'Check on yours with /pet status',
+            }, 'pet-showcase.png');
+            if (card) {
+                showcaseEmbed.setImage(`attachment://${card.name}`);
+                files = [card];
+            } else {
+                try {
+                    const spriteBuf = await generatePetSprite(pet.petId, 80, pet.evolutionStage ?? 1);
+                    if (spriteBuf) {
+                        showcaseEmbed.setThumbnail('attachment://pet_sprite.png');
+                        files = [new AttachmentBuilder(spriteBuf, {
+                            name: 'pet_sprite.png',
+                            description: `Pixel-art sprite of ${name}.`,
+                        })];
+                    }
+                } catch { /* non-critical */ }
+            }
 
             await btn.reply({ embeds: [showcaseEmbed], files });
         }

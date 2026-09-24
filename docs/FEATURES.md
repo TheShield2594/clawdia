@@ -637,7 +637,10 @@ evolution track.
 - **Six purchasable pets** — Dog and Cat (2,000), Bird and Fish (3,000), Fox (5,000), Wolf (8,000) — each granting a different passive: work earnings, crime success, XP gain, fish yield, rob success, or hunt yield.
 - **Four rare pets** — Eagle, Shark, Crystal Fox, and Lantern Owl — are not sold anywhere. Each is tied to one grind track and drops at a 4% chance alongside a legendary-tier result there. Rare pets are exempt from the slot limit, so a full roster can never lock one out.
 - **Progression:** pets level to 30 across three evolution stages (1–9, 10–19, 20+), with stage multipliers of 1.0×/1.5×/2.0× on the passive plus per-level growth. Stacked bonuses of the same type cap at **40%**.
-- **Upkeep:** hunger decays 10/day (5/day while resting). Below 30 a pet is starving, and a pet left starving for 3 days runs away. Base capacity is 3 slots, expandable 3 times.
+- **Upkeep:** hunger decays 10/day (5/day while resting). Below 30 a pet's passive switches off, and a pet left at zero hunger for 3 days runs away; a Revive Scroll calls it home with its level, bond and record intact. Base capacity is 3 slots, expandable 3 times.
+- **Companion card:** `/pet status` and the Showcase button draw each pet as a card: its portrait and evolution stage, a level ring, hunger (with where the passive cuts out) and bond bars, its passive, battle stats and record, and what it has to say. Every number on the card is also in the text beside it.
+- **Battles:** `/pet battle` fights a wild pet for XP, or a member for XP or coins. Each personality wins a different way (Energetic strikes first more often, Mischievous crits more, Loyal outlasts, Lazy shrugs hits off) and every pairing is close to even. Wagered battles are level-matched: both pets fight at the lower pet's level. The wins leaderboard counts member battles only.
+- **Pet of the Week** goes to the pet with the most care that week, counted at most 3 times per pet per day, and pays its owner 5,000 coins by default.
 
 ### Trading & Server Investment
 

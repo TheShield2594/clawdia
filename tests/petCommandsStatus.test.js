@@ -23,6 +23,7 @@ jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 jest.mock('../src/utils/grindProfile', () => ({ attachGrind: jest.fn(async user => user) }));
 jest.mock('../src/utils/itemImageHelper', () => ({ getItemImageAttachment: jest.fn(async () => null) }));
 jest.mock('../src/utils/cardGenerator', () => ({ generatePetSprite: jest.fn(async () => Buffer.from('png')) }));
+jest.mock('../src/utils/petStatusCard', () => ({ createPetStatusCard: jest.fn(async () => Buffer.from('card')) }));
 jest.mock('../src/services/questService', () => ({
     onPetCare: jest.fn(async () => ({ completed: [] })),
     notifyQuestComplete: jest.fn(async () => {}),
@@ -38,6 +39,7 @@ jest.mock('../src/services/levelingService', () => ({
 
 const pet = require('../src/commands/economy/pet');
 const { generatePetSprite } = require('../src/utils/cardGenerator');
+const { createPetStatusCard } = require('../src/utils/petStatusCard');
 const { announceLevelUp } = require('../src/services/levelingService');
 const { xpForLevel, REST_DURATION_MS } = require('../src/services/petService');
 
@@ -335,7 +337,7 @@ describe('/pet status — rest', () => {
 });
 
 describe('/pet status — showcase', () => {
-    test('posts a public card with the sprite and counts the interaction', async () => {
+    test('posts the companion card publicly and counts the interaction', async () => {
         seedUser({ pets: [makePet({ name: 'Rex', potw: true })] });
         const interaction = await openStatus();
 
@@ -348,15 +350,31 @@ describe('/pet status — showcase', () => {
         expect(embed.description).toContain('🌟 **Pet of the Week**');
         expect(embed.fields.map(f => f.name)).toEqual(['❤️ Bond', '🍖 Hunger', '✅ Bonus']);
         expect(embed.fields[0].value).toMatch(/ 10d$/);
-        expect(embed.thumbnail.url).toBe('attachment://pet_sprite.png');
-        expect(payload.files).toHaveLength(1);
+        expect(embed.image.url).toBe('attachment://pet-showcase.png');
+        expect(embed.thumbnail).toBeUndefined();
+        expect(payload.files.map(f => f.name)).toEqual(['pet-showcase.png']);
+        expect(createPetStatusCard).toHaveBeenLastCalledWith(expect.objectContaining({ kicker: 'Showcased by player', footerLeft: 'Showcase' }));
+        expect(generatePetSprite).not.toHaveBeenCalled();
         expect(stored().pets[0].weeklyInteractions).toBe(1);
     });
 
-    test('a hungry pet shows its bonus as off, and a failed sprite is left out', async () => {
+    test('falls back to the sprite when the card cannot be drawn', async () => {
+        seedUser({ pets: [makePet({ name: 'Rex' })] });
+        const interaction = await openStatus();
+
+        createPetStatusCard.mockRejectedValueOnce(new Error('no canvas'));
+        const { i } = await press(interaction, 'showcase', 0);
+
+        const payload = i.reply.mock.calls[0][0];
+        expect(payload.embeds[0].data.thumbnail.url).toBe('attachment://pet_sprite.png');
+        expect(payload.files).toHaveLength(1);
+    });
+
+    test('a hungry pet shows its bonus as off, and with no card and no sprite nothing is attached', async () => {
         seedUser({ pets: [makePet({ hunger: 10 })] });
         generatePetSprite.mockRejectedValueOnce(new Error('no canvas'));
         const interaction = await openStatus();
+        createPetStatusCard.mockRejectedValueOnce(new Error('no canvas'));
 
         const { i } = await press(interaction, 'showcase', 0);
 
