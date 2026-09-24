@@ -29,6 +29,7 @@ jest.mock('../src/models/Guild', () => ({ findOne: jest.fn(), findOneAndUpdate: 
 jest.mock('../src/dashboard/lib/middleware', () => ({
     checkAuth: (req, _res, next) => { req.user = { id: 'admin-1', username: 'admin' }; next(); },
     checkGuildAccess: (_req, _res, next) => next(),
+    requireGuildPermission: () => (_req, _res, next) => next(),
     checkWriteRateLimit: (_req, _res, next) => next(),
 }));
 jest.mock('../src/dashboard/lib/apiHelpers', () => ({

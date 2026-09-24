@@ -214,6 +214,7 @@ describe('the commands that take a target call the guard', () => {
         ['ban.js', 'moderation'],
         ['kick.js', 'moderation'],
         ['mute.js', 'moderation'],
+        ['unmute.js', 'moderation'],
         ['softban.js', 'moderation'],
         ['massban.js', 'moderation'],
     ];

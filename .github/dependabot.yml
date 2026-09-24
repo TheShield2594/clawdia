@@ -40,7 +40,20 @@ updates:
     labels:
       - dependencies
 
+  # The `docker` ecosystem reads the Dockerfile only. The digests pinned in
+  # docker-compose.yml (mongo, rsshub, autoheal) need their own entry, or MongoDB
+  # falls behind on security releases with nothing saying so (#1160).
+  # Dependabot does not recognise portainer-stack.yml as a compose file, so it
+  # never bumps that one: tests/imagePinning.test.js fails a compose bump until
+  # the stack file carries the same digest.
   - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+
+  - package-ecosystem: docker-compose
     directory: "/"
     schedule:
       interval: weekly

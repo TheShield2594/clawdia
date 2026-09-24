@@ -171,6 +171,44 @@ function createBotGateway(client) {
                 || member.permissions.has(PermissionFlagsBits.ManageGuild);
         },
 
+        /**
+         * Does this user hold every one of these permissions in the guild
+         * *right now*?
+         *
+         * `canManageGuild` answers whether someone may open the dashboard at
+         * all. Some of what the dashboard does is narrower than "manages the
+         * server" in Discord's own model: lifting a ban is Ban Members, lifting
+         * a timeout is Moderate Members. Without this, a Manage Server user who
+         * holds neither could do both through the bot (#1154).
+         *
+         * `permissions` are PermissionFlagsBits names ('BanMembers'), since a
+         * bigint does not survive JSON. An unknown name answers false rather
+         * than being skipped, so a typo cannot quietly widen a route.
+         * Administrator implies every permission, as it does in Discord.
+         *
+         * @returns {Promise<boolean|null>} null when Discord could not be asked;
+         *   same contract as canManageGuild.
+         */
+        async hasGuildPermissions(guildId, userId, permissions) {
+            const guild = guildOf(guildId);
+            if (!guild || !userId) return null;
+            const names = Array.isArray(permissions) ? permissions : [];
+            if (names.length === 0) return false;
+            if (!names.every(name => Object.hasOwn(PermissionFlagsBits, name))) return false;
+            if (guild.ownerId === userId) return true;
+
+            let member;
+            try {
+                // Forced, as in canManageGuild: a cached member is the stale answer.
+                member = await guild.members.fetch({ user: userId, force: true });
+            } catch (err) {
+                if (err?.code === 10007 || err?.code === 10013) return false;
+                return null;
+            }
+            if (!member) return false;
+            return member.permissions.has(names.map(name => PermissionFlagsBits[name]));
+        },
+
         async getGuild(guildId) {
             const guild = guildOf(guildId);
             return guild ? plainGuild(guild) : null;

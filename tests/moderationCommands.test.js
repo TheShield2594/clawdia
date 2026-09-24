@@ -119,6 +119,18 @@ describe('a moderator cannot act on someone who outranks them', () => {
                 return { interaction, done: member.timeout.mock.calls.length > 0 };
             },
         },
+        {
+            // #1154: lifting a timeout a senior applied is the same override.
+            name: 'unmute',
+            run: async member => {
+                const guild = makeGuild({ cached: [member] });
+                const interaction = makeInteraction({
+                    guild, options: { user: makeUser(member.id) }, invoker: modMember(),
+                });
+                await command('unmute').execute(interaction);
+                return { interaction, done: member.timeout.mock.calls.length > 0 };
+            },
+        },
     ];
 
     test.each(CASES)('$name refuses a target with a higher role', async ({ run }) => {
@@ -157,7 +169,7 @@ describe('a moderator cannot act on someone who outranks them', () => {
 // drive execute() with the interaction already deferred (as the dispatcher would
 // leave it) and prove both halves land through the right API.
 describe('the moderation commands acknowledge before slow work', () => {
-    test.each(['ban', 'kick', 'mute', 'softban'])(
+    test.each(['ban', 'kick', 'mute', 'unmute', 'softban'])(
         '/%s asks the dispatcher to defer publicly', name => {
             expect(command(name).deferral).toEqual({ ephemeral: false });
         });
@@ -166,13 +178,14 @@ describe('the moderation commands acknowledge before slow work', () => {
         ban: async interaction => command('ban').execute(interaction),
         kick: async interaction => command('kick').execute(interaction),
         mute: async interaction => command('mute').execute(interaction),
+        unmute: async interaction => command('unmute').execute(interaction),
         softban: async interaction => command('softban').execute(interaction),
     };
     const options = (name, id) => (name === 'mute'
         ? { user: makeUser(id), duration: 10 }
         : { user: makeUser(id) });
 
-    describe.each(['ban', 'kick', 'mute', 'softban'])('%s, when deferred', name => {
+    describe.each(['ban', 'kick', 'mute', 'unmute', 'softban'])('%s, when deferred', name => {
         test('edits the public placeholder with the success embed', async () => {
             const member = target();
             const guild = makeGuild({ cached: [member] });
@@ -538,6 +551,47 @@ describe('/mute and /unmute', () => {
 
         expect(member.timeout).toHaveBeenCalledWith(null);
         expect(lastReply(interaction)).toMatch(/User Unmuted/);
+        expect(logModeration).toHaveBeenCalledWith(GUILD_ID, 'unmute', expect.anything(), expect.anything(), expect.any(String));
+    });
+
+    test('unmute finds a quiet member the cache has dropped (#1154)', async () => {
+        const member = target();
+        const guild = makeGuild({ cached: [], fetchable: [member] });
+        const interaction = makeInteraction({
+            guild, invoker: modMember(), options: { user: makeUser(member.id) },
+        });
+        await command('unmute').execute(interaction);
+
+        expect(guild.members.fetch).toHaveBeenCalledWith(member.id);
+        expect(member.timeout).toHaveBeenCalledWith(null);
+    });
+
+    test('unmute records the case even when the public reply fails', async () => {
+        const member = target();
+        const guild = makeGuild({ cached: [member] });
+        const interaction = makeInteraction({
+            guild, invoker: modMember(), deferredAs: 'public', options: { user: makeUser(member.id) },
+        });
+        interaction.editReply.mockRejectedValueOnce(new Error('Unknown interaction'));
+        await command('unmute').execute(interaction);
+
+        expect(member.timeout).toHaveBeenCalledWith(null);
+        expect(logModeration).toHaveBeenCalledWith(GUILD_ID, 'unmute', expect.anything(), expect.anything(), expect.any(String));
+        // The unmute happened, so the moderator is not told it failed.
+        expect(interaction.followUp).not.toHaveBeenCalled();
+    });
+
+    test('a failed unmute records no case and says so', async () => {
+        const member = target();
+        member.timeout.mockRejectedValueOnce(new Error('Missing Permissions'));
+        const guild = makeGuild({ cached: [member] });
+        const interaction = makeInteraction({
+            guild, invoker: modMember(), options: { user: makeUser(member.id) },
+        });
+        await command('unmute').execute(interaction);
+
+        expect(logModeration).not.toHaveBeenCalled();
+        expect(lastReply(interaction)).toMatch(/Failed to unmute/i);
     });
 
     test('unmute refuses a user who is not in the guild', async () => {

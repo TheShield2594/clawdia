@@ -155,6 +155,64 @@ describe('canManageGuild', () => {
     });
 });
 
+// #1154: some dashboard actions need a narrower permission than Manage Server.
+describe('hasGuildPermissions', () => {
+    const { PermissionFlagsBits } = require('discord.js');
+
+    // Mirrors discord.js: an array means all of them, and Administrator implies all.
+    function memberWith(bits) {
+        const has = bit => (bits & PermissionFlagsBits.Administrator) === PermissionFlagsBits.Administrator
+            || (bits & bit) === bit;
+        return { permissions: { has: wanted => (Array.isArray(wanted) ? wanted.every(has) : has(wanted)) } };
+    }
+
+    function gatewayFor(fetchImpl, { ownerId = 'owner-1' } = {}) {
+        const fixture = stubGuild({ ownerId, members: { fetch: fetchImpl } });
+        return createBotGateway(stubClient({ guilds: { g1: fixture.guild } }));
+    }
+
+    test('true only when every named permission is held', async () => {
+        const bot = gatewayFor(async () => memberWith(PermissionFlagsBits.BanMembers));
+        await expect(bot.hasGuildPermissions('g1', 'u1', ['BanMembers'])).resolves.toBe(true);
+        await expect(bot.hasGuildPermissions('g1', 'u1', ['ModerateMembers'])).resolves.toBe(false);
+        await expect(bot.hasGuildPermissions('g1', 'u1', ['BanMembers', 'ModerateMembers'])).resolves.toBe(false);
+    });
+
+    test('Manage Server alone is not Ban Members', async () => {
+        const bot = gatewayFor(async () => memberWith(PermissionFlagsBits.ManageGuild));
+        await expect(bot.hasGuildPermissions('g1', 'u1', ['BanMembers'])).resolves.toBe(false);
+    });
+
+    test('forces the fetch past the member cache', async () => {
+        const fetchMember = jest.fn(async () => memberWith(PermissionFlagsBits.BanMembers));
+        await gatewayFor(fetchMember).hasGuildPermissions('g1', 'u1', ['BanMembers']);
+        expect(fetchMember).toHaveBeenCalledWith({ user: 'u1', force: true });
+    });
+
+    test('the owner holds everything, without a fetch', async () => {
+        const fetchMember = jest.fn();
+        const bot = gatewayFor(fetchMember, { ownerId: 'u1' });
+        await expect(bot.hasGuildPermissions('g1', 'u1', ['Administrator'])).resolves.toBe(true);
+        expect(fetchMember).not.toHaveBeenCalled();
+    });
+
+    test('an unknown or empty permission list is a no, not a pass', async () => {
+        const bot = gatewayFor(async () => memberWith(PermissionFlagsBits.Administrator));
+        await expect(bot.hasGuildPermissions('g1', 'u1', ['BanMembrs'])).resolves.toBe(false);
+        await expect(bot.hasGuildPermissions('g1', 'u1', [])).resolves.toBe(false);
+        await expect(bot.hasGuildPermissions('g1', 'u1', undefined)).resolves.toBe(false);
+    });
+
+    test('false for a departed member, null when Discord could not be asked', async () => {
+        const gone = gatewayFor(async () => { throw Object.assign(new Error('Unknown Member'), { code: 10007 }); });
+        await expect(gone.hasGuildPermissions('g1', 'u1', ['BanMembers'])).resolves.toBe(false);
+
+        const failing = gatewayFor(async () => { throw Object.assign(new Error('Service Unavailable'), { code: 500 }); });
+        await expect(failing.hasGuildPermissions('g1', 'u1', ['BanMembers'])).resolves.toBeNull();
+        await expect(failing.hasGuildPermissions('nope', 'u1', ['BanMembers'])).resolves.toBeNull();
+    });
+});
+
 describe('botGateway hands out data, never live objects', () => {
     let fixture;
     let bot;
