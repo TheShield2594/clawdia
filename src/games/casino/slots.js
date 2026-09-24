@@ -10,7 +10,7 @@ const Guild = require('../../models/Guild');
 const { placeWager } = require('../../utils/placeWager');
 const { confirmBet, confirmThreshold } = require('../../utils/confirmBet');
 const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
-const { hasEffect, getLuckyStreakBonus, luckySaveEligible } = require('../../services/effectsService');
+const { casinoLuck } = require('../../services/effectsService');
 const { randomFrom, SLOTS_LOSE_LINES, SLOTS_WIN_LINES, SLOTS_BIG_WIN_LINES } = require('../../utils/copyLines');
 const {
     claimJackpot,
@@ -472,9 +472,7 @@ async function playSlots(ctx) {
             Guild.findOne(guildFilter),
         ]);
 
-        const luckySavable = luckySaveEligible(bet);
-        const charmActive  = luckySavable && hasEffect(userDoc, 'lucky_charm');
-        const streakActive = luckySavable && getLuckyStreakBonus(userDoc) > 0;
+        const luck = casinoLuck('slots', userDoc, bet);
 
         // ── Debit the bet FIRST, before any pool or meter writes ────────────
         debited = await placeWager(userFilter, bet, { onWager });
@@ -511,13 +509,13 @@ async function playSlots(ctx) {
 
         // Lucky Charm: a losing spin sometimes gets a second one. A Hot Spin's
         // second spin keeps the reel it was locked to.
-        if (isNetLoss(result, bet) && charmActive && Math.random() < LUCKY_CHARM_RESPIN) {
+        if (isNetLoss(result, bet) && luck.charm > 0 && Math.random() < luck.charm) {
             view   = spin({ lock: hot ? firstView.stops[0] : null });
             result = evaluate(view.line, bet, { scatterCount: view.scatterCount });
             charm  = true;
         }
         // Lucky Streak: a spin that is still a loss is sometimes refunded.
-        if (isNetLoss(result, bet) && streakActive && Math.random() < LUCKY_STREAK_REFUND) {
+        if (isNetLoss(result, bet) && luck.streak > 0 && Math.random() < luck.streak) {
             result = { ...result, outcome: 'push', payout: bet };
         }
 

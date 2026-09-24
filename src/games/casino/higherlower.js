@@ -10,7 +10,7 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
-const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
+const { casinoLuck } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const {
     MAX_SESSION_MULT,
@@ -225,7 +225,7 @@ module.exports = {
 // streak = number of consecutive correct guesses in the current session (starts at 0).
 // mult = the session multiplier those guesses built, priced by their odds, and
 // cashValue = what the session is worth in coins now: the stake before the
-// first win, the cash-out after each one (coin boosters included).
+// first win, the cash-out after each one.
 // A session ends when the player cashes out, loses, or starts a new game.
 // releaseLock is called as soon as the hand resolves to a final state (win/
 // loss/cash-out/timeout) — NOT held through "Play Again", since a replay
@@ -274,13 +274,10 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
             const next         = rollCard();
             const pickedHigher = i.customId === upId;
 
-            // Fetch user for effect checks
-            const userDoc    = await User.findOne(userFilter);
-            const luckyActive = hasEffect(userDoc, 'lucky_charm');
-            const coinMult   = getCoinMultiplier(userDoc);
-            const serverMult = getServerCoinMultiplier(guildSettings);
-            const totalMult  = coinMult * serverMult;
-            const lsBonus    = getLuckyStreakBonus(userDoc);
+            // Fetch user for effect checks. No coin booster: on a long-shot
+            // call a 2× booster paid back 182% of the stake (#873, pass 26).
+            const userDoc = await User.findOne(userFilter);
+            const luck    = casinoLuck('higherlower', userDoc, bet);
 
             // Determine outcome
             if (next.value === current.value) {
@@ -294,7 +291,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
             const won = pickedHigher ? next.value > current.value : next.value < current.value;
 
             // Lucky Charm on loss: return bet silently and end session (low-stakes bets only)
-            if (!won && luckySaveEligible(bet) && luckyActive && Math.random() < 0.20) {
+            if (!won && luck.charm > 0 && Math.random() < luck.charm) {
                 const saved = await payHand(userFilter, bet,
                     { game: 'higherlower', handId, phase: 'lucky-save:charm' });
                 settledHere = true;
@@ -316,7 +313,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
             }
 
             // Lucky Streak on loss: return bet silently and end session (low-stakes bets only)
-            if (!won && luckySaveEligible(bet) && lsBonus > 0 && Math.random() < lsBonus) {
+            if (!won && luck.streak > 0 && Math.random() < luck.streak) {
                 const saved = await payHand(userFilter, bet,
                     { game: 'higherlower', handId, phase: 'lucky-save:streak' });
                 settledHere = true;
@@ -353,14 +350,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
             // WIN — calculate payout and present cash-out / risk-another choice
             const newStreak = streak + 1;
             const newMult   = nextMult(mult, current.value, pickedHigher);
-            let rawPayout   = Math.floor(bet * newMult);
-
-            // Apply coin/server multiplier to profit only. A certain call can
-            // price the session below the stake, and multiplying that "profit"
-            // would have multiplied the loss.
-            if (totalMult > 1.0 && rawPayout > bet) {
-                rawPayout = bet + Math.round((rawPayout - bet) * totalMult);
-            }
+            const rawPayout = Math.floor(bet * newMult);
 
             const newHistory = [...history, current];
             const cashId     = `hl_cash_${interaction.id}_${Date.now()}`;

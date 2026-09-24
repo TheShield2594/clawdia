@@ -10,7 +10,7 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
-const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
+const { casinoLuck } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const {
     BASE_WIN_MULT,
@@ -74,7 +74,6 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
     }
 
     try {
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const delay = ms => new Promise(r => setTimeout(r, ms));
 
         let queenPos = Math.floor(Math.random() * 3);
@@ -214,31 +213,25 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
 
         const won = guess === queenPos;
 
-        const userDoc          = round === 1 ? debited : await User.findOne(userFilter);
-        const luckyActive      = hasEffect(userDoc, 'lucky_charm');
-        const luckyStreakBonus = getLuckyStreakBonus(userDoc);
-        const coinMult         = getCoinMultiplier(userDoc);
-        const serverMult       = getServerCoinMultiplier(guildSettings);
-        const totalCoinMult    = coinMult * serverMult;
+        const userDoc = round === 1 ? debited : await User.findOne(userFilter);
+        // No coin booster: a 2× booster on the round-one win paid back 153% of
+        // the stake (#873, pass 26). The luck saves are the cup game's own rates.
+        const luck = casinoLuck('cupgame', userDoc, bet);
 
         let charmTriggered  = false;
         let streakTriggered = false;
         let grossPayout     = won ? currentPayout : 0;
 
-        const luckySavable = luckySaveEligible(bet);
-        if (!won && luckySavable && luckyActive && Math.random() < 0.20) {
+        if (!won && luck.charm > 0 && Math.random() < luck.charm) {
             grossPayout    = bet;
             charmTriggered = true;
         }
-        if (!won && !charmTriggered && luckySavable && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+        if (!won && !charmTriggered && luck.streak > 0 && Math.random() < luck.streak) {
             grossPayout     = bet;
             streakTriggered = true;
         }
 
-        let adjustedPayout = grossPayout;
-        if (grossPayout > bet && totalCoinMult > 1.0) {
-            adjustedPayout = bet + Math.round((grossPayout - bet) * totalCoinMult);
-        }
+        const adjustedPayout = grossPayout;
 
         const reveal = buildReveal(queenPos);
 
@@ -269,8 +262,6 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
                 title = round > 1 ? `🃏 Wrong Card — Lost ${(BASE_WIN_MULT * Math.pow(2, round - 1)).toFixed(1)}× payout!` : '🃏 Wrong Card!';
                 desc  = `> ${reveal.join('   ')}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\nYou picked **Card ${guess + 1}** but the Queen was at **Card ${queenPos + 1}**.`;
             }
-
-            if (totalCoinMult > 1.0 && adjustedPayout > bet) desc += `\n> 🚀 *${totalCoinMult.toFixed(1)}× Coin Booster applied!*`;
 
             const replayId = `monte_replay_${interaction.id}_${Date.now()}`;
 
@@ -344,11 +335,8 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
 
             const decisionMsg = await interaction.fetchReply();
             // The take is the same amount however it is reached — pressed,
-            // timed out, or recovered in the catch below — so it is computed
-            // once, above all three.
-            const adjustedTake = totalCoinMult > 1.0
-                ? bet + Math.round((currentPayout - bet) * totalCoinMult)
-                : currentPayout;
+            // timed out, or recovered in the catch below.
+            const adjustedTake = currentPayout;
             let decided = false;
             let tookMoney = false;
             let took = { credited: true, owed: false, balance: null };

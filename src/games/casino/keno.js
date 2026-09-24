@@ -10,7 +10,7 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
-const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
+const { casinoLuck } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const {
     POOL_SIZE,
@@ -81,8 +81,6 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
     let settled = false;
 
     try {
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-
         if (alreadyDebited) {
             debited = await User.findOne(userFilter);
         } else {
@@ -191,34 +189,25 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
         const matches    = drawn.filter(n => picked.includes(n)).length;
         const multiplier = PAYOUTS[matches] ?? 0;
 
-        const luckyActive      = hasEffect(debited, 'lucky_charm');
-        const luckyStreakBonus = getLuckyStreakBonus(debited);
-        const coinMult         = getCoinMultiplier(debited);
-        const serverMult       = getServerCoinMultiplier(guildSettings);
-        const totalCoinMult    = coinMult * serverMult;
+        // No coin booster: a 2× booster on keno's profit paid back 148% of the
+        // stake (#873, pass 26). The luck saves are keno's own, small rates.
+        const luck = casinoLuck('keno', debited, bet);
 
         let grossPayout = multiplier > 0 ? bet * multiplier : 0;
 
-        const luckySavable = luckySaveEligible(bet);
-
         let charmTriggered = false;
-        if (grossPayout === 0 && luckySavable && luckyActive && Math.random() < 0.20) {
+        if (grossPayout === 0 && luck.charm > 0 && Math.random() < luck.charm) {
             grossPayout = bet;
             charmTriggered = true;
         }
 
         let streakTriggered = false;
-        if (grossPayout === 0 && luckySavable && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+        if (grossPayout === 0 && luck.streak > 0 && Math.random() < luck.streak) {
             grossPayout = bet;
             streakTriggered = true;
         }
 
-        let adjustedPayout = grossPayout;
-        if (grossPayout > bet && totalCoinMult > 1.0) {
-            adjustedPayout = bet + Math.round((grossPayout - bet) * totalCoinMult);
-        }
-
-        const credit = adjustedPayout;
+        const credit = grossPayout;
         const paid   = await payHand(userFilter, credit,
             { game: 'keno', handId, phase: 'settle' });
         const balanceAfter = await settledBalance(userFilter, paid.balance);
@@ -227,8 +216,6 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
 
         const net    = credit - bet;
         const netStr = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
-        let boostNote = '';
-        if (totalCoinMult > 1.0 && adjustedPayout > bet) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
 
         // ── Special celebration for big wins (skipped if animation was skipped) ─
         if (matches === 5 && !animState.skipped) {
@@ -297,7 +284,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
         }
 
         const payoutLabel = credit > 0 ? '🏆 Payout' : '💀 Lost';
-        const payoutAmt   = credit > 0 ? adjustedPayout : bet;
+        const payoutAmt   = credit > 0 ? credit : bet;
 
         // Surface near-miss data
         const nearMisses = nearMissCount(picked, drawn);
@@ -309,7 +296,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
             .setColor(color)
             .setTitle(title)
             .setDescription(
-                `${desc}${boostNote}\n\n` +
+                `${desc}\n\n` +
                 `> 💸 Bet **${bet.toLocaleString()}**  ·  ${payoutLabel} **${payoutAmt.toLocaleString()}**  ·  Net **${netStr}**`
             )
             .addFields(

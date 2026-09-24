@@ -14,7 +14,6 @@ const { placeWager } = require('../../utils/placeWager');
 const { confirmBet } = require('../../utils/confirmBet');
 const { delay } = require('../../utils/delay');
 const { casinoRefusal, replayRefusal } = require('./betGuard');
-const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const { randomFrom, BJ_WIN_LINES, BJ_LOSE_LINES, BJ_BUST_LINES, BJ_PUSH_LINES } = require('../../utils/copyLines');
 const COLORS = require('../../utils/embedColors');
 const {
@@ -105,7 +104,6 @@ const RESULT_TAG = {
     evenmoney: { word: 'EVEN MONEY', tone: 'win' },
     win:       { word: 'WIN', tone: 'win' },
     push:      { word: 'PUSH', tone: 'push' },
-    lucky:     { word: 'LUCKY PUSH', tone: 'push' },
     lose:      { word: 'LOSE', tone: 'lose' },
     bust:      { word: 'BUST', tone: 'lose' },
 };
@@ -115,7 +113,6 @@ const RESULT_TEXT = {
     evenmoney: '💵 Even money',
     win:       '✅ Win',
     push:      '🤝 Push',
-    lucky:     '🍀 Lucky push',
     lose:      '❌ Lose',
     bust:      '💥 Bust',
 };
@@ -191,13 +188,12 @@ function buildEmbed(interaction, s) {
     if (s.insurance) betValue.push(`🛡️ ${s.currency}${s.insurance.toLocaleString()} insurance`);
 
     if (s.payout) {
-        const { returned, net, boost } = s.payout;
+        const { returned, net } = s.payout;
         const payout = [
             `Staked ${s.currency}${(staked + s.insurance).toLocaleString()}`,
             `Returned ${s.currency}${returned.toLocaleString()}`,
             `**Net ${signed(s.currency, net)}**`,
         ];
-        if (boost) payout.push(`🚀 ${boost.toFixed(1)}× coin boost on winnings`);
         embed.addFields(
             { name: '💰 Payout', value: payout.join('\n'), inline: true },
             { name: '🏦 Balance', value: `${s.currency}${(s.balance ?? 0).toLocaleString()}`, inline: true },
@@ -459,21 +455,11 @@ async function playHand(ctx) {
             s.holeHidden = false;
         }
 
-        // The settlement reads. A failed read falls back to what the hand
-        // already holds rather than rejecting: this used to be a bare
-        // Promise.all in a collector's `end`, where a database hiccup took the
-        // payout, the result and the lock release down with it.
-        const [freshUser, freshGuild] = await Promise.all([
-            User.findOne(userFilter),
-            Guild.findOne({ guildId: interaction.guild.id }),
-        ]).catch(err => {
-            console.error('[blackjack] settlement read failed; using the hand\'s own copy:', err);
-            return [null, null];
-        });
-        const player = freshUser ?? ctx.user;
-        const coinMult = getCoinMultiplier(player) * getServerCoinMultiplier(freshGuild ?? ctx.guildSettings);
-        const luckyActive = hasEffect(player, 'lucky_charm');
-        const luckyStreak = getLuckyStreakBonus(player);
+        // Table odds and nothing on top (#873, pass 26). Blackjack returns
+        // about 99.9% under basic strategy, so there is no room for a coin
+        // booster (a 2× one paid back 146%) or a luck save (the charm's 20%
+        // and the streak's 25% loss-to-push paid 111%). With neither, the
+        // settlement reads nothing from the database before it pays.
 
         const dealerTotal   = handTotal(s.dealer);
         const dealerNatural = isNaturalBlackjack(s.dealer);
@@ -484,18 +470,13 @@ async function playHand(ctx) {
             let handCredit;
             if (kind === 'natural') {
                 outcome = dealerNatural ? 'push' : 'blackjack';
-                handCredit = dealerNatural ? h.bet : naturalBlackjackCredit(h.bet, coinMult);
+                handCredit = dealerNatural ? h.bet : naturalBlackjackCredit(h.bet);
             } else if (kind === 'evenmoney') {
                 outcome = 'evenmoney';
-                handCredit = evenMoneyCredit(h.bet, coinMult);
+                handCredit = evenMoneyCredit(h.bet);
             } else {
                 outcome = settleHand(handTotal(h.cards), dealerTotal, { dealerNatural });
-                if (outcome === 'lose' && luckySaveEligible(h.bet)
-                    && ((luckyActive && Math.random() < 0.20)
-                        || (luckyStreak > 0 && Math.random() < luckyStreak))) {
-                    outcome = 'lucky';
-                }
-                handCredit = blackjackHandCredit(outcome === 'lucky' ? 'lose' : outcome, h.bet, coinMult, outcome === 'lucky');
+                handCredit = blackjackHandCredit(outcome, h.bet);
             }
             h.result = { outcome, net: handCredit - h.bet };
             credit += handCredit;
@@ -513,12 +494,11 @@ async function playHand(ctx) {
 
         const staked = s.hands.reduce((sum, h) => sum + h.bet, 0) + s.insurance;
         const net = credit - staked;
-        const boosted = s.hands.some(h => ['win', 'blackjack', 'evenmoney'].includes(h.result.outcome)) && coinMult > 1;
 
         const phase = { natural: dealerNatural ? 'natural-push' : 'natural', evenmoney: 'even-money', 'dealer-natural': 'peek-insurance', played: 'settle' }[kind];
         const paid = await payHand(userFilter, credit, { game: 'blackjack', handId, phase });
         s.balance = await settledBalance(userFilter, paid.balance);
-        s.payout = { returned: credit, net, boost: boosted ? coinMult : 0 };
+        s.payout = { returned: credit, net };
         s.stats = await recordBlackjackRound(userFilter, { net, natural: kind === 'natural' || kind === 'evenmoney' });
 
         headline(kind, net, dealerTotal, dealerNatural);
@@ -568,9 +548,6 @@ async function playHand(ctx) {
         } else if (outcome === 'push') {
             title = '🤝 Push'; color = COLORS.WARN; banner = { text: 'PUSH', tone: 'push' };
             copy = randomFrom(BJ_PUSH_LINES);
-        } else if (outcome === 'lucky') {
-            title = '🍀 Lucky push'; color = COLORS.WARN; banner = { text: 'LUCKY PUSH', tone: 'push' };
-            copy = 'Luck turned the loss into a push. Stake returned.';
         } else {
             title = `❌ Dealer wins${amount}`; color = COLORS.ERROR; banner = { text: 'DEALER WINS', tone: 'lose' };
             copy = randomFrom(BJ_LOSE_LINES);

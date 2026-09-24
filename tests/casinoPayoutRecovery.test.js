@@ -441,9 +441,9 @@ describe('a Lucky Save whose result cannot be rendered', () => {
      * `rollCard` takes two randoms — value then suit — so the sequence is
      * current card, next card, then the save roll. A King followed by an Ace
      * makes "Higher" a loss, and the last value puts the save roll on the true
-     * side of both the charm's flat 20% and the streak's 25%.
+     * side of both saves' rates (CASINO_LUCK.higherlower, 2% each).
      */
-    const LOSES_THEN_SAVES = [0.99, 0, 0, 0, 0.1];
+    const LOSES_THEN_SAVES = [0.99, 0, 0, 0, 0.001];
 
     test.each(['charm', 'streak'])('settles once for the %s save, not again for the failed render', async (kind) => {
         jest.useFakeTimers();
