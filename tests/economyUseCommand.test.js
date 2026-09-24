@@ -257,6 +257,21 @@ describe('the pet slot expansion', () => {
 });
 
 describe('the revive scroll', () => {
+    it('reads as blocked in the picker exactly where /use refuses it', () => {
+        const { useStatus } = use.__test__;
+        const { petCapacity } = require('../src/services/petService');
+        const fallen = { _id: 'grave-1', petId: 'dog', name: 'Rex' };
+
+        expect(useStatus('revive_scroll', { deceasedPets: [fallen], pets: [] }))
+            .toMatchObject({ ready: true, status: 'revives Rex' });
+        expect(useStatus('revive_scroll', { deceasedPets: [fallen], pets: [{ petId: 'dog' }] }))
+            .toMatchObject({ ready: false, status: 'you already have another Dog' });
+
+        const full = Array.from({ length: petCapacity({}) }, () => ({ petId: 'cat' }));
+        expect(useStatus('revive_scroll', { deceasedPets: [fallen], pets: full }))
+            .toMatchObject({ ready: false, status: 'no free pet slot for Rex' });
+    });
+
     const fallen = { _id: 'dead-1', petId: 'cat', name: 'Mittens', level: 4, battleWins: 2, battleLosses: 1 };
 
     it('refuses when no pet has starved', async () => {

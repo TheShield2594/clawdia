@@ -14,7 +14,7 @@ const { DEFAULT_SHOP_ITEMS } = require('../../../data/defaultShopItems');
 const { getRelicMeta } = require('../../../data/exploreData');
 const { findShopRow, findDefaultRow } = require('../../../utils/itemDisplay');
 const { SEASONAL_EVENTS } = require('../../../data/seasonalEvents');
-const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS } = require('../../../services/petService');
+const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, hasFreePetSlot } = require('../../../services/petService');
 const { MAX_STAMINA_UPGRADES } = require('../../../data/crossSystemData');
 const { getWorkFind, CAREER_BADGE_SHIFTS } = require('../../../data/workFinds');
 const { resolveTiers } = require('../../../utils/jobTiers');
@@ -136,7 +136,15 @@ function useStatus(itemId, user, { shopItems = [], hasRole = () => false, tiers 
         case 'revive_scroll': {
             const fallen = user?.deceasedPets?.[0];
             if (!fallen) return { usable: true, ready: false, status: 'no fallen pet to revive' };
-            const name = fallen.name || PET_DEFINITIONS[fallen.petId]?.name || fallen.petId;
+            const def = PET_DEFINITIONS[fallen.petId];
+            const name = fallen.name || def?.name || fallen.petId;
+            // The two refusals revive.js makes past "nobody to revive".
+            if ((user?.pets ?? []).some(p => p.petId === fallen.petId)) {
+                return { usable: true, ready: false, status: `you already have another ${def?.name ?? fallen.petId}` };
+            }
+            if (def?.purchasable && !hasFreePetSlot(user)) {
+                return { usable: true, ready: false, status: `no free pet slot for ${name}` };
+            }
             return { usable: true, ready: true, status: `revives ${name}` };
         }
     }

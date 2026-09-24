@@ -62,7 +62,7 @@ module.exports = {
             const [user, guildSettings] = await Promise.all([
                 User.findOne(
                     { userId: interaction.user.id, guildId: interaction.guild.id },
-                    'inventory activeEffects streak crimeContractStacks staminaUpgrades petSlots deceasedPets shiftsWorked'
+                    'inventory activeEffects streak crimeContractStacks staminaUpgrades petSlots pets deceasedPets shiftsWorked'
                 ).lean(),
                 getGuildSettings(interaction.guild.id),
             ]);
