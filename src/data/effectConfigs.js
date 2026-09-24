@@ -21,6 +21,8 @@ const EFFECT_CONFIGS = {
     xp_booster_2x:      { label: '2x XP Booster',     emoji: '⭐🚀', durationMs: 1  * 3_600_000, charges: -1 },
     lucky_streak:       { label: 'Lucky Streak',       emoji: '🎯',   durationMs: 30 * 60_000,     charges: -1 },
     salary_raise:       { label: 'Salary Raise',       emoji: '📈',   durationMs: 2  * 3_600_000, charges: -1 },
+    // Work-exclusive find (src/data/workFinds.js)
+    shift_booster:      { label: 'Shift Booster',      emoji: '📋',   durationMs: 3  * 3_600_000, charges: -1 },
 
     // ── P8 Black Market effects ───────────────────────────────────────────────
     obsidian_crown:     { label: 'Obsidian Crown',      emoji: '👑',   durationMs: 2  * 3_600_000, charges: -1 },

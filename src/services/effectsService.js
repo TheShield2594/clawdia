@@ -18,6 +18,7 @@ const ITEM_TO_EFFECT = {
     'xp_booster_2x':      'xp_booster_2x',
     'lucky_streak':       'lucky_streak',
     'salary_raise':       'salary_raise',
+    'shift_booster':      'shift_booster',
     'obsidian_crown':     'obsidian_crown',
     'voidsteel_cache':    'voidsteel_cache',
     'ghost_ledger':       'ghost_ledger',
@@ -252,6 +253,12 @@ function getSalaryMultiplier(user) {
     return hasEffect(user, 'salary_raise') ? 1.5 : 1.0;
 }
 
+// The Shift Booster's /work pay multiplier. Its own factor rather than part of
+// getSalaryMultiplier, so it stacks with a Salary Raise instead of competing.
+function getShiftMultiplier(user) {
+    return hasEffect(user, 'shift_booster') ? 1.25 : 1.0;
+}
+
 // Returns gathering yield multiplier from Silvered Talisman (5-charge, P1+) or Voidsteel Cache
 // (10-charge, P8+). Voidsteel Cache takes priority if both are active. Returns the effect key
 // that should be consumed, or null if neither is active, so callers can consumeEffect correctly.
@@ -326,6 +333,7 @@ module.exports = {
     timeRemaining,
     getCoinMultiplier,
     getSalaryMultiplier,
+    getShiftMultiplier,
     getXpMultiplier,
     getLuckyStreakBonus,
     LUCKY_SAVE_MAX_BET,

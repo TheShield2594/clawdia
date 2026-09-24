@@ -87,7 +87,7 @@ async function saleHistory(guildId, ids) {
  * @param {string}   [options.excludeSellerId] leave this seller's own listings
  *                   out of "cheapest listed", so a seller is not shown their
  *                   own price back as the going rate
- * @returns {Promise<Map<string, {lastPrice, lastSoldAt, medianPrice, sales, lowestListed}>>}
+ * @returns {Promise<Map<string, {lastPrice, lastSoldAt, medianPrice, minPrice, maxPrice, outliers, sales, lowestListed}>>}
  *          Items with no history and no listings are absent. Never rejects — a
  *          missing hint is cosmetic.
  */
@@ -97,7 +97,7 @@ async function priceSnapshot(guildId, itemIds, { excludeSellerId = null } = {}) 
     if (!ids.length) return out;
 
     const entry = id => {
-        if (!out.has(id)) out.set(id, { lastPrice: null, lastSoldAt: null, medianPrice: null, sales: 0, lowestListed: null });
+        if (!out.has(id)) out.set(id, { lastPrice: null, lastSoldAt: null, medianPrice: null, minPrice: null, maxPrice: null, outliers: 0, sales: 0, lowestListed: null });
         return out.get(id);
     };
 
@@ -116,8 +116,12 @@ async function priceSnapshot(guildId, itemIds, { excludeSellerId = null } = {}) 
         const e = entry(row._id);
         e.lastPrice   = row.lastPrice;
         e.lastSoldAt  = row.lastSoldAt;
-        e.medianPrice = median(row.prices ?? []);
-        e.sales       = (row.prices ?? []).length;
+        const prices  = row.prices ?? [];
+        e.medianPrice = median(prices);
+        e.minPrice    = prices.length ? Math.min(...prices) : null;
+        e.maxPrice    = prices.length ? Math.max(...prices) : null;
+        e.outliers    = countOutliers(prices, e.medianPrice);
+        e.sales       = prices.length;
     }
     for (const l of listings ?? []) {
         const e = entry(l.itemId);
@@ -133,17 +137,40 @@ const coins = (currency, n) => `${currency}${Math.round(n).toLocaleString()}`;
 
 // Sales needed before the median, rather than the latest sale, is the headline.
 // Below this there is no middle to speak of. The median takes one odd sale out
-// of the headline; it does not stop a determined seller, who could plant a
-// majority of a thin history through alts (paying the 5% fee each time). The
-// price check on the listing receipt shows the last sale and the median side
-// by side, so an odd one is visible there.
+// of the headline.
 const MEDIAN_AFTER = 3;
+
+// The median alone does not stop a determined seller: on a thin history they
+// can plant a majority through an alt, paying only the 5% fee each time. One
+// real sale at 3,000 and two self-dealt ones at 50,000 have a median of 50,000.
+//
+// Sale rows are anonymous by design, so the planted ones can't be told apart —
+// but they can't make the real ones vanish either. A sale more than
+// OUTLIER_RATIO times away from the median, either way, disagrees with it; once
+// a third or more of the recent sales disagree, the median is not speaking for
+// the market and the hint shows the range instead, so the real price stays in
+// view beside the planted one. One odd sale among several ordinary ones is
+// still outvoted, as before. To get a clean headline a seller now has to
+// outnumber the real sales two to one, not merely outvote them.
+const OUTLIER_RATIO = 3;
+
+/** How many of `prices` sit more than OUTLIER_RATIO times away from `mid`. */
+function countOutliers(prices, mid) {
+    if (!(mid > 0)) return 0;
+    return prices.filter(p => p > mid * OUTLIER_RATIO || p * OUTLIER_RATIO < mid).length;
+}
+
+/** Whether an item's recent sales disagree too much for one figure to stand for them. */
+function wideSpread(snapshot) {
+    return snapshot?.sales >= 2 && snapshot.outliers * 3 >= snapshot.sales;
+}
 
 /**
  * The one-line hint for the picker: the best single figure there is.
  * `meta` is the item's `describeItem` result. Empty when nothing is known.
  */
 function shortHint(snapshot, meta, currency) {
+    if (wideSpread(snapshot)) return `sold ${coins(currency, snapshot.minPrice)}–${coins(currency, snapshot.maxPrice)}`;
     if (snapshot?.sales >= MEDIAN_AFTER) return `sells for ~${coins(currency, snapshot.medianPrice)}`;
     if (snapshot?.lastPrice) return `last sold ${coins(currency, snapshot.lastPrice)}`;
     if (snapshot?.lowestListed) return `listed from ${coins(currency, snapshot.lowestListed)}`;
@@ -162,6 +189,7 @@ function priceCheck(snapshot, meta, currency, price) {
         const when = snapshot.lastSoldAt ? ` <t:${Math.floor(new Date(snapshot.lastSoldAt).getTime() / 1000)}:R>` : '';
         lines.push(`Last sold for **${coins(currency, snapshot.lastPrice)}**/ea${when}`);
         if (snapshot.sales > 1) lines.push(`Median of the last ${snapshot.sales} sales: **${coins(currency, snapshot.medianPrice)}**/ea`);
+        if (wideSpread(snapshot)) lines.push(`Those sales range from **${coins(currency, snapshot.minPrice)}** to **${coins(currency, snapshot.maxPrice)}** — too far apart to price against.`);
     }
     if (snapshot?.lowestListed) lines.push(`Cheapest other listing: **${coins(currency, snapshot.lowestListed)}**/ea`);
     const label = REFERENCE_LABELS[meta?.kind];
@@ -170,7 +198,9 @@ function priceCheck(snapshot, meta, currency, price) {
 
     // Judged against real sales first, then the game's own figure. Only the
     // clear cases get a verdict: a price within a factor of two says nothing.
-    const benchmark = snapshot?.medianPrice ?? snapshot?.lastPrice ?? (meta?.value > 0 ? meta.value : null);
+    // Sales that disagree widely are no benchmark at all (see OUTLIER_RATIO).
+    const sales = wideSpread(snapshot) ? null : (snapshot?.medianPrice ?? snapshot?.lastPrice);
+    const benchmark = sales ?? (meta?.value > 0 ? meta.value : null);
     if (benchmark) {
         if (price >= benchmark * 2)       lines.push('⚠️ Well above that — it may sit unsold until it expires.');
         else if (price <= benchmark / 2)  lines.push('💸 Well below that — expect it to go fast.');
@@ -178,4 +208,4 @@ function priceCheck(snapshot, meta, currency, price) {
     return lines.join('\n');
 }
 
-module.exports = { recordSale, priceSnapshot, shortHint, priceCheck, median, RECENT_SALES };
+module.exports = { recordSale, priceSnapshot, shortHint, priceCheck, median, RECENT_SALES, OUTLIER_RATIO, countOutliers };

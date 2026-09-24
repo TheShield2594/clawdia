@@ -2,9 +2,10 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const User = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
-const DEFAULT_TIERS = require('../../data/defaultTiers');
+const { resolveTiers } = require('../../utils/jobTiers');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
-const { getCoinMultiplier, getSalaryMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
+const { getCoinMultiplier, getSalaryMultiplier, getShiftMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
+const { WORK_FINDS } = require('../../data/workFinds');
 const { getMerchantCoinBonus } = require('../../services/synergyService');
 const { attachGrind } = require('../../utils/grindProfile');
 const { logTransaction } = require('../../utils/logTransaction');
@@ -21,12 +22,6 @@ const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
 const { challengeBonusPayoutKey, questRewardPayoutKey } = require('../../utils/payoutKey');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { ownedBy } = require('../../utils/collectorOwner');
-
-function resolveTiers(guildSettings) {
-    const saved = guildSettings?.jobTiers;
-    if (saved?.length === 4) return [...saved].sort((a, b) => a.tier - b.tier);
-    return DEFAULT_TIERS;
-}
 
 // Random scenario lines — {job} is replaced with the formatted job name
 const WORK_SCENARIOS = [
@@ -49,10 +44,9 @@ const LUCKY_FIND_ITEMS = [
     { itemId: 'lifesaver',        emoji: '🛟',   label: 'Lifesaver' },
     { itemId: 'coin_booster_2x',  emoji: '💰🚀', label: '2x Coin Booster' },
     { itemId: 'xp_booster_2x',   emoji: '⭐🚀', label: '2x XP Booster' },
-    // Work-exclusive drops — only obtainable from shifts
-    { itemId: 'shift_booster',    emoji: '📋',   label: 'Shift Booster',      workExclusive: true },
-    { itemId: 'master_key',       emoji: '🔑',   label: 'Master Key',          workExclusive: true },
-    { itemId: 'career_badge',     emoji: '📛',   label: 'Career Badge',         workExclusive: true },
+    // Work-exclusive drops — only obtainable from shifts. Named, and given
+    // something to do, in src/data/workFinds.js.
+    ...WORK_FINDS.map(f => ({ itemId: f.itemId, emoji: f.emoji, label: f.name, workExclusive: true })),
 ];
 
 // Career track mapping: which track each job family belongs to
@@ -193,13 +187,14 @@ module.exports = {
             const basedEarned = Math.max(1, Math.floor(basePay * performance.multiplier));
             const streakMult  = getStreakMultiplier(user.streak?.current ?? 0);
             const salaryMult  = getSalaryMultiplier(user);
+            const shiftMult   = getShiftMultiplier(user);
             const coinMult    = getCoinMultiplier(user);
             const serverMult  = getServerCoinMultiplier(guildSettings);
             const petWorkBonus = 1 + getTotalBonus(user.pets || [], 'work_earnings') / 100;
             // Merchant synergy: +5% while carrying anything at all. Defined and
             // exported since the synergies shipped, and never once read.
             const merchantMult = 1 + getMerchantCoinBonus(user);
-            const rawCombined = streakMult * salaryMult * coinMult * serverMult * petWorkBonus * merchantMult;
+            const rawCombined = streakMult * salaryMult * shiftMult * coinMult * serverMult * petWorkBonus * merchantMult;
             const combined    = clampMultiplier(rawCombined);
             const capActive   = rawCombined > MAX_COMBINED_MULTIPLIER;
             const earned      = Math.round(basedEarned * combined);
@@ -305,6 +300,7 @@ module.exports = {
             const multEntries = [];
             if (streakMult > 1.0)   multEntries.push({ emoji: '🔥', label: `${streakMult}x` });
             if (salaryMult > 1.0)   multEntries.push({ emoji: '📈', label: `${salaryMult}x` });
+            if (shiftMult > 1.0)    multEntries.push({ emoji: '📋', label: `${shiftMult}x` });
             if (coinMult > 1.0)     multEntries.push({ emoji: '💰🚀', label: `${coinMult}x` });
             if (serverMult > 1.0)   multEntries.push({ emoji: '🌐', label: `${serverMult}x` });
             if (petWorkBonus > 1.0) multEntries.push({ emoji: '🐶', label: `${petWorkBonus.toFixed(2)}x` });
@@ -487,3 +483,5 @@ module.exports = {
         }
     }
 };
+
+module.exports.__test__ = { LUCKY_FIND_ITEMS };  // what a shift can drop

@@ -20,6 +20,7 @@
 const { DEFAULT_SHOP_ITEMS, getItemLore, getItemRarity } = require('../data/defaultShopItems');
 const { getRelicMeta } = require('../data/exploreData');
 const { SEASONAL_EVENTS } = require('../data/seasonalEvents');
+const { getWorkFind } = require('../data/workFinds');
 
 // Matches /shop's rarity swatches so an item wears the same colour wherever it
 // is named.
@@ -178,6 +179,23 @@ function describeItem(itemId, { shopItems = [], aiItem = null } = {}) {
     const lower = id.toLowerCase();
     const shopItem = findShopRow(id, shopItems)
         ?? findDefaultRow(id);
+
+    // /work's exclusive finds aren't sold anywhere, so no shop row names them.
+    const workFind = shopItem ? null : getWorkFind(id);
+    if (workFind) {
+        return {
+            itemId: id,
+            name: workFind.name,
+            emoji: workFind.emoji,
+            rarity: workFind.rarity,
+            rarityEmoji: RARITY_EMOJIS[workFind.rarity] ?? '',
+            color: RARITY_HEX[workFind.rarity],
+            lore: workFind.lore,
+            // Never sold, so the game puts no price on it.
+            value: 0,
+            kind: 'work',
+        };
+    }
 
     const eventItem = shopItem ? null : EVENT_ITEMS.get(lower);
     if (eventItem) {

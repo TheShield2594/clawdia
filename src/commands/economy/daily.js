@@ -420,7 +420,7 @@ module.exports = {
                 await User.findOneAndUpdate(
                     { userId: interaction.user.id, guildId: interaction.guild.id },
                     [{ $set: {
-                        ...(droppedItem.streakFlag ? {} : { inventory: inventoryAddExpr(droppedItem.itemId, 1) }),
+                        ...(droppedItem.streakFlag ? {} : { inventory: inventoryAddExpr(droppedItem.itemId, droppedItem.quantity ?? 1) }),
                         ...dropSet,
                     } }],
                     { updatePipeline: true }
@@ -432,7 +432,7 @@ module.exports = {
                     type: 'daily_drop',
                     amount: 0,
                     balance: updated.balance,
-                    note: `${droppedItem.itemId}${isMilestone ? ` (streak milestone ${streakCurrent}d)` : ''}`
+                    note: `${droppedItem.itemId}${(droppedItem.quantity ?? 1) > 1 ? ` x${droppedItem.quantity}` : ''}${isMilestone ? ` (streak milestone ${streakCurrent}d)` : ''}`
                 });
             }
             // ─────────────────────────────────────────────────────────────────────

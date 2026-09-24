@@ -96,6 +96,8 @@ const COLLECTIONS = [
     { module: 'heistData', export: 'TARGETS',        kind: 'heist target',           system: 'heists', command: '/heist start' },
     { module: 'dailyDropTable', export: 'DROP_TABLE', kind: 'daily reward drop',     system: 'daily', command: '/daily' },
     { module: 'dailyDropTable', export: 'RARE_DROP_TABLE', kind: 'rare daily reward drop', system: 'daily', command: '/daily' },
+    { module: 'workFinds', export: 'WORK_FINDS',      kind: 'work find',              system: 'jobs', command: '/work' },
+    { module: 'workFinds', export: 'SUPPLY_CLOSET',   kind: 'Master Key supply closet item', system: 'jobs', command: '/use' },
     { module: 'seasonalEvents', export: 'SEASONAL_EVENTS', kind: 'seasonal event',   system: 'events', command: '/event status' }
 ];
 

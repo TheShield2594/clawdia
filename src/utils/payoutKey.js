@@ -833,6 +833,15 @@ function lootBoxItemPayoutKey(interactionId) {
 }
 
 /**
+ * The item a Master Key takes out of the supply closet with `/use`. The same
+ * shape as a loot box: the key is spent first, so a grant that misses is
+ * recorded as owed under this key rather than lost.
+ */
+function supplyClosetPayoutKey(interactionId) {
+    return `supplycloset:${interactionId}:item`;
+}
+
+/**
  * A role-granting shop item handed back when `/use` spent it and the role could
  * not be added (Discord refused: missing permission, role above the bot's).
  *
@@ -1109,7 +1118,7 @@ function exploreUnlockRefundPayoutKey(interactionId) {
 }
 
 module.exports = {
-    gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, useRoleRefundPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
+    gatherPayoutKey, exploreRelicPayoutKey, lootBoxItemPayoutKey, supplyClosetPayoutKey, useRoleRefundPayoutKey, shopRefundPayoutKey, shopGrantPayoutKey,
     questClaimPayoutKey, questRewardPayoutKey, tournamentEntryRefundPayoutKey, forgeRefundPayoutKey,
     weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
     marketSalePayoutKey, listingPurchasePayoutKey, listingCancelPayoutKey,
