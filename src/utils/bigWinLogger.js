@@ -27,7 +27,8 @@ async function logBigWin({ guildId, userId, username, amount, source, details, c
         if (!channelId) return;
 
         const channel = await client.channels.fetch(channelId).catch(() => null);
-        if (!channel?.isTextBased()) return;
+        // Only this guild's own channel: the id is resolved across every guild (#1140).
+        if (!channel?.isTextBased() || channel.guildId !== guildId) return;
 
         const src = SOURCE_LABELS[source] ?? { emoji: '🌟', label: source };
         const displayName = details?.itemName ?? details?.ore ?? 'rare drop';

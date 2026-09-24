@@ -55,6 +55,8 @@ function makeGuild({ channels = new Map(), canManage = true } = {}) {
             cache: { get: id => channels.get(id) ?? null },
             create: jest.fn().mockResolvedValue(created),
         },
+        // Every role is an ordinary one; level rewards refuse privileged roles (#1141).
+        roles: { cache: { get: id => ({ id, permissions: 0n }) } },
     };
     guild._created = created;
     return guild;
@@ -312,6 +314,24 @@ describe('voice XP', () => {
         // The highest reward at or below the new level, not every one below it.
         expect(member.roles.add).toHaveBeenCalledTimes(1);
         expect(member.roles.add).toHaveBeenCalledWith('role-2');
+    });
+
+    it('does not grant a level reward that carries admin permissions (#1141)', async () => {
+        const { PermissionFlagsBits } = require('discord.js');
+        getGuildSettings.mockResolvedValue({
+            ...levelingSettings(),
+            levelRoles: [{ level: 2, roleId: 'role-admin' }],
+        });
+        User.findOne.mockResolvedValue(makeUser({ xp: 99, level: 1 }));
+        const guild = makeGuild();
+        guild.roles.cache.get = id => ({ id, permissions: PermissionFlagsBits.Administrator });
+        const member = makeMember(guild);
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await sitInVoice(guild, member, 40);
+        errorSpy.mockRestore();
+
+        expect(member.roles.add).not.toHaveBeenCalled();
     });
 
     it('checks for a rivalry once the XP is saved', async () => {

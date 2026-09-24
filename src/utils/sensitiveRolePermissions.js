@@ -103,9 +103,41 @@ function describeSensitivePermissions(names) {
     return (names || []).map(name => PERMISSION_LABELS[name] || name).join(', ');
 }
 
+/**
+ * The role to grant for a reward or self-service path, or null when it must
+ * not be granted (#1141). Level rewards, shop items, `/role add`, the prestige
+ * elite role and the birthday role all hand out a role an admin configured,
+ * and a `ManageGuild`-only admin could point any of them at a role carrying
+ * Administrator. The settings route refuses that up front; this is the check at
+ * grant time, which also covers a role that gained a permission afterwards and
+ * one stored before either check existed. A role the guild no longer has is
+ * null too — there is nothing to grant.
+ *
+ * @param {import('discord.js').Guild|null|undefined} guild
+ * @param {string|null|undefined} roleId
+ * @param {string} context short label for the log line, e.g. 'level-reward'
+ * @param {string} [userId] who the role was for, for the log line
+ * @returns {import('discord.js').Role|null}
+ */
+function grantableRole(guild, roleId, context, userId) {
+    if (!guild || !roleId) return null;
+    const role = guild.roles?.cache?.get(roleId);
+    if (!role) return null;
+    const dangerous = sensitivePermissionsOf(role.permissions);
+    if (dangerous.length) {
+        console.error(
+            `[${context}] refusing to grant privileged role ${role.id} (${dangerous.join(', ')}) `
+            + `${userId ? `to ${userId} ` : ''}in guild ${guild.id}`
+        );
+        return null;
+    }
+    return role;
+}
+
 module.exports = {
     SENSITIVE_ROLE_PERMISSIONS,
     PERMISSION_LABELS,
     sensitivePermissionsOf,
     describeSensitivePermissions,
+    grantableRole,
 };

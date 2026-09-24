@@ -47,7 +47,9 @@ async function deliver(client, reminder) {
     const channel = await getChannel(client, reminder.channelId);
     if (channel) {
         try {
-            await channel.send(text);
+            // The text is whatever the member (or the model, via create_reminder)
+            // typed; only the reminder's owner may be pinged by it.
+            await channel.send({ content: text, allowedMentions: { users: [reminder.userId] } });
             return true;
         } catch (error) {
             console.error(`Error sending reminder to channel ${reminder.channelId}, falling back to DM:`, error.message);
@@ -56,7 +58,10 @@ async function deliver(client, reminder) {
 
     try {
         const user = await client.users.fetch(reminder.userId);
-        await user.send(`🔔 Reminder (from a channel I could no longer post in): ${reminder.message}`);
+        await user.send({
+            content: `🔔 Reminder (from a channel I could no longer post in): ${reminder.message}`,
+            allowedMentions: { parse: [] }
+        });
         return true;
     } catch (error) {
         console.error(`Error DMing reminder to user ${reminder.userId}:`, error.message);

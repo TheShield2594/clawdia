@@ -345,6 +345,30 @@ describe('a plain shop item', () => {
         expect(add).toHaveBeenCalledWith('role-9', expect.stringContaining('vip_pass'));
     });
 
+    it('refuses a role carrying admin permissions, and spends nothing (#1141)', async () => {
+        seedUser({ inventory: [{ itemId: 'vip_pass', quantity: 1 }] });
+        seedGuild({ shop: [{ name: 'vip_pass', roleId: 'role-9' }] });
+
+        const { PermissionFlagsBits } = require('discord.js');
+        const interaction = makeInteraction({
+            options: { item: 'vip_pass' },
+            roles: new Map([['role-9', { id: 'role-9', permissions: PermissionFlagsBits.Administrator }]]),
+        });
+        const add = jest.fn();
+        interaction.guild.members.fetch = jest.fn().mockResolvedValue({
+            roles: { cache: { has: () => false }, add },
+        });
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await use.execute(interaction);
+        errorSpy.mockRestore();
+
+        expect(add).not.toHaveBeenCalled();
+        expect(repliedText(interaction)).toContain("can't be used");
+        expect(slot('vip_pass').quantity).toBe(1);
+        expect(mockUsers.writes).toEqual([]);
+    });
+
     it('refuses a role item the member already has, and spends nothing', async () => {
         seedUser({ inventory: [{ itemId: 'vip_pass', quantity: 1 }] });
         seedGuild({ shop: [{ name: 'vip_pass', roleId: 'role-9' }] });

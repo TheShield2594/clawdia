@@ -516,22 +516,70 @@ function validateHeistUpdate(updates) {
     return null;
 }
 
-// `autoRoles` and `reactionRoles` are both in the allow-list, so this generic
-// endpoint can write role assignments that the dedicated routes would refuse —
-// a role carrying admin or moderator permissions handed out to joiners or to
-// anyone who reacts (#1061). Collect the role ids a patch would store into
-// either so the same deny check the dedicated routes make can be made here too.
+// Every parent whose role ids the bot hands to members: autorole, reaction-role
+// panels (and `/role add`, which reads them), level rewards, shop items and the
+// birthday role. All are in the allow-list, so this generic endpoint can write a
+// role there that carries admin or moderator permissions — which a
+// `ManageGuild`-only admin could then grant to themselves (#1061, #1141). The
+// role ids a patch would store under any of them are collected so the same deny
+// check the dedicated routes make can be made here too.
+const GRANTED_ROLE_PARENTS = new Set(['autoRoles', 'reactionRoles', 'levelRoles', 'shop', 'birthdays']);
+
+// Dotted keys count as much as whole-array writes: `autoRoles.0`,
+// `reactionRoles.0.roleId` and `shop.3` all pass the allow-list, and used to
+// skip the deny check because only the bare parent key was looked at.
 function collectSelfAssignRoleIds(updates) {
     const ids = new Set();
-    const addFrom = value => {
-        if (!Array.isArray(value)) return;
-        for (const entry of value) {
-            const roleId = entry && typeof entry === 'object' ? entry.roleId : entry;
-            if (typeof roleId === 'string' && roleId) ids.add(roleId);
+    const add = roleId => { if (typeof roleId === 'string' && roleId) ids.add(roleId); };
+    const walk = value => {
+        if (Array.isArray(value)) { value.forEach(walk); return; }
+        if (!value || typeof value !== 'object') return;
+        for (const [key, inner] of Object.entries(value)) {
+            if (key === 'roleId') add(inner);
+            else walk(inner);
         }
     };
     for (const [key, value] of Object.entries(updates)) {
-        if (key === 'autoRoles' || key === 'reactionRoles') addFrom(value);
+        const segments = key.split('.');
+        const parent = segments[0];
+        if (!GRANTED_ROLE_PARENTS.has(parent)) continue;
+        const last = segments[segments.length - 1];
+        if (typeof value === 'string') {
+            // `x.roleId`, or `autoRoles.0` — autorole entries may be bare ids.
+            if (last === 'roleId' || (parent === 'autoRoles' && segments.length === 2)) add(value);
+            continue;
+        }
+        // `autoRoles: ['id', …]` is the one parent whose entries may be strings.
+        if (parent === 'autoRoles' && Array.isArray(value)) {
+            for (const entry of value) if (typeof entry === 'string') add(entry);
+        }
+        walk(value);
+    }
+    return ids;
+}
+
+// Any `channelId` / `*ChannelId` field is somewhere the bot will post, and the
+// services that post look the id up across every guild the bot is in
+// (`client.channels.fetch`). A format check alone let an admin of one guild
+// aim the bot at a channel in another (#1140). Collects every snowflake stored
+// under such a key, whether it arrives as a dotted key or nested in an object.
+const CHANNEL_ID_KEY = /channelId$/i;
+const SNOWFLAKE = /^\d{17,20}$/;
+
+function collectChannelIds(updates) {
+    const ids = new Set();
+    const walk = (value, keyName) => {
+        if (typeof value === 'string') {
+            if (CHANNEL_ID_KEY.test(keyName) && SNOWFLAKE.test(value)) ids.add(value);
+            return;
+        }
+        if (Array.isArray(value)) { value.forEach(entry => walk(entry, '')); return; }
+        if (!value || typeof value !== 'object') return;
+        for (const [key, inner] of Object.entries(value)) walk(inner, key);
+    };
+    for (const [key, value] of Object.entries(updates || {})) {
+        const segments = key.split('.');
+        walk(value, segments[segments.length - 1]);
     }
     return ids;
 }
@@ -583,11 +631,11 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
     const publicPageError = validatePublicPageUpdate(updates);
     if (publicPageError) return res.status(400).json({ error: publicPageError });
 
-    // Deny-set check for self-assignable roles (#1061). Needs the live role
+    // Deny-set check for granted roles (#1061, #1141). Needs the live role
     // permissions, so it is a facade call rather than a pure validator; only
-    // runs when the patch actually writes autoRoles/reactionRoles. A guild the
-    // bot is not in returns no roles — nothing to assign there anyway, and the
-    // event handlers refuse the assignment regardless.
+    // runs when the patch actually writes one of GRANTED_ROLE_PARENTS. A guild
+    // the bot is not in returns no roles — nothing to assign there anyway, and
+    // every grant path refuses a privileged role regardless.
     const selfAssignRoleIds = collectSelfAssignRoleIds(updates);
     if (selfAssignRoleIds.size) {
         const roles = await req.bot.listRoles(guildId);
@@ -597,7 +645,8 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
         if (offending) {
             return res.status(400).json({
                 error: `The "${offending.name}" role grants ${describeSensitivePermissions(offending.dangerousPermissions)} `
-                    + 'and cannot be handed out through autorole or a reaction-role panel.',
+                    + 'and cannot be handed out through autorole, a reaction-role panel, a level reward, '
+                    + 'a shop item or the birthday role.',
             });
         }
     }
@@ -607,6 +656,24 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
         if (!guildSettings) {
             return res.status(404).json({ error: 'Guild not found' });
+        }
+
+        // Every channel the patch would store must be one of this guild's
+        // (#1140). An id already saved on the document is let through, so a
+        // whole-object save that carries a since-deleted channel still works;
+        // the services that post check the channel's guild themselves as well.
+        const channelIds = collectChannelIds(updates);
+        if (channelIds.size) {
+            const stored = collectChannelIds(
+                typeof guildSettings.toObject === 'function' ? guildSettings.toObject() : guildSettings);
+            const fresh = [...channelIds].filter(id => !stored.has(id));
+            if (fresh.length) {
+                const own = new Set(((await req.bot.listChannels(guildId)) || []).map(channel => channel.id));
+                const foreign = fresh.find(id => !own.has(id));
+                if (foreign) {
+                    return res.status(400).json({ error: `Channel ${foreign} is not a channel in this server` });
+                }
+            }
         }
 
         // No image salvage here any more (#888). Shop images used to live inline
@@ -709,6 +776,7 @@ Object.defineProperty(module.exports, 'ALLOWED_SETTING_PARENTS', {
 Object.assign(module.exports, {
     isAllowedSettingKey,
     collectSelfAssignRoleIds,
+    collectChannelIds,
     validateWelcomeUpdate,
     validateFarewellUpdate,
     validateBirthdaysUpdate,

@@ -54,6 +54,8 @@ const DEFAULTS = {
  *                                    empty the window closes, as it does live.
  * @param {Map}    [opts.channels]    guild channels by id, for a command that
  *                                    announces somewhere other than in place
+ * @param {Map}    [opts.roles]       guild roles by id, for a command that
+ *                                    checks a role's permissions before granting it
  */
 function makeInteraction({
     options = {},
@@ -62,6 +64,7 @@ function makeInteraction({
     components = [],
     holdCollectors = false,
     channels = new Map(),
+    roles = new Map(),
     guildId = DEFAULTS.guildId,
     userId = DEFAULTS.userId,
 } = {}) {
@@ -214,6 +217,7 @@ function makeInteraction({
             id: guildId,
             name: 'Guild',
             channels: { cache: { get: id => channels.get(id) ?? null } },
+            roles: { cache: roles },
             members: { cache: new Map(), fetch: jest.fn().mockResolvedValue(null) },
         },
         channel: {

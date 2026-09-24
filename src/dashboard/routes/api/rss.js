@@ -76,6 +76,11 @@ router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, checkWriteRa
     if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
         return res.status(400).json({ error: 'url must use http or https' });
     }
+    // Delivery fetches the channel by id across every guild the bot is in, so
+    // a well-formed id from another server would be posted to (#1140).
+    if (!(await req.bot.hasChannel(guildId, channelId))) {
+        return res.status(400).json({ error: 'That channel is not in this server' });
+    }
 
     try {
         const guildSettings = await Guild.findOne({ guildId });
@@ -167,6 +172,15 @@ router.patch('/guild/:guildId/rss/:index', checkAuth, checkGuildAccess, checkWri
     // The @everyone role shares the guild's ID. A feed that pings the whole
     // server on every post is not a setting this page offers.
     if (roleId === guildId) return res.status(400).json({ error: 'A feed cannot ping @everyone' });
+    // Any other guild's id is *its* @everyone role, and a role from another
+    // server is nothing a post here should name (#1140). Only this guild's own
+    // roles can be pinged.
+    if (roleId !== null) {
+        const roles = await req.bot.listRoles(guildId);
+        if (!(roles || []).some(role => role.id === roleId)) {
+            return res.status(400).json({ error: 'That role is not in this server' });
+        }
+    }
 
     const template = body.messageTemplate ?? '';
     if (typeof template !== 'string') return res.status(400).json({ error: 'messageTemplate must be text' });

@@ -48,9 +48,20 @@ describe('checkReminders delivery', () => {
 
         await checkReminders(client);
 
-        expect(channel.send).toHaveBeenCalledWith(expect.stringContaining('Do the thing'));
+        expect(channel.send).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Do the thing') }));
         expect(reminder.completed).toBe(true);
         expect(reminder.save).toHaveBeenCalled();
+    });
+
+    test('pings only the reminder owner, whatever the text says (#1142)', async () => {
+        const reminder = makeReminder({ message: '@everyone <@&123456789012345678> look' });
+        Reminder.find.mockResolvedValue([reminder]);
+        const channel = { send: jest.fn().mockResolvedValue(undefined) };
+        const client = makeClient({ channel });
+
+        await checkReminders(client);
+
+        expect(channel.send.mock.calls[0][0].allowedMentions).toEqual({ users: [reminder.userId] });
     });
 
     test('falls back to DMing the user when the channel is missing', async () => {
@@ -61,7 +72,7 @@ describe('checkReminders delivery', () => {
 
         await checkReminders(client);
 
-        expect(dmSend).toHaveBeenCalledWith(expect.stringContaining('Do the thing'));
+        expect(dmSend).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Do the thing') }));
         expect(reminder.completed).toBe(true);
     });
 
@@ -75,7 +86,7 @@ describe('checkReminders delivery', () => {
         await checkReminders(client);
 
         expect(channel.send).toHaveBeenCalled();
-        expect(dmSend).toHaveBeenCalledWith(expect.stringContaining('Do the thing'));
+        expect(dmSend).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Do the thing') }));
         expect(reminder.completed).toBe(true);
     });
 
