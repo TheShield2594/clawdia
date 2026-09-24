@@ -30,68 +30,100 @@ const COOLDOWN_MS    = 1.5 * 3_600_000; // 1.5 hours
 const DEATH_RATE     = 0.08;            // 8% of failures trigger critical death
 const DEATH_LOSS_MIN = 0.15;
 const DEATH_LOSS_MAX = 0.30;
+// A critical failure seizes a share of the wallet, but never more than this
+// many of the approach's worst fine — and never less than an ordinary bust
+// would have cost. Uncapped, it was 300k off a 1M wallet over a job worth
+// ~1.5k, a loss only players who had not found /bank ever paid.
+const CRIT_CAP_FINES = 2;
+// A fine the wallet cannot cover is served as time instead: the unpaid share
+// of it, scaled onto this, is added to the lockout. Without it an empty
+// wallet made every failure free and the loudest approach always correct.
+const HOLDING_MAX_MS = 1.5 * 3_600_000;
 
+// Balance. Every crime is tuned so its standard approach
+// averages more per attempt than the tier below it, the safe approach about
+// the same as standard with less swing, and the loud one ~25% more per
+// attempt — which its heat on failure roughly gives back per hour. Rates for
+// the other two approaches were solved against those targets from the
+// shared multipliers in APPROACH, so that the three slots read the same
+// on every job. tests/economyCrimeCommand.test.js holds the targets.
 const CRIMES = [
-    { name: 'pickpocketing',      displayName: 'Quick Snatch',  emoji: '🤏', riskEmoji: '🟢', riskLabel: 'Low risk · Small cut',        successRate: 0.60, minPayout: 80,   maxPayout: 200,  minFine: 50,  maxFine: 100 },
-    { name: 'selling fake merch', displayName: 'Street Hustle', emoji: '🛍️', riskEmoji: '🟢', riskLabel: 'Low risk · Small cut',        successRate: 0.55, minPayout: 100,  maxPayout: 300,  minFine: 75,  maxFine: 150 },
-    { name: 'hacking ATMs',       displayName: 'ATM Ghost',     emoji: '💻', riskEmoji: '🟡', riskLabel: 'Medium risk · Decent payout', successRate: 0.45, minPayout: 200,  maxPayout: 500,  minFine: 100, maxFine: 200 },
-    { name: 'art forgery',        displayName: 'The Forgery',   emoji: '🖼️', riskEmoji: '🟡', riskLabel: 'Medium risk · Decent payout', successRate: 0.40, minPayout: 300,  maxPayout: 700,  minFine: 150, maxFine: 300 },
-    { name: 'casino cheating',    displayName: 'Casino Con',    emoji: '🎰', riskEmoji: '🔴', riskLabel: 'High risk · Big money',       successRate: 0.35, minPayout: 400,  maxPayout: 1000, minFine: 200, maxFine: 400 },
-    { name: 'grand larceny',      displayName: 'The Score',     emoji: '💎', riskEmoji: '🔴', riskLabel: 'High risk · Big money',       successRate: 0.25, minPayout: 600,  maxPayout: 1500, minFine: 300, maxFine: 600 },
+    { name: 'pickpocketing',      displayName: 'Quick Snatch',  emoji: '🤏', riskEmoji: '🟢', riskLabel: 'Low risk · Small cut',        successRate: 0.62, minPayout: 80,   maxPayout: 200,  minFine: 40,  maxFine: 85  },
+    { name: 'selling fake merch', displayName: 'Street Hustle', emoji: '🛍️', riskEmoji: '🟢', riskLabel: 'Low risk · Small cut',        successRate: 0.56, minPayout: 100,  maxPayout: 300,  minFine: 50,  maxFine: 100 },
+    { name: 'hacking ATMs',       displayName: 'ATM Ghost',     emoji: '💻', riskEmoji: '🟡', riskLabel: 'Medium risk · Decent payout', successRate: 0.50, minPayout: 200,  maxPayout: 500,  minFine: 95,  maxFine: 190 },
+    { name: 'art forgery',        displayName: 'The Forgery',   emoji: '🖼️', riskEmoji: '🟡', riskLabel: 'Medium risk · Decent payout', successRate: 0.45, minPayout: 300,  maxPayout: 700,  minFine: 110, maxFine: 225 },
+    { name: 'casino cheating',    displayName: 'Casino Con',    emoji: '🎰', riskEmoji: '🔴', riskLabel: 'High risk · Big money',       successRate: 0.40, minPayout: 400,  maxPayout: 1000, minFine: 125, maxFine: 255 },
+    { name: 'grand larceny',      displayName: 'The Score',     emoji: '💎', riskEmoji: '🔴', riskLabel: 'High risk · Big money',       successRate: 0.35, minPayout: 600,  maxPayout: 1500, minFine: 160, maxFine: 320 },
 ];
 
+// The three slots every job offers. Only the success rate and the heat vary
+// by job; the payout and fine multipliers are the same everywhere, so ×0.75
+// always means the careful play and ×1.8 the loud one.
+const APPROACH = {
+    safe:     { payoutMult: 0.75, fineMult: 0.75 },
+    standard: { payoutMult: 1.00, fineMult: 1.00 },
+    loud:     { payoutMult: 1.80, fineMult: 1.40 },
+};
+
 // Per-crime execution method choices presented in Step 2.
-// successRate: absolute rate (null = wildcard, resolved at runtime)
+// successRate: absolute rate
 // payoutMult:  multiplier applied to base payout on success
+// payoutRange: wildcard only — the multiplier runs from [0] to [1] with how
+//              cleanly the job lands, averaging the loud slot's payoutMult
 // fineMult:    multiplier applied to fine on regular bust
 // wantedMs:    if > 0, sets wantedUntil = crimeTime + wantedMs on bust (must exceed COOLDOWN_MS to add extra penalty)
 const EXECUTION_METHODS = {
     'pickpocketing': {
         situation: "You've spotted a mark in the crowd. How do you play it?",
         methods: [
-            { id: 'feather_touch', label: '🤏 Feather touch', desc: 'Patient, near-invisible grab', successRate: 0.72, payoutMult: 0.80, fineMult: 0.75, wantedMs: 0 },
-            { id: 'quick_snatch',  label: '🏃 Quick snatch',  desc: 'Fast and practiced',           successRate: 0.60, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
-            { id: 'bold_grab',     label: '🎰 Bold grab',     desc: 'Loud exit, big cut',            successRate: 0.40, payoutMult: 1.60, fineMult: 1.35, wantedMs: 2 * 3_600_000 },
+            { id: 'feather_touch', label: '🤏 Feather touch', desc: 'Patient, near-invisible grab', successRate: 0.70, ...APPROACH.safe,     wantedMs: 0 },
+            { id: 'quick_snatch',  label: '🏃 Quick snatch',  desc: 'Fast and practiced',           successRate: 0.62, ...APPROACH.standard, wantedMs: 0 },
+            { id: 'bold_grab',     label: '🎰 Bold grab',     desc: 'Loud exit, big cut',           successRate: 0.50, ...APPROACH.loud,     wantedMs: 2 * 3_600_000 },
         ],
     },
     'selling fake merch': {
         situation: "You've got the goods. How do you move them?",
         methods: [
-            { id: 'tourist_trap',    label: '🏪 Tourist trap',    desc: 'Steady foot traffic, lower cut', successRate: 0.65, payoutMult: 0.85, fineMult: 0.80, wantedMs: 0 },
-            { id: 'hard_sell',       label: '🎤 Hard sell',       desc: 'The usual pitch',                successRate: 0.55, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
-            { id: 'wholesale_blitz', label: '📦 Wholesale blitz', desc: 'Bulk push, heat follows',        successRate: 0.38, payoutMult: 1.55, fineMult: 1.40, wantedMs: 2 * 3_600_000 },
+            { id: 'tourist_trap',    label: '🏪 Tourist trap',    desc: 'Steady foot traffic, lower cut', successRate: 0.63, ...APPROACH.safe,     wantedMs: 0 },
+            { id: 'hard_sell',       label: '🎤 Hard sell',       desc: 'The usual pitch',                successRate: 0.56, ...APPROACH.standard, wantedMs: 0 },
+            { id: 'wholesale_blitz', label: '📦 Wholesale blitz', desc: 'Bulk push, heat follows',        successRate: 0.44, ...APPROACH.loud,     wantedMs: 2 * 3_600_000 },
         ],
     },
     'hacking ATMs': {
         situation: "You're connected to the network. How do you drain it?",
         methods: [
-            { id: 'skimmer',     label: '💳 Skimmer',     desc: 'Install quietly, harvest slowly', successRate: 0.55, payoutMult: 0.80, fineMult: 0.75, wantedMs: 0 },
-            { id: 'remote_hack', label: '💻 Remote hack', desc: 'Standard operation',              successRate: 0.45, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
-            { id: 'zero_day',    label: '⚡ Zero-day',     desc: 'All-or-nothing exploit',          successRate: 0.28, payoutMult: 1.70, fineMult: 1.50, wantedMs: 2.5 * 3_600_000 },
+            { id: 'skimmer',     label: '💳 Skimmer',     desc: 'Install quietly, harvest slowly', successRate: 0.55, ...APPROACH.safe,     wantedMs: 0 },
+            { id: 'remote_hack', label: '💻 Remote hack', desc: 'Standard operation',              successRate: 0.50, ...APPROACH.standard, wantedMs: 0 },
+            { id: 'zero_day',    label: '⚡ Zero-day',     desc: 'All-or-nothing exploit',          successRate: 0.40, ...APPROACH.loud,     wantedMs: 2.5 * 3_600_000 },
         ],
     },
     'art forgery': {
         situation: "The studio is set. What's your approach?",
         methods: [
-            { id: 'minor_piece',  label: '🖌️ Minor piece',  desc: 'Low stakes, clean sale',       successRate: 0.52, payoutMult: 0.80, fineMult: 0.75, wantedMs: 0 },
-            { id: 'classic_swap', label: '🖼️ Classic swap', desc: 'A reliable forgery',           successRate: 0.40, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
-            { id: 'masterpiece',  label: '💎 Masterpiece',  desc: 'High-stakes, all eyes on you', successRate: 0.24, payoutMult: 1.75, fineMult: 1.60, wantedMs: 2.5 * 3_600_000 },
+            { id: 'minor_piece',  label: '🖌️ Minor piece',  desc: 'Low stakes, clean sale',       successRate: 0.50, ...APPROACH.safe,     wantedMs: 0 },
+            { id: 'classic_swap', label: '🖼️ Classic swap', desc: 'A reliable forgery',           successRate: 0.45, ...APPROACH.standard, wantedMs: 0 },
+            { id: 'masterpiece',  label: '💎 Masterpiece',  desc: 'High-stakes, all eyes on you', successRate: 0.36, ...APPROACH.loud,     wantedMs: 2.5 * 3_600_000 },
         ],
     },
     'casino cheating': {
         situation: "You're at the table. How do you tip the odds?",
         methods: [
-            { id: 'count_cards',  label: '🧮 Count cards',  desc: 'Subtle mathematical edge', successRate: 0.48, payoutMult: 0.80, fineMult: 0.75, wantedMs: 0 },
-            { id: 'marked_deck',  label: '🃏 Marked deck',  desc: 'Practiced, balanced risk', successRate: 0.35, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
-            { id: 'dealer_bribe', label: '💵 Dealer bribe', desc: 'All in — or all busted',   successRate: 0.20, payoutMult: 1.80, fineMult: 1.70, wantedMs: 3 * 3_600_000 },
+            { id: 'count_cards',  label: '🧮 Count cards',  desc: 'Subtle mathematical edge', successRate: 0.44, ...APPROACH.safe,     wantedMs: 0 },
+            { id: 'marked_deck',  label: '🃏 Marked deck',  desc: 'Practiced, balanced risk', successRate: 0.40, ...APPROACH.standard, wantedMs: 0 },
+            { id: 'dealer_bribe', label: '💵 Dealer bribe', desc: 'All in — or all busted',   successRate: 0.31, ...APPROACH.loud,     wantedMs: 3 * 3_600_000 },
         ],
     },
     'grand larceny': {
         situation: "You're outside the vault. How do you proceed?",
         methods: [
-            { id: 'pick_lock', label: '🔑 Pick the lock',  desc: 'Safer, slower',                successRate: 0.35, payoutMult: 0.80, fineMult: 0.75, wantedMs: 0 },
-            { id: 'cut_power', label: '💥 Cut the power',  desc: 'Riskier, faster',              successRate: 0.25, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
-            { id: 'bluff_in',  label: '🚨 Bluff your way', desc: 'Wildcard — 15–75% luck-based', successRate: null, payoutMult: 1.90, fineMult: 1.80, wantedMs: 3 * 3_600_000, wildcard: true },
+            { id: 'pick_lock', label: '🔑 Pick the lock',  desc: 'Safer, slower',   successRate: 0.39, ...APPROACH.safe,     wantedMs: 0 },
+            { id: 'cut_power', label: '💥 Cut the power',  desc: 'Riskier, faster', successRate: 0.35, ...APPROACH.standard, wantedMs: 0 },
+            // The wildcard is loud-slot odds with a swing on the cut: how well
+            // the story sells decides the multiplier. It used to draw its
+            // *success rate* from 15–75% instead — which, rolled once against
+            // a second draw, is exactly a flat 45%: the best odds on the job
+            // at the biggest multiplier, worth ~5× any other choice in the game.
+            { id: 'bluff_in',  label: '🚨 Bluff your way', desc: 'Wildcard — the better it sells, the bigger the cut', successRate: 0.27, ...APPROACH.loud, payoutRange: [1.0, 2.6], wantedMs: 3 * 3_600_000, wildcard: true },
         ],
     },
 };
@@ -105,8 +137,6 @@ const FINES = [
 ];
 
 const MAX_SUCCESS    = 0.95;
-const WILDCARD_FLOOR = 0.15;            // the wildcard's worst draw
-const WILDCARD_SPAN  = 0.60;            // …and how far above that its best one sits
 const PICK_WINDOW_MS = 15_000;
 const TOP_PAYOUT     = Math.max(...CRIMES.map(c => c.maxPayout));
 
@@ -127,19 +157,24 @@ function shuffle(list) {
 
 // The odds a method is really rolled at once every bonus is in — the same sum
 // the resolution below uses, so the buttons and the roll cannot disagree.
-// A wildcard draws its base rate at resolution, so it has a range.
-function methodOdds(method, bonus) {
-    if (method.wildcard) {
-        return {
-            min: Math.min(MAX_SUCCESS, WILDCARD_FLOOR + bonus),
-            max: Math.min(MAX_SUCCESS, WILDCARD_FLOOR + WILDCARD_SPAN + bonus),
-        };
-    }
-    const rate = Math.min(MAX_SUCCESS, method.successRate + bonus);
-    return { min: rate, max: rate };
-}
+const methodOdds = (method, bonus) => Math.min(MAX_SUCCESS, method.successRate + bonus);
 
-const oddsLabel = ({ min, max }) => (min === max ? pct(min) : `${pct(min)}–${pct(max)}`);
+const payoutLabel = method => (method.payoutRange
+    ? `×${method.payoutRange[0]}–${method.payoutRange[1]}`
+    : `×${method.payoutMult}`);
+
+/**
+ * The payout multiplier a landed job earns. A wildcard's rides the same roll
+ * that decided success: how far under the line it came is how cleanly the
+ * job went, from the bottom of its range to the top. The roll is uniform
+ * below the line, so the multiplier averages the middle of the range.
+ */
+function landedPayoutMult(method, roll, chance) {
+    if (!method.payoutRange) return method.payoutMult;
+    const [lo, hi] = method.payoutRange;
+    const clean = 1 - roll / chance;
+    return Math.round((lo + (hi - lo) * clean) * 100) / 100;
+}
 
 /**
  * Resolves to the owner's press, or null when the window closes. Kept apart
@@ -333,9 +368,8 @@ module.exports = {
             const execData = EXECUTION_METHODS[crime.name];
 
             const execMethodLines = execData.methods.map(m => {
-                const odds = methodOdds(m, oddsBonus);
-                const rateStr = m.wildcard ? `${oddsLabel(odds)} wildcard` : oddsLabel(odds);
-                const payoutStr = m.payoutMult !== 1.0 ? ` · ×${m.payoutMult} payout` : '';
+                const rateStr = pct(methodOdds(m, oddsBonus));
+                const payoutStr = m.payoutRange || m.payoutMult !== 1.0 ? ` · ${payoutLabel(m)} payout` : '';
                 const fineStr = ` · fine ${Math.round(crime.minFine * m.fineMult)}–${Math.round(crime.maxFine * m.fineMult)}`;
                 const wantedStr = m.wantedMs > 0 ? ` · 🔥 ${hours(m.wantedMs)}h heat on fail` : '';
                 return `**${m.label}** — ${m.desc}\n🎯 ${rateStr} success${payoutStr}${fineStr}${wantedStr}`;
@@ -345,21 +379,23 @@ module.exports = {
                 .setColor('#e67e22')
                 .setTitle(`${crime.emoji} ${crime.displayName} — Choose Your Approach`)
                 .setDescription(`🎯 ${execData.situation}\n\n${execMethodLines}${bonusLine}`)
-                .setFooter({ text: '15 seconds to decide. No pick and one is chosen for you.' })
+                .setFooter({ text: '15 seconds to decide. No pick and you play it safe.' })
                 .setTimestamp();
 
             const execRow = new ActionRowBuilder().addComponents(
                 execData.methods.map(m => new ButtonBuilder()
                     .setCustomId(`exec_${m.id}`)
-                    .setLabel(`${m.label}  ·  ${oddsLabel(methodOdds(m, oddsBonus))}`)
+                    .setLabel(`${m.label}  ·  ${pct(methodOdds(m, oddsBonus))}`)
                     .setStyle(ButtonStyle.Secondary))
             );
 
             await interaction.editReply({ embeds: [execEmbed], components: [execRow] });
 
             const execPress = await awaitPick(message, interaction.user.id);
+            // A player who stepped away gets the careful play. Picking at random
+            // handed them heat on a loud approach they never chose.
             const execMethod = (execPress && execData.methods.find(m => `exec_${m.id}` === execPress.customId))
-                ?? execData.methods[Math.floor(secureRandom() * execData.methods.length)];
+                ?? execData.methods[0];
             if (execPress) await execPress.deferUpdate().catch(() => {});
 
             // Synergy requirements read hunt/fishing/mining levels, and those live in
@@ -369,12 +405,9 @@ module.exports = {
             await attachGrind(user, ['hunt', 'fishing', 'mining']);
 
             // ── Resolve the crime ───────────────────────────────────────────────
-            const baseChance = execMethod.wildcard
-                ? WILDCARD_FLOOR + secureRandom() * WILDCARD_SPAN
-                : execMethod.successRate;
-            const successChance = Math.min(MAX_SUCCESS, baseChance + oddsBonus);
-
-            const success = secureRandom() < successChance;
+            const successChance = methodOdds(execMethod, oddsBonus);
+            const successRoll = secureRandom();
+            const success = successRoll < successChance;
             const crimeTime = new Date();
 
             const streakMult = clampMultiplier(getStreakMultiplier(user.streak?.current ?? 0));
@@ -387,7 +420,8 @@ module.exports = {
                 const baseEarned = Math.floor(crime.minPayout + secureRandom() * (crime.maxPayout - crime.minPayout));
                 // Merchant synergy: +5% while carrying anything at all.
                 const merchantMult = 1 + getMerchantCoinBonus(user);
-                let earned = Math.round(baseEarned * streakMult * execMethod.payoutMult * merchantMult);
+                const payoutMult = landedPayoutMult(execMethod, successRoll, successChance);
+                let earned = Math.round(baseEarned * streakMult * payoutMult * merchantMult);
                 if (isFeaturedCrime) earned = Math.round(earned * (1 + FEATURED_PAYOUT_BONUS));
 
                 // Keyed and recorded-if-lost. The cooldown slot was claimed up
@@ -433,15 +467,16 @@ module.exports = {
                 if (petCrimeBonus > 0) desc += `\n> 🐾 *Your pet boosted your success chance!*`;
                 if (masteryBonus > 0) desc += `\n> 🏆 *Criminal mastery: +${pct(masteryBonus)} applied*`;
                 if (isFeaturedCrime) desc += `\n> 🌟 *Featured job — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout applied!*`;
+                if (execMethod.payoutRange) desc += `\n> 🎲 *The bluff sold — ×${payoutMult} cut (range ${payoutLabel(execMethod)})*`;
 
                 const crimeMultEntries = [];
                 if (streakMult > 1.0) crimeMultEntries.push({ emoji: '🔥', label: `${streakMult.toFixed(2)}x` });
-                if (execMethod.payoutMult !== 1.0) crimeMultEntries.push({ emoji: '⚡', label: `×${execMethod.payoutMult}` });
+                if (payoutMult !== 1.0) crimeMultEntries.push({ emoji: '⚡', label: `×${payoutMult}` });
                 if (merchantMult > 1.0) crimeMultEntries.push({ emoji: '💼', label: `${merchantMult.toFixed(2)}x` });
                 if (isFeaturedCrime) crimeMultEntries.push({ emoji: '🌟', label: `+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%` });
                 // Every multiplier folded into `earned` above has to be in here too,
                 // or the bar breaks down a number it does not add up to.
-                const crimeBar = stackBar(crimeMultEntries, streakMult * execMethod.payoutMult * merchantMult * (isFeaturedCrime ? 1 + FEATURED_PAYOUT_BONUS : 1), earned, currency);
+                const crimeBar = stackBar(crimeMultEntries, streakMult * payoutMult * merchantMult * (isFeaturedCrime ? 1 + FEATURED_PAYOUT_BONUS : 1), earned, currency);
 
                 desc += `\n\n────────────────────\n  ${currency} Earned: **${earned.toLocaleString()} coins**`;
                 if (crimeBar) desc += `\n  ${crimeBar}`;
@@ -469,8 +504,10 @@ module.exports = {
                 // The lockout is whichever runs out last: the cooldown from the
                 // claim, or the heat. A flat "Cooldown: 1.5h" misstated every
                 // loud failure, which locks the player out for 2–3h.
-                const nextJobAt = new Date(Math.max(claimNow.getTime() + COOLDOWN_MS, wantedUntil?.getTime() ?? 0));
-                const nextJobStr = `\n\n⏱️ Next job ${relTime(nextJobAt)}`;
+                const cooldownEnds = claimNow.getTime() + COOLDOWN_MS;
+                const nextJobStr = (heldUntil = null) => `\n\n⏱️ Next job ${relTime(new Date(Math.max(
+                    cooldownEnds, wantedUntil?.getTime() ?? 0, heldUntil?.getTime() ?? 0,
+                )))}`;
 
                 // What this failure would take, sized once, so the Lifesaver
                 // reports the figure it actually absorbed rather than a re-roll.
@@ -479,10 +516,11 @@ module.exports = {
                 // than a success's).
                 const balanceNow = user.balance ?? 0;
                 let loss;
-                let lossRate = 0;
                 if (isCriticalFailure) {
-                    lossRate = DEATH_LOSS_MIN + secureRandom() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
-                    loss = Math.floor(balanceNow * lossRate);
+                    const lossRate = DEATH_LOSS_MIN + secureRandom() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
+                    const bustFine = Math.round((crime.minFine + secureRandom() * (crime.maxFine - crime.minFine)) * execMethod.fineMult);
+                    const critCap = Math.round(crime.maxFine * execMethod.fineMult * CRIT_CAP_FINES);
+                    loss = Math.max(bustFine, Math.min(Math.floor(balanceNow * lossRate), critCap));
                 } else {
                     const rawFine = Math.floor(crime.minFine + secureRandom() * (crime.maxFine - crime.minFine));
                     // The method's multiplier goes on before the wallet cap, so
@@ -502,10 +540,10 @@ module.exports = {
                 // filter to say the lifesaver was still there. A lifesaver that
                 // has gone since the read falls through to the normal fine.
                 //
-                // Only spent when there is something to absorb: an empty wallet
-                // loses nothing, and burning a 15,000-coin item to report
-                // "Fine Absorbed: 0" was the worst trade in the shop.
-                const absorbable = Math.min(loss, balanceNow);
+                // Only spent when there is something to absorb. An empty wallet
+                // still has one — the holding time below — so the check is on
+                // the loss, not on what the wallet could pay of it.
+                const absorbable = loss;
                 const lifesaverActive = absorbable > 0
                     && hasEffect(user, 'lifesaver')
                     && !!(await spendEffectCharge(User, userFilter, 'lifesaver'));
@@ -515,6 +553,23 @@ module.exports = {
                 const settledBalance = async result => (result.matched
                     ? result.balance
                     : (await User.findOne(userFilter, { balance: 1 }).lean())?.balance ?? balanceNow);
+
+                // Whatever share of the loss the wallet could not cover is
+                // served as holding time. Written as a `$max` so it only ever
+                // lengthens a lockout (heat may already run past it), and only
+                // for a debit that matched — a frozen member was not fined, so
+                // there is nothing unpaid to serve.
+                const serveUnpaid = async debit => {
+                    const unpaid = debit.matched ? loss - debit.taken : 0;
+                    if (unpaid <= 0 || loss <= 0) return { heldUntil: null, holdingStr: '' };
+                    const holdingMs = Math.round(HOLDING_MAX_MS * unpaid / loss);
+                    const heldUntil = new Date(cooldownEnds + holdingMs);
+                    await User.updateOne(userFilter, { $max: { wantedUntil: heldUntil } });
+                    return {
+                        heldUntil,
+                        holdingStr: `\n> ⛓️ *Couldn't cover ${currency}${unpaid.toLocaleString()} of it — ${Math.round(holdingMs / 60_000)} min in holding.*`,
+                    };
+                };
 
                 if (lifesaverActive) {
                     const lifesaverUpdate = { $inc: { 'crimeRecord.totalCrimes': 1 } };
@@ -526,7 +581,7 @@ module.exports = {
                     embed = new EmbedBuilder()
                         .setColor('#e67e22')
                         .setTitle(`${crime.emoji} Saved by the Lifesaver!`)
-                        .setDescription(`Your attempt at **${crime.displayName}** went sideways. ${flavorText}\n> 🛟 *Your Lifesaver activated and saved you! No coins lost! (consumed)*${wantedStr}${nextJobStr}`)
+                        .setDescription(`Your attempt at **${crime.displayName}** went sideways. ${flavorText}\n> 🛟 *Your Lifesaver activated and saved you! No coins lost! (consumed)*${wantedStr}${nextJobStr()}`)
                         .addFields(
                             { name: isCriticalFailure ? 'Death Loss Absorbed' : 'Fine Absorbed', value: `${currency}${absorbable.toLocaleString()}`, inline: true },
                             { name: 'Balance', value: `${currency}${balanceNow.toLocaleString()}`, inline: true }
@@ -542,8 +597,12 @@ module.exports = {
                     const debit = await debitUpTo(User, userFilter, loss, critSet);
                     const lost = debit.taken;
                     const critBalance = await settledBalance(debit);
+                    const { heldUntil, holdingStr } = await serveUnpaid(debit);
+                    // The share of the wallet this really was — the floor and
+                    // the cap both move it off the rolled rate.
+                    const walletShare = balanceNow > 0 ? Math.round((lost / balanceNow) * 100) : 0;
 
-                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_critical_fail', amount: -lost, balance: critBalance, note: `${crime.name} (critical failure, ${Math.round(lossRate * 100)}% seized, ${execMethod.id})` });
+                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_critical_fail', amount: -lost, balance: critBalance, note: `${crime.name} (critical failure, ${walletShare}% seized, ${execMethod.id})` });
 
                     const critNarrative = getCrimeFlavorText(crime.name, 'fail')
                         .replace('{fine}', lost.toLocaleString())
@@ -551,10 +610,10 @@ module.exports = {
                     const critDesc =
                         `${critNarrative}\n\n> *${flavorText}*\n\n` +
                         `────────────────────\n` +
-                        `  💸 Seized: ${currency}${lost.toLocaleString()} coins  (${Math.round(lossRate * 100)}% of wallet)\n` +
+                        `  💸 Seized: ${currency}${lost.toLocaleString()} coins  (${walletShare}% of wallet)\n` +
                         `  💰 Remaining: ${critBalance.toLocaleString()} coins\n` +
                         `────────────────────` +
-                        wantedStr + nextJobStr;
+                        holdingStr + wantedStr + nextJobStr(heldUntil);
 
                     embed = new EmbedBuilder()
                         .setColor('#8B0000')
@@ -571,6 +630,7 @@ module.exports = {
                     const debit = await debitUpTo(User, userFilter, loss, setFields);
                     const paid = debit.taken;
                     const finedBalance = await settledBalance(debit);
+                    const { heldUntil, holdingStr } = await serveUnpaid(debit);
 
                     logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_fine', amount: -paid, balance: finedBalance, note: `${crime.name} (busted, ${execMethod.id})` });
 
@@ -582,7 +642,7 @@ module.exports = {
                     embed = new EmbedBuilder()
                         .setColor(COLORS.ERROR)
                         .setTitle(`${crime.emoji} ${crime.displayName} — Busted`)
-                        .setDescription(`${bustNarrative}\n\n> *${flavorText}*${undergroundStr}${wantedStr}${nextJobStr}`)
+                        .setDescription(`${bustNarrative}\n\n> *${flavorText}*${undergroundStr}${holdingStr}${wantedStr}${nextJobStr(heldUntil)}`)
                         .addFields(
                             { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
                             { name: 'Balance',   value: `${currency}${finedBalance.toLocaleString()}`, inline: true }
@@ -625,3 +685,6 @@ module.exports = {
         }
     }
 };
+
+// The tables the balance test holds to its targets.
+module.exports.__test__ = { CRIMES, EXECUTION_METHODS, DEATH_RATE, CRIT_CAP_FINES };

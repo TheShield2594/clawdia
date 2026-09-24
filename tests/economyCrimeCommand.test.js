@@ -69,8 +69,8 @@ const COOLDOWN_MS = 1.5 * 3_600_000;
 // The quietest job and its safest method: fixed rates, no heat, and a payout
 // band narrow enough to assert against.
 const PICKPOCKET = 'pickpocketing';
-const FEATHER_TOUCH = 'exec_feather_touch';   // 72% success, ×0.80 payout, no heat
-const BOLD_GRAB = 'exec_bold_grab';           // 40% success, ×1.60 payout, 2h heat
+const FEATHER_TOUCH = 'exec_feather_touch';   // 70% success, ×0.75 payout, no heat
+const BOLD_GRAB = 'exec_bold_grab';           // 50% success, ×1.80 payout, 2h heat
 
 // Crime's payout-steering rolls draw from src/utils/secureRandom.js, not
 // Math.random (CodeQL js/insecure-randomness). Both are pointed at one shared
@@ -130,7 +130,7 @@ afterEach(() => { Math.random.mockRestore(); __setRandomSourceForTests(null); })
 
 describe('a clean getaway', () => {
     it('credits the payout and counts the crime', async () => {
-        // 0.1 is under feather touch's 72%, so the job lands.
+        // 0.1 is under feather touch's 70%, so the job lands.
         rolls([], 0.1);
         seedUser({ balance: 1000 });
         seedGuild();
@@ -245,7 +245,7 @@ describe('a clean getaway', () => {
 
 describe('getting caught', () => {
     it('fines the player, capped at a fifth of the wallet', async () => {
-        // 0.99 misses the 72% success roll and the 8% death roll both.
+        // 0.99 misses the 70% success roll and the 8% death roll both.
         rolls([], 0.99);
         seedUser({ balance: 1000 });
         seedGuild();
@@ -290,7 +290,7 @@ describe('getting caught', () => {
         expect(repliedText(interaction)).toContain('Underground district active');
     });
 
-    it('seizes a share of the wallet on a critical failure', async () => {
+    it('seizes a share of a small wallet on a critical failure', async () => {
         // The success roll misses and the 8% death check — the eighth roll of
         // the run — lands. Pinned by position because the two are the same
         // call, `Math.random()`, and nothing else tells them apart; a refactor
@@ -301,17 +301,28 @@ describe('getting caught', () => {
         // mocked at the top of this file. Without that it shifted with the
         // calendar, which is what made this test fail on 31 Aug.
         rollsUntil(7, 0.99, 0.01);
-        seedUser({ balance: 10_000 });
+        seedUser({ balance: 400 });
         seedGuild();
 
         const interaction = await run();
 
         expect(repliedText(interaction)).toContain('Everything Went Wrong');
-        const stored = mockUsers.get(USER_ID);
-        // 15–30% of the wallet.
-        expect(stored.balance).toBeLessThanOrEqual(8_500);
-        expect(stored.balance).toBeGreaterThanOrEqual(7_000);
-        expectNonNegativeBalance(stored, 'crime critical failure');
+        // 15.15% of 400 is 60 — over the 30-coin fine it floors at, under
+        // the 128-coin cap.
+        expect(mockUsers.get(USER_ID).balance).toBe(340);
+        expectNonNegativeBalance(mockUsers.get(USER_ID), 'crime critical failure');
+    });
+
+    it('caps a critical failure at twice the approach\'s worst fine, however full the wallet', async () => {
+        // Uncapped, this was 1,500+ off a 10,000 wallet over a job worth ~100.
+        // Feather touch's worst fine is 85 × 0.75, so the cap is 128.
+        rollsUntil(7, 0.99, 0.01);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        await run();
+
+        expect(mockUsers.get(USER_ID).balance).toBe(10_000 - 128);
     });
 
     it('spends a Lifesaver instead of coins', async () => {
@@ -483,8 +494,8 @@ describe('the prompts keep the player\'s picks', () => {
     });
 
     it('quotes odds that include every bonus the roll will use', async () => {
-        // A Lucky Charm is +20%: feather touch's 72% is rolled at 92%, and the
-        // buttons used to say 72% anyway.
+        // A Lucky Charm is +20%: feather touch's 70% is rolled at 90%, and the
+        // buttons used to say 70% anyway.
         rolls([], 0.1);
         seedUser({
             balance: 1000,
@@ -495,7 +506,7 @@ describe('the prompts keep the player\'s picks', () => {
         const interaction = await run();
 
         const text = repliedText(interaction);
-        expect(text).toContain('92%');
+        expect(text).toContain('90%');
         expect(text).toContain('Lucky Charm +20%');
     });
 });
@@ -591,15 +602,16 @@ describe('failure bookkeeping', () => {
         expect(mockUsers.get(USER_ID).balance).toBe(240);
     });
 
-    it('does not spend a Lifesaver when there is nothing to absorb', async () => {
+    it('spends a Lifesaver on an empty wallet too — it absorbs the holding time', async () => {
         rolls([], 0.99);
         seedUser({ balance: 0, activeEffects: [{ type: 'lifesaver', expiresAt: null, charges: 1 }] });
         seedGuild();
 
         const interaction = await run();
 
-        expect(repliedText(interaction)).not.toContain('Saved by the Lifesaver');
-        expect(mockUsers.get(USER_ID).activeEffects).toHaveLength(1);
+        expect(repliedText(interaction)).toContain('Saved by the Lifesaver');
+        expect(mockUsers.get(USER_ID).activeEffects).toEqual([]);
+        expect(mockUsers.get(USER_ID).wantedUntil).toBeNull();
     });
 
     it('shows a member frozen mid-job their real balance, not zero', async () => {
@@ -626,5 +638,111 @@ describe('failure bookkeeping', () => {
         const text = repliedText(interaction);
         expect(text).toContain('Quick Snatch');
         expect(text).not.toContain('Casino Con is next');
+    });
+});
+
+describe('the balance', () => {
+    const { CRIMES, EXECUTION_METHODS, DEATH_RATE, CRIT_CAP_FINES } = crime.__test__;
+
+    // Coins per attempt for a player with a wallet deep enough that neither
+    // the 20% fine cap nor the wallet share of a critical failure binds — the
+    // player the balance has to hold for. No mastery, no boosts.
+    const expectedValue = (c, m) => {
+        const payout = ((c.minPayout + c.maxPayout) / 2) * m.payoutMult;
+        const fine = ((c.minFine + c.maxFine) / 2) * m.fineMult;
+        const crit = c.maxFine * m.fineMult * CRIT_CAP_FINES;
+        const failure = (1 - DEATH_RATE) * fine + DEATH_RATE * crit;
+        return m.successRate * payout - (1 - m.successRate) * failure;
+    };
+
+    it.each(CRIMES.map(c => [c.displayName, c]))('%s: no approach dominates', (_name, c) => {
+        const [safe, standard, loud] = EXECUTION_METHODS[c.name].methods.map(m => expectedValue(c, m));
+        // Every approach pays on average — a choice that loses money is a trap.
+        expect(Math.min(safe, standard, loud)).toBeGreaterThan(0);
+        // Safe and standard sit within 15% of each other; loud earns more per
+        // attempt, but not so much that its heat stops mattering. The old Bluff
+        // was 5×.
+        expect(Math.abs(safe - standard) / standard).toBeLessThan(0.15);
+        expect(loud / standard).toBeGreaterThan(1.1);
+        expect(loud / standard).toBeLessThan(1.4);
+    });
+
+    it('pays more on average for each step up the ladder', () => {
+        const standards = CRIMES.map(c => expectedValue(c, EXECUTION_METHODS[c.name].methods[1]));
+        for (let i = 1; i < standards.length; i++) expect(standards[i]).toBeGreaterThan(standards[i - 1]);
+    });
+
+    it('swings the Bluff\'s cut with how cleanly it lands', async () => {
+        // A roll of 0.01 against 27% is about as clean as it gets:
+        // 1 − 0.01/0.27 of the way from ×1.0 to ×2.6.
+        rolls([], 0.01);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run([{ customId: 'grand larceny' }, { customId: 'exec_bluff_in' }]);
+
+        expect(repliedText(interaction)).toContain('×2.54 cut');
+    });
+
+    it('plays it safe for a player who never picks an approach', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        const interaction = await run([{ customId: PICKPOCKET }]);
+
+        expect(interaction.replies.at(-1).embeds[0].data.footer.text).toContain('Feather touch');
+        expect(mockUsers.get(USER_ID).wantedUntil).toBeNull();
+    });
+});
+
+describe('a fine the wallet cannot cover', () => {
+    it('is served as holding time on top of the cooldown', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 0 });
+        seedGuild();
+
+        const interaction = await run();
+
+        const claim = mockUsers.writes.find(w => w.update?.$set?.lastCrime).update.$set.lastCrime;
+        // Nothing paid: the whole 1.5h of holding, after the 1.5h cooldown.
+        expect(mockUsers.get(USER_ID).wantedUntil.getTime()).toBe(claim.getTime() + 2 * COOLDOWN_MS);
+        expect(repliedText(interaction)).toContain('90 min in holding');
+    });
+
+    it('scales the time to the share left unpaid', async () => {
+        // A 40-coin fine against a 20-coin wallet: half unpaid, 45 minutes.
+        rolls([], 0.99);
+        seedUser({ balance: 20 });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(mockUsers.get(USER_ID).balance).toBe(0);
+        expect(repliedText(interaction)).toContain('45 min in holding');
+    });
+
+    it('never shortens heat that already runs past it', async () => {
+        // The Bluff's 3h heat against a 20-coin wallet: 140 of a 160-coin fine
+        // unpaid is ~79 min of holding, ending at ~2.8h — so the heat stands.
+        rolls([], 0.99);
+        seedUser({ balance: 20 });
+        seedGuild();
+
+        const interaction = await run([{ customId: 'grand larceny' }, { customId: 'exec_bluff_in' }]);
+
+        expect(repliedText(interaction)).toContain('in holding');
+        expect(mockUsers.get(USER_ID).wantedUntil.getTime()).toBeGreaterThan(Date.now() + 2.95 * 3_600_000);
+    });
+
+    it('costs a paying player no time', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(mockUsers.get(USER_ID).wantedUntil).toBeNull();
+        expect(repliedText(interaction)).not.toContain('in holding');
     });
 });
