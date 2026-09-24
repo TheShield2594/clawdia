@@ -82,9 +82,6 @@ async function handleDig(interaction) {
     // Atomically claim the cooldown slot now that all preflight checks have
     // passed — see mineService.claimDigCooldown for the guarantees.
     const claim = await claimDigCooldown(user);
-    if (!claim.claimed && claim.inProgress) {
-        return replyDigPreflightFailure(interaction, { reason: 'dig_in_progress' });
-    }
     if (!claim.claimed) {
         return interaction.reply({
             embeds: [buildCooldownEmbed({
@@ -574,11 +571,6 @@ function replyDigPreflightFailure(interaction, preflight) {
                     color: '#b5651d',
                     nextAt: preflight.nextAt,
                 })],
-                ...ephemeral,
-            });
-        case 'dig_in_progress':
-            return interaction.reply({
-                content: "You're already mid-dig — finish that one first.",
                 ...ephemeral,
             });
         case 'cooldown':

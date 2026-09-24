@@ -1133,8 +1133,8 @@ async function prepareDigUser(user) {
 /**
  * Read-only preflight for a dig. Returns { ok: true, depthId, depth, pickaxe,
  * pickaxeData } or { ok: false, reason, ... } where `reason` is one of:
- * unknown_depth, depth_locked, injured, dig_in_progress, cooldown, no_stamina,
- * no_pickaxe, pickaxe_broken, no_charge.
+ * unknown_depth, depth_locked, injured, cooldown, no_stamina, no_pickaxe,
+ * pickaxe_broken, no_charge.
  */
 function validateDigPreflight(user, requestedDepthId) {
     const m = user.mining;
@@ -1150,12 +1150,6 @@ function validateDigPreflight(user, requestedDepthId) {
 
     if (m.injuryUntil && Date.now() < m.injuryUntil.getTime()) {
         return { ok: false, reason: 'injured', nextAt: new Date(m.injuryUntil.getTime()) };
-    }
-
-    // Another dig is still open on this profile — its prompts are waiting on the
-    // player. Checked before the cooldown, since that dig set lastMine too.
-    if (m.digLockUntil && Date.now() < new Date(m.digLockUntil).getTime()) {
-        return { ok: false, reason: 'dig_in_progress' };
     }
 
     // Read-only cooldown check; the slot is claimed atomically afterwards.
@@ -1199,9 +1193,7 @@ function validateDigPreflight(user, requestedDepthId) {
  * collection (see src/models/User.js), so a User-level guard would match
  * every document on the missing `mining` field and never reject anything.
  *
- * Returns { claimed: true, claimNow, release }, { claimed: false, nextAt } when
- * the cooldown is still running, or { claimed: false, inProgress: true } when
- * another dig holds the lock.
+ * Returns { claimed: true, claimNow, release } or { claimed: false, nextAt }.
  */
 async function claimDigCooldown(user) {
     const GrindProfile = require('../models/GrindProfile');
@@ -1214,41 +1206,28 @@ async function claimDigCooldown(user) {
 
     await persistGrindIfNew(user, 'mining');
     const claimQuery = { userId: user.userId, guildId: user.guildId, system: 'mining' };
-    // The claim also takes the dig lock: the cooldown alone is shorter than the
-    // dig's own prompts, so a second dig could otherwise claim while the first is
-    // still open and both would save over the same snapshot. commitDig clears the
-    // lock; DIG_LOCK_MS only bounds a dig whose process died before it could.
-    const lockUntil = new Date(claimNow.getTime() + LIMITS.DIG_LOCK_MS);
     const claimed = await GrindProfile.findOneAndUpdate(
         {
             ...claimQuery,
-            $and: [
-                { $or: [{ 'data.lastMine': null }, { 'data.lastMine': { $lte: cooldownFloor } }] },
-                { $or: [{ 'data.digLockUntil': null }, { 'data.digLockUntil': { $lte: claimNow } }] },
-            ],
+            $or: [{ 'data.lastMine': null }, { 'data.lastMine': { $lte: cooldownFloor } }],
         },
-        { $set: { 'data.lastMine': claimNow, 'data.digLockUntil': lockUntil } },
+        { $set: { 'data.lastMine': claimNow } },
         { new: true },
     );
 
     if (!claimed) {
         // Losing the claim means another dig already took the slot, so the
-        // in-memory snapshot is stale — read the winning state back so the reply
-        // reflects the dig that actually happened.
+        // in-memory snapshot is stale — read the winning timestamp back so the
+        // countdown reflects the dig that actually happened.
         const current = await GrindProfile.findOne(claimQuery).catch(() => null);
-        const heldUntil = current?.data?.digLockUntil ? new Date(current.data.digLockUntil) : null;
-        if (heldUntil && heldUntil.getTime() > claimNow.getTime()) {
-            return { claimed: false, inProgress: true };
-        }
         const lastAt = current?.data?.lastMine ?? claimNow;
         return { claimed: false, nextAt: new Date(new Date(lastAt).getTime() + LIMITS.MINE_COOLDOWN_MS) };
     }
 
-    m.lastMine     = claimNow;
-    m.digLockUntil = lockUntil;
+    m.lastMine = claimNow;
     const release = () => GrindProfile.updateOne(
         { ...claimQuery, 'data.lastMine': claimNow },
-        { $set: { 'data.lastMine': priorLastMine, 'data.digLockUntil': null } },
+        { $set: { 'data.lastMine': priorLastMine } },
     ).catch(() => null);
 
     return { claimed: true, claimNow, release };
@@ -1342,13 +1321,6 @@ async function commitDig(user, balanceAtLoad, { payoutKey } = {}) {
     const User = require('../models/User');
     const { detachBalanceDelta, commitBalanceDelta } = require('../utils/balanceDelta');
     const balanceFilter = { userId: user.userId, guildId: user.guildId };
-
-    // The saved profile replaces the stored one wholesale, so clearing the lock
-    // here is what lets the next dig claim — no separate write needed.
-    if (user.mining) {
-        user.mining.digLockUntil = null;
-        user.markModified('mining');
-    }
 
     const balanceDelta = detachBalanceDelta(user, balanceAtLoad);
     await user.save();

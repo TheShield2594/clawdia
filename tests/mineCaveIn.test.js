@@ -1,34 +1,10 @@
 'use strict';
 
-// Two fixes to /mine dig's transaction layer:
-//
-// - The dig lock. The cooldown (30s) is shorter than the dig's own prompts
-//   (over 50s with a cave-in), so the claim now also holds a lock that only the
-//   commit or the release clears — a second dig cannot start on the same
-//   snapshot while the first is still waiting on a button.
-// - A haul abandoned in a cave-in. Fleeing used to take the coins back and
-//   nothing else: the material drop, the success tally, the fail streak and
-//   every find-rewarding quest still booked the ore as kept.
+// A haul abandoned in a cave-in. Fleeing used to take the coins back and
+// nothing else: the material drop, the success tally, the fail streak and every
+// find-rewarding quest still booked the ore as kept.
 
-jest.mock('../src/models/GrindProfile', () => ({
-    findOneAndUpdate: jest.fn(),
-    findOne: jest.fn(),
-    updateOne: jest.fn(),
-}));
-jest.mock('../src/utils/grindProfile', () => ({
-    persistGrindIfNew: jest.fn(async () => {}),
-    attachGrind: jest.fn(async () => {}),
-}));
-jest.mock('../src/utils/balanceDelta', () => ({
-    detachBalanceDelta: jest.fn(() => 0),
-    commitBalanceDelta: jest.fn(async () => ({ credited: true })),
-}));
-
-const GrindProfile = require('../src/models/GrindProfile');
 const {
-    validateDigPreflight,
-    claimDigCooldown,
-    commitDig,
     abandonCaveIn,
     blastClearCaveIn,
     keptFind,
@@ -64,7 +40,6 @@ function makeUser(miningOverrides = {}) {
             equippedPickaxeIndex: 0,
             injuryUntil: null,
             lastMine: null,
-            digLockUntil: null,
             materials: {},
             pickaxes: [{
                 name: pick.name, tier: pick.tier, status: 'good',
@@ -74,77 +49,8 @@ function makeUser(miningOverrides = {}) {
             ...miningOverrides,
         },
         markModified: () => {},
-        save: jest.fn(async () => {}),
     };
 }
-
-beforeEach(() => jest.clearAllMocks());
-
-// ─── Dig lock ────────────────────────────────────────────────────────────────
-
-describe('dig lock', () => {
-    test('preflight turns away a dig while another one holds the lock', () => {
-        const user = makeUser({ digLockUntil: new Date(Date.now() + 60_000) });
-        expect(validateDigPreflight(user, null).reason).toBe('dig_in_progress');
-    });
-
-    test('an expired lock (a dig whose process died) does not block', () => {
-        const user = makeUser({ digLockUntil: new Date(Date.now() - 1) });
-        expect(validateDigPreflight(user, null).ok).toBe(true);
-    });
-
-    test('the claim requires the lock to be free and takes it for DIG_LOCK_MS', async () => {
-        GrindProfile.findOneAndUpdate.mockResolvedValue({ data: {} });
-        const user = makeUser();
-        const claim = await claimDigCooldown(user);
-
-        expect(claim.claimed).toBe(true);
-        const [filter, update] = GrindProfile.findOneAndUpdate.mock.calls[0];
-        expect(JSON.stringify(filter)).toContain('data.digLockUntil');
-        const lockUntil = update.$set['data.digLockUntil'];
-        expect(lockUntil.getTime() - update.$set['data.lastMine'].getTime()).toBe(LIMITS.DIG_LOCK_MS);
-        // The in-memory profile carries the lock so a save mid-flow keeps it.
-        expect(user.mining.digLockUntil).toBe(lockUntil);
-    });
-
-    test('the lock outlasts the cooldown, or it would not cover the prompts', () => {
-        expect(LIMITS.DIG_LOCK_MS).toBeGreaterThan(LIMITS.MINE_COOLDOWN_MS);
-    });
-
-    test('a claim lost to a held lock reports the dig in progress, not a cooldown', async () => {
-        GrindProfile.findOneAndUpdate.mockResolvedValue(null);
-        GrindProfile.findOne.mockResolvedValue({
-            data: { lastMine: new Date(Date.now() - 40_000), digLockUntil: new Date(Date.now() + 60_000) },
-        });
-        const claim = await claimDigCooldown(makeUser());
-        expect(claim).toEqual({ claimed: false, inProgress: true });
-    });
-
-    test('a claim lost to the cooldown alone still reports when to come back', async () => {
-        const last = new Date(Date.now() - 5_000);
-        GrindProfile.findOneAndUpdate.mockResolvedValue(null);
-        GrindProfile.findOne.mockResolvedValue({ data: { lastMine: last, digLockUntil: null } });
-        const claim = await claimDigCooldown(makeUser());
-        expect(claim.claimed).toBe(false);
-        expect(claim.nextAt.getTime()).toBe(last.getTime() + LIMITS.MINE_COOLDOWN_MS);
-    });
-
-    test('releasing the claim frees the lock too', async () => {
-        GrindProfile.findOneAndUpdate.mockResolvedValue({ data: {} });
-        GrindProfile.updateOne.mockResolvedValue({});
-        const claim = await claimDigCooldown(makeUser());
-        await claim.release();
-        const [, update] = GrindProfile.updateOne.mock.calls[0];
-        expect(update.$set['data.digLockUntil']).toBeNull();
-    });
-
-    test('committing the dig clears the lock in the profile it saves', async () => {
-        const user = makeUser({ digLockUntil: new Date(Date.now() + 60_000) });
-        await commitDig(user, 1000, { payoutKey: 'k' });
-        expect(user.mining.digLockUntil).toBeNull();
-        expect(user.save).toHaveBeenCalled();
-    });
-});
 
 // ─── Cave-in resolution ──────────────────────────────────────────────────────
 
