@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * The picture half of the `/hunt`, `/fish` and `/explore` profiles and of the
- * `/fish`, `/hunt` and `/mine` inventories.
+ * The picture half of the `/hunt`, `/fish` and `/explore` profiles, of the
+ * `/fish`, `/hunt` and `/mine` inventories, and of `/inventory`'s Items tab.
  *
  * Three cards, shared across the grinds so the screens read as one family:
  *
@@ -16,7 +16,8 @@
  *   createGrindInventoryCard   the inventory — gear on a rack with wear bars
  *                              and the equipped piece outlined, stock as
  *                              tiles with counts (`/fish inv`, `/hunt inv`,
- *                              `/mine inv`).
+ *                              `/mine inv`, and `/inventory`'s Items tab,
+ *                              which has stock but no gear).
  *
  * The art is the bundled catalogue (utils/defaultItemImages.js). An id with no
  * baked icon — a species or relic added before the bake action has run for it —
@@ -46,6 +47,8 @@ const THEMES = {
     fish:    { top: '#0f2944', bottom: '#050d18', accent: '#45a6ec', muted: '#9fc2dd', panel: 'rgba(255,255,255,0.06)' },
     explore: { top: '#33230f', bottom: '#110b04', accent: '#e0a83e', muted: '#d6bf95', panel: 'rgba(255,255,255,0.06)' },
     mine:    { top: '#2e2622', bottom: '#0d0a08', accent: '#e07b39', muted: '#cdb4a0', panel: 'rgba(255,255,255,0.06)' },
+    // /inventory's Items tab — not one grind but all of them, so Discord blurple.
+    items:   { top: '#1f2244', bottom: '#0a0b18', accent: '#7c86f7', muted: '#b6bbe9', panel: 'rgba(255,255,255,0.06)' },
 };
 
 /** The avatar ring for each prestige rank; rank 0 uses the activity accent. */
@@ -672,7 +675,7 @@ async function drawGearCard(ctx, g, x, y, w, theme) {
 
 /**
  * @param {object} opts
- * @param {'hunt'|'fish'|'explore'|'mine'} opts.activity
+ * @param {'hunt'|'fish'|'explore'|'mine'|'items'} opts.activity
  * @param {string}   opts.title       e.g. "munge's Tackle Box"
  * @param {string}   [opts.subtitle]  e.g. "3 rods · 60 bait · 4 materials"
  * @param {string[]} [opts.buffs]     active effects, drawn as pills (no emoji —
