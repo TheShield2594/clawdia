@@ -5,17 +5,30 @@
 
 const { EmbedBuilder } = require('discord.js');
 const { REGION_LIST } = require('../../../data/exploreData');
-const { isRegionEnabled, isRegionInSeason, regionCompletion } = require('../../../services/exploreService');
+const { ensureExploreData, isRegionEnabled, isRegionInSeason, regionCompletion } = require('../../../services/exploreService');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../../data/featuredRotation');
 const { exploreRegionItemId } = require('../../../data/activityItems');
 const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
-const { loadContext } = require('./shared');
+const { loadReadContext, EXPLORE_COLORS } = require('./shared');
+
+// What a player who has never set out sees: the starter region open, nothing
+// charted. Read-only, so a browse never creates a profile it would then leave
+// behind.
+const NEWCOMER = Object.freeze({
+    level: 1,
+    activeRegion: 'whispering_forest',
+    unlockedRegions: ['whispering_forest'],
+    regions: [],
+});
 
 async function handleRegions(interaction) {
-    const ctx = await loadContext(interaction);
+    // Listed as read-only in index.js, so it takes the read loader: the write
+    // one upserts a User document, which a browse has no business doing.
+    const ctx = await loadReadContext(interaction);
     if (!ctx) return;
     const { guildSettings, user, currency } = ctx;
-    const e = user.exploration;
+    if (user?.exploration) ensureExploreData(user);
+    const e = user?.exploration ?? NEWCOMER;
     const todaysFeature = getDailyFeatured(interaction.guild.id).region;
 
     const sections = REGION_LIST
@@ -32,7 +45,7 @@ async function handleRegions(interaction) {
                     ? '🟢 **In season** — open to everyone, free entry, limited time'
                     : '⚪ Out of season — returns with its event';
             } else if (e.unlockedRegions.includes(region.id)) {
-                status = e.level >= region.unlockLevel ? '🟢 Open to you' : `🟡 Unlocked, needs Explorer Lv ${region.unlockLevel}`;
+                status = '🟢 Open to you';
             } else {
                 status = `🔒 Explorer Lv ${region.unlockLevel} + ${currency}${region.unlockCost.toLocaleString()} via \`/explore travel\``;
             }
@@ -45,7 +58,7 @@ async function handleRegions(interaction) {
         });
 
     const embed = new EmbedBuilder()
-        .setColor('#2e7d32')
+        .setColor(EXPLORE_COLORS.TRAIL)
         .setTitle('🧭 Known Regions')
         .setDescription(sections.join('\n\n'))
         .setFooter({ text: `🌟 ${todaysFeature.name} pays +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% today · seasonal regions come and go with /event seasons.` })

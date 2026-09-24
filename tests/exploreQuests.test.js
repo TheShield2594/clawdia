@@ -115,12 +115,17 @@ describe('the hook that advances them', () => {
     });
 
     test('the expedition command calls it', () => {
+        const { grindCommandFiles } = require('./helpers/grindSources');
         const src = require('./helpers/grindSources').grindCommandSource('explore');
         expect(src).toContain('onExplore');
         // The trip counts even when the walk turned up nothing — the coin quests
-        // are the ones gated on a payout.
-        const hookAt   = src.indexOf('await onExplore(user, guildSettings)');
-        const payoutAt = src.indexOf('if (result.payout > 0)');
+        // are the ones gated on a payout. Ordered within the expedition's own
+        // flow (go.js): the concatenated folder also holds the result renderer,
+        // whose payout checks say nothing about when the quest hook runs.
+        const goFile = grindCommandFiles('explore').find(f => f.endsWith(`${require('path').sep}go.js`));
+        const goSrc  = require('fs').readFileSync(goFile, 'utf8');
+        const hookAt   = goSrc.indexOf('await onExplore(user, guildSettings)');
+        const payoutAt = goSrc.indexOf('if (result.payout > 0)');
         expect(hookAt).toBeGreaterThan(-1);
         expect(hookAt).toBeLessThan(payoutAt);
     });

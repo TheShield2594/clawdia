@@ -35,13 +35,22 @@ const LIMITS = {
     SECRET_PITY_MAX:      6,
     // What losing an encounter costs, as a share of that encounter's own average
     // reward (jittered by ±25%, then scaled by region depth like any other loss).
-    // It used to be a flat 200–600 whatever the prize was, which made the deep
-    // regions' gambles free and the starter region's ruinous — and since "keep
-    // your distance" pays a fixed share of the same reward band, a flat penalty
-    // meant the long-odds encounters, the ones with the biggest prizes, were the
-    // ones you should never take. Pricing the downside off the upside puts the
-    // decision back where the flavour text says it is.
-    ENCOUNTER_LOSS_RATE:  0.20,
+    // Priced off the upside so every region's gambles weigh the same.
+    //
+    // At 0.20 this made approaching the right call on every encounter in the
+    // game — about 1.5× the expected coins of keeping your distance, and more
+    // XP — so the one decision an expedition asks for had a solved answer. At
+    // 0.50 the answer depends on the creature and on you: each core region
+    // has a steady encounter (66%), a lean one (60%), a coin flip (54%) and a
+    // long shot (50%), and the break-even sits near 57%. Your standing
+    // bonuses lift the win and not the loss, the soft cap halves the win and
+    // not the loss, and knowing the region's lore adds ENCOUNTER_LORE_BONUS —
+    // so the same creature is worth approaching for one player and not for
+    // another. The button shows the odds, so the call is always informed.
+    ENCOUNTER_LOSS_RATE:  0.50,
+    // Win-chance bonus on encounters in a region whose lore you have collected
+    // in full. Lore was flavour text with a counter; this is what it is for.
+    ENCOUNTER_LORE_BONUS: 0.05,
     // What watching from the ferns pays, as a share of the reward band. Left
     // where it has always been: a timeout resolves as "keep your distance", so
     // trimming it would quietly dock players who simply didn't click in time.
@@ -61,37 +70,44 @@ const LIMITS = {
 // ─── EXPLORER PROGRESSION ────────────────────────────────────────────────────
 // xpRequired is the cumulative explorer XP needed to REACH that level.
 
+// The curve was re-cut so the gaps between region unlocks match how long a
+// region actually holds a player. Each region is fully charted about 65
+// expeditions after it opens; the old curve then asked for 1,000–1,700 more
+// before the next one (Lv 12 → 20 alone was ~1,050 expeditions), so most of a
+// player's time was spent in regions with nothing left to find. The first
+// five levels are unchanged. Existing explorers are re-levelled from their
+// XP on their next expedition, never down.
 const EXPLORER_LEVELS = [
     { level: 1,  xpRequired: 0,      title: 'Doorstep Wanderer' },
     { level: 2,  xpRequired: 120,    title: 'Doorstep Wanderer' },
     { level: 3,  xpRequired: 280,    title: 'Doorstep Wanderer' },
     { level: 4,  xpRequired: 500,    title: 'Pathfinder' },
     { level: 5,  xpRequired: 800,    title: 'Pathfinder' },
-    { level: 6,  xpRequired: 1_200,  title: 'Pathfinder' },
-    { level: 7,  xpRequired: 1_700,  title: 'Wayfarer' },
-    { level: 8,  xpRequired: 2_300,  title: 'Wayfarer' },
-    { level: 9,  xpRequired: 3_000,  title: 'Wayfarer' },
-    { level: 10, xpRequired: 3_900,  title: 'Trailblazer' },
-    { level: 11, xpRequired: 5_000,  title: 'Trailblazer' },
-    { level: 12, xpRequired: 6_300,  title: 'Trailblazer' },
-    { level: 13, xpRequired: 7_800,  title: 'Cartographer' },
-    { level: 14, xpRequired: 9_500,  title: 'Cartographer' },
-    { level: 15, xpRequired: 11_500, title: 'Cartographer' },
-    { level: 16, xpRequired: 13_800, title: 'Horizon Chaser' },
-    { level: 17, xpRequired: 16_400, title: 'Horizon Chaser' },
-    { level: 18, xpRequired: 19_300, title: 'Horizon Chaser' },
-    { level: 19, xpRequired: 22_600, title: 'Edge of the Map' },
-    { level: 20, xpRequired: 26_300, title: 'Edge of the Map' },
-    { level: 21, xpRequired: 30_400, title: 'Edge of the Map' },
-    { level: 22, xpRequired: 35_000, title: 'Mythwalker' },
-    { level: 23, xpRequired: 40_100, title: 'Mythwalker' },
-    { level: 24, xpRequired: 45_800, title: 'Mythwalker' },
-    { level: 25, xpRequired: 52_100, title: 'The Map Remembers You' },
-    { level: 26, xpRequired: 59_100, title: 'The Map Remembers You' },
-    { level: 27, xpRequired: 66_800, title: 'The Map Remembers You' },
-    { level: 28, xpRequired: 75_300, title: 'Legend of the Blank Spaces' },
-    { level: 29, xpRequired: 84_700, title: 'Legend of the Blank Spaces' },
-    { level: 30, xpRequired: 95_000, title: 'Legend of the Blank Spaces' },
+    { level: 6,  xpRequired: 1_150,  title: 'Pathfinder' },
+    { level: 7,  xpRequired: 1_550,  title: 'Wayfarer' },
+    { level: 8,  xpRequired: 2_000,  title: 'Wayfarer' },
+    { level: 9,  xpRequired: 2_500,  title: 'Wayfarer' },
+    { level: 10, xpRequired: 3_050,  title: 'Trailblazer' },
+    { level: 11, xpRequired: 3_650,  title: 'Trailblazer' },
+    { level: 12, xpRequired: 4_300,  title: 'Trailblazer' },
+    { level: 13, xpRequired: 5_000,  title: 'Cartographer' },
+    { level: 14, xpRequired: 5_750,  title: 'Cartographer' },
+    { level: 15, xpRequired: 6_550,  title: 'Cartographer' },
+    { level: 16, xpRequired: 7_400,  title: 'Horizon Chaser' },
+    { level: 17, xpRequired: 8_300,  title: 'Horizon Chaser' },
+    { level: 18, xpRequired: 9_250,  title: 'Horizon Chaser' },
+    { level: 19, xpRequired: 10_250, title: 'Edge of the Map' },
+    { level: 20, xpRequired: 11_300, title: 'Edge of the Map' },
+    { level: 21, xpRequired: 12_400, title: 'Edge of the Map' },
+    { level: 22, xpRequired: 13_550, title: 'Mythwalker' },
+    { level: 23, xpRequired: 14_750, title: 'Mythwalker' },
+    { level: 24, xpRequired: 16_000, title: 'Mythwalker' },
+    { level: 25, xpRequired: 17_300, title: 'The Map Remembers You' },
+    { level: 26, xpRequired: 18_650, title: 'The Map Remembers You' },
+    { level: 27, xpRequired: 20_100, title: 'The Map Remembers You' },
+    { level: 28, xpRequired: 21_650, title: 'Legend of the Blank Spaces' },
+    { level: 29, xpRequired: 23_300, title: 'Legend of the Blank Spaces' },
+    { level: 30, xpRequired: 25_050, title: 'Legend of the Blank Spaces' },
 ];
 
 // ─── EXPLORER PRESTIGE ───────────────────────────────────────────────────────
@@ -147,6 +163,8 @@ const EVENT_XP = {
     trap:             10,
     secret:           100,
     quiet:            8,
+    // A repeatable find in a region whose landmarks are all charted
+    anomaly:          30,
     // One-off, the first time a region has nothing left to hide from you
     survey:           250,
 };
@@ -211,6 +229,10 @@ const REGIONS = {
             'The forest notices you immediately. It pretends it didn\'t. You pretend you didn\'t notice it noticing.',
             'Pine needles. Damp earth. Somewhere ahead, something that is not wind moves through the branches.',
             'The path in is easy to find. The paths out keep rearranging themselves. Typical.',
+            'Birdsong stops the moment you cross the treeline. It starts again once the birds have finished discussing you.',
+            'A fox watches you from a stump, takes a mental note, and trots off to file it somewhere.',
+            'The canopy closes overhead like a door someone was polite enough not to slam.',
+            'Mushrooms line the path in a neat row. You did not see who planted them. They were not there a minute ago.',
         ],
         eventWeights: { encounter: 22, discovery: 18, trap: 14, treasure: 22, lore: 14, secret: 3, quiet: 7 },
         landmarks: [
@@ -233,7 +255,7 @@ const REGIONS = {
                 name: 'The Pale Stag',
                 emoji: '🦌',
                 intro: 'A stag the color of moonlight stands in the path. Its antlers hold seven lit candles. It is waiting for you to do something interesting.',
-                winChance: 0.62,
+                winChance: 0.60,
                 reward: { min: 900, max: 1_800 },
                 winLine: 'You hold its gaze and bow, just slightly. The stag inclines its head — a candle drips wax that hardens into coins at your feet. Apparently you passed.',
                 loseLine: 'You blink first. The stag huffs, the candles snuff out, and you spend twenty minutes finding the path again in the dark.',
@@ -244,7 +266,7 @@ const REGIONS = {
                 name: 'The Mushroom Circle Bargainer',
                 emoji: '🍄',
                 intro: 'A ring of mushrooms, and in the middle, a very small person in a very large hat offering you a deal in a voice like rustling leaves.',
-                winChance: 0.60,
+                winChance: 0.66,
                 reward: { min: 800, max: 1_600 },
                 winLine: 'You haggle. It haggles back. You haggle harder. It tips the enormous hat, impressed, and pays you for the entertainment.',
                 loseLine: 'You shake on the deal before reading the fine print written on a leaf. The leaf blows away. So does some of your dignity, and a few coins.',
@@ -255,11 +277,22 @@ const REGIONS = {
                 name: 'A Wolf Made of Dusk',
                 emoji: '🐺',
                 intro: 'Between two pines stands a wolf with no edges — just dusk in the shape of one. It does not growl. That is somehow worse.',
-                winChance: 0.58,
+                winChance: 0.50,
                 reward: { min: 1_100, max: 2_200 },
                 winLine: 'You stand very still and let it sniff your shadow. It takes a small bite of it — you won\'t miss it — and leaves payment in old coins. Fair trade.',
                 loseLine: 'You step back. Wrong move. The dusk-wolf swallows your lantern light and your sense of direction, and the forest charges a finder\'s fee.',
                 safeLine: 'You give it the path and take the long way. From behind, you see it\'s carrying something shiny. It drops a piece. Deliberately, you think.',
+            },
+            {
+                id: 'wf_enc_hermit',
+                name: 'The Hermit Who Charges Rent',
+                emoji: '🧙',
+                intro: 'A hermit sits in a hollow log with a sign reading \'VACANCY\'. He offers you a riddle. Get it right and he pays; get it wrong and you owe a night\'s rent for the log you did not sleep in.',
+                winChance: 0.54,
+                reward: { min: 1_000, max: 2_000 },
+                winLine: 'You answer the riddle (\'a map\', it is always a map). The hermit grumbles, pays up, and hangs a second sign: \'NO RIDDLES\'.',
+                loseLine: 'You guess \'a tree\'. It is never a tree. The hermit produces an itemized invoice written on bark and waits, patiently, while you pay it.',
+                safeLine: 'You decline the riddle and compliment the log. The hermit, starved of praise for decades, tips you for the review.',
             },
         ],
         traps: [
@@ -271,6 +304,15 @@ const REGIONS = {
             'Half-buried under the moss: a strongbox the forest apparently forgot to digest.',
             'A hollow stump, and inside it, somebody\'s emergency stash. Their emergency is now your payday.',
             'You follow a magpie out of spite. The magpie, insulted, leads you straight to its hoard.',
+            'A woodpecker has been drilling at the same knot for years. You open it with your thumb. The woodpecker is furious and you are rich.',
+            'Tucked in the roots of a fallen pine: a traveler\'s purse, a note reading \'for the next one\', and no sign of the last one.',
+            'The acorns on the Moss-Eaten Shrine have been replaced, overnight, with coins. The shrine accepts your thanks.',
+        ],
+        // Repeatable finds for the discovery slot once every landmark is charted.
+        anomalies: [
+            { id: 'wf_anom_rings', name: 'The Rings Out of Order', emoji: '🌀', line: 'A felled tree whose rings count backwards from the bark. At the center, a ring dated next spring. Someone paid well to have this measured, and left the payment behind.' },
+            { id: 'wf_anom_path', name: 'A Path That Wasn\'t There Yesterday', emoji: '🌀', line: 'A fresh trail, neatly swept, leading from nowhere to nowhere. Halfway along it someone has dropped a coin purse and, very deliberately, not come back for it.' },
+            { id: 'wf_anom_owls', name: 'Eleven Owls', emoji: '🦉', line: 'The Court of Owls has eleven statues today. The eleventh has a price tag on it, crossed out, and a stack of change beside it. You take the change. You leave the owl.' },
         ],
         relics: [
             { itemId: 'Whisperwood Charm',  rarity: 'rare',      lore: 'A knot of pale wood that murmurs when storms are coming. Usually about the storms. Sometimes about you.' },
@@ -302,6 +344,10 @@ const REGIONS = {
             'Dust, marble, silence. The kind of silence that used to be a city.',
             'A headless statue points dramatically at nothing. You follow the gesture anyway. It\'s only polite.',
             'Your footsteps echo twice. You only took one step. The ruins are padding their numbers.',
+            'A mosaic underfoot shows a map of the ruins with a small figure standing exactly where you are standing. The figure is holding a coin purse. Yours, specifically.',
+            'Wind moves through the colonnade and the columns hum a march nobody has played in a thousand years.',
+            'A market street, stalls still standing, prices still chalked up. Bread was very cheap here once. Everything else was not.',
+            'The gate\'s inscription reads WELCOME BACK. It is addressed to someone. You decide it is addressed to you.',
         ],
         eventWeights: { encounter: 20, discovery: 18, trap: 18, treasure: 22, lore: 14, secret: 3, quiet: 5 },
         landmarks: [
@@ -324,7 +370,7 @@ const REGIONS = {
                 name: 'The Last Curator',
                 emoji: '🗿',
                 intro: 'A stone figure dusts a shelf of rubble with infinite patience. It turns. "The museum," it grinds, "is closed. Unless you\'re here to donate. Or withdraw."',
-                winChance: 0.62,
+                winChance: 0.60,
                 reward: { min: 1_300, max: 2_600 },
                 winLine: 'You compliment the collection — specifically, sincerely. The Curator straightens with pride and processes your "early withdrawal" from the gift shop fund.',
                 loseLine: 'You touch an exhibit. THE exhibit. The Curator escorts you out by the collar and bills you for the velvet rope you were definitely not behind.',
@@ -335,7 +381,7 @@ const REGIONS = {
                 name: 'An Echo With Opinions',
                 emoji: '🌀',
                 intro: 'Your own voice comes back from the amphitheater — three seconds early. "Don\'t take the left stair," it says. You hadn\'t said anything yet.',
-                winChance: 0.60,
+                winChance: 0.66,
                 reward: { min: 1_200, max: 2_400 },
                 winLine: 'You trust the echo. The left stair collapses behind you; the right one leads to somebody\'s abandoned strongroom. The echo says "you\'re welcome" before you can thank it.',
                 loseLine: 'You take the left stair out of principle. The stair, also on principle, stops being a stair. The climb out costs you in coins and pride.',
@@ -346,11 +392,22 @@ const REGIONS = {
                 name: 'The Off-Duty Legion',
                 emoji: '⚔️',
                 intro: 'A ghost legion drills in the forum, eternally. The phantom centurion squints at you. "Recruit?" he asks, hopefully. They\'ve been short-staffed for nine hundred years.',
-                winChance: 0.58,
+                winChance: 0.50,
                 reward: { min: 1_500, max: 3_000 },
                 winLine: 'You drill with the dead for one hour and don\'t complain once. The centurion, moved nearly to tears, pays you a signing bonus from a pay chest that outlived the empire.',
                 loseLine: 'You march left when the legion marches right. Nine hundred years of formation, ruined. The fine for breaking formation is older than your country.',
                 safeLine: 'You salute crisply and keep walking. The legion returns it as one. A private jogs after you with "back pay" for a soldier you apparently resemble.',
+            },
+            {
+                id: 'cr_enc_gambler',
+                name: 'A Senator Down on His Luck',
+                emoji: '🎲',
+                intro: 'A ghostly senator in a moth-eaten toga is throwing knucklebones against the steps of the forum. \'Double or nothing,\' he offers. \'I\'ve been losing to myself for nine hundred years. Change of pace.\'',
+                winChance: 0.54,
+                reward: { min: 1_400, max: 2_800 },
+                winLine: 'The bones land in your favor. The senator applauds, pays from a purse older than your language, and swears you to secrecy about how bad he is at this.',
+                loseLine: 'The senator\'s bones land on six, then six, then six. He looks surprised. You check the bones afterward. They only have sixes.',
+                safeLine: 'You watch him play against himself for a while. He wins, loses, wins, and tosses you a coin for being the first witness in centuries.',
             },
         ],
         traps: [
@@ -362,6 +419,15 @@ const REGIONS = {
             'Under the throne: the royal petty cash. The empire fell; its bookkeeping didn\'t.',
             'A locked strongbox in the archive, untouched by fire. The lock surrenders out of professional respect.',
             'You pry up the one mosaic tile that doesn\'t match. Beneath it, a tax collector\'s private retirement plan.',
+            'A collapsed bathhouse with a drain that clinks. The drain has been collecting dropped coins for nine centuries and is ready to retire.',
+            'Behind a loose brick in the forum wall: an imperial bribe, never delivered. The empire can\'t collect it now.',
+            'A statue is holding out its hand, palm up, the way statues do. This one\'s palm is full. You say thank you. Out loud.',
+        ],
+        // Repeatable finds for the discovery slot once every landmark is charted.
+        anomalies: [
+            { id: 'cr_anom_census', name: 'The Census Taker\'s Ghost', emoji: '📋', line: 'A translucent clerk asks your name, age, and occupation, and writes \'explorer\' with great disapproval. You are paid the census participation stipend, nine centuries in arrears, with interest.' },
+            { id: 'cr_anom_repair', name: 'The Wall That Rebuilt Itself', emoji: '🧱', line: 'One wall of the ruins stands newly whole: fresh mortar, sharp corners, a builder\'s receipt pinned to it. The receipt is marked \'paid\' and there is change left over.' },
+            { id: 'cr_anom_parade', name: 'The Victory Parade, Again', emoji: '🎺', line: 'Somewhere a trumpet sounds and a procession of empty sandals marches past, celebrating a war nobody remembers winning. Coins are thrown to the crowd. You are the crowd.' },
         ],
         relics: [
             { itemId: 'Headless Coin',        rarity: 'rare',      lore: 'A coin from the ruins. The face changes when unobserved. The denomination, mercifully, does not.' },
@@ -393,6 +459,10 @@ const REGIONS = {
             'A thousand reflections of you walk in. You\'re fairly sure the same number walks each corridor. Fairly.',
             'The walls glow without a source. The dark down here had to be negotiated with, and the crystals won.',
             'You tap a crystal. It tings a perfect C. Three caverns away, something tings back, off-key, on purpose.',
+            'Your lantern light hits the first crystal and splits into colors you did not bring in with you.',
+            'Somewhere below, water drips onto crystal in a steady rhythm. It is keeping time. For what, it hasn\'t said.',
+            'The air tastes of cold stone and something sweeter underneath, like the caves are trying to be good hosts.',
+            'A crystal cracks as you pass, very softly. When you look, it has healed. When you look away, it cracks again, pleased with itself.',
         ],
         eventWeights: { encounter: 20, discovery: 16, trap: 18, treasure: 24, lore: 12, secret: 4, quiet: 6 },
         landmarks: [
@@ -426,7 +496,7 @@ const REGIONS = {
                 name: 'The Chord-Wyrm',
                 emoji: '🐉',
                 intro: 'A serpent of living crystal uncoils from the ceiling, scales ringing like a glass harp. It is not hungry. It is bored, which for dragons is more expensive.',
-                winChance: 0.58,
+                winChance: 0.50,
                 reward: { min: 2_200, max: 4_200 },
                 winLine: 'You hum the third note of its chord — the one it can\'t reach. It rears, delighted, and sheds a handful of singing scales as applause. They\'re worth a fortune. They know it.',
                 loseLine: 'You hum flat. The wyrm winces down to its tail, and the entire cavern winces with it. The acoustic fine is deducted in gemstones from your pack.',
@@ -437,11 +507,22 @@ const REGIONS = {
                 name: 'The Lantern That Went Ahead',
                 emoji: '🏮',
                 intro: 'A miner\'s lantern floats down the gallery, lit, carried by absolutely no one. It pauses. It bobs, invitingly, toward a side passage that is not on your map.',
-                winChance: 0.62,
+                winChance: 0.66,
                 reward: { min: 1_600, max: 3_200 },
                 winLine: 'You follow. The lantern leads you to a forgotten dig where the last crew left their wages and a note: "for whoever the light likes next." It likes you.',
                 loseLine: 'You follow — then second-guess at a fork. The lantern, offended, blows itself out. The dark charges by the minute and accepts only coins.',
                 safeLine: 'You decline with a small bow. The lantern dips, understanding, and drifts off — leaving a pinch of glowing oil on a rock for your trouble. It sells well.',
+            },
+            {
+                id: 'cc_enc_geologist',
+                name: 'The Geologist Who Never Left',
+                emoji: '⛏️',
+                intro: 'An old geologist, beard grown into the rock face, holds up two identical crystals. \'One is priceless,\' she says. \'One is glass. Pick. I\'ve been waiting forty years for someone to pick.\'',
+                winChance: 0.54,
+                reward: { min: 1_900, max: 3_800 },
+                winLine: 'You pick the left one. She stares at it, then at you, then laughs until the cave laughs with her. She buys it back from you at full price.',
+                loseLine: 'You pick the right one. It is glass. She sighs, charges you for the forty years of waiting, and puts both back on the shelf for the next person.',
+                safeLine: 'You decline to pick and ask about the forty years instead. She talks for an hour, happily, and pays you in the samples she won\'t need.',
             },
         ],
         traps: [
@@ -453,6 +534,15 @@ const REGIONS = {
             'A vein of gemstones grows around an old strongbox like the cave was gift-wrapping it for you.',
             'In the Geode Parlor, under the third cushion: somebody\'s rainy-day gems. It never rains down here. Their loss.',
             'The Mirror Lake\'s reflection shows a chest on the ceiling. The real one, naturally, is under the water. Four inches down. Heavy.',
+            'A crystal the size of a fist has grown around a coin purse like an oyster around grit. You chip it out. The crystal chimes, annoyed.',
+            'A dead-end gallery, and at the end of it, an abandoned prospector\'s claim with the sign still up and the takings still in the tin.',
+            'The Frozen Lightning has shed a splinter. You pocket it. Three separate buyers find you on the way out.',
+        ],
+        // Repeatable finds for the discovery slot once every landmark is charted.
+        anomalies: [
+            { id: 'cc_anom_echo', name: 'An Echo From Next Week', emoji: '🔊', line: 'You hear yourself, in a gallery ahead, saying \'oh, that\'s where it was.\' When you get there, it is where it was: a small cache, exactly as your future self described it.' },
+            { id: 'cc_anom_growth', name: 'A Room Grown Overnight', emoji: '💠', line: 'A new chamber has budded off the Singing Gallery since your last visit, walls still soft and warm. The first thing it grew was a shelf. The second thing was something to put on it.' },
+            { id: 'cc_anom_color', name: 'A Colour With No Name', emoji: '🌈', line: 'One crystal is glowing a color you have never seen before and cannot describe afterward. A collector pays handsomely for your notes, even though every page says \'you had to be there.\'' },
         ],
         relics: [
             { itemId: 'Singing Scale',        rarity: 'rare',      lore: 'A scale from the Chord-Wyrm. Hums a perfect fifth when its former owner is in a good mood. It is usually humming.' },
@@ -484,6 +574,10 @@ const REGIONS = {
             'Barnacled bollards, kelp-strung cranes. Beneath your boots, a cobblestone street and, beneath that, lamplight.',
             'A harbor bell rings under thirty feet of water. Right on schedule. The Docks never missed a shift; they just changed management.',
             'The gulls here don\'t cry. They mutter. Mostly figures, freight rates, and your name once, which you ignore.',
+            'A tram runs along the drowned high street, fully underwater, bell ringing. The passengers wave. You wave back before you think about it.',
+            'Salt spray, rotten rope, and a faint smell of fish supper from a chip shop that has been closed for ninety years.',
+            'The pier creaks under you in a rhythm that sounds a lot like a sea shanty. You catch yourself humming along.',
+            'A notice nailed to the harbor wall reads: ALL VISITORS REPORT TO CUSTOMS. It is dated tomorrow, same as always.',
         ],
         eventWeights: { encounter: 22, discovery: 16, trap: 18, treasure: 24, lore: 12, secret: 4, quiet: 4 },
         landmarks: [
@@ -506,7 +600,7 @@ const REGIONS = {
                 name: 'The Harbormaster\'s Late Shift',
                 emoji: '🧜',
                 intro: 'At the Customs House counter, something with too many opinions about tariffs and a coat of wet barnacles looks up. "Declarations?" it gurgles, stamp already inked.',
-                winChance: 0.62,
+                winChance: 0.60,
                 reward: { min: 2_400, max: 4_800 },
                 winLine: 'You declare everything, honestly, including the lint. The Harbormaster is so moved by the paperwork that it pays out a "compliance dividend" from the drowned treasury. Bureaucracy, but wet.',
                 loseLine: 'You undeclare one (1) souvenir. The stamp comes down like a depth charge. The fine is itemized, alphabetized, and immediate.',
@@ -517,7 +611,7 @@ const REGIONS = {
                 name: 'The Crew Still Unloading',
                 emoji: '👻',
                 intro: 'A ghost crew hauls phantom cargo from a ship that isn\'t there to a warehouse that mostly is. The bosun waves you over. They\'re one pair of hands short. They have been for ninety years.',
-                winChance: 0.60,
+                winChance: 0.66,
                 reward: { min: 2_200, max: 4_400 },
                 winLine: 'You take the end of a rope that isn\'t there and pull like it is. The crate lands — REAL — on the dock. Your share of the freight fee has been waiting in the manifest since before your grandparents.',
                 loseLine: 'You lift with your back, not your legs, and drop a crate of phantom porcelain. Phantom porcelain, it turns out, bills like the real thing.',
@@ -528,11 +622,22 @@ const REGIONS = {
                 name: 'A Siren, Off the Clock',
                 emoji: '🎶',
                 intro: 'On the seawall sits a siren, hair dripping, doing the harbor\'s crossword. She glances up. "I\'m not singing," she says. "Lunch break. But I do trade in interesting rumors, if you\'ve got one."',
-                winChance: 0.58,
+                winChance: 0.50,
                 reward: { min: 2_800, max: 5_500 },
                 winLine: 'You trade her the strangest true thing you\'ve seen out here. She laughs — a sound that briefly stops the tide — and pays in salvage coordinates that check out brilliantly.',
                 loseLine: 'You make a rumor up. Her eyes narrow; sirens fact-check. The tide takes a personal interest in your pockets on the walk back.',
                 safeLine: 'You help with the crossword instead. Seven across, "drowned." She finishes the puzzle, hums one bar of thanks — and the harbor leaves a finder\'s fee in your boot.',
+            },
+            {
+                id: 'sd_enc_auction',
+                name: 'The Salvage Auctioneer',
+                emoji: '🔨',
+                intro: 'A drowned auctioneer with a gavel made of driftwood holds up a sealed crate. \'Lot ninety-one! Contents unknown! Bidding starts at your nerve!\' The crowd of seagulls leans in.',
+                winChance: 0.54,
+                reward: { min: 2_500, max: 5_000 },
+                winLine: 'You win the lot. The crate opens on a ship\'s payroll, still dry, still sealed with the captain\'s wax. The gulls applaud in the only way gulls can.',
+                loseLine: 'You win the lot. The crate opens on ninety years of wet socks. The auctioneer bangs the gavel and the fee is non-refundable.',
+                safeLine: 'You watch the bidding without raising a hand. At the end, the auctioneer slides you the buyer\'s premium from someone else\'s lot. Spectators get the tips here.',
             },
         ],
         traps: [
@@ -544,6 +649,15 @@ const REGIONS = {
             'A strongbox in the Customs House marked "UNCLAIMED — 90 YEARS." The Harbormaster stamps it over to you without looking up.',
             'Low tide bares a rooftop with a chimney, and the chimney is stuffed with a smuggler\'s retirement plan. The smuggler, presumably, retired differently.',
             'The Tide Bell rings once as you pass — and the wave it shrugs ashore is carrying cargo with your timing written all over it.',
+            'A lobster pot hauled up by the tide contains no lobster, only a merchant\'s strongbox and one very smug crab.',
+            'The drowned bank\'s night-deposit slot is at exactly your height at low tide. The bank will not be needing it.',
+            'A message in a bottle, and the message is a map, and the map is accurate. This almost never happens.',
+        ],
+        // Repeatable finds for the discovery slot once every landmark is charted.
+        anomalies: [
+            { id: 'sd_anom_ship', name: 'The Ship That Came In', emoji: '⛵', line: 'A ship docks that no manifest mentions, unloads a single crate addressed to \'the one who waited\', and sails out again. You did not wait. You are here, though, and the crate isn\'t picky.' },
+            { id: 'sd_anom_bell', name: 'The Bell Rings Twice', emoji: '🔔', line: 'The Tide Bell rings twice for the same ship, which it never does. The whole harbor holds its breath. Then, from the fog, the salvage washes in, and it is all addressed to you.' },
+            { id: 'sd_anom_tide', name: 'A Tide Going the Wrong Way', emoji: '🌊', line: 'The sea retreats uphill for eleven minutes, exposing a street nobody has walked since the drowning. Every shop window has a closing-down sale sign. You shop fast.' },
         ],
         relics: [
             { itemId: 'Harbormaster\'s Stamp',  rarity: 'rare',      lore: 'Still inked. Anything you stamp becomes, in a small administrative way, yours. Use responsibly. Or don\'t; the paperwork is self-correcting.' },
@@ -575,6 +689,10 @@ const REGIONS = {
             'A shooting star crosses overhead — at walking pace. It seems to be looking for something. It is not subtle about it.',
             'The horizon is full of craters, each one a different size of "something landed here and meant it."',
             'Your shadow points at the sky instead of away from the sun. The Wastes have opinions about geometry.',
+            'The glass underfoot is so black that you can see the stars in it at noon.',
+            'A slow star drifts down on your left and settles into the sand like a cat choosing a spot to sleep.',
+            'The silence out here has a weight to it, as if the sky is still deciding whether it has finished falling.',
+            'You find your own footprints from a previous expedition, perfectly preserved in the glass. They look braver than you remember.',
         ],
         eventWeights: { encounter: 20, discovery: 16, trap: 18, treasure: 22, lore: 14, secret: 5, quiet: 5 },
         landmarks: [
@@ -597,7 +715,7 @@ const REGIONS = {
                 name: 'The Sky\'s Own Cartographer',
                 emoji: '🔭',
                 intro: 'A figure made of compacted starlight squints through a telescope built from a meteor fragment. "You\'re off the chart," it says, not unkindly. "Want to be on it? There\'s a fee. There\'s also a discount."',
-                winChance: 0.60,
+                winChance: 0.66,
                 reward: { min: 2_600, max: 5_200 },
                 winLine: 'You answer three questions about where you\'ve been honestly, including the embarrassing parts. The cartographer is delighted by the detail and pays you for "exceptional fieldwork."',
                 loseLine: 'You exaggerate your travels slightly. The telescope catches the lie mid-orbit. The correction fee is steep and the cartographer looks personally betrayed.',
@@ -608,7 +726,7 @@ const REGIONS = {
                 name: 'The Glassback Wyrm',
                 emoji: '🦂',
                 intro: 'Something the size of a wagon unfolds from the crater floor, plated in black glass, eyes like banked coals. It does not attack. It poses. It has clearly been waiting for an audience.',
-                winChance: 0.58,
+                winChance: 0.60,
                 reward: { min: 3_000, max: 5_800 },
                 winLine: 'You applaud, sincerely, at the right moments. The wyrm preens so hard a plate of fused glass shakes loose, gem-bright underneath. A standing ovation fee, apparently.',
                 loseLine: 'You yawn. Visibly. The wyrm takes it personally and slams its tail down hard enough to crack the crater and your coin pouch in the same motion.',
@@ -619,11 +737,22 @@ const REGIONS = {
                 name: 'Something Still Arriving',
                 emoji: '☄️',
                 intro: 'A streak of light is coming down, slow, deliberate, clearly not in a hurry after several hundred years of travel. It seems to want to land near you specifically.',
-                winChance: 0.55,
+                winChance: 0.50,
                 reward: { min: 3_400, max: 6_500 },
                 winLine: 'You stand your ground and let it land an arm\'s length away. It cools instantly into a smooth stone that hums when you touch it, and a pocket of glassy ground nearby is suddenly, generously, full of coin.',
                 loseLine: 'You flinch and step back at the last second. It lands anyway, throwing up a spray of molten glass that costs you dearly in singed supplies and scattered coin.',
                 safeLine: 'You watch it land from well outside the blast radius, patient and unbothered. It cracks open gently rather than violently, grateful for the lack of drama, and rolls a little of itself toward you.',
+            },
+            {
+                id: 'sw_enc_collector',
+                name: 'The Debt Collector From Orbit',
+                emoji: '🛸',
+                intro: 'Something in a long coat steps out of a crater with a ledger. \'The sky,\' it says, \'is owed. I\'m collecting. Or paying out, if you can prove the debt is someone else\'s.\'',
+                winChance: 0.54,
+                reward: { min: 3_200, max: 6_200 },
+                winLine: 'You point out the crater was dug before you were born. The collector checks its ledger, agrees, and pays you a finder\'s fee for the clerical error.',
+                loseLine: 'You argue. It shows you your footprints in the glass from a previous visit. Apparently you are the someone else. The debt is settled on the spot.',
+                safeLine: 'You don\'t argue and don\'t pay. You simply wait. The collector, unused to patience, gives up and leaves a courtesy payment for your trouble.',
             },
         ],
         traps: [
@@ -635,6 +764,15 @@ const REGIONS = {
             'A crater rim crumbles to reveal a strongbox fused half into glass, the rest of it still negotiable.',
             'The Market That Only Opens at Apogee left a stall standing. The till, somehow, is still in it.',
             'You crack open a cooled meteor fragment out of curiosity. Curiosity, this once, pays extremely well.',
+            'A crater has cooled around a cache of coins like the meteor landed on a bank. It may have.',
+            'A slow star lands in front of you and, cooling, turns out to have been carrying cargo. Nobody told it to stop.',
+            'Beneath the Fused Spire, a hollow in the glass, and in the hollow, the takings of a market that only opens once a year.',
+        ],
+        // Repeatable finds for the discovery slot once every landmark is charted.
+        anomalies: [
+            { id: 'sw_anom_constellation', name: 'A New Constellation', emoji: '✨', line: 'A cluster of stars has rearranged itself overnight into a shape that looks a lot like a coin purse. You chart it. The observatory pays well for new constellations, even rude ones.' },
+            { id: 'sw_anom_rain', name: 'Starfall, Lightly', emoji: '🌠', line: 'A gentle shower of tiny stars comes down around you, each one no bigger than a pebble and warm to hold. They are worth a small fortune. You fill your pockets.' },
+            { id: 'sw_anom_shadow', name: 'Your Shadow Points Home', emoji: '🧭', line: 'For one hour your shadow points in a single direction no matter where you turn. You follow it, and at the end of it is a cache, a note in your own handwriting, and no memory of writing it.' },
         ],
         relics: [
             { itemId: 'Compacted Starlight',  rarity: 'rare',      lore: 'A fragment of the cartographer\'s telescope lens. Looking through it shows you exactly where you are. Disappointingly accurate.' },
@@ -686,7 +824,7 @@ const REGIONS = {
                 name: 'A Yeti With a Ledger',
                 emoji: '🦣',
                 intro: 'An enormous white shape blocks the trail, holding a tiny notebook. "Toll," it rumbles, then squints at the page. "Or... rebate? The handwriting is bad. It\'s mine, and it\'s bad."',
-                winChance: 0.62,
+                winChance: 0.66,
                 reward: { min: 1_400, max: 2_800 },
                 winLine: 'You help it decipher its own bookkeeping. It\'s a rebate. The yeti pays out happily and initials your map with one enormous, careful Y.',
                 loseLine: 'You guess "toll." It was a rebate. The yeti, flustered, charges you the toll anyway to balance the books. Accounting is merciless at altitude.',
@@ -697,7 +835,7 @@ const REGIONS = {
                 name: 'The Skater on the Falls',
                 emoji: '⛸️',
                 intro: 'Someone is figure-skating on the frozen waterfall. Vertically. They pause mid-axel, upside down, and beckon: the ice apparently seats two.',
-                winChance: 0.58,
+                winChance: 0.50,
                 reward: { min: 1_600, max: 3_200 },
                 winLine: 'You manage thirty vertical seconds without dying. The skater is delighted. Prize money materializes from a sponsor you never see and the ice itself applauds.',
                 loseLine: 'You make it four seconds. Gravity, that traditionalist, files an objection. The entry fee is non-refundable and so is your composure.',
@@ -759,7 +897,7 @@ const REGIONS = {
                 name: 'The Understudy Skeleton',
                 emoji: '💀',
                 intro: 'A skeleton in a half-painted set rattles its script at you. "The lead ghost called in alive," it sighs. "Run lines with me? The haunting\'s at eight and the pay is criminal. In a good way."',
-                winChance: 0.62,
+                winChance: 0.66,
                 reward: { min: 1_400, max: 2_800 },
                 winLine: 'You deliver "BOO" with subtext, layers, motivation. The skeleton weeps from sockets that shouldn\'t allow it. You\'re paid scale plus a cut of the screams.',
                 loseLine: 'You laugh in the dramatic pause. The skeleton goes very still — professionally hurt — and the union fines you for breaking immersion.',
@@ -770,7 +908,7 @@ const REGIONS = {
                 name: 'A Witch Doing Inventory',
                 emoji: '🧙',
                 intro: 'A witch counts jars on her porch: eyeballs (pickled), screams (assorted), regret (top shelf). "I\'m over-stocked on luck," she says, not looking up. "Care to trade?"',
-                winChance: 0.60,
+                winChance: 0.50,
                 reward: { min: 1_500, max: 3_000 },
                 winLine: 'You trade her a true story she hasn\'t heard. She laughs herself off the rocking chair, recovers with dignity, and pays in luck. It works retroactively. The walk home is suspiciously smooth.',
                 loseLine: 'You try to haggle with a witch on her own porch. The jars all turn to watch. The trade goes through; the exchange rate is a lesson.',
@@ -832,7 +970,7 @@ const REGIONS = {
                 name: 'The Crab With the Conch Concession',
                 emoji: '🦀',
                 intro: 'A crab in a tiny visor runs a stall of conch shells. "Each one plays a different summer," it clicks. "Most are paid for. One\'s a free sample. I forget which. Wanna gamble?"',
-                winChance: 0.62,
+                winChance: 0.66,
                 reward: { min: 1_400, max: 2_800 },
                 winLine: 'You pick the third shell from the left, on instinct. The free sample — AND it plays the summer the crab opened the stall. Sentimental value pays out in actual value.',
                 loseLine: 'You pick the biggest shell. Rookie. It plays a summer of jellyfish stings and sunburn, billed at full price. The crab does not do refunds; the visor says so.',
@@ -843,7 +981,7 @@ const REGIONS = {
                 name: 'The Lifeguard of the Deep End',
                 emoji: '🌊',
                 intro: 'A figure of living seawater sits on a lifeguard chair facing the open ocean. "No one\'s drowned on my watch in four hundred years," it says. "Race you to the buoy. I\'ll give you the head start and the current."',
-                winChance: 0.58,
+                winChance: 0.50,
                 reward: { min: 1_700, max: 3_400 },
                 winLine: 'You lose, obviously — it IS the water — but you finish, which apparently no one does. The prize for finishing has been compounding since the chair was built.',
                 loseLine: 'You cramp at the halfway buoy and get escorted back with overwhelming, humiliating gentleness. The rescue is free. Your dropped valuables join the collection in the deep end.',
@@ -905,7 +1043,7 @@ const REGIONS = {
                 name: 'The Retired Matchmaker',
                 emoji: '🏹',
                 intro: 'At a café table sits a small ancient person with a ledger of every match they ever made. "Four thousand weddings," they say. "One mistake. Help me find it in the books and I\'ll make it worth your while."',
-                winChance: 0.60,
+                winChance: 0.66,
                 reward: { min: 1_500, max: 3_000 },
                 winLine: 'You find it: page 812, two names matched to each other\'s handwriting instead of each other. The matchmaker stares, laughs for a full minute, and pays the finder\'s fee. The couple, for the record, is still happy. Some mistakes hold.',
                 loseLine: 'You point confidently at page 9. Page 9 is the matchmaker\'s own wedding. The coffee you must now buy by way of apology is the most expensive in the Arcade.',
@@ -916,7 +1054,7 @@ const REGIONS = {
                 name: 'A Cupid on Inventory Day',
                 emoji: '💘',
                 intro: 'A cupid counts arrows behind the fletcher\'s stall, frowning. "One missing. Do you know what an unaccounted arrow DOES out there? Help me track it. Hazard pay included."',
-                winChance: 0.60,
+                winChance: 0.50,
                 reward: { min: 1_600, max: 3_200 },
                 winLine: 'You trace it to the Dead Letter Office, lodged in a mailbag — the arrow had a crush on a letter. Naturally. The cupid pays hazard rate and swears you to secrecy. (This embed doesn\'t count.)',
                 loseLine: 'You find the arrow by stepping on it. The paperwork for a self-inflicted administrative crush takes hours and costs you the filing fee. You feel very fondly about the form afterward. That\'s the arrow.',
@@ -977,7 +1115,7 @@ const REGIONS = {
                 name: 'A Tracker Twice Your Age',
                 emoji: '🥾',
                 intro: 'An old hunter kneels over a print in the snow that doesn\'t match anything alive. "Fresh," she says, without looking up. "Help me follow it or get out of the wind. Your call."',
-                winChance: 0.62,
+                winChance: 0.66,
                 reward: { min: 1_500, max: 3_000 },
                 winLine: 'You match her pace for three miles without complaint. The trail ends at a cache she\'s clearly been saving for someone who could keep up. That\'s apparently you now.',
                 loseLine: 'You lose the trail at the second ridge. She doesn\'t say anything, which is worse than if she had. The walk back costs you in coin and dignity.',
@@ -988,7 +1126,7 @@ const REGIONS = {
                 name: 'Something White and Patient',
                 emoji: '🦌',
                 intro: 'A shape that might be a stag, made of packed snow and old moonlight, watches you from the ridgeline. It has been there, the tracks suggest, since before you arrived.',
-                winChance: 0.58,
+                winChance: 0.50,
                 reward: { min: 1_800, max: 3_600 },
                 winLine: 'You sit down in the snow instead of approaching. Eventually it comes to you, sheds a sliver of something cold and valuable at your feet, and walks back into the white.',
                 loseLine: 'You approach too fast. It\'s gone before you blink, taking the warmth out of the air with it. You shiver the rest of the way home, lighter in pocket.',
@@ -1088,6 +1226,13 @@ const QUIET_LINES = [
     'Today the wilderness simply watches you pass. You get the feeling you were the event.',
     'You find footprints. They\'re yours. You\'ve been walking in one enormous, contemplative circle, and honestly? Good for you.',
     'The horizon stays exactly where horizons stay. Some expeditions are just stretching your legs with extra steps.',
+    'You sit on a rock for a while. The rock doesn\'t mind. Neither, you discover, do you.',
+    'The weather changes three times. You don\'t. The map doesn\'t either.',
+    'You follow a promising sound for an hour. It was a creek. It was a very good creek, to be fair.',
+    'Absolutely nothing happens, beautifully. You make a note in the margin: \'check again.\'',
+    'The wind carries the smell of rain and the faint sound of someone else\'s luck, somewhere else.',
+    'You find a bench someone built in the middle of nowhere. You sit on it. That was, apparently, the point.',
+    'Every clue you find leads to another clue that leads back to the first clue. Rest day, then.',
 ];
 
 // Footer flavor rotated on result embeds
@@ -1097,6 +1242,11 @@ const FOOTER_LINES = [
     'I watched the whole thing. You did fine. Mostly.',
     'Every expedition ends. The good ones end at home.',
     'The world is bigger than your map. For now.',
+    'The wilds keep score. They just don\'t show you the board.',
+    'Every map starts as a rumour.',
+    'Somewhere out there, a landmark is waiting to be named after you. Keep walking.',
+    'I\'d tell you what\'s over the next hill, but that would ruin it.',
+    'The blank spaces are patient. You don\'t have to be.',
 ];
 
 // Trap injury notice

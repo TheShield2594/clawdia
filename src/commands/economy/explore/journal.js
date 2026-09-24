@@ -7,7 +7,7 @@ const { EmbedBuilder, MessageFlags } = require('discord.js');
 const { LIMITS, REGIONS } = require('../../../data/exploreData');
 const { chunkByLength } = require('../../../utils/embedFields');
 const { paginate } = require('../../../utils/paginator');
-const { loadReadContext, EVENT_TYPE_EMOJI } = require('./shared');
+const { loadReadContext, EVENT_TYPE_EMOJI, EXPLORE_COLORS } = require('./shared');
 
 // Entries per journal page. Ten timestamped lines sit far under the 4096
 // description budget even when every summary runs long; chunkByLength backstops
@@ -64,7 +64,7 @@ async function handleJournal(interaction) {
     // than truncating, so this used to be a latent way to lose the whole command.
     const pages = chunkByLength(lines, { maxPerChunk: JOURNAL_PAGE_SIZE }).map(pageLines =>
         new EmbedBuilder()
-            .setColor('#8d6e63')
+            .setColor(EXPLORE_COLORS.JOURNAL)
             .setTitle(`📔 Expedition Journal — ${interaction.user.username}`)
             .setDescription(pageLines.join('\n'))
             .setFooter({ text: footer })

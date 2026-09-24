@@ -29,6 +29,7 @@ const EXPLORE_COUNTERS = [
     'totalExpeditions', 'treasuresFound', 'trapsSprung', 'encountersWon',
     'secretsFound', 'loreCollected', 'landmarksDiscovered', 'relicsRecovered',
     'totalEarned', 'bestHaul', 'sinceSecret', 'regionsSurveyed',
+    'anomaliesFound',
 ];
 
 // Timestamps that legitimately sit at null until something happens.
@@ -223,13 +224,19 @@ function isRegionEnabled(region, guildSettings) {
 /**
  * Regions a player can currently set out into: unlocked core regions plus
  * any in-season seasonal regions, minus anything an admin switched off.
+ *
+ * A core region's level requirement gates opening the route (`/explore
+ * travel`), not walking it afterwards. It used to gate both, which made
+ * prestige a trap: ascending reset Explorer Level to 1 and locked every route
+ * the player had already paid for behind hundreds of expeditions of re-climb,
+ * for a bonus a fraction the size of the income it cost.
  */
 function getAvailableRegions(user, guildSettings) {
     const e = user.exploration;
     return REGION_LIST.filter(r => {
         if (!isRegionEnabled(r, guildSettings)) return false;
         if (r.seasonalEventId) return isRegionInSeason(r, guildSettings);
-        return e.unlockedRegions.includes(r.id) && e.level >= r.unlockLevel;
+        return e.unlockedRegions.includes(r.id);
     });
 }
 
@@ -425,6 +432,11 @@ function rollTreasureTier() {
 
 // ─── EXECUTE EXPLORE ─────────────────────────────────────────────────────────
 
+// What an anomaly pays before multipliers: a little better than a landmark, so
+// the slot a charted region hands over is worth rolling rather than a
+// consolation prize.
+const ANOMALY_REWARD = { min: 400, max: 900 };
+
 /**
  * Run one expedition. Mutates the user document in memory (coins, XP, stats,
  * region progress, inventory relics) but does NOT save it.
@@ -472,7 +484,18 @@ function executeExplore(user, region, guildSettings, opts = {}) {
         case 'discovery': {
             const unfound = region.landmarks.filter(l => !progress.landmarksFound.includes(l.id));
             if (unfound.length === 0) {
-                // Nothing left to chart here — the slot pays out as treasure.
+                // Every landmark is on the map. The slot turns up one of the
+                // region's anomalies instead — repeatable, so a charted region
+                // still has something to find — or, for a region written
+                // without any, pays out as treasure.
+                if (region.anomalies?.length) {
+                    const anomaly = randomFrom(region.anomalies);
+                    e.anomaliesFound = (e.anomaliesFound ?? 0) + 1;
+                    result.anomaly = anomaly;
+                    result.payout = applyPayout(user, result, Math.round(randInt(ANOMALY_REWARD.min, ANOMALY_REWARD.max) * coinMult));
+                    result.xp = grantXp(user, EVENT_XP.anomaly, result);
+                    break;
+                }
                 return finishAsTreasure(user, region, progress, result, coinMult, { fallback: true });
             }
             const landmark = randomFrom(unfound);
@@ -493,6 +516,9 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             progress.loreFound.push(fragment.id);
             e.loreCollected += 1;
             result.lore = fragment;
+            // The last fragment is the one that turns on the encounter bonus
+            // (getEncounterWinChance), so the result can say so.
+            result.loreCompleted = unfound.length === 1;
             result.payout = applyPayout(user, result, Math.round(randInt(150, 400) * coinMult));
             result.xp = grantXp(user, EVENT_XP.lore, result);
             break;
@@ -573,6 +599,22 @@ function encounterLossBand(enc) {
 }
 
 /**
+ * The chance an approach wins, for this player.
+ *
+ * Knowing a region's story is worth something when you meet its locals: once
+ * every lore fragment in the region is collected, approaches there win
+ * `ENCOUNTER_LORE_BONUS` more often. That is what makes lore more than flavour
+ * text, and it can turn a coin-flip creature into one worth approaching.
+ */
+function getEncounterWinChance(user, region, enc) {
+    const progress = getRegionProgress(user, region.id);
+    const knowsLore = Boolean(progress) && region.lore.length > 0
+        && region.lore.every(l => progress.loreFound.includes(l.id));
+    const chance = enc.winChance + (knowsLore ? LIMITS.ENCOUNTER_LORE_BONUS : 0);
+    return { chance: Math.min(0.95, chance), loreBonus: knowsLore };
+}
+
+/**
  * What each option in an encounter is actually worth, in the coins this player
  * would see — every multiplier already applied. Display-only: the prompt used to
  * offer a blind choice between two pieces of flavour text, which is not a
@@ -593,8 +635,10 @@ function getEncounterStakes(user, region, guildSettings, result) {
     // below 0.5, Math.round would settle that coin to nothing and call a player
     // capped while they can still win thousands.
     const capped = settleAgainstDailyCap(user, 0).remaining === 0;
+    const { chance, loreBonus } = getEncounterWinChance(user, region, enc);
     return {
-        winChance: enc.winChance,
+        winChance: chance,
+        loreBonus,
         win:  { min: payout(enc.reward.min, coinMult), max: payout(enc.reward.max, coinMult) },
         safe: { min: payout(enc.reward.min, coinMult * LIMITS.ENCOUNTER_SAFE_RATE),
                 max: payout(enc.reward.max, coinMult * LIMITS.ENCOUNTER_SAFE_RATE) },
@@ -618,9 +662,12 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
 
     result.pendingChoice = false;
     result.choice = choice === 'approach' ? 'approach' : 'observe';
+    // A timeout resolves as keeping your distance; the embed says so, rather
+    // than presenting a choice the player never made as one they did.
+    result.hesitated = choice == null;
 
     if (result.choice === 'approach') {
-        if (secureRandom() < enc.winChance) {
+        if (secureRandom() < getEncounterWinChance(user, region, enc).chance) {
             result.outcome = 'win';
             e.encountersWon += 1;
             result.payout = applyPayout(user, result, Math.round(randInt(enc.reward.min, enc.reward.max) * coinMult));
@@ -1041,6 +1088,7 @@ module.exports = {
     applyExplorerXp,
     weightedRoll,
     randomFrom,
+    randInt,
     isRegionInSeason,
     isRegionEnabled,
     getAvailableRegions,
@@ -1056,6 +1104,7 @@ module.exports = {
     executeExplore,
     resolveEncounter,
     encounterLossBand,
+    getEncounterWinChance,
     getEncounterStakes,
     addJournalEntry,
     applyExploreXpBonus,

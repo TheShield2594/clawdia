@@ -826,12 +826,15 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 - Core: Whispering Forest → Crumbling Ruins → Crystal Caves → Sunken Docks → Starfall Wastes (level + coin gated, rising payouts)
 - Seasonal: Frostveil Pass (winter), Hollowgrave Lane (spooky), Scorchglass Shore (summer), The Velvet Arcade (Valentine's), Arctic Tundra (winter hunt) — open only while their seasonal event runs, and they drop event currency for the event shop
 - A bare `/explore go` follows your active region, and reroutes itself if that region has gone out of season or been switched off
+- Every result carries a **🥾 Set out again** button that runs the next expedition in the same region, through the same cooldown, lock and server gates as the slash command
+- The staged "Setting out" beat plays when there is something to reveal (an encounter, a secret, a first visit, epic or legendary treasure); routine runs go straight to the result
 
 **Progression:**
-- **Secret pity** — every expedition into a region that still hides a secret lifts the odds of finding one, shown as a live chance on the result embed. Regions you have fully uncovered stop building pity instead of promising a secret they can't deliver
+- **Secret pity** — every expedition into a region that still hides a secret lifts the odds of finding one. Once a drought reaches 10 expeditions the result embed shows the live chance. Regions you have fully uncovered stop building pity instead of promising a secret they can't deliver
+- **Anomalies** — once every landmark in a core region is charted, its discovery slot turns up repeatable anomalies instead, so a charted region still has something to find
 - **Fully surveyed** — chart every landmark, lore fragment and secret in a region and everything it pays you afterwards carries a standing +15%
 - **Relic case** — each distinct relic is worth +1% on exploration coins, up to the width of your case. Treasure prefers relics you don't own yet, so the case fills instead of stacking duplicates. The case starts at 10 of the 25 known relics and is widened by explorer prestige
-- **Encounters are a real bet** — the prompt quotes the win chance and both coin bands in the money *you* would see, and losing is priced off what was on the table rather than a flat fee, so the long-odds encounters with the biggest prizes are worth taking instead of worth dodging
+- **Encounters are a real decision** — the prompt quotes the win chance and both coin bands in the money *you* would see. Each core region has a steady encounter (66%), a lean one (60%), a coin flip (54%) and a long shot (50%). A loss costs half the encounter's average reward, so the first two are worth approaching and the last two are not, on the base numbers. Your standing bonuses lift the win and not the loss, the soft cap halves the win and not the loss, and **collecting a region's full lore adds +5%** to every approach there, so the right call depends on the creature and on you. A timeout resolves as keeping your distance, and the result says so
 - **Quiet expeditions** cost the cooldown but refund the stamina point — a blank walk isn't charged for
 - **Level-ups are announced** on the result embed, and name any region the new Explorer Level just brought within reach
 - **Daily coin caps ramp** — the first 100,000 coins in a rolling 24h window pay in full, everything up to 150,000 pays at 50%, and past that expeditions still chart the map and pay Explorer XP but stop paying cash
@@ -856,8 +859,8 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 P5. Each rank resets Explorer Level and XP and keeps everything else — charted
 regions, completed surveys, the relic case, the journal and every lifetime stat.
 An ascended explorer carries a prestige title rather than dropping back to
-"Doorstep Wanderer", but region unlocks are level-gated, so the deeper regions sit
-behind the ladder again until it is re-climbed:
+"Doorstep Wanderer". A region's level requirement gates opening its route, not
+walking it, so every route you have opened stays open through an ascension:
 
 | Rank | Grants (cumulative) |
 |---|---|

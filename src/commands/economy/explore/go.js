@@ -11,19 +11,15 @@ const { isVersionError } = require('../../../utils/versionRetry');
 const { detachBalanceDelta, commitBalanceDelta } = require('../../../utils/balanceDelta');
 const { gatherPayoutKey } = require('../../../utils/payoutKey');
 const { creditEventCurrencyOrOwe } = require('../../../utils/creditOrOwe');
-const {
-    LIMITS, TIER_COLORS, REGIONS, REGION_LIST, FOOTER_LINES, INJURY_LINES, relicSlug,
-} = require('../../../data/exploreData');
+const { LIMITS, REGIONS, relicSlug } = require('../../../data/exploreData');
 const { relicItemId, exploreRegionItemId } = require('../../../data/activityItems');
 const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
-const { TIER_STARS } = require('../../../data/materialRarity');
 const {
-    commitExpeditionRelic, getMaxStamina, applyStaminaRegen, applyDailyReset,
-    msUntilNextStamina, getRegionProgress, isRegionEnabled, resolveActiveRegion,
-    getRelicBonus, getSecretOdds, executeExplore, applyExploreXpBonus,
-    resolveEncounter, getEncounterStakes, addJournalEntry, randomFrom, formatMs,
+    commitExpeditionRelic, applyStaminaRegen, applyDailyReset, msUntilNextStamina,
+    resolveActiveRegion, executeExplore, applyExploreXpBonus, resolveEncounter,
+    getEncounterStakes, addJournalEntry, randInt,
 } = require('../../../services/exploreService');
-const { getTotalBonus, tryGrantRarePet, petCompanionLine } = require('../../../services/petService');
+const { getTotalBonus, tryGrantRarePet } = require('../../../services/petService');
 const { checkAndAward, announceAchievements } = require('../../../services/achievementService');
 const { ensureQuests, onExplore, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../../services/questService');
 const { recordMissionProgress } = require('../../../services/seasonMissionService');
@@ -32,7 +28,6 @@ const {
     getEventXpMultiplier, getEventCoinMultiplier,
     hasActiveEvent, getEventCurrencyId,
 } = require('../../../services/seasonalEventService');
-const { SEASONAL_EVENTS } = require('../../../data/seasonalEvents');
 const { buildCooldownEmbed } = require('../../../utils/cooldownEmbed');
 const { logTransaction } = require('../../../utils/logTransaction');
 const { logBigWin } = require('../../../utils/bigWinLogger');
@@ -40,7 +35,24 @@ const { addWeeklyChampionProgress, getWeeklyChampionLeader } = require('../../..
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../../data/featuredRotation');
 const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
-const { loadContext, regionGateError } = require('./shared');
+const { loadContext, regionGateError, EXPLORE_COLORS } = require('./shared');
+const { buildResultEmbed, secretTeaser, summarizeResult } = require('./embeds');
+const { attachResultActions, buildResultActions } = require('./actions');
+
+// How long an encounter waits for a choice before resolving as "keep your
+// distance".
+const ENCOUNTER_WINDOW_MS = 20_000;
+
+// The staged "Setting out" beat — the intro, a pause, then the find — earns its
+// two seconds on a run with something to reveal. On the routine ones it was
+// just a wait, hundreds of times over, so those go straight to the result.
+function isStagedRun(result, { firstVisit, rerouted }) {
+    return Boolean(result.pendingChoice)
+        || result.type === 'secret'
+        || firstVisit
+        || Boolean(rerouted)
+        || ['epic', 'legendary'].includes(result.treasureTier?.tier);
+}
 
 async function handleGo(interaction) {
     const ctx = await loadContext(interaction);
@@ -78,7 +90,7 @@ async function handleGo(interaction) {
             embeds: [buildCooldownEmbed({
                 title: '🤕 Patching Yourself Up',
                 description: 'The last trap left a mark. The wilds will still be wild when you can walk straight.',
-                color: '#2e7d32',
+                color: EXPLORE_COLORS.TRAIL,
                 nextAt: new Date(e.injuryUntil.getTime()),
             })],
             flags: MessageFlags.Ephemeral,
@@ -90,7 +102,7 @@ async function handleGo(interaction) {
             embeds: [buildCooldownEmbed({
                 title: '🥾 Catching Your Breath',
                 description: 'You just got back. Shake the dust off, check your boots for stowaways, then go again.',
-                color: '#2e7d32',
+                color: EXPLORE_COLORS.TRAIL,
                 nextAt: new Date(e.lastExplore.getTime() + LIMITS.EXPLORE_COOLDOWN_MS),
                 nextRewardPreview: secretTeaser(user, region, guildSettings),
             })],
@@ -103,9 +115,9 @@ async function handleGo(interaction) {
             embeds: [buildCooldownEmbed({
                 title: '😮‍💨 Out of Stamina',
                 description: 'Even legends sleep. Your legs have unionized and their demands are reasonable.',
-                color: '#2e7d32',
+                color: EXPLORE_COLORS.TRAIL,
                 nextAt: new Date(Date.now() + msUntilNextStamina(user)),
-                nextRewardPreview: 'Stamina regenerates 1 every 5 minutes.',
+                nextRewardPreview: `Stamina regenerates 1 every ${Math.round(LIMITS.STAMINA_REGEN_MS / 60_000)} minutes.`,
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -146,7 +158,7 @@ async function handleGo(interaction) {
             embeds: [buildCooldownEmbed({
                 title: '🥾 Catching Your Breath',
                 description: 'You just got back. Shake the dust off, check your boots for stowaways, then go again.',
-                color: '#2e7d32',
+                color: EXPLORE_COLORS.TRAIL,
                 nextAt: new Date(new Date(lastAt).getTime() + LIMITS.EXPLORE_COOLDOWN_MS),
                 nextRewardPreview: secretTeaser(user, region, guildSettings),
             })],
@@ -192,6 +204,13 @@ async function handleGo(interaction) {
         const result = executeExplore(user, region, guildSettings, { coinMultiplier });
         result.featured = isFeatured;
         const firstVisit = result.firstVisit;
+        const wasEncounter = Boolean(result.pendingChoice);
+        // What the first save below commits. If the second one fails, the
+        // result is rendered from this rather than from XP that never landed.
+        const committed = {
+            xp: result.xp,
+            explorerLevelUp: result.explorerLevelUp ? { ...result.explorerLevelUp } : undefined,
+        };
 
         // Rare companions are found, not bought: a legendary treasure is the
         // only thing that turns the owl up. Rolled here, with the expedition,
@@ -244,22 +263,34 @@ async function handleGo(interaction) {
             return interaction.reply({ content: 'Something went wrong writing your expedition down. Try again.', flags: MessageFlags.Ephemeral });
         }
 
-        // Staged narration: the setting-out beat, then the find
-        const delay = ms => new Promise(r => setTimeout(r, ms));
-        const reroutedLine = rerouted
-            ? `\n\n🧭 **${rerouted.emoji} ${rerouted.name}** is closed to you right now, so your compass reset to **${region.emoji} ${region.name}**. It'll wait.`
-            : '';
-        const featuredLine = isFeatured
-            ? `\n\n🌟 **Featured region today** — everything here pays **+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%** until the rotation turns over.`
-            : '';
-        await interaction.reply({
-            embeds: [new EmbedBuilder()
-                .setColor(region.color)
-                .setTitle(`${region.emoji} Setting out — ${region.name}`)
-                .setDescription(`*${result.intro}*${reroutedLine}${featuredLine}`)
-                .setFooter({ text: region.tagline })],
-        });
-        await delay(2000);
+        // Staged narration: the setting-out beat, then the find. `show` sends the
+        // first message and edits it after that, so the routine run that skips
+        // the beat answers with the result directly.
+        let replyMessage = null;
+        const show = async payload => {
+            if (replyMessage) return interaction.editReply(payload);
+            const response = await interaction.reply({ ...payload, withResponse: true });
+            replyMessage = response?.resource?.message ?? null;
+            return replyMessage;
+        };
+
+        const staged = isStagedRun(result, { firstVisit, rerouted });
+        if (staged) {
+            const reroutedLine = rerouted
+                ? `\n\n🧭 **${rerouted.emoji} ${rerouted.name}** is closed to you right now, so your compass reset to **${region.emoji} ${region.name}**. It'll wait.`
+                : '';
+            const featuredLine = isFeatured
+                ? `\n\n🌟 **Featured region today** — everything here pays **+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%** until the rotation turns over.`
+                : '';
+            await show({
+                embeds: [new EmbedBuilder()
+                    .setColor(region.color)
+                    .setTitle(`${region.emoji} Setting out — ${region.name}`)
+                    .setDescription(`*${result.intro}*${reroutedLine}${featuredLine}`)
+                    .setFooter({ text: region.tagline })],
+            });
+            await new Promise(r => setTimeout(r, 2000));
+        }
 
         // ── Encounter choice ──────────────────────────────────────────────────────
         if (result.pendingChoice) {
@@ -276,13 +307,16 @@ async function handleGo(interaction) {
                 new ButtonBuilder().setCustomId(`${encId}_approach`).setLabel(`🤝 Approach (${odds}%)`).setStyle(ButtonStyle.Primary),
                 new ButtonBuilder().setCustomId(`${encId}_observe`).setLabel('🌿 Keep Your Distance').setStyle(ButtonStyle.Secondary),
             );
-            await interaction.editReply({
+            const loreLine = stakes.loreBonus
+                ? `\n\n📖 *You know ${region.name}'s story, and it knows you do — **+${Math.round(LIMITS.ENCOUNTER_LORE_BONUS * 100)}%** on the approach.*`
+                : '';
+            const msg = await show({
                 embeds: [new EmbedBuilder()
                     .setColor(region.color)
                     .setTitle(`${enc.emoji} ${enc.name}`)
                     .setDescription(`*${enc.intro}*\n\n` + (stakes.capped
                         ? 'Approach it, or watch from a safe distance? The daily cap has already taken everything this can pay, so bold buys you nothing but the risk.'
-                        : 'Approach it, or watch from a safe distance? Bold pays better. Careful always pays.'))
+                        : 'Approach it, or watch from a safe distance? Bold can pay better. Careful always pays.') + loreLine)
                     .addFields(
                         {
                             name: `🤝 Approach — ${odds}%`,
@@ -299,17 +333,26 @@ async function handleGo(interaction) {
                             inline: true,
                         },
                     )
-                    .setFooter({ text: '20 seconds to decide. Hesitation counts as keeping your distance, which is honest of it.' })],
+                    .setFooter({ text: `${ENCOUNTER_WINDOW_MS / 1000} seconds to decide. Hesitation counts as keeping your distance, which is honest of it.` })],
                 components: [row],
             });
-            const msg = await interaction.fetchReply();
             const choice = await new Promise(resolve => {
+                if (!msg) return resolve(null);
                 const col = msg.createMessageComponentCollector({
                     filter: ownedBy(interaction.user.id, i => i.customId.startsWith(encId), "This isn't your expedition."),
-                    time: 20_000,
+                    time: ENCOUNTER_WINDOW_MS,
                     max: 1,
                 });
-                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.endsWith('_approach') ? 'approach' : 'observe'); });
+                // Resolve before acknowledging. A click that lands after
+                // Discord's three-second window makes deferUpdate throw, and
+                // awaiting it first left this promise unresolved for good —
+                // the collector had already ended on 'limit', so nothing else
+                // would — which hung the expedition with the player's economy
+                // lock held.
+                col.on('collect', i => {
+                    resolve(i.customId.endsWith('_approach') ? 'approach' : 'observe');
+                    i.deferUpdate().catch(() => {});
+                });
                 col.on('end', (_, reason) => { if (reason !== 'limit') resolve(null); });
             });
             resolveEncounter(user, region, guildSettings, result, choice);
@@ -326,7 +369,7 @@ async function handleGo(interaction) {
         const currencyId = getEventCurrencyId(guildSettings);
         if (currencyId && hasActiveEvent(guildSettings)) {
             const range = region.eventCurrency ?? { min: 1, max: 2 };
-            const amount = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
+            const amount = randInt(range.min, range.max);
             eventDrop = { currencyId, amount, owed: null };
         }
 
@@ -369,6 +412,7 @@ async function handleGo(interaction) {
         }
 
         const encounterDelta = detachBalanceDelta(user, balanceBaseline);
+        let unsaved = false;
         try {
             await user.save();
             const paid = await commitBalanceDelta(User, balanceFilter, user, encounterDelta, {
@@ -379,11 +423,32 @@ async function handleGo(interaction) {
             });
             if (!paid.credited) payoutOwed += encounterDelta;
         } catch (err) {
-            if (isVersionError(err)) {
-                return interaction.editReply({ content: 'A simultaneous request tangled your expedition log. Try `/explore go` again.', embeds: [], components: [] });
+            if (!isVersionError(err)) console.error('[explore] save error:', err);
+            const tangled = isVersionError(err) ? 'A simultaneous request tangled your expedition log. ' : '';
+            // The find already landed with the first save — stamina, cooldown,
+            // coins, Explorer XP and any relic. What this write carried was the
+            // encounter's outcome and the bookkeeping around the run.
+            if (wasEncounter) {
+                // The encounter's coins ride this write, so none moved.
+                await show({
+                    content: `${tangled}Your nerve held, but your notes didn't: the meeting with **${result.encounter.name}** couldn't be written down, so nothing was won or lost on it. \`/explore go\` when you're ready.`,
+                    embeds: [], components: [],
+                });
+                return { started: false };
             }
-            console.error('[explore] save error:', err);
-            return interaction.editReply({ content: 'Something went wrong writing your expedition down. Try again.', embeds: [], components: [] });
+            // Anything else was a find that is already paid, and wiping it for
+            // an error line hid a legendary haul the player had in fact banked.
+            // Render it from what the first save committed and say what didn't.
+            unsaved = true;
+            result.xp = committed.xp;
+            result.petXp = 0;
+            result.explorerLevelUp = committed.explorerLevelUp;
+            mainXp = 0;
+            leveledUp = false;
+            eventDrop = null;
+            newAchievements.length = 0;
+            questsDone.length = 0;
+            questsNear.length = 0;
         }
 
         // After the save, so a run that fails to write pays no drop. Never
@@ -438,7 +503,10 @@ async function handleGo(interaction) {
         const weeklyLeader = await getWeeklyChampionLeader(interaction.guild.id, 'explore').catch(() => null);
 
         // ── Result embed ──────────────────────────────────────────────────────────
-        const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings, weeklyLeader);
+        const embed = buildResultEmbed(result, region, user, {
+            currency, eventDrop, mainXp, firstVisit, guildSettings, weeklyLeader, unsaved,
+            intro: staged ? null : result.intro,
+        });
 
         if (rarePetDrop) {
             embed.addFields({
@@ -476,7 +544,8 @@ async function handleGo(interaction) {
         const thumbLabel = result.relic ? result.relic.itemId : region.name;
         const files = await attachItemThumbnail(embed, thumbId, interaction.guild.id, thumbLabel);
 
-        await interaction.editReply({ embeds: [embed], components: [], files });
+        const resultMessage = await show({ embeds: [embed], components: buildResultActions(), files });
+        attachResultActions(interaction, resultMessage, { regionId: region.id });
 
         // Server-wide whisper for secrets
         if (result.type === 'secret' && guildSettings?.exploration?.announceSecrets !== false) {
@@ -494,272 +563,11 @@ async function handleGo(interaction) {
                     .setTimestamp()],
             }).catch(err => console.error('[explore] secret announce error:', err));
         }
+        return { started: true };
     } catch (err) {
         if (!exploreCommitted) await releaseExploreClaim();
         throw err;
     }
-}
-
-function summarizeResult(result, currency) {
-    // Once the daily cap bites, payouts land at zero — say so rather than
-    // logging a triumphant haul of nothing.
-    const haul = result.payout > 0
-        ? `${currency}${result.payout.toLocaleString()}`
-        : result.cappedByDailyCap ? 'nothing the daily cap would let you keep' : `${currency}0`;
-
-    switch (result.type) {
-        case 'discovery': return `Charted ${result.landmark.name}`;
-        case 'lore':      return `Recovered a lore fragment`;
-        case 'secret':    return `Uncovered the secret: ${result.secret.name}`;
-        case 'treasure':  return `${result.relic ? `Recovered ${result.relic.itemId} and ` : ''}hauled ${haul} in treasure`;
-        case 'trap':      return `Sprang ${result.trap.name} (−${currency}${(result.penalty ?? 0).toLocaleString()})`;
-        case 'encounter': return result.outcome === 'win'
-            ? `Faced ${result.encounter.name} and came out ahead`
-            : result.outcome === 'safe'
-                ? `Watched ${result.encounter.name} from a respectful distance`
-                : `Faced ${result.encounter.name} and paid the tuition`;
-        default:          return 'A long, quiet walk';
-    }
-}
-
-/**
- * "It's been N expeditions since your last secret" is only true while the
- * region still HAS a secret to give. Once it's fully uncovered, saying it is
- * a promise nothing can keep, so say something honest instead.
- */
-function secretTeaser(user, region, guildSettings) {
-    if (!region) return 'The map never fills itself in.';
-    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id), guildSettings);
-    if (odds.exhausted) {
-        return `${region.name} has nothing left to hide from you. Other maps still do.`;
-    }
-    if (odds.sinceSecret >= 10) {
-        return `It's been ${odds.sinceSecret} expeditions since your last secret — the odds are up to ${(odds.chance * 100).toFixed(1)}% and still climbing.`;
-    }
-    return 'The map never fills itself in.';
-}
-
-/**
- * Where the player sits on the secret curve. Without it the pity system is
- * invisible and a dry run just looks like bad luck with no reason to believe
- * it lets up — the same reason hunt, fishing and mining grew a streak field.
- */
-function buildSecretPityField(user, region, guildSettings) {
-    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id), guildSettings);
-    if (odds.exhausted) return null;
-
-    const barLen = 16;
-    const ratio  = Math.min(1, odds.pity / LIMITS.SECRET_PITY_MAX);
-    const bar    = '█'.repeat(Math.round(ratio * barLen)) + '░'.repeat(barLen - Math.round(ratio * barLen));
-    const maxed  = odds.pity >= LIMITS.SECRET_PITY_MAX;
-    const lift   = odds.chance / odds.baseChance;
-
-    if (odds.pity <= 0) {
-        return {
-            name: `✨ Secret Odds — ${(odds.chance * 100).toFixed(1)}%`,
-            value: `\`${bar}\`\nEvery expedition here without a secret nudges these odds up.`,
-            inline: false,
-        };
-    }
-    return {
-        name: `✨ Something's Overdue — ${odds.sinceSecret} expeditions dry`,
-        value: `\`${bar}\`\n**${(odds.chance * 100).toFixed(1)}% secret chance** next time out `
-             + `— ×${lift.toFixed(2)} the base rate${maxed ? ' *(max)*' : ', climbing with every dry run'}.`,
-        inline: false,
-    };
-}
-
-function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings, weeklyLeader = null) {
-    const e = user.exploration;
-    // The "Setting out — <region>" embed is edited away by this one, so without
-    // an author line the message a player scrolls back to never says where any
-    // of this happened. The titles below are landmark and creature names; only
-    // the embed colour hinted at the region, which is not something you can read.
-    const embed = new EmbedBuilder()
-        .setAuthor({ name: `${region.emoji} ${region.name}` })
-        .setTimestamp();
-    const lines = [];
-
-    switch (result.type) {
-        case 'discovery':
-            embed.setColor(region.color).setTitle(`🗿 Landmark Charted — ${result.landmark.name}`);
-            lines.push(`*${result.landmark.line}*`);
-            break;
-        case 'lore':
-            embed.setColor(COLORS.RARE).setTitle('📜 Lore Fragment Recovered');
-            lines.push(`*You find words someone meant to be found:*`, '', `> ${result.lore.text}`);
-            break;
-        case 'secret':
-            embed.setColor(COLORS.PRIZE).setTitle(`✨ SECRET UNCOVERED — ${result.secret.name}`);
-            lines.push(`*${result.secret.reveal}*`);
-            break;
-        case 'treasure': {
-            const tier = result.treasureTier;
-            embed.setColor(TIER_COLORS[tier.tier] ?? region.color)
-                .setTitle(`🪙 Treasure — ${tier.tier.charAt(0).toUpperCase() + tier.tier.slice(1)} ${tier.stars}`);
-            lines.push(`*${result.treasureLine}*`);
-            if (result.relic) {
-                const relicHome = !result.relicOwed  // only claim it's in the bag once the grant landed (#873)
-                    ? `> It's in your \`/inventory\` now, and in \`/explore relics\`, where it earns its keep.`
-                    : `> ⚠️ It couldn't be added to your \`/inventory\` just now${result.relicOwed === 'owed' ? " and has been recorded as owed — it'll appear once the problem clears. Tell an admin if it doesn't." : ' or recorded — please contact a server admin.'}`;
-                lines.push('', `🏺 **Relic recovered: ${result.relic.itemId}**${result.relicIsNew ? ' — *new to your case*' : ''}`, `> *${result.relic.lore}*`, relicHome);
-            }
-            if (result.material) {
-                lines.push(
-                    '',
-                    `${result.material.emoji} **Fieldcraft: ${result.material.label}** — ${TIER_STARS[result.material.tier]}`,
-                    `> Packed away with the rest of your kit. \`/inventory\` has it under **Explore**, and a companion will eat it.`,
-                );
-            }
-            break;
-        }
-        case 'trap':
-            embed.setColor('#b5651d').setTitle(`🪤 Trap — ${result.trap.name}`);
-            lines.push(`*${result.trap.line}*`);
-            if (result.injured) lines.push('', `🤕 *${randomFrom(INJURY_LINES)}* (10 min)`);
-            break;
-        case 'encounter': {
-            const enc = result.encounter;
-            if (result.outcome === 'win') {
-                embed.setColor(COLORS.SUCCESS).setTitle(`${enc.emoji} ${enc.name} — Well Played`);
-                lines.push(`*${enc.winLine}*`);
-            } else if (result.outcome === 'safe') {
-                embed.setColor(region.color).setTitle(`${enc.emoji} ${enc.name} — Watched From the Ferns`);
-                lines.push(`*${enc.safeLine}*`);
-            } else {
-                embed.setColor('#CC4400').setTitle(`${enc.emoji} ${enc.name} — That Went Differently`);
-                lines.push(`*${enc.loseLine}*`);
-                if (result.injured) lines.push('', `🤕 *${randomFrom(INJURY_LINES)}* (10 min)`);
-            }
-            break;
-        }
-        default:
-            embed.setColor(COLORS.NEUTRAL).setTitle('🌫️ A Quiet Expedition');
-            lines.push(`*${result.quietLine}*`);
-            break;
-    }
-
-    if (firstVisit) {
-        lines.push('', `🗺️ **New region charted: ${region.emoji} ${region.name}** — it has a place on your map now. So do its blank spaces.`);
-    }
-
-    if (result.regionCompleted) {
-        lines.push(
-            '',
-            `🏅 **${region.emoji} ${region.name} — fully surveyed.**`,
-            `Every landmark, every fragment, every secret. There is nothing left in this region that you haven't stood in front of.`,
-            `Everything it pays you from here carries a standing **+${Math.round(result.surveyBonus * 100)}%**. The map keeps its debts.`,
-        );
-    }
-
-    const petLine = petCompanionLine(user?.pets, 'explore');
-    if (petLine) lines.push('', petLine);
-
-    embed.setDescription(lines.join('\n'));
-
-    const gains = [];
-    if (result.payout > 0) {
-        gains.push(`+${currency}${result.payout.toLocaleString()}`);
-    } else if (result.cappedByDailyCap && result.grossPayout > 0) {
-        // Don't render a legendary haul with a blank coin line and no reason.
-        gains.push(`~~+${currency}${result.grossPayout.toLocaleString()}~~ *(daily cap)*`);
-    }
-    if (result.payout > 0 && result.cappedByDailyCap) {
-        gains.push(`*(trimmed from ${currency}${result.grossPayout.toLocaleString()} — daily cap)*`);
-    }
-    if (result.penalty > 0) gains.push(`−${currency}${result.penalty.toLocaleString()}`);
-    if (result.xp > 0)      gains.push(`+${result.xp} Explorer XP${result.petXp > 0 ? ` *(🦉 +${result.petXp})*` : ''}`);
-    if (mainXp > 0)         gains.push(`+${mainXp} XP`);
-    if (eventDrop) {
-        const def = Object.values(SEASONAL_EVENTS).find(s => s.currency?.id === eventDrop.currencyId);
-        const dropLabel = `${eventDrop.amount} ${def?.currency?.emoji ?? '🎟️'} ${def?.currency?.name ?? eventDrop.currencyId}`;
-        // Only announce the drop as gained once the credit landed (#873, pass 13).
-        if (!eventDrop.owed) gains.push(`+${dropLabel}`);
-        else gains.push(`~~+${dropLabel}~~ *(${eventDrop.owed === 'owed' ? 'owed' : 'not delivered'})*`);
-    }
-    if (gains.length) embed.addFields({ name: '🎒 The Haul', value: gains.join('  ·  '), inline: false });
-
-    // Crossing an explorer level is the only thing that opens new regions, so it
-    // gets said out loud — and if the new level actually put one within reach,
-    // it gets named. Seasonal regions are left out: the calendar gates those,
-    // not the level, so promising one here would be a promise about the weather.
-    if (result.explorerLevelUp) {
-        const lift = result.explorerLevelUp;
-        const liftLines = [`Explorer Level **${lift.oldLevel}** → **${lift.newLevel}** — *${lift.newTitle}*`];
-        const opened = REGION_LIST.filter(r =>
-            !r.seasonalEventId
-            && isRegionEnabled(r, guildSettings)
-            && r.unlockLevel > lift.oldLevel
-            && r.unlockLevel <= lift.newLevel);
-        for (const opening of opened) {
-            liftLines.push(
-                `🔓 **${opening.emoji} ${opening.name}** is within reach — `
-                + `\`/explore travel\` opens the route for ${currency}${opening.unlockCost.toLocaleString()}.`
-            );
-        }
-        embed.addFields({ name: '⬆️ Level Up!', value: liftLines.join('\n'), inline: false });
-    }
-
-    if (result.hardCapped) {
-        embed.addFields({
-            name: '🧾 Daily Cap Reached',
-            value: `You've banked ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()} from exploring in the last 24 hours, which is where the coins stop. `
-                 + `Expeditions still chart the map and still pay Explorer XP — the wilds just stop paying cash until the window rolls over.`,
-            inline: false,
-        });
-    } else if (result.softCapped) {
-        embed.addFields({
-            name: '🧾 Past the Soft Cap',
-            value: `You're over ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()} for the last 24 hours, so hauls settle at `
-                 + `**${Math.round(LIMITS.DAILY_SOFT_CAP_RATE * 100)}%** from here — down to ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()}, `
-                 + `where they stop entirely. Charting and Explorer XP are untouched.`,
-            inline: false,
-        });
-    }
-
-    // Standing bonuses, shown once they're actually doing something
-    const boosts = [];
-    if (result.featured) boosts.push(`🌟 Featured region +${Math.round(FEATURED_PAYOUT_BONUS * 100)}%`);
-    if (result.surveyed) boosts.push(`🏅 Fully surveyed +${Math.round(LIMITS.SURVEY_BONUS * 100)}%`);
-    const relicBonus = getRelicBonus(user);
-    if (relicBonus > 0) boosts.push(`🏺 Relic case +${Math.round(relicBonus * 100)}%`);
-    if (boosts.length) {
-        embed.addFields({ name: '📈 Standing Bonuses', value: boosts.join('  ·  '), inline: false });
-    }
-
-    // Pity curve — only on runs that didn't turn up the secret
-    if (result.type !== 'secret') {
-        const pityField = buildSecretPityField(user, region, guildSettings);
-        if (pityField) embed.addFields(pityField);
-    }
-
-    const staminaNote = result.staminaSpared ? ' *(a blank walk costs no stamina)*' : '';
-    const leaderNote = weeklyLeader
-        ? `👑 Explorer of the Week so far: ${weeklyLeader.username} — ${currency}${(weeklyLeader.total ?? 0).toLocaleString()} recovered`
-        : randomFrom(FOOTER_LINES);
-    embed.setFooter({ text: `⚡ ${e.stamina}/${getMaxStamina(user)} stamina${staminaNote} · ${nextExpeditionNote(user)} · ${leaderNote}` });
-    return embed;
-}
-
-/**
- * When they can set out again — every other detail of the run is on the embed
- * except the one thing that decides what they do next. Whichever gate is further
- * out wins: an injury outlasts the cooldown by minutes, and quoting the cooldown
- * while a trap has them sitting down would be a lie with a countdown on it.
- */
-function nextExpeditionNote(user) {
-    const e = user.exploration;
-    const now = Date.now();
-    const cooldownLeft = e.lastExplore ? (e.lastExplore.getTime() + LIMITS.EXPLORE_COOLDOWN_MS) - now : 0;
-    const injuryLeft   = e.injuryUntil ? e.injuryUntil.getTime() - now : 0;
-
-    if (injuryLeft > cooldownLeft && injuryLeft > 0) return `🤕 walking again in ${formatMs(injuryLeft)}`;
-    if (e.stamina <= 0) {
-        const staminaLeft = msUntilNextStamina(user);
-        if (staminaLeft > cooldownLeft) return `😮‍💨 stamina back in ${formatMs(staminaLeft)}`;
-    }
-    if (cooldownLeft > 0) return `🥾 ready in ${formatMs(cooldownLeft)}`;
-    return '🥾 ready now';
 }
 
 module.exports = {

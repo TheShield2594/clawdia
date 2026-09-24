@@ -99,6 +99,13 @@ describe('the index', () => {
             expect(everything).not.toContain(secret.name);
             expect(everything).not.toContain(secret.reveal);
         }
+        // Anomalies are found the same way, once a region is charted.
+        const anomalies = Object.values(REGIONS).flatMap(region => region.anomalies || []);
+        expect(anomalies.length).toBeGreaterThan(0);
+        for (const anomaly of anomalies) {
+            expect(everything).not.toContain(anomaly.name);
+            expect(everything).not.toContain(anomaly.line);
+        }
     });
 });
 
