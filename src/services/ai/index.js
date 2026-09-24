@@ -1,4 +1,4 @@
-const { DEFAULT_CONFIRM_MODE, DEFAULT_MCP_ROUTE } = require('../../config/mcpServers');
+const { DEFAULT_CONFIRM_MODE, DEFAULT_MCP_ROUTE, DEFAULT_MCP_APPROVER, forGuild, ownerOf } = require('../../config/mcpServers');
 const { providers, getProvider, DEFAULT_MODELS, supportsStructured } = require('./providers');
 const { recordUsage } = require('./usage');
 const { enforceRateLimit, toolCallBudget } = require('./rateLimit');
@@ -25,6 +25,12 @@ const { requestModelJson, DEFAULT_TOKEN_BUDGETS } = require('../../utils/modelJs
  * the call fails at the provider, where the error can say which key is missing.
  *
  * @param {object} aiSettings a guild's `ai` settings subdocument
+ * @param {object} [options]
+ * @param {string} [options.guildId] the guild those settings belong to. The
+ *   MCP server list is bound to it (#1139): an OAuth connection authenticates
+ *   as this guild's grant and nobody else's, and a config-file server scoped to
+ *   named guilds is only offered to them. Without it the list resolves with no
+ *   OAuth grants and none of the scoped servers
  * @returns {{provider: string, model: string, temperature: number,
  *   maxTokens: number, contextTokens: ?number, apiKey: ?string,
  *   baseUrl: ?string, mcpServers: object[], mcpConfirm: string,
@@ -33,7 +39,7 @@ const { requestModelJson, DEFAULT_TOKEN_BUDGETS } = require('../../utils/modelJs
  *   `contextTokens` is null when the guild has not overridden it, meaning
  *   "take the window from the table in budget.js"
  */
-function resolveProviderConfig(aiSettings) {
+function resolveProviderConfig(aiSettings, { guildId } = {}) {
     const providerName = aiSettings.provider || 'openai';
     const model = aiSettings.model || DEFAULT_MODELS[providerName];
     const temperature = aiSettings.temperature ?? 0.7;
@@ -50,7 +56,7 @@ function resolveProviderConfig(aiSettings) {
 
     // Carried through so every caller that spreads this config keeps the
     // guild's MCP servers attached without having to know they exist.
-    const mcpServers = Array.isArray(aiSettings.mcpServers) ? aiSettings.mcpServers : [];
+    const mcpServers = forGuild(guildId, Array.isArray(aiSettings.mcpServers) ? aiSettings.mcpServers : []);
     // Which of those servers' tools need a person to approve them. Rides along
     // for the same reason: a transport that can ask should not have to know the
     // setting exists, only how to answer when the toolkit asks it to.
@@ -58,6 +64,9 @@ function resolveProviderConfig(aiSettings) {
     // Only Anthropic reads this — it is the one provider with two ways to reach
     // a server — but it rides along with the rest so no caller has to know that.
     const mcpRoute = aiSettings.mcpRoute || DEFAULT_MCP_ROUTE;
+    // Who may approve a call that is waiting on a person (#1143). Read by the
+    // Discord transports that build the approval prompt.
+    const mcpApprover = aiSettings.mcpApprover || DEFAULT_MCP_APPROVER;
 
     // Same idea for the guild's AI limits: they ride along with the config so
     // getCompletion/streamCompletion can enforce them centrally, instead of
@@ -85,6 +94,7 @@ function resolveProviderConfig(aiSettings) {
         mcpServers,
         mcpConfirm,
         mcpRoute,
+        mcpApprover,
         rateLimit
     };
 }
@@ -123,7 +133,21 @@ function streamCompletion({ userId, channelId, rateLimit, ...args }) {
     return streamProvider({ ...args, toolBudget: toolCallBudget({ guildId: args.guildId, userId, rateLimit }) });
 }
 
+/**
+ * The request's MCP server list, bound to the guild the request is for (#1139).
+ *
+ * `resolveProviderConfig` binds it already when it is told the guild; this is
+ * the net under the callers that spread a config resolved without one. A list
+ * that already has an owner keeps it — the guild whose settings it was read
+ * from is the one that decides whose grants it may use.
+ */
+function ownedServers(mcpServers, guildId) {
+    if (!Array.isArray(mcpServers) || ownerOf(mcpServers) || !guildId) return mcpServers;
+    return forGuild(guildId, mcpServers);
+}
+
 async function* streamProvider({ provider, guildId, mcp = true, usageOut, ...req }) {
+    req.mcpServers = ownedServers(req.mcpServers, guildId);
     yield* getProvider(provider).stream({ ...req, usageOut, useMcp: mcp });
     if (guildId && usageOut?.usage) {
         recordUsage(guildId, provider, req.model, usageOut.usage).catch(err =>
@@ -150,6 +174,7 @@ async function getCompletion({ provider, guildId, mcp = true, userId, channelId,
     enforceRateLimit({ guildId, userId, channelId, rateLimit });
     const result = await getProvider(provider).complete({
         ...req,
+        mcpServers: ownedServers(req.mcpServers, guildId),
         useMcp: mcp,
         toolBudget: toolCallBudget({ guildId, userId, rateLimit })
     });

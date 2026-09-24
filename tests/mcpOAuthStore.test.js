@@ -56,9 +56,9 @@ function storedGrant(over = {}) {
 }
 
 /** `Guild.findOne(...).lean()` resolving to a guild holding this grant. */
-function stubRead(oauth) {
+function stubRead(oauth, url = 'https://mcp.example.com/mcp') {
     Guild.findOne.mockReturnValue({
-        lean: async () => (oauth === null ? null : { ai: { mcpServers: [{ name: 'linear', oauth }] } }),
+        lean: async () => (oauth === null ? null : { ai: { mcpServers: [{ name: 'linear', url, oauth }] } }),
     });
 }
 
@@ -183,6 +183,29 @@ describe('handing out an access token', () => {
         // is more useful than one invented here.
         await expect(accessTokenFor('g1', 'linear')).resolves.toBe('at1');
         expect(refreshTokens).not.toHaveBeenCalled();
+    });
+});
+
+// #1139. A grant is for the server its own entry points at. A caller holding
+// the right guild and name but dialling somewhere else gets nothing — from the
+// database or from the memo.
+describe('the URL the token is for', () => {
+    test('is handed over when the caller dials the grant\'s own server', async () => {
+        stubRead(storedGrant());
+        await expect(accessTokenFor('g1', 'linear', { url: 'https://mcp.example.com/mcp' })).resolves.toBe('at1');
+    });
+
+    test('is refused for any other URL', async () => {
+        stubRead(storedGrant());
+        await expect(accessTokenFor('g1', 'linear', { url: 'https://attacker.example.com/mcp' })).resolves.toBeNull();
+        expect(refreshTokens).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('does not point at'));
+    });
+
+    test('and a memoized token is not a way around that', async () => {
+        stubRead(storedGrant());
+        await expect(accessTokenFor('g1', 'linear', { url: 'https://mcp.example.com/mcp' })).resolves.toBe('at1');
+        await expect(accessTokenFor('g1', 'linear', { url: 'https://attacker.example.com/mcp' })).resolves.toBeNull();
     });
 });
 

@@ -43,7 +43,7 @@ function mcpEl(id) { return document.getElementById(id); }
 // for MCP rather than posting the markup defaults over what is stored.
 function mcpSaveState() {
     return _mcpHydrated
-        ? { confirm: mcpEl('mcp-confirm').value, route: mcpEl('mcp-route').value }
+        ? { confirm: mcpEl('mcp-confirm').value, route: mcpEl('mcp-route').value, approver: mcpEl('mcp-approver').value }
         : null;
 }
 registerPayloadSources({ mcpSettings: () => mcpSaveState });
@@ -63,10 +63,11 @@ async function loadMcpServers(force) {
         _mcpProviderSupport = data.providerSupport || {};
         if (mcpEl('mcp-confirm') && data.confirmMode) mcpEl('mcp-confirm').value = data.confirmMode;
         if (mcpEl('mcp-route') && data.mcpRoute) mcpEl('mcp-route').value = data.mcpRoute;
+        if (mcpEl('mcp-approver') && data.approver) mcpEl('mcp-approver').value = data.approver;
         _mcpEffectiveRoute = data.effectiveRoute || null;
         // Set only on the success path: a load that failed leaves the controls
         // showing defaults that are not the guild's.
-        _mcpHydrated = Boolean(mcpEl('mcp-confirm') && mcpEl('mcp-route'));
+        _mcpHydrated = Boolean(mcpEl('mcp-confirm') && mcpEl('mcp-route') && mcpEl('mcp-approver'));
         renderMcpPresets();
         renderMcpServers(data.provider);
         loadMcpUsage();

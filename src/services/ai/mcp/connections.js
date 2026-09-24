@@ -144,7 +144,12 @@ function mcpClientFor(server, { onNotification = null, elicitation = false, samp
         // loaded by the config layer the model's own schema sits under. A static
         // token connection never touches it.
         getAccessToken: grant
-            ? ({ force }) => require('./oauthStore').accessTokenFor(grant.guildId, grant.server, { force })
+            ? ({ force }) => require('./oauthStore').accessTokenFor(grant.guildId, grant.server, {
+                force,
+                // The URL this client dials, so the store can refuse a grant
+                // whose connection points somewhere else (#1139).
+                url: server.connection.url
+            })
             : null
     });
 }

@@ -6,7 +6,7 @@ const { shopImageId } = require('../../../models/itemImageKeys');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { validateBaseUrl: validateOllamaBaseUrl } = require('../../../services/ai/providers/ollama');
-const { CONFIRM_MODES, MCP_ROUTES } = require('../../../config/mcpServers');
+const { CONFIRM_MODES, MCP_ROUTES, MCP_APPROVERS } = require('../../../config/mcpServers');
 const { isValidSlug } = require('../../lib/publicData');
 const { describeSensitivePermissions } = require('../../../utils/sensitiveRolePermissions');
 
@@ -360,8 +360,33 @@ function validateContextTokens(value) {
     return null;
 }
 
+// Same reasoning again for who may approve a waiting tool call (#1143).
+function validateMcpApprover(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string' || !MCP_APPROVERS.includes(value)) {
+        return `ai.mcpApprover must be one of: ${MCP_APPROVERS.join(', ')}`;
+    }
+    return null;
+}
+
+// MCP connections are managed through api/mcpServers.js and the OAuth routes,
+// never through here (#1139). Those routes validate the URL, cap the list,
+// encrypt the token and — the part that matters — never take an `oauth`
+// sub-object from a request: a grant is only ever written by the OAuth
+// callback. A generic write of `ai.mcpServers` skipped all of that, and let a
+// guild admin store an entry claiming another guild's grant.
+function writesMcpServers(key, value) {
+    if (key === 'ai.mcpServers' || key.startsWith('ai.mcpServers.')) return true;
+    return key === 'ai' && value && typeof value === 'object'
+        && Object.prototype.hasOwnProperty.call(value, 'mcpServers');
+}
+
 function validateAiUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
+        if (writesMcpServers(key, value)) {
+            return 'MCP servers are managed from the Connections tab, not through the settings endpoint';
+        }
+
         const isWholeAi = key === 'ai' && value && typeof value === 'object';
 
         let baseUrl;
@@ -379,6 +404,15 @@ function validateAiUpdate(updates) {
 
         if (confirm !== undefined) {
             const error = validateMcpConfirm(confirm);
+            if (error) return error;
+        }
+
+        let approver;
+        if (key === 'ai.mcpApprover') approver = value;
+        else if (isWholeAi) approver = value.mcpApprover;
+
+        if (approver !== undefined) {
+            const error = validateMcpApprover(approver);
             if (error) return error;
         }
 

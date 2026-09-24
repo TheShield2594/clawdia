@@ -153,7 +153,7 @@ There are two ways to add a server, and they stack:
 | | Where | Applies to | Who edits it |
 |---|---|---|---|
 | **Dashboard** | AI → 🔌 Connections | One Discord server | Anyone with Manage Server |
-| **Config file** | `config/mcp-servers.json` | Every Discord server | Whoever runs the bot |
+| **Config file** | `config/mcp-servers.json` | Every Discord server, or the ones its `guilds` list names | Whoever runs the bot |
 
 A dashboard entry with the same name as a file entry replaces it, so a server
 can be defined centrally and pointed at one guild's own credentials.
@@ -317,6 +317,7 @@ file lives outside the repo checkout.
 | `allowed_tools` | No | Allowlist of tool names. Empty means every tool. |
 | `blocked_tools` | No | Denylist of tool names. Wins over `allowed_tools`. |
 | `resources` | No | Set `true` to search this server's resources when somebody asks the AI something and put the relevant ones in the prompt. Off by default. |
+| `guilds` | No | Discord server IDs allowed to use this entry. Left out, every server with AI on gets it; `[]` means none. Set it on any entry whose token can write something, since members of every listed server can have the bot use it. |
 | `default_config` / `configs` | No | The API's raw toolset shape, if you need `defer_loading` or another setting the two lists above don't cover. |
 
 **The config file cannot hold a login.** Its secrets are `${ENV_VAR}`
@@ -355,6 +356,14 @@ host.
 Set `MCP_ALLOW_GUILD_SERVERS=false` in `.env` to make the config file the only
 way in. The Connections tab still lists what is active but refuses to save.
 
+A config-file entry runs on your credentials in every Discord server that turns
+AI on, and any member there can ask for its tools. Give an entry that can write
+something a `guilds` list so it only reaches the servers you meant.
+
+Dashboard tokens are encrypted at rest when `SECRET_ENCRYPTION_KEY` is set, the
+same as provider keys. Migration 027 encrypts the ones already stored, and
+`npm run secrets:encrypt` does the same on demand.
+
 #### Checking it works
 
 ```text
@@ -389,9 +398,12 @@ malformed config disables the connector, it never stops the bot from starting.
   straight away. `destructive` and `writes` both read the annotations a server
   publishes about its own tools; they differ over a tool that publishes none,
   which `destructive` lets through and `writes` asks about. `always` asks about
-  every call, reads included. A prompt can be answered by whoever asked or by
-  anyone with Manage Server, and expires unanswered after a minute — which means
-  the tool does not run.
+  every call, reads included. By default a prompt can be answered by whoever
+  asked or by anyone with Manage Server; set **Who can click Run it** to
+  *Only members who can manage this server* when a connection holds credentials
+  ordinary members should not use on their own say-so. The person who asked can
+  still cancel. A prompt expires unanswered after a minute, and the tool then
+  does not run.
 - **Questions from a server** are the same idea in reverse. A tool that gets
   halfway and needs one more fact — which environment, which of your three
   organisations — can ask, and the question appears in the channel with an

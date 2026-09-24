@@ -111,23 +111,27 @@ function invalidate(key) {
     tokenMemo.delete(key);
 }
 
-function memoGet(key) {
+// The memo remembers which URL the grant's entry pointed at when it was read,
+// so a caller asking on behalf of a different URL is not answered from memory
+// with a token the database would have refused it (#1139).
+function memoGet(key, url) {
     const entry = tokenMemo.get(key);
     if (!entry) return null;
     if (entry.until <= Date.now()) {
         tokenMemo.delete(key);
         return null;
     }
+    if (url !== undefined && entry.url !== url) return null;
     return entry.token;
 }
 
-function memoSet(key, token, expiresAt, epoch) {
+function memoSet(key, token, expiresAt, epoch, url) {
     const at = expiryMs(expiresAt);
     if (!token || at === null) return;
     if (epoch !== undefined && epoch !== epochOf(key)) return;
     const until = at - MEMO_SKEW_MS;
     if (until <= Date.now()) return;
-    tokenMemo.set(key, { token, until });
+    tokenMemo.set(key, { token, until, url });
 }
 
 /** The stored grant with its secrets decrypted, or null. */
@@ -240,7 +244,7 @@ async function storeRefreshed(guildId, server, previousRefreshToken, grant) {
  * re-read from the database rather than refreshed again — presenting a rotated
  * refresh token a second time is what gets the whole grant revoked.
  */
-async function refreshGrant(guildId, server, grant, { encryptedRefreshToken }) {
+async function refreshGrant(guildId, server, grant, { encryptedRefreshToken, url }) {
     const key = keyOf(guildId, server);
     const existing = inFlight.get(key);
     if (existing) return existing;
@@ -269,7 +273,7 @@ async function refreshGrant(guildId, server, grant, { encryptedRefreshToken }) {
 
         const stored = await storeRefreshed(guildId, server, encryptedRefreshToken, updated);
         if (stored) {
-            memoSet(key, updated.accessToken, updated.expiresAt, refreshEpoch);
+            memoSet(key, updated.accessToken, updated.expiresAt, refreshEpoch, url);
             return updated;
         }
 
@@ -277,7 +281,7 @@ async function refreshGrant(guildId, server, grant, { encryptedRefreshToken }) {
         // definition, so it is the one to use.
         const other = await readGrant(guildId, server);
         const winner = other?.accessToken ? other : updated;
-        memoSet(key, winner.accessToken, winner.expiresAt, refreshEpoch);
+        memoSet(key, winner.accessToken, winner.expiresAt, refreshEpoch, url);
         return winner;
     })().finally(() => inFlight.delete(key));
 
@@ -299,7 +303,15 @@ async function refreshGrant(guildId, server, grant, { encryptedRefreshToken }) {
  * it still works, and the request then fails with the server's own message the
  * way it did before any of this existed.
  */
-async function accessTokenFor(guildId, server, { force = false } = {}) {
+/*
+ * `url` is where the caller is about to send the token. When it is given, the
+ * token is only handed over if the grant's own entry points at that same URL
+ * (#1139): a grant was issued for one server, and a caller holding the right
+ * guild and server name but a different address is either a stale connection
+ * or somebody trying to have the token delivered to them. Either way the
+ * answer is no token.
+ */
+async function accessTokenFor(guildId, server, { force = false, url } = {}) {
     if (!guildId || !server) return null;
 
     const key = keyOf(guildId, server);
@@ -308,7 +320,7 @@ async function accessTokenFor(guildId, server, { force = false } = {}) {
         // given, which may well be what is memoized.
         invalidate(key);
     } else {
-        const memoized = memoGet(key);
+        const memoized = memoGet(key, url);
         if (memoized) return memoized;
     }
 
@@ -321,12 +333,24 @@ async function accessTokenFor(guildId, server, { force = false } = {}) {
         { 'ai.mcpServers.$': 1 },
     ).lean();
 
-    const stored = doc?.ai?.mcpServers?.[0]?.oauth;
+    const entry = doc?.ai?.mcpServers?.[0];
+    if (url !== undefined && entry?.url !== url) {
+        if (entry?.oauth) {
+            console.warn(`[MCP] refused the OAuth grant for "${server}" in ${guildId}: requested for a URL its connection does not point at`);
+        }
+        return null;
+    }
+
+    const stored = entry?.oauth;
     const grant = openGrant(stored);
     if (!grant?.accessToken && !grant?.refreshToken) return null;
 
+    // The token store holds the refresh too, so the entry's URL is recorded
+    // with every memo it writes below — including the one a refresh writes.
+    const entryUrl = entry?.url;
+
     if (!force && grant.accessToken && !needsRefresh(grant.expiresAt)) {
-        memoSet(key, grant.accessToken, grant.expiresAt, epoch);
+        memoSet(key, grant.accessToken, grant.expiresAt, epoch, entryUrl);
         return grant.accessToken;
     }
     if (!grant.refreshToken) {
@@ -338,6 +362,7 @@ async function accessTokenFor(guildId, server, { force = false } = {}) {
     try {
         const refreshed = await refreshGrant(guildId, server, grant, {
             encryptedRefreshToken: stored.refreshToken,
+            url: entryUrl,
         });
         return refreshed.accessToken;
     } catch (err) {

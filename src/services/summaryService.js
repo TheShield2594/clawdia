@@ -59,7 +59,7 @@ async function runSummaryJob(job, client) {
     const guildSettings = await Guild.findOne({ guildId: job.guildId });
     if (!guildSettings?.ai?.enabled) return false;
 
-    const config = resolveProviderConfig(guildSettings.ai);
+    const config = resolveProviderConfig(guildSettings.ai, { guildId: guildSettings.guildId });
     // No userId/channelId: this is a scheduled job, not a request. The guild's
     // per-user AI limit has no user to bill it to, and bounding a digest by a
     // per-channel window would silently drop the run the guild configured.
@@ -162,7 +162,7 @@ async function runDailyDigest(guildSettings, client) {
     const transcript = lines.join('\n').slice(-MAX_TRANSCRIPT_CHARS);
     const persona = guildSettings.ai?.systemPrompt || 'You are a helpful Discord bot assistant.';
 
-    const config = resolveProviderConfig(guildSettings.ai);
+    const config = resolveProviderConfig(guildSettings.ai, { guildId: guildSettings.guildId });
     // No userId/channelId: this is a scheduled job, not a request. The guild's
     // per-user AI limit has no user to bill it to, and bounding a digest by a
     // per-channel window would silently drop the run the guild configured.

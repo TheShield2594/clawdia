@@ -125,6 +125,39 @@ describe('who may answer', () => {
     });
 });
 
+// #1143. A guild whose connections hold an admin's credentials can take the
+// asker's own approval away, so a member cannot both ask for a write and wave
+// it through.
+describe('who may answer, when only managers approve', () => {
+    const filterFor = async () => {
+        const { message, prompt } = fakeMessage();
+        prompt.awaitMessageComponent.mockResolvedValue(click(APPROVE));
+        await createToolConfirmer(message, { approver: 'managers' })(CALL);
+        return prompt.awaitMessageComponent.mock.calls[0][0].filter;
+    };
+
+    test('not the person who asked, and they are told why', async () => {
+        const own = click(APPROVE, { userId: 'asker' });
+        expect((await filterFor())(own)).toBe(false);
+        expect(own.reply).toHaveBeenCalledWith(expect.objectContaining({
+            content: expect.stringContaining('manage this server'),
+        }));
+    });
+
+    test('though they can still withdraw it', async () => {
+        expect((await filterFor())(click(DENY, { userId: 'asker' }))).toBe(true);
+    });
+
+    test('anyone who can manage the server', async () => {
+        expect((await filterFor())(click(APPROVE, { userId: 'mod', manageGuild: true }))).toBe(true);
+    });
+
+    test('nobody else, for either button', async () => {
+        expect((await filterFor())(click(APPROVE, { userId: 'passer-by' }))).toBe(false);
+        expect((await filterFor())(click(DENY, { userId: 'passer-by' }))).toBe(false);
+    });
+});
+
 describe('what the prompt says', () => {
     const promptFor = async (call, message) => {
         const fake = message || fakeMessage();

@@ -14,8 +14,11 @@ const {
     getMcpServers,
     resolveMcpServers,
     usesOAuth,
-    buildAnthropicMcpParams
+    buildAnthropicMcpParams,
+    forGuild,
+    ownerOf
 } = require('../src/config/mcpServers');
+const { encryptSecret, _resetSecretBox } = require('../src/config/secretBox');
 
 let tmpDir;
 const originalEnv = process.env.MCP_SERVERS_CONFIG;
@@ -368,11 +371,11 @@ describe('an OAuth connection', () => {
     });
 
     test('carries the identity of the grant and none of its secrets', () => {
-        const [resolved] = resolveMcpServers([
+        const [resolved] = resolveMcpServers(forGuild('g1', [
             { name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant },
-        ]);
+        ]));
 
-        expect(resolved.connection.oauth).toEqual({ guildId: 'g1', server: 'linear' });
+        expect(resolved.connection.oauth).toEqual({ guildId: 'g1', server: 'linear', url: 'https://mcp.example.com/mcp' });
         expect(JSON.stringify(resolved)).not.toContain('enc:at');
         expect(JSON.stringify(resolved)).not.toContain('enc:rt');
     });
@@ -409,28 +412,79 @@ describe('an OAuth connection', () => {
     // flow clears the static token. Filtering here is what makes that
     // fall-through safe wherever it happens.
     test('is never handed to Anthropic\'s connector', () => {
-        const params = buildAnthropicMcpParams([
+        const params = buildAnthropicMcpParams(forGuild('g1', [
             { name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant },
             { name: 'github', url: 'https://api.githubcopilot.com/mcp/', authorizationToken: 'ghp_x' },
-        ]);
+        ]));
 
         expect(params.mcp_servers.map(s => s.name)).toEqual(['github']);
         expect(params.tools.map(t => t.mcp_server_name)).toEqual(['github']);
     });
 
     test('and a guild with nothing but OAuth connections sends the connector nothing', () => {
-        expect(buildAnthropicMcpParams([
+        expect(buildAnthropicMcpParams(forGuild('g1', [
             { name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant },
-        ])).toBeNull();
+        ]))).toBeNull();
     });
 
     test('forces the Anthropic client route, which the connector cannot refresh for', () => {
-        const withGrant = [{ name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant }];
+        const withGrant = forGuild('g1', [{ name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant }]);
         const withToken = [{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', authorizationToken: 'x' }];
 
         expect(usesOAuth(withGrant)).toBe(true);
         expect(usesOAuth(withToken)).toBe(false);
         expect(usesOAuth([])).toBe(false);
+    });
+
+    // #1139. The grant is looked up by guild and server name, and the token is
+    // sent to the entry's URL — so the guild has to be the one whose document
+    // the list came from, never a value written on the entry.
+    describe('is bound to the guild that owns the list', () => {
+        const foreign = { ...grant, guildId: 'victim' };
+
+        test('an entry naming another guild gets no grant, whatever URL it points at', () => {
+            const [resolved] = resolveMcpServers(forGuild('attacker', [
+                { name: 'linear', url: 'https://attacker.example.com/mcp', oauth: foreign },
+            ]));
+            expect(resolved.connection.oauth).toBeNull();
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('names another guild'));
+        });
+
+        test('the owner passed explicitly wins the same way', () => {
+            const [resolved] = resolveMcpServers(
+                [{ name: 'linear', url: 'https://attacker.example.com/mcp', oauth: foreign }],
+                { guildId: 'attacker' },
+            );
+            expect(resolved.connection.oauth).toBeNull();
+        });
+
+        test('a list with no owner gets no grant at all', () => {
+            const [resolved] = resolveMcpServers([
+                { name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant },
+            ]);
+            expect(resolved.connection.oauth).toBeNull();
+        });
+
+        test('a grant with no guild recorded is the owner\'s', () => {
+            const { guildId: _g, ...unnamed } = grant;
+            const [resolved] = resolveMcpServers(forGuild('g1', [
+                { name: 'linear', url: 'https://mcp.example.com/mcp', oauth: unnamed },
+            ]));
+            expect(resolved.connection.oauth).toMatchObject({ guildId: 'g1', server: 'linear' });
+        });
+
+        test('an unusable grant still keeps the server off Anthropic\'s connector', () => {
+            const servers = [{ name: 'linear', url: 'https://attacker.example.com/mcp', oauth: foreign }];
+            expect(buildAnthropicMcpParams(forGuild('attacker', servers))).toBeNull();
+            expect(usesOAuth(forGuild('attacker', servers))).toBe(true);
+        });
+
+        test('the owner is not something a list can carry itself', () => {
+            const list = forGuild('g1', [{ name: 'a', url: 'https://a.example.com/mcp' }]);
+            expect(ownerOf(list)).toBe('g1');
+            expect(ownerOf([...list])).toBeNull();
+            expect(ownerOf(JSON.parse(JSON.stringify(list)))).toBeNull();
+        });
     });
 });
 
@@ -466,5 +520,77 @@ describe('the resources opt-in', () => {
 describe('beta flag', () => {
     test('is the current MCP connector version', () => {
         expect(MCP_BETA).toBe('mcp-client-2025-11-20');
+    });
+});
+
+// #1143. The file's credentials are the operator's; `guilds` keeps an entry to
+// the Discord servers it names.
+describe('a config-file server scoped to named guilds', () => {
+    beforeEach(() => {
+        writeConfig({ servers: [
+            { name: 'open', url: 'https://open.example.com/mcp' },
+            { name: 'scoped', url: 'https://scoped.example.com/mcp', guilds: ['g1'] },
+            { name: 'nobody', url: 'https://nobody.example.com/mcp', guilds: [] },
+        ] });
+        load();
+    });
+
+    test('reaches the guilds it names', () => {
+        expect(resolveMcpServers(forGuild('g1', [])).map(s => s.name).sort()).toEqual(['open', 'scoped']);
+    });
+
+    test('and no other', () => {
+        expect(resolveMcpServers(forGuild('g2', [])).map(s => s.name)).toEqual(['open']);
+    });
+
+    test('nor a list whose guild is unknown', () => {
+        expect(resolveMcpServers([]).map(s => s.name)).toEqual(['open']);
+    });
+
+    test('a malformed list skips the entry rather than opening it to everyone', () => {
+        writeConfig({ servers: [{ name: 'bad', url: 'https://bad.example.com/mcp', guilds: 'g1' }] });
+        const result = load();
+        expect(result.servers).toEqual([]);
+        expect(result.warnings.join('\n')).toContain('"guilds" must be an array');
+    });
+});
+
+// #1146. Dashboard tokens are stored encrypted and opened here, the one reader.
+describe('a stored dashboard token', () => {
+    const KEY = 'mcp-token-test-key';
+    let savedKey;
+
+    beforeEach(() => {
+        savedKey = process.env.SECRET_ENCRYPTION_KEY;
+        process.env.SECRET_ENCRYPTION_KEY = KEY;
+        _resetSecretBox();
+        writeConfig({ servers: [] });
+        load();
+    });
+
+    afterEach(() => {
+        if (savedKey === undefined) delete process.env.SECRET_ENCRYPTION_KEY;
+        else process.env.SECRET_ENCRYPTION_KEY = savedKey;
+        _resetSecretBox();
+    });
+
+    test('is sent decrypted', () => {
+        const sealed = encryptSecret('ghp_secret');
+        expect(sealed).not.toBe('ghp_secret');
+        const [resolved] = resolveMcpServers([{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', authorizationToken: sealed }]);
+        expect(resolved.connection.authorizationToken).toBe('ghp_secret');
+        expect(resolved.server.authorization_token).toBe('ghp_secret');
+    });
+
+    test('written before encryption was switched on still works', () => {
+        const [resolved] = resolveMcpServers([{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', authorizationToken: 'ghp_plain' }]);
+        expect(resolved.connection.authorizationToken).toBe('ghp_plain');
+    });
+
+    test('that cannot be opened skips the connection rather than sending ciphertext', () => {
+        const sealed = encryptSecret('ghp_secret');
+        process.env.SECRET_ENCRYPTION_KEY = 'a-different-key';
+        _resetSecretBox();
+        expect(resolveMcpServers([{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', authorizationToken: sealed }])).toEqual([]);
     });
 });

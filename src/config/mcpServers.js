@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { decryptSecret } = require('./secretBox');
 
 // Beta flag the Messages API requires for the MCP connector. The older
 // mcp-client-2025-04-04 flag (tool config nested inside the server definition)
@@ -80,6 +81,48 @@ const FIRST_SERVER_CONFIRM_MODE = 'writes';
  */
 const MCP_ROUTES = ['auto', 'connector', 'client'];
 const DEFAULT_MCP_ROUTE = 'auto';
+
+/**
+ * Who may click "Run it" on a tool call that is waiting for approval (#1143).
+ *
+ *   requester  the member who asked, or anyone with Manage Server (the
+ *              default, and what the bot has always done)
+ *   managers   only members with Manage Server
+ *
+ * `requester` makes approval a "did you mean it" check: it stops a model that
+ * was talked into a call, not a member who wants the call made. A connection
+ * holding an admin's credentials — a GitHub token, a mailbox — is one where
+ * that difference matters, and `managers` is the setting for it.
+ */
+const MCP_APPROVERS = ['requester', 'managers'];
+const DEFAULT_MCP_APPROVER = 'requester';
+
+/**
+ * Which guild a list of stored servers belongs to (#1139).
+ *
+ * An OAuth grant is looked up by guild, and that guild has to be the one whose
+ * document the list came from — never a value read off the list itself, which
+ * is data a guild admin could once write. Threading a guild id through every
+ * layer between the settings read and the MCP client would touch every
+ * provider; the list is already passed through all of them untouched, so the
+ * owner rides on it instead, in a WeakMap rather than on the array so nothing
+ * that serialises or spreads the list can forge or leak it.
+ *
+ * A list with no owner resolves with no OAuth grants and none of the
+ * config-file servers that are scoped to named guilds — the safe reading of
+ * "we do not know whose this is".
+ */
+const owners = new WeakMap();
+
+function forGuild(guildId, servers) {
+    const list = Array.isArray(servers) ? [...servers] : [];
+    if (typeof guildId === 'string' && guildId) owners.set(list, guildId);
+    return list;
+}
+
+function ownerOf(servers) {
+    return (servers && typeof servers === 'object' && owners.get(servers)) || null;
+}
 
 let cache = null;
 
@@ -280,7 +323,7 @@ function isToolDeferred(toolset, toolName) {
 // (the API rejects either half on its own, so they are always built together),
 // and the plain url/token pair the bot's own MCP client dials for every other
 // provider.
-function normalizeServer(raw, { label, source, expandEnv, warnings }) {
+function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId = null }) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         warnings.push(`${label} is not an object — skipping it`);
         return null;
@@ -311,7 +354,20 @@ function normalizeServer(raw, { label, source, expandEnv, warnings }) {
         return null;
     }
 
-    const token = resolveSecret(raw.authorization_token ?? raw.authorizationToken, {
+    // A dashboard token is stored encrypted (#1146); the file's come from the
+    // environment and never are. `decryptSecret` hands back a value written
+    // before encryption was switched on as it is, and null for one it cannot
+    // open — which is a connection with no usable credential, so it is
+    // skipped rather than dialled with ciphertext as its bearer token.
+    let storedToken = raw.authorization_token ?? raw.authorizationToken;
+    if (source === 'guild' && typeof storedToken === 'string' && storedToken) {
+        storedToken = decryptSecret(storedToken);
+        if (storedToken === null) {
+            warnings.push(`${label} ("${name}") authorization_token could not be decrypted — skipping it`);
+            return null;
+        }
+    }
+    const token = resolveSecret(storedToken, {
         expandEnv,
         label: `${label} ("${name}") authorization_token`,
         warnings
@@ -334,9 +390,26 @@ function normalizeServer(raw, { label, source, expandEnv, warnings }) {
     // `${ENV_VAR}` references, which are read-only: a refresh token rotates,
     // and a process cannot write a new one back into its own environment. A
     // config-file server keeps the static token it always had.
-    const grant = source === 'guild' && raw.oauth?.guildId && (raw.oauth.accessToken || raw.oauth.refreshToken)
-        ? { guildId: raw.oauth.guildId, server: name }
-        : null;
+    //
+    // The guild is the one that owns the list (#1139), never `oauth.guildId`
+    // off the entry. The grant is looked up by guild and server name, so an
+    // entry that could name another guild could have that guild's token sent
+    // to whatever URL the entry points at. A stored `oauth.guildId` that
+    // disagrees with the owner is a record nobody's callback wrote, and the
+    // entry is treated as having no grant at all. The URL rides along so the
+    // token store can refuse to hand the token to a URL other than the one the
+    // grant's own entry points at.
+    const hasGrant = source === 'guild' && raw.oauth && (raw.oauth.accessToken || raw.oauth.refreshToken);
+    let grant = null;
+    if (hasGrant) {
+        if (!ownerGuildId) {
+            warnings.push(`${label} ("${name}") has an OAuth grant but no owning guild — not using it`);
+        } else if (raw.oauth.guildId && raw.oauth.guildId !== ownerGuildId) {
+            warnings.push(`${label} ("${name}") has an OAuth grant that names another guild — not using it`);
+        } else {
+            grant = { guildId: ownerGuildId, server: name, url };
+        }
+    }
 
     const server = { type: 'url', url, name };
     if (token) server.authorization_token = token;
@@ -349,11 +422,30 @@ function normalizeServer(raw, { label, source, expandEnv, warnings }) {
     // model has said anything.
     const resources = raw.resources === true || raw.use_resources === true;
 
+    // Config-file servers only: which guilds may use this one (#1143). The
+    // file's credentials are the operator's, and without a list they reach
+    // every guild that turns AI on. Absent means every guild, which is what the
+    // file has always meant; an empty list means none.
+    let guilds = null;
+    if (source === 'file' && raw.guilds !== undefined) {
+        if (!Array.isArray(raw.guilds)) {
+            warnings.push(`${label} ("${name}") "guilds" must be an array of guild ids — skipping it`);
+            return null;
+        }
+        guilds = raw.guilds.filter(id => typeof id === 'string' && id.trim()).map(id => id.trim());
+    }
+
     return {
         name,
         source,
         server,
         resources,
+        // Whether this connection authorizes with OAuth at all, grant usable or
+        // not. A grant refused above still marks a server that has no static
+        // token and cannot work on Anthropic's connector, so the routing below
+        // reads this rather than whether a grant was handed over.
+        oauth: Boolean(hasGrant),
+        ...(guilds ? { guilds } : {}),
         // What src/services/ai/mcp/ connects to when the guild is not on
         // Anthropic. Same url and same token — only the side that opens the
         // socket differs.
@@ -445,8 +537,12 @@ function getMcpServers() {
  * dashboard. A guild entry with the same name as a file entry replaces it, so a
  * server can be defined centrally and pointed at a guild's own credentials.
  */
-function resolveMcpServers(guildServers = []) {
-    const byName = new Map(getMcpServers().map(s => [s.name, s]));
+function resolveMcpServers(guildServers = [], { guildId = ownerOf(guildServers) } = {}) {
+    // A config-file server scoped to named guilds is left out of every other
+    // guild's list, and out of a list whose owner is not known (#1143).
+    const byName = new Map(getMcpServers()
+        .filter(s => !s.guilds || (guildId && s.guilds.includes(guildId)))
+        .map(s => [s.name, s]));
 
     if (guildServersAllowed() && Array.isArray(guildServers)) {
         const warnings = [];
@@ -456,7 +552,8 @@ function resolveMcpServers(guildServers = []) {
                 source: 'guild',
                 // Guild input is untrusted: no environment expansion here.
                 expandEnv: false,
-                warnings
+                warnings,
+                ownerGuildId: guildId
             });
             if (normalized) byName.set(normalized.name, normalized);
         });
@@ -480,7 +577,7 @@ function resolveMcpServers(guildServers = []) {
  * forces the client route for a guild that wants to be asked.
  */
 function usesOAuth(guildServers = []) {
-    return resolveMcpServers(guildServers).some(server => Boolean(server.connection?.oauth));
+    return resolveMcpServers(guildServers).some(server => server.oauth);
 }
 
 /**
@@ -513,7 +610,7 @@ function buildAnthropicMcpParams(guildServers = []) {
     // not be built (the server is down, the grant was revoked) and the caller
     // then falls through to this. Dropping them here is what makes that
     // fall-through safe wherever it happens.
-    const servers = resolveMcpServers(guildServers).filter(server => !server.connection?.oauth);
+    const servers = resolveMcpServers(guildServers).filter(server => !server.oauth);
     if (!servers.length) return null;
     return {
         mcp_servers: servers.map(s => s.server),
@@ -533,6 +630,10 @@ module.exports = {
     FIRST_SERVER_CONFIRM_MODE,
     MCP_ROUTES,
     DEFAULT_MCP_ROUTE,
+    MCP_APPROVERS,
+    DEFAULT_MCP_APPROVER,
+    forGuild,
+    ownerOf,
     guildServersAllowed,
     requiresApproval,
     isToolEnabled,

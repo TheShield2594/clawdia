@@ -61,7 +61,7 @@ async function generateNewspaper(client, guildDoc, preloadedGuild, requester) {
     // Use AI if configured
     if (guildDoc.ai?.enabled) {
         try {
-            const { provider, model, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(guildDoc.ai);
+            const { provider, model, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(guildDoc.ai, { guildId });
             if (apiKey || provider === 'ollama') {
                 const quoteInstruction = includeQuote
                     ? 'End with a witty "Quote of the Week" that you invent yourself based on the server activity.'

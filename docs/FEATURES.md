@@ -154,9 +154,11 @@ model is told the call was refused and answers from what it has.
 
 Tools that write something wait for a person. The **Approval** setting posts
 **Run it** / **Cancel** in the channel for a tool call and does not run it until
-the person who asked, or anyone who can manage the server, says so. Adding a
-first connection turns that on for writes, since connecting a server is not by
-itself consent to unattended ones.
+the person who asked, or anyone who can manage the server, says so. A guild
+can limit that to members who can manage the server. That matters when a
+connection runs on an admin's token, because otherwise any member can ask for a
+call and approve it. Adding a first connection turns approval on for writes,
+since connecting a server is not by itself consent to unattended ones.
 
 It runs the other way too. A tool that gets halfway and needs one more fact can
 ask, and the question appears in the channel as a form to fill in — bounded to
@@ -223,6 +225,8 @@ Config file:
 
 - `${VAR}` values resolve from the environment, so tokens stay out of the file
 - `enabled: false` parks a server without deleting the entry
+- `guilds: ["<server id>", …]` limits an entry to the Discord servers named;
+  without it, every server with AI on can use the file's credentials
 - `MCP_ALLOW_GUILD_SERVERS=false` makes the file the only way in
 - With neither source configured, requests are unchanged
 

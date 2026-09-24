@@ -93,7 +93,7 @@ function refuseTask({ ai, guildId, userId }) {
         return 'Deep task mode is switched off on this server. A server admin can turn it on under **AI → Chat** in the dashboard.';
     }
 
-    const config = resolveProviderConfig(ai);
+    const config = resolveProviderConfig(ai, { guildId });
     if (config.provider !== 'ollama' && !config.apiKey) {
         return `${providers.get(config.provider)?.label || config.provider} is not configured. Add an API key in the dashboard.`;
     }
@@ -157,7 +157,7 @@ function messageShim({ user, member, guild, channel }) {
  */
 async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
     const activity = createToolActivity();
-    const config = resolveProviderConfig(ai);
+    const config = resolveProviderConfig(ai, { guildId: guild?.id });
     const shim = messageShim({ user, member, guild, channel });
 
     const heading = `🧠 <@${user.id}> — working on: ${prompt.length > 180 ? `${prompt.slice(0, 179)}…` : prompt}`;
@@ -213,7 +213,7 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
             turnBudgetMs: TASK_TURN_BUDGET_MS,
             onToolEvent: activity.onEvent,
             mcpConfirm: config.mcpConfirm,
-            confirmTool: createToolConfirmer(shim),
+            confirmTool: createToolConfirmer(shim, { approver: config.mcpApprover }),
             botTools: ai.actionsEnabled ? buildBotTools(shim) : [],
             // Attributed, so the guild's ordinary windows bound this turn as
             // well as the deep-task allowance already spent above.
