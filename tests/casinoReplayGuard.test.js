@@ -37,6 +37,12 @@ jest.mock('../src/models/ActiveLock', () => require('./helpers/fakeActiveLock'))
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
+// The roulette table is drawn on node-canvas, whose encode finishes on libuv's
+// thread pool — outside the fake clock these replays run on. The image is
+// tested on its own in tests/casinoRoulette.test.js.
+jest.mock('../src/games/casino/rouletteTable', () => ({
+    renderRouletteTable: jest.fn(async () => Buffer.from('jpg')),
+}));
 // A replay reads the settings as they are *now*; the first hand read them off
 // its own Guild query. Mocking the cache is what lets a test change them in
 // between, the way an admin does.

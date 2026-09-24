@@ -285,7 +285,8 @@ const LUCKY_SAVE_MAX_BET = 25_000;
 
 // What Lucky Charm and Lucky Streak are worth in each casino game: the chance a
 // losing hand is saved. `charm` and `streak` are each game's own mechanic —
-// a re-spin in slots and roulette, a refund of the stake everywhere else.
+// a re-spin in slots, a tenth of the stake back in roulette (settlement.js),
+// and a refund of the stake everywhere else.
 //
 // Sized per game so that holding both items never takes a game past 99% return
 // under the best strategy the game allows (#873, pass 26). They used to be 20%
@@ -302,7 +303,7 @@ const CASINO_LUCK = Object.freeze({
     keno:        Object.freeze({ charm: 0.05,  streak: 0.05 }),
     cupgame:     Object.freeze({ charm: 0.04,  streak: 0.04 }),
     higherlower: Object.freeze({ charm: 0.02,  streak: 0.02 }),
-    roulette:    Object.freeze({ charm: 0.015, streak: 0 }),
+    roulette:    Object.freeze({ charm: 0.15,  streak: 0 }),
     blackjack:   Object.freeze({ charm: 0,     streak: 0 }),
     poker:       Object.freeze({ charm: 0,     streak: 0 }),
     crash:       Object.freeze({ charm: 0,     streak: 0 }),
