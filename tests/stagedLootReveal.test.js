@@ -159,6 +159,19 @@ describe('the copy tables', () => {
         }
     });
 
+    test('the event tier is named in each grind’s own words, never the internal "EVENT"', async () => {
+        for (const activity of ACTIVITIES) {
+            const label = REVEAL_COPY[activity].eventLabel;
+            expect([activity, typeof label, label.length > 0]).toEqual([activity, 'string', true]);
+
+            const { interaction, edits } = recorder();
+            await stagedLootReveal(interaction, 'event', FINAL, activity);
+            const mid = edits[1].embeds[0].data.description;
+            expect(mid).toContain(`**${label}**`);
+            expect(mid).not.toContain('EVENT');
+        }
+    });
+
     test('each grind’s flavour is its own, which is the only reason for a table', () => {
         // The legendary fanfare title is the one line all three share; every
         // other line differs, so a copy-paste that forgot to change one shows up

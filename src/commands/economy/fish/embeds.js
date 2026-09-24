@@ -34,7 +34,8 @@ function buildCastEmbed(result, user, location, rod, currency, _discordUser) {
                     { name: 'Reward',   value: finalPayout > 0 ? `${currency}${finalPayout}` : 'Nothing', inline: true },
                     { name: 'XP',       value: `+${xpEarned} XP`, inline: true },
                     { name: 'Rod',      value: buildRodLine(rod), inline: true },
-                    { name: 'Stamina',  value: buildStaminaLine(user), inline: true }
+                    { name: 'Stamina',  value: buildStaminaLine(user), inline: true },
+                    { name: 'Balance',  value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                 )
                 .setFooter({ text: buildFooter(user) })
                 .setTimestamp();
@@ -53,7 +54,8 @@ function buildCastEmbed(result, user, location, rod, currency, _discordUser) {
                     { name: 'Reward',   value: `**${currency}${finalPayout.toLocaleString()}**`, inline: true },
                     { name: 'XP',       value: `+${xpEarned} XP`, inline: true },
                     { name: 'Rod',      value: buildRodLine(rod), inline: true },
-                    { name: 'Stamina',  value: buildStaminaLine(user), inline: true }
+                    { name: 'Stamina',  value: buildStaminaLine(user), inline: true },
+                    { name: 'Balance',  value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                 )
                 .setFooter({ text: buildFooter(user) })
                 .setTimestamp();
@@ -68,11 +70,13 @@ function buildCastEmbed(result, user, location, rod, currency, _discordUser) {
         // rarer fact of the two, and the title already announces it as one. Without
         // this a critical event drop rendered crit-gold under a MYTHICAL headline.
         const color = tier === 'event' ? TIER_COLORS.event : isCrit ? '#FFD700' : TIER_COLORS[tier];
-        const tierLabel  = tier.charAt(0).toUpperCase() + tier.slice(1);
+        // The event tier is presented as Mythical everywhere a player sees it —
+        // the title, the staged reveal and the server announcement all say so.
+        const tierLabel  = tier === 'event' ? 'Mythical' : tier.charAt(0).toUpperCase() + tier.slice(1);
         const weightStr  = result.weightLbs > 0 ? ` (${result.weightLbs} lbs)` : '';
         const sizeStr    = sizeLabel ? ` [${sizeLabel}${weightStr}]` : '';
         const payDisplay = cappedByHard
-            ? `~~${currency}${finalPayout}~~ (daily cap)`
+            ? 'Nothing *(daily cap reached)*'
             : `**${currency}${finalPayout.toLocaleString()}**`;
 
         const isLegendary = tier === 'legendary';
@@ -251,7 +255,7 @@ function buildLevelUpLine(levelUp) {
 
 function buildFooter(user) {
     const f = user.fishing;
-    const parts = [`Cooldown: 45s`];
+    const parts = [`Cooldown: ${formatMs(LIMITS.CAST_COOLDOWN_MS)}`];
     if (f.activeBait)  parts.push(`Bait (${f.activeBaitCastsLeft} casts left)`);
     if (f.activeLuck)  parts.push(`Luck (queued)`);
     if (f.activeXpScroll) parts.push(`XP Scroll (queued)`);

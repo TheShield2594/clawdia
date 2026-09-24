@@ -1275,23 +1275,44 @@ function revertEscapedCast(user, snapshot, result) {
 /**
  * A rare (optional) reel-in was missed: downgrade the payout by ~65% to
  * simulate Uncommon yield. Mutates the user and the result in place.
+ *
+ * `snapshot` is the pre-cast snapshotCastRewards reading. executeCast already
+ * recorded the full payout as the best payout (and on the personal-best entry);
+ * both are brought back down to what the player actually received, so the
+ * profile never shows a payout that was never paid.
  */
-function downgradeOptionalMiss(user, result) {
-    const reduction = Math.round(result.finalPayout * 0.65);
+function downgradeOptionalMiss(user, result, snapshot = null) {
+    const f = user.fishing;
+    const fullPayout = result.finalPayout;
+    const reduction  = Math.round(fullPayout * 0.65);
     result.finalPayout        -= reduction;
     result.rawPayout          -= reduction;
     user.balance              -= reduction;
-    user.fishing.totalEarned  -= reduction;
-    user.fishing.dailyCoins   -= reduction;
+    f.totalEarned             -= reduction;
+    f.dailyCoins              -= reduction;
     result.tier = 'uncommon';
+
+    if (reduction > 0 && f.bestPayout === fullPayout) {
+        f.bestPayout = Math.max(snapshot?.bestPayout ?? 0, result.finalPayout);
+    }
+    if (result.isPersonalBest && f.personalBest) {
+        f.personalBest.payout = result.finalPayout;
+    }
+    // A boss fight is rolled off a rare-or-better catch. The player was just
+    // told the catch slipped to Uncommon, so it no longer qualifies.
+    result.bossEncounter = null;
+    user.markModified?.('fishing');
 }
 
 
 /**
  * The post-roll bonus stack: pity counter, pet yield, featured-spot bonus,
- * Wilderness district bonus (clamped to the daily hard cap), and the
- * best-payout stat. Mutates the user and annotates the result with
- * petYieldBonus / featuredSpotBonus / wildernessBonus for the renderer.
+ * Wilderness district bonus, and the best-payout stat. Each bonus stacks on the
+ * payout as it stands after the one before it, and every one of them is clamped
+ * to the headroom left under the daily hard cap — the cap applyPayoutModifiers
+ * enforces on the roll itself, which a bonus added afterwards must not walk
+ * past. Mutates the user and annotates the result with petYieldBonus /
+ * featuredSpotBonus / wildernessBonus for the renderer.
  */
 function applyCastBonuses(user, result, { petFishYieldPct = 0, isFeaturedSpot = false, featuredPayoutBonus = 0, wildernessActive = false } = {}) {
     // Pity counter: reset on rare+ success, increment otherwise
@@ -1301,40 +1322,21 @@ function applyCastBonuses(user, result, { petFishYieldPct = 0, isFeaturedSpot = 
         user.fishing.sinceRare = (user.fishing.sinceRare ?? 0) + 1;
     }
 
-    if (result.success && result.finalPayout > 0 && petFishYieldPct > 0) {
-        const bonus = Math.round(result.finalPayout * petFishYieldPct / 100);
-        if (bonus > 0) {
-            user.balance             += bonus;
-            user.fishing.totalEarned += bonus;
-            user.fishing.dailyCoins  += bonus;
-            result.finalPayout       += bonus;
-            result.petYieldBonus      = bonus;
-        }
-    }
+    const credit = (rate, field) => {
+        if (!result.success || !(result.finalPayout > 0) || !(rate > 0)) return;
+        const headroom = LIMITS.DAILY_HARD_CAP - (user.fishing.dailyCoins ?? 0);
+        const bonus    = Math.max(0, Math.min(Math.round(result.finalPayout * rate), headroom));
+        if (bonus <= 0) return;
+        user.balance             += bonus;
+        user.fishing.totalEarned += bonus;
+        user.fishing.dailyCoins  += bonus;
+        result.finalPayout       += bonus;
+        result[field]             = bonus;
+    };
 
-    if (result.success && result.finalPayout > 0 && isFeaturedSpot) {
-        const featBonus = Math.round(result.finalPayout * featuredPayoutBonus);
-        if (featBonus > 0) {
-            user.balance             += featBonus;
-            user.fishing.totalEarned += featBonus;
-            user.fishing.dailyCoins  += featBonus;
-            result.finalPayout       += featBonus;
-            result.featuredSpotBonus  = featBonus;
-        }
-    }
-
-    if (result.success && result.finalPayout > 0 && wildernessActive) {
-        const remaining = LIMITS.DAILY_HARD_CAP - user.fishing.dailyCoins;
-        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
-        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
-        if (bonus > 0) {
-            user.balance             += bonus;
-            user.fishing.totalEarned += bonus;
-            user.fishing.dailyCoins  += bonus;
-            result.finalPayout       += bonus;
-            result.wildernessBonus    = bonus;
-        }
-    }
+    credit(petFishYieldPct / 100, 'petYieldBonus');
+    if (isFeaturedSpot)   credit(featuredPayoutBonus, 'featuredSpotBonus');
+    if (wildernessActive) credit(WILDERNESS_YIELD_BONUS, 'wildernessBonus');
 
     if (result.success && result.finalPayout > user.fishing.bestPayout) {
         user.fishing.bestPayout = result.finalPayout;

@@ -228,9 +228,10 @@ describe('buildCastEmbed — fish, optional fields', () => {
         expect(embed.data.title).not.toContain('lbs');
     });
 
-    test('a capped payout strikes the number through and names the cap', () => {
-        const embed = cast(fishResult({ cappedByHard: true, finalPayout: 40 }));
-        expect(fieldsOf(embed).Reward).toBe('~~🪙40~~ (daily cap)');
+    test('a capped payout says nothing was paid and names the cap', () => {
+        // A capped roll pays 0; striking through a zero told the player nothing.
+        const embed = cast(fishResult({ cappedByHard: true, finalPayout: 0 }));
+        expect(fieldsOf(embed).Reward).toBe('Nothing *(daily cap reached)*');
     });
 
     test('weather that helps this location becomes a banner above the flavour', () => {

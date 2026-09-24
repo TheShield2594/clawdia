@@ -25,8 +25,12 @@ const EVENT_COLOR = '#e74c3c';
 
 // One entry per grind. `mid` is keyed by tier number — 4 epic, 5 legendary,
 // 6 event — and `fanfare` splits on whether the drop is an event-tier one.
+// `eventLabel` is what the event tier is called in that grind's partial
+// reveal, so it matches the fanfare and result embed that follow it rather
+// than the internal tier name.
 const REVEAL_COPY = {
     hunt: {
+        eventLabel: 'MYTHICAL',
         fogTitle: '🌫️ Something stirs in the shadows...',
         fogText:  '*The shadows shift. Something is here.*',
         mid: {
@@ -40,6 +44,7 @@ const REVEAL_COPY = {
         },
     },
     fish: {
+        eventLabel: 'MYTHICAL',
         fogTitle: '🌫️ Something stirs beneath the surface...',
         fogText:  '*The water shimmers. Something extraordinary is here.*',
         mid: {
@@ -53,6 +58,7 @@ const REVEAL_COPY = {
         },
     },
     mine: {
+        eventLabel: 'PRIMORDIAL',
         fogTitle: '🌫️ Your pickaxe strikes something unusual...',
         fogText:  '*The rock face glints in your lantern light.*',
         mid: {
@@ -71,7 +77,7 @@ const RULE = '━━━━━━━━━━━━━━━';
 const framed = text => `${RULE}\n${text}\n${RULE}`;
 
 const MID_COLOR = { 4: EPIC_COLOR, 5: LEGENDARY_COLOR, 6: EVENT_COLOR };
-const MID_LABEL = { 4: 'EPIC', 5: 'LEGENDARY', 6: 'EVENT' };
+const MID_LABEL = { 4: 'EPIC', 5: 'LEGENDARY' };
 
 /**
  * Reveal a drop, then show the caller's embed.
@@ -126,7 +132,7 @@ async function stagedLootReveal(interaction, tier, finalEmbed, activity, files =
         const midEmbed = new EmbedBuilder()
             .setColor(MID_COLOR[tierNum])
             .setTitle(copy.mid[tierNum])
-            .setDescription(framed(`❓❓❓  **${MID_LABEL[tierNum]}**  ❓❓❓`));
+            .setDescription(framed(`❓❓❓  **${MID_LABEL[tierNum] ?? copy.eventLabel}**  ❓❓❓`));
         await interaction.editReply({ embeds: [midEmbed] });
         await delay(STAGE_MS);
 

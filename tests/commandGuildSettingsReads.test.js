@@ -94,9 +94,9 @@ describe('commands do not hydrate the whole guild document', () => {
             // rather than the cache's shared plain object.
             'src/commands/economy/boost.js': 1,
 
-            // A positional projection over an array, narrower than anything the
-            // cache could hand back.
-            'src/commands/economy/fish/cast.js': 1,
+            // src/commands/economy/fish/cast.js used to read the server fish
+            // records here before writing them. The record update is a pair of
+            // conditional writes now, with no read ahead of them.
         });
     });
 
