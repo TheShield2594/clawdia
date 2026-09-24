@@ -81,6 +81,7 @@ const COLLECTIONS = [
     // Exploring
     { module: 'exploreData', export: 'REGION_LIST',  kind: 'explorable region',      system: 'exploring', command: '/explore travel' },
     { module: 'exploreData', export: 'RELIC_LIST',   kind: 'collectible relic',      system: 'exploring', command: '/explore relics' },
+    { module: 'exploreData', export: 'ROUTE_LIST',   kind: 'expedition route',       system: 'exploring', command: '/explore go' },
 
     // Across the three grinds
     { module: 'crossSystemData', export: 'CROSS_CONSUMABLES', kind: 'cross-activity consumable', system: 'crafting', command: '/craft make' },
@@ -142,7 +143,7 @@ const DESCRIPTION_KEYS = ['description', 'desc', 'flavor', 'lore', 'tagline'];
  * id in an answer is a string the user cannot do anything with.
  *
  * The third group is the one worth being deliberate about: `secrets`, `relics`,
- * `landmarks`, `encounters`, `traps` and the narrative lines are the things
+ * `landmarks`, `anomalies`, `encounters`, `traps` and the narrative lines are the things
  * /explore hides until somebody finds them. They are nested inside the region
  * records, so a generic walk would happily tell a player the reward and the
  * reveal text of every secret in a region they have never visited. The length
@@ -154,7 +155,7 @@ const SKIPPED_KEYS = new Set([
     ...NAME_KEYS, ...DESCRIPTION_KEYS,
     'id', 'slug', 'emoji', 'color', 'weight',
     'tierWeights', 'eventWeights', 'zoneMaterials',
-    'intros', 'landmarks', 'encounters', 'traps', 'secrets', 'relics',
+    'intros', 'landmarks', 'anomalies', 'encounters', 'traps', 'secrets', 'relics',
     'treasureLines', 'quietLines', 'footerLines', 'injuryLines',
     'winLine', 'loseLine', 'safeLine', 'reveal', 'line'
 ]);

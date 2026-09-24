@@ -13,8 +13,9 @@ const {
     ensureExploreData, getMaxStamina, applyStaminaRegen, applyDailyReset,
     msUntilNextStamina, isRegionEnabled, getRelicCollection,
     getRelicBonus, getRelicCapacity, getExplorerPrestige, getExplorerTitle, formatMs,
+    getLiveStreak, getStreakBonus, resolveRoute,
 } = require('../../../services/exploreService');
-const { loadReadContext, surveyedCount, prestigeBonusLines } = require('./shared');
+const { loadReadContext, surveyedCount, prestigeBonusLines, EXPLORE_COLORS } = require('./shared');
 const { buildMissingRelicsField } = require('./relics');
 const { relicItemId, exploreRegionItemId } = require('../../../data/activityItems');
 const { msUntilDailyReset } = require('../../../services/grindEngine');
@@ -64,6 +65,18 @@ async function handleProfile(interaction) {
     ]);
 }
 
+/** Current streak (as it stands — a cold trail reads zero), its bonus, and the best. */
+function streakRecord(userData) {
+    const e = userData.exploration;
+    const live = getLiveStreak(userData);
+    const best = e.bestStreak ?? 0;
+    const route = resolveRoute(e.lastRoute);
+    const now = live > 0
+        ? `🔥 ${live}-run streak (+${Math.round(getStreakBonus(userData) * 100)}%)`
+        : '🔥 no streak';
+    return `${now} · best ${best} · ${route.emoji} ${route.name}`;
+}
+
 function prestigeOf(e) {
     const rank = Math.max(0, Number(e.prestige) || 0);
     return { rank, badge: PRESTIGE_BADGES[Math.min(rank, PRESTIGE_BADGES.length - 1)] ?? '' };
@@ -88,7 +101,7 @@ async function overviewPage({ target, isSelf, userData, guildSettings, currency,
         : xpLine(progress, e.level);
 
     const embed = new EmbedBuilder()
-        .setColor(activeRegion?.color ?? '#2e7d32')
+        .setColor(activeRegion?.color ?? EXPLORE_COLORS.TRAIL)
         .setTitle(`${prestigeBadge || '🧭'} ${target.username}'s Explorer Profile`)
         .setDescription([
             `**${title}** · Level ${e.level}${activeRegion ? ` · ${activeRegion.emoji} ${activeRegion.name}` : ''}`
@@ -103,6 +116,7 @@ async function overviewPage({ target, isSelf, userData, guildSettings, currency,
                     `${e.totalExpeditions.toLocaleString()} expeditions · ${surveyed} region${surveyed === 1 ? '' : 's'} surveyed`,
                     `${currency}${e.totalEarned.toLocaleString()} earned · best ${currency}${e.bestHaul.toLocaleString()}`,
                     `${e.secretsFound} secrets · ${e.trapsSprung} traps sprung *(we don't judge)*`,
+                    streakRecord(userData),
                 ].join('\n'),
                 inline: true,
             },
@@ -175,7 +189,7 @@ async function relicsPage({ target, isSelf, userData, collection }) {
     ];
 
     const embed = new EmbedBuilder()
-        .setColor('#c9a227')
+        .setColor(EXPLORE_COLORS.RELIC)
         .setTitle(`🏺 ${target.username}'s Relic Case`)
         .setDescription([
             `**${collection.length} of ${RELIC_LIST.length} relics** · ${rarityCounts.join(' · ')}`,
@@ -215,7 +229,7 @@ async function progressPage({ target, isSelf, userData, guildSettings, currency 
     const surveyed = surveyedCount(userData, guildSettings);
 
     const embed = new EmbedBuilder()
-        .setColor(REGIONS[e.activeRegion]?.color ?? '#2e7d32')
+        .setColor(REGIONS[e.activeRegion]?.color ?? EXPLORE_COLORS.TRAIL)
         .setTitle(`🎖️ ${target.username}'s Exploring Progress`);
 
     const boosts = [];

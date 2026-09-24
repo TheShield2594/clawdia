@@ -20,7 +20,7 @@ const {
     canPrestige, getExplorerTitle, getRelicCollection, relicCapacityForBonus,
 } = require('../../../services/exploreService');
 const { progressBar } = require('../../../utils/progressBar');
-const { loadContext, prestigeBonusLines } = require('./shared');
+const { loadContext, prestigeBonusLines, EXPLORE_COLORS } = require('./shared');
 
 async function handlePrestige(interaction) {
     const ctx = await loadContext(interaction);
@@ -35,7 +35,7 @@ async function handlePrestige(interaction) {
     if (state.reason === 'max_rank') {
         return interaction.reply({
             embeds: [new EmbedBuilder()
-                .setColor('#6a1b9a')
+                .setColor(EXPLORE_COLORS.PRESTIGE)
                 .setTitle(`${badge} There Is No Further Edge`)
                 .setDescription(
                     `You are a **P${rank}** explorer — the last rank the map has a name for.\n` +
@@ -53,7 +53,7 @@ async function handlePrestige(interaction) {
         const finalXp = EXPLORER_LEVELS[MAX_EXPLORER_LEVEL - 1].xpRequired;
         return interaction.reply({
             embeds: [new EmbedBuilder()
-                .setColor('#2e7d32')
+                .setColor(EXPLORE_COLORS.TRAIL)
                 .setTitle(`${badge} Explorer Prestige — P${rank}`)
                 .setDescription(
                     `Reach **Explorer Level ${MAX_EXPLORER_LEVEL}** to ascend to ${nextBadge} **P${rank + 1}**.\n` +
@@ -63,33 +63,32 @@ async function handlePrestige(interaction) {
                     { name: `${nextBadge} P${rank + 1} would grant`, value: prestigeBonusLines(nextRow, EXPLORER_PRESTIGE[rank]).join('\n') || 'Nothing new', inline: true },
                     { name: 'Progress', value: `${e.xp.toLocaleString()} / ${finalXp.toLocaleString()} XP\n${progressBar(e.xp, finalXp, 12)}`, inline: true },
                 )
-                .setFooter({ text: 'Prestige keeps your map, your surveys, your relics, your journal and every lifetime stat — only Explorer Level and XP reset.' })
+                .setFooter({ text: 'Prestige keeps your map, your open routes, your surveys, your relics, your journal and every lifetime stat — only Explorer Level and XP reset.' })
                 .setTimestamp()],
             flags: MessageFlags.Ephemeral,
         });
     }
 
     const confirmEmbed = new EmbedBuilder()
-        .setColor('#6a1b9a')
+        .setColor(EXPLORE_COLORS.PRESTIGE)
         .setTitle(`${nextBadge} Walk Off The Edge — Ascend to P${rank + 1}?`)
         .setDescription(
             `You've reached **Explorer Level ${MAX_EXPLORER_LEVEL}**. Ascending is permanent and cannot be undone.\n\n` +
             `**Resets:** Explorer Level → 1, Explorer XP → 0\n` +
-            `**Keeps:** every charted region, every survey, your relic case, your journal and every lifetime stat`
+            `**Keeps:** every charted region, every route you've opened, every survey, your relic case, your journal and every lifetime stat`
         )
         .addFields({ name: `${nextBadge} P${rank + 1} bonuses`, value: prestigeBonusLines(nextRow, EXPLORER_PRESTIGE[rank]).join('\n') || 'Nothing new', inline: false });
 
-    // Region access is gated on explorer level, so an ascension puts the deeper
-    // regions back behind the ladder. Say so before the button, not after it.
-    const relocked = REGION_LIST
-        .filter(r => !r.seasonalEventId
-            && e.unlockedRegions.includes(r.id)
-            && r.unlockLevel > 1)
-        .map(r => `${r.emoji} ${r.name} *(Lv.${r.unlockLevel})*`);
-    if (relocked.length) {
+    // A route's level requirement gates opening it, not walking it, so an
+    // ascension costs the ladder and nothing else — the deep regions stay open.
+    // It used to re-lock them, which made ascending the worst trade in the game.
+    const kept = REGION_LIST
+        .filter(r => !r.seasonalEventId && e.unlockedRegions.includes(r.id) && r.unlockLevel > 1)
+        .map(r => `${r.emoji} ${r.name}`);
+    if (kept.length) {
         confirmEmbed.addFields({
-            name: '⚠️ Behind the level gate again until you re-climb',
-            value: relocked.join('\n'),
+            name: '🧭 Routes that stay open',
+            value: kept.join(' · '),
             inline: false,
         });
     }
@@ -163,7 +162,7 @@ async function handlePrestige(interaction) {
                 e.xp       = 0;
 
                 const embed = new EmbedBuilder()
-                    .setColor('#6a1b9a')
+                    .setColor(EXPLORE_COLORS.PRESTIGE)
                     .setTitle(`${nextBadge} Prestige ${rank + 1} — ${getExplorerTitle(user)}`)
                     .setDescription(
                         `You walk back out through the doorstep you started at, and it doesn't look any smaller.\n` +

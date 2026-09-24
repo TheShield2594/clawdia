@@ -13,6 +13,8 @@ const {
     REGION_LIST,
     RELIC_INDEX,
     QUIET_LINES,
+    ROUTES,
+    DEFAULT_ROUTE,
 } = require('../data/exploreData');
 const grind = require('./grindEngine');
 const { MATERIAL_RARITY } = require('../data/materialRarity');
@@ -29,11 +31,12 @@ const EXPLORE_COUNTERS = [
     'totalExpeditions', 'treasuresFound', 'trapsSprung', 'encountersWon',
     'secretsFound', 'loreCollected', 'landmarksDiscovered', 'relicsRecovered',
     'totalEarned', 'bestHaul', 'sinceSecret', 'regionsSurveyed',
+    'anomaliesFound', 'streak', 'bestStreak',
 ];
 
 // Timestamps that legitimately sit at null until something happens.
 // `staminaLastRegen` and `dailyWindowStart` are the engine's, likewise.
-const EXPLORE_TIMESTAMPS = ['lastExplore', 'injuryUntil'];
+const EXPLORE_TIMESTAMPS = ['lastExplore', 'injuryUntil', 'streakAt'];
 
 /**
  * Backfill the exploration profile. Reports whether it actually wrote anything,
@@ -57,6 +60,7 @@ function ensureExploreData(user) {
     };
 
     seed('activeRegion', 'whispering_forest');
+    seed('lastRoute', DEFAULT_ROUTE);
     for (const key of EXPLORE_COUNTERS) seed(key, 0);
     for (const key of EXPLORE_TIMESTAMPS) {
         if (!(key in e)) { e[key] = null; dirty = true; }
@@ -223,13 +227,19 @@ function isRegionEnabled(region, guildSettings) {
 /**
  * Regions a player can currently set out into: unlocked core regions plus
  * any in-season seasonal regions, minus anything an admin switched off.
+ *
+ * A core region's level requirement gates opening the route (`/explore
+ * travel`), not walking it afterwards. It used to gate both, which made
+ * prestige a trap: ascending reset Explorer Level to 1 and locked every route
+ * the player had already paid for behind hundreds of expeditions of re-climb,
+ * for a bonus a fraction the size of the income it cost.
  */
 function getAvailableRegions(user, guildSettings) {
     const e = user.exploration;
     return REGION_LIST.filter(r => {
         if (!isRegionEnabled(r, guildSettings)) return false;
         if (r.seasonalEventId) return isRegionInSeason(r, guildSettings);
-        return e.unlockedRegions.includes(r.id) && e.level >= r.unlockLevel;
+        return e.unlockedRegions.includes(r.id);
     });
 }
 
@@ -323,6 +333,53 @@ function getRelicCapacity(user) {
     return relicCapacityForBonus(getExplorerPrestige(user).relicCapBonus);
 }
 
+// ─── ROUTES & STREAKS ────────────────────────────────────────────────────────
+
+/** A route definition by id, falling back to the default for anything unknown. */
+function resolveRoute(routeId) {
+    return ROUTES[routeId] ?? ROUTES[DEFAULT_ROUTE];
+}
+
+/**
+ * The streak as it stands right now: a trail left cold past
+ * LIMITS.STREAK_WINDOW_MS reads as zero, before any expedition has written
+ * the reset down. Display and payout both read this, so neither quotes a
+ * bonus the next expedition won't pay.
+ */
+function getLiveStreak(user, now = Date.now()) {
+    const e = user.exploration ?? {};
+    const streak = Math.max(0, Number(e.streak) || 0);
+    if (!streak) return 0;
+    const at = e.streakAt ? new Date(e.streakAt).getTime() : null;
+    if (at == null || now - at > LIMITS.STREAK_WINDOW_MS) return 0;
+    return streak;
+}
+
+/** Coin bonus the current streak is worth, capped at STREAK_MAX points. */
+function getStreakBonus(user, now = Date.now()) {
+    return Math.min(getLiveStreak(user, now), LIMITS.STREAK_MAX) * LIMITS.STREAK_BONUS_PER;
+}
+
+/**
+ * Carry the streak forward once an expedition has resolved. A trap or a lost
+ * encounter ends it; anything else — a quiet walk included, since surviving
+ * is the whole skill — adds one. The count itself is uncapped (a best streak
+ * of 23 is worth bragging about); only the bonus stops at STREAK_MAX.
+ */
+function settleStreak(user, result) {
+    const e = user.exploration;
+    const broke = result.type === 'trap' || result.outcome === 'loss';
+    if (broke) {
+        if (e.streak > 0) result.streakBroken = e.streak;
+        e.streak = 0;
+    } else {
+        e.streak = (e.streak ?? 0) + 1;
+        if (e.streak > (e.bestStreak ?? 0)) e.bestStreak = e.streak;
+    }
+    e.streakAt = new Date();
+    result.streak = e.streak;
+}
+
 // ─── EVENT ROLL ──────────────────────────────────────────────────────────────
 
 /**
@@ -337,7 +394,7 @@ function getRelicCapacity(user) {
  * two is how a server with rareEventBonus set ends up being quoted a secret
  * chance lower than the one it actually rolls against.
  */
-function buildEventWeights(region, guildSettings) {
+function buildEventWeights(region, guildSettings, route = null) {
     const w = { ...region.eventWeights };
 
     // Admin knob: shift weight from the mundane to secrets + treasure
@@ -348,6 +405,12 @@ function buildEventWeights(region, guildSettings) {
         w.trap     = Math.max(1, w.trap  - shift * 0.5);
         w.treasure += shift * 0.6;
         w.secret   += shift * 0.4;
+    }
+
+    // The route reshapes the table last, so it scales whatever the admin knob
+    // left rather than being undone by it.
+    for (const [type, mult] of Object.entries(route?.weights ?? {})) {
+        if (type in w) w[type] *= mult;
     }
     return w;
 }
@@ -364,8 +427,8 @@ function applySecretPrestige(weight, user) {
     return weight * (1 + getExplorerPrestige(user).secretBonus);
 }
 
-function rollEventType(user, region, guildSettings, progress) {
-    const w = buildEventWeights(region, guildSettings);
+function rollEventType(user, region, guildSettings, progress, route = null) {
+    const w = buildEventWeights(region, guildSettings, route);
     const secretsLeft = hasUnfoundSecrets(region, progress);
 
     if (secretsLeft) {
@@ -398,13 +461,13 @@ function getSecretPity(user) {
  * chance, the pity-boosted chance, and whether the region has anything left
  * to find at all. Display-only — the roll itself lives in rollEventType.
  */
-function getSecretOdds(user, region, progress, guildSettings = null) {
+function getSecretOdds(user, region, progress, guildSettings = null, route = null) {
     if (!hasUnfoundSecrets(region, progress)) {
         return { exhausted: true, sinceSecret: 0, baseChance: 0, chance: 0, pity: 0 };
     }
     // Same table the roll uses, so a server running rareEventBonus is quoted
     // the odds it actually plays against.
-    const w = buildEventWeights(region, guildSettings);
+    const w = buildEventWeights(region, guildSettings, route);
     // Same widening the roll applies, before the total is taken — quoting the
     // unprestiged slot against a prestiged roll is the one thing this must not do.
     w.secret = applySecretPrestige(w.secret, user);
@@ -425,6 +488,11 @@ function rollTreasureTier() {
 
 // ─── EXECUTE EXPLORE ─────────────────────────────────────────────────────────
 
+// What an anomaly pays before multipliers: a little better than a landmark, so
+// the slot a charted region hands over is worth rolling rather than a
+// consolation prize.
+const ANOMALY_REWARD = { min: 400, max: 900 };
+
 /**
  * Run one expedition. Mutates the user document in memory (coins, XP, stats,
  * region progress, inventory relics) but does NOT save it.
@@ -441,6 +509,11 @@ function rollTreasureTier() {
  */
 function executeExplore(user, region, guildSettings, opts = {}) {
     const e = user.exploration;
+    const route = resolveRoute(opts.route ?? e.lastRoute);
+    e.lastRoute = route.id;
+    // A trail left cold resets the streak before this run's coins are priced.
+    const coldStreak = e.streak > 0 && getLiveStreak(user) === 0 ? e.streak : 0;
+    if (coldStreak) e.streak = 0;
     const progress = getRegionProgress(user, region.id, { create: true });
     const firstVisit = progress.expeditions === 0;
     const wasFullyCharted = isRegionFullyCharted(region, progress);
@@ -452,15 +525,19 @@ function executeExplore(user, region, guildSettings, opts = {}) {
     e.dailyExpeditions += 1;
     progress.expeditions += 1;
 
-    const coinMult    = getPayoutMultiplier(user, region, guildSettings, opts.coinMultiplier ?? 1, progress);
+    const coinMult    = getPayoutMultiplier(user, region, guildSettings, opts.coinMultiplier ?? 1, progress, route);
     const penaltyMult = getPenaltyMultiplier(region);
 
     const result = {
         regionId: region.id,
+        route: route.id,
+        // The bonus this run was priced with, before its own outcome moves it.
+        streakBonus: getStreakBonus(user),
+        streakCooled: coldStreak || undefined,
         firstVisit,
         secretsLeft,
         surveyed: wasFullyCharted,
-        type: rollEventType(user, region, guildSettings, progress),
+        type: rollEventType(user, region, guildSettings, progress, route),
         payout: 0,
         grossPayout: 0,
         xp: 0,
@@ -472,7 +549,18 @@ function executeExplore(user, region, guildSettings, opts = {}) {
         case 'discovery': {
             const unfound = region.landmarks.filter(l => !progress.landmarksFound.includes(l.id));
             if (unfound.length === 0) {
-                // Nothing left to chart here — the slot pays out as treasure.
+                // Every landmark is on the map. The slot turns up one of the
+                // region's anomalies instead — repeatable, so a charted region
+                // still has something to find — or, for a region written
+                // without any, pays out as treasure.
+                if (region.anomalies?.length) {
+                    const anomaly = randomFrom(region.anomalies);
+                    e.anomaliesFound = (e.anomaliesFound ?? 0) + 1;
+                    result.anomaly = anomaly;
+                    result.payout = applyPayout(user, result, Math.round(randInt(ANOMALY_REWARD.min, ANOMALY_REWARD.max) * coinMult));
+                    result.xp = grantXp(user, EVENT_XP.anomaly, result);
+                    break;
+                }
                 return finishAsTreasure(user, region, progress, result, coinMult, { fallback: true });
             }
             const landmark = randomFrom(unfound);
@@ -493,6 +581,9 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             progress.loreFound.push(fragment.id);
             e.loreCollected += 1;
             result.lore = fragment;
+            // The last fragment is the one that turns on the encounter bonus
+            // (getEncounterWinChance), so the result can say so.
+            result.loreCompleted = unfound.length === 1;
             result.payout = applyPayout(user, result, Math.round(randInt(150, 400) * coinMult));
             result.xp = grantXp(user, EVENT_XP.lore, result);
             break;
@@ -518,7 +609,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             const trap = randomFrom(region.traps);
             // Trap penalties are hand-tuned per region already, so they take
             // no region multiplier on top — only the balance floor applies.
-            const rawPenalty = randInt(trap.penalty.min, trap.penalty.max);
+            const rawPenalty = Math.round(randInt(trap.penalty.min, trap.penalty.max) * route.trapPenaltyMult);
             const penalty = Math.min(rawPenalty, Math.max(0, user.balance));
             user.balance -= penalty;
             e.trapsSprung += 1;
@@ -556,6 +647,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
     if (result.type !== 'secret' && !result.pendingChoice) {
         countTowardPity(user, result);
     }
+    if (!result.pendingChoice) settleStreak(user, result);
 
     finalizeStats(user, region, progress, result, wasFullyCharted);
     user.markModified('exploration');
@@ -573,6 +665,22 @@ function encounterLossBand(enc) {
 }
 
 /**
+ * The chance an approach wins, for this player.
+ *
+ * Knowing a region's story is worth something when you meet its locals: once
+ * every lore fragment in the region is collected, approaches there win
+ * `ENCOUNTER_LORE_BONUS` more often. That is what makes lore more than flavour
+ * text, and it can turn a coin-flip creature into one worth approaching.
+ */
+function getEncounterWinChance(user, region, enc) {
+    const progress = getRegionProgress(user, region.id);
+    const knowsLore = Boolean(progress) && region.lore.length > 0
+        && region.lore.every(l => progress.loreFound.includes(l.id));
+    const chance = enc.winChance + (knowsLore ? LIMITS.ENCOUNTER_LORE_BONUS : 0);
+    return { chance: Math.min(0.95, chance), loreBonus: knowsLore };
+}
+
+/**
  * What each option in an encounter is actually worth, in the coins this player
  * would see — every multiplier already applied. Display-only: the prompt used to
  * offer a blind choice between two pieces of flavour text, which is not a
@@ -581,7 +689,7 @@ function encounterLossBand(enc) {
 function getEncounterStakes(user, region, guildSettings, result) {
     const enc = result.encounter;
     const progress = getRegionProgress(user, region.id);
-    const coinMult    = getPayoutMultiplier(user, region, guildSettings, result.coinMultiplier ?? 1, progress);
+    const coinMult    = getPayoutMultiplier(user, region, guildSettings, result.coinMultiplier ?? 1, progress, resolveRoute(result.route));
     const penaltyMult = getPenaltyMultiplier(region);
     const loss = encounterLossBand(enc);
     // Payouts are quoted after the daily caps have taken their cut, because that
@@ -593,8 +701,10 @@ function getEncounterStakes(user, region, guildSettings, result) {
     // below 0.5, Math.round would settle that coin to nothing and call a player
     // capped while they can still win thousands.
     const capped = settleAgainstDailyCap(user, 0).remaining === 0;
+    const { chance, loreBonus } = getEncounterWinChance(user, region, enc);
     return {
-        winChance: enc.winChance,
+        winChance: chance,
+        loreBonus,
         win:  { min: payout(enc.reward.min, coinMult), max: payout(enc.reward.max, coinMult) },
         safe: { min: payout(enc.reward.min, coinMult * LIMITS.ENCOUNTER_SAFE_RATE),
                 max: payout(enc.reward.max, coinMult * LIMITS.ENCOUNTER_SAFE_RATE) },
@@ -602,6 +712,8 @@ function getEncounterStakes(user, region, guildSettings, result) {
         // True once the hard cap leaves nothing to win, so the prompt can say
         // the bet is all downside rather than silently offering a 0-coin prize.
         capped,
+        // What a loss would also end — the streak is on the table too.
+        streakAtRisk: getLiveStreak(user),
     };
 }
 
@@ -613,14 +725,17 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
     const e = user.exploration;
     const enc = result.encounter;
     const progress = getRegionProgress(user, region.id);
-    const coinMult    = getPayoutMultiplier(user, region, guildSettings, result.coinMultiplier ?? 1, progress);
+    const coinMult    = getPayoutMultiplier(user, region, guildSettings, result.coinMultiplier ?? 1, progress, resolveRoute(result.route));
     const penaltyMult = getPenaltyMultiplier(region);
 
     result.pendingChoice = false;
     result.choice = choice === 'approach' ? 'approach' : 'observe';
+    // A timeout resolves as keeping your distance; the embed says so, rather
+    // than presenting a choice the player never made as one they did.
+    result.hesitated = choice == null;
 
     if (result.choice === 'approach') {
-        if (secureRandom() < enc.winChance) {
+        if (secureRandom() < getEncounterWinChance(user, region, enc).chance) {
             result.outcome = 'win';
             e.encountersWon += 1;
             result.payout = applyPayout(user, result, Math.round(randInt(enc.reward.min, enc.reward.max) * coinMult));
@@ -649,6 +764,7 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
     }
 
     countTowardPity(user, result);
+    settleStreak(user, result);
     finalizeStats(user, region, progress, result, isRegionFullyCharted(region, progress));
     user.markModified('exploration');
     return result;
@@ -702,6 +818,7 @@ function finishAsTreasure(user, region, progress, result, coinMult, { fallback =
     result.material = grantTreasureMaterial(user, tier.tier);
 
     countTowardPity(user, result);
+    settleStreak(user, result);
     finalizeStats(user, region, progress, result, isRegionFullyCharted(region, progress));
     user.markModified('exploration');
     return result;
@@ -712,14 +829,16 @@ function finishAsTreasure(user, region, progress, result, coinMult, { fallback =
 /**
  * Everything that multiplies a payout: the seasonal event bonus, the admin
  * drop-rate knob, how deep the region is, the standing bonus for a fully
- * surveyed map, and the relic display case.
+ * surveyed map, the relic display case, the route, and the streak.
  */
-function getPayoutMultiplier(user, region, guildSettings, eventCoinMultiplier = 1, progress = null) {
+function getPayoutMultiplier(user, region, guildSettings, eventCoinMultiplier = 1, progress = null, route = null) {
     const dropRate = clamp(guildSettings?.exploration?.dropRateMultiplier ?? 1, 0.1, 5);
     const survey   = isRegionFullyCharted(region, progress) ? 1 + LIMITS.SURVEY_BONUS : 1;
     const relics   = 1 + getRelicBonus(user);
     const prestige = 1 + getExplorerPrestige(user).payoutBonus;
-    return eventCoinMultiplier * dropRate * region.payoutMultiplier * survey * relics * prestige;
+    const path     = 1 + (route?.payoutBonus ?? 0);
+    const streak   = 1 + getStreakBonus(user);
+    return eventCoinMultiplier * dropRate * region.payoutMultiplier * survey * relics * prestige * path * streak;
 }
 
 /**
@@ -1041,6 +1160,7 @@ module.exports = {
     applyExplorerXp,
     weightedRoll,
     randomFrom,
+    randInt,
     isRegionInSeason,
     isRegionEnabled,
     getAvailableRegions,
@@ -1056,7 +1176,11 @@ module.exports = {
     executeExplore,
     resolveEncounter,
     encounterLossBand,
+    getEncounterWinChance,
     getEncounterStakes,
+    resolveRoute,
+    getLiveStreak,
+    getStreakBonus,
     addJournalEntry,
     applyExploreXpBonus,
     rollTreasureMaterial,

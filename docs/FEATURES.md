@@ -812,7 +812,7 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 **Commands:**
 
 ```text
-/explore go [region]   - Set out on an expedition (1 stamina, 60s cooldown)
+/explore go [region] [route] - Set out on an expedition (1 stamina, 60s cooldown)
 /explore travel        - Unlock and move between regions
 /explore regions       - Browse every region, requirements, and progress
 /explore journal       - Reread your most recent finds
@@ -826,12 +826,22 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 - Core: Whispering Forest → Crumbling Ruins → Crystal Caves → Sunken Docks → Starfall Wastes (level + coin gated, rising payouts)
 - Seasonal: Frostveil Pass (winter), Hollowgrave Lane (spooky), Scorchglass Shore (summer), The Velvet Arcade (Valentine's), Arctic Tundra (winter hunt) — open only while their seasonal event runs, and they drop event currency for the event shop
 - A bare `/explore go` follows your active region, and reroutes itself if that region has gone out of season or been switched off
+- Every result carries three route buttons that run the next expedition in the same region, through the same cooldown, lock and server gates as the slash command. The route you just took is highlighted, so "same again" stays one click
+
+**Routes and streaks:**
+- **🥾 Main Trail** — traps less than half as often, −10% coins. The route for protecting a streak
+- **🧭 Off the Path** — landmarks and lore come up 1.8× as often and secrets 1.5×. The fastest way to chart a region and the best Explorer XP while there is something left to chart
+- **🌑 Deep Wilds** — more treasure and secrets and +30% coins, but traps twice as often and 25% harder
+- A bare `/explore go` takes the route you used last; `/explore regions` lists what each one does
+- **🔥 Streaks** — every expedition that doesn't end in a trap or a lost encounter adds one, worth +2% coins each up to +20%. A trap or a lost encounter ends it, and so does 30 minutes away. The encounter prompt says when a loss would cost you your streak, so a long streak makes the Deep Wilds and a bold approach a real gamble. Your current and best streaks show on `/explore profile`
+- The staged "Setting out" beat plays when there is something to reveal (an encounter, a secret, a first visit, epic or legendary treasure); routine runs go straight to the result
 
 **Progression:**
-- **Secret pity** — every expedition into a region that still hides a secret lifts the odds of finding one, shown as a live chance on the result embed. Regions you have fully uncovered stop building pity instead of promising a secret they can't deliver
+- **Secret pity** — every expedition into a region that still hides a secret lifts the odds of finding one. Once a drought reaches 10 expeditions the result embed shows the live chance. Regions you have fully uncovered stop building pity instead of promising a secret they can't deliver
+- **Anomalies** — once every landmark in a core region is charted, its discovery slot turns up repeatable anomalies instead, so a charted region still has something to find
 - **Fully surveyed** — chart every landmark, lore fragment and secret in a region and everything it pays you afterwards carries a standing +15%
 - **Relic case** — each distinct relic is worth +1% on exploration coins, up to the width of your case. Treasure prefers relics you don't own yet, so the case fills instead of stacking duplicates. The case starts at 10 of the 25 known relics and is widened by explorer prestige
-- **Encounters are a real bet** — the prompt quotes the win chance and both coin bands in the money *you* would see, and losing is priced off what was on the table rather than a flat fee, so the long-odds encounters with the biggest prizes are worth taking instead of worth dodging
+- **Encounters are a real decision** — the prompt quotes the win chance and both coin bands in the money *you* would see. Each core region has a steady encounter (66%), a lean one (60%), a coin flip (54%) and a long shot (50%). A loss costs half the encounter's average reward, so the first two are worth approaching and the last two are not, on the base numbers. Your standing bonuses lift the win and not the loss, the soft cap halves the win and not the loss, and **collecting a region's full lore adds +5%** to every approach there, so the right call depends on the creature and on you. A timeout resolves as keeping your distance, and the result says so
 - **Quiet expeditions** cost the cooldown but refund the stamina point — a blank walk isn't charged for
 - **Level-ups are announced** on the result embed, and name any region the new Explorer Level just brought within reach
 - **Daily coin caps ramp** — the first 100,000 coins in a rolling 24h window pay in full, everything up to 150,000 pays at 50%, and past that expeditions still chart the map and pay Explorer XP but stop paying cash
@@ -856,8 +866,8 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 P5. Each rank resets Explorer Level and XP and keeps everything else — charted
 regions, completed surveys, the relic case, the journal and every lifetime stat.
 An ascended explorer carries a prestige title rather than dropping back to
-"Doorstep Wanderer", but region unlocks are level-gated, so the deeper regions sit
-behind the ladder again until it is re-climbed:
+"Doorstep Wanderer". A region's level requirement gates opening its route, not
+walking it, so every route you have opened stays open through an ascension:
 
 | Rank | Grants (cumulative) |
 |---|---|

@@ -11,7 +11,7 @@
 // here never register as commands of their own (see utils/commandLoader.js).
 
 const { SlashCommandBuilder } = require('discord.js');
-const { REGION_LIST } = require('../../../data/exploreData');
+const { REGION_LIST, ROUTE_LIST } = require('../../../data/exploreData');
 const { EVENT_TYPE_EMOJI } = require('./shared');
 const { handleGo } = require('./go');
 const { handleMap } = require('./map');
@@ -26,6 +26,8 @@ const REGION_CHOICES = REGION_LIST.map(r => ({
     name: `${r.emoji} ${r.name}${r.seasonalEventId ? ' (seasonal)' : ''}`,
     value: r.id,
 }));
+
+const ROUTE_CHOICES = ROUTE_LIST.map(r => ({ name: `${r.emoji} ${r.name}`, value: r.id }));
 
 const EVENT_TYPE_CHOICES = Object.entries(EVENT_TYPE_EMOJI).map(([id]) => ({
     name: `${EVENT_TYPE_EMOJI[id]} ${id.charAt(0).toUpperCase()}${id.slice(1)}`,
@@ -45,7 +47,12 @@ module.exports = {
                     o.setName('region')
                         .setDescription('Region to explore (defaults to your active region)')
                         .setRequired(false)
-                        .addChoices(...REGION_CHOICES)))
+                        .addChoices(...REGION_CHOICES))
+                .addStringOption(o =>
+                    o.setName('route')
+                        .setDescription('How you set out: safe trail, off the path, or the deep wilds (defaults to your last)')
+                        .setRequired(false)
+                        .addChoices(...ROUTE_CHOICES)))
         .addSubcommand(sub =>
             sub.setName('map')
                 .setDescription("View your Explorer's Map — every region, landmark, and secret you've charted."))

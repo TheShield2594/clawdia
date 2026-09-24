@@ -471,7 +471,8 @@
       "go": {
         "description": "Parte en una expedición. Usa 1 de energía. Enfriamiento: 60s.",
         "options": {
-          "region": { "description": "Región a explorar (por defecto, tu región activa)" }
+          "region": { "description": "Región a explorar (por defecto, tu región activa)" },
+          "route": { "description": "Cómo partes: sendero seguro, fuera del camino o tierras profundas (por defecto, la última)" }
         }
       },
       "map": { "description": "Consulta tu Mapa de Explorador: cada región, hito y secreto que has trazado." },
