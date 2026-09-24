@@ -12,7 +12,8 @@ const { LIMITS, REGIONS, FOOTER_LINES } = require('../src/data/exploreData');
 const {
     PITY_SHOW_AFTER, buildResultEmbed, buildSecretPityField, summarizeResult,
 } = require('../src/commands/economy/explore/embeds');
-const { IDS, asExploreGo, buildResultActions } = require('../src/commands/economy/explore/actions');
+const { IDS, asExploreGo, buildResultActions, routeFromCustomId } = require('../src/commands/economy/explore/actions');
+const { ROUTE_LIST } = require('../src/data/exploreData');
 
 const region = REGIONS.whispering_forest;
 
@@ -30,6 +31,33 @@ function quietResult(overrides = {}) {
 const fieldNames = embed => (embed.data.fields ?? []).map(f => f.name);
 
 describe('the result embed', () => {
+    test('names the route beside the region', () => {
+        const user = makeUser();
+        const embed = buildResultEmbed(quietResult({ route: 'deep' }), region, user, { currency: '🪙' });
+        expect(embed.data.author.name).toContain('Deep Wilds');
+    });
+
+    test('says when a streak ends, went cold, or maxed out', () => {
+        const user = makeUser();
+        const broken = buildResultEmbed(quietResult({ type: 'trap', trap: region.traps[0], penalty: 10, streakBroken: 6 }), region, user, { currency: '🪙' });
+        expect(broken.data.description).toMatch(/Streak over.*6-run/);
+        const cooled = buildResultEmbed(quietResult({ streakCooled: 3, streak: 1 }), region, user, { currency: '🪙' });
+        expect(cooled.data.description).toMatch(/went cold.*3-run/);
+        const maxed = buildResultEmbed(quietResult({ streak: LIMITS.STREAK_MAX }), region, user, { currency: '🪙' });
+        expect(maxed.data.description).toMatch(/Trail sense maxed/);
+        const plain = buildResultEmbed(quietResult({ streak: 3 }), region, user, { currency: '🪙' });
+        expect(plain.data.description).not.toMatch(/Streak|Trail sense|went cold/);
+    });
+
+    test('the haul line credits the route and the streak on a paying run', () => {
+        const user = makeUser();
+        const embed = buildResultEmbed(quietResult({ type: 'treasure', payout: 300, grossPayout: 300, route: 'deep', streakBonus: 0.06,
+            treasureTier: { tier: 'common', stars: '⭐' }, treasureLine: 'Coins.' }), region, user, { currency: '🪙' });
+        const haul = embed.data.fields.find(f => f.name === '🎒 The Haul').value;
+        expect(haul).toMatch(/deep wilds \+30%/);
+        expect(haul).toMatch(/streak \+6%/);
+    });
+
     test('stays quiet about the secret curve until a drought is worth mentioning', () => {
         const user = makeUser();
         user.exploration.sinceSecret = PITY_SHOW_AFTER - 1;
@@ -103,20 +131,33 @@ describe('the result embed', () => {
     });
 });
 
-describe('the Set out again button', () => {
-    test('is one primary button with a stable id', () => {
-        const [row] = buildResultActions();
-        const [button] = row.components;
-        expect(button.data.custom_id).toBe(IDS.again);
-        expect(button.data.label).toMatch(/Set out again/);
+describe('the route buttons', () => {
+    test('one per route, with the route just taken highlighted', () => {
+        const [row] = buildResultActions('deep');
+        expect(row.components).toHaveLength(ROUTE_LIST.length);
+        for (const [i, route] of ROUTE_LIST.entries()) {
+            const button = row.components[i];
+            expect(button.data.custom_id).toBe(IDS[route.id]);
+            expect(button.data.label).toContain(route.name);
+            // ButtonStyle.Primary is 1, Secondary 2
+            expect(button.data.style).toBe(route.id === 'deep' ? 1 : 2);
+        }
     });
 
-    test('runs /explore go in the same region through the command\'s own options', () => {
+    test('a button id maps back to its route and nothing else does', () => {
+        for (const route of ROUTE_LIST) expect(routeFromCustomId(IDS[route.id])).toBe(route.id);
+        expect(routeFromCustomId('explore_act_route_nowhere')).toBeNull();
+        expect(routeFromCustomId('explore_123_approach')).toBeNull();
+        expect(routeFromCustomId(undefined)).toBeNull();
+    });
+
+    test('runs /explore go in the same region, by the pressed route, through the command\'s own options', () => {
         const button = { id: 'b1', user: { id: 'u1' }, reply: jest.fn(function () { return this.id; }) };
-        const dressed = asExploreGo(button, { region: 'crystal_caves' });
+        const dressed = asExploreGo(button, { region: 'crystal_caves', route: 'offpath' });
         expect(dressed.commandName).toBe('explore');
         expect(dressed.options.getSubcommand()).toBe('go');
         expect(dressed.options.getString('region')).toBe('crystal_caves');
+        expect(dressed.options.getString('route')).toBe('offpath');
         expect(dressed.options.getString('type')).toBeNull();
         // Everything else is the button's own, bound to it.
         expect(dressed.user.id).toBe('u1');
@@ -143,8 +184,8 @@ describe('the expedition flow', () => {
         expect(go).not.toMatch(/Something went wrong writing your expedition down\. Try again\.', embeds: \[\]/);
     });
 
-    test('the result carries the Set out again button', () => {
-        expect(go).toMatch(/components: buildResultActions\(\)/);
+    test('the result carries the route buttons', () => {
+        expect(go).toMatch(/components: buildResultActions\(result\.route\)/);
         expect(go).toMatch(/attachResultActions\(interaction, resultMessage/);
         expect(go).toMatch(/return \{ started: true \}/);
     });

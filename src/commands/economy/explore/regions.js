@@ -4,7 +4,7 @@
 // the player's progress through it.
 
 const { EmbedBuilder } = require('discord.js');
-const { REGION_LIST } = require('../../../data/exploreData');
+const { REGION_LIST, ROUTE_LIST, LIMITS } = require('../../../data/exploreData');
 const { ensureExploreData, isRegionEnabled, isRegionInSeason, regionCompletion } = require('../../../services/exploreService');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../../data/featuredRotation');
 const { exploreRegionItemId } = require('../../../data/activityItems');
@@ -61,6 +61,15 @@ async function handleRegions(interaction) {
         .setColor(EXPLORE_COLORS.TRAIL)
         .setTitle('🧭 Known Regions')
         .setDescription(sections.join('\n\n'))
+        // The route is the other half of where you go: how you set out. Said
+        // here once, since the result buttons only have room for its name.
+        .addFields({
+            name: '🧭 Routes',
+            value: ROUTE_LIST.map(r => `${r.emoji} **${r.name}** — ${r.description}`).join('\n')
+                + `\n🔥 *Every run that dodges traps and lost encounters builds your streak: `
+                + `+${Math.round(LIMITS.STREAK_BONUS_PER * 100)}% coins each, up to +${Math.round(LIMITS.STREAK_MAX * LIMITS.STREAK_BONUS_PER * 100)}%.*`,
+            inline: false,
+        })
         .setFooter({ text: `🌟 ${todaysFeature.name} pays +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% today · seasonal regions come and go with /event seasons.` })
         .setTimestamp();
 

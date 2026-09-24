@@ -1,11 +1,15 @@
 'use strict';
 
-// The button on a finished /explore go result: set out again.
+// The buttons on a finished /explore go result: set out again, by one of the
+// three routes (data/exploreData.js ROUTES). The route you took last is the
+// highlighted one, so "same again" is still one obvious click, and the other
+// two make every trip start with a choice — a safer trail to protect a streak,
+// or the deep wilds to cash one in.
 //
 // An expedition used to end on a wall of text with nothing to press, so every
 // trip after the first began with the player retyping the slash command —
-// /fish and /hunt had grown "again" buttons, /explore had not. "Set out again"
-// is /explore go itself, run through the same dispatch as the slash command:
+// /fish and /hunt had grown "again" buttons, /explore had not. Each route
+// button is /explore go itself, run through the same dispatch as the slash command:
 // same handler, same economy lock, and the same server policy and
 // economy-freeze gates the command dispatcher applies, which a button press
 // would otherwise walk past. This is fish/actions.js's "Cast again" for
@@ -24,9 +28,10 @@ const {
     commandIsFreezeGated, isEconomyFrozen, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
 } = require('../../../utils/economyFreeze');
 
-const IDS = {
-    again: 'explore_act_again',
-};
+const { ROUTE_LIST } = require('../../../data/exploreData');
+
+const ROUTE_PREFIX = 'explore_act_route_';
+const IDS = Object.fromEntries(ROUTE_LIST.map(r => [r.id, `${ROUTE_PREFIX}${r.id}`]));
 
 // Long enough to outlast the 60-second cooldown several times over, so "Set
 // out again" is still there when the explorer is; short enough that the
@@ -34,10 +39,21 @@ const IDS = {
 // life.
 const ACTION_IDLE_MS = 5 * 60_000;
 
-function buildResultActions() {
+/** One button per route; `currentRoute` — the one just taken — is highlighted. */
+function buildResultActions(currentRoute = null) {
     return [new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(IDS.again).setLabel('🥾 Set out again').setStyle(ButtonStyle.Primary),
+        ...ROUTE_LIST.map(r => new ButtonBuilder()
+            .setCustomId(IDS[r.id])
+            .setLabel(`${r.emoji} ${r.name}`)
+            .setStyle(r.id === currentRoute ? ButtonStyle.Primary : ButtonStyle.Secondary)),
     )];
+}
+
+/** The route a result button stands for, or null for anything else. */
+function routeFromCustomId(customId) {
+    if (!customId?.startsWith(ROUTE_PREFIX)) return null;
+    const id = customId.slice(ROUTE_PREFIX.length);
+    return ROUTE_LIST.some(r => r.id === id) ? id : null;
 }
 
 /**
@@ -45,11 +61,12 @@ function buildResultActions() {
  * handler — which reads `interaction.options` — runs unchanged. Everything else
  * (reply, editReply, user, guild, id…) is the button's own.
  */
-function asExploreGo(button, { region = null } = {}) {
+function asExploreGo(button, { region = null, route = null } = {}) {
+    const strings = { region, route };
     const options = {
         getSubcommandGroup: () => null,
         getSubcommand:      () => 'go',
-        getString:          name => (name === 'region' ? region : null),
+        getString:          name => strings[name] ?? null,
         getInteger:         () => null,
         getBoolean:         () => null,
         getUser:            () => null,
@@ -92,9 +109,9 @@ async function gateRefusal(button, command) {
 }
 
 /**
- * Arms the button on a finished result. `message` is the reply carrying it;
- * `regionId` is where this expedition went, so "Set out again" walks the same
- * ground.
+ * Arms the buttons on a finished result. `message` is the reply carrying them;
+ * `regionId` is where this expedition went, so the next one walks the same
+ * ground by whichever route was pressed.
  */
 function attachResultActions(interaction, message, { regionId = null } = {}) {
     if (!message) return null;
@@ -114,7 +131,8 @@ function attachResultActions(interaction, message, { regionId = null } = {}) {
             const refusal = await gateRefusal(button, command);
             if (refusal) return button.reply({ content: refusal, flags: MessageFlags.Ephemeral }).catch(() => {});
 
-            const outcome = await command.execute(asExploreGo(button, { region: regionId }), button.client);
+            const route = routeFromCustomId(button.customId);
+            const outcome = await command.execute(asExploreGo(button, { region: regionId, route }), button.client);
             // The new expedition carries its own button; this one would only
             // race it. Taken off here rather than by the session's end handler,
             // which leaves components alone while a press is still in flight.
@@ -135,4 +153,5 @@ module.exports = {
     attachResultActions,
     buildResultActions,
     gateRefusal,
+    routeFromCustomId,
 };

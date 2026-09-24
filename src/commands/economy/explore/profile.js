@@ -13,6 +13,7 @@ const {
     ensureExploreData, getMaxStamina, applyStaminaRegen, applyDailyReset,
     msUntilNextStamina, isRegionEnabled, getRelicCollection,
     getRelicBonus, getRelicCapacity, getExplorerPrestige, getExplorerTitle, formatMs,
+    getLiveStreak, getStreakBonus, resolveRoute,
 } = require('../../../services/exploreService');
 const { loadReadContext, surveyedCount, prestigeBonusLines, EXPLORE_COLORS } = require('./shared');
 const { buildMissingRelicsField } = require('./relics');
@@ -64,6 +65,18 @@ async function handleProfile(interaction) {
     ]);
 }
 
+/** Current streak (as it stands — a cold trail reads zero), its bonus, and the best. */
+function streakRecord(userData) {
+    const e = userData.exploration;
+    const live = getLiveStreak(userData);
+    const best = e.bestStreak ?? 0;
+    const route = resolveRoute(e.lastRoute);
+    const now = live > 0
+        ? `🔥 ${live}-run streak (+${Math.round(getStreakBonus(userData) * 100)}%)`
+        : '🔥 no streak';
+    return `${now} · best ${best} · ${route.emoji} ${route.name}`;
+}
+
 function prestigeOf(e) {
     const rank = Math.max(0, Number(e.prestige) || 0);
     return { rank, badge: PRESTIGE_BADGES[Math.min(rank, PRESTIGE_BADGES.length - 1)] ?? '' };
@@ -103,6 +116,7 @@ async function overviewPage({ target, isSelf, userData, guildSettings, currency,
                     `${e.totalExpeditions.toLocaleString()} expeditions · ${surveyed} region${surveyed === 1 ? '' : 's'} surveyed`,
                     `${currency}${e.totalEarned.toLocaleString()} earned · best ${currency}${e.bestHaul.toLocaleString()}`,
                     `${e.secretsFound} secrets · ${e.trapsSprung} traps sprung *(we don't judge)*`,
+                    streakRecord(userData),
                 ].join('\n'),
                 inline: true,
             },

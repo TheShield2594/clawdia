@@ -812,7 +812,7 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 **Commands:**
 
 ```text
-/explore go [region]   - Set out on an expedition (1 stamina, 60s cooldown)
+/explore go [region] [route] - Set out on an expedition (1 stamina, 60s cooldown)
 /explore travel        - Unlock and move between regions
 /explore regions       - Browse every region, requirements, and progress
 /explore journal       - Reread your most recent finds
@@ -826,7 +826,14 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 - Core: Whispering Forest → Crumbling Ruins → Crystal Caves → Sunken Docks → Starfall Wastes (level + coin gated, rising payouts)
 - Seasonal: Frostveil Pass (winter), Hollowgrave Lane (spooky), Scorchglass Shore (summer), The Velvet Arcade (Valentine's), Arctic Tundra (winter hunt) — open only while their seasonal event runs, and they drop event currency for the event shop
 - A bare `/explore go` follows your active region, and reroutes itself if that region has gone out of season or been switched off
-- Every result carries a **🥾 Set out again** button that runs the next expedition in the same region, through the same cooldown, lock and server gates as the slash command
+- Every result carries three route buttons that run the next expedition in the same region, through the same cooldown, lock and server gates as the slash command. The route you just took is highlighted, so "same again" stays one click
+
+**Routes and streaks:**
+- **🥾 Main Trail** — traps less than half as often, −10% coins. The route for protecting a streak
+- **🧭 Off the Path** — landmarks and lore come up 1.8× as often and secrets 1.5×. The fastest way to chart a region and the best Explorer XP while there is something left to chart
+- **🌑 Deep Wilds** — more treasure and secrets and +30% coins, but traps twice as often and 25% harder
+- A bare `/explore go` takes the route you used last; `/explore regions` lists what each one does
+- **🔥 Streaks** — every expedition that doesn't end in a trap or a lost encounter adds one, worth +2% coins each up to +20%. A trap or a lost encounter ends it, and so does 30 minutes away. The encounter prompt says when a loss would cost you your streak, so a long streak makes the Deep Wilds and a bold approach a real gamble. Your current and best streaks show on `/explore profile`
 - The staged "Setting out" beat plays when there is something to reveal (an encounter, a secret, a first visit, epic or legendary treasure); routine runs go straight to the result
 
 **Progression:**

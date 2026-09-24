@@ -81,6 +81,7 @@ const COLLECTIONS = [
     // Exploring
     { module: 'exploreData', export: 'REGION_LIST',  kind: 'explorable region',      system: 'exploring', command: '/explore travel' },
     { module: 'exploreData', export: 'RELIC_LIST',   kind: 'collectible relic',      system: 'exploring', command: '/explore relics' },
+    { module: 'exploreData', export: 'ROUTE_LIST',   kind: 'expedition route',       system: 'exploring', command: '/explore go' },
 
     // Across the three grinds
     { module: 'crossSystemData', export: 'CROSS_CONSUMABLES', kind: 'cross-activity consumable', system: 'crafting', command: '/craft make' },

@@ -101,7 +101,7 @@ async function handleBrowse(interaction, ev, def, currency) {
     // An event shop item's name and description are whatever an admin typed
     // into the dashboard, with no length cap on either — five of them joined
     // ran past the 4,096 a description allows, and discord.js throws rather
-    // than truncating, so one long blurb took the whole page down. Cut each
+    // than truncating, so one long description took the whole page down. Cut each
     // entry to a readable length instead of losing items off the end: they are
     // bought by name, and a name the page never printed cannot be typed.
     const ITEM_NAME = 100;

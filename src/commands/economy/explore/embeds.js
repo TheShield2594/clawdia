@@ -18,7 +18,7 @@ const { SEASONAL_EVENTS } = require('../../../data/seasonalEvents');
 const { FEATURED_PAYOUT_BONUS } = require('../../../data/featuredRotation');
 const {
     getMaxStamina, msUntilNextStamina, getRegionProgress, isRegionEnabled,
-    getRelicBonus, getSecretOdds, randomFrom, formatMs,
+    getRelicBonus, getSecretOdds, randomFrom, formatMs, resolveRoute, getLiveStreak,
 } = require('../../../services/exploreService');
 const { petCompanionLine } = require('../../../services/petService');
 const COLORS = require('../../../utils/embedColors');
@@ -60,9 +60,9 @@ function summarizeResult(result, currency) {
  * region still HAS a secret to give. Once it's fully uncovered, saying it is
  * a promise nothing can keep, so say something honest instead.
  */
-function secretTeaser(user, region, guildSettings) {
+function secretTeaser(user, region, guildSettings, route = null) {
     if (!region) return 'The map never fills itself in.';
-    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id), guildSettings);
+    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id), guildSettings, route);
     if (odds.exhausted) {
         return `${region.name} has nothing left to hide from you. Other maps still do.`;
     }
@@ -78,8 +78,8 @@ function secretTeaser(user, region, guildSettings) {
  * looks like bad luck with no reason to believe it lets up; shown on every
  * run, it was a bar that said "0.0% overdue" under most results.
  */
-function buildSecretPityField(user, region, guildSettings) {
-    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id), guildSettings);
+function buildSecretPityField(user, region, guildSettings, route = null) {
+    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id), guildSettings, route);
     if (odds.exhausted || odds.sinceSecret < PITY_SHOW_AFTER) return null;
 
     const barLen = 16;
@@ -87,10 +87,11 @@ function buildSecretPityField(user, region, guildSettings) {
     const bar    = '█'.repeat(Math.round(ratio * barLen)) + '░'.repeat(barLen - Math.round(ratio * barLen));
     const maxed  = odds.pity >= LIMITS.SECRET_PITY_MAX;
     const lift   = odds.chance / odds.baseChance;
+    const via    = route ? ` by the ${route.name}` : '';
 
     return {
         name: `✨ Something's Overdue — ${odds.sinceSecret} expeditions dry`,
-        value: `\`${bar}\`\n**${(odds.chance * 100).toFixed(1)}% secret chance** next time out `
+        value: `\`${bar}\`\n**${(odds.chance * 100).toFixed(1)}% secret chance** next time out${via} `
              + `— ×${lift.toFixed(2)} the base rate${maxed ? ' *(max)*' : ', climbing with every dry run'}.`,
         inline: false,
     };
@@ -103,6 +104,12 @@ function buildSecretPityField(user, region, guildSettings) {
 function standingBonusLine(result, user) {
     if (!(result.payout > 0)) return null;
     const boosts = [];
+    const route = result.route ? resolveRoute(result.route) : null;
+    if (route?.payoutBonus) {
+        const pct = Math.round(route.payoutBonus * 100);
+        boosts.push(`${route.emoji} ${route.name.toLowerCase()} ${pct > 0 ? '+' : '−'}${Math.abs(pct)}%`);
+    }
+    if (result.streakBonus > 0) boosts.push(`🔥 streak +${Math.round(result.streakBonus * 100)}%`);
     if (result.featured) boosts.push(`🌟 featured +${Math.round(FEATURED_PAYOUT_BONUS * 100)}%`);
     if (result.surveyed) boosts.push(`🏅 surveyed +${Math.round(LIMITS.SURVEY_BONUS * 100)}%`);
     const relicBonus = getRelicBonus(user);
@@ -127,12 +134,13 @@ function buildResultEmbed(result, region, user, {
     currency, eventDrop = null, mainXp = 0, firstVisit = false, guildSettings = null, weeklyLeader = null, unsaved = false, intro = null,
 } = {}) {
     const e = user.exploration;
+    const route = result.route ? resolveRoute(result.route) : null;
     // The "Setting out — <region>" embed is edited away by this one, so without
     // an author line the message a player scrolls back to never says where any
     // of this happened. The titles below are landmark and creature names; only
     // the embed colour hinted at the region, which is not something you can read.
     const embed = new EmbedBuilder()
-        .setAuthor({ name: `${region.emoji} ${region.name}` })
+        .setAuthor({ name: `${region.emoji} ${region.name}${route ? ` · ${route.emoji} ${route.name}` : ''}` })
         .setTimestamp();
     const lines = [];
     if (intro) lines.push(`-# ${intro}`, '');
@@ -220,6 +228,9 @@ function buildResultEmbed(result, region, user, {
         );
     }
 
+    const streakNews = streakLine(result);
+    if (streakNews) lines.push('', streakNews);
+
     const petLine = petCompanionLine(user?.pets, 'explore');
     if (petLine) lines.push('', petLine);
 
@@ -291,7 +302,7 @@ function buildResultEmbed(result, region, user, {
 
     // Pity curve — only on runs that didn't turn up the secret
     if (result.type !== 'secret') {
-        const pityField = buildSecretPityField(user, region, guildSettings);
+        const pityField = buildSecretPityField(user, region, guildSettings, route);
         if (pityField) embed.addFields(pityField);
     }
 
@@ -308,11 +319,32 @@ function buildResultEmbed(result, region, user, {
     // the footer keeps its flavour line — it used to show the leader on every
     // run once anyone had scored, and the flavour lines were never seen again.
     const staminaNote = result.staminaSpared ? ' *(a blank walk costs no stamina)*' : '';
+    const liveStreak = getLiveStreak(user);
+    const streakNote = liveStreak > 0 ? ` · 🔥 ${liveStreak}-run streak` : '';
     const leaderNote = weeklyLeader && result.payout > 0
         ? `👑 Explorer of the Week so far: ${weeklyLeader.username} — ${currency}${(weeklyLeader.total ?? 0).toLocaleString()} recovered`
         : randomFrom(FOOTER_LINES);
-    embed.setFooter({ text: `⚡ ${e.stamina}/${getMaxStamina(user)} stamina${staminaNote} · ${nextExpeditionNote(user)}\n${leaderNote}` });
+    embed.setFooter({ text: `⚡ ${e.stamina}/${getMaxStamina(user)} stamina${staminaNote}${streakNote} · ${nextExpeditionNote(user)}\n${leaderNote}` });
     return embed;
+}
+
+/**
+ * What this run did to the streak, when it is news: it ended, it went cold
+ * before the run began, or it just reached the most it can pay. A streak that
+ * simply ticked up is in the footer, not the story.
+ */
+function streakLine(result) {
+    if (result.streakBroken) {
+        return `💥 **Streak over** — your ${result.streakBroken}-run trail sense is gone. The wilds were counting too.`;
+    }
+    const lines = [];
+    if (result.streakCooled) {
+        lines.push(`🌫️ *The trail went cold while you were away — your ${result.streakCooled}-run streak reset.*`);
+    }
+    if (result.streak === LIMITS.STREAK_MAX) {
+        lines.push(`🔥 **Trail sense maxed** — ${LIMITS.STREAK_MAX} runs clean, **+${Math.round(LIMITS.STREAK_MAX * LIMITS.STREAK_BONUS_PER * 100)}%** on every haul while it lasts.`);
+    }
+    return lines.join('\n') || null;
 }
 
 /**
@@ -341,6 +373,7 @@ module.exports = {
     buildResultEmbed,
     buildSecretPityField,
     nextExpeditionNote,
+    streakLine,
     secretTeaser,
     summarizeResult,
 };

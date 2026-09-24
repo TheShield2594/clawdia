@@ -38,6 +38,7 @@ const {
     RELIC_RARITY_ORDER,
     TOTAL_CORE_SECRETS,
     EXPLORER_LEVELS,
+    ROUTES,
     getRelicMeta,
 } = require('../src/data/exploreData');
 
@@ -620,15 +621,16 @@ describe('secret pity tells the truth', () => {
         user.exploration.stamina = LIMITS.MAX_STAMINA;
         user.exploration.sinceSecret = 7;
 
-        // 0.92 is chosen to land in the secret slot of the region's event
-        // table, so this expedition finds one rather than hoping a roll does.
+        // 0.875 is chosen to land in the secret slot of the region's event
+        // table as the default route (the Main Trail) reshapes it, so this
+        // expedition finds one rather than hoping a roll does.
         // The type assertion below is what keeps that honest: reorder or
         // reweight the table and it fails, instead of the test quietly
         // covering nothing. The twenty-expedition sweep below cannot stand in
         // for this — delete the reset and it still passes whenever those
         // twenty happen to turn up no secret at all.
-        const roll = jest.spyOn(Math, 'random').mockReturnValue(0.92);
-        __setRandomSourceForTests(() => 0.92);
+        const roll = jest.spyOn(Math, 'random').mockReturnValue(0.875);
+        __setRandomSourceForTests(() => 0.875);
         try {
             const result = executeExplore(user, region, settings, {});
             expect(result.type).toBe('secret');
@@ -1282,6 +1284,8 @@ describe('the encounter choice is a real decision', () => {
                 if (r.pendingChoice) {
                     user.inventory = relics.map(relic => ({ itemId: relic.itemId, quantity: 1 }));
                     user.exploration.regions = [];
+                    // The walk built a streak too, which lifts coins the same way.
+                    user.exploration.streak = 0;
                     return r;
                 }
             }
@@ -1292,8 +1296,10 @@ describe('the encounter choice is a real decision', () => {
         const plainStakes = getEncounterStakes(plain, region, settings, plainResult);
         expect(plainStakes.winChance).toBe(plainResult.encounter.winChance);
         expect(plainStakes.win.min).toBeGreaterThan(plainStakes.safe.min);
+        // The route the walk took prices the prize too (the default trail pays less).
+        const routeMult = 1 + ROUTES[plainResult.route].payoutBonus;
         expect(plainStakes.safe.min).toBe(
-            Math.round(plainResult.encounter.reward.min * region.payoutMultiplier * safeRate));
+            Math.round(plainResult.encounter.reward.min * region.payoutMultiplier * routeMult * safeRate));
 
         // Same encounter definition, richer explorer → a bigger quoted prize.
         const richResult = encounterFor(collector, RELIC_LIST.slice(0, 8));

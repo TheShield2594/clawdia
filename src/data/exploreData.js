@@ -65,7 +65,63 @@ const LIMITS = {
     // 11-25 a reason to exist beyond the trade window.
     RELIC_BONUS_PER:      0.01,
     RELIC_BONUS_MAX:      0.10,
+    // Trail sense: every expedition that doesn't end in a trap or a lost
+    // encounter adds one to the streak, and each point is worth
+    // STREAK_BONUS_PER on coins, up to STREAK_MAX points. A trap or a lost
+    // encounter ends it, and so does leaving the trail cold for longer than
+    // STREAK_WINDOW_MS. It is what a risky route or a bold approach puts on
+    // the line besides coins — the push-your-luck half of the route choice.
+    STREAK_BONUS_PER:     0.02,
+    STREAK_MAX:           10,
+    STREAK_WINDOW_MS:     30 * 60_000,
 };
+
+// ─── EXPEDITION ROUTES ───────────────────────────────────────────────────────
+// How an expedition sets out, chosen per trip: the slash option, or one of the
+// three buttons on the last result. A route reshapes the region's event table
+// (multipliers on its weights, applied after the admin rare-event knob) and
+// can move coins and trap penalties. Each is the right call for a different
+// player:
+//
+//   trail    — fewest traps, so it keeps a streak alive. Pays the least.
+//   offpath  — landmarks and lore come up far more often: the charting route,
+//              and so the fastest Explorer XP. Traps a little more.
+//   deep     — richer finds and more secrets, +15% coins, but traps come
+//              twice as often and bite harder. Burns streaks.
+//
+// tests/exploreRoutes.test.js holds that no route beats another on every
+// axis — coins, XP, charting and safety.
+const ROUTES = {
+    trail: {
+        id: 'trail',
+        name: 'Main Trail',
+        emoji: '🥾',
+        description: 'Fewer traps, leaner pickings: −10% coins. The route for keeping a streak alive.',
+        weights: { trap: 0.45, quiet: 1.4, encounter: 0.9, treasure: 0.9, secret: 0.75 },
+        payoutBonus: -0.10,
+        trapPenaltyMult: 1,
+    },
+    offpath: {
+        id: 'offpath',
+        name: 'Off the Path',
+        emoji: '🧭',
+        description: 'Landmarks and lore turn up far more often. So do traps, a little.',
+        weights: { discovery: 1.8, lore: 1.8, secret: 1.5, trap: 1.2, treasure: 0.75, quiet: 0.5 },
+        payoutBonus: 0,
+        trapPenaltyMult: 1,
+    },
+    deep: {
+        id: 'deep',
+        name: 'Deep Wilds',
+        emoji: '🌑',
+        description: 'Richer finds, more secrets and +30% coins. Traps come twice as often and bite harder.',
+        weights: { trap: 2.0, treasure: 1.4, secret: 1.5, encounter: 1.15, quiet: 0.25 },
+        payoutBonus: 0.30,
+        trapPenaltyMult: 1.25,
+    },
+};
+const ROUTE_LIST = Object.values(ROUTES);
+const DEFAULT_ROUTE = 'trail';
 
 // ─── EXPLORER PROGRESSION ────────────────────────────────────────────────────
 // xpRequired is the cumulative explorer XP needed to REACH that level.
@@ -1265,6 +1321,9 @@ module.exports = {
     MAX_EXPLORER_LEVEL:    EXPLORER_LEVELS.length,
     MAX_EXPLORER_PRESTIGE: EXPLORER_PRESTIGE.length - 1,
     EVENT_XP,
+    ROUTES,
+    ROUTE_LIST,
+    DEFAULT_ROUTE,
     TREASURE_TIERS,
     TREASURE_MATERIALS,
     TIER_COLORS,

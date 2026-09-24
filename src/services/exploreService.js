@@ -13,6 +13,8 @@ const {
     REGION_LIST,
     RELIC_INDEX,
     QUIET_LINES,
+    ROUTES,
+    DEFAULT_ROUTE,
 } = require('../data/exploreData');
 const grind = require('./grindEngine');
 const { MATERIAL_RARITY } = require('../data/materialRarity');
@@ -29,12 +31,12 @@ const EXPLORE_COUNTERS = [
     'totalExpeditions', 'treasuresFound', 'trapsSprung', 'encountersWon',
     'secretsFound', 'loreCollected', 'landmarksDiscovered', 'relicsRecovered',
     'totalEarned', 'bestHaul', 'sinceSecret', 'regionsSurveyed',
-    'anomaliesFound',
+    'anomaliesFound', 'streak', 'bestStreak',
 ];
 
 // Timestamps that legitimately sit at null until something happens.
 // `staminaLastRegen` and `dailyWindowStart` are the engine's, likewise.
-const EXPLORE_TIMESTAMPS = ['lastExplore', 'injuryUntil'];
+const EXPLORE_TIMESTAMPS = ['lastExplore', 'injuryUntil', 'streakAt'];
 
 /**
  * Backfill the exploration profile. Reports whether it actually wrote anything,
@@ -58,6 +60,7 @@ function ensureExploreData(user) {
     };
 
     seed('activeRegion', 'whispering_forest');
+    seed('lastRoute', DEFAULT_ROUTE);
     for (const key of EXPLORE_COUNTERS) seed(key, 0);
     for (const key of EXPLORE_TIMESTAMPS) {
         if (!(key in e)) { e[key] = null; dirty = true; }
@@ -330,6 +333,53 @@ function getRelicCapacity(user) {
     return relicCapacityForBonus(getExplorerPrestige(user).relicCapBonus);
 }
 
+// ─── ROUTES & STREAKS ────────────────────────────────────────────────────────
+
+/** A route definition by id, falling back to the default for anything unknown. */
+function resolveRoute(routeId) {
+    return ROUTES[routeId] ?? ROUTES[DEFAULT_ROUTE];
+}
+
+/**
+ * The streak as it stands right now: a trail left cold past
+ * LIMITS.STREAK_WINDOW_MS reads as zero, before any expedition has written
+ * the reset down. Display and payout both read this, so neither quotes a
+ * bonus the next expedition won't pay.
+ */
+function getLiveStreak(user, now = Date.now()) {
+    const e = user.exploration ?? {};
+    const streak = Math.max(0, Number(e.streak) || 0);
+    if (!streak) return 0;
+    const at = e.streakAt ? new Date(e.streakAt).getTime() : null;
+    if (at == null || now - at > LIMITS.STREAK_WINDOW_MS) return 0;
+    return streak;
+}
+
+/** Coin bonus the current streak is worth, capped at STREAK_MAX points. */
+function getStreakBonus(user, now = Date.now()) {
+    return Math.min(getLiveStreak(user, now), LIMITS.STREAK_MAX) * LIMITS.STREAK_BONUS_PER;
+}
+
+/**
+ * Carry the streak forward once an expedition has resolved. A trap or a lost
+ * encounter ends it; anything else — a quiet walk included, since surviving
+ * is the whole skill — adds one. The count itself is uncapped (a best streak
+ * of 23 is worth bragging about); only the bonus stops at STREAK_MAX.
+ */
+function settleStreak(user, result) {
+    const e = user.exploration;
+    const broke = result.type === 'trap' || result.outcome === 'loss';
+    if (broke) {
+        if (e.streak > 0) result.streakBroken = e.streak;
+        e.streak = 0;
+    } else {
+        e.streak = (e.streak ?? 0) + 1;
+        if (e.streak > (e.bestStreak ?? 0)) e.bestStreak = e.streak;
+    }
+    e.streakAt = new Date();
+    result.streak = e.streak;
+}
+
 // ─── EVENT ROLL ──────────────────────────────────────────────────────────────
 
 /**
@@ -344,7 +394,7 @@ function getRelicCapacity(user) {
  * two is how a server with rareEventBonus set ends up being quoted a secret
  * chance lower than the one it actually rolls against.
  */
-function buildEventWeights(region, guildSettings) {
+function buildEventWeights(region, guildSettings, route = null) {
     const w = { ...region.eventWeights };
 
     // Admin knob: shift weight from the mundane to secrets + treasure
@@ -355,6 +405,12 @@ function buildEventWeights(region, guildSettings) {
         w.trap     = Math.max(1, w.trap  - shift * 0.5);
         w.treasure += shift * 0.6;
         w.secret   += shift * 0.4;
+    }
+
+    // The route reshapes the table last, so it scales whatever the admin knob
+    // left rather than being undone by it.
+    for (const [type, mult] of Object.entries(route?.weights ?? {})) {
+        if (type in w) w[type] *= mult;
     }
     return w;
 }
@@ -371,8 +427,8 @@ function applySecretPrestige(weight, user) {
     return weight * (1 + getExplorerPrestige(user).secretBonus);
 }
 
-function rollEventType(user, region, guildSettings, progress) {
-    const w = buildEventWeights(region, guildSettings);
+function rollEventType(user, region, guildSettings, progress, route = null) {
+    const w = buildEventWeights(region, guildSettings, route);
     const secretsLeft = hasUnfoundSecrets(region, progress);
 
     if (secretsLeft) {
@@ -405,13 +461,13 @@ function getSecretPity(user) {
  * chance, the pity-boosted chance, and whether the region has anything left
  * to find at all. Display-only — the roll itself lives in rollEventType.
  */
-function getSecretOdds(user, region, progress, guildSettings = null) {
+function getSecretOdds(user, region, progress, guildSettings = null, route = null) {
     if (!hasUnfoundSecrets(region, progress)) {
         return { exhausted: true, sinceSecret: 0, baseChance: 0, chance: 0, pity: 0 };
     }
     // Same table the roll uses, so a server running rareEventBonus is quoted
     // the odds it actually plays against.
-    const w = buildEventWeights(region, guildSettings);
+    const w = buildEventWeights(region, guildSettings, route);
     // Same widening the roll applies, before the total is taken — quoting the
     // unprestiged slot against a prestiged roll is the one thing this must not do.
     w.secret = applySecretPrestige(w.secret, user);
@@ -453,6 +509,11 @@ const ANOMALY_REWARD = { min: 400, max: 900 };
  */
 function executeExplore(user, region, guildSettings, opts = {}) {
     const e = user.exploration;
+    const route = resolveRoute(opts.route ?? e.lastRoute);
+    e.lastRoute = route.id;
+    // A trail left cold resets the streak before this run's coins are priced.
+    const coldStreak = e.streak > 0 && getLiveStreak(user) === 0 ? e.streak : 0;
+    if (coldStreak) e.streak = 0;
     const progress = getRegionProgress(user, region.id, { create: true });
     const firstVisit = progress.expeditions === 0;
     const wasFullyCharted = isRegionFullyCharted(region, progress);
@@ -464,15 +525,19 @@ function executeExplore(user, region, guildSettings, opts = {}) {
     e.dailyExpeditions += 1;
     progress.expeditions += 1;
 
-    const coinMult    = getPayoutMultiplier(user, region, guildSettings, opts.coinMultiplier ?? 1, progress);
+    const coinMult    = getPayoutMultiplier(user, region, guildSettings, opts.coinMultiplier ?? 1, progress, route);
     const penaltyMult = getPenaltyMultiplier(region);
 
     const result = {
         regionId: region.id,
+        route: route.id,
+        // The bonus this run was priced with, before its own outcome moves it.
+        streakBonus: getStreakBonus(user),
+        streakCooled: coldStreak || undefined,
         firstVisit,
         secretsLeft,
         surveyed: wasFullyCharted,
-        type: rollEventType(user, region, guildSettings, progress),
+        type: rollEventType(user, region, guildSettings, progress, route),
         payout: 0,
         grossPayout: 0,
         xp: 0,
@@ -544,7 +609,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             const trap = randomFrom(region.traps);
             // Trap penalties are hand-tuned per region already, so they take
             // no region multiplier on top — only the balance floor applies.
-            const rawPenalty = randInt(trap.penalty.min, trap.penalty.max);
+            const rawPenalty = Math.round(randInt(trap.penalty.min, trap.penalty.max) * route.trapPenaltyMult);
             const penalty = Math.min(rawPenalty, Math.max(0, user.balance));
             user.balance -= penalty;
             e.trapsSprung += 1;
@@ -582,6 +647,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
     if (result.type !== 'secret' && !result.pendingChoice) {
         countTowardPity(user, result);
     }
+    if (!result.pendingChoice) settleStreak(user, result);
 
     finalizeStats(user, region, progress, result, wasFullyCharted);
     user.markModified('exploration');
@@ -623,7 +689,7 @@ function getEncounterWinChance(user, region, enc) {
 function getEncounterStakes(user, region, guildSettings, result) {
     const enc = result.encounter;
     const progress = getRegionProgress(user, region.id);
-    const coinMult    = getPayoutMultiplier(user, region, guildSettings, result.coinMultiplier ?? 1, progress);
+    const coinMult    = getPayoutMultiplier(user, region, guildSettings, result.coinMultiplier ?? 1, progress, resolveRoute(result.route));
     const penaltyMult = getPenaltyMultiplier(region);
     const loss = encounterLossBand(enc);
     // Payouts are quoted after the daily caps have taken their cut, because that
@@ -646,6 +712,8 @@ function getEncounterStakes(user, region, guildSettings, result) {
         // True once the hard cap leaves nothing to win, so the prompt can say
         // the bet is all downside rather than silently offering a 0-coin prize.
         capped,
+        // What a loss would also end — the streak is on the table too.
+        streakAtRisk: getLiveStreak(user),
     };
 }
 
@@ -657,7 +725,7 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
     const e = user.exploration;
     const enc = result.encounter;
     const progress = getRegionProgress(user, region.id);
-    const coinMult    = getPayoutMultiplier(user, region, guildSettings, result.coinMultiplier ?? 1, progress);
+    const coinMult    = getPayoutMultiplier(user, region, guildSettings, result.coinMultiplier ?? 1, progress, resolveRoute(result.route));
     const penaltyMult = getPenaltyMultiplier(region);
 
     result.pendingChoice = false;
@@ -696,6 +764,7 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
     }
 
     countTowardPity(user, result);
+    settleStreak(user, result);
     finalizeStats(user, region, progress, result, isRegionFullyCharted(region, progress));
     user.markModified('exploration');
     return result;
@@ -749,6 +818,7 @@ function finishAsTreasure(user, region, progress, result, coinMult, { fallback =
     result.material = grantTreasureMaterial(user, tier.tier);
 
     countTowardPity(user, result);
+    settleStreak(user, result);
     finalizeStats(user, region, progress, result, isRegionFullyCharted(region, progress));
     user.markModified('exploration');
     return result;
@@ -759,14 +829,16 @@ function finishAsTreasure(user, region, progress, result, coinMult, { fallback =
 /**
  * Everything that multiplies a payout: the seasonal event bonus, the admin
  * drop-rate knob, how deep the region is, the standing bonus for a fully
- * surveyed map, and the relic display case.
+ * surveyed map, the relic display case, the route, and the streak.
  */
-function getPayoutMultiplier(user, region, guildSettings, eventCoinMultiplier = 1, progress = null) {
+function getPayoutMultiplier(user, region, guildSettings, eventCoinMultiplier = 1, progress = null, route = null) {
     const dropRate = clamp(guildSettings?.exploration?.dropRateMultiplier ?? 1, 0.1, 5);
     const survey   = isRegionFullyCharted(region, progress) ? 1 + LIMITS.SURVEY_BONUS : 1;
     const relics   = 1 + getRelicBonus(user);
     const prestige = 1 + getExplorerPrestige(user).payoutBonus;
-    return eventCoinMultiplier * dropRate * region.payoutMultiplier * survey * relics * prestige;
+    const path     = 1 + (route?.payoutBonus ?? 0);
+    const streak   = 1 + getStreakBonus(user);
+    return eventCoinMultiplier * dropRate * region.payoutMultiplier * survey * relics * prestige * path * streak;
 }
 
 /**
@@ -1106,6 +1178,9 @@ module.exports = {
     encounterLossBand,
     getEncounterWinChance,
     getEncounterStakes,
+    resolveRoute,
+    getLiveStreak,
+    getStreakBonus,
     addJournalEntry,
     applyExploreXpBonus,
     rollTreasureMaterial,

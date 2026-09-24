@@ -1302,7 +1302,7 @@ textarea.auto-resize {
 .cw-section-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; margin-bottom: 56px; }
 .cw-eyebrow { font-family: 'JetBrains Mono', monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-500); margin-bottom: 16px; }
 .cw-section-title { font-family: 'Instrument Serif', serif; font-size: 64px; line-height: 1; margin: 0; max-width: 700px; }
-.cw-section-blurb { font-size: 17px; color: var(--ink-600); max-width: 380px; margin: 0; line-height: 1.5; }
+.cw-section-description { font-size: 17px; color: var(--ink-600); max-width: 380px; margin: 0; line-height: 1.5; }
 
 .cw-feature-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
 .cw-feature { background: #fff; border: 1px solid rgba(20,17,13,.06); border-radius: 22px; padding: 26px 24px 24px; display: flex; flex-direction: column; min-height: 240px; transition: transform .2s, box-shadow .2s; }

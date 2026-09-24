@@ -17,7 +17,7 @@ const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
 const {
     commitExpeditionRelic, applyStaminaRegen, applyDailyReset, msUntilNextStamina,
     resolveActiveRegion, executeExplore, applyExploreXpBonus, resolveEncounter,
-    getEncounterStakes, addJournalEntry, randInt,
+    getEncounterStakes, addJournalEntry, randInt, resolveRoute,
 } = require('../../../services/exploreService');
 const { getTotalBonus, tryGrantRarePet } = require('../../../services/petService');
 const { checkAndAward, announceAchievements } = require('../../../services/achievementService');
@@ -82,6 +82,10 @@ async function handleGo(interaction) {
         if (resolved.switched) rerouted = resolved.from;
     }
 
+    // The route is picked per trip — the slash option or a result button — and
+    // otherwise follows the one taken last.
+    const route = resolveRoute(interaction.options.getString('route') ?? e.lastRoute);
+
     const gateError = regionGateError(user, region, guildSettings);
     if (gateError) return interaction.reply({ content: gateError, flags: MessageFlags.Ephemeral });
 
@@ -104,7 +108,7 @@ async function handleGo(interaction) {
                 description: 'You just got back. Shake the dust off, check your boots for stowaways, then go again.',
                 color: EXPLORE_COLORS.TRAIL,
                 nextAt: new Date(e.lastExplore.getTime() + LIMITS.EXPLORE_COOLDOWN_MS),
-                nextRewardPreview: secretTeaser(user, region, guildSettings),
+                nextRewardPreview: secretTeaser(user, region, guildSettings, route),
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -160,7 +164,7 @@ async function handleGo(interaction) {
                 description: 'You just got back. Shake the dust off, check your boots for stowaways, then go again.',
                 color: EXPLORE_COLORS.TRAIL,
                 nextAt: new Date(new Date(lastAt).getTime() + LIMITS.EXPLORE_COOLDOWN_MS),
-                nextRewardPreview: secretTeaser(user, region, guildSettings),
+                nextRewardPreview: secretTeaser(user, region, guildSettings, route),
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -201,7 +205,7 @@ async function handleGo(interaction) {
         const isFeatured = region.id === featuredRegion.id;
         const coinMultiplier = getEventCoinMultiplier(guildSettings)
             * (isFeatured ? 1 + FEATURED_PAYOUT_BONUS : 1);
-        const result = executeExplore(user, region, guildSettings, { coinMultiplier });
+        const result = executeExplore(user, region, guildSettings, { coinMultiplier, route: route.id });
         result.featured = isFeatured;
         const firstVisit = result.firstVisit;
         const wasEncounter = Boolean(result.pendingChoice);
@@ -285,7 +289,7 @@ async function handleGo(interaction) {
             await show({
                 embeds: [new EmbedBuilder()
                     .setColor(region.color)
-                    .setTitle(`${region.emoji} Setting out — ${region.name}`)
+                    .setTitle(`${region.emoji} Setting out — ${region.name} · ${route.emoji} ${route.name}`)
                     .setDescription(`*${result.intro}*${reroutedLine}${featuredLine}`)
                     .setFooter({ text: region.tagline })],
             });
@@ -307,6 +311,9 @@ async function handleGo(interaction) {
                 new ButtonBuilder().setCustomId(`${encId}_approach`).setLabel(`🤝 Approach (${odds}%)`).setStyle(ButtonStyle.Primary),
                 new ButtonBuilder().setCustomId(`${encId}_observe`).setLabel('🌿 Keep Your Distance').setStyle(ButtonStyle.Secondary),
             );
+            // A lost encounter ends the streak as surely as a trap does, so the
+            // prompt prices that in beside the coins.
+            const streakLoss = stakes.streakAtRisk > 0 ? `, and ends your 🔥 ${stakes.streakAtRisk}-run streak` : '';
             const loreLine = stakes.loreBonus
                 ? `\n\n📖 *You know ${region.name}'s story, and it knows you do — **+${Math.round(LIMITS.ENCOUNTER_LORE_BONUS * 100)}%** on the approach.*`
                 : '';
@@ -321,8 +328,8 @@ async function handleGo(interaction) {
                         {
                             name: `🤝 Approach — ${odds}%`,
                             value: stakes.capped
-                                ? `Win: **nothing** — the daily cap has your coins.\nLose: **−${range(stakes.loss)}**, and it may leave a mark.`
-                                : `Win: **+${range(stakes.win)}**\nLose: **−${range(stakes.loss)}**, and it may leave a mark.`,
+                                ? `Win: **nothing** — the daily cap has your coins.\nLose: **−${range(stakes.loss)}**${streakLoss}, and it may leave a mark.`
+                                : `Win: **+${range(stakes.win)}**\nLose: **−${range(stakes.loss)}**${streakLoss}, and it may leave a mark.`,
                             inline: true,
                         },
                         {
@@ -544,7 +551,7 @@ async function handleGo(interaction) {
         const thumbLabel = result.relic ? result.relic.itemId : region.name;
         const files = await attachItemThumbnail(embed, thumbId, interaction.guild.id, thumbLabel);
 
-        const resultMessage = await show({ embeds: [embed], components: buildResultActions(), files });
+        const resultMessage = await show({ embeds: [embed], components: buildResultActions(result.route), files });
         attachResultActions(interaction, resultMessage, { regionId: region.id });
 
         // Server-wide whisper for secrets
