@@ -53,6 +53,10 @@ describe('hungerBar', () => {
     test('is green when fed and red when starving', () => {
         expect(hungerBar(90)).toContain('🟩');
         expect(hungerBar(5)).toContain('🟥');
+        // Orange while it is asking but the bonus still holds, red once it lapses.
+        expect(hungerBar(45)).toContain('🟧');
+        expect(hungerBar(30)).toContain('🟧');
+        expect(hungerBar(29)).toContain('🟥');
     });
 
     test('clamps junk input to 0', () => {

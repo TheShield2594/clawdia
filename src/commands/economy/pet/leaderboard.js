@@ -2,7 +2,7 @@
 
 const { EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
-const { PET_DEFINITIONS, heartBar } = require('../../../services/petService');
+const { heartBar, getPetDisplay } = require('../../../services/petService');
 const COLORS = require('../../../utils/embedColors');
 
 async function executeLeaderboard(interaction) {
@@ -17,22 +17,21 @@ async function executeLeaderboard(interaction) {
         sortStage = { $sort: { petLevel: -1 } };
         titleLabel = 'Highest Level Pets';
         lineBuilder = (e, rank) => {
-            const def  = PET_DEFINITIONS[e.pet.petId];
-            const name = e.pet.name || def?.name || e.pet.petId;
-            const stage = e.pet.evolutionStage ?? 1;
-            const stageEmoji = stage >= 3 ? '🌟' : stage >= 2 ? '✨' : '';
-            return `${rank} ${def?.emoji ?? '🐾'} **${name}** ${stageEmoji} — Lv**${e.pet.level ?? 1}** — <@${e.userId}>`;
+            const { emoji, titledName } = getPetDisplay(e.pet);
+            // Stars for the stage, as the status card shows it. This used to be
+            // 🌟 for an Apex pet, the same mark the footer uses for Pet of the Week.
+            const stars = '⭐'.repeat(e.pet.evolutionStage ?? 1);
+            return `${rank} ${emoji} **${titledName}** ${stars} — Lv**${e.pet.level ?? 1}** — <@${e.userId}>`;
         };
     } else if (sortType === 'wins') {
-        addFieldsStage = { $addFields: { petWins: '$pets.battleWins' } };
-        sortStage = { $sort: { petWins: -1 } };
-        titleLabel = 'Most Battle Wins';
+        // PvP only: wild wins are a count of time spent grinding, and anyone
+        // can rack them up. Fewer losses breaks a tie in wins.
+        addFieldsStage = { $addFields: { petWins: { $ifNull: ['$pets.pvpWins', 0] }, petLosses: { $ifNull: ['$pets.pvpLosses', 0] } } };
+        sortStage = { $sort: { petWins: -1, petLosses: 1 } };
+        titleLabel = 'Most PvP Wins';
         lineBuilder = (e, rank) => {
-            const def  = PET_DEFINITIONS[e.pet.petId];
-            const name = e.pet.name || def?.name || e.pet.petId;
-            const wins   = e.pet.battleWins   ?? 0;
-            const losses = e.pet.battleLosses ?? 0;
-            return `${rank} ${def?.emoji ?? '🐾'} **${name}** — ⚔️ ${wins}W / ${losses}L — <@${e.userId}>`;
+            const { emoji, titledName } = getPetDisplay(e.pet);
+            return `${rank} ${emoji} **${titledName}** — ⚔️ ${e.pet.pvpWins ?? 0}W / ${e.pet.pvpLosses ?? 0}L vs members — <@${e.userId}>`;
         };
     } else {
         // Default: bond days
@@ -40,10 +39,9 @@ async function executeLeaderboard(interaction) {
         sortStage = { $sort: { bondDays: -1 } };
         titleLabel = 'Most Bonded Pets';
         lineBuilder = (e, rank) => {
-            const def  = PET_DEFINITIONS[e.pet.petId];
-            const name = e.pet.name || def?.name || e.pet.petId;
+            const { emoji, titledName } = getPetDisplay(e.pet);
             const potw = e.pet.potw ? ' 🌟' : '';
-            return `${rank} ${def?.emoji ?? '🐾'} **${name}**${potw} — ${heartBar(e.bondDays)} ${e.bondDays}d — <@${e.userId}>`;
+            return `${rank} ${emoji} **${titledName}**${potw} — ${heartBar(e.bondDays)} ${e.bondDays}d — <@${e.userId}>`;
         };
     }
 
@@ -53,7 +51,7 @@ async function executeLeaderboard(interaction) {
         addFieldsStage,
         sortStage,
         { $limit: 10 },
-        { $project: { _id: 0, userId: 1, pet: '$pets', bondDays: 1, petLevel: 1, petWins: 1 } },
+        { $project: { _id: 0, userId: 1, pet: '$pets', bondDays: 1, petLevel: 1, petWins: 1, petLosses: 1 } },
     ]);
 
     const medals = ['🥇', '🥈', '🥉'];

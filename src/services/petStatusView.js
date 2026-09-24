@@ -15,6 +15,7 @@ const {
     getMoodColor,
     heartBar,
     PET_MAX_LEVEL,
+    getMoodBand,
     xpForLevel,
     getPetDisplay,
     getEffectiveBonusPct,
@@ -30,7 +31,10 @@ const HUNGER_BAR_LENGTH = 10;
 function hungerBar(hunger) {
     const pct    = Math.round(Math.min(100, Math.max(0, Number(hunger) || 0)));
     const filled = Math.round((pct / 100) * HUNGER_BAR_LENGTH);
-    const color  = pct >= STARVING_THRESHOLD ? '🟩' : '🟥';
+    // Same bands as the mood and the card colour: green while comfortable,
+    // orange once it is asking, red once the bonus is off.
+    const band   = getMoodBand(pct);
+    const color  = band === 'concerning' ? '🟥' : band === 'pleading' ? '🟧' : '🟩';
     return color.repeat(filled) + '⬛'.repeat(HUNGER_BAR_LENGTH - filled) + ` ${pct}%`;
 }
 

@@ -251,3 +251,74 @@ describe('recordPetInteraction', () => {
         expect(pet.interactionsToday).toBe(1);
     });
 });
+
+describe('mood bands line up with the passive bonus', () => {
+    const { getMoodBand, getMoodColor, getMoodAction } = require('../src/services/petService');
+
+    test('the band only turns to "concerning" once the bonus is off', () => {
+        expect(getMoodBand(STARVING_THRESHOLD)).toBe('pleading');
+        expect(getMoodBand(STARVING_THRESHOLD - 0.01)).toBe('concerning');
+        expect(getMoodBand(59)).toBe('pleading');
+        expect(getMoodBand(60)).toBe('content');
+        expect(getMoodBand(90)).toBe('blissful');
+    });
+
+    test('the colour follows the same bands', () => {
+        expect(getMoodColor(STARVING_THRESHOLD)).toBe('#ff9800');
+        expect(getMoodColor(STARVING_THRESHOLD - 1)).toBe('#f44336');
+    });
+
+    test('each species has its own gesture, fed or hungry', () => {
+        const fed    = { petId: 'shark', hunger: 95, lastDecayAt: new Date(NOW) };
+        const hungry = { petId: 'shark', hunger: 10, lastDecayAt: new Date(NOW) };
+        expect(getMoodAction(fed, NOW)).toBe('lazy, lazy circles');
+        expect(getMoodAction(hungry, NOW)).toBe('restless, tightening circles');
+        expect(getMoodAction({ petId: 'nonesuch', hunger: 50 }, NOW)).toBeNull();
+    });
+});
+
+describe('petCompanionLine', () => {
+    const { petCompanionLine } = require('../src/services/petService');
+    const pet = (petId, overrides = {}) => ({
+        petId, name: null, hunger: 100, lastDecayAt: new Date(NOW), personality: 'loyal', level: 1, evolutionStage: 1, ...overrides,
+    });
+
+    test('the pet whose passive the activity uses is the one that speaks', () => {
+        const line = petCompanionLine([pet('fish'), pet('dog'), pet('wolf', { name: 'Ghost' })], 'hunt', NOW);
+        expect(line).toBe('> 🐺 **Ghost** stays close, alert for any sign of danger.');
+    });
+
+    test('a fish never narrates a hunt, but a land pet can stand in', () => {
+        expect(petCompanionLine([pet('fish')], 'hunt', NOW)).toBeNull();
+        expect(petCompanionLine([pet('fish'), pet('cat')], 'mine', NOW)).toContain('**Cat**');
+        expect(petCompanionLine([pet('fish')], 'fish', NOW)).toContain('**Fish**');
+    });
+
+    test('exploration has lines, so the Lantern Owl finally speaks — with its evolved look', () => {
+        const owl = pet('lantern_owl', { name: 'Wick', personality: 'energetic', level: 22, evolutionStage: 3 });
+        expect(petCompanionLine([pet('dog'), owl], 'explore', NOW))
+            .toBe('> 🏮 **Wick** scouts ahead and doubles back to hurry you along!');
+    });
+
+    test('a hungry pet says nothing', () => {
+        expect(petCompanionLine([pet('wolf', { hunger: 5 })], 'hunt', NOW)).toBeNull();
+    });
+});
+
+describe('sanitizePetName', () => {
+    const { sanitizePetName } = require('../src/services/petService');
+
+    test.each([
+        ['<@123456> Rex', 'Rex'],
+        ['**Rex**', 'Rex'],
+        ['sir_fluff', 'sir fluff'],
+        ['@everyone', 'everyone'],
+        ['<#123><@&9>', ''],
+        ['a\nb', 'a b'],
+        ["O'Malley", "O'Malley"],
+        ['🐶 Rex', '🐶 Rex'],
+        ['x'.repeat(40), 'x'.repeat(32)],
+    ])('%j becomes %j', (raw, clean) => {
+        expect(sanitizePetName(raw)).toBe(clean);
+    });
+});

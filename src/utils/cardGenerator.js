@@ -415,16 +415,16 @@ const PET_SPRITE_COLORS = {
 // Mirrors EVOLUTION_STAGE emoji in petService so a showcased Apex pet is
 // visibly different from a stage 1 of the same species.
 const EVOLVED_PET_EMOJIS = {
-    dog:         { 2: '🐕', 3: '🐺' },
+    dog:         { 2: '🐕', 3: '🐕‍🦺' },
     cat:         { 2: '🐈', 3: '🐅' },
-    bird:        { 2: '🦜', 3: '🦅' },
-    fish:        { 2: '🐟', 3: '🦈' },
-    fox:         { 2: '🦊', 3: '🌟' },
-    wolf:        { 2: '🐺', 3: '🌑' },
-    eagle:       { 2: '🦅', 3: '⚡' },
-    shark:       { 2: '🦈', 3: '🌊' },
-    crystal_fox: { 2: '💎', 3: '🔮' },
-    lantern_owl: { 2: '🦉', 3: '🏮' },
+    bird:        { 2: '🦜', 3: '🦚' },
+    fish:        { 2: '🐟', 3: '🐡' },
+    fox:         { 2: '🍂', 3: '🔥' },
+    wolf:        { 2: '🌕', 3: '🌑' },
+    eagle:       { 2: '🪶', 3: '⚡' },
+    shark:       { 2: '🌊', 3: '🔱' },
+    crystal_fox: { 2: '💠', 3: '🔮' },
+    lantern_owl: { 2: '🕯️', 3: '🏮' },
 };
 
 const PET_SPRITE_EMOJIS = {

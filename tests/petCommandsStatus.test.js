@@ -216,6 +216,21 @@ describe('/pet status — play', () => {
         expect(announceLevelUp).not.toHaveBeenCalled();
     });
 
+    test('player XP from Play is once an hour across all pets; the pet still gets its XP', async () => {
+        seedUser({ pets: [
+            makePet({ petId: 'dog', lastPlay: new Date(Date.now() - 10 * 60_000) }),
+            makePet({ petId: 'cat', name: 'Tom' }),
+        ] });
+        const interaction = await openStatus();
+
+        const i = await interaction.press({ customId: `pet_play:${USER}:1:pet-cat` });
+
+        expect(stored().xp).toBe(0);
+        expect(stored().pets[1].xp).toBe(10);
+        expect(i.reply.mock.calls[0][0].content)
+            .toBe("🎾 You played with **Tom**! They loved it.\n✨ **+10 XP** for Tom! *(You've had your play XP for this hour.)*");
+    });
+
     test('a player level-up and a pet level-up are both announced', async () => {
         seedUser({ level: 1, xp: 1_000_000, pets: [makePet({ xp: xpForLevel(2) - 5 })] });
         const interaction = await openStatus();

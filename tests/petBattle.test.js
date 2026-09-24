@@ -193,10 +193,14 @@ describe('simulateBattle fairness', () => {
         expect(res.rounds[0].attacker).toBe('b');
     });
 
-    test('a faster pet still strikes first', () => {
-        const fast = { ...twin, personality: 'energetic' }; // +2 spd
-        const res = simulateBattle({ ...twin }, fast, () => 0.1);
-        expect(res.rounds[0].attacker).toBe('b');
+    test('a faster pet opens more often, but not always', () => {
+        const rng = seededRng(0xFA57);
+        const fast = { ...twin, personality: 'energetic' };
+        let bOpened = 0;
+        const N = 2000;
+        for (let i = 0; i < N; i++) if (simulateBattle({ ...twin }, fast, rng).rounds[0].attacker === 'b') bOpened++;
+        expect(bOpened / N).toBeGreaterThan(0.53);
+        expect(bOpened / N).toBeLessThan(0.75);
     });
 
     test('an even mirror match is a coin flip for the challenger, not ~78%', () => {
@@ -206,6 +210,33 @@ describe('simulateBattle fairness', () => {
         for (let i = 0; i < N; i++) if (simulateBattle(twin, { ...twin }, rng).winner === 'a') wins++;
         expect(wins / N).toBeGreaterThan(0.45);
         expect(wins / N).toBeLessThan(0.55);
+    });
+});
+
+describe('personality balance', () => {
+    // Personality is rolled once at adoption and never changes, so no roll may
+    // be a lasting handicap. Every pairing, both seats, at low, mid and high
+    // level, stays within 42–58% (the tuning keeps it near ±4%).
+    const KEYS = ['energetic', 'mischievous', 'loyal', 'lazy'];
+
+    test.each([1, 15, 28])('every pairing is close to even at level %i', (level) => {
+        const rng = seededRng(0xBA1A + level);
+        const stage = level >= 20 ? 3 : level >= 10 ? 2 : 1;
+        const N = 1500;
+        for (const x of KEYS) {
+            for (const y of KEYS) {
+                if (x === y) continue;
+                let wins = 0;
+                for (let i = 0; i < N; i++) {
+                    const px = { petId: 'dog', level, evolutionStage: stage, personality: x };
+                    const py = { petId: 'dog', level, evolutionStage: stage, personality: y };
+                    if (simulateBattle(px, py, rng).winner === 'a') wins++;
+                    if (simulateBattle(py, px, rng).winner === 'b') wins++;
+                }
+                const pct = wins / (2 * N);
+                expect([x, y, pct > 0.42 && pct < 0.58]).toEqual([x, y, true]);
+            }
+        }
     });
 });
 
@@ -248,6 +279,18 @@ describe('getPetDisplay for wild opponents and the Lantern Owl', () => {
         expect(getPetDisplay({ petId: 'lantern_owl', evolutionStage: 3 }).emoji).toBe('🏮');
     });
 
+    test('no evolved look repeats the stage before it, another species, or the Pet of the Week star', () => {
+        const baseIcons = Object.values(PET_DEFINITIONS).map(d => d.emoji);
+        for (const [petId, def] of Object.entries(PET_DEFINITIONS)) {
+            const looks = [1, 2, 3].map(stage => getPetDisplay({ petId, evolutionStage: stage }).emoji);
+            expect([petId, new Set(looks).size]).toEqual([petId, 3]);
+            for (const look of looks.slice(1)) {
+                const clash = look === '🌟' || baseIcons.some(icon => icon === look && icon !== def.emoji);
+                expect([petId, look, clash]).toEqual([petId, look, false]);
+            }
+        }
+    });
+
     test('every species has an evolved look at every stage', () => {
         for (const petId of Object.keys(PET_DEFINITIONS)) {
             for (const stage of [2, 3]) {
@@ -265,8 +308,10 @@ describe('pet sprite palettes', () => {
         for (const petId of Object.keys(PET_DEFINITIONS)) {
             expect([petId, Boolean(sprites.PET_SPRITE_COLORS[petId])]).toEqual([petId, true]);
             expect([petId, Boolean(sprites.PET_SPRITE_EMOJIS[petId])]).toEqual([petId, true]);
-            expect([petId, sprites.EVOLVED_PET_EMOJIS[petId]?.[3]])
-                .toEqual([petId, getPetDisplay({ petId, evolutionStage: 3 }).emoji]);
+            for (const stage of [2, 3]) {
+                expect([petId, stage, sprites.EVOLVED_PET_EMOJIS[petId]?.[stage]])
+                    .toEqual([petId, stage, getPetDisplay({ petId, evolutionStage: stage }).emoji]);
+            }
         }
     });
 });

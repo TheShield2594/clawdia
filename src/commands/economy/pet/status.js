@@ -117,8 +117,15 @@ async function executeStatus(interaction) {
                 return btn.reply({ content: `🎾 **${name}** is tired from playing! Try again in **${playLeft}m**.`, flags: MessageFlags.Ephemeral });
             }
 
-            const rolledXp = 15 + Math.floor(Math.random() * 11); // 15–25 XP
-            const { leveled, gained: xpGain } = applyXpGain(freshUser, rolledXp);
+            // Player XP from Play is once an hour per player, not per pet: the
+            // per-pet cooldown alone let a ten-pet roster pay ten times as much.
+            // The pet still gets its own XP from every play.
+            const ownerPlayedRecently = freshUser.pets.some((other, i) =>
+                i !== idx && cooldownMinutesLeft(other.lastPlay, PLAY_COOLDOWN_MS) > 0);
+            const rolledXp = ownerPlayedRecently ? 0 : 15 + Math.floor(Math.random() * 11); // 15–25 XP
+            const { leveled, gained: xpGain } = rolledXp > 0
+                ? applyXpGain(freshUser, rolledXp)
+                : { leveled: false, gained: 0 };
             const petXpResult = applyPetXp(freshUser.pets[idx], 10);
             freshUser.pets[idx].lastPlay = new Date();
             recordPetInteraction(freshUser.pets[idx]);
@@ -159,7 +166,10 @@ async function executeStatus(interaction) {
                 : petXpResult.leveledUp
                 ? `\n📈 **${name} reached pet Level ${petXpResult.toLevel}!**`
                 : '';
-            await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n✨ **+${xpGain} XP** for you, **+${petXpResult.gained} XP** for ${name}!${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
+            const xpLine = xpGain > 0
+                ? `✨ **+${xpGain} XP** for you, **+${petXpResult.gained} XP** for ${name}!`
+                : `✨ **+${petXpResult.gained} XP** for ${name}! *(You've had your play XP for this hour.)*`;
+            await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n${xpLine}${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
             await interaction.editReply(
                 await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
             ).catch(() => {});

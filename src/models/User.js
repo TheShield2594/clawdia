@@ -38,6 +38,10 @@ const petFields = () => ({
     evolutionStage:     { type: Number,  default: 1, min: 1, max: 3 },
     battleWins:         { type: Number,  default: 0 },
     battleLosses:       { type: Number,  default: 0 },
+    // Member-vs-member results only. battleWins/battleLosses also count wild
+    // fights, so ranking on them measured time spent grinding, not skill.
+    pvpWins:            { type: Number,  default: 0 },
+    pvpLosses:          { type: Number,  default: 0 },
     lastBattle:         { type: Date,    default: null },
 });
 

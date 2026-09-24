@@ -37,7 +37,7 @@ const DAILY_QUEST_POOL = [
       target: 3, difficulty: 'medium', category: 'exploration' },
     { questId: 'daily_explore_5',       name: 'Blank Spaces',       description: 'Set out on 5 expeditions',
       target: 5, difficulty: 'hard', category: 'exploration' },
-    { questId: 'daily_pet_care_3',      name: 'Good Owner',         description: 'Feed, play with or rest your pets 3 times',
+    { questId: 'daily_pet_care_3',      name: 'Good Owner',         description: 'Feed, play with, rest or battle your pets 3 times',
       target: 3, difficulty: 'easy', category: 'pets' },
 ];
 

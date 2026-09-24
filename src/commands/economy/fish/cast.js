@@ -141,7 +141,7 @@ async function handleCast(interaction) {
         await delay(2000 + Math.floor(Math.random() * 3001));
 
         // Fish/Shark pet: +5%/+15% yield (only if hunger >= 30)
-        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../../services/petService');
+        const { getTotalBonus, petCompanionLine, tryGrantRarePet } = require('../../../services/petService');
         const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
 
         const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
@@ -446,19 +446,9 @@ async function handleCast(interaction) {
             embed.setDescription(desc + `\n> ${reelResult.icon} *${reelResult.label}*`);
         }
 
-        // Pet narrative: show active pet's personality flavor in description
-        if (result.success && result.catchType !== 'junk') {
-            const activePet = (user.pets || []).find(p => isPetActive(p));
-            if (activePet) {
-                const petDef = PET_DEFS[activePet.petId];
-                const petName = activePet.name || petDef?.name || activePet.petId;
-                const flavorFn = TRAIT_FLAVOR[activePet.personality]?.fish;
-                if (flavorFn && petDef) {
-                    const desc = embed.data.description ?? '';
-                    embed.setDescription(desc + `\n> ${flavorFn(petName, petDef.emoji)}`);
-                }
-            }
-        }
+        // Pet narrative: the companion helping with this activity says its line.
+        const petLine = result.success && result.catchType !== 'junk' ? petCompanionLine(user.pets, 'fish') : null;
+        if (petLine) embed.setDescription(`${embed.data.description ?? ''}\n${petLine}`);
 
         // The base catch's big-win log — a boss fight below logs its own bonus
         // separately, and must not swallow this one.

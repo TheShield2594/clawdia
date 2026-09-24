@@ -24,21 +24,25 @@ const TRAIT_FLAVOR = {
         hunt: (name, emoji) => `${emoji} **${name}** yawns and stretches before reluctantly helping out.`,
         fish: (name, emoji) => `${emoji} **${name}** naps nearby while the line bobs lazily in the water.`,
         mine: (name, emoji) => `${emoji} **${name}** watches from a safe distance, conserving energy.`,
+        explore: (name, emoji) => `${emoji} **${name}** rides along in your pack, peeking out now and then.`,
     },
     energetic: {
         hunt: (name, emoji) => `${emoji} **${name}** races ahead, picking up a trail before you even start!`,
         fish: (name, emoji) => `${emoji} **${name}** splashes excitedly, nudging fish toward your hook!`,
         mine: (name, emoji) => `${emoji} **${name}** digs alongside you with boundless enthusiasm!`,
+        explore: (name, emoji) => `${emoji} **${name}** scouts ahead and doubles back to hurry you along!`,
     },
     mischievous: {
         hunt: (name, emoji) => `${emoji} **${name}** keeps watch while you case the area... suspiciously well.`,
         fish: (name, emoji) => `${emoji} **${name}** nudges your rod just enough to keep things interesting.`,
         mine: (name, emoji) => `${emoji} **${name}** "accidentally" dislodges a promising-looking boulder.`,
+        explore: (name, emoji) => `${emoji} **${name}** wanders off and comes back with something it definitely shouldn't have.`,
     },
     loyal: {
         hunt: (name, emoji) => `${emoji} **${name}** stays close, alert for any sign of danger.`,
         fish: (name, emoji) => `${emoji} **${name}** watches the line intently, refusing to look away.`,
         mine: (name, emoji) => `${emoji} **${name}** stands guard at the tunnel entrance, unwavering.`,
+        explore: (name, emoji) => `${emoji} **${name}** never lets you out of sight on the trail.`,
     },
 };
 
@@ -82,6 +86,29 @@ const RARE_PET_DROP_CHANCE = 0.04;
 function rarePetForSource(source) {
     return Object.values(PET_DEFINITIONS)
         .find(d => !d.purchasable && d.materialSource === source) ?? null;
+}
+
+const PET_NAME_MAX = 32;
+
+/**
+ * A player-chosen pet name made safe to print anywhere a name goes: embeds,
+ * public messages, autocomplete labels and the canvas card.
+ *
+ * Mentions are removed (a pet named `<@id>` pinged that member whenever its
+ * name was posted), as are the characters Discord reads as formatting, which
+ * let a name break out of the bold around it. Underscores become spaces so
+ * `sir_fluff` still reads as a name. Returns '' when nothing usable is left.
+ */
+function sanitizePetName(raw) {
+    return String(raw ?? '')
+        .replace(/<(?:@[!&]?|#|\/[^:>]*:)\d*>/g, '')   // user, role, channel and command mentions
+        .replace(/[\p{Cc}\p{Cf}]/gu, (ch) => (ch === '\u200D' ? ch : ' ')) // controls/newlines; keep emoji joiners
+        .replace(/_/g, ' ')
+        .replace(/[*~`|\\<>@#[\]]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, PET_NAME_MAX)
+        .trim();
 }
 
 /** A fresh pet document. Shared by /pet adopt and rare drops so they can't drift. */
@@ -172,7 +199,7 @@ const REST_DURATION_MS = 2 * 60 * 60 * 1000; // a /pet rest lasts 2 hours
 const MOOD_LINES = {
     blissful: [
         '"I could nap here forever... this is the life."',
-        '"You fed me so well — I might just purr until tomorrow."',
+        '"You fed me so well — I might just hum happily until tomorrow."',
         '"Life is good. Very good. *Extremely* good."',
         '"I am completely and utterly content. Please don\'t move me."',
         '"If happiness had a shape, it would be whatever snack I just had."',
@@ -204,11 +231,48 @@ const MOOD_LINES = {
     ],
 };
 
+// The bands line up with the passive bonus: everything from `pleading` up keeps
+// the bonus, and `concerning` is exactly "below STARVING_THRESHOLD, bonus off".
+// They used to break at 50 and 20, so a pet could plead while its bonus was
+// already gone, and the colour, the hunger bar and the bonus each told a
+// different story about the same number.
+const MOOD_BANDS = [
+    { band: 'blissful',   min: 90,                 color: '#4caf50' }, // green
+    { band: 'content',    min: 60,                 color: '#cddc39' }, // lime
+    { band: 'pleading',   min: STARVING_THRESHOLD, color: '#ff9800' }, // orange
+    { band: 'concerning', min: -Infinity,          color: '#f44336' }, // red — bonus off
+];
+
+function moodBandFor(hunger) {
+    return MOOD_BANDS.find(b => hunger >= b.min);
+}
+
 function getMoodBand(hunger) {
-    if (hunger >= 90) return 'blissful';
-    if (hunger >= 50) return 'content';
-    if (hunger >= 20) return 'pleading';
-    return 'concerning';
+    return moodBandFor(hunger).band;
+}
+
+// What each species is doing while it says its line, so a Shark and a Cat no
+// longer sound like the same animal. One gesture for a fed pet, one for a
+// hungry one.
+const SPECIES_ACTIONS = {
+    dog:         { fed: 'tail thumping against the floor',  hungry: 'whining softly at the bowl' },
+    cat:         { fed: 'slow, satisfied blink',            hungry: 'pointed stare at the empty bowl' },
+    bird:        { fed: 'cheerful little trill',            hungry: 'ruffled feathers and a pointed chirp' },
+    fish:        { fed: 'a happy stream of bubbles',        hungry: 'nudging the glass by the food flakes' },
+    fox:         { fed: 'bushy tail curled in contentment', hungry: 'sniffing hopefully at your pockets' },
+    wolf:        { fed: 'a low, contented rumble',          hungry: 'a long, hungry howl' },
+    eagle:       { fed: 'preening proudly',                 hungry: 'a sharp, impatient cry' },
+    shark:       { fed: 'lazy, lazy circles',               hungry: 'restless, tightening circles' },
+    crystal_fox: { fed: 'a faint chime of crystal',         hungry: 'a dim, flickering glow' },
+    lantern_owl: { fed: 'lantern glowing warm and steady',  hungry: 'lantern guttering low' },
+};
+
+/** The species gesture that goes with a pet's mood line, or null for an unknown species. */
+function getMoodAction(pet, now = Date.now()) {
+    const actions = SPECIES_ACTIONS[pet?.petId];
+    if (!actions) return null;
+    const band = getMoodBand(effectiveHunger(pet, now));
+    return band === 'blissful' || band === 'content' ? actions.fed : actions.hungry;
 }
 
 function getMoodLine(pet, now = Date.now()) {
@@ -220,13 +284,9 @@ function getMoodLine(pet, now = Date.now()) {
     return lines[(petHash + nameHash + dayIndex) % lines.length];
 }
 
-// Ramps monotonically from calm to alarming. It used to end on purple, which
-// read as *less* urgent than the red band above it.
+// Ramps monotonically from calm to alarming, on the same bands as the mood.
 function getMoodColor(hunger) {
-    if (hunger >= 90) return '#4caf50'; // blissful   — green
-    if (hunger >= 50) return '#cddc39'; // content    — lime
-    if (hunger >= 20) return '#ff9800'; // pleading   — orange
-    return '#f44336';                   // concerning — red
+    return moodBandFor(hunger).color;
 }
 
 const HEART_BAR_LENGTH = 8;
@@ -508,6 +568,43 @@ function getTotalBonus(pets, bonusType, now = Date.now()) {
     return Math.min(total, MAX_STACKED_BONUS_PCT);
 }
 
+// ── Companion lines on grind results ──────────────────────────────────────────
+//
+// The one line of pet flavour a hunt, cast, dig or expedition result carries.
+// It used to be whichever fed pet sat first in the roster, so a Fish would
+// "race ahead, picking up a trail" on a hunt while the Wolf that was actually
+// boosting it said nothing, and the Lantern Owl never spoke at all because
+// exploration had no line.
+
+// Which passives each activity uses, so the pet helping is the one that talks.
+const ACTIVITY_BONUS_TYPES = {
+    hunt:    ['hunt_yield', 'hunt_xp'],
+    fish:    ['fish_yield'],
+    mine:    ['mine_yield'],
+    explore: ['explore_xp'],
+};
+// Pets that only make sense on the water.
+const AQUATIC_PETS = new Set(['fish', 'shark']);
+
+/**
+ * The companion line for an activity ('hunt'|'fish'|'mine'|'explore'), as a
+ * block-quote, or null when no fed pet fits. Prefers a pet whose passive the
+ * activity uses (highest level first), then any other fed pet that belongs
+ * there — never a fish on dry land.
+ */
+function petCompanionLine(pets, activity, now = Date.now()) {
+    const active = (pets ?? []).filter(p => isPetActive(p, now) && PET_DEFINITIONS[p.petId]);
+    const helps  = ACTIVITY_BONUS_TYPES[activity] ?? [];
+    const byLevel = (a, b) => (b.level ?? 1) - (a.level ?? 1);
+    const pet = active.filter(p => helps.includes(PET_DEFINITIONS[p.petId].bonusType)).sort(byLevel)[0]
+        ?? active.filter(p => activity === 'fish' || !AQUATIC_PETS.has(p.petId)).sort(byLevel)[0];
+    if (!pet) return null;
+    const flavor = TRAIT_FLAVOR[pet.personality]?.[activity];
+    if (!flavor) return null;
+    const { emoji, name } = getPetDisplay(pet);
+    return `> ${flavor(name, emoji)}`;
+}
+
 // ── Progression: leveling & evolution ───────────────────────────────────────
 
 const PET_MAX_LEVEL = 30;
@@ -530,17 +627,21 @@ const XP_WILD_LOSS     = 8;
 
 // Evolution display: stage title prefixes + an optional evolved emoji per pet.
 const EVOLUTION_TITLES = { 1: '', 2: 'Seasoned ', 3: 'Apex ' };
+// Every stage looks different from the one before it, and no evolved form
+// borrows another species' icon (a Dog used to become the Wolf's 🐺, a Bird the
+// Eagle's 🦅, a Fish the Shark's 🦈) or the 🌟 that marks Pet of the Week.
+// Mirrored in utils/cardGenerator.js; tests/petBattle.test.js keeps them equal.
 const EVOLVED_EMOJI = {
-    dog:         { 2: '🐕',  3: '🐺' },
+    dog:         { 2: '🐕',  3: '🐕‍🦺' },
     cat:         { 2: '🐈',  3: '🐅' },
-    bird:        { 2: '🦜',  3: '🦅' },
-    fish:        { 2: '🐟',  3: '🦈' },
-    fox:         { 2: '🦊',  3: '🌟' },
-    wolf:        { 2: '🐺',  3: '🌑' },
-    eagle:       { 2: '🦅',  3: '⚡' },
-    shark:       { 2: '🦈',  3: '🌊' },
-    crystal_fox: { 2: '💎',  3: '🔮' },
-    lantern_owl: { 2: '🦉',  3: '🏮' },
+    bird:        { 2: '🦜',  3: '🦚' },
+    fish:        { 2: '🐟',  3: '🐡' },
+    fox:         { 2: '🍂',  3: '🔥' },
+    wolf:        { 2: '🌕',  3: '🌑' },
+    eagle:       { 2: '🪶',  3: '⚡' },
+    shark:       { 2: '🌊',  3: '🔱' },
+    crystal_fox: { 2: '💠',  3: '🔮' },
+    lantern_owl: { 2: '🕯️',  3: '🏮' },
 };
 
 // Total XP required to *reach* a given level (cumulative). Gentle quadratic curve.
@@ -614,13 +715,24 @@ function applyPetXp(pet, amount) {
 
 // ── Battle engine ───────────────────────────────────────────────────────────
 
-// Personalities tilt combat stats: each leans into attack/defense/speed.
+// Personalities tilt combat stats, each a different way to win: Energetic
+// strikes first more often, Mischievous crits more, Loyal outlasts, Lazy
+// shrugs hits off. They are percentages of the level-derived stats, so a
+// personality weighs the same at level 1 as at level 30.
+//
+// These used to be flat points, and personality is rolled at adoption and
+// never changes, so it was a hidden permanent power rank: Energetic beat Lazy
+// 85% of the time at equal level and Loyal lost to everything. The values below
+// were tuned by simulation to keep every pairing within about 45–55% at every
+// level (tests/petBattle.test.js holds them to that).
 const PERSONALITY_COMBAT = {
-    energetic:   { atk: 2, def: 0, spd: 2 },
-    mischievous: { atk: 2, def: 1, spd: 1 },
-    loyal:       { atk: 1, def: 3, spd: 0 },
-    lazy:        { atk: 0, def: 2, spd: 1 },
+    energetic:   { spd: 0.30, atk: 0.08 },
+    mischievous: { atk: 0.06, crit: 0.10 },
+    loyal:       { hp: 0.10,  def: 0.05 },
+    lazy:        { def: 0.15, hp: 0.06 },
 };
+
+const BASE_CRIT_CHANCE = 0.10;
 
 /**
  * Derive battle stats from a pet's level, evolution, and personality.
@@ -628,13 +740,25 @@ const PERSONALITY_COMBAT = {
 function getPetStats(pet) {
     const level = pet.level ?? 1;
     const stage = pet.evolutionStage ?? 1;
-    const p     = PERSONALITY_COMBAT[pet.personality] ?? { atk: 1, def: 1, spd: 1 };
+    const p     = PERSONALITY_COMBAT[pet.personality] ?? {};
+    // Only HP is rounded (it is shown on the HP bar). Rounding attack at low
+    // level turned a 6% edge into a whole point, which is 8% of a level-1 hit.
+    const scale = (base, pct = 0) => base * (1 + pct);
     return {
-        hp:  40 + level * 6 + stage * 10,
-        atk: 8  + level * 2 + stage * 3 + p.atk,
-        def: 4  + level * 1 + stage * 2 + p.def,
-        spd: 5  + level + p.spd,
+        hp:   Math.round(scale(40 + level * 6 + stage * 10, p.hp)),
+        atk:  scale(8  + level * 2 + stage * 3,  p.atk),
+        def:  scale(4  + level * 1 + stage * 2,  p.def),
+        spd:  scale(5  + level,                  p.spd),
+        crit: BASE_CRIT_CHANCE + (p.crit ?? 0),
     };
+}
+
+// Smoothing on the first-strike odds, so a small speed edge is a small edge.
+const FIRST_STRIKE_SMOOTHING = 5;
+
+/** The chance that A strikes first: weighted by speed, never a certainty. */
+function firstStrikeChance(a, b) {
+    return (a.spd + FIRST_STRIKE_SMOOTHING) / (a.spd + b.spd + 2 * FIRST_STRIKE_SMOOTHING);
 }
 
 /**
@@ -647,19 +771,20 @@ function simulateBattle(petA, petB, rng = Math.random) {
     let hpA = a.hp, hpB = b.hp;
     const rounds = [];
 
-    // Faster pet strikes first. Striking first is worth a lot in an even fight
-    // (~78% of mirror matches), so a speed tie is a coin flip rather than
-    // going to the challenger by default.
-    let turnA = a.spd === b.spd ? rng() < 0.5 : a.spd > b.spd;
+    // Striking first is worth a lot in an even fight (~78% of mirror matches),
+    // so it is a speed-weighted roll rather than a sure thing for the faster
+    // pet — and never a default in the challenger's favour.
+    let turnA = rng() < firstStrikeChance(a, b);
     const MAX_ROUNDS = 30;
 
     for (let r = 0; r < MAX_ROUNDS && hpA > 0 && hpB > 0; r++) {
         const atk = turnA ? a : b;
         const def = turnA ? b : a;
-        // Damage = atk - def/2, ±25% variance, min 1; ~10% crit for 1.5x.
+        // Damage = atk - def/2, ±25% variance, min 1; crit (10%, more for
+        // Mischievous) for 1.5x.
         const base     = Math.max(1, atk.atk - def.def / 2);
         const variance = 0.75 + rng() * 0.5;
-        const crit     = rng() < 0.10 ? 1.5 : 1.0;
+        const crit     = rng() < atk.crit ? 1.5 : 1.0;
         const damage   = Math.max(1, Math.round(base * variance * crit));
 
         if (turnA) hpB = Math.max(0, hpB - damage);
@@ -902,6 +1027,8 @@ module.exports = {
     RARE_PET_DROP_CHANCE,
     rarePetForSource,
     createPet,
+    sanitizePetName,
+    PET_NAME_MAX,
     resolvePetRef,
     rollRarePet,
     BASE_PET_SLOTS,
@@ -931,7 +1058,11 @@ module.exports = {
     getPetBonus,
     getTotalBonus,
     getMoodLine,
+    getMoodBand,
+    getMoodAction,
     getMoodColor,
+    SPECIES_ACTIONS,
+    petCompanionLine,
     heartBar,
     assignPersonality,
     // Progression & battles
@@ -948,6 +1079,8 @@ module.exports = {
     getEffectiveBonusPct,
     applyPetXp,
     getPetStats,
+    firstStrikeChance,
+    PERSONALITY_COMBAT,
     simulateBattle,
     makeWildPet,
     levelMatched,

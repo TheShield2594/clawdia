@@ -120,7 +120,16 @@ async function executeBattle(interaction) {
         }
         throw sync.saveError;
     }
-    await user.save().catch(() => {});
+    // Persist the decay just applied. This used to swallow every error, which
+    // hid a failed write behind a battle that then went ahead on stale state.
+    try {
+        await user.save();
+    } catch (err) {
+        if (isVersionError(err)) {
+            return interaction.reply({ content: 'Edit conflict — please try again.', flags: MessageFlags.Ephemeral });
+        }
+        throw err;
+    }
 
     const mine = resolvePetRef(user?.pets, petRef);
     if (!mine) return interaction.reply({ content: NO_SUCH_PET, flags: MessageFlags.Ephemeral });
@@ -351,8 +360,11 @@ async function pvpBattle(interaction, ctx) {
         // XP + records
         const aXp = applyPetXp(aPet, aWon ? XP_BATTLE_WIN : XP_BATTLE_LOSS);
         const bXp = applyPetXp(bPet, aWon ? XP_BATTLE_LOSS : XP_BATTLE_WIN);
-        if (aWon) { aPet.battleWins = (aPet.battleWins ?? 0) + 1; bPet.battleLosses = (bPet.battleLosses ?? 0) + 1; }
-        else      { bPet.battleWins = (bPet.battleWins ?? 0) + 1; aPet.battleLosses = (aPet.battleLosses ?? 0) + 1; }
+        const [winPet, losePet] = aWon ? [aPet, bPet] : [bPet, aPet];
+        winPet.battleWins  = (winPet.battleWins ?? 0) + 1;
+        winPet.pvpWins     = (winPet.pvpWins ?? 0) + 1;
+        losePet.battleLosses = (losePet.battleLosses ?? 0) + 1;
+        losePet.pvpLosses    = (losePet.pvpLosses ?? 0) + 1;
         aPet.lastBattle = new Date(); bPet.lastBattle = new Date();
         chUser.markModified('pets'); opUser.markModified('pets');
 
