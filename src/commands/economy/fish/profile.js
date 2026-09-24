@@ -18,6 +18,8 @@ const {
 const {
     PRESTIGE_BONUSES,
     ROD_UPGRADES,
+    ROD_BY_SLUG,
+    ROD_BY_TIER,
     BAIT_PACKS,
     CONSUMABLES,
     MATERIAL_NAMES
@@ -26,7 +28,8 @@ const { chunkByLength } = require('../../../utils/embedFields');
 const { paginate } = require('../../../utils/paginator');
 const { MAX_PRESTIGE, PRESTIGE_LABELS } = require('./shared');
 const { formatPrestigeBonuses } = require('./embeds');
-const { sendProfileTabs } = require('../../../utils/grindProfileView');
+const { sendProfileTabs, renderAttachment, pagePayload, stockLine, titleCase } = require('../../../utils/grindProfileView');
+const { createGrindInventoryCard } = require('../../../utils/grindProfileCard');
 const { readCatalog, fishOverviewPage, fishCatalogPage, fishProgressPage } = require('./profilePages');
 const COLORS = require('../../../utils/embedColors');
 const { ascendGrind } = require('../../../utils/grindPrestige');
@@ -274,7 +277,7 @@ async function handleInv(interaction) {
         case 'rods':      return paginate(interaction, rodPages(interaction, user));
         case 'bait':      return interaction.reply({ embeds: [baitEmbed(interaction, user)] });
         case 'materials': return interaction.reply({ embeds: [materialsEmbed(interaction, user)] });
-        default:          return interaction.reply({ embeds: [overviewEmbed(interaction, user)] });
+        default:          return interaction.reply(await overviewPayload(interaction, user));
     }
 }
 
@@ -434,11 +437,64 @@ function materialsEmbed(interaction, user) {
 
 const OVERVIEW_ROD_PREVIEW = 5;
 
+// The overview's text half lists every number the card draws (#672) but
+// leaves the per-item emoji to the category views: the card carries the art,
+// and the emoji doubled up (Lure shared 🎣 with the Rods heading, Premium
+// Chum and Shrimp Bait were both 🦐). One emoji per heading, plus the rod
+// status mark, which is information rather than decoration.
+
+/** Medallion colours for the materials, which have no baked art yet (#1168). */
+const MATERIAL_COLORS = {
+    fish_scale:     '#5dade2',
+    rare_scale:     '#3498db',
+    mythic_scale:   '#9b59b6',
+    pearl:          '#ecf0f1',
+    seaweed_bundle: '#27ae60',
+    driftwood:      '#a0785a',
+    old_coin:       '#f1c40f',
+    shark_tooth:    '#bdc3c7',
+    tentacle_ink:   '#34495e',
+    coral_fragment: '#ff7f7f',
+    rabbits_foot:   '#d7bde2',
+    feather:        '#f5f5f5',
+};
+
+// Hunt drops that fishing recipes also take.
+const HUNT_MATERIAL_NAMES = { rabbits_foot: "Rabbit's Foot", feather: 'Feather' };
+
+const rodIconId = rod => {
+    const slug = rod.slug ?? ROD_BY_TIER[rod.tier]?.slug;
+    return slug && ROD_BY_SLUG[slug] ? `fish:${slug}` : null;
+};
+
+/** Everything /fish inv shows, as data both halves of the overview read. */
+function inventoryStock(user) {
+    const f = user.fishing;
+    const bait = Object.entries(f.bait ?? {})
+        .filter(([, qty]) => qty > 0)
+        .map(([type, qty]) => {
+            const pack = BAIT_PACKS.find(b => b.baitType === type);
+            return { iconId: pack ? `fish:${pack.id}` : null, name: titleCase(type), count: qty };
+        });
+    const consumables = Object.entries(f.consumables ?? {})
+        .filter(([, qty]) => qty > 0)
+        .map(([id, qty]) => ({ iconId: CONSUMABLES[id] ? `fish:${id}` : null, name: CONSUMABLES[id]?.name ?? titleCase(id), count: qty }));
+    const materials = Object.entries(f.materials ?? {})
+        .filter(([, qty]) => qty > 0)
+        .map(([id, qty]) => ({ iconId: `fish:${id}`, name: MATERIAL_NAMES[id] ?? titleCase(id), count: qty, color: MATERIAL_COLORS[id] }));
+    const huntMats = user.hunt?.materials ?? {};
+    for (const id of Object.keys(HUNT_MATERIAL_NAMES)) {
+        const qty = huntMats[id] ?? 0;
+        if (qty) materials.push({ iconId: `hunt:${id}`, name: HUNT_MATERIAL_NAMES[id], source: 'hunt', count: qty, color: MATERIAL_COLORS[id] });
+    }
+    return { bait, consumables, materials };
+}
+
 function overviewEmbed(interaction, user) {
     const f = user.fishing;
     const embed = new EmbedBuilder()
         .setColor(COLORS.INFO)
-        .setTitle(`🎒 ${interaction.user.username}'s Fishing Inventory`)
+        .setTitle(`🎒 ${interaction.user.username}'s Tackle Box`)
         .setTimestamp();
 
     // Rods — a short preview, equipped first, pointing at the full list.
@@ -447,29 +503,93 @@ function overviewEmbed(interaction, user) {
     } else {
         const ordered = orderedRods(f);
         const preview = ordered.slice(0, OVERVIEW_ROD_PREVIEW).map(({ rod, index }) => {
-            const equipped = index === f.equippedRodIndex ? ' **[E]**' : '';
-            return `**${index + 1}.** ${rod.name}${equipped} — ${rodStatusEmoji(rod.status)} ${rod.currentDurability}/${rod.maxDurability}`;
+            const equipped = index === f.equippedRodIndex ? ' · **equipped**' : '';
+            const upgrade  = rod.upgrade ? ` · ${ROD_UPGRADES[rod.upgrade]?.name ?? titleCase(rod.upgrade)}` : '';
+            return `**${index + 1}.** ${rod.name}${equipped} — ${rodStatusEmoji(rod.status)} ${rod.currentDurability}/${rod.maxDurability}${upgrade}`;
         });
         const extra = ordered.length - preview.length;
         if (extra > 0) preview.push(`…and ${extra} more — \`/fish inv category:rods\` for the full list`);
         embed.addFields({ name: `🎣 Rods (${f.rods.length})`, value: preview.join('\n'), inline: false });
     }
 
-    const baitLines = baitStockLines(f);
-    embed.addFields({ name: '🪱 Bait', value: baitLines.length ? baitLines.join('\n') : 'None', inline: true });
+    const { bait, consumables, materials } = inventoryStock(user);
+    embed.addFields(
+        { name: '🪱 Bait',        value: stockLine(bait, 'None'),        inline: false },
+        { name: '🧪 Consumables', value: stockLine(consumables, 'None'), inline: false },
+    );
 
-    const consumableLines = consumableStockLines(f);
-    embed.addFields({ name: '🧪 Consumables', value: consumableLines.length ? consumableLines.join('\n') : 'None', inline: true });
+    const buffs = buffPills(f);
+    if (buffs.length) embed.addFields({ name: '⚡ Active Buffs', value: buffs.join(' · '), inline: false });
 
-    const activeLines = activeBuffLines(f);
-    if (activeLines.length) embed.addFields({ name: '⚡ Active Buffs', value: activeLines.join('\n'), inline: false });
-
-    const { matLines, huntMatLines } = fishingMaterialLines(user);
-    const allMats = [...matLines, ...huntMatLines];
-    embed.addFields({ name: '🪨 Materials', value: allMats.length ? allMats.join('\n') : 'None yet — catch fish for drops', inline: false });
+    embed.addFields({ name: '🪨 Materials', value: stockLine(materials, 'None yet — catch fish for drops'), inline: false });
 
     embed.setFooter({ text: 'Open a section with /fish inv category:<name> • Equip a rod with /fish equip <number>' });
     return embed;
+}
+
+/** Plain buff names for the card, which cannot draw emoji. */
+function buffPills(f) {
+    const pills = [];
+    if (f.activeBait) {
+        const name = CONSUMABLES[f.activeBait]?.name ?? titleCase(f.activeBait);
+        pills.push(`${name} (${f.activeBaitCastsLeft} casts left)`);
+    }
+    if (f.activeLuck)     pills.push("Angler's Luck queued");
+    if (f.activeXpScroll) pills.push('XP Scroll queued');
+    return pills;
+}
+
+function renderInventoryCard(interaction, user) {
+    const f = user.fishing;
+    const { bait, consumables, materials } = inventoryStock(user);
+    const ordered = orderedRods(f);
+    const rods = ordered.slice(0, OVERVIEW_ROD_PREVIEW).map(({ rod, index }) => ({
+        iconId:   rodIconId(rod),
+        name:     rod.name,
+        number:   index + 1,
+        current:  rod.currentDurability,
+        max:      rod.maxDurability,
+        status:   rod.status,
+        equipped: index === f.equippedRodIndex,
+        tag:      rod.upgrade ? (ROD_UPGRADES[rod.upgrade]?.name ?? titleCase(rod.upgrade)) : null,
+    }));
+    const sum = list => list.reduce((n, e) => n + e.count, 0);
+    const subtitle = [
+        `${f.rods.length} rod${f.rods.length === 1 ? '' : 's'}`,
+        `${sum(bait).toLocaleString('en-US')} bait`,
+        `${sum(consumables).toLocaleString('en-US')} consumables`,
+        `${sum(materials).toLocaleString('en-US')} materials`,
+    ].join(' · ');
+
+    const describe = list => list.map(e => `${e.name} ${e.count}`).join(', ') || 'none';
+    const alt = `Fishing inventory for ${interaction.user.username}. `
+        + `Rods: ${rods.map(r => `${r.name} ${r.current} of ${r.max}${r.equipped ? ' (equipped)' : ''}`).join(', ') || 'none'}. `
+        + `Bait: ${describe(bait)}. Consumables: ${describe(consumables)}. Materials: ${describe(materials)}.`;
+
+    return renderAttachment(() => createGrindInventoryCard({
+        activity: 'fish',
+        title:    `${interaction.user.username}'s Tackle Box`,
+        subtitle,
+        buffs:    buffPills(f),
+        gear: {
+            label:   'Rods',
+            count:   f.rods.length,
+            entries: rods,
+            more:    ordered.length - rods.length,
+            empty:   'No rods yet — buy one with /fish shop rod.',
+        },
+        sections: [
+            { label: 'Bait',        entries: bait,        empty: 'No bait — the Bamboo Rod fishes without it.' },
+            { label: 'Consumables', entries: consumables, empty: 'No consumables — see /fish shop.' },
+            { label: 'Materials',   entries: materials,   empty: 'None yet — catch fish for material drops.' },
+        ],
+    }), 'fish-inventory.png', alt);
+}
+
+async function overviewPayload(interaction, user) {
+    const embed = overviewEmbed(interaction, user);
+    const card = await renderInventoryCard(interaction, user);
+    return pagePayload(embed, card);
 }
 
 module.exports = {
@@ -477,4 +597,5 @@ module.exports = {
     handleInv,
     handlePrestige,
     handleProfile,
+    __test__: { overviewEmbed, overviewPayload, inventoryStock },
 };

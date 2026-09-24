@@ -234,9 +234,12 @@ function timeRemaining(expiresAt) {
     if (!expiresAt) return 'permanent';
     const ms = new Date(expiresAt).getTime() - Date.now();
     if (ms <= 0) return 'expired';
-    const h = Math.floor(ms / 3_600_000);
-    const m = Math.ceil((ms % 3_600_000) / 60_000);
-    if (h > 0) return `${h}h ${m}m`;
+    // Round up to the minute first, then split: rounding the minute part on
+    // its own read 2h59m30s as "2h 60m".
+    const total = Math.ceil(ms / 60_000);
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    if (h > 0) return m ? `${h}h ${m}m` : `${h}h`;
     return `${m}m`;
 }
 

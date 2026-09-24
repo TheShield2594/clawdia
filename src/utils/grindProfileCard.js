@@ -1,9 +1,10 @@
 'use strict';
 
 /**
- * The picture half of `/hunt profile`, `/fish profile` and `/explore profile`.
+ * The picture half of the `/hunt`, `/fish` and `/explore` profiles, of the
+ * `/fish`, `/hunt` and `/mine` inventories, and of `/inventory`'s Items tab.
  *
- * Two cards, shared by all three so the profiles read as one family:
+ * Three cards, shared across the grinds so the screens read as one family:
  *
  *   createGrindProfileCard     the overview — avatar, rank, XP bar, where the
  *                              player is, stamina, four headline numbers and a
@@ -12,6 +13,11 @@
  *                              has, grouped, owned ones in full colour and the
  *                              rest as grey ghosts, so the gaps say what to go
  *                              after next.
+ *   createGrindInventoryCard   the inventory — gear on a rack with wear bars
+ *                              and the equipped piece outlined, stock as
+ *                              tiles with counts (`/fish inv`, `/hunt inv`,
+ *                              `/mine inv`, and `/inventory`'s Items tab,
+ *                              which has stock but no gear).
  *
  * The art is the bundled catalogue (utils/defaultItemImages.js). An id with no
  * baked icon — a species or relic added before the bake action has run for it —
@@ -40,6 +46,9 @@ const THEMES = {
     hunt:    { top: '#15301d', bottom: '#070f09', accent: '#4cc27a', muted: '#9cc7a8', panel: 'rgba(255,255,255,0.06)' },
     fish:    { top: '#0f2944', bottom: '#050d18', accent: '#45a6ec', muted: '#9fc2dd', panel: 'rgba(255,255,255,0.06)' },
     explore: { top: '#33230f', bottom: '#110b04', accent: '#e0a83e', muted: '#d6bf95', panel: 'rgba(255,255,255,0.06)' },
+    mine:    { top: '#2e2622', bottom: '#0d0a08', accent: '#e07b39', muted: '#cdb4a0', panel: 'rgba(255,255,255,0.06)' },
+    // /inventory's Items tab — not one grind but all of them, so Discord blurple.
+    items:   { top: '#1f2244', bottom: '#0a0b18', accent: '#7c86f7', muted: '#b6bbe9', panel: 'rgba(255,255,255,0.06)' },
 };
 
 /** The avatar ring for each prestige rank; rank 0 uses the activity accent. */
@@ -501,6 +510,287 @@ async function createGrindCollectionCard(opts) {
     return encodeCanvas(canvas);
 }
 
+// ─── The inventory card ──────────────────────────────────────────────────────
+
+// The tackle box / gun rack / tool belt: what a player is carrying right now,
+// where the collection card is what they have ever found. Gear gets a rack of
+// cards (art, wear bar, equipped outline); stock gets a grid of tiles, each
+// with its count in a pill on the corner.
+
+const INV_W = 1000;
+const INV_PAD = 32;
+const INV_HEADER_H = 104;
+const INV_SECTION_HEAD = 34;
+const INV_GEAR_COLS = 5;
+const INV_GEAR_GAP = 14;
+const INV_GEAR_H = 214;
+const INV_TILE_COLS = 8;
+const INV_TILE = 72;
+const INV_TILE_W = (INV_W - INV_PAD * 2) / INV_TILE_COLS;
+const INV_TILE_H = INV_TILE + 30;
+const INV_PILL_H = 30;
+
+// Stand-in medallion colours for stock with no baked art and no colour of its
+// own, picked by name so an item keeps its colour from one render to the next
+// and a row of them does not read as one blur of the accent.
+const MEDALLION_PALETTE = ['#5dade2', '#58d68d', '#f5b041', '#ec7063', '#af7ac5', '#48c9b0', '#f4d03f', '#dc7633', '#85929e', '#e59866'];
+
+function medallionColor(name) {
+    let h = 0;
+    for (const ch of String(name ?? '')) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    return MEDALLION_PALETTE[h % MEDALLION_PALETTE.length];
+}
+
+/** Wear colour: the activity accent while healthy, amber, then red; grey when broken. */
+function wearColor(frac, status, theme) {
+    if (status === 'broken') return '#6b6b6b';
+    if (frac > 0.5) return theme.accent;
+    if (frac > 0.25) return '#f5c542';
+    return '#e5534b';
+}
+
+/** A count in a rounded pill, anchored on its bottom-right corner at (x, y). */
+function drawCountPill(ctx, text, x, y, color) {
+    ctx.save();
+    ctx.font = `bold 14px ${FONT}`;
+    const w = Math.max(24, ctx.measureText(text).width + 14);
+    const h = 22;
+    // Dark fill, coloured rim: a pale item colour (Pearl) would wash out white text.
+    roundRect(ctx, x - w, y - h, w, h, h / 2);
+    ctx.fillStyle = '#0d141c';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x - w / 2, y - h / 2 + 1);
+    ctx.restore();
+}
+
+function drawMoreNote(ctx, more, y, theme) {
+    if (!(more > 0)) return;
+    ctx.font = `14px ${FONT}`;
+    ctx.fillStyle = theme.muted;
+    ctx.textAlign = 'right';
+    ctx.fillText(`+${more} more`, INV_W - INV_PAD, y + 20);
+    ctx.textAlign = 'left';
+}
+
+function drawSectionHead(ctx, label, count, y, theme) {
+    ctx.font = `bold 15px ${FONT}`;
+    ctx.fillStyle = theme.accent;
+    const text = label.toUpperCase();
+    ctx.fillText(text, INV_PAD, y + 20);
+    if (count != null) {
+        const labelW = ctx.measureText(text).width;
+        ctx.font = `15px ${FONT}`;
+        ctx.fillStyle = theme.muted;
+        ctx.fillText(String(count), INV_PAD + labelW + 10, y + 20);
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(INV_PAD, y + 28, INV_W - INV_PAD * 2, 1);
+}
+
+/** Card heights, shared by the renderer and the size the canvas is made. */
+function inventoryLayout(opts) {
+    const gear = opts.gear ?? null;
+    const sections = opts.sections ?? [];
+    const buffs = (opts.buffs ?? []).filter(Boolean);
+    let h = INV_HEADER_H;
+    if (buffs.length) h += INV_PILL_H + 14;
+    if (gear) h += INV_SECTION_HEAD + (gear.entries?.length ? INV_GEAR_H : 40) + 14;
+    for (const s of sections) {
+        const rows = s.entries?.length ? Math.ceil(s.entries.length / INV_TILE_COLS) : 0;
+        h += INV_SECTION_HEAD + (rows ? rows * INV_TILE_H : 40) + 10;
+    }
+    return { height: h + INV_PAD - 10, gear, sections, buffs };
+}
+
+async function drawGearCard(ctx, g, x, y, w, theme) {
+    const h = INV_GEAR_H;
+    roundRect(ctx, x, y, w, h, 14);
+    ctx.fillStyle = g.equipped ? 'rgba(255,255,255,0.11)' : theme.panel;
+    ctx.fill();
+    if (g.equipped) {
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = theme.accent;
+        ctx.stroke();
+    }
+
+    // Slot number, top left: the number the equip command takes.
+    if (g.number != null) {
+        ctx.font = `bold 15px ${FONT}`;
+        ctx.fillStyle = theme.muted;
+        ctx.fillText(`#${g.number}`, x + 12, y + 24);
+    }
+    if (g.equipped) {
+        ctx.font = `bold 12px ${FONT}`;
+        const label = 'EQUIPPED';
+        const pw = ctx.measureText(label).width + 14;
+        roundRect(ctx, x + w - pw - 10, y + 10, pw, 20, 10);
+        ctx.fillStyle = theme.accent;
+        ctx.fill();
+        ctx.fillStyle = '#0b0b0b';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, x + w - pw / 2 - 10, y + 24);
+        ctx.textAlign = 'left';
+    }
+
+    const icon = 92;
+    const broken = g.status === 'broken';
+    await drawEntry(ctx, { iconId: g.iconId, name: g.name, color: g.color, owned: !broken }, x + (w - icon) / 2, y + 30, icon, theme);
+
+    ctx.textAlign = 'center';
+    ctx.font = `bold 16px ${FONT}`;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(fitText(ctx, g.name, w - 20), x + w / 2, y + 144);
+
+    // Wear bar.
+    const max = Math.max(1, g.max ?? 1);
+    const cur = Math.max(0, Math.min(max, g.current ?? 0));
+    const frac = cur / max;
+    const bx = x + 14, bw = w - 28, by = y + 156, bh = 10;
+    roundRect(ctx, bx, by, bw, bh, bh / 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fill();
+    if (frac > 0) {
+        roundRect(ctx, bx, by, Math.max(bh, bw * frac), bh, bh / 2);
+        ctx.fillStyle = wearColor(frac, g.status, theme);
+        ctx.fill();
+    }
+    ctx.font = `13px ${FONT}`;
+    ctx.fillStyle = broken ? '#e5534b' : theme.muted;
+    const statusWord = g.status && g.status !== 'good' ? ` · ${g.status}` : '';
+    ctx.fillText(fitText(ctx, `${cur}/${max}${statusWord}`, w - 20), x + w / 2, by + bh + 18);
+
+    if (g.tag) {
+        ctx.font = `bold 12px ${FONT}`;
+        ctx.fillStyle = theme.accent;
+        ctx.fillText(fitText(ctx, `+ ${g.tag}`.toUpperCase(), w - 20), x + w / 2, by + bh + 36);
+    }
+    ctx.textAlign = 'left';
+}
+
+/**
+ * @param {object} opts
+ * @param {'hunt'|'fish'|'explore'|'mine'|'items'} opts.activity
+ * @param {string}   opts.title       e.g. "munge's Tackle Box"
+ * @param {string}   [opts.subtitle]  e.g. "3 rods · 60 bait · 4 materials"
+ * @param {string[]} [opts.buffs]     active effects, drawn as pills (no emoji —
+ *        a canvas draws them as boxes)
+ * @param {{label: string, entries: object[], more?: number, empty?: string}} [opts.gear]
+ *        entries: { iconId, name, color?, number, current, max, status, equipped, tag? };
+ *        the first five are drawn, `more` says how many were left off
+ * @param {{label: string, entries: object[], count?: number, more?: number, empty?: string}[]} [opts.sections]
+ *        entries: { iconId, name, count, color? } — callers trim a long list
+ *        themselves and pass how many they left off as `more`
+ * @returns {Promise<Buffer>} PNG
+ */
+async function createGrindInventoryCard(opts) {
+    const theme = themeFor(opts.activity);
+    const { height, gear, sections, buffs } = inventoryLayout(opts);
+
+    const canvas = createCanvas(INV_W, height);
+    const ctx = canvas.getContext('2d');
+    paintBackground(ctx, INV_W, height, theme);
+    ctx.fillStyle = theme.accent;
+    ctx.fillRect(0, 0, INV_W, 6);
+
+    ctx.font = `bold 32px ${FONT}`;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(fitText(ctx, opts.title, INV_W - INV_PAD * 2), INV_PAD, 56);
+    ctx.font = `17px ${FONT}`;
+    ctx.fillStyle = theme.muted;
+    ctx.fillText(fitText(ctx, opts.subtitle ?? '', INV_W - INV_PAD * 2), INV_PAD, 84);
+
+    let y = INV_HEADER_H;
+
+    // ── Active buffs, as a row of pills
+    if (buffs.length) {
+        let x = INV_PAD;
+        ctx.font = `bold 14px ${FONT}`;
+        for (const b of buffs) {
+            const text = fitText(ctx, String(b).replace(/^[^\p{L}\p{N}]+/u, ''), 360);
+            const w = ctx.measureText(text).width + 26;
+            if (x + w > INV_W - INV_PAD) break;
+            roundRect(ctx, x, y, w, INV_PILL_H, INV_PILL_H / 2);
+            ctx.fillStyle = 'rgba(245,197,66,0.16)';
+            ctx.fill();
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = '#f5c542';
+            ctx.stroke();
+            ctx.fillStyle = '#f5c542';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x + 13, y + INV_PILL_H / 2 + 1);
+            ctx.textBaseline = 'alphabetic';
+            x += w + 10;
+        }
+        y += INV_PILL_H + 14;
+    }
+
+    // ── Gear rack
+    if (gear) {
+        const shown = (gear.entries ?? []).slice(0, INV_GEAR_COLS);
+        const more = (gear.more ?? 0) + Math.max(0, (gear.entries?.length ?? 0) - shown.length);
+        drawSectionHead(ctx, gear.label, gear.count ?? null, y, theme);
+        drawMoreNote(ctx, more, y, theme);
+        y += INV_SECTION_HEAD;
+        if (shown.length) {
+            const w = (INV_W - INV_PAD * 2 - INV_GEAR_GAP * (INV_GEAR_COLS - 1)) / INV_GEAR_COLS;
+            for (let i = 0; i < shown.length; i++) {
+                await drawGearCard(ctx, shown[i], INV_PAD + i * (w + INV_GEAR_GAP), y, w, theme);
+            }
+            y += INV_GEAR_H + 14;
+        } else {
+            ctx.font = `italic 17px ${FONT}`;
+            ctx.fillStyle = theme.muted;
+            ctx.fillText(gear.empty ?? 'Nothing here yet.', INV_PAD, y + 26);
+            y += 40 + 14;
+        }
+    }
+
+    // ── Stock grids
+    for (const s of sections) {
+        const entries = s.entries ?? [];
+        drawSectionHead(ctx, s.label, s.count ?? null, y, theme);
+        drawMoreNote(ctx, s.more, y, theme);
+        y += INV_SECTION_HEAD;
+        if (!entries.length) {
+            ctx.font = `italic 17px ${FONT}`;
+            ctx.fillStyle = theme.muted;
+            ctx.fillText(s.empty ?? 'None', INV_PAD, y + 26);
+            y += 40 + 10;
+            continue;
+        }
+        for (let i = 0; i < entries.length; i++) {
+            const e = { ...entries[i], color: entries[i].color ?? medallionColor(entries[i].name) };
+            const col = i % INV_TILE_COLS;
+            const row = Math.floor(i / INV_TILE_COLS);
+            const cx = INV_PAD + col * INV_TILE_W;
+            const cy = y + row * INV_TILE_H;
+            const ix = cx + (INV_TILE_W - INV_TILE) / 2;
+            await drawEntry(ctx, { iconId: e.iconId, name: e.name, color: e.color, owned: true }, ix, cy, INV_TILE, theme);
+            if (e.count != null) {
+                const n = Number(e.count);
+                const text = Number.isFinite(n) ? `×${n > 9999 ? '9999+' : n.toLocaleString('en-US')}` : String(e.count);
+                drawCountPill(ctx, text, ix + INV_TILE + 8, cy + INV_TILE, e.color ?? theme.accent);
+            }
+            // Step down a size before truncating: "Composite Round" fits at 11px.
+            ctx.font = `13px ${FONT}`;
+            if (ctx.measureText(e.name).width > INV_TILE_W - 10) ctx.font = `11px ${FONT}`;
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.fillText(fitText(ctx, e.name, INV_TILE_W - 10), cx + INV_TILE_W / 2, cy + INV_TILE + 20);
+            ctx.textAlign = 'left';
+        }
+        y += Math.ceil(entries.length / INV_TILE_COLS) * INV_TILE_H + 10;
+    }
+
+    return encodeCanvas(canvas);
+}
+
 /** Test seam: forget decoded art. */
 function _resetCache() {
     iconCache.clear();
@@ -510,8 +800,11 @@ function _resetCache() {
 module.exports = {
     createGrindProfileCard,
     createGrindCollectionCard,
+    createGrindInventoryCard,
     THEMES,
     COLL_COLS,
+    INV_GEAR_COLS,
+    INV_TILE_COLS,
     _resetCache,
     __test__: { initials, shade },
 };

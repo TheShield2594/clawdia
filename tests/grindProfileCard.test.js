@@ -8,7 +8,8 @@
 // without it, see grindProfileView.renderAttachment).
 
 const {
-    createGrindProfileCard, createGrindCollectionCard, COLL_COLS, _resetCache, __test__,
+    createGrindProfileCard, createGrindCollectionCard, createGrindInventoryCard,
+    COLL_COLS, INV_TILE_COLS, _resetCache, __test__,
 } = require('../src/utils/grindProfileCard');
 const { initials, shade } = __test__;
 
@@ -103,6 +104,44 @@ describe('createGrindCollectionCard', () => {
             sections: [{ label: 'Epic', color: '#9b59b6', entries: section(3, () => true) }],
         });
         expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
+    });
+});
+
+describe('createGrindInventoryCard', () => {
+    const rod = (n, over = {}) => ({
+        iconId: n % 2 ? 'fish:carbon_rod' : 'no-such:icon', name: `Rod ${n}`, number: n,
+        current: 50, max: 100, status: 'good', equipped: n === 1, ...over,
+    });
+    const tiles = n => Array.from({ length: n }, (_, i) => ({
+        iconId: i % 2 ? 'fish:lure_pack' : null, name: `Stock ${i}`, count: i * 997, color: '#ecf0f1',
+    }));
+    const card = (over = {}) => ({
+        activity: 'fish', title: "munge's Tackle Box", subtitle: '3 rods',
+        buffs: ['Chum Bait (2 casts left)', "🍀 Angler's Luck queued"],
+        gear: { label: 'Rods', count: 3, entries: [rod(1), rod(2, { status: 'broken', current: 0 }), rod(3, { tag: 'Enhanced Line' })] },
+        sections: [{ label: 'Bait', entries: tiles(3) }, { label: 'Materials', entries: [] }],
+        ...over,
+    });
+
+    test('renders a 1000-wide PNG', async () => {
+        const png = await createGrindInventoryCard(card());
+        expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
+        expect(size(png).width).toBe(1000);
+    });
+
+    test('a stock section grows one row per full tile row', async () => {
+        const one = size(await createGrindInventoryCard(card({ sections: [{ label: 'Bait', entries: tiles(INV_TILE_COLS) }] })));
+        const two = size(await createGrindInventoryCard(card({ sections: [{ label: 'Bait', entries: tiles(INV_TILE_COLS + 1) }] })));
+        expect(two.height).toBeGreaterThan(one.height);
+    });
+
+    test('draws only five rods and still renders with more, none, and no buffs', async () => {
+        const many = await createGrindInventoryCard(card({
+            gear: { label: 'Rods', entries: Array.from({ length: 9 }, (_, i) => rod(i + 1)), more: 4 },
+        }));
+        expect(many.subarray(0, 4)).toEqual(PNG_MAGIC);
+        const empty = await createGrindInventoryCard(card({ buffs: [], gear: { label: 'Rods', entries: [] }, sections: [] }));
+        expect(empty.subarray(0, 4)).toEqual(PNG_MAGIC);
     });
 });
 

@@ -11,7 +11,7 @@ jest.mock('../src/models/User', () => ({ findOne: jest.fn(), findOneAndUpdate: j
 jest.mock('../src/models/GrindProfile', () => ({ find: jest.fn(), findOneAndUpdate: jest.fn() }));
 
 const { __test__ } = require('../src/commands/economy/hunt/inventory');
-const { orderedWeapons, weaponsPages, ammoEmbed, consumablesEmbed, materialsPages, overviewEmbed } = __test__;
+const { orderedWeapons, weaponsPages, ammoEmbed, consumablesEmbed, materialsPages, overviewEmbed, overviewPayload, inventoryStock } = __test__;
 const { WEAPON_BY_TIER } = require('../src/data/huntData');
 
 const MAX_FIELD_VALUE = 1024;
@@ -128,5 +128,34 @@ describe('hunt inventory builders', () => {
         const embed = overviewEmbed(interaction, emptyHunt());
         const weaponsField = fieldsOf(embed).find(f => /Weapons/.test(f.name));
         expect(weaponsField.value).toMatch(/shop weapon/);
+    });
+
+    test('inventoryStock maps held stock to art keys and skips empty stacks', () => {
+        const { ammo, consumables, materials } = inventoryStock(fullHunt());
+        for (const e of [...ammo, ...consumables, ...materials]) {
+            expect(e.count).toBeGreaterThan(0);
+            expect(e.iconId).toMatch(/^hunt:/);
+        }
+    });
+
+    test('overviewPayload attaches the gun-rack card as the embed image', async () => {
+        const payload = await overviewPayload(interaction, fullHunt());
+        expect(payload.files).toHaveLength(1);
+        expect(payload.files[0].name).toBe('hunt-inventory.png');
+        expect(payload.embeds[0].toJSON().image.url).toBe('attachment://hunt-inventory.png');
+    });
+
+    test('overviewPayload renders an empty inventory too', async () => {
+        const payload = await overviewPayload(interaction, emptyHunt());
+        expect(payload.files).toHaveLength(1);
+    });
+
+    test('a huge material stock stays inside the field limit', () => {
+        const h = fullHunt();
+        h.materials = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`material_number_${i}`, 1000 + i]));
+        for (const field of fieldsOf(overviewEmbed(interaction, h))) {
+            expect(field.value.length).toBeLessThanOrEqual(MAX_FIELD_VALUE);
+        }
+        expect(textOf(overviewEmbed(interaction, h))).toMatch(/…and \d+ more/);
     });
 });

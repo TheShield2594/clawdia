@@ -5,11 +5,15 @@ const { attachGrind } = require('../../utils/grindProfile');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
 const { MATERIAL_RARITY, TIER_LABELS, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
-const { getItemLore } = require('../../data/defaultShopItems');
+const { getItemLore, getItemRarity, defaultItemIdByName } = require('../../data/defaultShopItems');
 const { getRelicMeta } = require('../../data/exploreData');
 const { packFieldsCapped, EMBED_LIMITS } = require('../../utils/embedFields');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { relicItemId } = require('../../data/activityItems');
+const { hasDefaultItemImage } = require('../../utils/defaultItemImages');
+const { createGrindInventoryCard } = require('../../utils/grindProfileCard');
+const { renderAttachment, pagePayload } = require('../../utils/grindProfileView');
 
 const TOTAL_MATERIALS = Object.keys(MATERIAL_RARITY).length;
 
@@ -214,6 +218,97 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
     return embed;
 }
 
+// ─── The Items card ───────────────────────────────────────────────────────────
+
+// The picture half of the Items tab: shop items, forged items and relics as
+// tiles with their counts, active effects as pills. The embed keeps every
+// number (#672) and the lore the card has no room for. The material tabs stay
+// text until their art exists (#1168).
+
+const ITEMS_CARD_TILES = 16; // two rows per section; the embed has the rest
+
+// Count-pill colours by rarity. Shop items say Common..Mythic, relics
+// rare..legendary, forged items whatever the model wrote.
+const RARITY_COLORS = {
+    common: '#95a5a6', uncommon: '#2ecc71', rare: '#3498db',
+    epic: '#9b59b6', mythic: '#f39c12', legendary: '#f39c12',
+};
+const rarityColor = rarity => RARITY_COLORS[String(rarity ?? '').toLowerCase()] ?? null;
+
+/** Split the inventory into the card's three sections. */
+function itemsCardSections(inventory, shopItems, aiItemMap) {
+    const shop = [], forged = [], relics = [];
+    for (const entry of inventory) {
+        if (!(entry.quantity > 0)) continue;
+        const relic = getRelicMeta(entry.itemId);
+        if (relic) {
+            relics.push({ iconId: relicItemId(relic.slug), name: relic.itemId, count: entry.quantity, color: rarityColor(relic.rarity) });
+        } else if (entry.itemId.startsWith('ai_')) {
+            const ai = aiItemMap[entry.itemId];
+            forged.push({ iconId: null, name: ai?.name ?? 'Unknown forged item', count: entry.quantity, color: rarityColor(ai?.rarity) });
+        } else {
+            const lower = entry.itemId.toLowerCase();
+            const shopItem = shopItems.find(s => s.name.toLowerCase() === lower || s.itemId?.toLowerCase() === lower);
+            // Baked art is keyed on the default catalogue's bare id; a custom
+            // guild item has none and draws as a medallion.
+            const id = shopItem?.itemId ?? defaultItemIdByName(entry.itemId) ?? lower;
+            shop.push({
+                iconId: hasDefaultItemImage(id) ? id : null,
+                name:   shopItem?.name ?? entry.itemId,
+                count:  entry.quantity,
+                color:  rarityColor(getItemRarity(id, shopItem?.price ?? 0)),
+            });
+        }
+    }
+    return { shop, forged, relics };
+}
+
+function effectPills(activeEffects) {
+    return activeEffects.map(e => {
+        const cfg = EFFECT_CONFIGS[e.type];
+        if (!cfg) return null;
+        const left = e.expiresAt
+            ? `${timeRemaining(e.expiresAt)} left`
+            : e.charges > 0 ? `${e.charges} use${e.charges !== 1 ? 's' : ''} left` : 'permanent';
+        return `${cfg.label} (${left})`;
+    }).filter(Boolean);
+}
+
+function buildItemsCard(inventory, shopItems, activeEffects, aiItemMap, target) {
+    const { shop, forged, relics } = itemsCardSections(inventory, shopItems, aiItemMap);
+    const pills = effectPills(activeEffects);
+    if (!shop.length && !forged.length && !relics.length && !pills.length) return Promise.resolve(null);
+
+    const sum = list => list.reduce((n, e) => n + e.count, 0);
+    const subtitle = [
+        `${sum(shop).toLocaleString('en-US')} item${sum(shop) === 1 ? '' : 's'}`,
+        forged.length ? `${sum(forged).toLocaleString('en-US')} forged` : null,
+        `${relics.length} relic${relics.length === 1 ? '' : 's'}`,
+        `${pills.length} active effect${pills.length === 1 ? '' : 's'}`,
+    ].filter(Boolean).join(' · ');
+
+    const section = (label, entries, empty) => {
+        const tiles = entries.slice(0, ITEMS_CARD_TILES);
+        return { label, entries: tiles, count: entries.length || null, more: entries.length - tiles.length, empty };
+    };
+    const sections = [section('Shop Items', shop, 'Nothing from the shop yet — see /shop.')];
+    if (forged.length) sections.push(section('Forged Items', forged));
+    sections.push(section('Relics', relics, 'No relics yet — /explore brings them home.'));
+
+    const describe = list => list.map(e => `${e.name} ${e.count}`).join(', ') || 'none';
+    const alt = `Inventory for ${target.username}. Shop items: ${describe(shop)}. `
+        + (forged.length ? `Forged items: ${describe(forged)}. ` : '')
+        + `Relics: ${describe(relics)}. Active effects: ${pills.join(', ') || 'none'}.`;
+
+    return renderAttachment(() => createGrindInventoryCard({
+        activity: 'items',
+        title:    `${target.username}'s Inventory`,
+        subtitle,
+        buffs:    pills,
+        sections,
+    }), 'inventory-items.png', alt);
+}
+
 function buildTabRow(active, interactionId, disabled = false) {
     return new ActionRowBuilder().addComponents(
         TAB_KEYS.map(key =>
@@ -296,9 +391,15 @@ module.exports = {
             explore: buildMaterialsEmbed('explore', mats.explore, color, footer, target, avatarURL),
         };
 
+        // The Items tab carries its card as the embed image; the material tabs
+        // are text until their art exists (#1168).
+        const itemsCard = await buildItemsCard(inventory, shopItems, activeEffects, aiItemMap, target);
+        const itemsPage = pagePayload(embeds.items, itemsCard);
+        const pageFor = tab => (tab === 'items' ? itemsPage : { embeds: [embeds[tab]], files: [] });
+
         let activeTab = 'items';
         const message = await interaction.reply({
-            embeds: [embeds[activeTab]],
+            ...pageFor(activeTab),
             components: [buildTabRow(activeTab, interaction.id)],
             fetchReply: true
         });
@@ -315,8 +416,10 @@ module.exports = {
 
         collector.on('collect', async btn => {
             activeTab = btn.customId.split('_')[1];
+            // `attachments: []` drops the previous tab's card; `files` adds this one's.
             await btn.update({
-                embeds: [embeds[activeTab]],
+                ...pageFor(activeTab),
+                attachments: [],
                 components: [buildTabRow(activeTab, interaction.id)]
             });
         });
@@ -328,5 +431,5 @@ module.exports = {
         });
     },
 
-    __test__: { buildItemsEmbed },
+    __test__: { buildItemsEmbed, buildItemsCard, itemsCardSections },
 };

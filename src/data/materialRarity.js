@@ -1,4 +1,6 @@
-// Rarity tier mapping for all hunt/fish/mine materials
+// Rarity tier mapping for every hunt, fish, mine and explore material.
+// tests/materialRarityCoverage.test.js keeps it in step with each system's
+// MATERIAL_NAMES, so a new material can't be left out of /inventory again.
 // Tiers: 1=common, 2=uncommon, 3=rare, 4=epic, 5=legendary
 
 const MATERIAL_RARITY = {
@@ -29,6 +31,45 @@ const MATERIAL_RARITY = {
     thunderfeather:    { tier: 5, emoji: '⚡', label: 'Thunderfeather',      source: 'hunt' },
     spectral_bone:     { tier: 5, emoji: '💀', label: 'Spectral Bone',       source: 'hunt' },
     bandit_mask:       { tier: 5, emoji: '🎭', label: 'Bandit Mask',         source: 'hunt' },
+
+    // Zone materials. Each takes the tier of the animal that drops it (common 1 … legendary 5).
+    // Beginner Forest
+    striped_pelt:      { tier: 1, emoji: '🐿️', label: 'Striped Pelt',      source: 'hunt' },
+    crow_feather:      { tier: 1, emoji: '🐦', label: 'Crow Feather',      source: 'hunt' },
+    slick_skin:        { tier: 1, emoji: '🐸', label: 'Slick Skin',        source: 'hunt' },
+    opossum_pelt:      { tier: 1, emoji: '🐀', label: 'Opossum Pelt',      source: 'hunt' },
+    hardwood_chip:     { tier: 1, emoji: '🪵', label: 'Hardwood Chip',     source: 'hunt' },
+    // Desert Wastes
+    jackrabbit_foot:   { tier: 2, emoji: '🐇', label: 'Jackrabbit\'s Foot', source: 'hunt' },
+    scavenger_feather: { tier: 2, emoji: '🪶', label: 'Scavenger Feather', source: 'hunt' },
+    scorpion_claw:     { tier: 2, emoji: '🦂', label: 'Scorpion Claw',     source: 'hunt' },
+    sand_pelt:         { tier: 2, emoji: '🦊', label: 'Sand Pelt',         source: 'hunt' },
+    venom_sac:         { tier: 3, emoji: '🐍', label: 'Venom Sac',         source: 'hunt' },
+    hyena_fang:        { tier: 3, emoji: '🦷', label: 'Hyena Fang',        source: 'hunt' },
+    // Murky Swamp
+    marsh_feather:     { tier: 2, emoji: '🪶', label: 'Marsh Feather',     source: 'hunt' },
+    hog_tusk:          { tier: 2, emoji: '🐗', label: 'Hog Tusk',          source: 'hunt' },
+    swamp_scale:       { tier: 2, emoji: '🦎', label: 'Swamp Scale',       source: 'hunt' },
+    swamp_gland:       { tier: 3, emoji: '🫧', label: 'Swamp Gland',       source: 'hunt' },
+    cottonmouth_venom: { tier: 3, emoji: '🐍', label: 'Cottonmouth Venom', source: 'hunt' },
+    gator_hide:        { tier: 4, emoji: '🐊', label: 'Gator Hide',        source: 'hunt' },
+    shadow_pelt:       { tier: 4, emoji: '🐆', label: 'Shadow Pelt',       source: 'hunt' },
+    // Arctic Tundra
+    caribou_antler:    { tier: 3, emoji: '🦌', label: 'Caribou Antler',    source: 'hunt' },
+    arctic_fox_pelt:   { tier: 3, emoji: '🦊', label: 'Arctic Fox Pelt',   source: 'hunt' },
+    snowy_feather:     { tier: 3, emoji: '🦉', label: 'Snowy Feather',     source: 'hunt' },
+    thick_hide:        { tier: 4, emoji: '🐂', label: 'Thick Hide',        source: 'hunt' },
+    mammoth_tusk:      { tier: 4, emoji: '🦣', label: 'Mammoth Tusk',      source: 'hunt' },
+    polar_claw:        { tier: 4, emoji: '🐻‍❄️', label: 'Polar Claw',        source: 'hunt' },
+    saber_fang:        { tier: 4, emoji: '🐅', label: 'Saber Fang',        source: 'hunt' },
+    // Legendary Peaks
+    ram_horn:          { tier: 3, emoji: '🐏', label: 'Ram Horn',          source: 'hunt' },
+    ancient_relic:     { tier: 3, emoji: '🏺', label: 'Ancient Relic',     source: 'hunt' },
+    dire_wolf_fang:    { tier: 4, emoji: '🐺', label: 'Dire Wolf Fang',    source: 'hunt' },
+    primal_claw:       { tier: 4, emoji: '🐻', label: 'Primal Claw',       source: 'hunt' },
+    obsidian_antler:   { tier: 5, emoji: '🦌', label: 'Obsidian Antler',   source: 'hunt' },
+    storm_feather:     { tier: 5, emoji: '🌩️', label: 'Storm Feather',     source: 'hunt' },
+    ember_fang:        { tier: 5, emoji: '🔥', label: 'Ember Fang',        source: 'hunt' },
 
     // Fishing materials
     fish_scale:        { tier: 1, emoji: '🐟', label: 'Fish Scale',          source: 'fish' },
