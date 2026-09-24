@@ -12,7 +12,7 @@ jest.mock('../src/models/User', () => ({ findOne: jest.fn(), findOneAndUpdate: j
 jest.mock('../src/models/GrindProfile', () => ({ find: jest.fn(), findOneAndUpdate: jest.fn() }));
 
 const { __test__ } = require('../src/commands/economy/mine/inventory');
-const { overviewEmbed, pickaxePages, chargesEmbed, consumablesEmbed, materialsPages } = __test__;
+const { overviewEmbed, pickaxePages, chargesEmbed, consumablesEmbed, materialsPages, overviewPayload, inventoryStock } = __test__;
 
 const MAX_FIELD_VALUE = 1024;
 const MAX_DESCRIPTION = 4096;
@@ -110,5 +110,24 @@ describe('mine inventory builders', () => {
     test('materialsPages lists materials, and reassures when there are none', () => {
         expect(materialsPages(fullMining())[0].data.description).toMatch(/rock|copper/i);
         expect(materialsPages(emptyMining())[0].data.description).toMatch(/None yet/);
+    });
+
+    test('inventoryStock maps held stock to art keys and skips empty stacks', () => {
+        const { charges, consumables, materials } = inventoryStock(fullMining());
+        expect(charges.map(c => c.iconId)).toEqual(['mine:iron_blast_pack', 'mine:steel_blast_pack']);
+        expect(consumables.every(c => c.iconId?.startsWith('mine:'))).toBe(true);
+        expect(materials.map(m => m.name)).toEqual(['Rock Fragment', 'Copper Flake']);
+    });
+
+    test('overviewPayload attaches the tool-belt card as the embed image', async () => {
+        const payload = await overviewPayload(interaction, fullMining());
+        expect(payload.files).toHaveLength(1);
+        expect(payload.files[0].name).toBe('mine-inventory.png');
+        expect(payload.embeds[0].toJSON().image.url).toBe('attachment://mine-inventory.png');
+    });
+
+    test('overviewPayload renders an empty inventory too', async () => {
+        const payload = await overviewPayload(interaction, emptyMining());
+        expect(payload.files).toHaveLength(1);
     });
 });

@@ -28,7 +28,7 @@ const { chunkByLength } = require('../../../utils/embedFields');
 const { paginate } = require('../../../utils/paginator');
 const { MAX_PRESTIGE, PRESTIGE_LABELS } = require('./shared');
 const { formatPrestigeBonuses } = require('./embeds');
-const { sendProfileTabs, renderAttachment, pagePayload } = require('../../../utils/grindProfileView');
+const { sendProfileTabs, renderAttachment, pagePayload, stockLine, titleCase } = require('../../../utils/grindProfileView');
 const { createGrindInventoryCard } = require('../../../utils/grindProfileCard');
 const { readCatalog, fishOverviewPage, fishCatalogPage, fishProgressPage } = require('./profilePages');
 const COLORS = require('../../../utils/embedColors');
@@ -443,8 +443,6 @@ const OVERVIEW_ROD_PREVIEW = 5;
 // Chum and Shrimp Bait were both 🦐). One emoji per heading, plus the rod
 // status mark, which is information rather than decoration.
 
-const titleCase = id => String(id).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-
 /** Medallion colours for the materials, which have no baked art yet (#1168). */
 const MATERIAL_COLORS = {
     fish_scale:     '#5dade2',
@@ -487,16 +485,9 @@ function inventoryStock(user) {
     const huntMats = user.hunt?.materials ?? {};
     for (const id of Object.keys(HUNT_MATERIAL_NAMES)) {
         const qty = huntMats[id] ?? 0;
-        if (qty) materials.push({ iconId: null, name: HUNT_MATERIAL_NAMES[id], source: 'hunt', count: qty, color: MATERIAL_COLORS[id] });
+        if (qty) materials.push({ iconId: `hunt:${id}`, name: HUNT_MATERIAL_NAMES[id], source: 'hunt', count: qty, color: MATERIAL_COLORS[id] });
     }
     return { bait, consumables, materials };
-}
-
-/** "Worm Bait ×40 · Lure ×12", or the fallback when there is nothing. */
-function stockLine(entries, empty) {
-    return entries.length
-        ? entries.map(e => `${e.name}${e.source ? ` (${e.source})` : ''} ×${e.count.toLocaleString('en-US')}`).join(' · ')
-        : empty;
 }
 
 function overviewEmbed(interaction, user) {

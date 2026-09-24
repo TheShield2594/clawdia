@@ -15,9 +15,11 @@ const { MessageFlags, EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind } = require('../../../utils/grindProfile');
 const { ensureMineData, durabilityBar, pickaxeStatusEmoji } = require('../../../services/mineService');
-const { packFieldsCapped, chunkByLength } = require('../../../utils/embedFields');
+const { chunkByLength } = require('../../../utils/embedFields');
 const { paginate } = require('../../../utils/paginator');
-const { BLAST_PACKS, CONSUMABLES, MATERIAL_NAMES } = require('../../../data/mineData');
+const { BLAST_PACKS, CONSUMABLES, MATERIAL_NAMES, PICKAXE_BY_TIER, PICKAXE_BY_SLUG, PICKAXE_UPGRADES } = require('../../../data/mineData');
+const { renderAttachment, pagePayload, stockLine, titleCase } = require('../../../utils/grindProfileView');
+const { createGrindInventoryCard } = require('../../../utils/grindProfileCard');
 const COLORS = require('../../../utils/embedColors');
 
 // ─── Shared loader ──────────────────────────────────────────────────────────
@@ -43,13 +45,6 @@ async function loadMine(interaction) {
 
 // ─── Section helpers ──────────────────────────────────────────────────────────
 
-function chargeLines(m) {
-    return BLAST_PACKS
-        .map(b => ({ b, stock: m.charges[b.chargeType] ?? 0 }))
-        .filter(({ stock }) => stock > 0)
-        .map(({ b }) => `${b.emoji} ${b.chargeType.replace(/_/g, ' ')}: **${m.charges[b.chargeType] ?? 0}**`);
-}
-
 function consumableLines(m) {
     return Object.entries(m.consumables ?? {})
         .filter(([, qty]) => qty > 0)
@@ -74,38 +69,66 @@ function materialLines(m) {
         .map(([id, qty]) => `${MATERIAL_NAMES[id] ?? id}: **${qty}**`);
 }
 
-// ─── Overview: every category in one embed ────────────────────────────────────
+// ─── Overview: a tool-belt card and its text half ─────────────────────────────
+
+const OVERVIEW_PICKAXE_PREVIEW = 5;
+const OVERVIEW_MATERIAL_TILES = 16;
+
+/** Everything the overview shows, as data both halves read. */
+function inventoryStock(m) {
+    const charges = BLAST_PACKS
+        .map(pack => ({ iconId: `mine:${pack.id}`, name: titleCase(pack.chargeType), count: m.charges?.[pack.chargeType] ?? 0 }))
+        .filter(e => e.count > 0);
+    const consumables = Object.entries(m.consumables ?? {})
+        .filter(([, qty]) => qty > 0)
+        .map(([id, qty]) => ({ iconId: CONSUMABLES[id] ? `mine:${id}` : null, name: CONSUMABLES[id]?.name ?? titleCase(id), count: qty }));
+    const materials = Object.entries(m.materials ?? {})
+        .filter(([, qty]) => qty > 0)
+        .map(([id, qty]) => ({ iconId: `mine:${id}`, name: MATERIAL_NAMES[id] ?? titleCase(id), count: qty }));
+    return { charges, consumables, materials };
+}
+
+/** Plain buff names — the card cannot draw emoji, and the text matches it. */
+function buffPills(m) {
+    const pills = [];
+    if (m.activeMagnet)   pills.push(`${CONSUMABLES[m.activeMagnet]?.name ?? titleCase(m.activeMagnet)} (${m.activeMagnetMinesLeft} mines left)`);
+    if (m.activeLamp)     pills.push(`Miner's Lamp (${m.activeLampMinesLeft} mines left)`);
+    if (m.activeInstinct) pills.push("Miner's Instinct queued");
+    if (m.activeXpScroll) pills.push('XP Scroll queued');
+    return pills;
+}
+
+const upgradeName = id => (id ? (PICKAXE_UPGRADES[id]?.name ?? titleCase(id)) : null);
+
+// Equipped first, then by tier, carrying the slot number /mine equip takes.
+function orderedPickaxes(m) {
+    return m.pickaxes
+        .map((p, index) => ({ p, index }))
+        .sort((a, b) => {
+            if (a.index === m.equippedPickaxeIndex) return -1;
+            if (b.index === m.equippedPickaxeIndex) return 1;
+            return (b.p.tier ?? 0) - (a.p.tier ?? 0);
+        });
+}
 
 function overviewEmbed(interaction, m) {
     const embed = new EmbedBuilder()
         .setColor('#b5651d')
-        .setTitle(`⛏️ ${interaction.user.username}'s Mining Inventory`)
+        .setTitle(`⛏️ ${interaction.user.username}'s Tool Belt`)
         .setTimestamp();
 
     if (!m.pickaxes.length) {
         embed.addFields({ name: '🪓 Pickaxes', value: 'None — buy one with `/mine shop pickaxe`', inline: false });
     } else {
-        const lines = m.pickaxes.map((p, i) => {
-            const isEquipped = i === m.equippedPickaxeIndex;
-            const bar = durabilityBar(p.currentDurability, p.maxDurability);
-            const upgradeStr = p.upgrade ? ` [${p.upgrade.replace(/_/g, ' ')}]` : '';
-            return `**Slot ${i + 1}**${isEquipped ? ' *(equipped)*' : ''} — ${p.name}${upgradeStr} ${pickaxeStatusEmoji(p.status)}\n> ${bar} ${p.currentDurability}/${p.maxDurability}`;
+        const ordered = orderedPickaxes(m);
+        const preview = ordered.slice(0, OVERVIEW_PICKAXE_PREVIEW).map(({ p, index }) => {
+            const equipped = index === m.equippedPickaxeIndex ? ' · **equipped**' : '';
+            const upgrade  = p.upgrade ? ` · ${upgradeName(p.upgrade)}` : '';
+            return `**Slot ${index + 1}** ${p.name}${equipped} — ${pickaxeStatusEmoji(p.status)} ${p.currentDurability}/${p.maxDurability}${upgrade}`;
         });
-        // Nothing caps how many pickaxes a miner accumulates and each entry runs
-        // ~85 characters, so a single field ran out of room around the twelfth one
-        // and Discord rejected the whole embed. Spill into continuation fields —
-        // but only so many: an embed also has a 6,000-character budget across all
-        // of its fields, which unbounded spilling would eventually blow instead.
-        const PICKAXE_FIELDS = 3;
-        const { fields, omitted } = packFieldsCapped('🪓 Pickaxes', lines, { maxFields: PICKAXE_FIELDS });
-        embed.addFields(...fields);
-        if (omitted > 0) {
-            embed.addFields({
-                name: '…and more',
-                value: `${omitted} further pickaxe(s) not shown — \`/mine inv category:pickaxes\` for the full list. \`/mine discard\` clears broken and condemned ones.`,
-                inline: false
-            });
-        }
+        const extra = ordered.length - preview.length;
+        if (extra > 0) preview.push(`…and ${extra} more — \`/mine inv category:pickaxes\` for the full list`);
+        embed.addFields({ name: `🪓 Pickaxes (${m.pickaxes.length})`, value: preview.join('\n'), inline: false });
 
         const junk = m.pickaxes.filter(p => p.status === 'broken' || p.status === 'condemned').length;
         if (junk > 0) {
@@ -117,19 +140,76 @@ function overviewEmbed(interaction, m) {
         }
     }
 
-    const charges = chargeLines(m);
-    embed.addFields({ name: '💥 Blast Charges', value: charges.length ? charges.join('\n') : 'None', inline: true });
+    const { charges, consumables, materials } = inventoryStock(m);
+    embed.addFields(
+        { name: '💥 Blast Charges', value: stockLine(charges, 'None'),     inline: false },
+        { name: '🎒 Consumables',   value: stockLine(consumables, 'None'), inline: false },
+    );
 
-    const consumables = consumableLines(m);
-    embed.addFields({ name: '🎒 Consumables', value: consumables.length ? consumables.join('\n') : 'None', inline: true });
+    const buffs = buffPills(m);
+    if (buffs.length) embed.addFields({ name: '🔋 Active Buffs', value: buffs.join(' · '), inline: false });
 
-    embed.addFields({ name: '🔋 Active Buffs', value: buffLines(m).join('\n') || 'None', inline: false });
-
-    const mats = materialLines(m);
-    embed.addFields({ name: '🪨 Materials', value: mats.length ? mats.join('\n') : 'None — find them by mining rare ores', inline: false });
+    embed.addFields({ name: '🪨 Materials', value: stockLine(materials, 'None — find them by mining rare ores'), inline: false });
 
     embed.setFooter({ text: 'Open a section with /mine inv category:<name> • Equip /mine equip <slot> • Discard /mine discard <slot>' });
     return embed;
+}
+
+function renderInventoryCard(interaction, m) {
+    const { charges, consumables, materials } = inventoryStock(m);
+    const ordered = orderedPickaxes(m);
+    const pickaxes = ordered.slice(0, OVERVIEW_PICKAXE_PREVIEW).map(({ p, index }) => {
+        const slug = p.slug && PICKAXE_BY_SLUG[p.slug] ? p.slug : PICKAXE_BY_TIER[p.tier]?.slug;
+        return {
+            iconId:   slug ? `mine:${slug}` : null,
+            name:     p.name,
+            number:   index + 1,
+            current:  p.currentDurability,
+            max:      p.maxDurability,
+            status:   p.status,
+            equipped: index === m.equippedPickaxeIndex,
+            tag:      upgradeName(p.upgrade),
+        };
+    });
+    const matTiles = materials.slice(0, OVERVIEW_MATERIAL_TILES);
+    const sum = list => list.reduce((n, e) => n + e.count, 0);
+    const subtitle = [
+        `${m.pickaxes.length} pickaxe${m.pickaxes.length === 1 ? '' : 's'}`,
+        `${sum(charges).toLocaleString('en-US')} charges`,
+        `${sum(consumables).toLocaleString('en-US')} consumables`,
+        `${sum(materials).toLocaleString('en-US')} materials`,
+    ].join(' · ');
+
+    const describe = list => list.map(e => `${e.name} ${e.count}`).join(', ') || 'none';
+    const alt = `Mining inventory for ${interaction.user.username}. `
+        + `Pickaxes: ${pickaxes.map(p => `${p.name} ${p.current} of ${p.max}${p.equipped ? ' (equipped)' : ''}`).join(', ') || 'none'}. `
+        + `Charges: ${describe(charges)}. Consumables: ${describe(consumables)}. Materials: ${describe(materials)}.`;
+
+    return renderAttachment(() => createGrindInventoryCard({
+        activity: 'mine',
+        title:    `${interaction.user.username}'s Tool Belt`,
+        subtitle,
+        buffs:    buffPills(m),
+        gear: {
+            label:   'Pickaxes',
+            count:   m.pickaxes.length,
+            entries: pickaxes,
+            more:    ordered.length - pickaxes.length,
+            empty:   'No pickaxes yet — buy one with /mine shop pickaxe.',
+        },
+        sections: [
+            { label: 'Blast Charges', entries: charges,     empty: 'No charges — the Wooden Pickaxe digs without them.' },
+            { label: 'Consumables',   entries: consumables, empty: 'No consumables — see /mine shop.' },
+            { label: 'Materials',     entries: matTiles,    count: materials.length || null, more: materials.length - matTiles.length,
+                empty: 'None yet — mine rare ores for drops.' },
+        ],
+    }), 'mine-inventory.png', alt);
+}
+
+async function overviewPayload(interaction, m) {
+    const embed = overviewEmbed(interaction, m);
+    const card = await renderInventoryCard(interaction, m);
+    return pagePayload(embed, card);
 }
 
 // ─── Focused category views ───────────────────────────────────────────────────
@@ -211,7 +291,7 @@ async function handleInv(interaction) {
         case 'charges':     return interaction.reply({ embeds: [chargesEmbed(m)] });
         case 'consumables': return interaction.reply({ embeds: [consumablesEmbed(m)] });
         case 'materials':   return paginate(interaction, materialsPages(m));
-        default:            return interaction.reply({ embeds: [overviewEmbed(interaction, m)] });
+        default:            return interaction.reply(await overviewPayload(interaction, m));
     }
 }
 
@@ -317,6 +397,8 @@ module.exports = {
     // a plain mining-data object and return embeds without touching the database.
     __test__: {
         overviewEmbed,
+        overviewPayload,
+        inventoryStock,
         pickaxePages,
         chargesEmbed,
         consumablesEmbed,

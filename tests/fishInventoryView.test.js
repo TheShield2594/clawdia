@@ -40,7 +40,7 @@ describe('/fish inv overview', () => {
         expect(bait).toEqual([{ iconId: 'fish:worm_bait_pack', name: 'Worm Bait', count: 40 }]);
         expect(consumables.map(c => c.iconId)).toEqual(['fish:chum_bait', null]);
         expect(materials.map(m => m.name)).toEqual(['Fish Scale', 'Pearl', "Rabbit's Foot"]);
-        expect(materials.at(-1)).toMatchObject({ iconId: null, source: 'hunt' });
+        expect(materials.at(-1)).toMatchObject({ iconId: 'hunt:rabbits_foot', source: 'hunt' });
     });
 
     test('the text carries every count the card draws, without per-item emoji', () => {

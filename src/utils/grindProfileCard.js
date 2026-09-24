@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * The picture half of `/hunt profile`, `/fish profile`, `/explore profile` and
- * `/fish inv`.
+ * The picture half of the `/hunt`, `/fish` and `/explore` profiles and of the
+ * `/fish`, `/hunt` and `/mine` inventories.
  *
  * Three cards, shared across the grinds so the screens read as one family:
  *
@@ -15,7 +15,8 @@
  *                              after next.
  *   createGrindInventoryCard   the inventory — gear on a rack with wear bars
  *                              and the equipped piece outlined, stock as
- *                              tiles with counts (`/fish inv`).
+ *                              tiles with counts (`/fish inv`, `/hunt inv`,
+ *                              `/mine inv`).
  *
  * The art is the bundled catalogue (utils/defaultItemImages.js). An id with no
  * baked icon — a species or relic added before the bake action has run for it —
@@ -44,6 +45,7 @@ const THEMES = {
     hunt:    { top: '#15301d', bottom: '#070f09', accent: '#4cc27a', muted: '#9cc7a8', panel: 'rgba(255,255,255,0.06)' },
     fish:    { top: '#0f2944', bottom: '#050d18', accent: '#45a6ec', muted: '#9fc2dd', panel: 'rgba(255,255,255,0.06)' },
     explore: { top: '#33230f', bottom: '#110b04', accent: '#e0a83e', muted: '#d6bf95', panel: 'rgba(255,255,255,0.06)' },
+    mine:    { top: '#2e2622', bottom: '#0d0a08', accent: '#e07b39', muted: '#cdb4a0', panel: 'rgba(255,255,255,0.06)' },
 };
 
 /** The avatar ring for each prestige rank; rank 0 uses the activity accent. */
@@ -525,6 +527,17 @@ const INV_TILE_W = (INV_W - INV_PAD * 2) / INV_TILE_COLS;
 const INV_TILE_H = INV_TILE + 30;
 const INV_PILL_H = 30;
 
+// Stand-in medallion colours for stock with no baked art and no colour of its
+// own, picked by name so an item keeps its colour from one render to the next
+// and a row of them does not read as one blur of the accent.
+const MEDALLION_PALETTE = ['#5dade2', '#58d68d', '#f5b041', '#ec7063', '#af7ac5', '#48c9b0', '#f4d03f', '#dc7633', '#85929e', '#e59866'];
+
+function medallionColor(name) {
+    let h = 0;
+    for (const ch of String(name ?? '')) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    return MEDALLION_PALETTE[h % MEDALLION_PALETTE.length];
+}
+
 /** Wear colour: the activity accent while healthy, amber, then red; grey when broken. */
 function wearColor(frac, status, theme) {
     if (status === 'broken') return '#6b6b6b';
@@ -551,6 +564,15 @@ function drawCountPill(ctx, text, x, y, color) {
     ctx.textBaseline = 'middle';
     ctx.fillText(text, x - w / 2, y - h / 2 + 1);
     ctx.restore();
+}
+
+function drawMoreNote(ctx, more, y, theme) {
+    if (!(more > 0)) return;
+    ctx.font = `14px ${FONT}`;
+    ctx.fillStyle = theme.muted;
+    ctx.textAlign = 'right';
+    ctx.fillText(`+${more} more`, INV_W - INV_PAD, y + 20);
+    ctx.textAlign = 'left';
 }
 
 function drawSectionHead(ctx, label, count, y, theme) {
@@ -650,7 +672,7 @@ async function drawGearCard(ctx, g, x, y, w, theme) {
 
 /**
  * @param {object} opts
- * @param {'hunt'|'fish'|'explore'} opts.activity
+ * @param {'hunt'|'fish'|'explore'|'mine'} opts.activity
  * @param {string}   opts.title       e.g. "munge's Tackle Box"
  * @param {string}   [opts.subtitle]  e.g. "3 rods · 60 bait · 4 materials"
  * @param {string[]} [opts.buffs]     active effects, drawn as pills (no emoji —
@@ -658,8 +680,9 @@ async function drawGearCard(ctx, g, x, y, w, theme) {
  * @param {{label: string, entries: object[], more?: number, empty?: string}} [opts.gear]
  *        entries: { iconId, name, color?, number, current, max, status, equipped, tag? };
  *        the first five are drawn, `more` says how many were left off
- * @param {{label: string, entries: object[], empty?: string}[]} [opts.sections]
- *        entries: { iconId, name, count, color? }
+ * @param {{label: string, entries: object[], count?: number, more?: number, empty?: string}[]} [opts.sections]
+ *        entries: { iconId, name, count, color? } — callers trim a long list
+ *        themselves and pass how many they left off as `more`
  * @returns {Promise<Buffer>} PNG
  */
 async function createGrindInventoryCard(opts) {
@@ -709,13 +732,7 @@ async function createGrindInventoryCard(opts) {
         const shown = (gear.entries ?? []).slice(0, INV_GEAR_COLS);
         const more = (gear.more ?? 0) + Math.max(0, (gear.entries?.length ?? 0) - shown.length);
         drawSectionHead(ctx, gear.label, gear.count ?? null, y, theme);
-        if (more > 0) {
-            ctx.font = `14px ${FONT}`;
-            ctx.fillStyle = theme.muted;
-            ctx.textAlign = 'right';
-            ctx.fillText(`+${more} more`, INV_W - INV_PAD, y + 20);
-            ctx.textAlign = 'left';
-        }
+        drawMoreNote(ctx, more, y, theme);
         y += INV_SECTION_HEAD;
         if (shown.length) {
             const w = (INV_W - INV_PAD * 2 - INV_GEAR_GAP * (INV_GEAR_COLS - 1)) / INV_GEAR_COLS;
@@ -734,7 +751,8 @@ async function createGrindInventoryCard(opts) {
     // ── Stock grids
     for (const s of sections) {
         const entries = s.entries ?? [];
-        drawSectionHead(ctx, s.label, null, y, theme);
+        drawSectionHead(ctx, s.label, s.count ?? null, y, theme);
+        drawMoreNote(ctx, s.more, y, theme);
         y += INV_SECTION_HEAD;
         if (!entries.length) {
             ctx.font = `italic 17px ${FONT}`;
@@ -744,7 +762,7 @@ async function createGrindInventoryCard(opts) {
             continue;
         }
         for (let i = 0; i < entries.length; i++) {
-            const e = entries[i];
+            const e = { ...entries[i], color: entries[i].color ?? medallionColor(entries[i].name) };
             const col = i % INV_TILE_COLS;
             const row = Math.floor(i / INV_TILE_COLS);
             const cx = INV_PAD + col * INV_TILE_W;
@@ -756,7 +774,9 @@ async function createGrindInventoryCard(opts) {
                 const text = Number.isFinite(n) ? `×${n > 9999 ? '9999+' : n.toLocaleString('en-US')}` : String(e.count);
                 drawCountPill(ctx, text, ix + INV_TILE + 8, cy + INV_TILE, e.color ?? theme.accent);
             }
+            // Step down a size before truncating: "Composite Round" fits at 11px.
             ctx.font = `13px ${FONT}`;
+            if (ctx.measureText(e.name).width > INV_TILE_W - 10) ctx.font = `11px ${FONT}`;
             ctx.fillStyle = '#ffffff';
             ctx.textAlign = 'center';
             ctx.fillText(fitText(ctx, e.name, INV_TILE_W - 10), cx + INV_TILE_W / 2, cy + INV_TILE + 20);

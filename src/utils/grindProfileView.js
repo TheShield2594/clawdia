@@ -242,6 +242,40 @@ async function sendProfileTabs(interaction, tabs) {
     return message;
 }
 
+// ─── Inventory text ──────────────────────────────────────────────────────────
+
+// The text half of the /fish, /hunt and /mine inv overviews, which carry the
+// inventory card as their image. Every count the card draws is here too
+// (#672), but not the per-item emoji: the card carries the art, and the emoji
+// had started doubling up across items.
+
+/** "worm_bait" -> "Worm Bait". */
+function titleCase(id) {
+    return String(id).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * "Worm Bait ×40 · Lure ×12", or `empty` when there is nothing. Past `limit`
+ * characters it stops and says how many were left off, so a field stays under
+ * Discord's 1,024.
+ *
+ * @param {{name: string, count: number, source?: string}[]} entries
+ * @param {string} empty
+ * @param {number} [limit]
+ */
+function stockLine(entries, empty, limit = 1000) {
+    if (!entries.length) return empty;
+    const parts = entries.map(e => `${e.name}${e.source ? ` (${e.source})` : ''} ×${e.count.toLocaleString('en-US')}`);
+    let out = '';
+    for (let i = 0; i < parts.length; i++) {
+        const next = out ? `${out} · ${parts[i]}` : parts[i];
+        const tail = i < parts.length - 1 ? ` · …and ${parts.length - i - 1} more` : '';
+        if (next.length + tail.length > limit) return `${out} · …and ${parts.length - i} more`;
+        out = next;
+    }
+    return out;
+}
+
 module.exports = {
     TAB_WINDOW_MS,
     buildTodayField,
@@ -252,6 +286,8 @@ module.exports = {
     renderAttachment,
     sendProfileTabs,
     staminaLine,
+    stockLine,
     textBar,
+    titleCase,
     xpLine,
 };

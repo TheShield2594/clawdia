@@ -11,7 +11,7 @@
 // so the whole group could collapse — Discord will not let a subcommand *group*
 // be run on its own, so /hunt inv had to stop being a group to become runnable.
 
-const { WEAPON_BY_TIER, CONSUMABLES, MATERIAL_NAMES } = require('../../../data/huntData');
+const { WEAPON_BY_TIER, WEAPON_UPGRADES, AMMO_PACKS, CONSUMABLES, MATERIAL_NAMES } = require('../../../data/huntData');
 const { weaponStatusEmoji, durabilityBar, repairsRemaining, ensureHuntData } = require('../../../services/huntService');
 const { chunkByLength } = require('../../../utils/embedFields');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
@@ -19,6 +19,8 @@ const { MessageFlags, EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind } = require('../../../utils/grindProfile');
 const { paginate } = require('../../../utils/paginator');
+const { renderAttachment, pagePayload, stockLine, titleCase } = require('../../../utils/grindProfileView');
+const { createGrindInventoryCard } = require('../../../utils/grindProfileCard');
 const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -170,15 +172,43 @@ function materialsPages(h) {
         .setFooter({ text: footer }));
 }
 
-// ── The at-a-glance overview: every category in one embed ────────────────────
+// ── The at-a-glance overview: a gun-rack card and its text half ──────────────
 
 const OVERVIEW_WEAPON_PREVIEW = 5;
-const OVERVIEW_MATERIAL_PREVIEW = 8;
+// Sixteen tiles is two rows on the card; the hunt has 58 material types, and
+// the full list is one `category:materials` away.
+const OVERVIEW_MATERIAL_TILES = 16;
+
+/** Everything the overview shows, as data both halves read. */
+function inventoryStock(h) {
+    const ammo = AMMO_PACKS
+        .map(pack => ({ iconId: `hunt:${pack.id}`, name: titleCase(pack.ammoType), count: h.ammo?.[pack.ammoType] ?? 0 }))
+        .filter(e => e.count > 0);
+    const consumables = Object.entries(h.consumables ?? {})
+        .filter(([id, qty]) => CONSUMABLES[id] && qty > 0)
+        .map(([id, qty]) => ({ iconId: `hunt:${id}`, name: CONSUMABLES[id].name, count: qty }));
+    const materials = Object.entries(h.materials ?? {})
+        .filter(([, qty]) => qty > 0)
+        .map(([id, qty]) => ({ iconId: `hunt:${id}`, name: MATERIAL_NAMES[id] ?? titleCase(id), count: qty }));
+    return { ammo, consumables, materials };
+}
+
+/** Plain buff names — the card cannot draw emoji, and the text matches it. */
+function buffPills(h) {
+    const pills = [];
+    if (h.activeBait)     pills.push(`${CONSUMABLES[h.activeBait]?.name ?? titleCase(h.activeBait)} (${h.activeBaitHuntsLeft} hunts left)`);
+    if (h.activeCharm)    pills.push(`${CONSUMABLES[h.activeCharm]?.name ?? titleCase(h.activeCharm)} (${h.activeCharmHuntsLeft} hunts left)`);
+    if (h.activeFocus)    pills.push("Hunter's Focus queued");
+    if (h.activeXpScroll) pills.push('XP Scroll queued');
+    return pills;
+}
+
+const upgradeName = id => (id ? (WEAPON_UPGRADES[id]?.name ?? titleCase(id)) : null);
 
 function overviewEmbed(interaction, h) {
     const embed = new EmbedBuilder()
         .setColor(COLORS.INFO)
-        .setTitle(`🎒 ${interaction.user.username}'s Hunt Inventory`)
+        .setTitle(`🎒 ${interaction.user.username}'s Gun Rack`)
         .setTimestamp();
 
     // Weapons — a short preview, equipped first, pointing at the full list.
@@ -187,48 +217,89 @@ function overviewEmbed(interaction, h) {
     } else {
         const ordered = orderedWeapons(h);
         const preview = ordered.slice(0, OVERVIEW_WEAPON_PREVIEW).map(({ w, index }) => {
-            const wd       = WEAPON_BY_TIER[w.tier];
-            const equipped = index === h.equippedWeaponIndex ? ' **[E]**' : '';
-            return `**#${index + 1}** ${wd?.emoji ?? '🔫'} ${w.name}${equipped} — ${weaponStatusEmoji(w.status)} ${w.currentDurability}/${w.maxDurability}`;
+            const equipped = index === h.equippedWeaponIndex ? ' · **equipped**' : '';
+            const upgrade  = w.upgrade ? ` · ${upgradeName(w.upgrade)}` : '';
+            return `**#${index + 1}** ${w.name}${equipped} — ${weaponStatusEmoji(w.status)} ${w.currentDurability}/${w.maxDurability}${upgrade}`;
         });
         const extra = ordered.length - preview.length;
         if (extra > 0) preview.push(`…and ${extra} more — \`/hunt inv category:weapons\` for the full list`);
         embed.addFields({ name: `🔫 Weapons (${h.weapons.length})`, value: preview.join('\n'), inline: false });
     }
 
-    // Ammo — the four stocks, compact.
-    const ammoLines = AMMO_ROWS.map(([type, emoji]) => `${emoji} ${type.replace(/_/g, ' ')}: **${h.ammo[type] ?? 0}**`);
-    embed.addFields({ name: '🔶 Ammo', value: ammoLines.join('\n'), inline: true });
+    const { ammo, consumables, materials } = inventoryStock(h);
+    embed.addFields(
+        { name: '🔶 Ammo',        value: stockLine(ammo, 'None'),        inline: false },
+        { name: '🧪 Consumables', value: stockLine(consumables, 'None'), inline: false },
+    );
 
-    // Consumables — names and counts only (the full descriptions live in the
-    // focused view), plus any active buffs.
-    const consLines = Object.entries(h.consumables)
-        .map(([id, qty]) => {
-            const def = CONSUMABLES[id];
-            if (!def || qty <= 0) return null;
-            return `${def.emoji} ${def.name} ×${qty}`;
-        })
-        .filter(Boolean);
-    embed.addFields({ name: '🧪 Consumables', value: consLines.length ? consLines.join('\n') : 'None', inline: true });
+    const buffs = buffPills(h);
+    if (buffs.length) embed.addFields({ name: '✅ Active Buffs', value: buffs.join(' · '), inline: false });
 
-    const buffs = activeBuffLines(h);
-    if (buffs.length) embed.addFields({ name: '✅ Active Buffs', value: buffs.join('\n'), inline: false });
-
-    // Materials — a preview, pointing at the full list when it overflows.
-    const matEntries = Object.entries(h.materials)
-        .filter(([, qty]) => qty > 0)
-        .map(([id, qty]) => `• ${MATERIAL_NAMES[id] ?? id} ×${qty}`);
-    if (!matEntries.length) {
-        embed.addFields({ name: '🪨 Materials', value: 'None yet — hunt rare+ animals for drops', inline: false });
-    } else {
-        const preview = matEntries.slice(0, OVERVIEW_MATERIAL_PREVIEW);
-        const extra = matEntries.length - preview.length;
-        if (extra > 0) preview.push(`…and ${extra} more — \`/hunt inv category:materials\` for the full list`);
-        embed.addFields({ name: `🪨 Materials (${matEntries.length})`, value: preview.join('\n'), inline: false });
-    }
+    embed.addFields({
+        name:  materials.length ? `🪨 Materials (${materials.length})` : '🪨 Materials',
+        value: stockLine(materials, 'None yet — hunt rare+ animals for drops'),
+        inline: false,
+    });
 
     embed.setFooter({ text: 'Open a section with /hunt inv category:<name> • Equip /hunt equip <#> • Discard /hunt discard <#>' });
     return embed;
+}
+
+function renderInventoryCard(interaction, h) {
+    const { ammo, consumables, materials } = inventoryStock(h);
+    const ordered = orderedWeapons(h);
+    const weapons = ordered.slice(0, OVERVIEW_WEAPON_PREVIEW).map(({ w, index }) => {
+        const slug = WEAPON_BY_TIER[w.tier]?.slug;
+        return {
+            iconId:   slug ? `hunt:${slug}` : null,
+            name:     w.name,
+            number:   index + 1,
+            current:  w.currentDurability,
+            max:      w.maxDurability,
+            status:   w.status,
+            equipped: index === h.equippedWeaponIndex,
+            tag:      upgradeName(w.upgrade),
+        };
+    });
+    const matTiles = materials.slice(0, OVERVIEW_MATERIAL_TILES);
+    const sum = list => list.reduce((n, e) => n + e.count, 0);
+    const subtitle = [
+        `${h.weapons.length} weapon${h.weapons.length === 1 ? '' : 's'}`,
+        `${sum(ammo).toLocaleString('en-US')} rounds`,
+        `${sum(consumables).toLocaleString('en-US')} consumables`,
+        `${sum(materials).toLocaleString('en-US')} materials`,
+    ].join(' · ');
+
+    const describe = list => list.map(e => `${e.name} ${e.count}`).join(', ') || 'none';
+    const alt = `Hunting inventory for ${interaction.user.username}. `
+        + `Weapons: ${weapons.map(w => `${w.name} ${w.current} of ${w.max}${w.equipped ? ' (equipped)' : ''}`).join(', ') || 'none'}. `
+        + `Ammo: ${describe(ammo)}. Consumables: ${describe(consumables)}. Materials: ${describe(materials)}.`;
+
+    return renderAttachment(() => createGrindInventoryCard({
+        activity: 'hunt',
+        title:    `${interaction.user.username}'s Gun Rack`,
+        subtitle,
+        buffs:    buffPills(h),
+        gear: {
+            label:   'Weapons',
+            count:   h.weapons.length,
+            entries: weapons,
+            more:    ordered.length - weapons.length,
+            empty:   'No weapons yet — buy one with /hunt shop weapon.',
+        },
+        sections: [
+            { label: 'Ammo',        entries: ammo,        empty: 'No ammo — the Wooden Rifle hunts without it.' },
+            { label: 'Consumables', entries: consumables, empty: 'No consumables — see /hunt shop.' },
+            { label: 'Materials',   entries: matTiles,    count: materials.length || null, more: materials.length - matTiles.length,
+                empty: 'None yet — hunt rare+ animals for drops.' },
+        ],
+    }), 'hunt-inventory.png', alt);
+}
+
+async function overviewPayload(interaction, h) {
+    const embed = overviewEmbed(interaction, h);
+    const card = await renderInventoryCard(interaction, h);
+    return pagePayload(embed, card);
 }
 
 // ── Shared loader ─────────────────────────────────────────────────────────────
@@ -265,7 +336,7 @@ async function executeInv(interaction) {
         case 'ammo':        return interaction.reply({ embeds: [ammoEmbed(h)] });
         case 'consumables': return interaction.reply({ embeds: [consumablesEmbed(h)] });
         case 'materials':   return paginate(interaction, materialsPages(h));
-        default:            return interaction.reply({ embeds: [overviewEmbed(interaction, h)] });
+        default:            return interaction.reply(await overviewPayload(interaction, h));
     }
 }
 
@@ -364,5 +435,7 @@ module.exports = {
         consumablesEmbed,
         materialsPages,
         overviewEmbed,
+        overviewPayload,
+        inventoryStock,
     },
 };
