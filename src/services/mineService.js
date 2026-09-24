@@ -8,6 +8,9 @@ const {
     LIMITS,
     INTENSITY_LEVELS,
     DEFAULT_INTENSITY_LEVEL,
+    SEAM_GRADES,
+    ROCK_STABILITY,
+    ROCK_READ,
     PRESTIGE_BONUSES,
     MINE_QUEST_TEMPLATES
 } = require('../data/mineData');
@@ -269,7 +272,10 @@ const FAILURE_SEVERITIES = [
     { id: 'rockfall',   label: 'Rockfall',      durLoss: 2, injuryMs: 0,                        xp: 5, msg: 'Loose rocks tumbled from the ceiling. You dove clear.' },
     { id: 'rockfall',   label: 'Rockfall',      durLoss: 2, injuryMs: 0,                        xp: 5, msg: 'A tremor shook the tunnel and the vein collapsed.' },
     { id: 'stuck',      label: 'Pickaxe Stuck', durLoss: 5, injuryMs: 0,                        xp: 0, msg: 'Your pickaxe lodged deep in the rock face. You yanked it free at great cost.' },
-    { id: 'cave_in',    label: 'Cave-in',       durLoss: 3, injuryMs: LIMITS.INJURY_PENALTY_MS, xp: 0, msg: 'A small cave-in forced you to retreat and rest!' }
+    // Kept as `cave_in` internally, but shown as "Pinned": the intensity cave-in (the
+    // blast / dig out / flee prompt) is a different event, and two things called
+    // "cave-in" with different rules was one too many.
+    { id: 'cave_in',    label: 'Pinned',        durLoss: 3, injuryMs: LIMITS.INJURY_PENALTY_MS, xp: 0, msg: 'A slab came down and pinned your leg. You crawled out, but you need to rest.' }
 ];
 
 function rollFailureSeverity() {
@@ -595,15 +601,69 @@ function tickConsumables(user) {
 }
 
 /**
- * A correct vein read promotes the payout to the next rung's multiplier while the
- * cave-in risk and durability cost stay where the miner put them. Reading the seam
- * makes it richer; it does not make the tunnel more dangerous. Keeping the risk
- * fixed is the point: the danger is chosen deliberately, and only ever by the
- * player — never handed to them by the outcome of a minigame.
+ * Lifts the payout to the multiplier `steps` rungs up the ladder (capped at the
+ * top) while the cave-in risk and durability cost stay where the miner put them.
+ * A rich seam makes the dig richer; it does not make the tunnel more dangerous.
+ * The danger is chosen deliberately, and only ever by the player.
  */
-function promoteIntensity(level) {
-    const next = INTENSITY_LEVELS.find(l => l.level === level.level + 1);
-    return next ? { ...level, multiplier: next.multiplier, promoted: true } : level;
+function promoteIntensity(level, steps = 1) {
+    if (!(steps > 0)) return level;
+    const top    = INTENSITY_LEVELS[INTENSITY_LEVELS.length - 1].level;
+    const target = INTENSITY_LEVELS.find(l => l.level === Math.min(top, level.level + steps));
+    if (!target || target.level === level.level) return level;
+    return { ...level, multiplier: target.multiplier, promoted: true, promotedBy: target.level - level.level };
+}
+
+// ─── ROCK SURVEY ─────────────────────────────────────────────────────────────
+
+/** How often the lamp reads the rock's stability correctly, 0..1. */
+function rockReadAccuracy(user) {
+    const m = user.mining;
+    const tier = m.pickaxes?.[m.equippedPickaxeIndex]?.tier ?? 1;
+    let accuracy = ROCK_READ.BASE_ACCURACY + (tier - 1) * ROCK_READ.PER_PICKAXE_TIER;
+    if (m.activeLamp === 'miners_lamp') accuracy += ROCK_READ.LAMP_BONUS;
+    return Math.min(ROCK_READ.MAX_ACCURACY, accuracy);
+}
+
+/**
+ * What the lamp shows before a dig. The seam grade is exact; the stability is a
+ * read that is right `accuracy` of the time and otherwise off by one step. The
+ * dig itself uses the true stability — `read` is only what the miner sees.
+ *
+ * Returns { seam, stability, read, accuracy }.
+ */
+function surveyRock(user) {
+    const seam      = weightedRoll(SEAM_GRADES);
+    const stability = weightedRoll(ROCK_STABILITY);
+    const accuracy  = rockReadAccuracy(user);
+
+    let read = stability;
+    if (secureRandom() >= accuracy) {
+        const at = ROCK_STABILITY.indexOf(stability);
+        const neighbours = [ROCK_STABILITY[at - 1], ROCK_STABILITY[at + 1]].filter(Boolean);
+        read = neighbours[Math.floor(secureRandom() * neighbours.length)];
+    }
+    return { seam, stability, read, accuracy };
+}
+
+const MAX_CAVE_IN_RISK = 0.9;
+
+/** A rung's cave-in risk scaled by a stability (true or read). */
+function riskAt(level, stability) {
+    return Math.min(MAX_CAVE_IN_RISK, level.caveInRisk * (stability?.riskMult ?? 1));
+}
+
+/**
+ * The intensity the dig actually runs at: the chosen rung, lifted by the seam
+ * grade, with its cave-in risk scaled by the rock's true stability.
+ */
+function digIntensity(picked, survey) {
+    const promoted = promoteIntensity(picked, survey?.seam?.promote ?? 0);
+    return {
+        ...promoted,
+        baseMultiplier: picked.multiplier,
+        caveInRisk:     riskAt(picked, survey?.stability),
+    };
 }
 
 // ─── FULL MINE EXECUTION ─────────────────────────────────────────────────────
@@ -665,8 +725,10 @@ function executeMine(user, depthId, options = {}) {
         if (m.activeXpScroll) xpGain = Math.round(xpGain * 1.5);
         xpGain = Math.round(xpGain * streakMult);
 
-        applyDurabilityLoss(pickaxe, 1);
-        result.durabilityLost = 1;
+        // Careful digs cost the pickaxe nothing — that is the rung's whole point.
+        const baseWear = options.intensity?.durLoss === 0 ? 0 : 1;
+        if (baseWear > 0) applyDurabilityLoss(pickaxe, baseWear);
+        result.durabilityLost = baseWear;
 
         user.balance     += adjustedPayout;
         m.totalEarned    += adjustedPayout;
@@ -749,12 +811,10 @@ function executeMine(user, depthId, options = {}) {
             // What executeMine has already credited, and what mine/dig.js reverses if the
             // player flees.
             result.caveInPayout  = result.finalPayout ?? 0;
-            // The multiplier the vein read earned is held in escrow, not destroyed.
-            // Cave-in and the multiplier used to be exclusive branches, so reading the
-            // vein perfectly, caving in, and spending a blast charge to dig clear paid
-            // exactly the same as a one-in-three read — the charge bought back a haul
-            // stripped of the very bonus it was risked for. mine/dig.js pays this out only
-            // on a successful escape.
+            // The intensity multiplier (seam promotion included) is held in escrow,
+            // not destroyed. Cave-in and the multiplier used to be exclusive branches,
+            // so blasting clear bought back a haul stripped of the very bonus it was
+            // risked for. mine/dig.js pays this out only when the player blasts clear.
             result.caveInEscrow  = multiplier !== 1.0 && result.finalPayout
                 ? Math.round(result.finalPayout * (multiplier - 1.0))
                 : 0;
@@ -802,15 +862,16 @@ function executeMine(user, depthId, options = {}) {
 // ─── CAVE-IN RESOLUTION ──────────────────────────────────────────────────────
 
 /**
- * The player blasted clear of a cave-in: spend one charge and release the
- * escrowed intensity bonus, clamped to the daily hard cap the same way the
- * uninterrupted path clamps it.
+ * The player blasted clear of a cave-in: spend `cost` charges (the rung's
+ * blastCost) and release the escrowed intensity bonus, clamped to the daily hard
+ * cap the same way the uninterrupted path clamps it.
  */
-function blastClearCaveIn(user, result, chargeType) {
+function blastClearCaveIn(user, result, chargeType, cost = 1) {
     const m = user.mining;
     if (chargeType) {
-        m.charges[chargeType] = Math.max(0, (m.charges[chargeType] ?? 0) - 1);
+        m.charges[chargeType] = Math.max(0, (m.charges[chargeType] ?? 0) - cost);
     }
+    result.caveInChargesSpent = chargeType ? cost : 0;
     if (result.caveInEscrow > 0) {
         const remainingCap = Math.max(0, LIMITS.DAILY_HARD_CAP - m.dailyCoins);
         const bonus        = Math.min(result.caveInEscrow, remainingCap);
@@ -823,6 +884,21 @@ function blastClearCaveIn(user, result, chargeType) {
         }
     }
     result.caveInEscaped = true;
+    user.markModified('mining');
+}
+
+/**
+ * The player dug out of a cave-in by hand: `staminaCost` stamina buys back the
+ * ore executeMine already credited, but not the escrowed intensity bonus — you
+ * carry out what you can. The option for a miner with no charges to blast with.
+ */
+function digOutCaveIn(user, result, staminaCost) {
+    const m = user.mining;
+    m.stamina = Math.max(0, (m.stamina ?? 0) - staminaCost);
+    result.caveInStaminaSpent = staminaCost;
+    result.caveInEscrowLost   = result.caveInEscrow ?? 0;
+    result.caveInEscaped      = true;
+    result.caveInDugOut       = true;
     user.markModified('mining');
 }
 
@@ -1360,8 +1436,13 @@ module.exports = {
     consumableStatus,
     tickConsumables,
     promoteIntensity,
+    rockReadAccuracy,
+    surveyRock,
+    riskAt,
+    digIntensity,
     executeMine,
     blastClearCaveIn,
+    digOutCaveIn,
     abandonCaveIn,
     keptFind,
     assignDailyMineQuests,

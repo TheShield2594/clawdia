@@ -173,7 +173,7 @@ describe('buildMineEmbed — the multiplier stack', () => {
             streakMult: 1.5,
             isCrit: true,
             critMultiplier: 2,
-            intensityLevel: { emoji: '🔥', multiplier: 3 },
+            intensityLevel: { name: 'Reckless', emoji: '🔥', multiplier: 3 },
             featuredDepthBonus: 100,
             petYieldBonus: 50,
             petYieldPct: 20,
@@ -184,7 +184,7 @@ describe('buildMineEmbed — the multiplier stack', () => {
         const stack = fieldsOf(embed)['📈 Multipliers'];
         expect(stack).toContain('1.50x');
         expect(stack).toContain('2.00x crit');
-        expect(stack).toContain('3.00x depth');
+        expect(stack).toContain('3.00x reckless');
         expect(stack).toContain(`${(1 + FEATURED_PAYOUT_BONUS).toFixed(2)}x featured`);
         expect(stack).toContain('1.20x pet');
         expect(stack).toContain('1.10x district');
@@ -192,24 +192,24 @@ describe('buildMineEmbed — the multiplier stack', () => {
         expect(stack).toContain('2.00x yield');
     });
 
-    // An unpaid cave-in keeps the depth multiplier off the stack: the dig did
+    // An unpaid cave-in keeps the intensity multiplier off the stack: the dig did
     // not get the intensity payout, so printing its factor would not reconcile.
-    test('an unpaid cave-in drops the depth multiplier from the stack', () => {
+    test('an unpaid cave-in drops the intensity multiplier from the stack', () => {
         const embed = dig(digResult({
             finalPayout: 400, streakMult: 1.5,
-            intensityLevel: { emoji: '🔥', multiplier: 3 },
+            intensityLevel: { name: 'Reckless', emoji: '🔥', multiplier: 3 },
             caveIn: true, caveInBonusPaid: false,
         }));
-        expect(fieldsOf(embed)['📈 Multipliers']).not.toContain('x depth');
+        expect(fieldsOf(embed)['📈 Multipliers']).not.toContain('x reckless');
     });
 
-    test('a cave-in that still paid its bonus keeps the depth multiplier', () => {
+    test('a cave-in that still paid its bonus keeps the intensity multiplier', () => {
         const embed = dig(digResult({
             finalPayout: 400,
-            intensityLevel: { emoji: '🔥', multiplier: 3 },
+            intensityLevel: { name: 'Reckless', emoji: '🔥', multiplier: 3 },
             caveIn: true, caveInBonusPaid: true,
         }));
-        expect(fieldsOf(embed)['📈 Multipliers']).toContain('3.00x depth');
+        expect(fieldsOf(embed)['📈 Multipliers']).toContain('3.00x reckless');
     });
 
     // The pet's percentage and its coin bonus are recorded separately, so a
@@ -227,7 +227,7 @@ describe('buildMineEmbed — the multiplier stack', () => {
         const embed = dig(digResult({ finalPayout: 400, intensityLevel: {}, streakMult: 1.4 }));
         const stack = fieldsOf(embed)['📈 Multipliers'];
         expect(stack).toContain('1.40x');
-        expect(stack).not.toContain('x depth');
+        expect(stack).not.toContain('x push');
     });
 
     test('a stack on a haul that paid nothing is not rendered', () => {
@@ -316,7 +316,7 @@ describe('buildMineEmbed — failure', () => {
             failure: { severity: { id: 'cave_in', injuryMs: 900_000 }, message: 'The roof came down.' },
             levelUp: { oldLevel: 2, newLevel: 3 },
         })));
-        expect(fields['🤕 Cave-in']).toContain('15m');
+        expect(fields['🤕 Pinned']).toContain('15m');
         expect(fields['⬆️ Level Up!']).toContain('**2** → **3**');
     });
 
@@ -400,7 +400,7 @@ describe('buildFailureTitle', () => {
         ['clean_miss', '💨 Empty Vein!'],
         ['rockfall',   '🪨 Rockfall!'],
         ['stuck',      '🔧 Pickaxe Stuck!'],
-        ['cave_in',    '🕳️ Cave-in!'],
+        ['cave_in',    '🤕 Pinned!'],
     ])('%s renders its own title', (id, expected) => {
         expect(buildFailureTitle(id)).toBe(expected);
     });

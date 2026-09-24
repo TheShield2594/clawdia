@@ -7,6 +7,7 @@
 const {
     abandonCaveIn,
     blastClearCaveIn,
+    digOutCaveIn,
     keptFind,
     applyDigBonuses,
     updateMineQuestProgress,
@@ -132,6 +133,36 @@ describe('blastClearCaveIn', () => {
         blastClearCaveIn(user, result, null);
         expect(result.caveInBonusPaid).toBe(100);
         expect(user.mining.dailyCoins).toBe(LIMITS.DAILY_HARD_CAP);
+    });
+});
+
+describe('blast cost scales with the rung', () => {
+    test('blasting a Reckless cave-in spends three charges', () => {
+        const user = afterStrike();
+        user.mining.charges.iron_blast = 5;
+        const result = caveInResult();
+        blastClearCaveIn(user, result, 'iron_blast', 3);
+        expect(user.mining.charges.iron_blast).toBe(2);
+        expect(result.caveInChargesSpent).toBe(3);
+    });
+});
+
+describe('digOutCaveIn', () => {
+    test('costs stamina, keeps the ore, leaves the intensity bonus buried', () => {
+        const user = afterStrike();
+        user.balance = 1500;
+        user.mining.stamina = 4;
+        const result = caveInResult();
+        digOutCaveIn(user, result, 2);
+
+        expect(user.mining.stamina).toBe(2);
+        expect(user.balance).toBe(1500);          // the ore's 500 stays credited
+        expect(result.finalPayout).toBe(500);     // no escrow released
+        expect(result.caveInBonusPaid).toBeUndefined();
+        expect(result.caveInEscrowLost).toBe(500);
+        expect(result.caveInDugOut).toBe(true);
+        expect(user.mining.materials.ore_chunk).toBe(2);
+        expect(keptFind(result)).toBe(true);
     });
 });
 

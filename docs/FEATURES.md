@@ -572,25 +572,38 @@ Coal Tunnels down, and the Abyss adds two event ores of its own.
 Once a depth is unlocked it stays accessible for good — the level requirement is
 checked at purchase, not every dig.
 
-**A dig** is a risk choice followed by a vein read. You pick how hard to push —
-the choice is yours, and it is the only thing that sets the danger:
+**A dig** starts with your lamp reading the rock, then you choose how hard to
+push against what it shows:
 
-| Push | Payout | Cave-in risk | Pickaxe wear |
-|---|---:|---:|---:|
-| ☀️ Surface | 0.7× | 0% | 1 |
-| 🪨 Shallow | 1.0× | 5% | 1 |
-| 🔩 Mid | 1.4× | 12% | 2 |
-| 💎 Deep | 2.0× | 20% | 3 |
+- **Seam** — ▫️ Thin, ✨ Good or 💎 Rich. Read exactly. A good seam pays one rung
+  higher, a rich one two, at the risk you chose.
+- **Stability** — 🟩 Solid (half the risk), 🟨 Seamed, or 🟥 Fractured (1.75× the
+  risk). This is only a read: it is right 60% of the time with a Wooden Pickaxe,
+  more with better pickaxes and a Miner's Lamp, and a wrong read is one step off.
+  The result tells you what the rock really was.
 
-Then the tunnel shows you where the seam runs, the dust settles, and you call it.
-A correct read promotes the payout one rung — Deep pays the Abyss's **3×** — at the
-risk you already chose. 🌑 Abyss cannot be selected; it is only ever earned.
+| Push | Payout | Base cave-in risk | Pickaxe wear | Blast cost |
+|---|---:|---:|---:|---:|
+| 🪶 Careful | 0.8× | 0% | 0 | — |
+| 🪨 Steady | 1.0× | 5% | 1 | 1 charge |
+| 🔨 Hard | 1.4× | 12% | 2 | 2 charges |
+| 🧨 Reckless | 2.0× | 20% | 3 | 3 charges |
 
-Pass `intensity:` on the command to skip the prompt and dig straight away. An
-unanswered prompt repeats whatever you dug last.
+🌋 Frenzied (**3×**) cannot be selected: it is what a good or rich seam pays at
+Reckless or Hard.
 
-Cave in and you choose again: spend a blast charge to dig clear and keep the whole
-haul, multiplier included, or flee and lose it.
+Pass `intensity:` on the command to skip the prompt and dig without seeing the
+read first. An unanswered prompt repeats whatever you dug last.
+
+Cave in and you choose again:
+
+- **Blast clear** — spend the rung's blast cost in your pickaxe's charges and keep
+  the whole haul, multiplier included.
+- **Dig out** — spend 2 stamina and keep the ore, but not the intensity bonus.
+  Works with any pickaxe, including the Wooden one, which takes no charges.
+- **Flee** — lose the haul.
+
+Leave the prompt and you blast clear if you can afford to, and flee if not.
 
 **Miner prestige** (`/mine prestige`) opens at Miner Level 50 and runs to P5. Each
 rank resets Miner Level and XP and keeps everything else — pickaxes, unlocked

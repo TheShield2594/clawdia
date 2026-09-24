@@ -100,7 +100,7 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
         const intensityMult = result.caveIn && !result.caveInBonusPaid ? 1 : (result.intensityLevel?.multiplier ?? 1);
         addMult('🔥', `${(result.streakMult ?? 1).toFixed(2)}x`, result.streakMult ?? 1);
         addMult('⚡', `${critMultiplier.toFixed(2)}x crit`, critMultiplier);
-        addMult(result.intensityLevel?.emoji ?? '⛏️', `${intensityMult.toFixed(2)}x depth`, intensityMult);
+        addMult(result.intensityLevel?.emoji ?? '⛏️', `${intensityMult.toFixed(2)}x ${(result.intensityLevel?.name ?? 'push').toLowerCase()}`, intensityMult);
         addMult('🌟', `${(1 + FEATURED_PAYOUT_BONUS).toFixed(2)}x featured`, result.featuredDepthBonus > 0 ? 1 + FEATURED_PAYOUT_BONUS : 1);
         addMult('💎', `${(1 + (result.petYieldPct ?? 0) / 100).toFixed(2)}x pet`, result.petYieldBonus > 0 ? 1 + (result.petYieldPct ?? 0) / 100 : 1);
         addMult('🌲', `${(1 + WILDERNESS_YIELD_BONUS).toFixed(2)}x district`, result.wildernessBonus > 0 ? 1 + WILDERNESS_YIELD_BONUS : 1);
@@ -177,7 +177,7 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
     }
 
     if (failure.severity.injuryMs > 0) {
-        embed.addFields({ name: '🤕 Cave-in', value: `Extra cooldown: **${formatMs(failure.severity.injuryMs)}**`, inline: true });
+        embed.addFields({ name: '🤕 Pinned', value: `Extra cooldown: **${formatMs(failure.severity.injuryMs)}**`, inline: true });
     }
 
     if (result.collapseEvent) {
@@ -236,7 +236,7 @@ function buildFailureTitle(severityId) {
         clean_miss: '💨 Empty Vein!',
         rockfall:   '🪨 Rockfall!',
         stuck:      '🔧 Pickaxe Stuck!',
-        cave_in:    '🕳️ Cave-in!'
+        cave_in:    '🤕 Pinned!'
     }[severityId] ?? '❌ Failed Mine';
 }
 
