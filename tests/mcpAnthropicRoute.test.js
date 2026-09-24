@@ -27,6 +27,7 @@ jest.mock('@anthropic-ai/sdk', () => class {
 
 const anthropic = require('../src/services/ai/providers/anthropic');
 const { MAX_TOOL_ROUNDS } = require('../src/services/ai/mcp/toolkit');
+const { forGuild } = require('../src/config/mcpServers');
 
 const GITHUB = { name: 'github', url: 'https://api.githubcopilot.com/mcp/', enabled: true };
 
@@ -136,12 +137,12 @@ describe('which route a request takes', () => {
             ...REQ,
             mcpRoute: 'connector',
             mcpConfirm: 'off',
-            mcpServers: [{
+            mcpServers: forGuild('g1', [{
                 ...GITHUB,
                 name: 'linear',
                 url: 'https://mcp.example.com/mcp',
                 oauth: { guildId: 'g1', clientId: 'cid', accessToken: 'enc:at', refreshToken: 'enc:rt' }
-            }]
+            }])
         }));
         expect(tookClientRoute()).toBe(true);
     });

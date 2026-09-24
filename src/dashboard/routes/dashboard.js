@@ -154,12 +154,13 @@ async function buildGuildSettingsLocals(req) {
     }));
 
     const safeSettings = guildSettings.toObject();
-    // MCP authorization tokens are write-only: the panel shows that a token
-    // exists, never its value, so it must not be in the rendered page at all.
+    // MCP credentials are write-only: the panel shows that a token or a login
+    // exists, never its value, so neither may be in the rendered page at all.
+    // That includes the OAuth grant (#1146), whose access token, refresh token
+    // and client secret are sealed at best and plaintext on an install with no
+    // SECRET_ENCRYPTION_KEY — it goes out as the three facts the panel shows.
     if (Array.isArray(safeSettings.ai?.mcpServers)) {
-        safeSettings.ai.mcpServers = safeSettings.ai.mcpServers.map(
-            ({ authorizationToken, ...rest }) => ({ ...rest, hasToken: Boolean(authorizationToken) })
-        );
+        safeSettings.ai.mcpServers = safeSettings.ai.mcpServers.map(pageMcpServer);
     }
 
     // Pre-load the set of item images that actually exist so the template can
@@ -283,4 +284,20 @@ async function renderGuildPanel(req, res) {
 router.get('/guild/:guildId', checkAuth, renderGuildSettings);
 router.get('/guild/:guildId/panel/:panel', checkAuth, renderGuildPanel);
 
+/**
+ * One stored MCP connection as the rendered page may carry it: the token as
+ * "there is one", and the OAuth grant as whether it is connected, with whom and
+ * for what — none of its three secrets (#1146).
+ */
+function pageMcpServer({ authorizationToken, oauth, ...rest }) {
+    return {
+        ...rest,
+        hasToken: Boolean(authorizationToken),
+        oauth: oauth
+            ? { connected: Boolean(oauth.accessToken || oauth.refreshToken), issuer: oauth.issuer || null, scope: oauth.scope || null }
+            : null
+    };
+}
+
 module.exports = router;
+module.exports.pageMcpServer = pageMcpServer;

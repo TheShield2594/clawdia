@@ -48,6 +48,7 @@ const APPROVE = 'mcp-approve';
 const DENY = 'mcp-deny';
 
 const NOT_YOURS = 'Only the person who asked, or someone who can manage this server, can answer this.';
+const MANAGERS_ONLY = 'Only someone who can manage this server can approve tool calls here.';
 
 /**
  * The arguments as a code block a human can read.
@@ -139,9 +140,17 @@ function buttons(disabled = false) {
  * own buttons and its own clock.
  *
  * @param {object} message the message that started the turn
+ * @param {object} [options]
+ * @param {string} [options.approver] `requester` (the default) lets the member
+ *        who asked answer for themselves; `managers` takes that away, so a call
+ *        runs only once somebody with Manage Server has said yes (#1143). The
+ *        requester can still click Cancel either way — declining their own
+ *        request is never something to stop them doing.
  * @returns {(call: object) => Promise<{approved: boolean, timedOut?: boolean}>}
  */
-function createToolConfirmer(message, { timeoutMs = CONFIRM_TIMEOUT_MS } = {}) {
+function createToolConfirmer(message, { timeoutMs = CONFIRM_TIMEOUT_MS, approver = 'requester' } = {}) {
+    const managersOnly = approver === 'managers';
+
     return async ({ server, tool, args, annotations }) => {
         const heading = `<@${message.author.id}> — run \`${toolLabel(server)} · ${toolLabel(tool)}\`?${describeTool(annotations)}`;
         const file = argsAttachment(args);
@@ -167,6 +176,11 @@ function createToolConfirmer(message, { timeoutMs = CONFIRM_TIMEOUT_MS } = {}) {
             // Whoever asked can answer for themselves; anyone who could have
             // configured the connection in the first place can answer for them.
             if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
+            // Unless the guild has said approval is a moderator's decision, in
+            // which case the requester may only withdraw the request.
+            if (managersOnly && interaction.customId === APPROVE) {
+                return !rejectOtherUser(interaction, [], MANAGERS_ONLY);
+            }
             return !rejectOtherUser(interaction, message.author.id, NOT_YOURS);
         };
 

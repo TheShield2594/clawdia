@@ -32,9 +32,15 @@
  *     nothing rather than spending the code a second time.
  *   - The flow records who started it and which guild it is for, so the grant
  *     lands on the connection the admin was actually looking at and nowhere
- *     else. The session is not consulted at all: a login can expire while the
- *     admin is on the consent screen, and the flow's own record is a better
- *     statement of intent than whoever happens to hold the cookie on return.
+ *     else.
+ *   - The callback only completes for the dashboard user who started the flow
+ *     (#1145). Without that, anyone could start a flow on their own guild's
+ *     connection and send the authorization URL to somebody else: the victim
+ *     approves a consent screen that names the bot, and their third-party
+ *     token is stored in the attacker's guild. Checking the session against
+ *     `startedBy` binds the grant to the person who asked for it. The flow is
+ *     spent either way, so a link that reached the wrong person cannot be used
+ *     afterwards by the right one either.
  *   - It is still behind `checkAuth`, so an anonymous request cannot even reach
  *     the lookup. That is the same `checkAuth` every other route in the API
  *     mounts first, which `tests/dashboardAuthEnforcement.test.js` enforces
@@ -147,7 +153,7 @@ async function startFlow(req, res) {
         const stored = await storedServer(guildId, name);
         if (!stored) return res.status(404).json({ error: 'No MCP server with that name' });
 
-        const resolved = resolveMcpServers([{ ...stored, enabled: true }]).find(s => s.name === name);
+        const resolved = resolveMcpServers([{ ...stored, enabled: true }], { guildId }).find(s => s.name === name);
         if (!resolved) return res.status(400).json({ error: 'Stored server is not valid — re-save it' });
 
         // What the server says when asked. A 401 carrying a Bearer challenge
@@ -272,6 +278,19 @@ async function handleCallback(req, res) {
             ok: false,
             title: 'This authorization has already been used, or has expired',
             detail: 'Start the connection again from the dashboard.',
+        });
+    }
+
+    // Bound to the dashboard user who clicked Connect (#1145). A flow with no
+    // recorded starter predates this check or was made outside the start
+    // route, and is refused for the same reason: there is nobody to match.
+    if (!flow.startedBy || !req.user?.id || req.user.id !== flow.startedBy) {
+        console.warn(`[MCP] OAuth callback for "${flow.server}" in ${flow.guildId} refused: completed by a different dashboard user than the one who started it`);
+        return closingPage(res, {
+            ok: false,
+            title: 'This authorization was started by someone else',
+            detail: 'Only the dashboard user who clicked Connect can finish the login, so nothing was connected. '
+                + 'If you meant to connect this server, start the connection yourself from the dashboard.',
         });
     }
 

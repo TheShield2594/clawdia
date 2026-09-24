@@ -1,7 +1,7 @@
 'use strict';
 
 const Guild = require('../../../models/Guild');
-const { getMcpServers } = require('../../../config/mcpServers');
+const { getMcpServers, forGuild } = require('../../../config/mcpServers');
 const { prewarmMcpServers } = require('./toolkit');
 
 /**
@@ -78,7 +78,7 @@ async function warmNow(client) {
     // and the point of this is to be finished before the first message rather
     // than to be finished quickly.
     for (const guild of guilds) {
-        connections += await prewarmMcpServers(guild.ai?.mcpServers || []);
+        connections += await prewarmMcpServers(forGuild(guild.guildId, guild.ai?.mcpServers));
     }
 
     if (connections) {

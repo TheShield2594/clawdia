@@ -14,6 +14,41 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.14.0] - 2026-09-24
+
+Migrations through `027_encrypt_mcp_tokens`.
+
+MCP credential fixes from the whole-repo security review (#1139, #1143, #1145, #1146).
+
+- **An MCP OAuth grant is bound to the guild that owns it (#1139).** The grant
+  used to be looked up by the `oauth.guildId` stored on the connection, which a
+  guild admin could write through the generic settings route. They could then
+  have another guild's Linear, Notion or GitHub token sent to a URL they
+  controlled. The owning guild now comes from the document the list was read
+  from, and a stored `oauth.guildId` that disagrees means no grant. The token
+  store also refuses to hand a token to any URL other than the one the grant's
+  own connection points at. The generic settings route now rejects
+  `ai.mcpServers`, so connections only change through the Connections tab,
+  which never accepts `oauth` in a request.
+- **The OAuth callback only completes for the user who clicked Connect
+  (#1145).** A flow finished by a different dashboard user is refused before
+  the code is exchanged. Before this, a victim who opened an attacker's
+  authorization link had their token stored in the attacker's guild.
+- **Static MCP tokens are encrypted at rest (#1146),** the same as provider
+  keys and OAuth grants, when `SECRET_ENCRYPTION_KEY` is set. Migration 027
+  encrypts tokens already stored, and `npm run secrets:encrypt` covers them too.
+  The settings page also no longer receives the OAuth grant's access token,
+  refresh token or client secret, only whether it is connected, the issuer and
+  the scope.
+- **Guilds can require a moderator to approve MCP tool calls (#1143).** A new
+  **Who can click Run it** setting under Connections → Approval. *Only members
+  who can manage this server* takes approval away from the member who asked,
+  who can still cancel. The default is unchanged.
+- **Config-file MCP servers can be scoped to named guilds (#1143).** A
+  `guilds` list on an entry in `config/mcp-servers.json` limits it to those
+  Discord servers. Without one, an entry still reaches every guild with AI on,
+  as before.
+
 ## [4.13.18] - 2026-09-23
 
 Migrations through `026_backfill_shop_item_ids`.

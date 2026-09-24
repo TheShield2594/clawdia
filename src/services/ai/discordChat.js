@@ -166,7 +166,7 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
  * content, which is the right answer for the reply-to-bot trigger.
  */
 async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
-    const { provider, model, temperature, maxTokens, contextTokens, apiKey, baseUrl, mcpServers, mcpConfirm, mcpRoute, rateLimit } = resolveProviderConfig(aiSettings);
+    const { provider, model, temperature, maxTokens, contextTokens, apiKey, baseUrl, mcpServers, mcpConfirm, mcpRoute, mcpApprover, rateLimit } = resolveProviderConfig(aiSettings, { guildId: message.guild?.id });
     const providerDef = providers.get(provider);
     const providerLabel = providerDef?.label || provider;
 
@@ -466,7 +466,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         // before spending the guild's model budget on a server's behalf. Each
         // prompt is its own message with its own clock, so sharing the function
         // shares no state — it is one object rather than two doing the same job.
-        const confirmer = createToolConfirmer(message);
+        const confirmer = createToolConfirmer(message, { approver: mcpApprover });
         const callArgs = {
             provider, model, apiKey, baseUrl,
             systemPrompt: fitted.systemPrompt, history: fitted.history, prompt: fitted.prompt,

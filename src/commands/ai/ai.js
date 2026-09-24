@@ -3,6 +3,7 @@ const User = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const {
     resolveMcpServers,
+    forGuild,
     getMcpServers,
     requiresApproval,
     DEFAULT_CONFIRM_MODE,
@@ -459,7 +460,7 @@ async function removeScheduledTask(interaction) {
 /** The guild's stored connections, merged with the operator's config file. */
 async function guildMcpServers(guildId) {
     const settings = await getGuildSettings(guildId);
-    return resolveMcpServers(settings?.ai?.mcpServers || []);
+    return resolveMcpServers(forGuild(guildId, settings?.ai?.mcpServers));
 }
 
 /**
@@ -476,7 +477,7 @@ async function respondWithPrompts(interaction, typed) {
     const settings = await getGuildSettings(interaction.guild.id);
 
     const listings = await Promise.race([
-        listGuildPrompts(settings?.ai?.mcpServers || []),
+        listGuildPrompts(forGuild(interaction.guild.id, settings?.ai?.mcpServers)),
         new Promise(resolve => setTimeout(() => resolve([]), AUTOCOMPLETE_BUDGET_MS).unref?.())
     ]).catch(() => []);
 
@@ -502,7 +503,7 @@ async function handleMcp(interaction) {
 
     if (sub === 'prompts') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const listings = await listGuildPrompts(ai.mcpServers || []);
+        const listings = await listGuildPrompts(forGuild(interaction.guild.id, ai.mcpServers));
         return interaction.editReply({ embeds: [promptsEmbed(listings)] });
     }
 
@@ -524,7 +525,7 @@ async function handleMcp(interaction) {
                 route,
                 effectiveRoute: route !== 'auto'
                     ? route
-                    : (requiresApproval(confirmMode, ai.mcpServers || []) ? 'client' : 'connector')
+                    : (requiresApproval(confirmMode, forGuild(interaction.guild.id, ai.mcpServers)) ? 'client' : 'connector')
             })],
             flags: MessageFlags.Ephemeral
         });
@@ -542,7 +543,7 @@ async function handleMcp(interaction) {
     // network round trip and will not fit inside an interaction's three
     // seconds.
     const name = interaction.options.getString('server');
-    const server = resolveMcpServers(ai.mcpServers || []).find(entry => entry.name === name);
+    const server = resolveMcpServers(forGuild(interaction.guild.id, ai.mcpServers)).find(entry => entry.name === name);
     if (!server) {
         return interaction.reply({
             content: `No MCP connection named \`${name}\` — run \`/ai mcp servers\` to see what is configured.`,
@@ -584,7 +585,7 @@ async function runMcpPrompt(interaction, ai) {
     await interaction.deferReply();
 
     const requested = interaction.options.getString('name');
-    const listings = await listGuildPrompts(ai.mcpServers || []);
+    const listings = await listGuildPrompts(forGuild(interaction.guild.id, ai.mcpServers));
     const match = findPrompt(listings, requested);
     if (match.error) return editText(interaction, match.error);
 
@@ -605,12 +606,12 @@ async function runMcpPrompt(interaction, ai) {
         return editText(interaction, 'The AI is switched off on this server, so there is nothing to run this prompt through.');
     }
 
-    const config = resolveProviderConfig(ai);
+    const config = resolveProviderConfig(ai, { guildId: interaction.guild.id });
     if (config.provider !== 'ollama' && !config.apiKey) {
         return editText(interaction, `${providers.get(config.provider)?.label || config.provider} is not configured. Add an API key in the dashboard.`);
     }
 
-    const rendered = await renderPrompt(ai.mcpServers || [], match.server, match.prompt.name, parsed.values);
+    const rendered = await renderPrompt(forGuild(interaction.guild.id, ai.mcpServers), match.server, match.prompt.name, parsed.values);
     if (rendered.error) return editText(interaction, `❌ ${rendered.error}`);
 
     const systemPrompt = (ai.systemPrompt || 'You are a helpful Discord bot assistant.')

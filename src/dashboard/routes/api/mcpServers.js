@@ -12,11 +12,14 @@ const {
     getMcpServers,
     resolveMcpServers,
     requiresApproval,
+    forGuild,
     CONFIRM_MODES,
     DEFAULT_CONFIRM_MODE,
     FIRST_SERVER_CONFIRM_MODE,
     MCP_ROUTES,
-    DEFAULT_MCP_ROUTE
+    DEFAULT_MCP_ROUTE,
+    MCP_APPROVERS,
+    DEFAULT_MCP_APPROVER
 } = require('../../../config/mcpServers');
 const { getToolUsage } = require('../../../services/ai/mcp/usage');
 const { inspectServer } = require('../../../services/ai/mcp/inspect');
@@ -306,7 +309,7 @@ function validateServerInput(body, name) {
 function effectiveMcpRoute(guildSettings) {
     const route = guildSettings?.ai?.mcpRoute || DEFAULT_MCP_ROUTE;
     if (route !== 'auto') return route;
-    return requiresApproval(guildSettings?.ai?.mcpConfirm, guildSettings?.ai?.mcpServers || [])
+    return requiresApproval(guildSettings?.ai?.mcpConfirm, forGuild(guildSettings?.guildId, guildSettings?.ai?.mcpServers))
         ? 'client'
         : 'connector';
 }
@@ -335,6 +338,9 @@ router.get('/guild/:guildId/mcp-servers', checkAuth, checkGuildAccess, async (re
             // connection's tools will actually do without a second request.
             confirmMode: guildSettings?.ai?.mcpConfirm || DEFAULT_CONFIRM_MODE,
             confirmModes: CONFIRM_MODES,
+            // Who may approve a waiting call (#1143).
+            approver: guildSettings?.ai?.mcpApprover || DEFAULT_MCP_APPROVER,
+            approvers: MCP_APPROVERS,
             // Only Anthropic has two ways to reach a server, so this is the
             // setting and what it currently resolves to — the panel says which
             // route is actually in effect rather than making an admin work out
@@ -470,11 +476,11 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             // cache that is still cold. `existing.oauth` is read after the
             // clearing above, so a save that just signed the connection out
             // correctly warms it without one.
-            prewarmMcpServers([{
+            prewarmMcpServers(forGuild(guildId, [{
                 ...validated.value,
                 authorizationToken: token ?? existing?.authorizationToken ?? null,
                 oauth: existing?.oauth ?? null,
-            }], {
+            }]), {
                 // Just the one that was saved (#838). Warming resolves the
                 // operator's config file in alongside it, and without this a
                 // save of one server dials every shared server in that file
@@ -547,7 +553,7 @@ router.post('/guild/:guildId/mcp-servers/:name/test', checkAuth, checkGuildAcces
         // Resolved rather than read straight off the document, so the test
         // dials exactly what a chat request would — same https check, same
         // token, same tool filters.
-        const resolved = resolveMcpServers([{ ...stored, enabled: true }]).find(s => s.name === name);
+        const resolved = resolveMcpServers([{ ...stored, enabled: true }], { guildId }).find(s => s.name === name);
         if (!resolved) return res.status(400).json({ error: 'Stored server is not valid — re-save it' });
 
         const mode = guildSettings?.ai?.mcpConfirm || DEFAULT_CONFIRM_MODE;

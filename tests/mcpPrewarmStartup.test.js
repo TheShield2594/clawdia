@@ -9,7 +9,7 @@
 
 jest.mock('../src/models/Guild', () => ({ find: jest.fn() }));
 jest.mock('../src/services/ai/mcp/toolkit', () => ({ prewarmMcpServers: jest.fn(async () => 1) }));
-jest.mock('../src/config/mcpServers', () => ({ getMcpServers: jest.fn(() => []) }));
+jest.mock('../src/config/mcpServers', () => ({ getMcpServers: jest.fn(() => []), forGuild: jest.fn((_guildId, servers) => servers || []) }));
 
 const Guild = require('../src/models/Guild');
 const { getMcpServers } = require('../src/config/mcpServers');

@@ -5,6 +5,7 @@
       "url": "https://api.githubcopilot.com/mcp/",
       "enabled": true,
       "authorization_token": "${GITHUB_MCP_TOKEN}",
+      "guilds": ["123456789012345678"],
       "blocked_tools": [
         "delete_file",
         "delete_repository"

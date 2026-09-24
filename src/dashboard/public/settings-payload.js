@@ -369,7 +369,8 @@ function buildSettingsPayload(section, ctx = {}) {
             // changed the temperature on the Chat tab and pressed Save.
             ...(mcp ? {
                 'ai.mcpConfirm': mcp.confirm,
-                'ai.mcpRoute': mcp.route
+                'ai.mcpRoute': mcp.route,
+                'ai.mcpApprover': mcp.approver
             } : {})
         };
     } else if (section === 'tempvoice') {

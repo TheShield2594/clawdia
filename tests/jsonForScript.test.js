@@ -92,3 +92,36 @@ describe('guild-settings.ejs', () => {
         expect(html).toContain('id="ai-mcp"');
     });
 });
+
+// #1146. The route strips MCP credentials before the page is rendered; the
+// OAuth grant used to go out whole — access token, refresh token and client
+// secret, sealed at best and plaintext without SECRET_ENCRYPTION_KEY.
+describe('the MCP connections the settings page is given', () => {
+    const { pageMcpServer } = require('../src/dashboard/routes/dashboard');
+
+    it('carry no token and no grant secrets', () => {
+        const page = pageMcpServer({
+            name: 'linear',
+            url: 'https://mcp.example.com/mcp',
+            authorizationToken: 'ghp_DO-NOT-LEAK',
+            oauth: {
+                guildId: 'g1', issuer: 'https://auth.example.com', scope: 'read',
+                clientId: 'cid', clientSecret: 'cs_DO-NOT-LEAK',
+                accessToken: 'at_DO-NOT-LEAK', refreshToken: 'rt_DO-NOT-LEAK',
+            },
+        });
+
+        expect(JSON.stringify(page)).not.toMatch(/DO-NOT-LEAK/);
+        expect(page).toMatchObject({
+            name: 'linear',
+            hasToken: true,
+            oauth: { connected: true, issuer: 'https://auth.example.com', scope: 'read' },
+        });
+        expect(Object.keys(page.oauth).sort()).toEqual(['connected', 'issuer', 'scope']);
+    });
+
+    it('say there is no login when there is none', () => {
+        expect(pageMcpServer({ name: 'docs', url: 'https://docs.example.com/mcp' }))
+            .toMatchObject({ hasToken: false, oauth: null });
+    });
+});

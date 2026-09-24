@@ -358,6 +358,29 @@ describe('coming back from the consent screen', () => {
         expect(mockExchange).not.toHaveBeenCalled();
     });
 
+    // #1145. A flow started by one dashboard user, finished by another, is a
+    // victim approving an attacker's link: their token would land in the
+    // attacker's guild.
+    test('a flow started by somebody else is refused before the code is spent', async () => {
+        McpOAuthState.findByIdAndDelete = jest.fn(() => ({ lean: async () => ({ ...FLOW, startedBy: 'attacker' }) }));
+
+        const { status, text } = await api('GET', '/mcp/oauth/callback?state=st&code=abc');
+
+        expect(status).toBe(400);
+        expect(text).toMatch(/started by someone else/);
+        expect(mockExchange).not.toHaveBeenCalled();
+        expect(mockSaveGrant).not.toHaveBeenCalled();
+    });
+
+    test('and so is a flow that recorded nobody', async () => {
+        McpOAuthState.findByIdAndDelete = jest.fn(() => ({ lean: async () => ({ ...FLOW, startedBy: null }) }));
+
+        const { status } = await api('GET', '/mcp/oauth/callback?state=st&code=abc');
+
+        expect(status).toBe(400);
+        expect(mockSaveGrant).not.toHaveBeenCalled();
+    });
+
     test('the flow is consumed before the code is spent', async () => {
         const order = [];
         McpOAuthState.findByIdAndDelete = jest.fn(() => ({ lean: async () => { order.push('consume'); return FLOW; } }));

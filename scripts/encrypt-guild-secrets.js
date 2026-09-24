@@ -27,6 +27,7 @@ require('../src/config/fileSecrets').loadFileSecrets();
 
 const mongoose = require('mongoose');
 const { encryptStoredGuildKeys } = require('../src/migrations/018_encrypt_guild_ai_keys');
+const { encryptStoredMcpTokens } = require('../src/migrations/027_encrypt_mcp_tokens');
 const { encryptionEnabled } = require('../src/config/secretBox');
 
 async function main() {
@@ -55,6 +56,16 @@ async function main() {
                 'That is expected when a guild admin saves a key mid-sweep — the dashboard encrypts on ' +
                 'write, so nothing is left in the clear. Re-run this to confirm.'
             );
+        }
+
+        // The MCP connections' static tokens (#1146), the same sweep over the
+        // server list rather than the four provider-key fields.
+        const mcp = await encryptStoredMcpTokens();
+        console.log(mcp.tokens
+            ? `Encrypted ${mcp.tokens} MCP server token(s) across ${mcp.guilds} guild(s).`
+            : 'Nothing to do — every stored MCP server token is already encrypted.');
+        if (mcp.skipped) {
+            console.log(`${mcp.skipped} MCP token(s) were rewritten while the sweep was running and were left as found. Re-run this to confirm.`);
         }
     } finally {
         await mongoose.disconnect();

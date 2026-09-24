@@ -97,7 +97,7 @@ async function runAiPromptTask(client, task) {
     // Required late rather than at module load: this file is reached from the
     // scheduler at boot, and the AI façade pulls in every provider behind it.
     const { resolveProviderConfig, getCompletion } = require('./aiService');
-    const config = resolveProviderConfig(ai);
+    const config = resolveProviderConfig(ai, { guildId: task.guildId });
     if (config.provider !== 'ollama' && !config.apiKey) {
         throw new Error(`${config.provider} has no API key configured`);
     }

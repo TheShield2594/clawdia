@@ -544,9 +544,13 @@ const guildSchema = new Schema({
                 name:               { type: String, required: true },
                 url:                { type: String, required: true },
                 enabled:            { type: Boolean, default: true },
-                // Stored as given. Never rendered back to the dashboard: the UI
-                // shows whether a token exists, never what it is.
-                authorizationToken: { type: String, default: null },
+                // Encrypted at rest through src/config/secretBox.js, like the
+                // provider keys and the OAuth grant below (#1146) — this is a
+                // GitHub PAT or a mailbox's API key as often as not. Opened in
+                // normalizeServer (src/config/mcpServers.js), the one reader.
+                // Never rendered back to the dashboard: the UI shows whether a
+                // token exists, never what it is.
+                authorizationToken: { type: String, default: null, set: encryptSecret },
                 // Empty allowedTools means "every tool"; anything in
                 // blockedTools is switched off even if also allowed.
                 allowedTools:       [{ type: String }],
@@ -640,6 +644,14 @@ const guildSchema = new Schema({
             type: String,
             enum: ['auto', 'connector', 'client'],
             default: 'auto'
+        },
+        // Who may click "Run it" on a tool call waiting for approval (#1143):
+        // the member who asked (or a moderator), or moderators only. See
+        // MCP_APPROVERS in src/config/mcpServers.js.
+        mcpApprover: {
+            type: String,
+            enum: ['requester', 'managers'],
+            default: 'requester'
         },
         // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)
         actionsEnabled: { type: Boolean, default: false },
