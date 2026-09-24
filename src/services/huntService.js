@@ -190,6 +190,21 @@ function calculateCritChance(user, traits = []) {
 }
 
 /**
+ * The odds a shot at this particular animal lands: the hunter's base chance,
+ * the prey's traits, and whatever the approach earned. It is what executeHunt
+ * rolls against, and it is exported so the approach screen can show the player
+ * the same number moving ("Shot odds 58% → 83%") rather than a bonus in the
+ * abstract.
+ */
+function huntSuccessChance(user, weapon, zone, traits = [], stealthBonus = 0) {
+    let chance = calculateSuccessChance(user, weapon, zone);
+    if (traits.includes('elusive'))  chance -= 0.10;
+    if (traits.includes('spectral') && user.hunt.activeCharm === 'luck_charm') chance -= 0.015;
+    if (stealthBonus)                chance += stealthBonus;
+    return Math.min(0.95, Math.max(0.10, chance));
+}
+
+/**
  * Folds the aim phase's grade into a crit chance.
  *
  * The aim bonus moves in both directions now: a shot taken inside the window
@@ -963,13 +978,7 @@ function executeHunt(user, zoneId, options = {}) {
     }
     const traits = animal.traits ?? [];
 
-    // Base success chance + trait adjustments
-    let successChance = calculateSuccessChance(user, weapon, zone);
-    if (traits.includes('elusive'))  successChance -= 0.10;
-    if (traits.includes('spectral') && h.activeCharm === 'luck_charm') successChance -= 0.015;
-    if (options.stealthBonus)        successChance += options.stealthBonus;
-    successChance = Math.min(0.95, Math.max(0.10, successChance));
-
+    const successChance = huntSuccessChance(user, weapon, zone, traits, options.stealthBonus);
     const success = secureRandom() < successChance;
 
     // Track which consumables were active BEFORE ticking
@@ -1321,9 +1330,31 @@ function buildApexEncounter(base) {
     return { ...base, phases: pool.slice(0, APEX_PHASES_PER_DUEL) };
 }
 
-function rollApexType() {
+// Which apex a kill draws out, keyed on the kill's traits so the challenger
+// fits the animal: a stag's ghost for spectral and elusive prey, the wolf
+// alpha for pack and aggressive hunters, the boar for the armoured and the
+// huge. First match wins, in this order; trait-less prey draws at random.
+const APEX_BY_TRAIT = [
+    ['spectral',    'phantom_stag'],
+    ['pack_hunter', 'dire_alpha'],
+    ['armored',     'ironhide_boar'],
+    ['elusive',     'phantom_stag'],
+    ['giant',       'ironhide_boar'],
+    ['aggressive',  'dire_alpha'],
+];
+
+function apexTypeIdFor(animal) {
+    const traits = animal?.traits ?? [];
+    for (const [trait, id] of APEX_BY_TRAIT) {
+        if (traits.includes(trait) && APEX_TYPES[id]) return id;
+    }
     const keys = Object.keys(APEX_TYPES);
-    return buildApexEncounter(APEX_TYPES[keys[Math.floor(secureRandom() * keys.length)]]);
+    return keys[Math.floor(secureRandom() * keys.length)];
+}
+
+function rollApexType(animal = null) {
+    const id = apexTypeIdFor(animal);
+    return { id, ...buildApexEncounter(APEX_TYPES[id]) };
 }
 
 // Nerve: the duel's second axis. A wrong aggressive read costs two, so two bad
@@ -1404,7 +1435,10 @@ function resolveApexEncounter(user, animal, tier, choicesMade, apexType, weaponI
     const { phaseResults, nerve } = resolveApexPhases(at, choicesMade, user);
 
     const correctCount = phaseResults.filter(p => p.correct).length;
-    const broken       = nerve <= 0;
+    // Walking away mid-duel — letting a phase's clock run out — ends it the
+    // same way a broken nerve does. Anything kinder makes going quiet the best
+    // move the moment a read goes wrong.
+    const broken       = nerve <= 0 || options.forfeit === true;
 
     // One roll for the whole duel: the outcome tier picks a share of it, so the
     // four outcomes stay ordered against each other on any single encounter.
@@ -1433,7 +1467,9 @@ function resolveApexEncounter(user, animal, tier, choicesMade, apexType, weaponI
         perfect:  `🏆 **FLAWLESS** — You read the ${at.name} like a book. Maximum trophy!`,
         win:      `✅ You outmaneuvered the ${at.name}. A worthy trophy.`,
         survived: `😓 You barely walked away — the ${at.name} left its mark. Partial reward.`,
-        escaped:  `💀 The ${at.name} broke your nerve and vanished into the wild!`
+        escaped:  options.forfeit
+            ? `💨 You hesitated — the ${at.name} took the opening and melted back into the wild.`
+            : `💀 The ${at.name} broke your nerve and vanished into the wild!`
     };
 
     if (weapon) user.markModified('hunt');
@@ -1686,6 +1722,7 @@ module.exports = {
     msUntilDailyReset,
     calculateSuccessChance,
     calculateCritChance,
+    huntSuccessChance,
     applyAimBonus,
     rollTier,
     rollAnimal,
@@ -1712,6 +1749,7 @@ module.exports = {
     rollTrophyQuality,
     executeHunt,
     rollApexType,
+    apexTypeIdFor,
     buildApexEncounter,
     APEX_PHASES_PER_DUEL,
     resolveApexEncounter,

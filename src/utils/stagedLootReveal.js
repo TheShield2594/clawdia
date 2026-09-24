@@ -88,8 +88,12 @@ const MID_LABEL = { 4: 'EPIC', 5: 'LEGENDARY', 6: 'EVENT' };
  *   art `finalEmbed.setThumbnail('attachment://…')` points at). Only the final
  *   edit carries them — the fog/reveal beats show their own art-free embeds — so
  *   the attachment lands exactly on the render that references it.
+ * @param {object} [options]
+ * @param {Array} [options.components] action rows for the final render only —
+ *   buttons that act on the result (e.g. /hunt's "Hunt again") must not be
+ *   pressable while the fog is still hiding what the result is.
  */
-async function stagedLootReveal(interaction, tier, finalEmbed, activity, files = []) {
+async function stagedLootReveal(interaction, tier, finalEmbed, activity, files = [], { components } = {}) {
     const copy = REVEAL_COPY[activity];
     if (!copy) throw new Error(`stagedLootReveal: no reveal copy for "${activity}"`);
 
@@ -97,6 +101,7 @@ async function stagedLootReveal(interaction, tier, finalEmbed, activity, files =
     // the fog/reveal beats show their own art-free embeds, so an empty `files`
     // would just tell Discord to clear attachments that were never added.
     const finalPayload = files.length ? { embeds: [finalEmbed], files } : { embeds: [finalEmbed] };
+    if (components) finalPayload.components = components;
 
     const tierNum = TIER_NUM[tier] ?? 0;
     if (tierNum < REVEAL_FROM_TIER) {

@@ -19,6 +19,7 @@ const {
     notifyQuestComplete, notifyQuestNearComplete,
 } = require('../services/questService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
+const { getPolicyDecision } = require('../utils/commandPolicy');
 const {
     commandIsFreezeGated, isEconomyFrozen, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
 } = require('../utils/economyFreeze');
@@ -169,24 +170,6 @@ async function trackQuestCommandUse(interaction) {
     await notifyQuestNearComplete(guildSettings, interaction.member, nearComplete, interaction.channel);
 }
 
-function memberHasAnyRole(member, roleIds = []) {
-    if (!member || !Array.isArray(roleIds) || roleIds.length === 0) return false;
-    return roleIds.some(roleId => member.roles?.cache?.has(roleId));
-}
-
-function isWithinRuleWindow(rule, now) {
-    const day = now.getUTCDay();
-    const hour = now.getUTCHours();
-    if (Array.isArray(rule.daysOfWeek) && rule.daysOfWeek.length > 0 && !rule.daysOfWeek.includes(day)) {
-        return false;
-    }
-    if (rule.startHourUtc == null || rule.endHourUtc == null) return true;
-    if (rule.startHourUtc <= rule.endHourUtc) {
-        return hour >= rule.startHourUtc && hour <= rule.endHourUtc;
-    }
-    return hour >= rule.startHourUtc || hour <= rule.endHourUtc;
-}
-
 // `setDefaultMemberPermissions` on a command builder is a *default*, not a rule.
 // A guild admin can reassign any command to @everyone under Server Settings →
 // Integrations, and Discord will then deliver it as an ordinary interaction with
@@ -210,25 +193,6 @@ function missingRequiredPermissions(interaction, command) {
 
     const missing = interaction.memberPermissions.missing(required);
     return missing.length ? missing : null;
-}
-
-function getPolicyDecision(interaction, guildSettings) {
-    const policies = guildSettings?.commandPolicies;
-    if (!policies?.enabled) return { allowed: true };
-    if (policies.exceptions?.userIds?.includes(interaction.user.id)) return { allowed: true };
-    if (memberHasAnyRole(interaction.member, policies.exceptions?.roleIds)) return { allowed: true };
-
-    const cmd = interaction.commandName;
-    const now = new Date();
-    const applicableRules = (policies.rules || []).filter(rule => {
-        if (rule.command !== cmd && rule.command !== '*') return false;
-        if (Array.isArray(rule.roleIds) && rule.roleIds.length > 0 && !memberHasAnyRole(interaction.member, rule.roleIds)) return false;
-        if (Array.isArray(rule.channelIds) && rule.channelIds.length > 0 && !rule.channelIds.includes(interaction.channelId)) return false;
-        return isWithinRuleWindow(rule, now);
-    });
-    const denied = applicableRules.find(rule => rule.effect === 'deny');
-    if (denied) return { allowed: false, reason: 'This command is blocked by server policy for your context.' };
-    return { allowed: true };
 }
 
 // Node's setTimeout treats delays > 2^31-1 ms as 1 ms, which would wipe the

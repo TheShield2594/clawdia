@@ -22,6 +22,12 @@ const AIM_WINDOW_MS = 900;
 
 const AIM_LATE_MS   = 2500;
 
+// Now and then the sights hold a beat longer on a "steady…" before the real
+// call, so hammering the button on a rhythm is not a strategy: the only way to
+// grade perfect is to wait for the word. One extra edit, never more.
+const AIM_FAKEOUT_CHANCE = 0.25;
+const AIM_FAKEOUT_MS     = 700;
+
 function gradeShot(shotMs, openAtMs) {
     const grade =
         shotMs === null                    ? 'timeout' :
@@ -59,7 +65,13 @@ function gradeShot(shotMs, openAtMs) {
     };
 }
 
-async function runAimPhase(interaction, huntMsg) {
+/**
+ * Runs the timed shot. `options.scene` dresses every embed the phase shows
+ * (the encounter's shared header), and `options.fakeOut` holds a "steady…"
+ * beat before the call — the caller rolls it, so the phase itself stays
+ * deterministic under a stubbed clock.
+ */
+async function runAimPhase(interaction, huntMsg, { scene = e => e, fakeOut = false } = {}) {
     const delay = ms => new Promise(r => setTimeout(r, ms));
 
     const aimWaitMs = 1000 + Math.floor(Math.random() * 1001);
@@ -74,7 +86,7 @@ async function runAimPhase(interaction, huntMsg) {
         .setDescription('*Hold your breath… wait for the shot to line up.*')
         .setFooter({ text: 'Fire when the shot is called — rush it and you spoil the shot.' });
 
-    await interaction.editReply({ embeds: [aimSightsEmbed], components: [aimRow] });
+    await interaction.editReply({ embeds: [scene(aimSightsEmbed)], components: [aimRow] });
     const aimTime = Date.now();
 
     const collector = huntMsg.createMessageComponentCollector({
@@ -85,7 +97,15 @@ async function runAimPhase(interaction, huntMsg) {
 
     let shotTaken = false;
     const shot = new Promise(resolve => {
-        collector.on('collect', async i => { await i.deferUpdate(); resolve(Date.now() - aimTime); });
+        // The clock is read the moment the press arrives, before the
+        // acknowledgement goes back over the wire — awaiting deferUpdate first
+        // charged a full round trip to the shot, which is the latency this
+        // phase exists to keep out of the grade. Resolving before the ack also
+        // means a rejected ack cannot leave the phase waiting forever.
+        collector.on('collect', i => {
+            resolve(Date.now() - aimTime);
+            i.deferUpdate().catch(() => {});
+        });
         collector.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
     }).then(ms => { shotTaken = ms !== null; return ms; });
 
@@ -99,12 +119,28 @@ async function runAimPhase(interaction, huntMsg) {
     // phase exists to take it out of.
     let windowOpensAt = aimWaitMs;
     await Promise.race([shot, delay(aimWaitMs)]);
+    if (!shotTaken && fakeOut) {
+        // Not the call. A press here is still early, exactly as before it —
+        // the window has not opened, so nothing yet counts as on time.
+        windowOpensAt = Infinity;
+        await interaction.editReply({
+            embeds: [scene(new EmbedBuilder()
+                .setColor('#8B0000')
+                .setTitle('🎯 Steady…')
+                .setDescription('*It shifts its weight. Not yet — wait for the shot.*'))],
+            components: [aimRow],
+        });
+        await Promise.race([shot, delay(AIM_FAKEOUT_MS)]);
+        // The window opens after this beat, so the collector's deadline has to
+        // move with it or the fake-out would come out of the late grace.
+        if (!shotTaken) collector.resetTimer({ time: AIM_FAKEOUT_MS + AIM_LATE_MS });
+    }
     if (!shotTaken) {
         await interaction.editReply({
-            embeds: [new EmbedBuilder()
+            embeds: [scene(new EmbedBuilder()
                 .setColor(COLORS.ERROR)
                 .setTitle('💥 FIRE!')
-                .setDescription('**Take the shot — NOW!**')],
+                .setDescription('**Take the shot — NOW!**'))],
             components: [aimRow],
         });
         windowOpensAt = Date.now() - aimTime;
@@ -121,10 +157,61 @@ async function runAimPhase(interaction, huntMsg) {
     const shotMs = await shot;
     const aim    = gradeShot(shotMs, windowOpensAt);
 
-    await interaction.editReply({ embeds: [aim.embed()], components: [] });
+    await interaction.editReply({ embeds: [scene(aim.embed())], components: [] });
     await delay(600);
 
     return aim;
+}
+
+// ─── STEALTH OUTCOME ─────────────────────────────────────────────────────────
+// The approach is a read of the animal, and the read is the skill: a correct
+// one always pays. There used to be a hidden 80/50/20 roll on top, which meant
+// one correct read in five was *penalised* — worse than the safe option — while
+// the screen said "no bonus". Variance belongs to the shot, which is already a
+// roll; the read itself is now deterministic.
+
+const STEALTH_OUTCOMES = {
+    perfect: {
+        color: '#00FF7F', title: '🤫 Perfect approach!',
+        body: '*You read it perfectly. It froze for a moment — then relaxed. It never sensed you.*',
+    },
+    decent: {
+        color: '#FFA500', title: '🌿 Decent approach…',
+        body: '*Not the ideal line, but you kept your noise down. It stirred — then settled.*',
+    },
+    spooked: {
+        color: '#FF6B6B', title: '🔊 You spooked it!',
+        body: '*It heard you before you were in range, and fixed you with a stare. Every advantage lost.*',
+    },
+    timeout: {
+        color: '#888888', title: '⏰ Hesitated too long…',
+        body: '*You weighed your options too long — the moment passed. No approach bonus.*',
+    },
+};
+
+/**
+ * Grades an approach choice against the profile. Returns
+ * { outcome, bonus, label } where outcome is perfect | decent | spooked |
+ * timeout and bonus is the option's own stealthBonus (0 on a timeout).
+ */
+function resolveStealth(profile, pickedId) {
+    const chosen = profile.options.find(o => o.id === pickedId);
+    if (!chosen) return { outcome: 'timeout', bonus: 0, label: '' };
+    const outcome =
+        pickedId === profile.correctId ? 'perfect' :
+        chosen.stealthBonus >= 0       ? 'decent'  :
+                                         'spooked';
+    return { outcome, bonus: chosen.stealthBonus, label: chosen.label };
+}
+
+/** Fisher–Yates over the given random source; the old sort-by-coin-flip was biased. */
+function shuffled(items, random = Math.random) {
+    const out = [...items];
+    for (let i = out.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
 }
 
 // ─── STEALTH APPROACH PROFILES (per animal) ──────────────────────────────────
@@ -237,8 +324,13 @@ function pickApproachProfile(animal) {
 }
 
 module.exports = {
+    AIM_FAKEOUT_CHANCE,
+    AIM_FAKEOUT_MS,
     AIM_LATE_MS,
     AIM_WINDOW_MS,
+    STEALTH_OUTCOMES,
+    resolveStealth,
+    shuffled,
     APPROACH_PROFILES,
     GENERIC_PROFILE_IDS,
     TRAIT_PROFILE_ORDER,
