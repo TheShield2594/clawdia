@@ -14,8 +14,8 @@
  * Also here, because they are the same pass over the same collectors: the two
  * replays that took a stake and then acknowledged the press with a call that
  * could throw before anything that could return the stake had started, and
- * slots' Hot Reel, whose loss streak two spins in flight at once could both
- * spend.
+ * slots' Heat meter (the Hot Reel's loss streak, before pass 25), which two
+ * spins in flight at once could both spend.
  */
 
 const fs   = require('fs');
@@ -209,69 +209,67 @@ describe('every replay site asks before it stakes', () => {
     });
 });
 
-// ─── Slots' Hot Reel ───────────────────────────────────────────────────────────
+// ─── Slots' Heat meter ─────────────────────────────────────────────────────────
 
-describe('/casino slots — the Hot Reel streak is claimed, not read', () => {
+describe('/casino slots — a full Heat meter is claimed, not read', () => {
     const slots = require('../src/games/casino/slots');
-    // Cherry, Lemon, Grape: three different regulars, a loss on every reel the
-    // Hot Reel can lock the first one to as well.
-    const LOSING_REELS = [0.01, 0.3, 0.6];
+    const { HEAT_MAX, HIGH_VALUE_SYMBOLS } = jest.requireActual('../src/games/casino/slotsReels');
 
-    let randomSpy;
-    beforeEach(() => {
-        jest.useFakeTimers();
-        randomSpy = jest.spyOn(Math, 'random');
-        for (const r of LOSING_REELS) randomSpy.mockReturnValueOnce(r);
-        randomSpy.mockReturnValue(0.5);
-    });
-    afterEach(() => {
-        jest.useRealTimers();
-        randomSpy.mockRestore();
-    });
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
 
-    const isClaim = filter => filter?.['casinoStats.slotsLossStreak'] !== undefined;
+    const isClaim = filter => filter?.['casinoStats.slotsHeat'] !== undefined;
 
-    async function spinWith(streak, claimWins) {
+    async function spinWith(heat, claimWins) {
         User.findOneAndUpdate.mockImplementation(async filter => {
             if (isClaim(filter)) return claimWins ? { _id: 'u' } : null;
-            return walletDoc({ casinoStats: { slotsLossStreak: streak } });
+            return walletDoc({ casinoStats: { slotsHeat: heat } });
         });
         const interaction = makeInteraction({ options: { bet: BET }, userId: USER_ID, guildId: GUILD_ID });
         const run = slots.execute(interaction, { releaseLock: jest.fn(), onWager: jest.fn() });
         for (let i = 0; i < 40; i++) await jest.advanceTimersByTimeAsync(250);
         await run;
-        const text = interaction.replies.flatMap(r => r?.embeds ?? []).map(e => e.data?.description ?? '').join('\n');
-        return { hot: text.includes('Hot Reel activated') };
+        const result = interaction.replies.filter(r => r?.components?.length).at(-1).embeds[0].data;
+        const grid = result.description.split('\n');
+        return { hot: result.description.includes('Hot Spin'), payline: grid[1] };
     }
 
-    const streakWrites = () => User.updateOne.mock.calls
+    const heatWrites = () => User.updateOne.mock.calls
         .map(([, update]) => update)
-        .filter(update => JSON.stringify(update).includes('slotsLossStreak'));
+        .filter(update => JSON.stringify(update).includes('slotsHeat'));
 
-    test('the spin that wins the claim locks the reel, and the claim is guarded on the streak', async () => {
-        const { hot } = await spinWith(3, true);
+    test('the spin that wins the claim is hot, and the claim is guarded on a full meter', async () => {
+        const { hot, payline } = await spinWith(HEAT_MAX, true);
 
         expect(hot).toBe(true);
+        // Reel 1 of a Hot Spin lands a high-value symbol on the payline.
+        const { SYMBOLS } = jest.requireActual('../src/games/casino/slotsReels');
+        const highValue = SYMBOLS.filter(s => HIGH_VALUE_SYMBOLS.includes(s.name)).map(s => s.emoji);
+        expect(highValue.some(emoji => payline.startsWith(`▶️ ${emoji}`))).toBe(true);
+
         const [[filter, update]] = User.findOneAndUpdate.mock.calls.filter(([f]) => isClaim(f));
-        expect(filter).toMatchObject({ userId: USER_ID, guildId: GUILD_ID, 'casinoStats.slotsLossStreak': { $gte: 3 } });
-        expect(update).toEqual({ $set: { 'casinoStats.slotsLossStreak': 0 } });
+        expect(filter).toMatchObject({ userId: USER_ID, guildId: GUILD_ID, 'casinoStats.slotsHeat': { $gte: HEAT_MAX } });
+        expect(update).toEqual({ $set: { 'casinoStats.slotsHeat': 0 } });
     }, 30_000);
 
-    test('a spin that loses the claim to another spin spins cold', async () => {
-        // It read three losses, as the other spin did — but the other spin
-        // spent them first.
-        const { hot } = await spinWith(3, false);
+    test('a spin that loses the claim to another spin spins cold, and fills the next meter', async () => {
+        // It read a full meter, as the other spin did — but the other spin
+        // spent it first.
+        const { hot } = await spinWith(HEAT_MAX, false);
         expect(hot).toBe(false);
+        expect(heatWrites()).toEqual([{ $inc: { 'casinoStats.slotsHeat': 1 } }]);
     }, 30_000);
 
-    test('a loss is counted with $inc, not written back as the streak read plus one', async () => {
-        await spinWith(1, false);
-        expect(streakWrites()).toEqual([{ $inc: { 'casinoStats.slotsLossStreak': 1 } }]);
+    test('every cold spin fills the meter with $inc, whatever it paid', async () => {
+        // From play, not from losses: the Hot Reel this replaced counted losses
+        // in a row, which paid best to whoever kept chasing them.
+        await spinWith(3, false);
+        expect(heatWrites()).toEqual([{ $inc: { 'casinoStats.slotsHeat': 1 } }]);
         expect(User.findOneAndUpdate.mock.calls.filter(([f]) => isClaim(f))).toEqual([]);
     }, 30_000);
 
-    test('a losing hot-reel spin leaves the streak where the claim put it', async () => {
-        await spinWith(3, true);
-        expect(streakWrites()).toEqual([]);
+    test('a hot spin leaves the meter where the claim put it', async () => {
+        await spinWith(HEAT_MAX, true);
+        expect(heatWrites()).toEqual([]);
     }, 30_000);
 });

@@ -258,6 +258,15 @@
           "limit": { "description": "Apuesta máx. en monedas. Ponlo a 0 para sin límite." }
         }
       },
+      "slotsconfig": {
+        "description": "(Admin) Configura cómo se anuncia un Triple Comodín en las tragaperras.",
+        "options": {
+          "announce": { "description": "Anunciar un Triple Comodín en el canal (activado por defecto)." },
+          "ping_here": { "description": "Mencionar @here con el anuncio (desactivado por defecto)." },
+          "channel": { "description": "Dónde anunciarlo (por defecto: donde se jugó)." },
+          "clear_channel": { "description": "Volver a anunciarlo donde se jugó." }
+        }
+      },
       "blackjack": {
         "description": "Juega al blackjack contra la banca",
         "options": {

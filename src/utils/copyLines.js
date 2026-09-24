@@ -131,12 +131,26 @@ const SLOTS_LOSE_LINES = [
     'The machine takes. That\'s its whole thing.',
     'Tough spin. The jackpot pool grows.',
     'Not this time. Try again?',
+    'Nothing on the line.',
+    'The reels kept their secrets.',
+    'Cold spin. The meter\'s still climbing.',
 ];
 
 const SLOTS_WIN_LINES = [
     'There it is.',
     'The reels came through.',
     'Luck decided to show up today.',
+    'Clean hit.',
+    'The machine blinked first.',
+    'Right on the line.',
+];
+
+// For a win of 10× the stake or more, where the ordinary lines undersell it.
+const SLOTS_BIG_WIN_LINES = [
+    'The whole row lit up.',
+    'That\'s the one they talk about.',
+    'The machine is going to need a minute.',
+    'Somebody check the reels — that can\'t be legal.',
 ];
 
 const WORK_ROUGH_LINES = [
@@ -229,6 +243,7 @@ module.exports = {
     getCrimeFlavorText,
     SLOTS_LOSE_LINES,
     SLOTS_WIN_LINES,
+    SLOTS_BIG_WIN_LINES,
     WORK_ROUGH_LINES,
     WORK_EXCEPTIONAL_LINES,
     ROB_WIN_LINES,

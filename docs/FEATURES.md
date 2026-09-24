@@ -525,7 +525,12 @@ third of the code. The sections below cover it in full.
 /casino roulette     - Bet on Red/Black, Odd/Even, Low/High, dozens, columns, or a straight number
 /casino jackpot      - View the current progressive jackpot pool
                        Fed 0.5% of every casino bet. Drops on a random trigger that grows
-                       with each bet, or outright to a Triple Wild on /casino slots.
+                       with each bet, or to a Triple Wild on /casino slots. Either pays
+                       the pool up to a cap set by the winning bet; the rest stays in it.
+/casino slots        - 3-reel slot machine on real reel strips: 3×3 window, Wilds, Boosts,
+                       Scatter free spins, a Heat meter (every 10th paid spin is a Hot Spin),
+                       Spin / ½ / 2× buttons and a paytable with the odds. Returns 94%.
+/casino slotsconfig  - (Admin) Triple Wild announcement: on/off, @here, and channel
 /quiz                - Answer trivia for rewards
 /boost               - Activate economy boosts
 ```

@@ -14,7 +14,8 @@
  *     along won every round, and its "tell" was right 60% of the time;
  *   - higher-or-lower added +0.5× per correct call whatever the odds (about
  *     115% on the first call alone);
- *   - slots paid two-of-a-kind at half the row (about 153% a spin).
+ *   - slots paid two-of-a-kind at half the row (about 153% a spin); pass 25
+ *     rebuilt its paytable, and holds the coin booster off it here.
  *
  * The pure odds are pinned in casinoPayoutTables.test.js and
  * casinoSlotsReels.test.js. This file drives the games themselves.
@@ -40,11 +41,11 @@ jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 // A stacked deck, when a test sets one: cards are dealt off the end, player
 // first, so the last four are player, player, dealer up-card, dealer hole card.
 let mockDeck = null;
-// Fixed reels, when a test sets them: spinReel hands them out in order.
-let mockReels = null;
+// Fixed spins, when a test queues them: see tests/helpers/slotsSpins.js.
+let mockSpins = [];
 jest.mock('../src/games/casino/slotsReels', () => {
     const actual = jest.requireActual('../src/games/casino/slotsReels');
-    return { ...actual, spinReel: (...args) => (mockReels?.length ? mockReels.shift() : actual.spinReel(...args)) };
+    return { ...actual, spin: (...args) => (mockSpins.length ? mockSpins.shift() : actual.spin(...args)) };
 });
 jest.mock('../src/games/casino/blackjackHands', () => {
     const actual = jest.requireActual('../src/games/casino/blackjackHands');
@@ -58,7 +59,8 @@ const cupgame = require('../src/games/casino/cupgame');
 const higherlower = require('../src/games/casino/higherlower');
 const blackjack = require('../src/games/casino/blackjack');
 const slots = require('../src/games/casino/slots');
-const { SYMBOLS } = jest.requireActual('../src/games/casino/slotsReels');
+const { BY_NAME } = jest.requireActual('../src/games/casino/slotsReels');
+const { view } = require('./helpers/slotsSpins');
 const { deleteLobby } = require('../src/utils/crashLobby');
 const { walletDoc, GUILD_ID, USER_ID, BET } = require('./helpers/casinoInteraction');
 const { makeInteraction } = require('./helpers/fakeInteraction');
@@ -277,13 +279,11 @@ describe('blackjack insurance', () => {
     }, 20_000);
 });
 
-// ── slots: a pair that returns less than the stake is a loss ─────────────────
+// ── slots: what a spin pays is the paytable's, and nothing multiplies it ─────
 
-describe('slots below-stake pairs', () => {
-    const sym = name => SYMBOLS.find(x => x.name === name);
-
-    async function spin(reels, doc = {}) {
-        mockReels = [...reels];
+describe('slots pays the paytable', () => {
+    async function spin(spins, doc = {}) {
+        mockSpins = [...spins];
         User.findOne.mockImplementation(() => query(walletDoc(doc)));
         // The wager's own write hands back the document the game reads effects off.
         const real = User.findOneAndUpdate.getMockImplementation();
@@ -294,17 +294,27 @@ describe('slots below-stake pairs', () => {
         const run = slots.execute(hand, { releaseLock: jest.fn(), onWager: jest.fn() });
         for (let i = 0; i < 100; i++) await jest.advanceTimersByTimeAsync(250);
         await run;
-        mockReels = null;
+        mockSpins = [];
         return { hand, credits: keyedCredits().filter(c => c.key.startsWith('casino:slots:')) };
     }
 
-    // A Cherry pair pays 100 × 2 × 0.25 = 50 on a 100 stake. The booster
-    // multiplied its "profit" of −50 into −100 and credited nothing.
-    test('a coin booster does not deepen the loss on a pair that returns less than the stake', async () => {
+    // #873, pass 25. A booster multiplied the profit on a slots win, and slots'
+    // wins pay many times the stake: a 2× booster turned the 94% machine into
+    // one that paid back about 169%, for 2,500 coins an hour.
+    test('a coin booster does not multiply a slots win', async () => {
         const booster = { activeEffects: [{ type: 'coin_booster_2x', expiresAt: new Date(Date.now() + 3.6e6) }] };
-        const { hand, credits } = await spin([sym('Cherry'), sym('Cherry'), sym('Lemon')], booster);
+        const { credits } = await spin([view(['Bell', 'Bell', 'Bell'])], booster);
 
-        expect(credits.map(c => c.amount)).toEqual([50]);
-        expect(JSON.stringify(hand.replies)).toContain('part of your bet back');
+        expect(credits.map(c => c.amount)).toEqual([BET * BY_NAME.get('Bell').three]);
+    }, 20_000);
+
+    // The old two-of-a-kind paid a quarter of the row, so a Cherry pair
+    // returned half the stake and was shown as a win.
+    test('a low pair pays nothing and says so, rather than returning part of the bet as a "win"', async () => {
+        const { hand, credits } = await spin([view(['Cherry', 'Cherry', 'Lemon'])]);
+
+        expect(credits).toEqual([]);
+        const result = hand.replies.filter(r => r?.components?.length).at(-1).embeds[0].data;
+        expect(result.title).toContain('No Win');
     }, 20_000);
 });

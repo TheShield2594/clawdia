@@ -2,7 +2,9 @@
  * Progressive casino jackpot pool — fed by all casino bets at a configurable rate.
  *
  * Trigger probability starts at 0.01% and increases by 0.001% with each eligible bet,
- * resetting after each drop.
+ * resetting after each drop. A drop pays the pool up to a cap proportional to the
+ * bet that triggered it (`dropCap`), so a minimum bet cannot win what a maximum
+ * one does; whatever the cap leaves stays in the pool.
  *
  * This is the *only* jackpot pool. Slots used to keep a second one of its own
  * (`slots.jackpotPool`: seeded at 5,000, grown by a flat 10 a spin, won on Triple
@@ -38,6 +40,10 @@ const { creditCoinsOrOwe } = require('../utils/creditOrOwe');
 const { jackpotPayoutKey } = require('../utils/payoutKey');
 
 const BASE_TRIGGER_RATE  = 0.0001;  // 0.01%
+// The most a random drop may be worth per coin staked, which is what caps the
+// pot a drop pays out (see `dropCap`). Every casino game gets this back on top
+// of its own return, and it is what the 0.5% contribution pays for.
+const RANDOM_DROP_RETURN = 0.005;
 const TRIGGER_INCREMENT  = 0.00001; // 0.001% per bet
 const HOT_POOL_THRESHOLD = 500_000; // 🔥 indicator above this amount
 const DEFAULT_SEED       = 10_000;  // mirrors Guild.casinoJackpot.seedAmount's default
@@ -70,7 +76,16 @@ async function clearClaim(guildId, payoutKey) {
 }
 
 /**
- * Claims the entire pool for one player, reseeds it, and credits the win.
+ * Claims the pool — or as much of it as `maxWin` allows — for one player, and
+ * credits the win.
+ *
+ * `maxWin` is the cap that keeps the jackpot from being farmed at the minimum
+ * stake (#873, pass 25). Uncapped, a 10-coin bet won the same pot as a
+ * 100,000-coin one, so the pool's worth per coin staked grew without bound as
+ * the stake shrank. Each caller passes a cap proportional to the bet that won,
+ * chosen so that the chance of winning times the cap is a fixed share of the
+ * stake. What the cap leaves behind stays in the pool for the next winner; a
+ * claim that takes everything reseeds it, as every claim used to.
  *
  * The claim is a single update-pipeline write and it does four things at once:
  * reseeds the pool, records who won, records *how much* — computed from the pool
@@ -109,7 +124,7 @@ async function clearClaim(guildId, payoutKey) {
  * free to fall back. `claimed: true, credited: false` means the pot is the
  * player's and has not arrived yet; `owed` says whether that is written down.
  */
-async function awardPool({ guildId, userId, username, seedAmount, extra = 0, note = 'Progressive jackpot win', interaction = null }) {
+async function awardPool({ guildId, userId, username, seedAmount, extra = 0, maxWin = null, note = 'Progressive jackpot win', interaction = null }) {
     const payoutKey = jackpotPayoutKey(guildId, randomUUID());
 
     // Two stages rather than one $set, so that the amount is read from the pool
@@ -130,19 +145,24 @@ async function awardPool({ guildId, userId, username, seedAmount, extra = 0, not
     // every outstanding claim would close the gap, and is not worth a growing
     // array on the guild document for a case that needs a failed credit and a
     // 0.01% trigger in the same guild before the debt is settled.
+    //
+    // The remainder is computed in the same write for the same reason: the pool
+    // becomes what the claim left behind, and a claim that left less than the
+    // seed — every uncapped one — reseeds it.
+    const potExpr = { $add: [{ $ifNull: ['$casinoJackpot.pool', seedAmount] }, extra] };
     const claimed = await Guild.findOneAndUpdate(
         { guildId },
         [
             {
                 $set: {
-                    'casinoJackpot.lastWonAmount': {
-                        $add: [{ $ifNull: ['$casinoJackpot.pool', seedAmount] }, extra],
-                    },
+                    'casinoJackpot.lastWonAmount': maxWin > 0 ? { $min: [potExpr, Math.floor(maxWin)] } : potExpr,
                 },
             },
             {
                 $set: {
-                    'casinoJackpot.pool':             seedAmount,
+                    'casinoJackpot.pool': {
+                        $max: [seedAmount, { $subtract: [potExpr, '$casinoJackpot.lastWonAmount'] }],
+                    },
                     'casinoJackpot.betsCount':        0,
                     'casinoJackpot.lastWinnerId':     { $literal: userId },
                     'casinoJackpot.lastWinnerName':   { $literal: username },
@@ -164,6 +184,7 @@ async function awardPool({ guildId, userId, username, seedAmount, extra = 0, not
     }
 
     const wonAmount = claimed.casinoJackpot?.lastWonAmount ?? 0;
+    const newPool   = claimed.casinoJackpot?.pool ?? seedAmount;
 
     const { credited, owed, doc } = await creditCoinsOrOwe(
         { userId, guildId },
@@ -199,10 +220,10 @@ async function awardPool({ guildId, userId, username, seedAmount, extra = 0, not
     }
 
     if (interaction) {
-        await announceJackpot({ guildDoc: claimed, interaction, wonAmount, newPool: seedAmount, credited, owed }).catch(() => {});
+        await announceJackpot({ guildDoc: claimed, interaction, wonAmount, newPool, credited, owed }).catch(() => {});
     }
 
-    return { claimed: true, credited, owed, wonAmount, newPool: seedAmount };
+    return { claimed: true, credited, owed, wonAmount, newPool };
 }
 
 /**
@@ -316,6 +337,15 @@ async function reconcileJackpotClaims({ limit = MAX_RECONCILE_PER_BOOT } = {}) {
 }
 
 /**
+ * The most a random drop triggered by `bet` may pay: the pot at which the
+ * drop's worth — its chance times the pot — is RANDOM_DROP_RETURN of the bet.
+ * At the base trigger rate that is 50× the bet.
+ */
+function dropCap(bet, triggerChance) {
+    return Math.max(1, Math.floor(bet * RANDOM_DROP_RETURN / triggerChance));
+}
+
+/**
  * Contributes `bet` coins to the guild's progressive jackpot pool and checks whether
  * the jackpot triggers this bet.
  *
@@ -339,6 +369,7 @@ async function processJackpotBet({ guildId, userId, username, bet, interaction }
         const { credited, owed, wonAmount, newPool } = await awardPool({
             guildId, userId, username, seedAmount, interaction,
             extra: contribution,
+            maxWin: dropCap(bet, triggerChance),
         });
         return { triggered: credited, owed: owed ?? false, wonAmount, newPool };
     }
@@ -356,8 +387,10 @@ async function processJackpotBet({ guildId, userId, username, bet, interaction }
 }
 
 /**
- * Awards the whole pool to a player whose game dealt them its own jackpot hand —
- * slots' Triple Wild — rather than the random per-bet trigger. The caller must not
+ * Awards the pool, up to `maxWin`, to a player whose game dealt them its own
+ * jackpot hand — slots' Triple Wild — rather than the random per-bet trigger.
+ * `maxWin` is the caller's cap, proportional to the winning bet (see awardPool);
+ * omitted, the whole pool is claimed. The caller must not
  * credit the win itself: on `credited` the coins are already in the winner's
  * balance and a `casino_jackpot` transaction is logged; on `claimed` without
  * `credited` the pot is still theirs and is being recovered under its key, so
@@ -369,7 +402,7 @@ async function processJackpotBet({ guildId, userId, username, bet, interaction }
  *
  * Returns `{ claimed, credited, owed, wonAmount, newPool }`.
  */
-async function claimJackpot({ guildId, userId, username, note = 'Progressive jackpot win' }) {
+async function claimJackpot({ guildId, userId, username, maxWin = null, note = 'Progressive jackpot win' }) {
     const guild = await Guild.findOne({ guildId }, 'casinoJackpot').lean();
     // No document means no pool: the claim would match nothing, and the caller
     // needs to hear that no pot was taken so it can fall back. The same guard
@@ -377,7 +410,7 @@ async function claimJackpot({ guildId, userId, username, note = 'Progressive jac
     if (!guild) return { claimed: false, credited: false, owed: false, wonAmount: 0, newPool: DEFAULT_SEED };
 
     const seedAmount = guild.casinoJackpot?.seedAmount ?? DEFAULT_SEED;
-    return awardPool({ guildId, userId, username, seedAmount, note });
+    return awardPool({ guildId, userId, username, seedAmount, maxWin, note });
 }
 
 /**
@@ -428,7 +461,7 @@ async function announceJackpot({ guildDoc, interaction, wonAmount, newPool, cred
             `${interaction.user} just **triggered the progressive jackpot!** 🎊\n\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
             outcome +
-            `  🔄 Pool resets to: **${newPool.toLocaleString()}** coins\n` +
+            `  🔄 Pool now: **${newPool.toLocaleString()}** coins\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
             `> Every casino bet feeds the pot. Could be you next. 🎲`
         )
@@ -454,4 +487,6 @@ module.exports = {
     getJackpotDisplay,
     HOT_POOL_THRESHOLD,
     DEFAULT_SEED,
+    RANDOM_DROP_RETURN,
+    dropCap,
 };

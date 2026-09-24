@@ -50,6 +50,7 @@ const { logTransaction } = require('../src/utils/logTransaction');
 const { recordOwedPayout } = require('../src/utils/owedPayout');
 const {
     processJackpotBet, claimJackpot, reconcileJackpotClaims, getJackpotDisplay, HOT_POOL_THRESHOLD,
+    RANDOM_DROP_RETURN, dropCap,
 } = require('../src/services/casinoJackpotService');
 
 const BASE_TRIGGER_RATE = 0.0001;
@@ -70,8 +71,11 @@ function roll(trigger) {
     jest.spyOn(Math, 'random').mockReturnValue(trigger ? 0 : 0.9999);
 }
 
+// betsCount 0 keeps the trigger at its base rate, where a 10,000 bet's drop cap
+// (bet × 0.5% ÷ 0.01% = 500,000) covers the whole 250,000 pool: these tests are
+// about the claim, and the cap has its own below.
 function jackpot(over = {}) {
-    return { pool: 250_000, betsCount: 40, contributionRate: 0.005, seedAmount: 10_000, ...over };
+    return { pool: 250_000, betsCount: 0, contributionRate: 0.005, seedAmount: 10_000, ...over };
 }
 
 function bet(over = {}) {
@@ -106,7 +110,7 @@ describe('processJackpotBet — the bet that does not win', () => {
 
         const result = await processJackpotBet(bet());
 
-        expect(guildDoc().casinoJackpot).toMatchObject({ pool: 250_050, betsCount: 41 });
+        expect(guildDoc().casinoJackpot).toMatchObject({ pool: 250_050, betsCount: 1 });
         expect(result).toEqual({ triggered: false, newPool: 250_050 });
         expect(balance()).toBe(999);
     });
@@ -566,6 +570,49 @@ describe('claimJackpot — the game that deals its own jackpot', () => {
         const claim = await claimJackpot({ guildId: GUILD, userId: USER, username: 'Ada' });
 
         expect(claim).toMatchObject({ claimed: true, credited: false, owed: true, wonAmount: 250_000 });
+    });
+});
+
+// #873, pass 25. The pot used to be the same whatever the stake that won it, so a
+// 10-coin bet's share of it per coin staked grew without bound: slots at the
+// minimum paid back more than it took whenever the pool held ~12,700 coins.
+describe('the pot a claim may take is capped by the bet', () => {
+    test('a random drop pays at most the bet’s share of it, and the rest stays in the pool', async () => {
+        roll(true);
+
+        // Base rate 0.01%: a 100 bet's drop is worth 100 × 0.5% ÷ 0.01% = 5,000.
+        const result = await processJackpotBet(bet({ bet: 100 }));
+
+        expect(result).toMatchObject({ triggered: true, wonAmount: 5_000 });
+        expect(balance()).toBe(999 + 5_000);
+        // 250,000 + this bet's contribution of 1, less what was won.
+        expect(guildDoc().casinoJackpot).toMatchObject({ pool: 245_001, lastWonAmount: 5_000 });
+        expect(result.newPool).toBe(245_001);
+    });
+
+    test('the cap holds a drop’s worth to the same share of the stake at any trigger rate', () => {
+        for (const chance of [0.0001, 0.0005, 0.002]) {
+            for (const stake of [10, 1_000, 250_000]) {
+                const worth = chance * dropCap(stake, chance);
+                expect(worth / stake).toBeLessThanOrEqual(RANDOM_DROP_RETURN);
+                expect(worth / stake).toBeGreaterThan(RANDOM_DROP_RETURN * 0.9);
+            }
+        }
+    });
+
+    test('a claim capped below the pool leaves the remainder, never less than the seed', async () => {
+        mockGuilds.reset();
+        mockGuilds.seed({ guildId: GUILD, casinoJackpot: jackpot({ pool: 12_000 }) });
+
+        const claim = await claimJackpot({ guildId: GUILD, userId: USER, username: 'Ada', maxWin: 5_000 });
+
+        // 12,000 − 5,000 is under the 10,000 seed, so the pool reseeds.
+        expect(claim).toMatchObject({ claimed: true, wonAmount: 5_000, newPool: 10_000 });
+    });
+
+    test('a cap above the pool claims all of it', async () => {
+        const claim = await claimJackpot({ guildId: GUILD, userId: USER, username: 'Ada', maxWin: 10_000_000 });
+        expect(claim).toMatchObject({ wonAmount: 250_000, newPool: 10_000 });
     });
 });
 

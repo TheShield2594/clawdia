@@ -316,7 +316,9 @@ const userSchema = new Schema({
     pinnedAchievement: { type: String,  default: null },
 
     casinoStats: {
-        slotsLossStreak: { type: Number, default: 0 },
+        // Slots' Heat meter: paid spins since the last Hot Spin. It replaced the
+        // loss streak (`slotsLossStreak`, now unread) that fed the Hot Reel.
+        slotsHeat: { type: Number, default: 0 },
         // /casino blackjack's record, shown in its footer. A streak counts
         // consecutive rounds that came out ahead; a push leaves it alone.
         bjHands:      { type: Number, default: 0 },

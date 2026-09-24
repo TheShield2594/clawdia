@@ -4,6 +4,20 @@ const { ownedBy } = require('../utils/collectorOwner');
 const DEFAULT_THRESHOLD = 10_000;
 
 /**
+ * The largest bet that goes through without a confirmation prompt, for this
+ * guild and this wallet. Infinity when the guild has turned the prompt off.
+ * Shared with the games' own raise buttons (slots' 2×), which must not step a
+ * player past the prompt one press at a time.
+ */
+function confirmThreshold(guildSettings, walletBalance) {
+    const configured = guildSettings?.economy?.betConfirmThreshold;
+    if (configured === 0) return Infinity;
+    return typeof configured === 'number' && configured > 0
+        ? configured
+        : Math.min(DEFAULT_THRESHOLD, Math.floor(walletBalance * 0.5));
+}
+
+/**
  * Returns { shouldProceed: boolean, alreadyReplied: boolean }.
  * alreadyReplied is true when a confirmation prompt was sent (so callers must
  * NOT call interaction.deferReply() afterwards — the interaction is already
@@ -11,14 +25,7 @@ const DEFAULT_THRESHOLD = 10_000;
  */
 async function confirmBet(interaction, amount, walletBalance, gameName, guildSettings = null) {
     const economy = guildSettings?.economy || {};
-    const configured = economy.betConfirmThreshold;
-    if (configured === 0) return { shouldProceed: true, alreadyReplied: false };
-
-    const threshold = typeof configured === 'number' && configured > 0
-        ? configured
-        : Math.min(DEFAULT_THRESHOLD, Math.floor(walletBalance * 0.5));
-
-    if (amount <= threshold) return { shouldProceed: true, alreadyReplied: false };
+    if (amount <= confirmThreshold(guildSettings, walletBalance)) return { shouldProceed: true, alreadyReplied: false };
 
     const currency = economy.currency || '💰';
     const pct = walletBalance > 0 ? Math.round((amount / walletBalance) * 100) : 100;
@@ -59,4 +66,4 @@ async function confirmBet(interaction, amount, walletBalance, gameName, guildSet
     }
 }
 
-module.exports = { confirmBet };
+module.exports = { confirmBet, confirmThreshold };

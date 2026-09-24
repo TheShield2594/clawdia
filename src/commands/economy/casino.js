@@ -1,8 +1,9 @@
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags, ChannelType } = require('discord.js');
 const Guild = require('../../models/Guild');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const User  = require('../../models/User');
 const { processJackpotBet, getJackpotDisplay } = require('../../services/casinoJackpotService');
+const { JACKPOT_CAP_MULT } = require('../../games/casino/slotsReels');
 const { advanceMissions } = require('../../services/seasonMissionService');
 const { tryAcquire, release } = require('../../utils/activeGameLock');
 const { checkAndAwardAtomic, announceAchievements } = require('../../services/achievementService');
@@ -68,7 +69,23 @@ const builder = new SlashCommandBuilder()
             .setName('limit')
             .setDescription('Max bet in coins. Set to 0 for no limit.')
             .setMinValue(0)
-            .setRequired(true)));
+            .setRequired(true)))
+    .addSubcommand(sub => sub
+        .setName('slotsconfig')
+        .setDescription('(Admin) Configure how a slots Triple Wild is announced.')
+        .addBooleanOption(opt => opt
+            .setName('announce')
+            .setDescription('Announce a Triple Wild to the channel (default on).'))
+        .addBooleanOption(opt => opt
+            .setName('ping_here')
+            .setDescription('Ping @here with the announcement (default off).'))
+        .addChannelOption(opt => opt
+            .setName('channel')
+            .setDescription('Where to announce it (default: where it was spun).')
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement))
+        .addBooleanOption(opt => opt
+            .setName('clear_channel')
+            .setDescription('Go back to announcing where it was spun.')));
 
 for (const game of games) {
     builder.addSubcommand(sub => {
@@ -113,6 +130,38 @@ module.exports = {
             return interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
         }
 
+        // The three settings the Triple Wild broadcast reads. They were declared
+        // on the Guild model and read by slots, and nothing anywhere could set
+        // them.
+        if (sub === 'slotsconfig') {
+            if (!interaction.memberPermissions?.has('ManageGuild')) {
+                return interaction.reply({ content: '❌ You need the **Manage Server** permission to configure slots.', flags: MessageFlags.Ephemeral });
+            }
+            const announce     = interaction.options.getBoolean('announce');
+            const pingHere     = interaction.options.getBoolean('ping_here');
+            const channel      = interaction.options.getChannel('channel');
+            const clearChannel = interaction.options.getBoolean('clear_channel');
+
+            const set = {};
+            if (announce !== null) set['slots.announceJackpot'] = announce;
+            if (pingHere !== null) set['slots.jackpotPingHere'] = pingHere;
+            if (channel) set['slots.jackpotChannelId'] = channel.id;
+            else if (clearChannel) set['slots.jackpotChannelId'] = null;
+
+            const updated = Object.keys(set).length
+                ? await Guild.findOneAndUpdate({ guildId: interaction.guild.id }, { $set: set }, { new: true })
+                : guildSettings;
+            const slots = updated?.slots ?? {};
+            const where = slots.jackpotChannelId ? `<#${slots.jackpotChannelId}>` : 'the channel it was spun in';
+            return interaction.reply({
+                content: `${Object.keys(set).length ? '✅ Slots updated.' : '🎰 Slots settings:'}\n` +
+                    `• Triple Wild announcement: **${(slots.announceJackpot ?? true) ? 'on' : 'off'}**\n` +
+                    `• Ping @here: **${slots.jackpotPingHere ? 'yes' : 'no'}**\n` +
+                    `• Announced in: ${where}`,
+                flags: MessageFlags.Ephemeral,
+            });
+        }
+
         if (sub === 'jackpot') {
             const { hot, display } = await getJackpotDisplay(interaction.guild.id);
             const lastWinner = guildSettings?.casinoJackpot?.lastWinnerName;
@@ -124,8 +173,8 @@ module.exports = {
                     `${hot ? '🔥 **The jackpot is HOT!** Every bet brings this closer to dropping.\n\n' : ''}` +
                     `**Current Pool:** ${display}\n\n` +
                     `Every casino bet contributes **${Math.round((guildSettings?.casinoJackpot?.contributionRate ?? 0.005) * 100 * 10) / 10}%** to this pool.\n` +
-                    `Trigger chance grows with every bet — someone will win it soon.\n` +
-                    `🃏 Or take it outright: **Triple Wild** on \`/casino slots\` wins the whole pool.`
+                    `Trigger chance grows with every bet — someone will win it soon. A drop pays up to a share set by the bet that triggered it; the rest stays in the pool.\n` +
+                    `🃏 Or go for it: **Triple Wild** on \`/casino slots\` wins the pool, up to **${JACKPOT_CAP_MULT}×** the bet.`
                 )
                 .addFields(
                     lastWinner ? { name: '🏆 Last Winner', value: `**${lastWinner}** — ${lastWon?.toLocaleString() ?? '?'} coins`, inline: true } : { name: '​', value: '​', inline: false }

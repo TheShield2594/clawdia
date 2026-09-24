@@ -6,44 +6,84 @@ const {
     MessageFlags,
 } = require('discord.js');
 const User = require('../../models/User');
-const { placeWager } = require('../../utils/placeWager');
-const { confirmBet } = require('../../utils/confirmBet');
-const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
-const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const Guild = require('../../models/Guild');
-const { randomFrom, SLOTS_LOSE_LINES, SLOTS_WIN_LINES } = require('../../utils/copyLines');
-const { claimJackpot, DEFAULT_SEED: JACKPOT_SEED } = require('../../services/casinoJackpotService');
+const { placeWager } = require('../../utils/placeWager');
+const { confirmBet, confirmThreshold } = require('../../utils/confirmBet');
+const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
+const { hasEffect, getLuckyStreakBonus, luckySaveEligible } = require('../../services/effectsService');
+const { randomFrom, SLOTS_LOSE_LINES, SLOTS_WIN_LINES, SLOTS_BIG_WIN_LINES } = require('../../utils/copyLines');
+const {
+    claimJackpot,
+    DEFAULT_SEED: JACKPOT_SEED,
+    RANDOM_DROP_RETURN,
+} = require('../../services/casinoJackpotService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { delay } = require('../../utils/delay');
 const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
 const {
     SYMBOLS,
-    HIGH_VALUE_SYMBOLS,
-    FREE_SPIN_JACKPOT_MULT,
-    spinReel,
-    randomEmoji,
+    HEAT_MAX,
+    TRIPLE_WILD_MULT,
+    TRIPLE_BOOST_MULT,
+    FREE_SPINS,
+    LUCKY_CHARM_RESPIN,
+    LUCKY_STREAK_REFUND,
+    PROGRESSIVE_RETURN,
+    JACKPOT_CAP_MULT,
+    spin,
+    fillerEmoji,
     evaluate,
+    isNetLoss,
+    odds,
 } = require('./slotsReels');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b0.png';
 
+const MIN_BET = 10;
+const MAX_BET = 1_000_000_000;
+
+// The reveal. Each reel stops on its own frame; the last one holds longer when
+// the first two have set something up (see `teaseFor`).
+const FRAME_MS      = 700;
+const TEASE_MS      = 1_500;
+const CHARM_MS      = 1_200;
+const FREE_INTRO_MS = 1_500;
+const FREE_SPIN_MS  = 700;
+
+// A win this many times the stake or more is announced in the guild's
+// announcement channel, when it has one.
 const WIN_ANNOUNCE_MULT = 50;
-// Consecutive losses that lock the first reel to a high-value symbol.
-const HOT_REEL_STREAK = 3;
 
-// The jackpot slots plays for is the shared progressive pool
-// (services/casinoJackpotService) — the same one `/casino jackpot` reports and
-// every casino bet feeds at 0.5%. Slots keeps no pool of its own; a Triple Wild is
-// simply a second, rarer way to claim this one. FREE_SPIN_JACKPOT_MULT is what a
-// Triple Wild pays when there is no pool to claim: on a free spin (which staked
-// nothing), or in a guild with no document and so no accumulated pot. A claim
-// that succeeded and has not been credited yet is *not* one of those — the pot
-// is the player's and is being recovered under its payout key, so paying this
-// on top would pay the same Triple Wild twice (#873).
+const REPLAY_WINDOW_MS = 120_000;
 
-function reelDisplay(reels, revealed) {
-    return reels.map((s, i) => i < revealed ? s.emoji : randomEmoji()).join('  ┃  ');
-}
+// Slots' own colours. The outcome roles come from embedColors; the rest are
+// this machine's identity and live here.
+const PALETTE = {
+    spin:    '#6c5ce7',
+    tease:   COLORS.PRIZE,
+    lose:    '#4f545c',
+    push:    COLORS.NEUTRAL,
+    win:     COLORS.SUCCESS,
+    big:     '#f5a623',
+    mega:    '#ff6b3d',
+    epic:    '#e0218a',
+    jackpot: '#d63cff',
+    free:    '#ff8fc7',
+    error:   COLORS.ERROR,
+};
+
+// Win tiers, by what the whole spin returned as a multiple of the stake.
+const TIERS = [
+    { min: 50, key: 'epic', title: '💥 EPIC WIN 💥' },
+    { min: 25, key: 'mega', title: '🔥 MEGA WIN 🔥' },
+    { min: 10, key: 'big',  title: '✨ BIG WIN ✨' },
+];
+
+// ─── Rendering ────────────────────────────────────────────────────────────────
+
+const fmt = n => Math.round(n).toLocaleString();
+const signed = n => (n >= 0 ? `+${fmt(n)}` : `−${fmt(Math.abs(n))}`);
 
 function embedAuthor(interaction) {
     return {
@@ -52,146 +92,326 @@ function embedAuthor(interaction) {
     };
 }
 
-function spinEmbed(display, bet, stage, interaction, jackpotPool) {
-    const statuses = [
-        '🎰 **Spinning all reels…**',
-        '🔒 **First reel locked!** Spinning remaining…',
-        '🔒🔒 **Two reels locked!** Last one spinning…',
-    ];
-    return new EmbedBuilder()
-        .setAuthor(embedAuthor(interaction))
-        .setThumbnail(THUMB)
-        .setColor(COLORS.PRIZE)
-        .setTitle('🎰 Slot Machine')
-        .setDescription(`${statuses[stage]}\n\n> **[ ${display} ]**`)
-        .addFields(
-            { name: '💰 Bet',            value: `**${bet.toLocaleString()}** coins`,          inline: true },
-            { name: '🎲 Status',         value: `Reel ${stage}/3 locked`,                     inline: true },
-            { name: '🏆 Progressive Jackpot', value: `**${jackpotPool.toLocaleString()}** coins`, inline: true },
-        );
+/**
+ * The 3×3 window, payline in the middle. Reels at or past `revealed` are still
+ * spinning and show filler; every stopped cell is what the strip really holds.
+ */
+function gridText(window, revealed = 3) {
+    return window.map((row, r) => {
+        const cells = row.map((s, reel) => (reel < revealed ? s.emoji : fillerEmoji())).join(' ');
+        return r === 1 ? `▶️ ${cells} ◀️` : `▪️ ${cells} ▪️`;
+    }).join('\n');
+}
+
+function heatText(heat, hot) {
+    if (hot) return '🔥 **HOT SPIN**';
+    const filled = Math.min(heat, HEAT_MAX);
+    return `${'▰'.repeat(filled)}${'▱'.repeat(HEAT_MAX - filled)} ${filled}/${HEAT_MAX}`;
+}
+
+function sessionText(session) {
+    if (!session.spins) return 'First spin of the session';
+    const net = session.returned - session.wagered;
+    return `Session · ${session.spins} spin${session.spins === 1 ? '' : 's'} · ` +
+        `wagered ${fmt(session.wagered)} · net ${signed(net)}`;
 }
 
 /**
- * Whether a spin lost the player money. At TWO_OF_A_KIND_RATE a Cherry or Lemon
- * pair pays back less than the stake, so it is a loss for everything that asks
- * — the lucky saves, the Hot Reel streak and the result card — though it still
- * returns part of the bet (#873, pass 24).
+ * What the last reel is holding its breath for, once the first two have
+ * stopped — or null, and it stops on the ordinary beat. Reads only the two
+ * stopped reels: the tease is about what *could* land, and it never lies about
+ * what already has.
  */
-function isNetLoss(result, bet) {
-    return result.outcome === 'lose' || (result.outcome === 'two' && result.payout < bet);
+function teaseFor(window) {
+    const [a, b] = window[1];
+    const wild = s => s.type === 'wild';
+    if (wild(a) && wild(b)) return '🃏🃏 **One more Wild for the jackpot…**';
+    const scatters = window.flatMap(row => row.slice(0, 2)).filter(s => s.type === 'scatter').length;
+    if (scatters >= 2) return '🌸🌸 **Free spins locked in — one more Scatter for 15…**';
+    const top = s => s.name === 'Diamond' || s.name === 'Star';
+    if ((top(a) || wild(a)) && (top(b) || wild(b)) && (a === b || wild(a) || wild(b))) {
+        return `${a.emoji}${b.emoji} **Last reel…**`;
+    }
+    return null;
 }
 
-function resultEmbed(reels, result, bet, balance, interaction, jackpotPool, note = '') {
-    const { payout, outcome, symbol, wildCount, multFactor } = result;
-    const partialLoss = outcome === 'two' && isNetLoss(result, bet);
-    const display = reels.map(s => s.emoji).join('  ┃  ');
-    const net     = payout - bet;
-    const netStr  = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
+function statusFields(ctx) {
+    return [
+        { name: '💸 Bet',         value: `**${fmt(ctx.bet)}**`,      inline: true },
+        { name: '🔥 Heat',        value: heatText(ctx.heat, ctx.hot), inline: true },
+        { name: '🏦 Progressive', value: `**${fmt(ctx.pool)}**`,     inline: true },
+    ];
+}
 
-    const cfg = {
-        jackpot: { color: '#FF00FF', title: '🎰 ✨ J A C K P O T ✨ 🎰', line: '🃏🃏🃏 **TRIPLE WILD — JACKPOT!** 🎉🎊🎉\n*The reels went absolutely wild!*' },
-        mult3:   { color: '#00FFFF', title: '🎰 ⚡ Triple Boost! ⚡',     line: `⚡⚡⚡ **TRIPLE MULTIPLIER BONUS!**\n*${randomFrom(SLOTS_WIN_LINES)}*` },
-        three:   { color: '#00FF00', title: `🎰 🏆 Three ${symbol?.name ?? ''}s!`, line: `${symbol?.emoji.repeat(3)} **THREE OF A KIND!**\n*${randomFrom(SLOTS_WIN_LINES)}*` },
-        two:     partialLoss
-            ? { color: '#FF4444', title: '🎰 Two of a Kind',       line: `${symbol?.emoji.repeat(2)} **Two ${symbol?.name ?? ''}s** — part of your bet back.` }
-            : { color: '#FFAA00', title: '🎰 Two of a Kind',       line: `${symbol?.emoji.repeat(2)} **Two ${symbol?.name ?? ''}s** — partial win!\n*${randomFrom(SLOTS_WIN_LINES)}*` },
-        push:    { color: '#f39c12', title: '🎰 🎯 Lucky Streak Fired!',   line: '🎯 **Your Lucky Streak fired!** Bet returned — spin again!' },
-        scatter: { color: '#ff69b4', title: '🌸 Scatter — Free Spins!',   line: '🌸 **Scatter symbols triggered!** Free spins incoming…' },
-        lose:    { color: '#FF4444', title: '🎰 No Match',                line: `💨 *${randomFrom(SLOTS_LOSE_LINES)}*` },
-    };
-    const { color, title, line } = cfg[outcome] ?? cfg.lose;
-
-    let extras = '';
-    if (wildCount > 0 && outcome !== 'jackpot') extras += '\n> 🃏 *Wild card assisted!*';
-    if (multFactor > 1 && outcome !== 'mult3')  extras += `\n> ⚡ *${multFactor}x Boost applied!*`;
-
-    const payoutVal = payout > 0 ? payout : bet;
-    const payoutLabel = payout > 0 ? (partialLoss ? '💰 Returned' : '🏆 Payout') : '💀 Lost';
+function frameEmbed(ctx, window, { revealed, status, color = PALETTE.spin }) {
     return new EmbedBuilder()
-        .setAuthor(embedAuthor(interaction))
+        .setAuthor(embedAuthor(ctx.interaction))
         .setThumbnail(THUMB)
         .setColor(color)
-        .setTitle(title)
-        .setDescription(
-            `> **[ ${display} ]**\n\n${line}${extras}\n\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `  💸 Bet: ${bet.toLocaleString()}  ·  ${payoutLabel}: ${payoutVal.toLocaleString()}  ·  📊 Net: **${netStr}**\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━` + note
-        )
+        .setTitle('🎰 Slots')
+        .setDescription(`${status}\n\n${gridText(window, revealed)}`)
+        .addFields(statusFields(ctx))
+        .setFooter({ text: sessionText(ctx.session) });
+}
+
+/** Plays one set of reels to a stop, reel by reel. A Hot Spin's first reel starts stopped. */
+async function reveal(surface, ctx, view) {
+    const first = ctx.hot ? 1 : 0;
+    const lead  = ctx.hot ? '🔥 **Hot Spin!** Reel 1 locked.' : '🎰 **Spinning…**';
+    for (let revealed = first; revealed < 3; revealed++) {
+        const tease = revealed === 2 ? teaseFor(view.window) : null;
+        await surface.edit({
+            embeds: [frameEmbed(ctx, view.window, {
+                revealed,
+                status: tease ?? lead,
+                color: tease ? PALETTE.tease : PALETTE.spin,
+            })],
+            components: [],
+        });
+        await delay(tease ? TEASE_MS : FRAME_MS);
+    }
+}
+
+function tierFor(total, bet, jackpotWon) {
+    if (jackpotWon) return { key: 'jackpot', title: '🎰 ✨ J A C K P O T ✨ 🎰' };
+    const mult = total / bet;
+    const tier = TIERS.find(t => mult >= t.min);
+    if (tier) return tier;
+    if (total > bet)   return { key: 'win',  title: '🎰 Win!' };
+    if (total === bet) return { key: 'push', title: '🎰 Money Back' };
+    return { key: 'lose', title: '🎰 No Win' };
+}
+
+/** The headline for what the payline did. */
+function lineHeadline(result) {
+    const { outcome, symbol, lineMult, multFactor } = result;
+    const boosted = multFactor > 1 ? ` *(⚡ ×${multFactor})*` : '';
+    switch (outcome) {
+        case 'jackpot': return `🃏🃏🃏 **TRIPLE WILD!** ${TRIPLE_WILD_MULT}× on the line`;
+        case 'mult3':   return `⚡⚡⚡ **Triple Boost** — **${TRIPLE_BOOST_MULT}×**`;
+        case 'three':   return `${symbol.emoji.repeat(3)} **Three ${symbol.plural}** — **${lineMult}×**${boosted}`;
+        case 'pair':    return `${symbol.emoji.repeat(2)} **Pair of ${symbol.plural}** — **${lineMult}×**${boosted}`;
+        case 'push':    return '🎯 **Lucky Streak** — your bet came back.';
+        default:        return null;
+    }
+}
+
+function resultEmbed(ctx, view, spinOutcome) {
+    const {
+        result, linePay, pot, freeTotal, freeRuns, freeSpins, balance, notes, jackpotWon, charm,
+    } = spinOutcome;
+    const total = linePay + pot + freeTotal;
+    const tier  = tierFor(total, ctx.bet, jackpotWon);
+
+    const lines = [gridText(view.window), ''];
+    const headline = lineHeadline(result);
+    if (headline) lines.push(headline);
+    if (freeSpins) {
+        const n = view.scatterCount;
+        lines.push(`🌸 **${n} Scatters** — ${freeSpins.spins} free spins${freeSpins.mult > 1 ? ` at **${freeSpins.mult}×**` : ''}!`);
+    }
+    if (!headline && !freeSpins) lines.push(`💨 *${randomFrom(SLOTS_LOSE_LINES)}*`);
+    else if (total > ctx.bet) lines.push(`*${randomFrom(total >= 10 * ctx.bet ? SLOTS_BIG_WIN_LINES : SLOTS_WIN_LINES)}*`);
+
+    const details = [];
+    if (ctx.hot)  details.push('🔥 Hot Spin — reel 1 landed a high-value symbol');
+    if (charm)    details.push('🍀 Lucky Charm — a second spin');
+    if (result.wildCount > 0 && ['three', 'pair', 'mult3'].includes(result.outcome)) details.push('🃏 A Wild completed the line');
+    if (jackpotWon) details.push(`🏆 Progressive pot: **+${fmt(pot)}**`);
+    if (freeRuns.length) {
+        const wins = freeRuns.filter(r => r.pay > 0);
+        details.push(`🌸 Free spins: **+${fmt(freeTotal)}** (${wins.length} of ${freeRuns.length} hit)`);
+    }
+    if (details.length) lines.push('', ...details.map(d => `> ${d}`));
+
+    const description = lines.join('\n') + notes.join('');
+
+    return new EmbedBuilder()
+        .setAuthor(embedAuthor(ctx.interaction))
+        .setThumbnail(THUMB)
+        .setColor(PALETTE[tier.key])
+        .setTitle(tier.title)
+        .setDescription(description)
         .addFields(
-            { name: '💰 Balance',      value: `**${balance.toLocaleString()}** coins`,      inline: true },
-            { name: '🏆 Progressive Jackpot', value: `**${jackpotPool.toLocaleString()}** coins`, inline: true },
+            { name: '💸 Bet',         value: `**${fmt(ctx.bet)}**`,                inline: true },
+            { name: '🏆 Won',         value: `**${fmt(total)}**`,                  inline: true },
+            { name: '📊 Net',         value: `**${signed(total - ctx.bet)}**`,     inline: true },
+            { name: '💰 Balance',     value: `**${fmt(balance)}**`,                inline: true },
+            { name: '🔥 Heat',        value: heatText(ctx.heatAfter, false),       inline: true },
+            { name: '🏦 Progressive', value: `**${fmt(ctx.pool)}**`,               inline: true },
         )
-        .setFooter({ text: '🃏 Wild substitutes for any symbol  •  ⚡ Boost multiplies your win' })
+        .setFooter({ text: `${sessionText(ctx.session)} · 📊 Paytable for the odds` })
         .setTimestamp();
+}
+
+function freeSpinFrame(ctx, run, index, count, runningTotal, mult) {
+    const headline = lineHeadline(run.result);
+    return new EmbedBuilder()
+        .setAuthor(embedAuthor(ctx.interaction))
+        .setThumbnail(THUMB)
+        .setColor(PALETTE.free)
+        .setTitle(`🌸 Free Spin ${index + 1} of ${count}${mult > 1 ? ` · ${mult}×` : ''}`)
+        .setDescription(`${gridText(run.view.window)}\n\n${run.pay > 0 ? `${headline} → **+${fmt(run.pay)}**` : '*No win*'}`)
+        .addFields({ name: '🎁 Free spin total', value: `**+${fmt(runningTotal)}**`, inline: true })
+        .setFooter({ text: sessionText(ctx.session) });
 }
 
 /**
  * The channel-wide announcement of a Triple Wild.
  *
- * `delivery` is the claim's outcome, and it is what makes the channel hear the
- * same thing the winner does: this embed used to say the player "walked away
- * with the entire pool" whatever became of the credit, so a pot that had not
- * arrived was announced as paid to everyone while the winner's own result embed
- * said otherwise (#873).
+ * `delivery` is the claim's outcome, so the channel hears the same thing the
+ * winner does: a pot that has not arrived is not announced as paid (#873).
  *
  * @param {object} interaction  the spin, for the winner's name and avatar
- * @param {number} wonAmount    the pot that was claimed
- * @param {number} newPool      what the pool was reseeded to
- * @param {object} [delivery]   `{ credited, owed }` from the claim; defaults to
- *                              a delivered pot, which is what every caller
- *                              before the claim could fail to land meant
+ * @param {number} wonAmount    what the spin won in all — line pay and pot
+ * @param {number} newPool      what the pool holds after the claim
+ * @param {object} [delivery]   `{ credited, owed }` from the claim
  */
 function jackpotBroadcastEmbed(interaction, wonAmount, newPool, delivery = {}) {
     const { credited = true, owed = false } = delivery;
     const wonLine = credited
-        ? `  💰 Won: **${wonAmount.toLocaleString()}** coins\n`
-        : `  💰 Won: **${wonAmount.toLocaleString()}** coins — not delivered yet\n` +
-          (owed
-              ? `  📝 Recorded for an admin to settle\n`
-              : `  ⚠️ Could not be recorded — tell an admin\n`);
+        ? `💰 Won **${wonAmount.toLocaleString()}** coins`
+        : `💰 Won **${wonAmount.toLocaleString()}** coins — not delivered yet\n` +
+          (owed ? '📝 Recorded for an admin to settle' : '⚠️ Could not be recorded — tell an admin');
 
     return new EmbedBuilder()
-        .setColor('#FF00FF')
+        .setColor(PALETTE.jackpot)
+        .setTitle('🎰 ✨ J A C K P O T ✨ 🎰')
         .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
         .setDescription(
-            `🎰 ━━━━━━━━━━━━━━━━━━━━━━━ 🎰\n` +
-            `　　　**J A C K P O T**\n` +
-            `🎰 ━━━━━━━━━━━━━━━━━━━━━━━ 🎰\n\n` +
-            `${interaction.user} just hit **TRIPLE WILD** 🃏🃏🃏\n` +
-            (credited ? `and walked away with the entire pool.\n\n` : `and claimed the entire pool.\n\n`) +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            wonLine +
-            `  🔄 New pool: **${newPool.toLocaleString()}** coins\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-            `> Think you can be next?`
+            `${interaction.user} just hit **TRIPLE WILD** 🃏🃏🃏 on the slots!\n\n` +
+            `${wonLine}\n` +
+            `🏦 Progressive now: **${newPool.toLocaleString()}** coins\n\n` +
+            '> Think you can be next? `/casino slots`'
         )
         .setTimestamp();
 }
 
 function paytableEmbed() {
+    const o = odds();
+    const oneIn = key => {
+        const p = o.lines.get(key);
+        return p ? ` · 1 in ${fmt(1 / p)}` : '';
+    };
+    const regulars = SYMBOLS.filter(s => s.type === 'regular').reverse();
+    const threes = regulars.map(s => `${s.emoji.repeat(3)} **${s.three}×**${oneIn(`three:${s.name}`)}`);
+    const pairs  = regulars.filter(s => s.pair > 0).map(s => `${s.emoji.repeat(2)} **${s.pair}×**${oneIn(`pair:${s.name}`)}`);
+    const pct = x => `${(x * 100).toFixed(1)}%`;
+    const total = o.reelReturn + PROGRESSIVE_RETURN + RANDOM_DROP_RETURN;
+
     return new EmbedBuilder()
-        .setColor(COLORS.PRIZE)
+        .setColor(PALETTE.spin)
         .setThumbnail(THUMB)
-        .setTitle('🎰 Slot Machine — Paytable')
-        .setDescription('Match **3 symbols** (or **2 + a Wild 🃏**) to win!\n⚡ Boost on any reel multiplies your payout.\n​')
-        .addFields(
-            { name: '🍒 Cherry',   value: '**2×** your bet',   inline: true },
-            { name: '🍋 Lemon',    value: '**3×** your bet',   inline: true },
-            { name: '🍇 Grape',    value: '**5×** your bet',   inline: true },
-            { name: '🔔 Bell',     value: '**8×** your bet',   inline: true },
-            { name: '💎 Diamond',  value: '**15×** your bet',  inline: true },
-            { name: '🌟 Star',     value: '**25×** your bet',  inline: true },
-            { name: '​', value: '​', inline: false },
-            { name: '🃏🃏🃏 Triple Wild', value: '🏆 **JACKPOT — wins the whole progressive pool** (`/casino jackpot`)', inline: true },
-            { name: '⚡⚡⚡ Triple Boost', value: '**4× bet**', inline: true },
-            { name: 'Two of a Kind', value: 'A quarter of the 3-of-a-kind payout', inline: false },
-            { name: '🌸🌸 Two Scatters', value: '**3 free spins** (no bet deducted)', inline: true },
-            { name: '🌸🌸🌸 Three Scatters', value: '**5 free spins** with **1.5× multiplier**', inline: true },
-            { name: '🔥 Hot Reel', value: 'After 3 losses in a row, reel 1 locks to a high-value symbol', inline: false },
+        .setTitle('🎰 Slots — Paytable')
+        .setDescription(
+            'Wins pay on the **middle line** ▶️ ◀️, as a multiple of your bet.\n' +
+            '🃏 **Wild** stands in for any symbol except 🌸. Every ⚡ **Boost** on the line doubles a line win.\n\n' +
+            `🃏🃏🃏 **${TRIPLE_WILD_MULT}×** + the progressive pot, up to **${JACKPOT_CAP_MULT}×** your bet${oneIn('jackpot')}\n` +
+            `⚡⚡⚡ **${TRIPLE_BOOST_MULT}×** (Wilds count)${oneIn('mult3')}\n` +
+            `${threes.join('\n')}\n${pairs.join('\n')}`
         )
-        .setFooter({ text: 'Two-of-a-kind pays 25% of the three-of-a-kind rate for that symbol • a Wild beside two different symbols completes the better-paying one' });
+        .addFields(
+            {
+                name: '🌸 Free Spins',
+                value: `2 Scatters anywhere in the window: **${FREE_SPINS[2].spins} free spins**. ` +
+                    `3 Scatters: **${FREE_SPINS[3].spins}** at **${FREE_SPINS[3].mult}×**. ` +
+                    `About 1 in ${fmt(1 / o.freeSpinRate)} spins.`,
+            },
+            {
+                name: '🔥 Heat',
+                value: `Every paid spin fills the meter. At ${HEAT_MAX}, your next spin is a **Hot Spin**: reel 1 lands a 🔔, 💎 or 🌟.`,
+            },
+            {
+                name: '🍀 Luck items',
+                value: `Lucky Charm re-spins ${pct(LUCKY_CHARM_RESPIN)} of losing spins; Lucky Streak refunds ${pct(LUCKY_STREAK_REFUND)} of them (bets up to 25,000). Coin boosters don't apply to slots.`,
+            },
+            {
+                name: '📊 The math',
+                value: `Return to player **${pct(total)}**: ${pct(o.reelReturn)} from the reels and features, ` +
+                    `up to ${pct(PROGRESSIVE_RETURN)} from Triple Wild pots and ${pct(RANDOM_DROP_RETURN)} from random pool drops. ` +
+                    `A line win lands on **${pct(o.hitRate)}** of spins, and every one pays more than the bet.`,
+            },
+        )
+        .setFooter({ text: 'The window shows the real reel strips — what sits above and below the line is what was there.' });
 }
+
+/**
+ * The buttons under a result. Spin repeats the bet; ½ and 2× spin again at
+ * half or double. Each is disabled when that spin could not go ahead — the
+ * wallet cannot cover it, it is over the guild's limit, or (2× only) it would
+ * step past the large-bet confirmation a typed command would have asked for.
+ */
+function controls(ids, bet, balance, guildSettings) {
+    const limit = guildSettings?.economy?.casinoMaxBet > 0 ? guildSettings.economy.casinoMaxBet : MAX_BET;
+    const half   = Math.max(MIN_BET, Math.floor(bet / 2));
+    const double = Math.min(MAX_BET, bet * 2);
+    const doubleCeiling = Math.min(limit, balance, confirmThreshold(guildSettings, balance));
+
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(ids.replay).setLabel(`🎰 Spin · ${fmt(bet)}`)
+            .setStyle(ButtonStyle.Primary).setDisabled(bet > balance || bet > limit),
+        new ButtonBuilder().setCustomId(ids.half).setLabel(`½ · ${fmt(half)}`)
+            .setStyle(ButtonStyle.Secondary).setDisabled(half >= bet || half > balance),
+        new ButtonBuilder().setCustomId(ids.double).setLabel(`2× · ${fmt(double)}`)
+            .setStyle(ButtonStyle.Secondary).setDisabled(double <= bet || double > doubleCeiling),
+        new ButtonBuilder().setCustomId(ids.paytable).setLabel('📊 Paytable')
+            .setStyle(ButtonStyle.Secondary),
+    );
+}
+
+// ─── Where a spin renders ─────────────────────────────────────────────────────
+//
+// The first spin edits the command's reply. Every replay edits through the
+// button press that asked for it instead: a press carries its own token, good
+// for fifteen minutes from the press, where the command's own expires fifteen
+// minutes after it was typed. Chaining replays through the command's token
+// broke a long session at that mark — the coins moved and the message stopped
+// updating.
+//
+// A bet that needed the large-bet confirmation plays in a public follow-up: the
+// confirmation itself is ephemeral, and playing into it hid the biggest bets
+// from the channel.
+
+function replySurface(interaction) {
+    return {
+        edit:   payload => interaction.editReply(payload),
+        fetch:  () => interaction.fetchReply(),
+        notice: content => interaction.editReply({ content, embeds: [], components: [] }),
+    };
+}
+
+function followUpSurface(interaction) {
+    let message = null;
+    return {
+        async edit(payload) {
+            if (!message) {
+                // A new message cannot be sent with empty content; an edit can clear it.
+                const { content, ...rest } = payload;
+                message = await interaction.followUp(content ? payload : rest);
+                return message;
+            }
+            return interaction.editReply({ ...payload, message });
+        },
+        fetch:  async () => message,
+        // The confirmation is still the command's reply, and it is private.
+        notice: content => interaction.editReply({ content, embeds: [], components: [] }),
+    };
+}
+
+function pressSurface(press) {
+    return {
+        edit:   payload => press.editReply(payload),
+        fetch:  async () => (await press.fetchReply?.()) ?? press.message,
+        notice: async content => {
+            await press.followUp({ content, flags: MessageFlags.Ephemeral }).catch(() => {});
+            await press.editReply({ components: [] }).catch(() => {});
+        },
+    };
+}
+
+const newSession = () => ({ spins: 0, wagered: 0, returned: 0 });
+
+// ─── The command ──────────────────────────────────────────────────────────────
 
 module.exports = {
     name: 'slots',
@@ -200,9 +420,9 @@ module.exports = {
     configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
-                .setDescription('Amount of coins to bet (min 10)')
-                .setMinValue(10)
-                .setMaxValue(1_000_000_000)
+                .setDescription(`Amount of coins to bet (min ${MIN_BET})`)
+                .setMinValue(MIN_BET)
+                .setMaxValue(MAX_BET)
                 .setRequired(true)),
     async execute(interaction, { releaseLock, onWager } = {}) {
         const bet           = interaction.options.getInteger('bet');
@@ -214,17 +434,26 @@ module.exports = {
         }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
-        const { shouldProceed: slProceed, alreadyReplied: slReplied } = await confirmBet(interaction, bet, wallet, 'Slots', guildSettings);
-        if (!slProceed) { releaseLock?.(); return; }
-        if (!slReplied) await interaction.deferReply();
-        await playSlots(interaction, bet, releaseLock, onWager);
+        const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, wallet, 'Slots', guildSettings);
+        if (!shouldProceed) { releaseLock?.(); return; }
+        if (!alreadyReplied) await interaction.deferReply();
+        const surface = alreadyReplied ? followUpSurface(interaction) : replySurface(interaction);
+        await playSlots({ interaction, bet, surface, releaseLock, onWager, session: newSession() });
     },
 };
 
-// releaseLock is called once the spin settles into a result — "Spin Again"
-// starts a brand-new hand with its own atomic debit, so it doesn't need the
-// lock re-held.
-async function playSlots(interaction, bet, releaseLock, onWager) {
+// ─── One spin ─────────────────────────────────────────────────────────────────
+
+/**
+ * Plays one paid spin: stake, reels, every payout settled, and only then the
+ * show. Nothing the player watches can change what they were paid — a crash
+ * mid-reveal leaves a settled hand, not a lost one.
+ *
+ * releaseLock is called once the spin has settled. A replay starts a brand-new
+ * hand with its own atomic debit, so it does not need the lock re-held.
+ */
+async function playSlots(ctx) {
+    const { interaction, bet, surface, releaseLock, onWager, session } = ctx;
     const handId = newHandId();
     let settled  = false;
     // Hoisted so the rollback below can tell "the spin errored" from "the spin
@@ -243,304 +472,252 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
             Guild.findOne(guildFilter),
         ]);
 
-        const luckyActive      = hasEffect(userDoc, 'lucky_charm');
-        const luckyStreakBonus = getLuckyStreakBonus(userDoc);
-        const coinMult         = getCoinMultiplier(userDoc);
-        const serverMult       = getServerCoinMultiplier(guildSettings);
-        const totalCoinMult    = coinMult * serverMult;
+        const luckySavable = luckySaveEligible(bet);
+        const charmActive  = luckySavable && hasEffect(userDoc, 'lucky_charm');
+        const streakActive = luckySavable && getLuckyStreakBonus(userDoc) > 0;
 
-        // ── Debit the bet FIRST, before any pool mutations ─────────────────
+        // ── Debit the bet FIRST, before any pool or meter writes ────────────
         debited = await placeWager(userFilter, bet, { onWager });
         if (!debited) {
             releaseLock?.();
             const fresh = await User.findOne(userFilter);
-            return interaction.editReply({
-                content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
-                embeds: [], components: [],
-            });
+            return surface.notice(`❌ Not enough coins for a **${fmt(bet)}** spin! Your balance: **${fmt(fresh?.balance ?? 0)}** coins.`);
         }
 
-        // Snapshot of the shared progressive pool, for the reels-spinning embeds. The
-        // pool moves under us while they animate (every casino bet in the guild feeds
-        // it), so the result embed reports a fresh figure rather than this one.
-        const jackpotPool = guildSettings?.casinoJackpot?.pool ?? JACKPOT_SEED;
-
-        // ── Hot Reel mechanic: after 3 consecutive losses, lock reel 1 ────────
+        // ── Heat meter ──────────────────────────────────────────────────────
         //
-        // The streak is claimed, not read. It used to be read off `userDoc` —
-        // fetched before the wager — and written back with a plain `$set` once
-        // the spin settled, which let two spins in flight at once both see the
-        // same three losses and both lock a reel: a replay does not hold the
-        // casino lock, so a player's "Spin Again" and a fresh `/casino slots`
-        // in another channel run side by side. The spin that wins the claim
-        // zeroes the streak in the same write that proves it was there; the
-        // other finds it gone and spins cold. The losses are counted with `$inc`
-        // for the same reason — a `$set` of `read + 1` loses one spin's loss
-        // to the other.
-        const hotReelTriggered = (userDoc.casinoStats?.slotsLossStreak ?? 0) >= HOT_REEL_STREAK
+        // A full meter is claimed, not read: the claim zeroes it in the same
+        // write that proves it was full, so two spins in flight at once — a
+        // replay does not hold the casino lock — cannot both spend it. The one
+        // that loses the claim spins cold and counts toward the next meter. A
+        // spin that is not hot adds its one with `$inc` for the same reason.
+        const heatBefore = userDoc.casinoStats?.slotsHeat ?? 0;
+        const hot = heatBefore >= HEAT_MAX
             && Boolean(await User.findOneAndUpdate(
-                { ...userFilter, 'casinoStats.slotsLossStreak': { $gte: HOT_REEL_STREAK } },
-                { $set: { 'casinoStats.slotsLossStreak': 0 } },
+                { ...userFilter, 'casinoStats.slotsHeat': { $gte: HEAT_MAX } },
+                { $set: { 'casinoStats.slotsHeat': 0 } },
                 { projection: { _id: 1 } },
             ).catch(() => null));
-
-        let reels = [spinReel(), spinReel(), spinReel()];
-        if (hotReelTriggered) {
-            const hotPool = SYMBOLS.filter(s => HIGH_VALUE_SYMBOLS.includes(s.name));
-            reels[0] = hotPool[Math.floor(Math.random() * hotPool.length)];
+        if (!hot) {
+            await User.updateOne(userFilter, { $inc: { 'casinoStats.slotsHeat': 1 } }).catch(() => {});
         }
+        const heatAfter = hot ? 0 : Math.min(HEAT_MAX, heatBefore + 1);
 
-        let result = evaluate(reels, bet);
-        let charmTriggered = false;
+        // ── The reels ───────────────────────────────────────────────────────
+        const firstView = spin({ hot });
+        let view   = firstView;
+        let result = evaluate(view.line, bet, { scatterCount: view.scatterCount });
+        let charm  = false;
 
-        // Lucky Charm: on loss, 20% chance to re-spin (low-stakes bets only)
-        const luckySavable = luckySaveEligible(bet);
-        if (isNetLoss(result, bet) && luckySavable && luckyActive && Math.random() < 0.20) {
-            reels  = [spinReel(), spinReel(), spinReel()];
-            result = evaluate(reels, bet);
-            charmTriggered = true;
+        // Lucky Charm: a losing spin sometimes gets a second one. A Hot Spin's
+        // second spin keeps the reel it was locked to.
+        if (isNetLoss(result, bet) && charmActive && Math.random() < LUCKY_CHARM_RESPIN) {
+            view   = spin({ lock: hot ? firstView.stops[0] : null });
+            result = evaluate(view.line, bet, { scatterCount: view.scatterCount });
+            charm  = true;
         }
-        // Lucky Streak: on remaining loss, convert to a push (bet returned)
-        if (isNetLoss(result, bet) && luckySavable && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+        // Lucky Streak: a spin that is still a loss is sometimes refunded.
+        if (isNetLoss(result, bet) && streakActive && Math.random() < LUCKY_STREAK_REFUND) {
             result = { ...result, outcome: 'push', payout: bet };
         }
 
-        // ── Jackpot claim (bet already charged) ────────────────────────────
+        // ── Progressive pot (bet already charged) ───────────────────────────
         //
-        // A losing spin needs no pool write of its own: placeWager above already
-        // reported the wager, and that is what feeds the progressive pool its 0.5%.
-        // Slots writing a second contribution here is exactly how it ended up with a
-        // pool of its own.
-        let finalJackpotPool = jackpotPool;
+        // A Triple Wild pays TRIPLE_WILD_MULT on the line like any line win,
+        // and claims the pool on top — up to JACKPOT_CAP_MULT × the bet, which
+        // is what keeps a minimum bet from winning what a maximum one does.
+        // casinoJackpotService credits the pot itself under its own payout key,
+        // so it never passes through payHand below; a claim that has not been
+        // credited is being recovered under that key, and paying anything in
+        // its place would pay it twice (#873).
+        const jackpotPool = guildSettings?.casinoJackpot?.pool ?? JACKPOT_SEED;
+        let pot = 0;
         let jackpotWon = false;
-        let jackpotNote = null;
         let jackpotDelivery = {};
+        let newPool = null;
+        const notes = [];
 
         if (result.outcome === 'jackpot') {
             const claim = await claimJackpot({
                 guildId:  interaction.guild.id,
                 userId:   interaction.user.id,
                 username: interaction.user.username,
+                maxWin:   bet * JACKPOT_CAP_MULT,
                 note:     'Progressive jackpot win — slots Triple Wild',
             });
-            finalJackpotPool = claim.newPool;
+            newPool = claim.newPool;
             if (claim.claimed) {
-                // The pot came out of the pool, so it is this player's whether or
-                // not the credit has landed yet — and either way the spin's own
-                // credit below must skip the amount. A claim that has not been
-                // paid is being recovered under its own payout key (the restart
-                // reconciler, `payouts:replay`), and paying the flat mega-win in
-                // its place would pay the same Triple Wild twice: the fallback
-                // used to run on top of a pool the service had put back, over a
-                // credit that may well have committed and only lost its response.
-                //
-                // result.payout carries the pot for the embeds' arithmetic only.
                 jackpotWon = true;
-                result = { ...result, payout: claim.wonAmount };
+                pot = claim.wonAmount;
                 jackpotDelivery = { credited: claim.credited, owed: claim.owed };
                 if (!claim.credited) {
-                    jackpotNote = claim.owed
-                        ? '\n> ⚠️ *The pot could not be paid out just now — it has been recorded and an admin can settle it.*'
-                        : '\n> ⚠️ *The pot could not be paid out just now, and could not be recorded either — please tell an admin.*';
+                    notes.push(claim.owed
+                        ? '\n⚠️ The progressive pot could not be paid out just now — it has been recorded and an admin can settle it.'
+                        : '\n⚠️ The progressive pot could not be paid out just now, and could not be recorded either — please tell an admin.');
                 }
             } else {
-                // Nothing was claimed — there is no guild document and so no pool
-                // to win. Pay the flat mega-win through the normal payout path
-                // instead; a Triple Wild is never a dead spin.
-                console.error(`[Slots] no jackpot pool to claim for ${interaction.user.id} — paying the ${FREE_SPIN_JACKPOT_MULT}x fallback`);
-                result = { ...result, payout: bet * FREE_SPIN_JACKPOT_MULT };
+                // No guild document, so no pool. The line pay still stands.
+                console.error(`[Slots] no jackpot pool to claim for ${interaction.user.id} — paying the line only`);
             }
         }
 
-        // ── Handle scatter free spins ───────────────────────────────────────────
-        let freeSpinCount = 0;
-        let freeSpinMult  = 1;
-        if (result.outcome === 'scatter') {
-            freeSpinCount = result.scatterCount >= 3 ? 5 : 3;
-            freeSpinMult  = result.scatterCount >= 3 ? 1.5 : 1;
+        // ── Free spins, played now and paid with the rest ───────────────────
+        const freeSpins = result.freeSpins;
+        const freeRuns  = [];
+        let freeTotal   = 0;
+        if (freeSpins) {
+            for (let n = 0; n < freeSpins.spins; n++) {
+                const freeView   = spin();
+                const freeResult = evaluate(freeView.line, bet, { freeSpin: true });
+                const pay = Math.floor(freeResult.payout * freeSpins.mult);
+                freeTotal += pay;
+                freeRuns.push({ view: freeView, result: freeResult, pay });
+            }
         }
 
-        // ── Update loss streak ──────────────────────────────────────────────────
-        // A hot-reel spin reset it when it claimed the streak, and a loss on one
-        // does not count toward the next — so it writes nothing more.
-        const isWin = !isNetLoss(result, bet);
-        if (isWin || !hotReelTriggered) {
-            await User.updateOne(userFilter, isWin
-                ? { $set: { 'casinoStats.slotsLossStreak': 0 } }
-                : { $inc: { 'casinoStats.slotsLossStreak': 1 } },
-            ).catch(() => {});
-        }
-
-        // Apply coin booster to payout (net profit portion only). A claimed jackpot
-        // is exempt: the pool is a fixed pot of coins other players paid in, not a
-        // multiple of this bet, and running a booster over it mints the difference.
-        let adjustedPayout = result.payout;
-        // Profit only: a pair that returns less than the stake has none, and
-        // multiplying its negative "profit" deepened the loss.
-        if (result.payout > bet && totalCoinMult > 1.0 && !jackpotWon) {
-            adjustedPayout = bet + Math.round((result.payout - bet) * totalCoinMult);
-        }
-
-        // Credit the payout (bet already debited above). casinoJackpotService credits
-        // a claimed jackpot itself — including it here would pay the pool out twice.
-        // A claimed jackpot is credited by casinoJackpotService under its own
-        // key; paying it here as well would pay the pool out twice.
-        const paid = await payHand(userFilter, jackpotWon ? 0 : adjustedPayout,
-            { game: 'slots', handId, phase: 'settle' });
-        settled    = true;
+        // ── Settle ──────────────────────────────────────────────────────────
+        //
+        // No coin booster. A booster multiplies the profit on a win, and slots'
+        // wins pay several times the stake, so a 2× booster turned a 94% machine
+        // into one that paid back about 169%.
+        const linePay = result.payout;
+        const paid = await payHand(userFilter, linePay, { game: 'slots', handId, phase: 'settle' });
         let balanceAfter = await settledBalance(userFilter, paid.balance);
+        notes.push(payoutNote(paid));
+        if (freeTotal > 0) {
+            const freePaid = await payHand(userFilter, freeTotal, { game: 'slots', handId, phase: 'free-spins' });
+            balanceAfter = await settledBalance(userFilter, freePaid.balance);
+            notes.push(payoutNote(freePaid));
+        }
+        settled = true;
+        releaseLock?.();
 
-        const delay = ms => new Promise(r => setTimeout(r, ms));
+        session.spins    += 1;
+        session.wagered  += bet;
+        session.returned += linePay + freeTotal + pot;
 
-        await interaction.editReply({ embeds: [spinEmbed(reelDisplay(reels, 0), bet, 0, interaction, jackpotPool)], components: [] });
-        await delay(800);
-        await interaction.editReply({ embeds: [spinEmbed(reelDisplay(reels, 1), bet, 1, interaction, jackpotPool)] });
-        await delay(800);
-        await interaction.editReply({ embeds: [spinEmbed(reelDisplay(reels, 2), bet, 2, interaction, jackpotPool)] });
-        await delay(800);
+        // ── The show ────────────────────────────────────────────────────────
+        const show = { ...ctx, hot, heat: hot ? HEAT_MAX : heatAfter, heatAfter, pool: jackpotPool };
+        const sessionBefore = { spins: session.spins - 1, wagered: session.wagered - bet, returned: session.returned - (linePay + freeTotal + pot) };
+        const frameCtx = { ...show, session: sessionBefore };
 
-        // If jackpot won, post the broadcast embed before the winner sees their result
+        if (charm) {
+            await reveal(surface, frameCtx, firstView);
+            await surface.edit({
+                embeds: [frameEmbed(frameCtx, firstView.window, {
+                    revealed: 3,
+                    status: '🍀 **Lucky Charm!** Second chance…',
+                    color: PALETTE.tease,
+                })],
+                components: [],
+            });
+            await delay(CHARM_MS);
+        }
+        await reveal(surface, frameCtx, view);
+
+        // The pool after this spin: the claim's own figure on a Triple Wild,
+        // otherwise a fresh read — this spin's contribution was fired from
+        // placeWager and the reels have been turning since the snapshot.
+        if (newPool === null) {
+            const fresh = await Guild.findOne(guildFilter, 'casinoJackpot').lean().catch(() => null);
+            newPool = fresh?.casinoJackpot?.pool ?? jackpotPool;
+        }
+        show.pool = newPool;
+
+        const outcome = {
+            result, linePay, pot, freeTotal, freeRuns, freeSpins, balance: balanceAfter, notes, jackpotWon, charm,
+        };
+
+        if (freeSpins) {
+            // The spin that won them, with the scatters in view, then the spins.
+            await surface.edit({
+                embeds: [resultEmbed({ ...show, session: sessionBefore }, view, { ...outcome, freeTotal: 0, freeRuns: [] })
+                    .setColor(PALETTE.free)
+                    .setTitle(`🌸 FREE SPINS × ${freeSpins.spins}${freeSpins.mult > 1 ? ` at ${freeSpins.mult}×` : ''}`)],
+                components: [],
+            });
+            await delay(FREE_INTRO_MS);
+            let running = 0;
+            for (const [index, run] of freeRuns.entries()) {
+                running += run.pay;
+                await surface.edit({ embeds: [freeSpinFrame(frameCtx, run, index, freeRuns.length, running, freeSpins.mult)], components: [] });
+                await delay(FREE_SPIN_MS);
+            }
+        }
+
+        const stamp = Date.now();
+        const ids = {
+            replay:   `slots_replay_${interaction.id}_${stamp}`,
+            half:     `slots_half_${interaction.id}_${stamp}`,
+            double:   `slots_double_${interaction.id}_${stamp}`,
+            paytable: `slots_pay_${interaction.id}_${stamp}`,
+        };
+        await surface.edit({
+            embeds: [resultEmbed(show, view, outcome)],
+            components: [controls(ids, bet, balanceAfter, guildSettings)],
+        });
+
+        // The channel hears about a Triple Wild after the winner has seen it land.
         if (jackpotWon && (guildSettings?.slots?.announceJackpot ?? true)) {
-            const pingHere       = guildSettings?.slots?.jackpotPingHere ?? false;
-            const jackpotChanId  = guildSettings?.slots?.jackpotChannelId ?? null;
-            const targetChannel  = jackpotChanId
+            const pingHere      = guildSettings?.slots?.jackpotPingHere ?? false;
+            const jackpotChanId = guildSettings?.slots?.jackpotChannelId ?? null;
+            const targetChannel = jackpotChanId
                 ? (interaction.guild?.channels?.cache?.get(jackpotChanId) ?? interaction.channel)
                 : interaction.channel;
             await targetChannel?.send({
                 content: pingHere ? '@here' : undefined,
                 // The client default never parses @here; this opt-in is the one place it should.
                 allowedMentions: pingHere ? { parse: ['everyone'] } : { parse: [] },
-                embeds: [jackpotBroadcastEmbed(interaction, result.payout, finalJackpotPool, jackpotDelivery)],
+                embeds: [jackpotBroadcastEmbed(interaction, linePay + pot, newPool, jackpotDelivery)],
             }).catch(err => console.error(`[Slots] jackpot broadcast failed — channel:${targetChannel?.id} interaction:${interaction.id}`, err));
         }
 
-        // ── Scatter: play free spins automatically ──────────────────────────────
-        if (freeSpinCount > 0) {
-            let freeTotalPayout = 0;
-            let freeSpinNote    = '';
-            const freeResults = [];
-            for (let fs = 0; fs < freeSpinCount; fs++) {
-                const freeReels = [spinReel(), spinReel(), spinReel()];
-                const freeResult = evaluate(freeReels, bet);
-                // Triple wilds in a free spin pay a flat mega-win — the progressive
-                // pool is only claimable on paid spins (evaluate leaves payout at 0).
-                if (freeResult.outcome === 'jackpot') freeResult.payout = bet * FREE_SPIN_JACKPOT_MULT;
-                const freePayout = Math.round(freeResult.payout * freeSpinMult);
-                freeTotalPayout += freePayout;
-                freeResults.push({ reels: freeReels, payout: freePayout, outcome: freeResult.outcome });
-            }
-            if (freeTotalPayout > 0) {
-                const freeSpins = await payHand(userFilter, freeTotalPayout,
-                    { game: 'slots', handId, phase: 'free-spins' });
-                balanceAfter = await settledBalance(userFilter, freeSpins.balance);
-                freeSpinNote = payoutNote(freeSpins);
-            }
-            const freeResultLines = freeResults.map((fr, i) =>
-                `Spin ${i + 1}: ${fr.reels.map(r => r.emoji).join(' ')} → **+${fr.payout.toLocaleString()}**`
-            ).join('\n');
-            const scatterEmbed = new EmbedBuilder()
-                .setColor('#ff69b4')
-                .setTitle(`🌸 Free Spins Complete! (${freeSpinCount} spins${freeSpinMult > 1 ? ` · ${freeSpinMult}×` : ''})`)
-                .setDescription(freeResultLines)
-                .addFields(
-                    { name: '🎁 Free Spin Total', value: `**+${freeTotalPayout.toLocaleString()}** coins`, inline: true },
-                    { name: '💰 Balance',          value: `**${balanceAfter.toLocaleString()}** coins${freeSpinNote}`, inline: true },
-                )
+        // ── Big win announcement ────────────────────────────────────────────
+        // The whole spin counts — a free-spin run is as much a win as a line.
+        const total = linePay + freeTotal;
+        const announceChannelId = guildSettings?.economy?.announcementChannelId ?? null;
+        if (!jackpotWon && total >= WIN_ANNOUNCE_MULT * bet && announceChannelId && announceChannelId !== interaction.channelId) {
+            const what = result.symbol ? `Three ${result.symbol.plural}` : freeSpins ? 'free-spin run' : 'win';
+            const bigWinEmbed = new EmbedBuilder()
+                .setColor(PALETTE.epic)
+                .setDescription(`🎰 ${interaction.user} just hit a **${Math.floor(total / bet)}× ${what}** on slots for **${fmt(total)} coins**!`)
                 .setTimestamp();
-            await interaction.editReply({ embeds: [scatterEmbed], components: [] });
-            await delay(2000);
+            const ch = interaction.guild?.channels?.cache?.get(announceChannelId);
+            if (ch?.isTextBased?.()) ch.send({ embeds: [bigWinEmbed] }).catch(() => {});
         }
 
-        // Lock is released only after the spin's payout (including any free-spin
-        // payouts) has fully settled, so "Spin Again" can't start a new hand for
-        // this player while a free-spin credit is still being written.
-        releaseLock?.();
-
-        // ── Big win announcement ────────────────────────────────────────────────
-        const winMult = adjustedPayout > 0 ? adjustedPayout / bet : 0;
-        if (winMult >= WIN_ANNOUNCE_MULT && !jackpotWon) {
-            const announceChannelId = guildSettings?.economy?.announcementChannelId ?? null;
-            if (announceChannelId) {
-                const bigWinEmbed = new EmbedBuilder()
-                    .setColor(COLORS.PRIZE)
-                    .setDescription(
-                        `🎰 ${interaction.user} just hit a **${winMult.toFixed(0)}× ${result.symbol?.name ?? 'win'}** on slots for **${adjustedPayout.toLocaleString()} coins**!`
-                    )
-                    .setTimestamp();
-                const ch = interaction.guild?.channels?.cache?.get(announceChannelId);
-                if (ch?.isTextBased?.()) ch.send({ embeds: [bigWinEmbed] }).catch(() => {});
-            }
-        }
-
-        const replayId   = `slots_replay_${interaction.id}_${Date.now()}`;
-        const paytableId = `slots_pay_${interaction.id}_${Date.now()}`;
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(replayId).setLabel('🎰 Spin Again').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId(paytableId).setLabel('📊 Paytable').setStyle(ButtonStyle.Secondary),
-        );
-
-        // Refresh the pool for the result embed rather than reusing the pre-spin
-        // snapshot. This spin's own 0.5% contribution is fired and forgotten from
-        // placeWager, and the reels animated for ~2.4 seconds on top of that, so the
-        // snapshot is stale by the time anyone reads it — and this is the figure a
-        // player checks against `/casino jackpot`.
-        if (!jackpotWon) {
-            const fresh = await Guild.findOne(guildFilter, 'casinoJackpot').lean().catch(() => null);
-            finalJackpotPool = fresh?.casinoJackpot?.pool ?? finalJackpotPool;
-        }
-
-        const finalEmbed = resultEmbed(reels, { ...result, payout: adjustedPayout }, bet, balanceAfter, interaction, finalJackpotPool, payoutNote(paid));
-        if (hotReelTriggered) {
-            const desc = finalEmbed.data.description ?? '';
-            finalEmbed.setDescription(desc + '\n> 🔥 *Hot Reel activated — first reel was locked to a high-value symbol!*');
-        }
-        if (charmTriggered) {
-            const desc = finalEmbed.data.description ?? '';
-            finalEmbed.setDescription(desc + '\n> 🍀 *Lucky Charm gave you a second chance!*');
-        }
-        if (totalCoinMult > 1.0 && adjustedPayout > bet) {
-            const desc = finalEmbed.data.description ?? '';
-            finalEmbed.setDescription(desc + `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied to winnings!*`);
-        }
-        // A pot that was claimed but has not reached the balance yet says so
-        // here. The embed reports the win and the new balance from the same
-        // document, and without this it would show the pot as paid.
-        if (jackpotNote) {
-            const desc = finalEmbed.data.description ?? '';
-            finalEmbed.setDescription(desc + jackpotNote);
-        }
-        await interaction.editReply({
-            embeds: [finalEmbed],
-            components: [row],
-        });
-
-        const msg = await interaction.fetchReply();
+        const msg = await surface.fetch();
         const collector = msg.createMessageComponentCollector({
             filter: ownedBy(
                 interaction.user.id,
-                i => [replayId, paytableId].includes(i.customId),
-                "This isn't your spin — run `/slots` for your own.",
+                i => Object.values(ids).includes(i.customId),
+                "This isn't your spin — run `/casino slots` for your own.",
             ),
-            time: 60_000,
+            time: REPLAY_WINDOW_MS,
         });
 
         collector.on('collect', async i => {
-            if (i.customId === paytableId) {
-                await i.reply({ embeds: [paytableEmbed()], flags: MessageFlags.Ephemeral });
+            if (i.customId === ids.paytable) {
+                await i.reply({ embeds: [paytableEmbed()], flags: MessageFlags.Ephemeral }).catch(() => {});
                 return;
             }
+            const nextBet = i.customId === ids.half ? Math.max(MIN_BET, Math.floor(bet / 2))
+                : i.customId === ids.double ? Math.min(MAX_BET, bet * 2)
+                : bet;
             // A new spin is a new hand, so it answers to the settings as they
             // are now, not as they were when the first one was typed.
-            const refused = await replayRefusal(interaction.guild.id, bet);
-            if (refused) { collector.stop('refused'); return refuseReplay(i, interaction, refused); }
+            const refused = await replayRefusal(interaction.guild.id, nextBet);
+            if (refused) {
+                collector.stop('refused');
+                return refuseReplay(i, { editReply: payload => surface.edit(payload) }, refused);
+            }
             collector.stop('replay');
-            await i.deferUpdate();
-            await playSlots(interaction, bet, null, onWager);
+            await i.deferUpdate().catch(() => {});
+            await playSlots({ ...ctx, bet: nextBet, surface: pressSurface(i), releaseLock: null });
         });
 
         collector.on('end', (_, reason) => {
-            if (reason !== 'replay') interaction.editReply({ components: [] }).catch(() => {});
+            if (reason !== 'replay') surface.edit({ components: [] }).catch(() => {});
         });
 
     } catch (err) {
@@ -550,10 +727,14 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
             ? await payHand(userFilter, bet, { game: 'slots', handId, phase: 'rollback' })
             : null;
         const outcome = !debited ? 'No wager was taken.'
-            : settled ? 'Your hand had already been settled.'
+            : settled ? 'Your spin had already been settled — check your balance.'
             : rolled.credited ? 'Your wager was refunded — please try again.' : 'Your wager could not be refunded.';
-        await interaction.editReply({
-            content: `An error occurred while playing slots. ${outcome}${rolled ? payoutNote(rolled) : ''}`,
+        await surface.edit({
+            content: '',
+            embeds: [new EmbedBuilder()
+                .setColor(PALETTE.error)
+                .setTitle('🎰 Slots hit a snag')
+                .setDescription(`An error occurred while playing slots. ${outcome}${rolled ? payoutNote(rolled) : ''}`)],
             components: [],
         }).catch(() => {});
     }
