@@ -241,6 +241,40 @@ describe('the buttons', () => {
         expect(double.disabled).toBe(true);
     }, 20_000);
 
+    test('Max spins at the most a player can stake without a confirmation', async () => {
+        // A 10,000 wallet and no configured threshold: the confirmation asks
+        // above half the wallet, so Max is 5,000.
+        const spin = await play([LOSER()], { holdCollectors: true });
+        const max = buttons(resultOf(spin)).find(b => b.custom_id.startsWith('slots_max_'));
+        expect(max.label).toBe('Max · 5,000');
+        expect(max.disabled).toBe(false);
+
+        mockSpins = [LOSER()];
+        await spin.press({ customId: idFor(spin, 'slots_max_') });
+        for (let i = 0; i < 60; i++) await jest.advanceTimersByTimeAsync(250);
+        expect(debits()).toEqual([BET, 5_000]);
+    }, 20_000);
+
+    test('Max stops at the server’s bet limit', async () => {
+        guild.economy.casinoMaxBet = 300;
+        const spin = await play([LOSER()]);
+        const max = buttons(resultOf(spin)).find(b => b.custom_id.startsWith('slots_max_'));
+        expect(max.label).toBe('Max · 300');
+    }, 20_000);
+
+    test('Max is off when the bet is already the most it could be', async () => {
+        guild.economy.casinoMaxBet = BET;
+        const spin = await play([LOSER()]);
+        const max = buttons(resultOf(spin)).find(b => b.custom_id.startsWith('slots_max_'));
+        expect(max.disabled).toBe(true);
+    }, 20_000);
+
+    test('a row holds all five buttons, which is Discord’s limit', async () => {
+        const spin = await play([LOSER()]);
+        expect(buttons(resultOf(spin)).map(b => b.custom_id.split('_')[1]))
+            .toEqual(['replay', 'half', 'double', 'max', 'pay']);
+    }, 20_000);
+
     test('the paytable answers privately, with the real return', async () => {
         const spin = await play([LOSER()], { holdCollectors: true });
         const press = await spin.press({ customId: idFor(spin, 'slots_pay_') });

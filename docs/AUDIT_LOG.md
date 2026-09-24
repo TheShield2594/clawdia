@@ -2578,7 +2578,7 @@ Real reel strips shown through a 3×3 window (the rows above and below the line
 are what the strip holds, so a near miss is genuine), reels that stop one at a
 time with a held last reel when two Wilds, two Scatters or a top pair are
 showing, win tiers (Big / Mega / Epic / Jackpot), a heat meter, a session total,
-Spin / ½ / 2× / Paytable buttons (2× will not step past the guild limit, the
+Spin / ½ / 2× / Max / Paytable buttons (2× and Max will not step past the guild limit, the
 wallet or the large-bet confirmation), and a paytable that prints each line's
 odds and the return. Autoplay was deliberately left out: the UK Gambling
 Commission banned it on online slots in 2021 as a harm driver.

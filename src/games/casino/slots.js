@@ -336,16 +336,28 @@ function paytableEmbed() {
 }
 
 /**
- * The buttons under a result. Spin repeats the bet; ½ and 2× spin again at
- * half or double. Each is disabled when that spin could not go ahead — the
- * wallet cannot cover it, it is over the guild's limit, or (2× only) it would
- * step past the large-bet confirmation a typed command would have asked for.
+ * The buttons under a result. Spin repeats the bet; ½, 2× and Max spin again
+ * at half, double, or the most this player can stake without a confirmation.
+ * Each is disabled when that spin could not go ahead — the wallet cannot cover
+ * it, it is over the guild's limit, or (2× and Max) it would step past the
+ * large-bet confirmation a typed command would have asked for.
  */
-function controls(ids, bet, balance, guildSettings) {
+function stakeOptions(bet, balance, guildSettings) {
     const limit = guildSettings?.economy?.casinoMaxBet > 0 ? guildSettings.economy.casinoMaxBet : MAX_BET;
-    const half   = Math.max(MIN_BET, Math.floor(bet / 2));
-    const double = Math.min(MAX_BET, bet * 2);
-    const doubleCeiling = Math.min(limit, balance, confirmThreshold(guildSettings, balance));
+    // The most a raise button may stake: the guild's limit, the wallet, and the
+    // largest bet a typed command would take without asking to confirm.
+    const ceiling = Math.floor(Math.min(limit, balance, confirmThreshold(guildSettings, balance), MAX_BET));
+    return {
+        limit,
+        ceiling,
+        half:   Math.max(MIN_BET, Math.floor(bet / 2)),
+        double: Math.min(MAX_BET, bet * 2),
+        max:    ceiling,
+    };
+}
+
+function controls(ids, bet, balance, stakes) {
+    const { limit, ceiling, half, double, max } = stakes;
 
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(ids.replay).setLabel(`🎰 Spin · ${fmt(bet)}`)
@@ -353,7 +365,11 @@ function controls(ids, bet, balance, guildSettings) {
         new ButtonBuilder().setCustomId(ids.half).setLabel(`½ · ${fmt(half)}`)
             .setStyle(ButtonStyle.Secondary).setDisabled(half >= bet || half > balance),
         new ButtonBuilder().setCustomId(ids.double).setLabel(`2× · ${fmt(double)}`)
-            .setStyle(ButtonStyle.Secondary).setDisabled(double <= bet || double > doubleCeiling),
+            .setStyle(ButtonStyle.Secondary).setDisabled(double <= bet || double > ceiling),
+        // Max never lowers the stake: after a confirmed large bet the ceiling
+        // can sit below it, and "Max" spinning for less would read as a lie.
+        new ButtonBuilder().setCustomId(ids.max).setLabel(`Max · ${fmt(Math.max(max, MIN_BET))}`)
+            .setStyle(ButtonStyle.Secondary).setDisabled(max <= bet || max < MIN_BET),
         new ButtonBuilder().setCustomId(ids.paytable).setLabel('📊 Paytable')
             .setStyle(ButtonStyle.Secondary),
     );
@@ -648,11 +664,13 @@ async function playSlots(ctx) {
             replay:   `slots_replay_${interaction.id}_${stamp}`,
             half:     `slots_half_${interaction.id}_${stamp}`,
             double:   `slots_double_${interaction.id}_${stamp}`,
+            max:      `slots_max_${interaction.id}_${stamp}`,
             paytable: `slots_pay_${interaction.id}_${stamp}`,
         };
+        const stakes = stakeOptions(bet, balanceAfter, guildSettings);
         await surface.edit({
             embeds: [resultEmbed(show, view, outcome)],
-            components: [controls(ids, bet, balanceAfter, guildSettings)],
+            components: [controls(ids, bet, balanceAfter, stakes)],
         });
 
         // The channel hears about a Triple Wild after the winner has seen it land.
@@ -699,8 +717,10 @@ async function playSlots(ctx) {
                 await i.reply({ embeds: [paytableEmbed()], flags: MessageFlags.Ephemeral }).catch(() => {});
                 return;
             }
-            const nextBet = i.customId === ids.half ? Math.max(MIN_BET, Math.floor(bet / 2))
-                : i.customId === ids.double ? Math.min(MAX_BET, bet * 2)
+            // The stake the button showed, not one worked out again at press time.
+            const nextBet = i.customId === ids.half ? stakes.half
+                : i.customId === ids.double ? stakes.double
+                : i.customId === ids.max ? stakes.max
                 : bet;
             // A new spin is a new hand, so it answers to the settings as they
             // are now, not as they were when the first one was typed.
