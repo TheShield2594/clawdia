@@ -45,6 +45,7 @@ const {
     validateAiUpdate,
     validateHeistUpdate,
     collectSelfAssignRoleIds,
+    collectChannelIds,
 } = settings;
 
 const SNOWFLAKE = '111222333444555666';
@@ -670,8 +671,117 @@ describe('collectSelfAssignRoleIds', () => {
         expect([...ids].sort()).toEqual(['a1', 'a2', 'r1']);
     });
 
-    it('ignores everything that is not one of the two role parents', () => {
-        expect(collectSelfAssignRoleIds({ 'welcome.enabled': true, levelRoles: [{ roleId: 'x' }] }).size).toBe(0);
+    it('gathers level rewards, shop items and the birthday role too (#1141)', () => {
+        const ids = collectSelfAssignRoleIds({
+            levelRoles: [{ level: 1, roleId: 'l1' }],
+            shop: [{ name: 'VIP', price: 0, roleId: 's1' }, { name: 'Hat', price: 5 }],
+            birthdays: { enabled: true, roleId: 'b1' },
+        });
+        expect([...ids].sort()).toEqual(['b1', 'l1', 's1']);
+    });
+
+    it('gathers role ids written through dotted keys (#1141)', () => {
+        const ids = collectSelfAssignRoleIds({
+            'autoRoles.0': 'a1',
+            'autoRoles.1': { roleId: 'a2' },
+            'reactionRoles.0.roleId': 'r1',
+            'levelRoles.2': { level: 1, roleId: 'l1' },
+            'shop.0.roleId': 's1',
+            'birthdays.roleId': 'b1',
+        });
+        expect([...ids].sort()).toEqual(['a1', 'a2', 'b1', 'l1', 'r1', 's1']);
+    });
+
+    it('ignores role ids under parents that grant nothing', () => {
+        expect(collectSelfAssignRoleIds({
+            'welcome.enabled': true,
+            commandPolicies: { cooldownOverrides: [{ command: 'x', roleId: 'c1' }] },
+        }).size).toBe(0);
+    });
+});
+
+describe('collectChannelIds', () => {
+    it('gathers every snowflake under a channelId-style key, dotted or nested', () => {
+        const ids = collectChannelIds({
+            'bibleVerse.channelId': '111111111111111111',
+            economy: { announcementChannelId: '222222222222222222' },
+            'moderation.logChannelId': '333333333333333333',
+            dailyNewsProfiles: [{ profileId: 'p', channelId: '444444444444444444' }],
+        });
+        expect([...ids].sort()).toEqual([
+            '111111111111111111', '222222222222222222', '333333333333333333', '444444444444444444',
+        ]);
+    });
+
+    it('skips ignore lists, empty values and anything not shaped like an id', () => {
+        expect(collectChannelIds({
+            moderation: { exemptChannelIds: ['111111111111111111'], logChannelId: null },
+            'welcome.channelId': '',
+            'heist.announceChannelId': 'nope',
+        }).size).toBe(0);
+    });
+});
+
+describe('POST /guild/:guildId/settings — channels must belong to the guild (#1140)', () => {
+    const OWN = '111111111111111111';
+    const FOREIGN = '999999999999999999';
+    const STORED = '555555555555555555';
+    const bot = stubBotGateway({
+        listChannels: jest.fn(async () => [{ id: OWN, name: 'general', type: 0, parentId: null }]),
+    });
+
+    let app;
+    let doc;
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        app = express();
+        app.use(express.json());
+        app.use((req, _res, next) => { req.bot = bot; next(); });
+        app.use('/api/v1', settings);
+        doc = {
+            guildId: 'g1', shop: [],
+            moderation: { logChannelId: STORED },
+            set: jest.fn(), save: jest.fn(async () => {}),
+        };
+        Guild.findOne.mockResolvedValue(doc);
+    });
+
+    const post = body => request(app).post('/api/v1/guild/g1/settings').send(body);
+
+    it.each([
+        ['bibleVerse.channelId', { 'bibleVerse.channelId': FOREIGN }],
+        ['economy.announcementChannelId', { economy: { announcementChannelId: FOREIGN } }],
+        ['moderation.logChannelId', { 'moderation.logChannelId': FOREIGN }],
+        ['dailyNewsProfiles[].channelId', { dailyNewsProfiles: [{ profileId: 'p', channelId: FOREIGN }] }],
+    ])('refuses another server\'s channel in %s', async (_label, body) => {
+        const res = await post(body);
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain(FOREIGN);
+        expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('saves a channel that is in this server', async () => {
+        const res = await post({ 'moderation.logChannelId': OWN });
+
+        expect(res.status).toBe(200);
+        expect(doc.save).toHaveBeenCalled();
+    });
+
+    it('lets an id that is already saved through, so a stale channel does not block the save', async () => {
+        const res = await post({ moderation: { logChannelId: STORED } });
+
+        expect(res.status).toBe(200);
+        expect(bot.listChannels).not.toHaveBeenCalled();
+    });
+
+    it('refuses a new channel when the bot cannot list the guild\'s channels', async () => {
+        bot.listChannels.mockResolvedValueOnce(null);
+        const res = await post({ 'moderation.logChannelId': OWN });
+
+        expect(res.status).toBe(400);
+        expect(doc.save).not.toHaveBeenCalled();
     });
 });
 
@@ -724,6 +834,19 @@ describe('POST /guild/:guildId/settings — self-assignable role guard (#1061)',
 
         expect(res.status).toBe(200);
         expect(doc.save).toHaveBeenCalled();
+    });
+
+    it.each([
+        ['a level reward', { levelRoles: [{ level: 1, roleId: 'admin' }] }],
+        ['a shop item', { shop: [{ name: 'Free admin', price: 0, roleId: 'admin' }] }],
+        ['a dotted autoRoles write', { 'autoRoles.0': { roleId: 'admin' } }],
+        ['a dotted reactionRoles write', { 'reactionRoles.0.roleId': 'admin' }],
+    ])('refuses a privileged role written as %s (#1141)', async (_label, body) => {
+        const res = await post(body);
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain('Staff');
+        expect(doc.save).not.toHaveBeenCalled();
     });
 
     it('does not look up roles when the patch touches neither parent', async () => {

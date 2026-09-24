@@ -512,7 +512,10 @@ async function resolveTurn(interaction, sessionId, actionText) {
         return interaction.editReply('The adventure has not begun yet. The host must use `/dm begin`.');
     }
     if (player.hp <= 0) {
-        return interaction.editReply(`**${player.name}** has fallen and cannot act. The rest of the party fights on.`);
+        return interaction.editReply({
+            content: `**${player.name}** has fallen and cannot act. The rest of the party fights on.`,
+            allowedMentions: { parse: [] }
+        });
     }
 
     // Roles are counted back from the end of the log, never forward from its

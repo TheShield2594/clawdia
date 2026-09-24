@@ -50,6 +50,11 @@ async function postDailyVerse(client, guildId, channelId, translation) {
     let channel = client.channels.cache.get(channelId);
     if (!channel) channel = await client.channels.fetch(channelId).catch(() => null);
     if (!channel || typeof channel.send !== 'function') return;
+    // The id is resolved across every guild the bot is in (#1140).
+    if (channel.guildId !== guildId) {
+        console.warn(`[BibleService] Channel ${channelId} is not in guild ${guildId}; not posting`);
+        return;
+    }
 
     const guild = channel.guild;
     if (guild) {
