@@ -60,6 +60,7 @@ const COLLECTIONS = [
     { module: 'fishData', export: 'JUNK_ITEMS',      kind: 'fishing junk catch',     system: 'fishing', command: '/fish cast' },
     { module: 'fishData', export: 'TREASURE_ITEMS',  kind: 'fishing treasure catch', system: 'fishing', command: '/fish cast' },
     { module: 'fishData', export: 'BOSS_TYPES',      kind: 'boss fish encounter',    system: 'fishing', command: '/fish cast' },
+    { module: 'fishData', export: 'FIGHT_MOVES',     kind: 'fishing fight move (reel-in and boss rounds)', system: 'fishing', command: '/fish cast' },
     { module: 'fishData', export: 'WEATHER_LIST',    kind: 'fishing weather',        system: 'fishing', command: '/fish cast' },
     { module: 'fishData', export: 'SIZE_TIERS',      kind: 'fish size grade',        system: 'fishing', command: '/fish records' },
     { module: 'fishData', export: 'FAILURE_SEVERITIES', kind: 'failed cast outcome', system: 'fishing', command: '/fish cast' },

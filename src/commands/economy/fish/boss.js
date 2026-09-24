@@ -1,14 +1,16 @@
 'use strict';
 
-// The boss fight a rare-or-better /fish cast can turn into: three phases of
-// read-the-fish button choices fought over the revealed catch, then a bonus
+// The boss fight a rare-or-better /fish cast can turn into: something big
+// goes for the catch on its way up, and the angler fights it for three rounds of
+// read-the-cue button choices fought over the revealed catch, then a bonus
 // payout credited on its own atomic write. The base catch is already saved and
 // shown by the time this runs; nothing here can take it back.
 
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const {
-    rollBossType,
+    rollBossFight,
+    scoreFightMove,
     ensureFishingData,
     resolveBossEncounter,
     applyPayoutModifiers,
@@ -20,82 +22,74 @@ const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const { gatherPayoutKey } = require('../../../utils/payoutKey');
 const { logBigWin } = require('../../../utils/bigWinLogger');
 const COLORS = require('../../../utils/embedColors');
-const { awaitCasterClick } = require('./shared');
+const { FIGHT_MOVES, BOSS_LINE_INTEGRITY } = require('../../../data/fishData');
+const { awaitCasterClick, buildMoveRow, moveFromCustomId } = require('./shared');
 
-const BOSS_COLOR   = '#B03A2E';
-const BOSS_PHASE_MS = 30_000;
-const BOSS_IDS     = ['boss_match', 'boss_hold', 'boss_safe'];
-const BOSS_ID_KEY  = { boss_match: 'match', boss_hold: 'hold', boss_safe: 'safe' };
-// A phase the player let run out. Never the correct answer, so a timeout keeps
-// the credit for phases already answered and earns none for the rest — waiting
-// out a boss whose answer happens to be "slack" is not a winning strategy.
+const BOSS_COLOR    = '#B03A2E';
+const BOSS_ROUND_MS = 15_000;
+// A round the player let run out. Never the correct answer, and it costs the
+// line like any wrong move — waiting a boss out is not a strategy.
 const BOSS_TIMEOUT = 'timeout';
 
-function bossPhaseIcon(p) {
+function roundIcon(p) {
     if (p.correct) return '✅';
-    if (p.chosen === 'safe') return '🛡️';
     if (p.chosen === BOSS_TIMEOUT) return '⏱️';
     return '❌';
 }
 
+function integrityBar(integrity) {
+    return '❤️'.repeat(integrity) + '🖤'.repeat(BOSS_LINE_INTEGRITY - integrity);
+}
+
 async function runBossFight({ interaction, reelMsg, embed, catchFiles, result, location, guildSettings, currency }) {
-    const bossType    = rollBossType();
-    const phaseCount  = bossType.phases.length;
+    const fight       = rollBossFight();
+    const { boss: bossType, rounds } = fight;
+    const roundCount  = rounds.length;
     const bossFish    = result.bossEncounter.fish;
     const choicesMade = [];
     const shown       = [];
+    let integrity     = BOSS_LINE_INTEGRITY;
 
-    const buildBossPhaseEmbed = phaseIndex => {
-        const phase     = bossType.phases[phaseIndex];
-        const integrity = Math.max(0, 3 - shown.filter(p => !p.correct && p.chosen !== 'safe').length);
-        const intBar    = '❤️'.repeat(integrity) + '🖤'.repeat(3 - integrity);
-        const histLines = shown.map((p, i) => `Phase ${i + 1}: ${bossPhaseIcon(p)}`).join('  ');
+    const customIdFor = move => `boss_${interaction.id}_${move}`;
+    const moveIds     = Object.keys(FIGHT_MOVES).map(customIdFor);
 
+    const buildRoundEmbed = i => {
+        const histLines = shown.map((p, n) => `Round ${n + 1}: ${roundIcon(p)}`).join('  ');
+        const opening   = i === 0
+            ? `*${bossType.intro} Your ${bossFish.emoji} **${bossFish.name}** is still on the hook — land them both.*\n\n`
+            : '';
         return new EmbedBuilder()
             .setColor(BOSS_COLOR)
-            .setTitle(`${bossType.emoji} ${bossType.name} — Phase ${phaseIndex + 1}/${phaseCount}`)
+            .setTitle(`${bossType.emoji} ${bossType.name} — Round ${i + 1}/${roundCount}`)
             .setDescription(
-                `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `  ${bossFish.emoji}  **${bossFish.name}**\n` +
-                `  Line Integrity: ${intBar}\n` +
-                `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-                `${phase.hint}\n\n` +
+                opening +
+                `Line: ${integrityBar(integrity)}\n\n` +
+                `> **${rounds[i].text}**\n\n` +
                 (histLines ? `${histLines}\n\n` : '') +
-                `**Choose your response — NOW:**`
+                `**Read it. Answer it.** ⏱️ ${BOSS_ROUND_MS / 1000}s`
             )
-            .setFooter({ text: `⏱️ ${BOSS_PHASE_MS / 1000}s per phase • Bonus: 3/3 = 1.5× the catch's value | 2/3 = 1× | 1/3 = 0.4× | 0/3 = nothing` });
-    };
-
-    const buildPhaseRow = phaseIndex => {
-        const { choices } = bossType.phases[phaseIndex];
-        return new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('boss_match').setLabel(choices.match.label).setStyle(ButtonStyle.Danger),
-            new ButtonBuilder().setCustomId('boss_hold').setLabel(choices.hold.label).setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('boss_safe').setLabel(choices.safe.label).setStyle(ButtonStyle.Secondary)
-        );
+            .setFooter({ text: `${bossType.description} • Bonus: 3/3 = 1.5× your catch's value | 2/3 = 1× | 1/3 = 0.4× | a snapped line = nothing` });
     };
 
     let timedOut = false;
-    for (let i = 0; i < phaseCount; i++) {
-        const pick = awaitCasterClick(reelMsg, interaction.user.id, BOSS_IDS);
-        await interaction.editReply({ embeds: [embed, buildBossPhaseEmbed(i)], components: [buildPhaseRow(i)], files: catchFiles });
-        pick.start(BOSS_PHASE_MS);
+    for (let i = 0; i < roundCount && integrity > 0; i++) {
+        const pick = awaitCasterClick(reelMsg, interaction.user.id, moveIds);
+        await interaction.editReply({ embeds: [embed, buildRoundEmbed(i)], components: [buildMoveRow(customIdFor)], files: catchFiles });
+        pick.start(BOSS_ROUND_MS);
         const clicked = await pick.choice;
-        if (!clicked) {
-            timedOut = true;
-            while (choicesMade.length < phaseCount) choicesMade.push(BOSS_TIMEOUT);
-            break;
-        }
-        const chosen = BOSS_ID_KEY[clicked];
+        const chosen  = clicked ? moveFromCustomId(clicked) : BOSS_TIMEOUT;
+        const scored  = scoreFightMove(rounds[i], chosen);
+        integrity = Math.max(0, integrity - scored.cost);
         choicesMade.push(chosen);
-        shown.push({ chosen, correct: chosen === bossType.phases[i].correct });
+        shown.push({ chosen, correct: scored.correct });
+        if (!clicked) { timedOut = true; break; }
     }
 
     // Resolve outcome
     const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
     await attachGrind(freshUser);
     ensureFishingData(freshUser);
-    const bossResult = resolveBossEncounter(freshUser, bossFish, result.bossEncounter.tier, choicesMade, bossType);
+    const bossResult = resolveBossEncounter(freshUser, bossFish, result.bossEncounter.tier, choicesMade, fight);
 
     // The reload above is already seconds old by the time the fight
     // resolves, and `save()` writes `balance` as an absolute `$set` — so
@@ -159,7 +153,7 @@ async function runBossFight({ interaction, reelMsg, embed, catchFiles, result, l
         }).catch(() => null);
     }
 
-    const phaseScoreLine = bossResult.phaseResults.map((p, i) => `Phase ${i + 1}: ${bossPhaseIcon(p)}`).join('  ');
+    const phaseScoreLine = bossResult.phaseResults.map((p, i) => `Round ${i + 1}: ${roundIcon(p)}`).join('  ');
 
     const outcomeColors = { perfect: '#FFD700', win: '#2ecc71', survived: '#3498db', escaped: COLORS.NEUTRAL };
     const outcomeTitles = {
@@ -170,14 +164,14 @@ async function runBossFight({ interaction, reelMsg, embed, catchFiles, result, l
     };
 
     const timeoutNote = timedOut
-        ? `⏱️ *You hesitated — the ${bossType.name} took the phases you didn't answer.*\n\n`
+        ? `⏱️ *You hesitated — the ${bossType.name} took its chance and ran.*\n\n`
         : '';
     const bossResultEmbed = new EmbedBuilder()
         .setColor(outcomeColors[bossResult.outcome] ?? '#95a5a6')
         .setTitle(outcomeTitles[bossResult.outcome] ?? '❓ Boss Result')
         .setDescription(`${phaseScoreLine}\n\n${timeoutNote}${bossResult.message}\n\n*The catch above is yours either way.*`)
         .addFields(
-            { name: 'Score',        value: `${bossResult.correctCount}/${phaseCount} correct`, inline: true },
+            { name: 'Score',        value: `${bossResult.correctCount}/${roundCount} read right`, inline: true },
             { name: 'Bonus Payout', value: bossResult.bonusPayout > 0 ? `${currency}${bossResult.bonusPayout.toLocaleString()}` : 'None', inline: true },
             { name: 'Rod Damage',   value: `-${bossResult.durabilityLost} durability`, inline: true }
         )

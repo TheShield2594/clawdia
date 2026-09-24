@@ -212,7 +212,7 @@ describe('/fish profile', () => {
         const snap = snapshotCastRewards(user);
         recordCatalogCatch(user.fishing, fish, 3.5);
         recordCatalogCatch(user.fishing, fish, 2);
-        expect(user.fishing.catalog[fish.id]).toEqual({ count: 2, heaviest: 3.5 });
+        expect(user.fishing.catalog[fish.id]).toEqual({ count: 2, heaviest: 3.5, scale: fishData.FISH_WEIGHT_SCALE });
         revertEscapedCast(user, snap, {});
         expect(user.fishing.catalog).toEqual({});
     });

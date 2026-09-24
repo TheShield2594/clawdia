@@ -4,7 +4,7 @@
 // a catch can trip.
 
 const { TIER_NUM, TIER_STARS } = require('../../../data/materialRarity');
-const { EmbedBuilder, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../../models/Guild');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const User = require('../../../models/User');
@@ -20,6 +20,7 @@ const {
     rollWinterHuntMaterial,
     updateFishQuestProgress,
     commitCast,
+    rollFightCues,
 } = require('../../../services/fishService');
 const { buildCooldownEmbed } = require('../../../utils/cooldownEmbed');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require('../../../data/featuredRotation');
@@ -36,10 +37,12 @@ const { WILDERNESS_YIELD_BONUS } = require('../../../data/crossSystemData');
 const { gatherPayoutKey } = require('../../../utils/payoutKey');
 const { logBigWin } = require('../../../utils/bigWinLogger');
 const { PITY_COPY } = require('../../../utils/pityBonus');
-const { FISH_TIER_SCORE, awaitCasterClick } = require('./shared');
+const { FISH_TIER_SCORE, awaitCasterClick, buildMoveRow, moveFromCustomId } = require('./shared');
+const { REEL_IN, FIGHT_MOVES, FISH_WEIGHT_SCALE } = require('../../../data/fishData');
 const { runBossFight } = require('./boss');
 const { buildCastEmbed } = require('./embeds');
 const { attachResultThumbnail } = require('../../../utils/itemImageHelper');
+const { renderCatchCard } = require('./catchCard');
 const COLORS = require('../../../utils/embedColors');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
 
@@ -121,8 +124,8 @@ async function handleCast(interaction) {
         const isFeaturedSpot    = locationId === featured.fishSpot.id;
 
         // ── Cast & Wait for Bite ──────────────────────────────────────────────────
-        // Common/Uncommon: passive (no button). Rare: optional single button (3s) — miss
-        // downgrades to Uncommon payout. Epic: required (3s). Legendary: required (2s).
+        // Common/Uncommon land on their own. Rare, Epic and Legendary put up a
+        // fight the angler has to read — see the reel-in below and REEL_IN.
         const authorOpts = { name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL() };
         const featuredNote = isFeaturedSpot ? `\n\n🌟 **Featured Spot!** +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout & +${Math.round(FEATURED_RARE_BONUS * 100)}% rare chance active.` : '';
 
@@ -144,82 +147,100 @@ async function handleCast(interaction) {
         // Snapshot pre-cast reward state so we can reverse it if the fish escapes
         const preCastSnapshot = snapshotCastRewards(user);
 
-        let reelResult = null; // { caught: bool, label: string, icon: string }
+        let reelResult = null; // { caught: bool, label: string, icon: string } — shown on the result
 
         const result = executeCast(user, locationId, { reactionFactor: 1.0, marketplaceActive, username: interaction.user.username });
 
-        // ── Rarity-Gated Reel-In ──────────────────────────────────────────────────
-        if (result.success && result.catchType === 'fish' && ['rare', 'epic', 'legendary'].includes(result.tier)) {
-            const REEL_TIERS = {
-                legendary: { window: 2000, required: true,  color: '#FFD700', emoji: '⚡', label: 'LEGENDARY CATCH — REEL IT IN!',  tagline: 'Once-in-a-lifetime — don\'t let it go!' },
-                epic:      { window: 3000, required: true,  color: '#9b59b6', emoji: '🔥', label: 'EPIC CATCH — HOLD THE LINE!',    tagline: 'A rare fighter — keep the tension!' },
-                rare:      { window: 3000, required: false, color: '#3498db', emoji: '🎣', label: 'You feel a bite! Reel In?',      tagline: 'Hit the button to land it, or it slips to Uncommon.' },
-            };
-            const cfg   = REEL_TIERS[result.tier];
-            const reelId = `reel_${interaction.id}`;
+        // ── The Fight: Rarity-Gated Reel-In ──────────────────────────────────────
+        // A rare-or-better bite fights back. Each beat shows what the fish is
+        // doing and the angler answers with one of three moves (FIGHT_MOVES), in a
+        // fresh order each time. The bite never names the fish or its tier — the
+        // staged reveal after the fight is where the catch is shown — only the
+        // urgency of the prompt hints at how big it is.
+        const reelCfg = result.success && result.catchType === 'fish' ? REEL_IN[result.tier] : null;
+        if (reelCfg) {
+            const BITE = {
+                rare:      { color: '#3498db', title: '🎣 Something\'s biting!' },
+                epic:      { color: '#9b59b6', title: '🔥 Your rod bends double!' },
+                legendary: { color: '#FFD700', title: '⚡ The reel SCREAMS!' },
+            }[result.tier];
+            const stakes      = reelCfg.required ? 'Misread it and it\'s gone.' : 'Misread it and you\'ll land something smaller.';
+            const cues        = rollFightCues(reelCfg.beats);
+            const customIdFor = move => `reel_${interaction.id}_${move}`;
+            const moveIds     = Object.keys(FIGHT_MOVES).map(customIdFor);
 
-            const biteEmbed = new EmbedBuilder()
-                .setColor(cfg.color)
-                .setTitle(`${cfg.emoji} ${cfg.label}`)
-                .setDescription(
-                    `*A **${result.fish.name}** is on the line!*\n\n` +
-                    `${cfg.tagline}\n\n` +
-                    (cfg.required
-                        ? `⚠️ **Press within ${cfg.window / 1000}s or it escapes!**`
-                        : `💡 **Optional** — miss it and you still get an Uncommon catch.`)
-                )
-                .setAuthor(authorOpts);
-            const reelRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId(reelId)
-                    .setEmoji('🎣')
-                    .setLabel(`Reel In! (${cfg.window / 1000}s)`)
-                    .setStyle(cfg.required ? ButtonStyle.Danger : ButtonStyle.Primary)
-            );
+            let missed = null; // { cue, chosen } — the beat that was misread
+            for (let beat = 0; beat < cues.length; beat++) {
+                const beatEmbed = new EmbedBuilder()
+                    .setColor(BITE.color)
+                    .setTitle(BITE.title)
+                    .setDescription(
+                        (beat > 0 ? '**It\'s not done yet!**\n\n' : '') +
+                        `> **${cues[beat].text}**\n\n` +
+                        `**What do you do?** ⏱️ ${reelCfg.windowMs / 1000}s — ${stakes}`
+                    )
+                    .setAuthor(authorOpts);
+                if (cues.length > 1) beatEmbed.setFooter({ text: `Read ${beat + 1} of ${cues.length}` });
 
-            const reel = awaitCasterClick(reelMsg, interaction.user.id, [reelId]);
-            await interaction.editReply({ embeds: [biteEmbed], components: [reelRow] });
-            reel.start(cfg.window);
-            const reelPressed = (await reel.choice) !== null;
+                const pick = awaitCasterClick(reelMsg, interaction.user.id, moveIds);
+                await interaction.editReply({ embeds: [beatEmbed], components: [buildMoveRow(customIdFor)] });
+                pick.start(reelCfg.windowMs);
+                const clicked = await pick.choice;
+                const chosen  = clicked ? moveFromCustomId(clicked) : null;
+                if (chosen !== cues[beat].correct) { missed = { cue: cues[beat], chosen }; break; }
+                if (beat < cues.length - 1) await delay(400);
+            }
 
-            if (!reelPressed) {
-                if (cfg.required) {
+            if (missed) {
+                // Say what the right read was, so a miss teaches the next fight.
+                const right    = FIGHT_MOVES[missed.cue.correct];
+                const feedback = missed.chosen
+                    ? `You went for **${FIGHT_MOVES[missed.chosen].label.toLowerCase()}** — it needed **${right.emoji} ${right.label.toLowerCase()}**.`
+                    : `You froze — it needed **${right.emoji} ${right.label.toLowerCase()}**.`;
+
+                if (reelCfg.required) {
                     // Fish escapes — only stamina and rod durability stay spent.
+                    const lostFish = result.fish;
+                    const lostTier = result.tier === 'legendary' ? 'Legendary' : 'Epic';
                     revertEscapedCast(user, preCastSnapshot, result);
-                    reelResult = { caught: false, icon: '💨', label: `${result.tier} fish escaped!` };
 
-                    const durLine = result.durabilityLost > 0 ? ` Rod took ${result.durabilityLost} durability damage.` : '';
+                    const durLine = result.durabilityLost > 0 ? ` Your rod took ${result.durabilityLost} durability damage.` : '';
                     await interaction.editReply({
                         embeds: [new EmbedBuilder()
                             .setColor(COLORS.NEUTRAL)
-                            .setTitle('💨 It Got Away!')
-                            .setDescription(`*The ${result.fish.name} snapped the line and vanished into the depths.*\n\nStamina spent — nothing to show for it.${durLine}`)
+                            .setTitle('💨 The One That Got Away')
+                            .setDescription(
+                                `${feedback}\n\n` +
+                                `*The line snaps. For one second you see it roll at the surface — a ${lostFish.emoji} **${lostFish.name}**. ${lostTier}.*\n\n` +
+                                `Stamina spent — nothing to show for it.${durLine}`
+                            )
                             .setAuthor(authorOpts)],
                         components: [],
                     });
                     await delay(1200);
                 } else {
-                    // Rare optional miss — downgrade payout to simulate Uncommon yield
-                    downgradeOptionalMiss(user, result, preCastSnapshot);
-                    reelResult = { caught: true, icon: '😬', label: 'Rare slipped — Uncommon catch instead' };
+                    // Rare misread — the rare one slips off and an Uncommon comes up instead.
+                    downgradeOptionalMiss(user, result, preCastSnapshot, { locationId, username: interaction.user.username });
+                    reelResult = { caught: true, icon: '😬', label: `Something rare slipped the hook — you landed this instead` };
 
                     await interaction.editReply({
                         embeds: [new EmbedBuilder()
                             .setColor(COLORS.NEUTRAL)
-                            .setTitle('😬 Slipped Away Partially…')
-                            .setDescription(`*The ${result.fish.name} struggled free but you still pulled something in.*\n\nCatch downgraded to Uncommon.`)
+                            .setTitle('😬 It Shook Free…')
+                            .setDescription(`${feedback}\n\n*The big one tears loose — but something smaller grabs the lure on the way back.*`)
                             .setAuthor(authorOpts)],
                         components: [],
                     });
-                    await delay(800);
+                    await delay(900);
                 }
             } else {
-                const tierLabel = result.tier.charAt(0).toUpperCase() + result.tier.slice(1);
-                reelResult = { caught: true, icon: cfg.required ? '🏆' : '✅', label: `${tierLabel} catch secured!` };
+                reelResult = cues.length > 1
+                    ? { caught: true, icon: '🏆', label: `Won a ${cues.length}-round fight` }
+                    : { caught: true, icon: '🎯', label: 'Landed on a perfect read' };
                 await interaction.editReply({
                     embeds: [new EmbedBuilder()
-                        .setColor(cfg.color)
-                        .setTitle(`${reelResult.icon} ${reelResult.label}`)
+                        .setColor(BITE.color)
+                        .setTitle('🎯 Perfect read!')
                         .setDescription('*Reeling it in…*')
                         .setAuthor(authorOpts)],
                     components: [],
@@ -289,15 +310,20 @@ async function handleCast(interaction) {
         // stamina, durability and cooldown it cost. Nothing else to show.
         if (result.escaped) return;
 
-        // Submit to active tournament if fish catch (not junk/treasure)
-        if (result.success && result.catchType === 'fish' && result.fish && result.finalPayout > 0) {
+        // Submit to active tournament if fish catch (not junk/treasure). The score
+        // is the catch itself: the pet, featured-spot and Wilderness bonuses are
+        // paid out but left off it, so owning a pet or fishing today's featured
+        // spot doesn't decide a tournament.
+        const catchScore = (result.finalPayout ?? 0)
+            - (result.petYieldBonus ?? 0) - (result.featuredSpotBonus ?? 0) - (result.wildernessBonus ?? 0);
+        if (result.success && result.catchType === 'fish' && result.fish && catchScore > 0) {
             submitTournamentCatch(interaction.guild.id, {
                 userId:    interaction.user.id,
                 username:  interaction.user.username,
                 fishName:  result.fish.name,
                 fishEmoji: result.fish.emoji ?? '🐟',
                 tier:      result.tier,
-                score:     result.finalPayout
+                score:     catchScore
             }).catch(() => null);
         }
 
@@ -324,12 +350,21 @@ async function handleCast(interaction) {
 
         const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
 
-        // Result artwork — the caught fish's icon as the embed thumbnail (emoji
-        // fallback). Threaded through every render of this embed, boss phases
-        // included, so the attachment rides with each one.
-        const catchFiles = result.success && result.catchType === 'fish'
-            ? await attachResultThumbnail(embed, 'fish', result.fish, interaction.guild.id)
-            : [];
+        // Result artwork — a catch card (the fish, its size against the species'
+        // range, the payout and whatever records it set) as the embed's image,
+        // or the fish's icon as a thumbnail if the card cannot be drawn.
+        // Threaded through every render of this embed, boss rounds included, so
+        // the attachment rides with each one.
+        let catchFiles = [];
+        if (result.success && result.catchType === 'fish') {
+            const card = await renderCatchCard({ result, user, location, worldRecord, reelResult, username: interaction.member?.displayName || interaction.user.username });
+            if (card) {
+                embed.setImage(`attachment://${card.name}`);
+                catchFiles = [card];
+            } else {
+                catchFiles = await attachResultThumbnail(embed, 'fish', result.fish, interaction.guild.id);
+            }
+        }
 
         if (payoutOwed > 0) {
             embed.addFields({
@@ -338,20 +373,23 @@ async function handleCast(interaction) {
             });
         }
 
-        if (result.petYieldBonus > 0) {
-            embed.addFields({ name: '🐠 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petFishYieldPct}% yield)`, inline: true });
-        }
-        if (result.featuredSpotBonus > 0) {
-            embed.addFields({ name: '🌟 Featured Spot Bonus', value: `+${result.featuredSpotBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
-        }
-        if (result.wildernessBonus > 0) {
-            embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+${Math.round(WILDERNESS_YIELD_BONUS * 100)}% yield)`, inline: true });
+        // The post-roll bonuses, as one line that sits above the balance they
+        // went into rather than three fields trailing below it.
+        const bonusBits = [];
+        if (result.petYieldBonus > 0)     bonusBits.push(`🐠 Pet +${result.petYieldBonus.toLocaleString()} (${petFishYieldPct}%)`);
+        if (result.featuredSpotBonus > 0) bonusBits.push(`🌟 Featured Spot +${result.featuredSpotBonus.toLocaleString()} (${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`);
+        if (result.wildernessBonus > 0)   bonusBits.push(`🌲 Wilderness +${result.wildernessBonus.toLocaleString()} (${Math.round(WILDERNESS_YIELD_BONUS * 100)}%)`);
+        if (bonusBits.length) {
+            const bonusField = { name: '✨ Bonuses', value: bonusBits.join(' · '), inline: false };
+            const balanceAt  = (embed.data.fields ?? []).findIndex(fl => fl.name === 'Balance');
+            if (balanceAt >= 0) embed.spliceFields(balanceAt, 0, bonusField);
+            else embed.addFields(bonusField);
         }
         if (winterHuntMaterial) {
             const matName = HUNT_MATERIAL_NAMES[winterHuntMaterial] ?? winterHuntMaterial;
             embed.addFields({ name: '❄️ Winter Hunt Event', value: `+1 ${matName} (hunt material found in icy waters!)`, inline: true });
         }
-        if (worldRecord) {
+        if (worldRecord?.set) {
             const prev = worldRecord.previous;
             embed.addFields({
                 name: '🌍 New Server Record!',
@@ -375,12 +413,9 @@ async function handleCast(interaction) {
 
         // Weekly champion race footer. Fish accumulates rarity tiers rather
         // than coins, so the number is a score and is named as one.
-        let leaderNote;
-        if (weeklyLeader) {
-            leaderNote = `👑 Angler of the Week so far: ${weeklyLeader.username} — ${(weeklyLeader.total ?? 0).toLocaleString()} rarity score`;
-        } else {
-            leaderNote = '👑 No Angler of the Week yet — be the first!';
-        }
+        const leaderNote = weeklyLeader
+            ? `👑 Week leader: ${weeklyLeader.username} (${(weeklyLeader.total ?? 0).toLocaleString()} pts)`
+            : '👑 No Angler of the Week yet';
         const existingFooter = embed.data.footer?.text ?? '';
         embed.setFooter({ text: existingFooter ? `${existingFooter} · ${leaderNote}` : leaderNote });
 
@@ -418,6 +453,7 @@ async function handleCast(interaction) {
         await stagedLootReveal(interaction, result.success ? result.tier : null, embed, 'fish', catchFiles);
 
         announceRareCatch(interaction, guildSettings, result, location);
+        announceServerRecord(interaction, guildSettings, result, worldRecord);
 
         // Boss encounter — multi-phase fight, fought over the revealed catch.
         if (result.bossEncounter) {
@@ -537,6 +573,33 @@ function replyCastPreflightFailure(interaction, preflight) {
     }
 }
 
+// A catch that takes a server record off another player is news worth posting.
+// A first-ever record for a species is not — early on that is most catches —
+// and neither is beating your own. Fire-and-forget, like the catch post.
+function announceServerRecord(interaction, guildSettings, result, worldRecord) {
+    const prev = worldRecord?.set ? worldRecord.previous : null;
+    if (!prev || !prev.userId || prev.userId === interaction.user.id) return;
+    if (guildSettings?.economy?.announceRareDrops === false) return;
+
+    const announceChannelId = guildSettings?.economy?.announcementChannelId;
+    const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
+    const channel = resolved?.isTextBased() ? resolved : interaction.channel;
+    if (!channel) return;
+
+    channel.send({
+        embeds: [new EmbedBuilder()
+            .setColor('#45a6ec')
+            .setTitle('🌍 Server Record Broken!')
+            .setDescription(
+                `<@${interaction.user.id}> landed a **${result.weightLbs} lbs** ${result.fish.emoji} **${result.fish.name}** — ` +
+                `the heaviest this server has ever seen.\n\n` +
+                `The old record, **${prev.weight} lbs**, belonged to <@${prev.userId}>. Time to take it back.`
+            )
+            .setTimestamp()],
+        allowedMentions: { users: [interaction.user.id] },
+    }).catch(() => null);
+}
+
 // ─── World Records ────────────────────────────────────────────────────────────
 
 /**
@@ -544,26 +607,43 @@ function replyCastPreflightFailure(interaction, preflight) {
  * record, or if there is none. Both writes are conditional on the record still
  * being beatable at write time, so two catches racing each other can neither
  * push a duplicate entry for the species nor let a lighter fish overwrite a
- * heavier one that landed a moment earlier.
+ * heavier one that landed a moment earlier. A record weighed on an older weight
+ * table (FISH_WEIGHT_SCALE) is not comparable, so any new catch replaces it.
  *
- * Returns { previous } — the record that was beaten, or null for a first
- * record — when this catch set the record, and null when it did not.
+ * Returns { set: true, previous, record } when this catch set the record —
+ * `previous` is the record it beat, or null when there was none on this scale —
+ * and { set: false, previous: null, record } when it did not, `record` being the
+ * standing record the catch fell short of (null if it cannot be read).
  */
 async function checkAndUpdateWorldRecord(guildId, { fish, weight, userId, username }) {
-    const entry = { fish, weight, userId, username, date: new Date() };
+    const entry = { fish, weight, userId, username, date: new Date(), scale: FISH_WEIGHT_SCALE };
 
     const beaten = await Guild.findOneAndUpdate(
-        { guildId, fishingWorldRecords: { $elemMatch: { fish, weight: { $lt: weight } } } },
+        {
+            guildId,
+            fishingWorldRecords: { $elemMatch: { fish, $or: [{ weight: { $lt: weight } }, { scale: { $ne: FISH_WEIGHT_SCALE } }] } },
+        },
         { $set: { 'fishingWorldRecords.$': entry } },
         { new: false, projection: { fishingWorldRecords: { $elemMatch: { fish } } } }
     ).lean();
-    if (beaten) return { previous: beaten.fishingWorldRecords?.[0] ?? null };
+    if (beaten) {
+        const old = beaten.fishingWorldRecords?.[0] ?? null;
+        return { set: true, previous: old?.scale === FISH_WEIGHT_SCALE ? old : null, record: entry };
+    }
 
     const first = await Guild.updateOne(
         { guildId, 'fishingWorldRecords.fish': { $ne: fish } },
         { $push: { fishingWorldRecords: entry } }
     );
-    return first.modifiedCount > 0 ? { previous: null } : null;
+    if (first.modifiedCount > 0) return { set: true, previous: null, record: entry };
+
+    // Not a record: read the one that stands, for the catch card to measure
+    // against. Positional projection — narrower than the cached settings copy.
+    const standing = await Guild.findOne(
+        { guildId, 'fishingWorldRecords.fish': fish },
+        { 'fishingWorldRecords.$': 1 }
+    ).lean().catch(() => null);
+    return { set: false, previous: null, record: standing?.fishingWorldRecords?.[0] ?? null };
 }
 
 module.exports = {

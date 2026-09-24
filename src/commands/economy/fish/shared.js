@@ -4,7 +4,9 @@
 // for a sibling module, which is what keeps the folder free of require cycles.
 
 const { walletOf, grindWallet, shopRefundMessage, PRESTIGE_BADGES } = require('../../../utils/grindShop');
-const { PRESTIGE_BONUSES } = require('../../../data/fishData');
+const { randomInt } = require('crypto');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { PRESTIGE_BONUSES, FIGHT_MOVES } = require('../../../data/fishData');
 const { ownedBy } = require('../../../utils/collectorOwner');
 
 // The wallet, the charge and the refund are the same in all three grind
@@ -54,8 +56,29 @@ function awaitCasterClick(message, userId, customIds) {
     return { choice, start: windowMs => collector.resetTimer({ time: windowMs }) };
 }
 
+// The three fight moves (FIGHT_MOVES) as a button row, in a fresh order every
+// time so the answer is read off the cue rather than off where the button was
+// last time. Shared by the reel-in and the boss rounds.
+function buildMoveRow(customIdFor) {
+    const moves = Object.values(FIGHT_MOVES);
+    for (let i = moves.length - 1; i > 0; i--) {
+        const j = randomInt(i + 1);
+        [moves[i], moves[j]] = [moves[j], moves[i]];
+    }
+    return new ActionRowBuilder().addComponents(moves.map(m =>
+        new ButtonBuilder().setCustomId(customIdFor(m.id)).setEmoji(m.emoji).setLabel(m.label).setStyle(ButtonStyle.Secondary)
+    ));
+}
+
+/** The move a buildMoveRow button stands for, from its custom id. */
+function moveFromCustomId(customId) {
+    return customId.slice(customId.lastIndexOf('_') + 1);
+}
+
 module.exports = {
     awaitCasterClick,
+    buildMoveRow,
+    moveFromCustomId,
     FISH_TIER_SCORE,
     MAX_PRESTIGE,
     PRESTIGE_BADGES,

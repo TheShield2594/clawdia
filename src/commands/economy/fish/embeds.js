@@ -5,7 +5,7 @@
 // build a reply without this file knowing which handler asked.
 
 const { EmbedBuilder } = require('discord.js');
-const { TIER_COLORS, FISH_TRAITS, LIMITS, getTimeOfDay, TIME_OF_DAY_BONUSES, FISHER_LEVELS } = require('../../../data/fishData');
+const { TIER_COLORS, FISH_TRAITS, LIMITS, getTimeOfDay, TIME_OF_DAY_BONUSES, FISHER_LEVELS, FISH } = require('../../../data/fishData');
 const { TIER_RIBBON, TIER_NUM, TIER_STARS } = require('../../../data/materialRarity');
 const { getCurrentWeather } = require('../../../services/weatherService');
 const { stackBar } = require('../../../utils/rewardReveal');
@@ -40,6 +40,7 @@ function buildCastEmbed(result, user, location, rod, currency, _discordUser) {
                 .setFooter({ text: buildFooter(user) })
                 .setTimestamp();
             if (levelUp) embed.addFields({ name: '⬆️ Level Up!', value: buildLevelUpLine(levelUp) });
+            addDailyLimitsField(embed, result, currency);
             return embed;
         }
 
@@ -60,7 +61,7 @@ function buildCastEmbed(result, user, location, rod, currency, _discordUser) {
                 .setFooter({ text: buildFooter(user) })
                 .setTimestamp();
             if (levelUp)       embed.addFields({ name: '⬆️ Level Up!', value: buildLevelUpLine(levelUp), inline: false });
-            if (cappedByHard)  embed.addFields({ name: '⚠️ Daily Cap', value: 'Daily coin limit reached. Rewards reduced.', inline: false });
+            addDailyLimitsField(embed, result, currency);
             return embed;
         }
 
@@ -144,9 +145,15 @@ function buildCastEmbed(result, user, location, rod, currency, _discordUser) {
         }
         if (result.venomousDrain) embed.addFields({ name: '☠️ Venomous!', value: 'The fish stung you — extra stamina drained!', inline: true });
 
-        // Personal best
+        // Personal best is per species: the heaviest of this fish you have landed.
+        // The first of a species is its own moment — a new catalog entry.
         if (result.isPersonalBest && result.weightLbs > 0) {
-            embed.addFields({ name: '🏆 New Personal Best!', value: `${fish.name} — ${result.weightLbs} lbs!`, inline: false });
+            const was = result.previousBest > 0 ? ` (was ${result.previousBest} lbs)` : '';
+            embed.addFields({ name: '🏆 New Personal Best!', value: `Your heaviest ${fish.name} yet — **${result.weightLbs} lbs**${was}.`, inline: false });
+        }
+        if (result.firstCatch) {
+            const logged = Object.keys(user.fishing.catalog ?? {}).length;
+            embed.addFields({ name: '📖 New Species!', value: `First **${fish.name}** in your catalog — ${logged}/${Object.keys(FISH).length} species logged.`, inline: false });
         }
 
         if (specialDrop) embed.addFields({ name: '🎁 Material Drop!', value: `You found **${specialDrop.name}**!`, inline: false });
@@ -158,6 +165,8 @@ function buildCastEmbed(result, user, location, rod, currency, _discordUser) {
         } else if (rod.currentDurability <= Math.floor(rod.maxDurability * 0.20)) {
             embed.addFields({ name: '⚠️ Low Durability', value: `Your rod is nearly worn out (${rod.currentDurability}/${rod.maxDurability}). Repair soon!`, inline: false });
         }
+
+        addDailyLimitsField(embed, result, currency);
 
         embed.addFields(
             { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`, inline: true },
@@ -223,6 +232,28 @@ function buildCastEmbed(result, user, location, rod, currency, _discordUser) {
     return embed;
 }
 
+/**
+ * Says what the daily limits took off this catch, when they took anything:
+ * cast fatigue (diminishing returns past a number of casts), the soft cap
+ * (half pay past it) and the hard cap (nothing past it). Without this a payout
+ * just quietly shrank and the player had no way to know why.
+ */
+function addDailyLimitsField(embed, result, currency) {
+    const lines = [];
+    if (result.cappedByHard) {
+        const would = result.uncappedPayout > 0 ? ` — this one would have paid **${currency}${result.uncappedPayout.toLocaleString()}**` : '';
+        lines.push(`🛑 Daily coin cap reached${would}. Coins resume when your daily window resets.`);
+    } else {
+        if ((result.fatigueMult ?? 1) < 1) {
+            lines.push(`🥱 Fatigue: payouts ×${result.fatigueMult} after this many casts today.`);
+        }
+        if (result.softCapped) {
+            lines.push('📉 Past the daily soft cap — payouts are halved until your window resets.');
+        }
+    }
+    if (lines.length) embed.addFields({ name: 'Daily Limits', value: lines.join('\n'), inline: false });
+}
+
 function buildFailureTitle(severityId) {
     return {
         line_slack: '💨 Nothing Biting...',
@@ -254,17 +285,17 @@ function buildLevelUpLine(levelUp) {
 }
 
 function buildFooter(user) {
+    // Kept short: it wraps on mobile, and the cast adds the weekly leader to it.
+    // Only what is active right now — conditions and consumables in play.
     const f = user.fishing;
-    const parts = [`Cooldown: ${formatMs(LIMITS.CAST_COOLDOWN_MS)}`];
-    if (f.activeBait)  parts.push(`Bait (${f.activeBaitCastsLeft} casts left)`);
-    if (f.activeLuck)  parts.push(`Luck (queued)`);
-    if (f.activeXpScroll) parts.push(`XP Scroll (queued)`);
-
+    const parts = [];
     const weather = getCurrentWeather();
-    const tod     = getTimeOfDay();
-    const todData = TIME_OF_DAY_BONUSES[tod];
+    const todData = TIME_OF_DAY_BONUSES[getTimeOfDay()];
     parts.push(`${weather.emoji} ${weather.name}`);
     if (todData) parts.push(todData.description);
+    if (f.activeBait)     parts.push(`Bait ×${f.activeBaitCastsLeft}`);
+    if (f.activeLuck)     parts.push('Luck ready');
+    if (f.activeXpScroll) parts.push('XP Scroll ready');
 
     return parts.join(' • ');
 }
