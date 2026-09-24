@@ -676,6 +676,9 @@ function executeMine(user, depthId, options = {}) {
         // so only the caller knows what the player actually walked away with.
 
         m.successfulMines  += 1;
+        // Kept so a haul abandoned in a cave-in can put the fail streak back
+        // where it was: fleeing is neither a success nor a failed swing.
+        result.priorConsecutiveFails = m.consecutiveFails;
         m.consecutiveFails  = 0;
         if (tier === 'legendary') m.legendaryFinds += 1;
         if (tier === 'event')     m.eventFinds     += 1;
@@ -796,6 +799,82 @@ function executeMine(user, depthId, options = {}) {
     return result;
 }
 
+// ─── CAVE-IN RESOLUTION ──────────────────────────────────────────────────────
+
+/**
+ * The player blasted clear of a cave-in: spend one charge and release the
+ * escrowed intensity bonus, clamped to the daily hard cap the same way the
+ * uninterrupted path clamps it.
+ */
+function blastClearCaveIn(user, result, chargeType) {
+    const m = user.mining;
+    if (chargeType) {
+        m.charges[chargeType] = Math.max(0, (m.charges[chargeType] ?? 0) - 1);
+    }
+    if (result.caveInEscrow > 0) {
+        const remainingCap = Math.max(0, LIMITS.DAILY_HARD_CAP - m.dailyCoins);
+        const bonus        = Math.min(result.caveInEscrow, remainingCap);
+        if (bonus > 0) {
+            user.balance          += bonus;
+            m.totalEarned         += bonus;
+            m.dailyCoins          += bonus;
+            result.finalPayout     = (result.finalPayout ?? 0) + bonus;
+            result.caveInBonusPaid = bonus;
+        }
+    }
+    result.caveInEscaped = true;
+    user.markModified('mining');
+}
+
+/**
+ * The player fled a cave-in: the haul is buried, so undo everything executeMine
+ * booked for it — the coins, the gathering-yield charge, the find counters, the
+ * material drop and the success tally — and flag the result so every later
+ * reader (quests, reveal, announcements, the result embed) treats the find as
+ * not kept. `result.success` stays true because the swing itself landed; the
+ * XP it earned is kept for the same reason.
+ */
+function abandonCaveIn(user, result, { refundEffectCharge } = {}) {
+    const m = user.mining;
+    result.caveInLostPayout = (result.caveInPayout ?? 0) + (result.caveInEscrow ?? 0);
+
+    if (result.caveInPayout) {
+        user.balance   -= result.caveInPayout;
+        m.totalEarned  -= result.caveInPayout;
+        m.dailyCoins   -= result.caveInPayout;
+    }
+    result.finalPayout = 0;
+
+    // The doubling charge bought ore that is now buried — hand it back rather
+    // than billing a Black Market item for coins never kept.
+    if (result.gatheringYield) {
+        if (refundEffectCharge) refundEffectCharge(user, result.gatheringYield.effect);
+        result.gatheringYield = null;
+    }
+
+    if (result.tier === 'legendary') m.legendaryFinds = Math.max(0, m.legendaryFinds - 1);
+    if (result.tier === 'event')     m.eventFinds     = Math.max(0, m.eventFinds - 1);
+
+    if (result.specialDrop) {
+        const key = result.specialDrop.itemId;
+        if (m.materials?.[key] != null) {
+            m.materials[key] = Math.max(0, m.materials[key] - 1);
+        }
+        result.specialDrop = null;
+    }
+
+    m.successfulMines = Math.max(0, (m.successfulMines ?? 0) - 1);
+    if (result.priorConsecutiveFails != null) m.consecutiveFails = result.priorConsecutiveFails;
+
+    result.caveInAbandoned = true;
+    user.markModified('mining');
+}
+
+/** A successful swing whose haul the player actually walked away with. */
+function keptFind(result) {
+    return !!result?.success && !result.caveInAbandoned;
+}
+
 // ─── MINE DAILY QUESTS ───────────────────────────────────────────────────────
 
 function assignDailyMineQuests(user) {
@@ -857,6 +936,10 @@ function updateMineQuestProgress(user, result, depthId) {
 
     if (!mineQuests.length) return;
 
+    // A haul abandoned in a cave-in was never brought up, so it counts toward
+    // nothing that rewards a find — only toward the dig itself.
+    const kept = keptFind(result);
+
     for (const quest of mineQuests) {
         const template = MINE_QUEST_TEMPLATES.find(t => t.id === quest.questId);
         if (!template) continue;
@@ -866,30 +949,30 @@ function updateMineQuestProgress(user, result, depthId) {
                 quest.progress += 1;
                 break;
             case 'rare_plus_finds':
-                if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier))
+                if (kept && ['rare', 'epic', 'legendary', 'event'].includes(result.tier))
                     quest.progress += 1;
                 break;
             case 'epic_plus_finds':
-                if (result.success && ['epic', 'legendary', 'event'].includes(result.tier))
+                if (kept && ['epic', 'legendary', 'event'].includes(result.tier))
                     quest.progress += 1;
                 break;
             case 'legendary_plus_finds':
-                if (result.success && ['legendary', 'event'].includes(result.tier))
+                if (kept && ['legendary', 'event'].includes(result.tier))
                     quest.progress += 1;
                 break;
             case 'crits':
-                if (result.success && result.isCrit) quest.progress += 1;
+                if (kept && result.isCrit) quest.progress += 1;
                 break;
             case 'earn_coins':
-                if (result.success && result.finalPayout > 0)
+                if (kept && result.finalPayout > 0)
                     quest.progress = Math.min(quest.progress + result.finalPayout, template.target);
                 break;
             case 'material_drops':
-                if (result.success && result.specialDrop) quest.progress += 1;
+                if (kept && result.specialDrop) quest.progress += 1;
                 break;
             case 'success_streak':
-                if (result.success) quest.progress += 1;
-                else               quest.progress  = 0;
+                if (kept) quest.progress += 1;
+                else      quest.progress  = 0;
                 break;
             case 'depth_mines':
                 if (depthId === template.depth) quest.progress += 1;
@@ -1050,8 +1133,8 @@ async function prepareDigUser(user) {
 /**
  * Read-only preflight for a dig. Returns { ok: true, depthId, depth, pickaxe,
  * pickaxeData } or { ok: false, reason, ... } where `reason` is one of:
- * unknown_depth, depth_locked, injured, cooldown, no_stamina, no_pickaxe,
- * pickaxe_broken, no_charge.
+ * unknown_depth, depth_locked, injured, dig_in_progress, cooldown, no_stamina,
+ * no_pickaxe, pickaxe_broken, no_charge.
  */
 function validateDigPreflight(user, requestedDepthId) {
     const m = user.mining;
@@ -1067,6 +1150,12 @@ function validateDigPreflight(user, requestedDepthId) {
 
     if (m.injuryUntil && Date.now() < m.injuryUntil.getTime()) {
         return { ok: false, reason: 'injured', nextAt: new Date(m.injuryUntil.getTime()) };
+    }
+
+    // Another dig is still open on this profile — its prompts are waiting on the
+    // player. Checked before the cooldown, since that dig set lastMine too.
+    if (m.digLockUntil && Date.now() < new Date(m.digLockUntil).getTime()) {
+        return { ok: false, reason: 'dig_in_progress' };
     }
 
     // Read-only cooldown check; the slot is claimed atomically afterwards.
@@ -1110,7 +1199,9 @@ function validateDigPreflight(user, requestedDepthId) {
  * collection (see src/models/User.js), so a User-level guard would match
  * every document on the missing `mining` field and never reject anything.
  *
- * Returns { claimed: true, claimNow, release } or { claimed: false, nextAt }.
+ * Returns { claimed: true, claimNow, release }, { claimed: false, nextAt } when
+ * the cooldown is still running, or { claimed: false, inProgress: true } when
+ * another dig holds the lock.
  */
 async function claimDigCooldown(user) {
     const GrindProfile = require('../models/GrindProfile');
@@ -1123,28 +1214,41 @@ async function claimDigCooldown(user) {
 
     await persistGrindIfNew(user, 'mining');
     const claimQuery = { userId: user.userId, guildId: user.guildId, system: 'mining' };
+    // The claim also takes the dig lock: the cooldown alone is shorter than the
+    // dig's own prompts, so a second dig could otherwise claim while the first is
+    // still open and both would save over the same snapshot. commitDig clears the
+    // lock; DIG_LOCK_MS only bounds a dig whose process died before it could.
+    const lockUntil = new Date(claimNow.getTime() + LIMITS.DIG_LOCK_MS);
     const claimed = await GrindProfile.findOneAndUpdate(
         {
             ...claimQuery,
-            $or: [{ 'data.lastMine': null }, { 'data.lastMine': { $lte: cooldownFloor } }],
+            $and: [
+                { $or: [{ 'data.lastMine': null }, { 'data.lastMine': { $lte: cooldownFloor } }] },
+                { $or: [{ 'data.digLockUntil': null }, { 'data.digLockUntil': { $lte: claimNow } }] },
+            ],
         },
-        { $set: { 'data.lastMine': claimNow } },
+        { $set: { 'data.lastMine': claimNow, 'data.digLockUntil': lockUntil } },
         { new: true },
     );
 
     if (!claimed) {
         // Losing the claim means another dig already took the slot, so the
-        // in-memory snapshot is stale — read the winning timestamp back so the
-        // countdown reflects the dig that actually happened.
+        // in-memory snapshot is stale — read the winning state back so the reply
+        // reflects the dig that actually happened.
         const current = await GrindProfile.findOne(claimQuery).catch(() => null);
+        const heldUntil = current?.data?.digLockUntil ? new Date(current.data.digLockUntil) : null;
+        if (heldUntil && heldUntil.getTime() > claimNow.getTime()) {
+            return { claimed: false, inProgress: true };
+        }
         const lastAt = current?.data?.lastMine ?? claimNow;
         return { claimed: false, nextAt: new Date(new Date(lastAt).getTime() + LIMITS.MINE_COOLDOWN_MS) };
     }
 
-    m.lastMine = claimNow;
+    m.lastMine     = claimNow;
+    m.digLockUntil = lockUntil;
     const release = () => GrindProfile.updateOne(
         { ...claimQuery, 'data.lastMine': claimNow },
-        { $set: { 'data.lastMine': priorLastMine } },
+        { $set: { 'data.lastMine': priorLastMine, 'data.digLockUntil': null } },
     ).catch(() => null);
 
     return { claimed: true, claimNow, release };
@@ -1153,8 +1257,8 @@ async function claimDigCooldown(user) {
 
 /**
  * The post-roll bonus stack: pity counter (a rare find abandoned in a cave-in
- * does not reset it), featured-depth bonus, pet yield, Wilderness district
- * bonus (clamped to the daily hard cap), the forfeited-payout scaling for a
+ * does not reset it), featured-depth bonus, pet yield and Wilderness district
+ * bonus (each clamped to the daily hard cap), the forfeited-payout scaling for a
  * hard-capped dig, and the best-payout stat. Mutates the user and annotates
  * the result for the renderer.
  */
@@ -1162,7 +1266,7 @@ function applyDigBonuses(user, result, { isFeaturedDepth = false, featuredPayout
     const m = user.mining;
 
     // Pity counter: reset only when a rare+ find was actually kept (not abandoned in a cave-in)
-    const keptRareFind = result.success && !result.caveInAbandoned && ['rare', 'epic', 'legendary', 'event'].includes(result.tier);
+    const keptRareFind = keptFind(result) && ['rare', 'epic', 'legendary', 'event'].includes(result.tier);
     if (keptRareFind) {
         m.sinceRare = 0;
     } else {
@@ -1171,8 +1275,12 @@ function applyDigBonuses(user, result, { isFeaturedDepth = false, featuredPayout
 
     // Yield bonuses below are gated on result.finalPayout > 0, which an
     // abandoned cave-in resets to 0 — so abandoning correctly forfeits these too.
+    // Every bonus below is clamped to what is left under the daily hard cap, the
+    // same way the intensity multiplier and the blast escrow are.
+    const capRoom = () => Math.max(0, LIMITS.DAILY_HARD_CAP - m.dailyCoins);
+
     if (result.success && result.finalPayout > 0 && isFeaturedDepth) {
-        const featBonus = Math.round(result.finalPayout * featuredPayoutBonus);
+        const featBonus = Math.min(Math.round(result.finalPayout * featuredPayoutBonus), capRoom());
         if (featBonus > 0) {
             user.balance             += featBonus;
             m.totalEarned            += featBonus;
@@ -1183,7 +1291,7 @@ function applyDigBonuses(user, result, { isFeaturedDepth = false, featuredPayout
     }
 
     if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
-        const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
+        const bonus = Math.min(Math.round(result.finalPayout * petMineYieldPct / 100), capRoom());
         if (bonus > 0) {
             user.balance        += bonus;
             m.totalEarned       += bonus;
@@ -1195,9 +1303,7 @@ function applyDigBonuses(user, result, { isFeaturedDepth = false, featuredPayout
     }
 
     if (result.success && result.finalPayout > 0 && wildernessActive) {
-        const remaining = LIMITS.DAILY_HARD_CAP - m.dailyCoins;
-        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
-        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
+        const bonus = Math.min(Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS), capRoom());
         if (bonus > 0) {
             user.balance          += bonus;
             m.totalEarned         += bonus;
@@ -1236,6 +1342,13 @@ async function commitDig(user, balanceAtLoad, { payoutKey } = {}) {
     const User = require('../models/User');
     const { detachBalanceDelta, commitBalanceDelta } = require('../utils/balanceDelta');
     const balanceFilter = { userId: user.userId, guildId: user.guildId };
+
+    // The saved profile replaces the stored one wholesale, so clearing the lock
+    // here is what lets the next dig claim — no separate write needed.
+    if (user.mining) {
+        user.mining.digLockUntil = null;
+        user.markModified('mining');
+    }
 
     const balanceDelta = detachBalanceDelta(user, balanceAtLoad);
     await user.save();
@@ -1276,6 +1389,9 @@ module.exports = {
     tickConsumables,
     promoteIntensity,
     executeMine,
+    blastClearCaveIn,
+    abandonCaveIn,
+    keptFind,
     assignDailyMineQuests,
     updateMineQuestProgress,
     prepareDigUser,

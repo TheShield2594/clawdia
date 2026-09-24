@@ -459,7 +459,13 @@ const TIER_COLORS = {
 
 const LIMITS = {
     MINE_COOLDOWN_MS:        30_000,
-    INJURY_PENALTY_MS:       15 * 60_000,
+    // How long a dig holds its claim while its prompts are open. The prompts
+    // alone can run past 50s — longer than the cooldown — so without a hold a
+    // second dig could start on the same snapshot while the first is still
+    // waiting on a button. Cleared when the dig commits or releases; this
+    // ceiling only matters if the process dies mid-dig.
+    DIG_LOCK_MS:             2 * 60_000,
+    INJURY_PENALTY_MS:      15 * 60_000,
     STAMINA_REGEN_MS:        6 * 60_000,
     MAX_STAMINA_BASE:        10,
     DAILY_WINDOW_MS:         24 * 3_600_000,

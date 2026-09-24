@@ -38,13 +38,18 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
         // An event catch keeps its own colour even on a critical: the tier is the
         // rarer fact of the two, and the title already announces it as one. Without
         // this a critical event drop rendered crit-gold under a MYTHICAL headline.
-        const color = tier === 'event' ? TIER_COLORS.event : isCrit ? '#FFD700' : TIER_COLORS[tier];
+        // A haul abandoned in a cave-in is still a landed swing, but none of it
+        // came up: it renders as the loss it is, never as a strike.
+        const abandoned = !!result.caveInAbandoned;
+        const color = abandoned ? '#8B0000' : tier === 'event' ? TIER_COLORS.event : isCrit ? '#FFD700' : TIER_COLORS[tier];
 
         const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
         // At the hard cap finalPayout is already 0, so the old strikethrough rendered
         // as "~~0~~ (daily cap reached)" — it struck out the wrong number and never
         // told the player what the cap had actually cost them.
-        const payoutDisplay = cappedByHard
+        const payoutDisplay = abandoned
+            ? `~~${currency}${(result.caveInLostPayout ?? 0).toLocaleString()}~~ → **${currency}0** *(buried)*`
+            : cappedByHard
             ? `~~${currency}${(result.forfeited ?? 0).toLocaleString()}~~ → **${currency}0**`
             : `**${currency}${finalPayout.toLocaleString()}**`;
 
@@ -52,14 +57,18 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
         const isEvent  = tier === 'event';
         const isHeadline = tierNum >= 5;   // legendary and event both get the full treatment
         const ribbon = TIER_RIBBON(tierNum);
-        const embedTitle = isHeadline
+        const embedTitle = abandoned
+            ? `🏃 Fled the Cave-in — ${ore.emoji} ${ore.name} lost`
+            : isHeadline
             ? (isEvent ? `☄️🌋 PRIMORDIAL STRIKE 🌋☄️` : `⛏️✨ LEGENDARY STRIKE ✨⛏️`)
             : `${ore.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${ore.name} ${isCrit ? '✨' : ''}`;
         const headlineLede = isEvent
             ? 'You broke into something that should not be down there.'
             : 'You struck something impossible in the deep.';
-        const embedDesc = isHeadline
-            ? `${ribbon}\n\n${headlineLede}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${ore.emoji}  **${ore.name}**  [${TIER_STARS[tierNum]}]\n  *${ore.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+        const embedDesc = abandoned
+            ? `You got out. The **${ore.name}** [${TIER_STARS[tierNum]}] you uncovered is buried behind you.`
+            : isHeadline
+            ? `${ribbon}\n\n${headlineLede}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${ore.emoji}  **${ore.name}**  [${TIER_STARS[tierNum]}]\n  *${ore.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nHauled to the surface.`
             : `${ribbon}\n\n*${ore.flavor}*`;
 
         const embed = new EmbedBuilder()
@@ -114,7 +123,7 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
             });
         }
 
-        if (specialDrop) {
+        if (specialDrop && !abandoned) {
             embed.addFields({ name: '🪨 Material Drop!', value: `You found **${specialDrop.name}**!`, inline: false });
         }
 
@@ -139,7 +148,7 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
             { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`,   inline: true },
             { name: 'Miner XP',  value: buildXpLine(user),                               inline: true }
         );
-        embed.setFooter({ text: `Cooldown: 30s • ${buildDailyProgressLine(user, currency)} • ${buildActiveConsumablesLine(user)}` });
+        embed.setFooter({ text: `Cooldown: ${formatMs(LIMITS.MINE_COOLDOWN_MS)} • ${buildDailyProgressLine(user, currency)} • ${buildActiveConsumablesLine(user)}` });
         embed.setTimestamp();
         return embed;
     }
@@ -173,7 +182,7 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
 
     if (result.collapseEvent) {
         embed.setColor('#8B0000');
-        embed.addFields({ name: '💀 Catastrophic Collapse!', value: `The tunnel caved in around you — your **${result.collapseEvent.weaponName}** was completely destroyed! Use \`/mine shop repair\` to fix it.`, inline: false });
+        embed.addFields({ name: '💀 Catastrophic Collapse!', value: `The tunnel caved in around you — your **${result.collapseEvent.weaponName}** broke in the collapse! Use \`/mine shop repair\` to fix it.`, inline: false });
     }
 
     if (levelUp) {
