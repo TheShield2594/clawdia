@@ -60,6 +60,7 @@ jest.mock('../src/services/huntService', () => {
         }),
         commitHunt: jest.fn().mockResolvedValue({ payoutOwed: 0 }),
         rollApexType: jest.fn(actual.rollApexType),
+        serverBestPayout: jest.fn().mockResolvedValue(0),
         applyPayoutModifiers: jest.fn(actual.applyPayoutModifiers),
     };
 });
@@ -283,7 +284,7 @@ describe('executeStart', () => {
         expect(picture.data.description).toBeUndefined();
         expect(text.data.thumbnail).toBeUndefined();
         expect(final.files.map(f => f.name)).toEqual(['hunt-result.png']);
-        expect(final.files[0].description).toMatch(/^Hunt result: /);
+        expect(final.files[0].description).toMatch(/^hunter bagged a /);
         expect(final.files[0].description).toContain('Quick hunt');
     });
 

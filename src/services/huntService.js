@@ -1687,6 +1687,26 @@ function applyHuntBonuses(user, result, zoneId, { petYieldPct = 0, petXpPct = 0,
 }
 
 /**
+ * The biggest single hunt anyone but `excludeUserId` has on record in this
+ * guild, for the kill card's record marker — the hunter's own best is added by
+ * the caller, from before the hunt that is being drawn. One indexed read
+ * (guildId, system, data.bestPayout), bounded so a slow database costs the
+ * card its marker rather than the player their result. Null when unknown.
+ */
+async function serverBestPayout(guildId, excludeUserId) {
+    const GrindProfile = require('../models/GrindProfile');
+    try {
+        const top = await GrindProfile.findOne(
+            { guildId, system: 'hunt', userId: { $ne: excludeUserId }, 'data.bestPayout': { $gt: 0 } },
+            { 'data.bestPayout': 1 },
+        ).sort({ 'data.bestPayout': -1 }).maxTimeMS(2000).lean();
+        return top?.data?.bestPayout ?? 0;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Persist the hunt and credit its coin movement as an atomic `$inc` after the
  * save has landed — same contract as fishService.commitCast. A credit that
  * will not land is returned as `payoutOwed`.
@@ -1766,6 +1786,7 @@ module.exports = {
     claimHuntCooldown,
     applyHuntBonuses,
     commitHunt,
+    serverBestPayout,
     WILDERNESS_YIELD_BONUS,
     formatMs,
     weaponStatusEmoji,

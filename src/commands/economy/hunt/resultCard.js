@@ -45,41 +45,80 @@ function cardChips({ result, stealth, aim, quick, flushed, isFeaturedZone, featu
     return chips;
 }
 
-function cardOptions({ result, zone, chips, apex = null }) {
+const TIER_TITLE = { common: 'Common', uncommon: 'Uncommon', rare: 'Rare', epic: 'Epic', legendary: 'Legendary', event: 'Mythical' };
+
+/**
+ * Where this payout stands: the hunter's best before this hunt, and the server
+ * record before it — the larger of everyone else's best and the hunter's own.
+ * Null parts are unknown (a read that failed), and draw nothing.
+ */
+function standing(payout, { priorBest = 0, othersBest = null } = {}) {
+    const record = othersBest == null ? null : Math.max(othersBest, priorBest);
+    return {
+        best: priorBest,
+        record,
+        personalBest: priorBest > 0 && payout > priorBest,
+        serverRecord: record != null && payout > 0 && payout > record,
+    };
+}
+
+function cardOptions({ result, zone, chips = [], username = 'Hunter', records = {}, apex = null }) {
     const quality = result.trophyQuality;
+    const capped = !!result.cappedByHard;
+    const payout = result.finalPayout ?? 0;
     const multipliers = [];
-    if ((result.streakMult ?? 1) > 1) multipliers.push({ label: 'streak', value: result.streakMult });
-    if (result.isCrit) multipliers.push({ label: 'crit', value: result.critMultiplier });
-    if (quality && quality.multiplier > 1) multipliers.push({ label: 'trophy', value: quality.multiplier });
+    if ((result.streakMult ?? 1) > 1) multipliers.push(result.streakMult);
+    if (result.isCrit) multipliers.push(result.critMultiplier);
+    if (quality && quality.multiplier > 1) multipliers.push(quality.multiplier);
+    const combined = multipliers.reduce((p, m) => p * m, 1);
+
+    let extraStat = null;
+    if (result.isCrit)      extraStat = { label: 'CRITICAL', value: `×${Number(result.critMultiplier).toFixed(2)}` };
+    else if (combined > 1)  extraStat = { label: 'MULTIPLIER', value: `×${combined.toFixed(2)}` };
+    else if (result.levelUp) extraStat = { label: 'LEVEL UP', value: `${result.levelUp.oldLevel} → ${result.levelUp.newLevel}` };
+
+    const subtitle = quality && GRADE_COLORS[quality.id]
+        ? `${quality.label} Trophy · ×${quality.multiplier.toFixed(2)}`
+        : `${TIER_TITLE[result.tier] ?? 'Clean'} kill`;
+
+    const where = standing(capped ? 0 : payout, records);
+    const badges = [];
+    if (where.serverRecord) badges.push({ text: 'SERVER RECORD', tone: 'gold' });
+    if (where.personalBest) badges.push({ text: 'PERSONAL BEST', tone: 'good' });
+    if (result.isCrit)      badges.push({ text: 'CRITICAL', tone: 'crit' });
+    if (result.levelUp && extraStat?.label !== 'LEVEL UP') {
+        badges.push({ text: `LEVEL ${result.levelUp.oldLevel} → ${result.levelUp.newLevel}`, tone: 'level' });
+    }
+    badges.push(...chips);
 
     return {
         activity: 'hunt',
+        kicker: `${username} bagged`,
         subject: { name: result.animal.name, iconId: `animal:${result.animal.id}` },
         tierNum: TIER_NUM[result.tier] ?? 1,
+        subtitle,
         place: { name: zone.name, iconId: `hunt:${zone.id}` },
-        payout: result.finalPayout ?? 0,
-        forfeited: result.cappedByHard ? (result.forfeitedPayout ?? 0) : null,
+        payout: capped ? 0 : payout,
+        forfeited: capped ? (result.forfeitedPayout ?? 0) : null,
         xp: result.xpEarned ?? 0,
-        levelUp: result.levelUp ? { from: result.levelUp.oldLevel, to: result.levelUp.newLevel } : null,
-        crit: !!result.isCrit,
-        grade: quality && GRADE_COLORS[quality.id] ? { label: quality.label, color: GRADE_COLORS[quality.id] } : null,
-        multipliers,
-        chips,
+        extraStat,
+        gauge: { best: where.best, record: where.record ?? 0 },
+        badges,
         apex,
     };
 }
 
 /** What a screen reader says for the card: the same facts, in a sentence. */
 function altText(opts) {
+    const tier = ['', 'common', 'uncommon', 'rare', 'epic', 'legendary', 'mythical'][opts.tierNum];
     const parts = [
-        `Hunt result: ${opts.crit ? 'critical ' : ''}${opts.grade ? `${opts.grade.label} ` : ''}${opts.subject.name}`,
-        `a ${['', 'common', 'uncommon', 'rare', 'epic', 'legendary', 'mythical'][opts.tierNum]} kill in ${opts.place.name}.`,
-        opts.forfeited != null && !(opts.payout > 0)
+        `${opts.kicker.replace(/ bagged$/, '')} bagged ${/^[aeiou]/i.test(tier) ? 'an' : 'a'} ${tier} ${opts.subject.name} in ${opts.place.name} (${opts.subtitle}).`,
+        opts.forfeited != null
             ? `No coins — the daily cap withheld ${opts.forfeited.toLocaleString('en-US')}.`
             : `${opts.payout.toLocaleString('en-US')} coins and ${opts.xp} XP.`,
     ];
-    if (opts.levelUp) parts.push(`Level up to ${opts.levelUp.to}.`);
-    if (opts.chips.length) parts.push(`${opts.chips.map(c => c.text).join(', ')}.`);
+    if (opts.extraStat) parts.push(`${opts.extraStat.label.toLowerCase()} ${opts.extraStat.value}.`);
+    if (opts.badges.length) parts.push(`${opts.badges.map(c => c.text).join(', ')}.`);
     if (opts.apex) parts.push(`Apex duel: ${opts.apex.title}${opts.apex.payout > 0 ? `, ${opts.apex.payout.toLocaleString('en-US')} bonus coins` : ''}.`);
     return parts.join(' ');
 }
@@ -100,4 +139,4 @@ async function renderHuntResultCard(args) {
     return { embed, file };
 }
 
-module.exports = { CARD_FILE, altText, cardChips, cardOptions, renderHuntResultCard };
+module.exports = { CARD_FILE, altText, cardChips, cardOptions, renderHuntResultCard, standing };

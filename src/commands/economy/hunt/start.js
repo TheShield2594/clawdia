@@ -23,6 +23,7 @@ const {
     updateHuntQuestProgress,
     commitHunt,
     huntSuccessChance,
+    serverBestPayout,
     formatMs
 } = require('../../../services/huntService');
 const { buildCooldownEmbed } = require('../../../utils/cooldownEmbed');
@@ -175,6 +176,10 @@ async function executeStart(interaction) {
         const featured       = getDailyFeatured(interaction.guild.id);
         const isFeaturedZone = zoneId === featured.huntZone.id;
 
+        // The hunter's best before this hunt, for the kill card's gauge — the
+        // hunt itself raises it.
+        const priorBest = h.bestPayout ?? 0;
+
         const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
         const result = executeHunt(user, zoneId, {
             stealthBonus: stealth.bonus, aimBonus: aim?.bonus ?? 0, marketplaceActive, encounter,
@@ -241,6 +246,13 @@ async function executeStart(interaction) {
         // phases included.
         const cardArgs = {
             result, zone,
+            username: interaction.member?.displayName ?? interaction.user.globalName ?? interaction.user.username,
+            records: {
+                priorBest,
+                othersBest: result.success && result.finalPayout > 0
+                    ? await serverBestPayout(interaction.guild.id, interaction.user.id)
+                    : null,
+            },
             chips: cardChips({
                 result, stealth, aim, quick, flushed, isFeaturedZone, rarePetDrop,
                 featuredPct: Math.round(FEATURED_PAYOUT_BONUS * 100),

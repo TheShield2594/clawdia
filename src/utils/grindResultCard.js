@@ -1,50 +1,85 @@
 'use strict';
 
 /**
- * The picture half of a grind result — what a `/hunt start` kill looks like
- * when it lands. The fourth card in the family utils/grindProfileCard.js
- * started, drawn with the same kit so the screens read as one set.
+ * The kill card: the picture a `/hunt start` kill carries above its result
+ * text. The sibling of the `/fish cast` catch card (utils/catchCard.js) and
+ * laid out to match it, so the two grinds' results read as one family:
  *
- *   ┌───────────────────────────────────────────────────────────────────┐
- *   │ ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ tier-coloured rule ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ │
- *   │  ╭─────────╮   RARE ★★★  CRITICAL  PRISTINE  LEVEL 11 → 12        │
- *   │  │  art in │   Red Deer                          (zone art, faint)│
- *   │  │  a tier │   Whispering Woods                                   │
- *   │  │  halo   │   +1,240 coins      +85 XP   LEVEL 11 → 12           │
- *   │  ╰─────────╯   1.50x streak × 2.00x crit × 1.20x trophy = 3.60x   │
- *   │  [Perfect approach] [Perfect shot] [Found: Rabbit's Foot]         │
- *   │  ▌APEX: Dire Alpha brought down — +1,800 coins                    │
- *   └───────────────────────────────────────────────────────────────────┘
+ *   ┌──────────────────────────────────────────────────────────────────────┐
+ *   │    ╭──────╮      THESHIELD BAGGED                   (zone art, faint)│
+ *   │   ( art in )     Golden Fox                                          │
+ *   │   ( a tier )     Pristine Trophy · ×1.20                             │
+ *   │   (  glow  )       YOUR BEST 2,980                                   │
+ *   │    ╰──────╯      ━━━━━━━━━━━━━◆━━━━━━━━━━━━  (this hunt's payout)    │
+ *   │                             RECORD 3,900                             │
+ *   │                  [COINS +1,240] [XP +85]  [CRITICAL ×2.13]           │
+ *   │ [LEGENDARY ★★★★★] [SERVER RECORD] [PERSONAL BEST] [Perfect shot] …   │
+ *   │ ▌APEX DUEL  Dire Alpha defeated                       +1,800 coins   │
+ *   │                                                     Legendary Peaks  │
+ *   └──────────────────────────────────────────────────────────────────────┘
  *
- * The same contract as its siblings: an illustration, not the record. Every
- * number here is also in the embed text beside it, callers give the file alt
- * text, and nothing on the canvas is a currency symbol or an emoji — a guild
- * currency can be a custom Discord emoji and node-canvas draws colour emoji as
- * boxes, so amounts are in "coins" and labels are words.
+ * What it adds to the catch card's layout is the place: the zone the animal
+ * was taken in, drawn huge and faint behind the right-hand side, as the
+ * profile card draws the player's zone. Where a fish is measured by weight, a
+ * kill is measured by what it paid, so the gauge sets this hunt's payout
+ * against the hunter's previous best and the server record.
+ *
+ * The same contract as every card in the family: an illustration, not the
+ * record — every number here is also in the embed text, callers give the file
+ * alt text, and nothing drawn is a currency symbol or an emoji (a guild
+ * currency can be a custom Discord emoji, and node-canvas draws colour emoji as
+ * boxes), so amounts are plain numbers and labels are words.
  *
  * @module utils/grindResultCard
  */
 
-const { createCanvas } = require('canvas');
+const { createCanvas, loadImage } = require('canvas');
 const { encodeCanvas } = require('./canvasEncode');
 const { primitives } = require('./grindProfileCard');
+const { getDefaultItemImage } = require('./defaultItemImages');
 
-const { FONT, themeFor, loadIcon, drawEntry, roundRect, fitText, shade, paintBackground } = primitives;
+const { FONT, themeFor, paintBackground, drawEntry, roundRect, fitText, shade } = primitives;
 
-const W = 1000;
-const PAD = 36;
-const ART = 250;
-const HEAD_H = 330;
-const CHIP_H = 34;
+// The catch card's grid, so the two line up.
+const CARD_W = 1000;
+const BASE_H = 440;
+const ART_SIZE = 250;
+const ART_X = 85;
+const ART_Y = 70;
+const PANEL_X = 400;
+const PANEL_W = CARD_W - PANEL_X - 50;
+const BADGE_Y = 362;
+const BADGE_H = 32;
 const APEX_H = 62;
 
-/** Tier colours by tier number — the same ramp the rarity ribbon uses. */
+/** Tier colours by tier number — the ramp the rarity ribbon uses. */
 const TIER_COLOR = { 1: '#9e9e9e', 2: '#4caf50', 3: '#2196f3', 4: '#9c27b0', 5: '#ff9800', 6: '#e74c3c' };
 const TIER_WORD  = { 1: 'COMMON', 2: 'UNCOMMON', 3: 'RARE', 4: 'EPIC', 5: 'LEGENDARY', 6: 'MYTHICAL' };
-const GOLD = '#f5c542';
+const GOLD = '#ffd166';
 const APEX_COLOR = { perfect: GOLD, win: '#2ecc71', survived: '#3498db', escaped: '#8a6a4a' };
+const TONE = { good: '#4cc27a', bad: '#e5534b', gold: GOLD, info: '#9cc7a8', crit: '#ffd700', level: '#b9a6ff' };
 
-/** Strips emoji and other pictographs a canvas cannot draw, and the spaces they leave. */
+// Zone art, decoded once per id.
+const placeCache = new Map();
+async function loadPlace(iconId) {
+    if (!iconId) return null;
+    if (placeCache.has(iconId)) return placeCache.get(iconId);
+    const bundled = getDefaultItemImage(iconId);
+    let img = null;
+    if (bundled) {
+        try { img = await loadImage(bundled.data); } catch { img = null; }
+    }
+    placeCache.set(iconId, img);
+    return img;
+}
+
+function hexToRgba(hex, alpha) {
+    const n = parseInt(String(hex).replace('#', ''), 16);
+    if (!Number.isFinite(n)) return `rgba(255,255,255,${alpha})`;
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+/** Strips emoji and the joiners around them, which a canvas cannot draw. */
 function plain(text) {
     return String(text ?? '')
         .replace(/\p{Extended_Pictographic}|\u{FE0F}|\u{200D}|\u{20E3}/gu, '')
@@ -54,222 +89,281 @@ function plain(text) {
 
 const n = v => Number(v ?? 0).toLocaleString('en-US');
 
-/** A rounded label; returns its width so a row of them can be laid out. */
-function pill(ctx, text, x, y, { color, fill = null, textColor = null, h = 30, size = 15 } = {}) {
+function pill(ctx, text, x, y, color, { font = `bold 16px ${FONT}`, padX = 14, h = BADGE_H, fill = null } = {}) {
     ctx.save();
-    ctx.font = `bold ${size}px ${FONT}`;
-    const w = ctx.measureText(text).width + 24;
+    ctx.font = font;
+    const w = ctx.measureText(text).width + padX * 2;
     roundRect(ctx, x, y, w, h, h / 2);
-    ctx.fillStyle = fill ?? `${color}29`;
+    ctx.fillStyle = fill ?? hexToRgba(color, 0.18);
     ctx.fill();
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2;
     ctx.strokeStyle = color;
     ctx.stroke();
-    ctx.fillStyle = textColor ?? color;
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, x + 12, y + h / 2 + 1);
+    ctx.fillText(text, x + padX, y + h / 2 + 1);
     ctx.restore();
     return w;
 }
 
-/** The animal on a soft halo in its tier colour — brighter and wider the rarer it is. */
-async function drawHero(ctx, entry, x, y, tierNum, theme) {
-    const color = TIER_COLOR[tierNum] ?? theme.accent;
-    const cx = x + ART / 2, cy = y + ART / 2;
-
+/** Lays badges out in rows across the card; returns the rows as [{x, badge, w}]. */
+function layoutBadges(ctx, badges, x0, maxW) {
     ctx.save();
-    roundRect(ctx, x, y, ART, ART, 28);
-    ctx.fillStyle = 'rgba(0,0,0,0.30)';
-    ctx.fill();
-    ctx.clip();
-    const halo = ctx.createRadialGradient(cx, cy, ART * 0.08, cx, cy, ART * (0.55 + tierNum * 0.04));
-    halo.addColorStop(0, `${shade(color, 0.25)}${tierNum >= 5 ? 'cc' : '88'}`);
-    halo.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = halo;
-    ctx.fillRect(x, y, ART, ART);
-    ctx.restore();
-
-    ctx.save();
-    roundRect(ctx, x, y, ART, ART, 28);
-    ctx.lineWidth = tierNum >= 5 ? 5 : 3;
-    ctx.strokeStyle = color;
-    ctx.stroke();
-    ctx.restore();
-
-    const inset = 26;
-    await drawEntry(ctx, { ...entry, color }, x + inset, y + inset, ART - inset * 2, theme);
-}
-
-/** Chips wrap onto as many rows as they need; this is how many that is. */
-function chipRows(ctx, chips, maxW) {
-    ctx.font = `bold 15px ${FONT}`;
-    let rows = chips.length ? 1 : 0, x = 0;
-    for (const c of chips) {
-        const w = ctx.measureText(c.text).width + 24;
-        if (x > 0 && x + w > maxW) { rows += 1; x = 0; }
+    ctx.font = `bold 16px ${FONT}`;
+    const rows = [[]];
+    let x = 0;
+    for (const b of badges) {
+        const w = ctx.measureText(b.text).width + 28;
+        if (x > 0 && x + w > maxW) { rows.push([]); x = 0; }
+        rows.at(-1).push({ x: x0 + x, badge: b, w });
         x += w + 10;
     }
-    return rows;
+    ctx.restore();
+    return badges.length ? rows : [];
+}
+
+// The payout gauge: this hunt's coins on a bar scaled to the biggest of the
+// three numbers, with the hunter's previous best above and the record below.
+function drawPayoutGauge(ctx, g, x, y, w, tierColor, theme) {
+    const h = 14;
+    const top = Math.max(g.value, g.best ?? 0, g.record ?? 0) * 1.08 || 1;
+    const at = v => x + Math.max(0, Math.min(1, v / top)) * w;
+
+    roundRect(ctx, x, y, w, h, h / 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.fill();
+
+    const fillW = Math.max(h, at(g.value) - x);
+    const grad = ctx.createLinearGradient(x, 0, x + fillW, 0);
+    grad.addColorStop(0, shade(tierColor, -0.35));
+    grad.addColorStop(1, tierColor);
+    roundRect(ctx, x, y, fillW, h, h / 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    const tick = (value, label, color, above) => {
+        const tx = at(value);
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(tx, y - 6);
+        ctx.lineTo(tx, y + h + 6);
+        ctx.stroke();
+        ctx.font = `bold 14px ${FONT}`;
+        ctx.fillStyle = color;
+        ctx.textAlign = tx > x + w - 70 ? 'right' : tx < x + 70 ? 'left' : 'center';
+        ctx.textBaseline = above ? 'bottom' : 'top';
+        ctx.fillText(label, tx, above ? y - 9 : y + h + 9);
+        ctx.restore();
+    };
+    if (g.best > 0)   tick(g.best, `YOUR BEST ${n(g.best)}`, theme.muted, true);
+    if (g.record > 0) tick(g.record, `RECORD ${n(g.record)}`, GOLD, false);
+
+    // This hunt: a diamond on the bar.
+    const cx = at(g.value), cy = y + h / 2, r = 11;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r);
+    ctx.lineTo(cx + r, cy);
+    ctx.lineTo(cx, cy + r);
+    ctx.lineTo(cx - r, cy);
+    ctx.closePath();
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = tierColor;
+    ctx.stroke();
+    ctx.restore();
+}
+
+function statTile(ctx, { label, value, accent, struck = false }, x, y, w, theme) {
+    const h = 78;
+    roundRect(ctx, x, y, w, h, 12);
+    ctx.fillStyle = theme.panel;
+    ctx.fill();
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = `bold 14px ${FONT}`;
+    ctx.fillStyle = theme.muted;
+    ctx.fillText(fitText(ctx, label, w - 32), x + 16, y + 12);
+    // Step the size down before truncating: the number is the point of the tile.
+    let size = 30;
+    ctx.font = `bold ${size}px ${FONT}`;
+    while (size > 16 && ctx.measureText(value).width > w - 32) {
+        size -= 2;
+        ctx.font = `bold ${size}px ${FONT}`;
+    }
+    const vy = y + 34 + (30 - size) / 2;
+    const text = fitText(ctx, value, w - 32);
+    ctx.fillStyle = accent ?? '#ffffff';
+    ctx.fillText(text, x + 16, vy);
+    if (struck) {
+        const tw = ctx.measureText(text).width;
+        ctx.fillRect(x + 12, vy + size / 2, tw + 8, 3);
+    }
+    ctx.restore();
 }
 
 /**
  * @param {object} opts
- * @param {'hunt'|'fish'|'mine'} opts.activity             picks the palette
- * @param {{name: string, iconId: ?string}} opts.subject   the animal / catch / ore
- * @param {number}  opts.tierNum                           1 common … 6 event
- * @param {?{name: string, iconId: ?string}} [opts.place]  zone art, drawn faint
- * @param {number}  opts.payout                            coins credited (0 when capped)
- * @param {?number} [opts.forfeited]                       set when the daily cap took it all
+ * @param {'hunt'|'fish'|'mine'} opts.activity         picks the palette
+ * @param {string}  opts.kicker                        e.g. "THESHIELD BAGGED"
+ * @param {{name: string, iconId: ?string}} opts.subject
+ * @param {number}  opts.tierNum                       1 common … 6 mythical
+ * @param {?string} [opts.subtitle]                    drawn in the tier colour
+ * @param {?{name: string, iconId: ?string}} [opts.place]  art faint behind, name bottom-right
+ * @param {number}  opts.payout                        coins credited (0 when capped)
+ * @param {?number} [opts.forfeited]                   what the daily cap withheld
  * @param {number}  opts.xp
- * @param {?{from: number, to: number}} [opts.levelUp]
- * @param {boolean} [opts.crit]
- * @param {?{label: string, color: string}} [opts.grade]   trophy quality
- * @param {{label: string, value: number}[]} [opts.multipliers]  e.g. { label: 'crit', value: 2 }
- * @param {{text: string, tone?: 'good'|'bad'|'info'}[]} [opts.chips]  how the run went
- * @param {?{outcome: string, title: string, payout: number}} [opts.apex]  the duel, once resolved
+ * @param {?{label: string, value: string}} [opts.extraStat]  the third tile
+ * @param {?{best: number, record: number}} [opts.gauge]   this payout against them
+ * @param {{text: string, tone?: string, color?: string}[]} [opts.badges]
+ * @param {?{outcome: string, title: string, payout: number}} [opts.apex]
  * @returns {Promise<Buffer>} PNG
  */
 async function createGrindResultCard(opts) {
     const theme = themeFor(opts.activity);
     const tierNum = Math.min(6, Math.max(1, opts.tierNum | 0 || 1));
     const tierColor = TIER_COLOR[tierNum];
-    const chips = (opts.chips ?? []).map(c => ({ ...c, text: plain(c.text) })).filter(c => c.text);
 
-    // Height depends on how many chip rows and whether a duel is banked.
+    const tierPill = { text: `${TIER_WORD[tierNum]}  ${'★'.repeat(tierNum)}`, color: tierColor, tier: true };
+    const badges = (opts.badges ?? [])
+        .map(b => ({ text: plain(b.text), color: b.color ?? TONE[b.tone] ?? theme.muted }))
+        .filter(b => b.text);
+
+    // The tier leads the badge row, under the art as on the catch card; the
+    // rest follow it and wrap onto further rows rather than being dropped.
     const measure = createCanvas(1, 1).getContext('2d');
-    const rows = chipRows(measure, chips, W - PAD * 2);
-    const height = HEAD_H + (rows ? rows * (CHIP_H + 10) + 8 : 0) + (opts.apex ? APEX_H + 14 : 0) + PAD - 12;
+    const rows = layoutBadges(measure, [tierPill, ...badges], 50, CARD_W - 100);
+    const extraRows = Math.max(0, rows.length - 1);
+    const apexY = BADGE_Y + rows.length * (BADGE_H + 10) + 6;
+    const height = BASE_H + extraRows * (BADGE_H + 10) + (opts.apex ? APEX_H + 16 : 0);
 
-    const canvas = createCanvas(W, height);
+    const canvas = createCanvas(CARD_W, height);
     const ctx = canvas.getContext('2d');
-    paintBackground(ctx, W, height, theme);
+    paintBackground(ctx, CARD_W, height, theme);
 
-    // The place, huge and faint on the right, as on the profile card.
-    const placeImg = await loadIcon(opts.place?.iconId);
+    // The place, huge and faint behind the right-hand side — faint enough
+    // that the text over it needs no scrim.
+    const placeImg = await loadPlace(opts.place?.iconId);
     if (placeImg) {
         ctx.save();
-        ctx.globalAlpha = 0.10;
-        ctx.drawImage(placeImg, W - 380, -20, 420, 420);
+        ctx.globalAlpha = 0.11;
+        ctx.drawImage(placeImg, CARD_W - 470, -30, 500, 500);
         ctx.restore();
     }
 
-    // A wash of the tier colour from the top — the rarer, the stronger.
-    const wash = ctx.createLinearGradient(0, 0, 0, HEAD_H);
-    wash.addColorStop(0, `${tierColor}${tierNum >= 5 ? '55' : tierNum >= 3 ? '33' : '1a'}`);
-    wash.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = wash;
-    ctx.fillRect(0, 0, W, HEAD_H);
-    ctx.fillStyle = tierColor;
-    ctx.fillRect(0, 0, W, 8);
+    // The glow the animal stands in, in its tier's colour — hotter the rarer.
+    const gx = ART_X + ART_SIZE / 2, gy = ART_Y + ART_SIZE / 2;
+    const glow = ctx.createRadialGradient(gx, gy, 10, gx, gy, 300);
+    glow.addColorStop(0, hexToRgba(tierColor, 0.35 + tierNum * 0.04));
+    glow.addColorStop(0.55, hexToRgba(tierColor, 0.12));
+    glow.addColorStop(1, hexToRgba(tierColor, 0));
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, CARD_W, height);
 
-    await drawHero(ctx, { iconId: opts.subject.iconId, name: opts.subject.name }, PAD, 44, tierNum, theme);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(gx, gy, ART_SIZE * 0.62, 0, Math.PI * 2);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = hexToRgba(tierColor, 0.8);
+    ctx.stroke();
+    ctx.restore();
 
-    const tx = PAD + ART + 34;
-    const tw = W - tx - PAD;
+    await drawEntry(ctx, { iconId: opts.subject.iconId, name: opts.subject.name, color: tierColor }, ART_X, ART_Y, ART_SIZE, theme);
 
-    // ── Tags: tier and stars, crit, trophy grade
-    let x = tx;
-    x += pill(ctx, `${TIER_WORD[tierNum]}  ${'★'.repeat(tierNum)}`, x, 48, { color: tierColor }) + 10;
-    if (opts.crit) x += pill(ctx, 'CRITICAL', x, 48, { color: GOLD, fill: GOLD, textColor: '#1a1400' }) + 10;
-    if (opts.grade?.label) x += pill(ctx, plain(opts.grade.label).toUpperCase(), x, 48, { color: opts.grade.color ?? theme.accent }) + 10;
-    // Up here rather than beside the XP, where a five-figure payout leaves no room.
-    if (opts.levelUp) pill(ctx, `LEVEL ${opts.levelUp.from} → ${opts.levelUp.to}`, x, 48, { color: '#b9a6ff' });
+    // Who, what, and the grade of it.
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = `bold 18px ${FONT}`;
+    ctx.fillStyle = theme.muted;
+    ctx.fillText(fitText(ctx, plain(opts.kicker).toUpperCase(), PANEL_W), PANEL_X, 48);
 
-    // ── Name and place
-    ctx.fillStyle = '#ffffff';
-    let nameSize = 54;
+    let nameSize = 50;
     ctx.font = `bold ${nameSize}px ${FONT}`;
     const name = plain(opts.subject.name);
-    while (nameSize > 34 && ctx.measureText(name).width > tw) {
+    while (nameSize > 34 && ctx.measureText(name).width > PANEL_W) {
         nameSize -= 2;
         ctx.font = `bold ${nameSize}px ${FONT}`;
     }
-    ctx.fillText(fitText(ctx, name, tw), tx, 132);
-    if (opts.place?.name) {
-        ctx.font = `19px ${FONT}`;
-        ctx.fillStyle = theme.muted;
-        ctx.fillText(fitText(ctx, plain(opts.place.name), tw), tx, 164);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(fitText(ctx, name, PANEL_W), PANEL_X, 74 + (50 - nameSize) / 2);
+
+    if (opts.subtitle) {
+        ctx.font = `bold 24px ${FONT}`;
+        ctx.fillStyle = tierColor;
+        ctx.fillText(fitText(ctx, plain(opts.subtitle), PANEL_W), PANEL_X, 136);
+    }
+    ctx.restore();
+
+    const capped = opts.forfeited != null && !(opts.payout > 0);
+    if (opts.gauge && !capped && opts.payout > 0 && (opts.gauge.best > 0 || opts.gauge.record > 0)) {
+        drawPayoutGauge(ctx, { ...opts.gauge, value: opts.payout }, PANEL_X, 206, PANEL_W, tierColor, theme);
     }
 
-    // ── The payout, big — or, at the daily cap, what the cap took
-    const payY = 232;
-    if (opts.forfeited != null && !(opts.payout > 0)) {
-        ctx.font = `bold 46px ${FONT}`;
-        ctx.fillStyle = '#8a8a8a';
-        const text = n(opts.forfeited);
-        ctx.fillText(text, tx, payY);
-        const tWidth = ctx.measureText(text).width;
-        ctx.fillRect(tx - 4, payY - 16, tWidth + 8, 4);
-        ctx.font = `bold 16px ${FONT}`;
-        ctx.fillStyle = '#e5534b';
-        ctx.fillText('DAILY CAP', tx + tWidth + 14, payY - 8);
-        x = tx + tWidth + 14 + ctx.measureText('DAILY CAP').width + 30;
-    } else {
-        ctx.font = `bold 60px ${FONT}`;
-        ctx.fillStyle = GOLD;
-        const text = `+${n(opts.payout)}`;
-        ctx.fillText(text, tx, payY);
-        const tWidth = ctx.measureText(text).width;
-        ctx.font = `bold 22px ${FONT}`;
-        ctx.fillStyle = shade(GOLD, -0.2);
-        ctx.fillText('coins', tx + tWidth + 10, payY);
-        x = tx + tWidth + 10 + ctx.measureText('coins').width + 34;
-    }
-    ctx.font = `bold 26px ${FONT}`;
-    ctx.fillStyle = '#b9a6ff';
-    const xpText = `+${n(opts.xp)} XP`;
-    ctx.fillText(xpText, x, payY);
+    // Stat tiles.
+    const tiles = [
+        capped
+            ? { label: 'DAILY CAP', value: n(opts.forfeited), accent: '#8a8a8a', struck: true }
+            : { label: 'COINS', value: `+${n(opts.payout)}`, accent: GOLD },
+        { label: 'XP', value: `+${n(opts.xp)}` },
+    ];
+    if (opts.extraStat) tiles.push({ label: plain(opts.extraStat.label), value: plain(opts.extraStat.value), accent: tierColor });
+    const gap = 14;
+    const tileW = (PANEL_W - gap * (tiles.length - 1)) / tiles.length;
+    tiles.forEach((t, i) => statTile(ctx, t, PANEL_X + i * (tileW + gap), 262, tileW, theme));
 
-    // ── The multiplier stack
-    const mults = (opts.multipliers ?? []).filter(m => m.value > 1);
-    if (mults.length) {
-        const combined = mults.reduce((p, m) => p * m.value, 1);
-        ctx.font = `18px ${FONT}`;
-        ctx.fillStyle = theme.muted;
-        const line = `${mults.map(m => `${m.value.toFixed(2)}x ${plain(m.label)}`).join('  ×  ')}  =  `;
-        ctx.fillText(fitText(ctx, line, tw - 90), tx, payY + 44);
-        const lw = Math.min(ctx.measureText(line).width, tw - 90);
-        ctx.font = `bold 20px ${FONT}`;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(`${combined.toFixed(2)}x`, tx + lw, payY + 44);
-    }
-
-    // ── How the run went
-    let y = HEAD_H;
-    if (chips.length) {
-        const TONE = { good: theme.accent, bad: '#e5534b', info: theme.muted, gold: GOLD };
-        let cx = PAD;
-        ctx.font = `bold 15px ${FONT}`;
-        for (const c of chips) {
-            const w = ctx.measureText(c.text).width + 24;
-            if (cx > PAD && cx + w > W - PAD) { cx = PAD; y += CHIP_H + 10; }
-            pill(ctx, c.text, cx, y, { color: TONE[c.tone] ?? theme.muted, h: CHIP_H });
-            cx += w + 10;
+    // Badges, the tier first. The first row sits under the art as the catch
+    // card's tier ribbon does.
+    rows.forEach((row, r) => {
+        for (const { x, badge } of row) {
+            const y = BADGE_Y + r * (BADGE_H + 10);
+            if (badge.tier) {
+                pill(ctx, badge.text, x, y, badge.color, { fill: hexToRgba(badge.color, 0.35) });
+            } else {
+                pill(ctx, badge.text, x, y, badge.color);
+            }
         }
-        y += CHIP_H + 18;
-    }
+    });
 
-    // ── The duel, once it is over
+    // The duel, once it is over.
     if (opts.apex) {
         const color = APEX_COLOR[opts.apex.outcome] ?? theme.accent;
-        roundRect(ctx, PAD, y, W - PAD * 2, APEX_H, 14);
-        ctx.fillStyle = `${color}24`;
+        const y = apexY;
+        roundRect(ctx, 50, y, CARD_W - 100, APEX_H, 14);
+        ctx.fillStyle = hexToRgba(color, 0.14);
         ctx.fill();
         ctx.fillStyle = color;
-        ctx.fillRect(PAD, y, 6, APEX_H);
+        ctx.fillRect(50, y, 6, APEX_H);
+        ctx.save();
+        ctx.textBaseline = 'alphabetic';
         ctx.font = `bold 14px ${FONT}`;
-        ctx.fillText('APEX DUEL', PAD + 22, y + 24);
+        ctx.fillText('APEX DUEL', 72, y + 24);
         ctx.font = `bold 20px ${FONT}`;
         ctx.fillStyle = '#ffffff';
-        const bonus = opts.apex.payout > 0 ? `+${n(opts.apex.payout)} coins` : 'no bonus';
-        ctx.fillText(fitText(ctx, plain(opts.apex.title), W - PAD * 2 - 240), PAD + 22, y + 48);
+        ctx.fillText(fitText(ctx, plain(opts.apex.title), CARD_W - 100 - 260), 72, y + 48);
         ctx.textAlign = 'right';
         ctx.fillStyle = opts.apex.payout > 0 ? GOLD : theme.muted;
-        ctx.fillText(bonus, W - PAD - 20, y + 40);
-        ctx.textAlign = 'left';
+        ctx.fillText(opts.apex.payout > 0 ? `+${n(opts.apex.payout)} coins` : 'no bonus', CARD_W - 70, y + 40);
+        ctx.restore();
+    }
+
+    // Where.
+    if (opts.place?.name) {
+        ctx.save();
+        ctx.font = `16px ${FONT}`;
+        ctx.fillStyle = theme.muted;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(fitText(ctx, plain(opts.place.name), 400), CARD_W - 24, height - 14);
+        ctx.restore();
     }
 
     return encodeCanvas(canvas);
 }
 
-module.exports = { createGrindResultCard, TIER_COLOR, __test__: { plain, chipRows } };
+module.exports = { createGrindResultCard, TIER_COLOR, __test__: { plain, layoutBadges } };

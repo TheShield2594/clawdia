@@ -250,3 +250,36 @@ describe('fitEmbeds — what Discord will accept in one message', () => {
         expect(e.data.fields).toHaveLength(25);
     });
 });
+
+describe('the server record the kill card measures against', () => {
+    const GrindProfile = require('../src/models/GrindProfile');
+    const { serverBestPayout } = require('../src/services/huntService');
+
+    function chain(result) {
+        const q = { sort: jest.fn(() => q), maxTimeMS: jest.fn(() => q), lean: jest.fn(() => result) };
+        return q;
+    }
+
+    afterEach(() => { delete GrindProfile.findOne; });
+
+    test('is everyone else\'s best, read highest-first and bounded', async () => {
+        const q = chain(Promise.resolve({ data: { bestPayout: 3900 } }));
+        GrindProfile.findOne = jest.fn(() => q);
+
+        expect(await serverBestPayout('g1', 'u1')).toBe(3900);
+        const [filter] = GrindProfile.findOne.mock.calls[0];
+        expect(filter).toMatchObject({ guildId: 'g1', system: 'hunt', userId: { $ne: 'u1' } });
+        expect(q.sort).toHaveBeenCalledWith({ 'data.bestPayout': -1 });
+        expect(q.maxTimeMS).toHaveBeenCalled();
+    });
+
+    test('is zero on a server nobody else has hunted', async () => {
+        GrindProfile.findOne = jest.fn(() => chain(Promise.resolve(null)));
+        expect(await serverBestPayout('g1', 'u1')).toBe(0);
+    });
+
+    test('is unknown, not zero, when the read fails', async () => {
+        GrindProfile.findOne = jest.fn(() => chain(Promise.reject(new Error('timeout'))));
+        expect(await serverBestPayout('g1', 'u1')).toBeNull();
+    });
+});
