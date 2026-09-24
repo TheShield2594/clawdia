@@ -296,6 +296,7 @@ function buildFooter(user) {
     if (f.activeBait)     parts.push(`Bait ×${f.activeBaitCastsLeft}`);
     if (f.activeLuck)     parts.push('Luck ready');
     if (f.activeXpScroll) parts.push('XP Scroll ready');
+    if (f.releaseKarma > 0) parts.push(`🌿 Karma ×${f.releaseKarma}`);
 
     return parts.join(' • ');
 }

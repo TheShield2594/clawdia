@@ -24,6 +24,8 @@ const { logBigWin } = require('../../../utils/bigWinLogger');
 const COLORS = require('../../../utils/embedColors');
 const { FIGHT_MOVES, BOSS_LINE_INTEGRITY } = require('../../../data/fishData');
 const { awaitCasterClick, buildMoveRow, moveFromCustomId } = require('./shared');
+const { renderFishResultCard } = require('./resultCard');
+const { buildResultActions } = require('./actions');
 
 const BOSS_COLOR    = '#B03A2E';
 const BOSS_ROUND_MS = 15_000;
@@ -41,7 +43,13 @@ function integrityBar(integrity) {
     return '❤️'.repeat(integrity) + '🖤'.repeat(BOSS_LINE_INTEGRITY - integrity);
 }
 
-async function runBossFight({ interaction, reelMsg, embed, catchFiles, result, location, guildSettings, currency }) {
+/**
+ * Fights the boss over the revealed catch. `lead` is the picture card's embed
+ * (empty when it could not be drawn) and `cardArgs` what drew it, so the card
+ * can be redrawn with the fight's banner once it is over; `release` is the
+ * catch's pending release, for the buttons the result ends on.
+ */
+async function runBossFight({ interaction, reelMsg, embed, lead = [], cardArgs = null, catchFiles, result, location, guildSettings, currency, release = null }) {
     const fight       = rollBossFight();
     const { boss: bossType, rounds } = fight;
     const roundCount  = rounds.length;
@@ -74,7 +82,7 @@ async function runBossFight({ interaction, reelMsg, embed, catchFiles, result, l
     let timedOut = false;
     for (let i = 0; i < roundCount && integrity > 0; i++) {
         const pick = awaitCasterClick(reelMsg, interaction.user.id, moveIds);
-        await interaction.editReply({ embeds: [embed, buildRoundEmbed(i)], components: [buildMoveRow(customIdFor)], files: catchFiles });
+        await interaction.editReply({ embeds: [...lead, embed, buildRoundEmbed(i)], components: [buildMoveRow(customIdFor)], files: catchFiles });
         pick.start(BOSS_ROUND_MS);
         const clicked = await pick.choice;
         const chosen  = clicked ? moveFromCustomId(clicked) : BOSS_TIMEOUT;
@@ -132,7 +140,7 @@ async function runBossFight({ interaction, reelMsg, embed, catchFiles, result, l
         }
     } catch (saveErr) {
         console.error('[fish boss] save error:', saveErr);
-        return interaction.editReply({ embeds: [embed], components: [], files: catchFiles, content: 'Something went wrong saving your boss result. Your catch above is safe; the boss bonus was not paid.' });
+        return interaction.editReply({ embeds: [...lead, embed], components: buildResultActions(release), files: catchFiles, content: 'Something went wrong saving your boss result. Your catch above is safe; the boss bonus was not paid.' });
     }
 
     if (bossResult.bonusPayout > 0) {
@@ -189,7 +197,24 @@ async function runBossFight({ interaction, reelMsg, embed, catchFiles, result, l
         });
     }
 
-    await interaction.editReply({ embeds: [embed, bossResultEmbed], components: [], files: catchFiles });
+    // The card, redrawn with the fight on it — the banner under the badges, as
+    // /hunt's card carries an apex duel.
+    let finalLead = lead, finalFiles = catchFiles;
+    if (cardArgs) {
+        const cardTitles = {
+            perfect:  `${bossType.name} mastered`,
+            win:      `${bossType.name} subdued`,
+            survived: `Barely held the ${bossType.name}`,
+            escaped:  bossResult.lineSnapped ? `${bossType.name} snapped the line` : `${bossType.name} shook free`,
+        };
+        const redrawn = await renderFishResultCard({
+            ...cardArgs,
+            apex: { label: 'Boss fight', outcome: bossResult.outcome, title: cardTitles[bossResult.outcome], payout: bossResult.bonusPayout },
+        });
+        if (redrawn) { finalLead = [redrawn.embed]; finalFiles = [redrawn.file]; }
+    }
+
+    await interaction.editReply({ embeds: [...finalLead, embed, bossResultEmbed], components: buildResultActions(release), files: finalFiles });
 }
 
 module.exports = { runBossFight, BOSS_TIMEOUT };

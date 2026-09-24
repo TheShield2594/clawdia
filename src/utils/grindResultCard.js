@@ -2,8 +2,9 @@
 
 /**
  * The kill card: the picture a `/hunt start` kill carries above its result
- * text. The sibling of the `/fish cast` catch card (utils/catchCard.js) and
- * laid out to match it, so the two grinds' results read as one family:
+ * text, and the `/fish cast` catch card too: one layout, so the two grinds'
+ * results read as one family. The catch card is drawn with `activity: 'fish'`,
+ * a weight gauge and a BOSS FIGHT banner (commands/economy/fish/resultCard.js):
  *
  *   ┌──────────────────────────────────────────────────────────────────────┐
  *   │    ╭──────╮      THESHIELD BAGGED                   (zone art, faint)│
@@ -125,9 +126,13 @@ function layoutBadges(ctx, badges, x0, maxW) {
 
 // The payout gauge: this hunt's coins on a bar scaled to the biggest of the
 // three numbers, with the hunter's previous best above and the record below.
+// A gauge can measure something other than coins — a fish is measured by its
+// weight — by passing its own `value`, a `unit` for the labels, and a `max`
+// for the bar's full length (the species' heaviest possible, say).
 function drawPayoutGauge(ctx, g, x, y, w, tierColor, theme) {
     const h = 14;
-    const top = Math.max(g.value, g.best ?? 0, g.record ?? 0) * 1.08 || 1;
+    const top = g.max ?? (Math.max(g.value, g.best ?? 0, g.record ?? 0) * 1.08 || 1);
+    const unit = g.unit ? ` ${g.unit}` : '';
     const at = v => x + Math.max(0, Math.min(1, v / top)) * w;
 
     roundRect(ctx, x, y, w, h, h / 2);
@@ -158,8 +163,8 @@ function drawPayoutGauge(ctx, g, x, y, w, tierColor, theme) {
         ctx.fillText(label, tx, above ? y - 9 : y + h + 9);
         ctx.restore();
     };
-    if (g.best > 0)   tick(g.best, `YOUR BEST ${n(g.best)}`, theme.muted, true);
-    if (g.record > 0) tick(g.record, `RECORD ${n(g.record)}`, GOLD, false);
+    if (g.best > 0)   tick(g.best, `YOUR BEST ${n(g.best)}${unit}`, theme.muted, true);
+    if (g.record > 0) tick(g.record, `RECORD ${n(g.record)}${unit}`, GOLD, false);
 
     // This hunt: a diamond on the bar.
     const cx = at(g.value), cy = y + h / 2, r = 11;
@@ -219,9 +224,12 @@ function statTile(ctx, { label, value, accent, struck = false }, x, y, w, theme)
  * @param {?number} [opts.forfeited]                   what the daily cap withheld
  * @param {number}  opts.xp
  * @param {?{label: string, value: string}} [opts.extraStat]  the third tile
- * @param {?{best: number, record: number}} [opts.gauge]   this payout against them
+ * @param {?{best: number, record: number, value?: number, unit?: string, max?: number}} [opts.gauge]
+ *        this payout against them — or, with `value`, whatever that measures
+ *        (a fish's weight in `unit` lbs, on a bar `max` long)
  * @param {{text: string, tone?: string, color?: string}[]} [opts.badges]
- * @param {?{outcome: string, title: string, payout: number}} [opts.apex]
+ * @param {?{outcome: string, title: string, payout: number, label?: string}} [opts.apex]
+ *        the banner under the badges; `label` names it (default "APEX DUEL")
  * @returns {Promise<Buffer>} PNG
  */
 async function createGrindResultCard(opts) {
@@ -301,8 +309,13 @@ async function createGrindResultCard(opts) {
     ctx.restore();
 
     const capped = opts.forfeited != null && !(opts.payout > 0);
-    if (opts.gauge && !capped && opts.payout > 0 && (opts.gauge.best > 0 || opts.gauge.record > 0)) {
-        drawPayoutGauge(ctx, { ...opts.gauge, value: opts.payout }, PANEL_X, 206, PANEL_W, tierColor, theme);
+    // A payout gauge (the default) has nothing to show when the cap took the
+    // payout; a gauge with a value of its own measures that instead.
+    const ownValue = opts.gauge?.value != null;
+    const gaugeValue = ownValue ? opts.gauge.value : opts.payout;
+    if (opts.gauge && (ownValue || !capped) && gaugeValue > 0
+        && (opts.gauge.best > 0 || opts.gauge.record > 0 || opts.gauge.max > 0)) {
+        drawPayoutGauge(ctx, { ...opts.gauge, value: gaugeValue }, PANEL_X, 206, PANEL_W, tierColor, theme);
     }
 
     // Stat tiles.
@@ -342,7 +355,7 @@ async function createGrindResultCard(opts) {
         ctx.save();
         ctx.textBaseline = 'alphabetic';
         ctx.font = `bold 14px ${FONT}`;
-        ctx.fillText('APEX DUEL', 72, y + 24);
+        ctx.fillText(plain(opts.apex.label ?? 'APEX DUEL').toUpperCase(), 72, y + 24);
         ctx.font = `bold 20px ${FONT}`;
         ctx.fillStyle = '#ffffff';
         ctx.fillText(fitText(ctx, plain(opts.apex.title), CARD_W - 100 - 260), 72, y + 48);

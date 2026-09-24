@@ -123,6 +123,7 @@ function harness(strategy) {
 }
 
 const titles = edits => edits.map(e => e.embeds?.map(x => x.data.title).join(' | '));
+const buttonIds = edit => (edit.components ?? []).flatMap(row => row.toJSON().components.map(c => c.custom_id));
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -134,7 +135,7 @@ test('a legendary fought and read right: no spoiler, reveal, card, then a boss f
     fishService.rollBossFight.mockReturnValue({ boss: BOSS_TYPES.ghost_eel, rounds: fishService.rollFightCues(3) });
 
     const { interaction, edits, sent } = harness('right');
-    await handleCast(interaction);
+    const outcome = await handleCast(interaction);
 
     // Two fight beats for a legendary, and none of them names the fish or tier.
     const bites = edits.filter(e => e.embeds[0].data.title === '⚡ The reel SCREAMS!');
@@ -152,13 +153,19 @@ test('a legendary fought and read right: no spoiler, reveal, card, then a boss f
     expect(fanfare).toBeGreaterThan(-1);
     expect(round1).toBeGreaterThan(fanfare);
 
-    // The final render: the catch with its card, and the boss result under it.
+    // The final render: the picture card leading (redrawn with the fight's
+    // banner), the catch's text, the boss result under it — and the buttons.
     const final = edits[edits.length - 1];
-    expect(final.embeds).toHaveLength(2);
-    expect(final.embeds[0].data.image.url).toBe('attachment://catch.png');
-    expect(final.files.map(f => f.name)).toEqual(['catch.png']);
-    expect(final.embeds[1].data.title).toMatch(/PERFECT/);
-    expect(final.components).toEqual([]);
+    expect(final.embeds).toHaveLength(3);
+    expect(final.embeds[0].data.image.url).toBe('attachment://fish-result.png');
+    expect(final.files.map(f => f.name)).toEqual(['fish-result.png']);
+    expect(final.embeds[2].data.title).toMatch(/PERFECT/);
+    expect(buttonIds(final)).toEqual(['fish_act_again', 'fish_act_keep', 'fish_act_release']);
+    // No buttons while the fight or the reveal is still on screen.
+    for (const e of edits.slice(0, -1)) {
+        expect(buttonIds(e).filter(id => id.startsWith('fish_act_'))).toEqual([]);
+    }
+    expect(outcome).toEqual({ started: true });
 
     // The legendary is still announced, boss or not.
     expect(sent.some(p => p.embeds[0].data.title.includes('Legendary Catch'))).toBe(true);
@@ -173,12 +180,16 @@ test('an epic misread escapes, and the escape says what got away and what the re
     const { interaction, edits } = harness('wrong');
     await handleCast(interaction);
 
-    const last = edits[edits.length - 1];
+    // The escape embed, then an edit that only adds the buttons under it.
+    const last = [...edits].reverse().find(e => e.embeds);
     expect(last.embeds[0].data.title).toBe('💨 The One That Got Away');
     expect(last.embeds[0].data.description).toContain(FISH.hammerhead.name);
     expect(last.embeds[0].data.description).toMatch(/it needed \*\*/);
     expect(user.balance).toBe(1000);
     expect(fishService.commitCast).toHaveBeenCalledTimes(1);
+    // Nothing landed, so there is nothing to keep or release — only another cast.
+    expect(buttonIds(edits[edits.length - 1])).toEqual(['fish_act_again']);
+    expect(user.fishing.pendingRelease).toBeNull();
 });
 
 test('a rare left to time out lands an actual Uncommon, and its boss roll is dropped', async () => {
@@ -190,11 +201,14 @@ test('a rare left to time out lands an actual Uncommon, and its boss roll is dro
     await handleCast(interaction);
 
     const final = edits[edits.length - 1];
-    expect(final.embeds).toHaveLength(1);
-    const title = final.embeds[0].data.title;
-    expect(title).not.toContain('Salmon');
-    const tier = final.embeds[0].data.fields.find(f => f.name === 'Tier').value;
+    expect(final.embeds).toHaveLength(2);
+    const text = final.embeds[1];
+    expect(text.data.title).not.toContain('Salmon');
+    const tier = text.data.fields.find(f => f.name === 'Tier').value;
     expect(tier).toBe('Uncommon');
     expect(fishService.rollBossFight).not.toHaveBeenCalled();
     expect(user.fishing.catalog.salmon).toBeUndefined();
+    // The release on offer is for the fish that actually landed, at what it paid.
+    expect(user.fishing.pendingRelease).toMatchObject({ castId: 'i1', fishId: user.fishing.pendingRelease.fishId, payout: 350 });
+    expect(user.fishing.pendingRelease.fishName).not.toBe('Salmon');
 });

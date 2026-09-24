@@ -21,6 +21,7 @@ const {
     updateFishQuestProgress,
     commitCast,
     rollFightCues,
+    recordPendingRelease,
 } = require('../../../services/fishService');
 const { buildCooldownEmbed } = require('../../../utils/cooldownEmbed');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require('../../../data/featuredRotation');
@@ -42,7 +43,8 @@ const { REEL_IN, FIGHT_MOVES, FISH_WEIGHT_SCALE } = require('../../../data/fishD
 const { runBossFight } = require('./boss');
 const { buildCastEmbed } = require('./embeds');
 const { attachResultThumbnail } = require('../../../utils/itemImageHelper');
-const { renderCatchCard } = require('./catchCard');
+const { renderFishResultCard, cardChips } = require('./resultCard');
+const { attachResultActions, buildResultActions } = require('./actions');
 const COLORS = require('../../../utils/embedColors');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
 
@@ -285,6 +287,11 @@ async function handleCast(interaction) {
         // Persist and credit through the service. An escape reverses its own
         // mutations, so that path simply produces a delta of zero and issues
         // no coin write.
+        // What this catch would cost to release, for the result's Keep / Release
+        // buttons — saved with the cast, keyed by it, and replacing whatever an
+        // earlier cast left on offer.
+        let release = recordPendingRelease(user, interaction.id, result);
+
         let payoutOwed = 0;
         try {
             ({ payoutOwed } = await commitCast(user, balanceAtLoad, {
@@ -307,8 +314,15 @@ async function handleCast(interaction) {
         }
 
         // Fish escaped — the escape embed is already up, and commitCast saved the
-        // stamina, durability and cooldown it cost. Nothing else to show.
-        if (result.escaped) return;
+        // stamina, durability and cooldown it cost. All that is left to offer is
+        // another cast.
+        if (result.escaped) {
+            await interaction.editReply({ components: buildResultActions(null) }).catch(() => {});
+            await attachResultActions(interaction, { locationId });
+            return { started: true };
+        }
+        // A payout that did not land cannot be handed back.
+        if (payoutOwed > 0) release = null;
 
         // Submit to active tournament if fish catch (not junk/treasure). The score
         // is the catch itself: the pet, featured-spot and Wilderness bonuses are
@@ -350,21 +364,28 @@ async function handleCast(interaction) {
 
         const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
 
-        // Result artwork — a catch card (the fish, its size against the species'
-        // range, the payout and whatever records it set) as the embed's image,
-        // or the fish's icon as a thumbnail if the card cannot be drawn.
-        // Threaded through every render of this embed, boss rounds included, so
-        // the attachment rides with each one.
-        let catchFiles = [];
-        if (result.success && result.catchType === 'fish') {
-            const card = await renderCatchCard({ result, user, location, worldRecord, reelResult, username: interaction.member?.displayName || interaction.user.username });
-            if (card) {
-                embed.setImage(`attachment://${card.name}`);
-                catchFiles = [card];
-            } else {
-                catchFiles = await attachResultThumbnail(embed, 'fish', result.fish, interaction.guild.id);
-            }
-        }
+        // The picture card leads a landed fish: its art, weight against its
+        // species, the payout and how the fight went, drawn above this text
+        // (fish/resultCard — the card /hunt start draws for a kill). If it
+        // cannot be drawn the art falls back to the embed's thumbnail. Either
+        // attachment rides every later render of the message, boss rounds
+        // included.
+        const cardArgs = {
+            result, location, worldRecord,
+            username: interaction.member?.displayName ?? interaction.user.globalName ?? interaction.user.username,
+            chips: cardChips({
+                result, reelResult, isFeaturedSpot, rarePetDrop,
+                featuredPct: Math.round(FEATURED_PAYOUT_BONUS * 100),
+                winterMaterialName: winterHuntMaterial ? (HUNT_MATERIAL_NAMES[winterHuntMaterial] ?? winterHuntMaterial) : null,
+            }),
+        };
+        const card = await renderFishResultCard(cardArgs);
+        const lead = card ? [card.embed] : [];
+        const catchFiles = card
+            ? [card.file]
+            : result.success && result.catchType === 'fish'
+                ? await attachResultThumbnail(embed, 'fish', result.fish, interaction.guild.id)
+                : [];
 
         if (payoutOwed > 0) {
             embed.addFields({
@@ -449,16 +470,24 @@ async function handleCast(interaction) {
         }
 
         // Staged loot reveal for rare+ drops. A boss fight opens on top of the
-        // revealed catch, so it gets the reveal too.
-        await stagedLootReveal(interaction, result.success ? result.tier : null, embed, 'fish', catchFiles);
+        // revealed catch, so it gets the reveal too. The buttons ride the final
+        // render only, so nothing can be pressed under the fog; a boss fight
+        // follows instead of them when one triggers, and arms them when it ends.
+        const components = result.bossEncounter ? [] : buildResultActions(release);
+        await stagedLootReveal(interaction, result.success ? result.tier : null, [...lead, embed], 'fish', catchFiles, { components });
 
         announceRareCatch(interaction, guildSettings, result, location);
         announceServerRecord(interaction, guildSettings, result, worldRecord);
 
         // Boss encounter — multi-phase fight, fought over the revealed catch.
         if (result.bossEncounter) {
-            await runBossFight({ interaction, reelMsg, embed, catchFiles, result, location, guildSettings, currency });
+            await runBossFight({
+                interaction, reelMsg, embed, lead, cardArgs: card ? cardArgs : null, catchFiles,
+                result, location, guildSettings, currency, release,
+            });
         }
+        await attachResultActions(interaction, { locationId });
+        return { started: true };
     } catch (err) {
         if (!castCommitted) await releaseFishClaim();
         throw err;

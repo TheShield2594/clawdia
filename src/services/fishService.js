@@ -33,6 +33,12 @@ const { WILDERNESS_YIELD_BONUS } = require('../data/crossSystemData');
 const { randomInt } = require('crypto');
 
 const DAILY_QUEST_COUNT = 3;
+
+// Keep / release (see releaseCatch). A released fish hands back its coins for
+// the XP again and a charge of river karma, which shifts this share of the
+// common weight up the ladder on the next fish; charges stack up to the cap.
+const RELEASE_KARMA_SHIFT = 0.10;
+const RELEASE_KARMA_MAX   = 3;
 const WEEK_MS = 7 * 24 * 3_600_000;
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
@@ -75,6 +81,9 @@ function ensureFishingData(user) {
     if (f.personalBest         == null) f.personalBest         = { fish: null, weight: 0, payout: 0 };
     if (f.weeklyRecord         == null) f.weeklyRecord         = { fish: null, weight: 0, userId: null, username: null, weekStart: null };
     if (f.lastBossEncounter    == null) f.lastBossEncounter    = null;
+    if (f.releaseKarma         == null) f.releaseKarma         = 0;
+    if (f.fishReleased         == null) f.fishReleased         = 0;
+    if (f.pendingRelease === undefined) f.pendingRelease       = null;
     if (!Array.isArray(f.trophies)) f.trophies = [];
     if (!f.catalog || typeof f.catalog !== 'object' || Array.isArray(f.catalog)) f.catalog = {};
 
@@ -223,6 +232,16 @@ function rollTier(user, location, rod) {
         w.common    = Math.max(0, w.common - shiftLeg - shiftEpic);
         w.legendary += shiftLeg;
         w.epic      += shiftEpic;
+    }
+
+    // River karma — a charge earned by releasing a catch (see releaseCatch):
+    // the next fish comes from a little further up the rarity ladder. The
+    // charge itself is spent by executeCast, which knows the cast reached here.
+    if ((f.releaseKarma ?? 0) > 0) {
+        const shift = w.common * RELEASE_KARMA_SHIFT;
+        w.common = Math.max(0, w.common - shift);
+        w.rare  += shift * 0.7;
+        w.epic  += shift * 0.3;
     }
 
     // Rod rarity boost
@@ -701,6 +720,10 @@ function executeCast(user, locationId, options = {}) {
             // Fish catch
             const tier = rollTier(user, location, rod);
             const fish = rollFish(tier, locationId ?? f.activeLocation);
+            if ((f.releaseKarma ?? 0) > 0) {
+                f.releaseKarma -= 1;
+                result.karmaUsed = true;
+            }
 
             // ── Trait effects ──────────────────────────────────────────────
             const traits = fish.traits ?? {};
@@ -1512,6 +1535,68 @@ async function commitCast(user, balanceAtLoad, { payoutKey } = {}) {
     return { payoutOwed: payout.credited ? 0 : balanceDelta };
 }
 
+// ─── KEEP / RELEASE ───────────────────────────────────────────────────────────
+//
+// A landed fish is sold on the spot — its coins are in the result. The result
+// then offers the choice to let it go instead: the coins go back, and the angler
+// gets the catch's XP a second time and a charge of river karma (a better shot
+// at a rare fish next cast). It is a real trade — coins now for progress and
+// luck — so it has to cost exactly what the catch paid.
+//
+// The cast records what it would cost as `pendingRelease`, keyed by the
+// interaction that cast it. Only that cast's buttons can spend it, only once,
+// and the next cast replaces it — so a stale result cannot release a fish the
+// angler has since moved on from.
+
+/** The pending-release record a cast leaves for its result's buttons. */
+function recordPendingRelease(user, castId, result) {
+    const f = user.fishing;
+    const releasable = result.success && result.catchType === 'fish' && result.fish && (result.finalPayout ?? 0) > 0;
+    f.pendingRelease = releasable ? {
+        castId,
+        fishId:   result.fish.id,
+        fishName: result.fish.name,
+        payout:   result.finalPayout,
+        xp:       Math.max(1, result.xpEarned ?? 0),
+        at:       new Date(),
+    } : null;
+    user.markModified?.('fishing');
+    return f.pendingRelease;
+}
+
+/** The release `castId`'s result may still offer, or null when it is gone. */
+function releasePlan(user, castId) {
+    const pending = user.fishing?.pendingRelease;
+    if (!pending || pending.castId !== castId || !(pending.payout > 0)) return null;
+    return pending;
+}
+
+/**
+ * Applies a release whose coins have already been taken back (the caller does
+ * that atomically, with chargeExact, so a player who has spent them since is
+ * refused rather than overdrawn). Returns { xp, karma, levelUp }.
+ */
+function applyRelease(user, plan) {
+    const f = user.fishing;
+    f.totalEarned  = Math.max(0, (f.totalEarned ?? 0) - plan.payout);
+    // The coins never happened, so they stop counting towards today's caps.
+    f.dailyCoins   = Math.max(0, (f.dailyCoins ?? 0) - plan.payout);
+    f.fishReleased = (f.fishReleased ?? 0) + 1;
+    f.releaseKarma = Math.min(RELEASE_KARMA_MAX, (f.releaseKarma ?? 0) + 1);
+    f.pendingRelease = null;
+    const lv = applyXp(user, plan.xp);
+    user.markModified('fishing');
+    return { xp: plan.xp, karma: f.releaseKarma, levelUp: lv.leveledUp ? lv : null };
+}
+
+/** Keeping the fish: the coins stay, and the release is no longer on offer. */
+function declineRelease(user, castId) {
+    if (!releasePlan(user, castId)) return false;
+    user.fishing.pendingRelease = null;
+    user.markModified('fishing');
+    return true;
+}
+
 // ─── FORMATTING HELPERS ───────────────────────────────────────────────────────
 
 const formatMs = grind.formatMs;
@@ -1560,6 +1645,11 @@ module.exports = {
     rollFishWeight,
     recordLandedFish,
     castFatigueMult,
+    recordPendingRelease,
+    releasePlan,
+    applyRelease,
+    declineRelease,
+    RELEASE_KARMA_MAX,
     assignDailyFishQuests,
     updateFishQuestProgress,
     prepareCastUser,
