@@ -4,6 +4,7 @@ const {
     ButtonBuilder,
     ButtonStyle,
     MessageFlags,
+    AttachmentBuilder,
 } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
@@ -21,6 +22,7 @@ const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { delay } = require('../../utils/delay');
 const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
+const { paytableImage, paytableAltText } = require('./slotsPaytableCard');
 const {
     SYMBOLS,
     HEAT_MAX,
@@ -333,6 +335,27 @@ function paytableEmbed() {
             },
         )
         .setFooter({ text: 'The window shows the real reel strips — what sits above and below the line is what was there.' });
+}
+
+/**
+ * Answers the Paytable button, privately, with the paytable image. Deferred
+ * first: the first render in a process takes around a second, and a press must
+ * be answered within three. A render that fails sends the text paytable instead.
+ */
+async function showPaytable(press) {
+    await press.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+    let payload;
+    try {
+        const image = new AttachmentBuilder(await paytableImage(), {
+            name: 'slots-paytable.png',
+            description: paytableAltText().slice(0, 1024),
+        });
+        payload = { files: [image] };
+    } catch (err) {
+        console.error('[Slots] paytable render failed:', err);
+        payload = { embeds: [paytableEmbed()] };
+    }
+    await press.editReply(payload).catch(() => {});
 }
 
 /**
@@ -717,7 +740,7 @@ async function playSlots(ctx) {
 
         collector.on('collect', async i => {
             if (i.customId === ids.paytable) {
-                await i.reply({ embeds: [paytableEmbed()], flags: MessageFlags.Ephemeral }).catch(() => {});
+                await showPaytable(i);
                 return;
             }
             // The stake the button showed, not one worked out again at press time.

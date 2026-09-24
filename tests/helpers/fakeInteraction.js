@@ -100,6 +100,7 @@ function makeInteraction({
             return entered;
         }),
         deferUpdate: jest.fn().mockResolvedValue(undefined),
+        deferReply: jest.fn(record),
         // `updateRejects` makes this press's render fail, which is how a test
         // reaches the catch that runs *after* a hand has already been settled.
         update: press.updateRejects

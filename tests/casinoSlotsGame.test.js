@@ -295,12 +295,35 @@ describe('the buttons', () => {
             .toEqual(['replay', 'half', 'double', 'max', 'pay']);
     }, 20_000);
 
-    test('the paytable answers privately, with the real return', async () => {
+    test('the paytable answers privately, with the paytable image', async () => {
+        jest.useRealTimers();
         const spin = await play([LOSER()], { holdCollectors: true });
         const press = await spin.press({ customId: idFor(spin, 'slots_pay_') });
 
-        const [[payload]] = press.reply.mock.calls;
-        expect(payload.flags).toBe(MessageFlags.Ephemeral);
+        expect(press.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
+        const [[payload]] = press.editReply.mock.calls;
+        const [image] = payload.files;
+        expect(image.name).toBe('slots-paytable.png');
+        expect(image.attachment.subarray(0, 4).toString('hex')).toBe('89504e47');
+        expect(image.description).toContain('Three Stars 88x');
+    }, 20_000);
+
+    test('a paytable that cannot be drawn falls back to the text paytable', async () => {
+        jest.useRealTimers();
+        let isolatedSlots;
+        jest.isolateModules(() => {
+            jest.doMock('../src/games/casino/slotsPaytableCard', () => ({
+                paytableImage: () => Promise.reject(new Error('no canvas')),
+                paytableAltText: () => '',
+            }));
+            isolatedSlots = require('../src/games/casino/slots');
+        });
+        mockSpins = [LOSER()];
+        const spin = makeInteraction({ options: { bet: BET }, userId: USER_ID, guildId: GUILD_ID, holdCollectors: true });
+        await isolatedSlots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
+        const press = await spin.press({ customId: idFor(spin, 'slots_pay_') });
+
+        const [[payload]] = press.editReply.mock.calls;
         const text = JSON.stringify(payload.embeds[0].data);
         expect(text).toContain('94.0%');
         expect(text).toContain("Coin boosters don't apply to slots");
