@@ -20,6 +20,9 @@ const GUIDE = path.join(__dirname, '../docs/EXTENDING.md');
 const SOURCES = [
     path.join(__dirname, '../src/events/interactionCreate.js'),
     path.join(__dirname, '../src/utils/commandLoader.js'),
+    // The cooldown half of the dispatcher's gate lives here, shared with the
+    // buttons that stand in for a command (/hunt's result actions).
+    path.join(__dirname, '../src/utils/commandPolicy.js'),
 ];
 
 // The contract table is the one under this heading; the guide has other tables.

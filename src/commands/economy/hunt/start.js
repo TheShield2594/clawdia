@@ -1,7 +1,12 @@
 'use strict';
 
-// /hunt start — the hunt itself, from preflight through the aim phase to the
-// staged reveal of what was taken.
+// /hunt start — the hunt itself, from preflight through the approach and the
+// shot to the staged reveal of what was taken, the apex duel it can trigger,
+// and the buttons the result card ends on.
+//
+// Every beat of an encounter wears the same header (the zone, see
+// embeds.sceneAuthor) so the prompts read as one scene changing rather than a
+// slideshow of unrelated cards.
 
 const { TIER_NUM, TIER_STARS } = require('../../../data/materialRarity');
 const { EmbedBuilder, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
@@ -17,13 +22,8 @@ const {
     applyHuntBonuses,
     updateHuntQuestProgress,
     commitHunt,
-    rollApexType,
-    apexNerveMax,
-    apexNerveAfter,
-    ensureHuntData,
-    resolveApexEncounter,
-    applyPayoutModifiers,
-    recordBestPayout,
+    huntSuccessChance,
+    serverBestPayout,
     formatMs
 } = require('../../../services/huntService');
 const { buildCooldownEmbed } = require('../../../utils/cooldownEmbed');
@@ -36,20 +36,41 @@ const { isVersionError } = require('../../../utils/versionRetry');
 const { logBigWin } = require('../../../utils/bigWinLogger');
 const { addWeeklyChampionProgress, getWeeklyChampionLeader } = require('../../../utils/weeklyChampion');
 const { getTimeBand } = require('../../../utils/timeBand');
-const { attachGrind } = require('../../../utils/grindProfile');
-const { ZONES } = require('../../../data/huntData');
-const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const { gatherPayoutKey } = require('../../../utils/payoutKey');
-const { pickApproachProfile, runAimPhase } = require('./aim');
-const { buildBonusLines, buildHuntEmbed } = require('./embeds');
+const { secureRandom } = require('../../../utils/secureRandom');
+const {
+    pickApproachProfile, runAimPhase, resolveStealth, shuffled,
+    STEALTH_OUTCOMES, AIM_FAKEOUT_CHANCE,
+} = require('./aim');
+const { buildBonusLines, buildHuntEmbed, sceneAuthor, fitEmbeds } = require('./embeds');
+const { buildResultActions, attachResultActions } = require('./actions');
+const { runApexDuel } = require('./apex');
+const { cardChips, renderHuntResultCard } = require('./resultCard');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
 const { attachResultThumbnail } = require('../../../utils/itemImageHelper');
 
+// How long the approach prompt waits for a read.
+const STEALTH_MS = 15_000;
+// The beat the approach result holds before the sights come up.
+const STEALTH_RESULT_MS = 1_200;
+// A perfect approach on common prey can flush out the bigger animal the hint
+// pointed at behind it.
+const LURKER_FLUSH_CHANCE = 0.30;
+
+const pct = p => `${Math.round(p * 100)}%`;
+const tsRel = date => `<t:${Math.floor(date.getTime() / 1000)}:R>`;
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
 // ═══════════════════════════════════════════════════════════════════════════════
-// START (was /hunt)
+// START
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Runs one hunt. Resolves `{ started: true }` once a hunt has claimed its
+ * cooldown and run — the "Hunt again" button uses it to know whether to retire
+ * the card it was pressed on — and undefined when the hunt was refused.
+ */
 async function executeStart(interaction) {
     const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
@@ -103,6 +124,8 @@ async function executeStart(interaction) {
     // `$inc` at the save, so `save()` never writes an absolute balance read
     // before that window. See src/utils/balanceDelta.js.
     const balanceAtLoad = user.balance ?? 0;
+    const weaponIndex = h.equippedWeaponIndex;
+    const scene = embed => embed.setAuthor(sceneAuthor(zone, interaction.user));
 
     try {
 
@@ -113,126 +136,34 @@ async function executeStart(interaction) {
             user.markModified('hunt');
         }
 
-        // ── Stealth Approach + Precision Aim ─────────────────────────────────────
-        // Phase 1 — Stealth: the prey is rolled first, and the player reads a
-        // behaviour hint about *that animal* and picks the matching approach.
-        //   Correct  → stealthBonus = +0.25 success chance, common→uncommon upgrade ~30%
-        //   Partial  → stealthBonus = +0.05 (safe but suboptimal)
-        //   Wrong    → stealthBonus = −0.10 (spooked the animal)
-        //   Timeout  → stealthBonus = 0
-        // Phase 2 — Aim: hold the shot until the target lines up, then fire.
-        //   In the window  → aimBonus = +0.18 crit chance
-        //   Late           → aimBonus = +0.08 crit chance
-        //   Early          → aimBonus = −0.05 crit chance (rushed the shot)
-        //   Timeout        → aimBonus = 0
-
-        let stealthBonus = 0;
-        let aimBonus     = 0;
-
-        // Rolled before the prompt so the hint can be truthful and the correct
-        // answer can follow the animal rather than the zone.
+        // Rolled before the prompt so the hint describes the animal that is
+        // actually there and the correct approach follows from it.
         let encounter = rollHuntEncounter(user, zoneId);
+        // Common prey can have something bigger behind it. It is rolled — and
+        // named in the hint — up front, so a perfect approach that flushes it
+        // out delivers the animal the player was told about, not a surprise
+        // swap for one they never saw.
+        const lurker = encounter.tier === 'common' ? rollAnimal('uncommon', zoneId) : null;
 
-        const delay = ms => new Promise(r => setTimeout(r, ms));
+        let stealth = { outcome: 'skipped', bonus: 0 };
+        let aim = null;
+        let flushed = false;
 
-        // A quick hunt trades both phase bonuses for the ~6-10 seconds of
-        // prompts and forced waits the interactive path costs — a real trade
-        // the player opts into, so it needs no rebalancing.
         if (!quick) {
-            const approachData = pickApproachProfile(encounter.animal);
-            // Shuffle the 3 options
-            const shuffled = [...approachData.options].sort(() => Math.random() - 0.5);
+            ({ stealth, flushed, encounter } = await runApproach(interaction, {
+                user, weapon, zone, encounter, lurker, scene,
+            }));
 
-            const stealthEmbed = new EmbedBuilder()
-                .setColor('#556B2F')
-                .setTitle(`🌿 Approaching ${zone.emoji} ${zone.name}…`)
-                .setDescription(
-                    `*${approachData.hint(encounter.animal)}*\n\n` +
-                    `**How do you close in on your prey?**\n` +
-                    `Choose wisely — the animal will react to your approach.`
-                )
-                .setFooter({ text: 'You have 15 seconds — or the hunt begins without a stealth bonus.' });
-
-            const stealthRow = new ActionRowBuilder().addComponents(
-                ...shuffled.map(opt => new ButtonBuilder()
-                    .setCustomId(`stealth_${opt.id}`)
-                    .setLabel(opt.label)
-                    .setStyle(ButtonStyle.Primary)
-                )
-            );
-
-            await interaction.reply({ embeds: [stealthEmbed], components: [stealthRow] });
-            const huntMsg = await interaction.fetchReply();
-
-            const pickedId = await new Promise(resolve => {
-                const col = huntMsg.createMessageComponentCollector({
-                    filter: ownedBy(interaction.user.id, i => i.customId.startsWith('stealth_'), "This isn't your hunt."),
-                    time: 15_000,
-                    max: 1,
+            // Armoured prey cannot be crit, and the aim phase only moves crit
+            // chance — so against it the phase would be a minigame that pays
+            // nothing while promising "+18% crit chance". It is skipped, and
+            // the result card says why.
+            if (!(encounter.animal.traits ?? []).includes('armored')) {
+                aim = await runAimPhase(interaction, await interaction.fetchReply(), {
+                    scene,
+                    fakeOut: secureRandom() < AIM_FAKEOUT_CHANCE,
                 });
-                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('stealth_', '')); });
-                col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
-            });
-
-            const chosen = shuffled.find(o => o.id === pickedId);
-            if (chosen) {
-                const isCorrectChoice = pickedId === approachData.correctId;
-                const isNeutralChoice = !isCorrectChoice && chosen.stealthBonus >= 0;
-                // Probabilistic outcome: correct=80% success, neutral=50%, wrong=20%
-                const successChance = isCorrectChoice ? 0.80 : isNeutralChoice ? 0.50 : 0.20;
-                const approachSucceeded = Math.random() < successChance;
-                if (approachSucceeded) {
-                    stealthBonus = chosen.stealthBonus;
-                } else {
-                    // Correct/neutral failed: animal startled; wrong: already bad, just slightly worse
-                    stealthBonus = isNeutralChoice ? 0 : -0.10;
-                }
             }
-
-            const isCorrect  = pickedId === approachData.correctId;
-            const isTimeout  = pickedId === null;
-            const chosenLabel = chosen?.label ?? '';
-            const stealthResultEmbed = new EmbedBuilder()
-                .setColor(
-                    isTimeout ? '#888888' :
-                    stealthBonus > 0 ? '#00FF7F' :
-                    stealthBonus < 0 ? '#FF6B6B' : '#FFA500'
-                )
-                .setTitle(
-                    isTimeout  ? '⏰ Hesitated too long…' :
-                    isCorrect && stealthBonus > 0 ? '🤫 Perfect approach!' :
-                    isCorrect && stealthBonus <= 0 ? '🐾 So close — it sensed you anyway…' :
-                    stealthBonus > 0 ? '🤔 Decent approach…' :
-                    stealthBonus < 0 ? '🔊 You spooked the animal!' :
-                    '🤔 No harm done…'
-                )
-                .setDescription(
-                    isTimeout
-                        ? `You weighed your options too long — the window closed.\n\nNo stealth bonus this hunt.`
-                        : isCorrect && stealthBonus > 0
-                        ? `**${chosenLabel}**\n\n*You read the terrain perfectly. The animal froze for a moment — then relaxed. It never sensed you.*\n\n**+25% success chance** and a chance of better prey.`
-                        : isCorrect && stealthBonus <= 0
-                        ? `**${chosenLabel}**\n\n*The right call — but the animal picked up something off. A twig snapped, the wind shifted. No bonus this time.*\n\n**No stealth bonus.**`
-                        : stealthBonus > 0
-                        ? `**${chosenLabel}**\n\n*Not the ideal approach, but you kept your noise down. The animal stirred — then settled.*\n\n**+5% success chance.**`
-                        : stealthBonus < 0
-                        ? `**${chosenLabel}**\n\n*The animal heard you before you got within range. It fixed you with a stare — every advantage lost.*\n\n**−10% success chance** this hunt.`
-                        : `**${chosenLabel}**\n\n*Could've gone worse. The animal wasn't alarmed, but you didn't gain any ground either.*\n\n**No stealth bonus.**`
-                );
-
-            await interaction.editReply({ embeds: [stealthResultEmbed], components: [] });
-            await delay(800);
-
-            // A patient, correct approach can turn common prey into something
-            // better — the "chance of better prey" the result copy promises.
-            // Applied here, once the stealth outcome is known, because the
-            // encounter itself is rolled before the prompt now.
-            if (stealthBonus > 0 && encounter.tier === 'common' && Math.random() < 0.30) {
-                encounter = { tier: 'uncommon', animal: rollAnimal('uncommon', zoneId) };
-            }
-
-            aimBonus = (await runAimPhase(interaction, huntMsg)).bonus;
-
         } else {
             await interaction.deferReply();
         }
@@ -245,8 +176,14 @@ async function executeStart(interaction) {
         const featured       = getDailyFeatured(interaction.guild.id);
         const isFeaturedZone = zoneId === featured.huntZone.id;
 
+        // The hunter's best before this hunt, for the kill card's gauge — the
+        // hunt itself raises it.
+        const priorBest = h.bestPayout ?? 0;
+
         const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
-        const result = executeHunt(user, zoneId, { stealthBonus, aimBonus, marketplaceActive, encounter });
+        const result = executeHunt(user, zoneId, {
+            stealthBonus: stealth.bonus, aimBonus: aim?.bonus ?? 0, marketplaceActive, encounter,
+        });
 
         // Pity counter, pet coin/XP yield, featured-zone and Wilderness
         // bonuses, best-payout record — the full post-roll bonus stack.
@@ -284,83 +221,61 @@ async function executeStart(interaction) {
                 payoutKey: gatherPayoutKey('hunt', interaction.id, 'run'),
             }));
             huntCommitted = true;
-            if (huntAchievements.length) {
-                announceAchievements(interaction.client, guildSettings, user, interaction.member, huntAchievements).catch(() => null);
-            }
-            notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
-            notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
         } catch (err) {
             // Nothing was saved, so give the cooldown slot back before telling them to retry.
             await releaseHuntClaim();
             if (isVersionError(err)) {
-                return interaction.editReply({ content: 'A simultaneous request conflicted with your hunt. Please try `/hunt start` again.' });
+                return interaction.editReply({ content: 'A simultaneous request conflicted with your hunt. Please try `/hunt start` again.', embeds: [], components: [] });
             }
             console.error('[hunt] save error:', err);
-            return interaction.editReply({ content: 'Something went wrong saving your hunt. Please try again.' });
+            return interaction.editReply({ content: 'Something went wrong saving your hunt. Please try again.', embeds: [], components: [] });
         }
 
-        // Log big win, then await the weekly tally update and re-fetch for accurate footer
         if (result.success && result.finalPayout > 0) {
-            const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-            if (result.finalPayout >= bigWinThreshold || ['legendary', 'event'].includes(result.tier)) {
-                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'hunt', details: { itemName: result.animal?.name, rarity: result.tier }, client: interaction.client });
-            }
             await addWeeklyChampionProgress({ guildId: interaction.guild.id, category: 'hunt', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.animal ? `${result.animal.emoji} ${result.animal.name} (${currency}${result.finalPayout.toLocaleString()})` : null }).catch(() => null);
         }
         const weeklyLeader = await getWeeklyChampionLeader(interaction.guild.id, 'hunt').catch(() => null);
 
-        const timeBand = getTimeBand();
+        // ── The result card ──────────────────────────────────────────────────
         const embed = buildHuntEmbed(result, user, zone, weapon, currency, interaction.user);
 
-        // Result artwork — the hunted animal's icon as the embed thumbnail (emoji
-        // fallback). Threaded through every render of this embed, apex phases
-        // included, so the attachment rides with each one.
-        const catchFiles = result.success
-            ? await attachResultThumbnail(embed, 'hunt', result.animal, interaction.guild.id)
-            : [];
+        // The picture card leads a kill: the animal's art, the payout and how
+        // the run went, drawn above this text (hunt/resultCard). If it cannot
+        // be drawn the art falls back to the embed's thumbnail, as before.
+        // Either attachment rides every later render of the message, apex
+        // phases included.
+        const cardArgs = {
+            result, zone,
+            username: interaction.member?.displayName ?? interaction.user.globalName ?? interaction.user.username,
+            records: {
+                priorBest,
+                othersBest: result.success && result.finalPayout > 0
+                    ? await serverBestPayout(interaction.guild.id, interaction.user.id)
+                    : null,
+            },
+            chips: cardChips({
+                result, stealth, aim, quick, flushed, isFeaturedZone, rarePetDrop,
+                featuredPct: Math.round(FEATURED_PAYOUT_BONUS * 100),
+            }),
+        };
+        const card = await renderHuntResultCard(cardArgs);
+        const lead = card ? [card.embed] : [];
+        const catchFiles = card
+            ? [card.file]
+            : result.success
+                ? await attachResultThumbnail(embed, 'hunt', result.animal, interaction.guild.id)
+                : [];
 
-        if (payoutOwed > 0) {
-            embed.addFields({
-                name: '⚠️ Payout Not Yet Credited',
-                value: `The **${currency}${payoutOwed.toLocaleString()}** from this hunt could not be paid out just now and has been recorded as owed — the balance shown below does not include it. It will be applied once the problem clears; tell an admin if it does not.`,
-            });
-        }
-        {
-            const desc = embed.data.description ?? '';
-            const lines = [];
-            if (stealthBonus > 0.10) lines.push(`> 🤫 *Perfect approach — +25% success, chance of better prey*`);
-            else if (stealthBonus > 0) lines.push(`> 🌿 *Decent approach — +5% success*`);
-            else if (stealthBonus < 0) lines.push(`> 🔊 *Spooked the animal — −10% success*`);
-            if (aimBonus >= 0.18) lines.push(`> 🎯 *Perfect shot — +18% crit chance*`);
-            else if (aimBonus > 0) lines.push(`> ✅ *Clean shot — +8% crit chance*`);
-            else if (aimBonus < 0) lines.push(`> 💨 *Rushed shot — −5% crit chance*`);
-            if (quick) lines.push(`> ⚡ *Quick hunt — stealth & aim skipped · turn off with \`/hunt start quick:false\`*`);
-            if (lines.length) embed.setDescription(desc + '\n' + lines.join('\n'));
-        }
-        // One consolidated field rather than one per bonus: Discord caps an embed at
-        // 25 fields, and giving each its own put a maximal hunt within one of the
-        // limit. Grouping them also reads better — they are all the same idea.
-        const bonusLines = buildBonusLines(result, petYieldPct, petXpPct);
-        if (bonusLines.length) {
-            embed.addFields({ name: '✨ Bonuses', value: bonusLines.join('\n'), inline: false });
-        }
-
-        // Weekly champion race footer
-        const leaderNote = weeklyLeader
-            ? `👑 Hunter of the Week so far: ${weeklyLeader.username} — ${(weeklyLeader.total ?? 0).toLocaleString()} coins hunted`
-            : '👑 No Hunter of the Week yet — be the first!';
-        const footerBase = `${timeBand.emoji} ${timeBand.label}`;
-        const currentFooter = embed.data.footer?.text ?? '';
-        embed.setFooter({ text: currentFooter ? `${currentFooter} · ${footerBase} · ${leaderNote}` : `${footerBase} · ${leaderNote}` });
-
-        if (isFeaturedZone) {
-            const desc = embed.data.description ?? '';
-            embed.setDescription(desc + `\n> 🌟 *Featured Zone: ${zone.emoji} ${zone.name} — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout bonus active!*`);
+        const chips = buildRunChips({ stealth, aim, quick, flushed, encounter, isFeaturedZone, zone });
+        const petLine = result.success ? petFlavorLine(user, { isPetActive, PET_DEFS, TRAIT_FLAVOR }) : null;
+        if (chips || petLine) {
+            embed.setDescription([embed.data.description, '', chips, petLine].filter(v => v !== null && v !== undefined).join('\n'));
         }
 
-        // Rare companion drop — announced prominently; this is the only way to get one.
+        // Rare companion drop — the rarest thing the game hands out, so it
+        // leads the fields (and is the last thing a trim would ever touch).
         if (rarePetDrop) {
-            embed.addFields({
+            embed.spliceFields(0, 0, {
                 name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
                 value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
                      + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
@@ -368,265 +283,225 @@ async function executeStart(interaction) {
                 inline: false,
             });
         }
+        if (payoutOwed > 0) {
+            embed.spliceFields(rarePetDrop ? 1 : 0, 0, {
+                name: '⚠️ Payout Not Yet Credited',
+                value: `The **${currency}${payoutOwed.toLocaleString()}** from this hunt could not be paid out just now and has been recorded as owed — the balance shown below does not include it. It will be applied once the problem clears; tell an admin if it does not.`,
+            });
+        }
 
-        // Pet narrative: show active pet's personality flavor in description
-        if (result.success) {
-            const activePet = (user.pets || []).find(p => isPetActive(p));
-            if (activePet) {
-                const petDef = PET_DEFS[activePet.petId];
-                const petName = activePet.name || petDef?.name || activePet.petId;
-                const flavorFn = TRAIT_FLAVOR[activePet.personality]?.hunt;
-                if (flavorFn && petDef) {
-                    const desc = embed.data.description ?? '';
-                    embed.setDescription(desc + `\n> ${flavorFn(petName, petDef.emoji)}`);
-                }
+        // One consolidated field rather than one per bonus — they are all the same idea.
+        const bonusLines = buildBonusLines(result, petYieldPct, petXpPct);
+        if (bonusLines.length) {
+            const kitAt = (embed.data.fields ?? []).findIndex(f => f.name === '🎒 Kit');
+            embed.spliceFields(kitAt >= 0 ? kitAt : (embed.data.fields?.length ?? 0), 0,
+                { name: '✨ Bonuses', value: bonusLines.join('\n'), inline: false });
+        }
+
+        // Footer: whatever the card already carries (active buffs), then the
+        // time of day and the week's race on a line of their own. Footers
+        // cannot render a custom currency emoji, hence "coins".
+        const timeBand = getTimeBand();
+        const leaderNote = weeklyLeader
+            ? `👑 Hunter of the Week: ${weeklyLeader.username} — ${(weeklyLeader.total ?? 0).toLocaleString()} coins`
+            : '👑 No Hunter of the Week yet — be the first!';
+        const currentFooter = embed.data.footer?.text;
+        embed.setFooter({ text: [currentFooter, `${timeBand.emoji} ${timeBand.label} · ${leaderNote}`].filter(Boolean).join('\n') });
+
+        fitEmbeds([...lead, embed]);
+
+        // Staged loot reveal for rare+ drops. A quick hunt skips the ceremony —
+        // the fog-and-fanfare build-up is the same forced wait the player opted
+        // out of, and the tier is still announced on the card. The buttons ride
+        // the final render only, so nothing can be pressed under the fog; an
+        // apex duel follows instead of them when one triggers.
+        const components = result.apexEncounter ? [] : buildResultActions(user, weapon, quick);
+        await stagedLootReveal(interaction, !quick && result.success ? result.tier : null, [...lead, embed], 'hunt', catchFiles, { components });
+
+        // Everything the channel hears about this hunt comes after the card
+        // has landed: a "quest complete" posted under the fog gave the result
+        // away before the reveal did.
+        announceAfterReveal(interaction, guildSettings, user, { huntAchievements, questsDone, questsNear });
+        if (result.success && result.finalPayout > 0) {
+            const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+            if (result.finalPayout >= bigWinThreshold || ['legendary', 'event'].includes(result.tier)) {
+                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'hunt', details: { itemName: result.animal?.name, rarity: result.tier }, client: interaction.client });
             }
         }
+        announceRareDrop(interaction, guildSettings, result, zone);
 
-        // Discord rejects an embed with more than 25 fields. A maximal hunt — crit,
-        // traits, trait effects, special drop, booster proc, level-up, both buffs
-        // expiring, weapon warning, pity, plus the pet / featured-zone / district
-        // bonuses — now reaches 24. Trim rather than lose the whole result embed to
-        // an exception if another field is added later.
-        if (embed.data.fields && embed.data.fields.length > 25) {
-            embed.data.fields.length = 25;
-        }
-
-        // Staged loot reveal for rare+ drops. A quick hunt skips the ceremony
-        // here too — the fog-and-fanfare build-up is the same forced wait the
-        // player opted out of, and the tier is still announced on the embed.
-        await stagedLootReveal(interaction, !quick && result.success ? result.tier : null, embed, 'hunt', catchFiles);
-
-        if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
-            const announceChannelId = guildSettings?.economy?.announcementChannelId;
-            const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
-            const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
-            const announceTier = TIER_NUM[result.tier] ?? 4;
-            const ANNOUNCE_COPY = {
-                4: { color: '#9c27b0', title: '🔮 Epic Find!',              line: 'A rare moment in the wild.' },
-                5: { color: '#ff9800', title: '✨ Legendary Trophy! ✨',     line: 'Only a handful of hunters have ever managed that.' },
-                6: { color: '#e74c3c', title: '☄️ Mythical Quarry! ☄️',     line: 'Nothing like it has been seen in living memory.' },
-            };
-            const copy = ANNOUNCE_COPY[announceTier] ?? ANNOUNCE_COPY[4];
-            const announcementEmbed = new EmbedBuilder()
-                .setColor(copy.color)
-                .setTitle(copy.title)
-                .setDescription(
-                    `<@${interaction.user.id}> just brought down ${result.animal.emoji} **${result.animal.name}** [${TIER_STARS[announceTier]}]\n` +
-                    `deep in the **${zone.name}**.\n\n` +
-                    copy.line
-                )
-                .setTimestamp();
-            announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
-        }
-
-        // ── Apex encounter — multi-phase showdown (mirrors the fishing boss UI) ──
         if (result.apexEncounter) {
-            // Pin the weapon that was actually equipped for this encounter so durability
-            // loss can't land on a different weapon if the player re-equips mid-flow.
-            const apexWeaponIndex = user.hunt.equippedWeaponIndex;
-            const apexType    = rollApexType();
-            const choicesMade = [];
-            const phaseCount  = apexType.phases.length;
-
-            const buildApexPhaseEmbed = (phaseIndex, prevResults) => {
-                const phase  = apexType.phases[phaseIndex];
-                const nerveMax  = apexNerveMax(user);
-                const nerve     = apexNerveAfter(prevResults, user);
-                const nerveBar  = '❤️'.repeat(nerve) + '🖤'.repeat(nerveMax - nerve);
-                const histLines = prevResults.map((p, i) => {
-                    const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
-                    return `Phase ${i + 1}: ${icon}`;
-                }).join('  ');
-
-                return new EmbedBuilder()
-                    .setColor('#3b1f04')
-                    .setTitle(`${apexType.emoji} ${apexType.name} — Phase ${phaseIndex + 1}/${phaseCount}`)
-                    .setDescription(
-                        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                        `  ${result.apexEncounter.animal.emoji}  The pack leader of your **${result.apexEncounter.animal.name}** appears!\n` +
-                        `  Nerve: ${nerveBar}\n` +
-                        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-                        `${phase.hint}\n\n` +
-                        (histLines ? `${histLines}\n\n` : '') +
-                        `**Choose your move — NOW:**`
-                    )
-                    .setFooter({ text: `⏱️ 30 seconds per phase • 3/3=1.5x bonus | 2/3=1x | 1/3=0.4x • A wrong read costs 2 nerve — at 0 it escapes. Backing off is safe but never counts.` });
-            };
-
-            const buildPhaseRow = (phaseIndex) => {
-                const choices = apexType.phases[phaseIndex].choices;
-                return new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('apex_match').setLabel(choices.match.label).setStyle(ButtonStyle.Danger),
-                    new ButtonBuilder().setCustomId('apex_hold').setLabel(choices.hold.label).setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId('apex_safe').setLabel(choices.safe.label).setStyle(ButtonStyle.Secondary)
-                );
-            };
-
-            const validIds = ['apex_match', 'apex_hold', 'apex_safe'];
-            const idToKey  = { apex_match: 'match', apex_hold: 'hold', apex_safe: 'safe' };
-
-            await interaction.editReply({ embeds: [embed, buildApexPhaseEmbed(0, [])], components: [buildPhaseRow(0)], files: catchFiles });
-
-            const runPhase = async (phaseIndex, prevResults, prevBtn) => {
-                const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
-                return new Promise(resolve => {
-                    const collector = fetchReply.createMessageComponentCollector({
-                        filter: ownedBy(interaction.user.id, i => validIds.includes(i.customId), "This isn't your hunt."),
-                        time: 30_000, max: 1
-                    });
-                    collector.on('collect', async btn => {
-                        const chosen  = idToKey[btn.customId];
-                        const phase   = apexType.phases[phaseIndex];
-                        const correct = chosen === phase.correct;
-                        const results = [...prevResults, { correct, chosen, correctChoice: phase.correct }];
-                        choicesMade.push(chosen);
-
-                        if (phaseIndex < phaseCount - 1) {
-                            await btn.update({ embeds: [embed, buildApexPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)], files: catchFiles });
-                            resolve({ btn, results });
-                        } else {
-                            resolve({ btn, results, done: true });
-                        }
-                    });
-                    collector.on('end', (collected, reason) => {
-                        if (reason === 'time' && collected.size === 0) {
-                            resolve({ btn: null, results: prevResults, timedOut: true });
-                        }
-                    });
-                });
-            };
-
-            let state = { btn: null, results: [], done: false, timedOut: false };
-            for (let i = 0; i < phaseCount; i++) {
-                state = await runPhase(i, state.results, state.btn);
-                if (state.timedOut) {
-                    const timeoutEmbed = new EmbedBuilder()
-                        .setColor('#3b1f04')
-                        .setTitle(`💨 ${apexType.emoji} The ${apexType.name} Escaped`)
-                        .setDescription('You hesitated too long — it melted back into the wild. No bonus this time.')
-                        .setTimestamp();
-                    interaction.editReply({ embeds: [embed, timeoutEmbed], components: [], files: catchFiles }).catch(() => {});
-                    return;
-                }
-            }
-
-            // Resolve outcome on a fresh user document
-            const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            if (!freshUser) {
-                console.error(`[hunt apex] user document vanished mid-encounter — user=${interaction.user.id} guild=${interaction.guild.id}`);
-                return state.btn.update({ content: 'Something went wrong resolving the encounter — your hunt rewards were already saved.', embeds: [embed], components: [], files: catchFiles }).catch(() => {});
-            }
-            await attachGrind(freshUser);
-            ensureHuntData(freshUser);
-            // The duel is priced off the kill that spawned it — crit, trophy
-            // quality, streak and traits included — rather than a fresh roll of
-            // the animal's base range (#744). Caps are still applied below.
-            const apexResult = resolveApexEncounter(
-                freshUser, result.apexEncounter.animal, result.apexEncounter.tier,
-                choicesMade, apexType, apexWeaponIndex,
-                { killPayout: result.apexEncounter.killPayout },
-            );
-
-            // The reload above is already seconds old by the time the fight
-            // resolves, and `save()` writes `balance` as an absolute `$set` — so
-            // the bonus is applied as its own `$inc` and `balance` stays out of
-            // the save, exactly as the hunt itself does.
-            const apexBalanceAtLoad = freshUser.balance ?? 0;
-
-            let apexQuestsDone = [], apexQuestsNear = [];
-            if (apexResult.bonusPayout > 0) {
-                const apexZone = ZONES[freshUser.hunt.activeZone] ?? zone;
-                // The apex fight is part of this hunt, so it rides on the gathering
-                // charge the kill already spent rather than burning a second one —
-                // otherwise a booster drains fastest on exactly the rare kills that
-                // trigger an apex in the first place.
-                const { adjustedPayout } = applyPayoutModifiers(freshUser, apexResult.bonusPayout, apexZone, {
-                    reuseGatheringYield: !!result.gatheringYield,
-                });
-                apexResult.bonusPayout = adjustedPayout;
-                freshUser.balance          += adjustedPayout;
-                freshUser.hunt.totalEarned += adjustedPayout;
-                freshUser.hunt.dailyCoins  += adjustedPayout;
-                recordBestPayout(freshUser.hunt, adjustedPayout, {
-                    animal: result.apexEncounter.animal,
-                    tier:   result.apexEncounter.tier,
-                    zoneId: freshUser.hunt.activeZone,
-                });
-
-                await ensureQuests(freshUser, guildSettings);
-                const earn = await onEconomyEarn(freshUser, guildSettings, adjustedPayout);
-                apexQuestsDone = earn.completed;
-                apexQuestsNear = earn.nearComplete;
-            }
-            freshUser.markModified('hunt');
-            let apexPayoutOwed = 0;
-            try {
-                // Same contract as the hunt's own payout: a credit that would not
-                // land is recorded as owed, and has to be said out loud rather
-                // than rendered as a bonus the player was paid.
-                const apexPaid = await saveWithBalanceDelta(User, freshUser, apexBalanceAtLoad, {
-                    service: 'hunt',
-                    jobName: 'apexBonusPayout',
-                    guildId: interaction.guild.id,
-                    payoutKey: gatherPayoutKey('hunt', interaction.id, 'apex'),
-                });
-                if (!apexPaid.credited) apexPayoutOwed = apexResult.bonusPayout;
-                if (apexQuestsDone.length || apexQuestsNear.length) {
-                    notifyQuestComplete(guildSettings, interaction.member, apexQuestsDone, interaction.channel, freshUser).catch(() => null);
-                    notifyQuestNearComplete(guildSettings, interaction.member, apexQuestsNear, interaction.channel).catch(() => null);
-                }
-            } catch (saveErr) {
-                console.error('[hunt apex] save error:', saveErr);
-                return state.btn.update({ content: 'Something went wrong saving your apex result — the encounter is lost and cannot be retried. Your original hunt rewards were already saved.', embeds: [], components: [] }).catch(() => {});
-            }
-
-            if (apexResult.bonusPayout > 0) {
-                const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-                if (apexResult.bonusPayout >= bigWinThreshold) {
-                    logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: apexResult.bonusPayout, source: 'hunt', details: { itemName: result.apexEncounter.animal.name, rarity: 'apex' }, client: interaction.client });
-                }
-            }
-
-            const phaseScoreLine = apexResult.phaseResults.map((p, i) => {
-                const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
-                return `Phase ${i + 1}: ${icon}`;
-            }).join('  ');
-
-            const outcomeColors = { perfect: '#FFD700', win: '#2ecc71', survived: '#3498db', escaped: '#3b1f04' };
-            const outcomeTitles = {
-                perfect:  `🏆 ${apexType.emoji} PERFECT — ${apexType.name} Brought Down!`,
-                win:      `✅ ${apexType.emoji} ${apexType.name} Defeated!`,
-                survived: `😓 ${apexType.emoji} You Survived the ${apexType.name}`,
-                escaped:  `💀 ${apexType.emoji} The ${apexType.name} Escaped`
-            };
-
-            const apexEmbed = new EmbedBuilder()
-                .setColor(outcomeColors[apexResult.outcome])
-                .setTitle(outcomeTitles[apexResult.outcome])
-                .setDescription(
-                    `${apexResult.message}\n\n${phaseScoreLine}\n\n` +
-                    (apexResult.bonusPayout > 0
-                        ? `💰 Bonus trophy: **+${currency}${apexResult.bonusPayout.toLocaleString()}**`
-                        : '*No bonus this time — but you lived to tell the tale.*') +
-                    `\n🔧 Weapon wear: -${apexResult.durabilityLost} durability`
-                )
-                .setTimestamp();
-
-            if (apexPayoutOwed > 0) {
-                apexEmbed.addFields({
-                    name: '⚠️ Payout Not Yet Credited',
-                    value: `The **${currency}${apexPayoutOwed.toLocaleString()}** bonus could not be paid out just now and has been recorded as owed — your balance does not include it yet. It will be applied once the problem clears; tell an admin if it does not.`,
-                });
-            }
-
-            await state.btn.update({ embeds: [embed, apexEmbed], components: [], files: catchFiles }).catch(() => {});
-            return;
+            await runApexDuel(interaction, {
+                embed, lead, cardArgs: card ? cardArgs : null, catchFiles,
+                result, user, zone, zoneId, weaponIndex, currency, guildSettings,
+            });
+        } else {
+            await attachResultActions(interaction, weaponIndex);
         }
+        return { started: true };
     } catch (err) {
         if (!huntCommitted) await releaseHuntClaim();
         throw err;
     }
+}
+
+// ─── THE APPROACH ─────────────────────────────────────────────────────────────
+
+/**
+ * The stealth prompt and its result. Returns { stealth, flushed, encounter } —
+ * `encounter` is the lurker when a perfect approach flushed it out.
+ */
+async function runApproach(interaction, { user, weapon, zone, encounter, lurker, scene }) {
+    const prey = encounter.animal;
+    const profile = pickApproachProfile(prey);
+    const options = shuffled(profile.options, secureRandom);
+    const oddsBefore = huntSuccessChance(user, weapon, zone, prey.traits ?? [], 0);
+    const deadline = new Date(Date.now() + STEALTH_MS);
+
+    const promptEmbed = scene(new EmbedBuilder()
+        .setColor('#556B2F')
+        .setTitle(`🌿 Stalking ${prey.emoji} ${prey.name}`)
+        .setDescription(
+            `*${profile.hint(prey)}*` +
+            (lurker ? `\n*Behind it, something bigger shifts in the brush — a ${lurker.emoji} **${lurker.name}**?*` : '') +
+            `\n\n**How do you close in?**\n` +
+            `🎯 Shot odds right now: **${pct(oddsBefore)}**\n` +
+            `⏳ Decide ${tsRel(deadline)}`
+        )
+        .setFooter({ text: 'Read the animal — the right approach raises your odds, the wrong one spooks it.' }));
+
+    const row = new ActionRowBuilder().addComponents(
+        ...options.map(opt => new ButtonBuilder()
+            .setCustomId(`stealth_${opt.id}`)
+            .setLabel(opt.label)
+            .setStyle(ButtonStyle.Primary))
+    );
+
+    await interaction.reply({ embeds: [promptEmbed], components: [row] });
+    const huntMsg = await interaction.fetchReply();
+
+    const pickedId = await new Promise(resolve => {
+        const col = huntMsg.createMessageComponentCollector({
+            filter: ownedBy(interaction.user.id, i => i.customId.startsWith('stealth_'), "This isn't your hunt."),
+            time: STEALTH_MS,
+            max: 1,
+        });
+        // Resolve before acknowledging: an ack that rejects must not leave the
+        // hunt — and the economy lock it holds — waiting forever.
+        col.on('collect', i => {
+            resolve(i.customId.replace('stealth_', ''));
+            i.deferUpdate().catch(() => {});
+        });
+        col.on('end', (_, reason) => { if (reason !== 'limit') resolve(null); });
+    });
+
+    const stealth = resolveStealth(profile, pickedId);
+
+    let flushed = false;
+    let target = encounter;
+    if (stealth.outcome === 'perfect' && lurker && secureRandom() < LURKER_FLUSH_CHANCE) {
+        target = { tier: 'uncommon', animal: lurker };
+        flushed = true;
+    }
+
+    const oddsAfter = huntSuccessChance(user, weapon, zone, target.animal.traits ?? [], stealth.bonus);
+    const copy = STEALTH_OUTCOMES[stealth.outcome];
+    const lines = [];
+    if (stealth.label) lines.push(`**${stealth.label}**`, '');
+    lines.push(copy.body, '');
+    if (flushed) {
+        lines.push(`${lurker.emoji} *Your patience pays — the **${lurker.name}** breaks cover. You shift your aim to the bigger prize.*`, '');
+    }
+    lines.push(oddsAfter === oddsBefore
+        ? `🎯 Shot odds: **${pct(oddsAfter)}**`
+        : `🎯 Shot odds: **${pct(oddsBefore)}** → **${pct(oddsAfter)}**`);
+    if ((target.animal.traits ?? []).includes('armored')) {
+        lines.push(`🛡️ *Its hide turns any critical strike — no point lining up a crit. You fire on instinct.*`);
+    }
+
+    await interaction.editReply({
+        embeds: [scene(new EmbedBuilder().setColor(copy.color).setTitle(copy.title).setDescription(lines.join('\n')))],
+        components: [],
+    });
+    await delay(STEALTH_RESULT_MS);
+
+    return { stealth, flushed, encounter: target };
+}
+
+// ─── THE CARD'S RUN LINE ──────────────────────────────────────────────────────
+
+const STEALTH_CHIPS = {
+    perfect: '🤫 Perfect approach',
+    decent:  '🌿 Decent approach',
+    spooked: '🔊 Spooked it',
+    timeout: '⏰ Hesitated',
+};
+const AIM_CHIPS = {
+    perfect: '🎯 Perfect shot',
+    late:    '✅ Clean shot',
+    early:   '💨 Rushed shot',
+    timeout: '⏰ Never fired',
+};
+
+/** One line of how this run went: the approach, the shot, and anything that bent the result. */
+function buildRunChips({ stealth, aim, quick, flushed, encounter, isFeaturedZone, zone }) {
+    const chips = [];
+    if (STEALTH_CHIPS[stealth.outcome]) chips.push(STEALTH_CHIPS[stealth.outcome]);
+    if (flushed) chips.push(`${encounter.animal.emoji} Flushed out bigger prey`);
+    if (aim && AIM_CHIPS[aim.grade]) chips.push(AIM_CHIPS[aim.grade]);
+    else if (!quick && (encounter.animal.traits ?? []).includes('armored')) chips.push('🛡️ Armored — no crit to aim for');
+    if (quick) chips.push('⚡ Quick hunt');
+    if (isFeaturedZone) chips.push(`🌟 Featured zone ${zone.emoji} +${Math.round(FEATURED_PAYOUT_BONUS * 100)}%`);
+    return chips.length ? chips.join('  ·  ') : null;
+}
+
+function petFlavorLine(user, { isPetActive, PET_DEFS, TRAIT_FLAVOR }) {
+    const activePet = (user.pets || []).find(p => isPetActive(p));
+    if (!activePet) return null;
+    const petDef = PET_DEFS[activePet.petId];
+    const flavorFn = TRAIT_FLAVOR[activePet.personality]?.hunt;
+    if (!flavorFn || !petDef) return null;
+    return `> ${flavorFn(activePet.name || petDef.name || activePet.petId, petDef.emoji)}`;
+}
+
+// ─── ANNOUNCEMENTS ────────────────────────────────────────────────────────────
+
+function announceAfterReveal(interaction, guildSettings, user, { huntAchievements, questsDone, questsNear }) {
+    if (huntAchievements.length) {
+        announceAchievements(interaction.client, guildSettings, user, interaction.member, huntAchievements).catch(() => null);
+    }
+    notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
+    notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
+}
+
+/**
+ * Epic-and-better finds are broadcast to the server's announcement channel.
+ * Only there: with none configured, the find's own card is already in the
+ * channel, and a second embed restating it underneath was noise.
+ */
+function announceRareDrop(interaction, guildSettings, result, zone) {
+    if (!result.success || !['epic', 'legendary', 'event'].includes(result.tier)) return;
+    if (guildSettings?.economy?.announceRareDrops === false) return;
+    const announceChannelId = guildSettings?.economy?.announcementChannelId;
+    const channel = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
+    if (!channel?.isTextBased() || channel.id === interaction.channelId) return;
+
+    const announceTier = TIER_NUM[result.tier] ?? 4;
+    const ANNOUNCE_COPY = {
+        4: { color: '#9c27b0', title: '🔮 Epic Find!',              line: 'A rare moment in the wild.' },
+        5: { color: '#ff9800', title: '✨ Legendary Trophy! ✨',     line: 'Only a handful of hunters have ever managed that.' },
+        6: { color: '#e74c3c', title: '☄️ Mythical Quarry! ☄️',     line: 'Nothing like it has been seen in living memory.' },
+    };
+    const copy = ANNOUNCE_COPY[announceTier] ?? ANNOUNCE_COPY[4];
+    channel.send({ embeds: [new EmbedBuilder()
+        .setColor(copy.color)
+        .setTitle(copy.title)
+        .setDescription(
+            `<@${interaction.user.id}> just brought down ${result.animal.emoji} **${result.animal.name}** [${TIER_STARS[announceTier]}]\n` +
+            `deep in the **${zone.name}**.\n\n` +
+            copy.line
+        )
+        .setTimestamp()] }).catch(() => null);
 }
 
 // Renders a failed hunt preflight (huntService.validateHuntPreflight) as the
@@ -648,7 +523,7 @@ function replyHuntPreflightFailure(interaction, preflight) {
             });
         case 'injured':
             return interaction.reply({
-                content: `You're injured and need to rest. Back in action in **${formatMs(preflight.remainingMs)}**.`,
+                content: `You're injured and need to rest. Back in action <t:${Math.floor((Date.now() + preflight.remainingMs) / 1000)}:R> (${formatMs(preflight.remainingMs)}).`,
                 ...ephemeral
             });
         case 'cooldown':
@@ -698,6 +573,10 @@ function replyHuntPreflightFailure(interaction, preflight) {
 }
 
 module.exports = {
+    LURKER_FLUSH_CHANCE,
+    STEALTH_MS,
+    buildRunChips,
     executeStart,
     replyHuntPreflightFailure,
+    runApproach,
 };

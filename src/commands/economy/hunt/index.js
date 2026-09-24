@@ -267,8 +267,16 @@ const HUNT_READ_ONLY = [
     'shop list',
     'zone list',
 ];
+// The lease has to outlive the longest hunt, not the typical one: a 15s
+// approach, the shot, a staged reveal and then a three-phase apex duel at 30s a
+// phase comes to roughly two minutes before any network time — right at the
+// default grind TTL, so a slow duel could lose its lock partway through. Every
+// other /hunt write releases in a moment, so the longer ceiling only matters
+// for a lease a crash leaks.
+const HUNT_LOCK_TTL_MS = 180_000;
 module.exports.execute = withEconomyLock(module.exports.execute, {
     activity: 'hunt',
+    ttlMs:    HUNT_LOCK_TTL_MS,
     only:     exceptReadOnly(HUNT_READ_ONLY),
 });
 

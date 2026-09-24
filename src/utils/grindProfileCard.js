@@ -806,5 +806,9 @@ module.exports = {
     INV_GEAR_COLS,
     INV_TILE_COLS,
     _resetCache,
+    // The drawing primitives, for the other cards in the family (the /fish
+    // cast catch card) so they share the palette, the art loading and the
+    // medallion fallback instead of growing their own.
+    primitives: { FONT, themeFor, paintBackground, drawEntry, roundRect, fitText, shade },
     __test__: { initials, shade },
 };

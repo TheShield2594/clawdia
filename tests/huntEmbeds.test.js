@@ -125,15 +125,14 @@ beforeEach(() => {
 
 describe('buildHuntEmbed — the failure embed', () => {
     test('a plain miss reports no reward and no XP', () => {
-        const fields = fieldsOf(hunt(failureResult()));
-        expect(fields.Zone).toBe(`${forest.emoji} ${forest.name}`);
-        expect(fields.Reward).toBe('Nothing');
-        expect(fields.XP).toBe('None');
-        expect(fields.Stamina).toBe('7/11 ⚡');
+        const embed = hunt(failureResult());
+        expect(embed.data.author.name).toBe(`${forest.emoji} ${forest.name}`);
+        expect(embed.data.description).toContain('💨 No reward  ·  No XP');
+        expect(fieldsOf(embed)['🎒 Kit']).toContain('7/11 stamina');
     });
 
     test('a failure that still paid XP prints the amount', () => {
-        expect(fieldsOf(hunt(failureResult({ xpEarned: 6 }))).XP).toBe('+6 XP');
+        expect(hunt(failureResult({ xpEarned: 6 })).data.description).toContain('✨ +6 XP');
     });
 
     test('an encountered animal is named ahead of the failure message', () => {
@@ -149,17 +148,17 @@ describe('buildHuntEmbed — the failure embed', () => {
             failure: { severity: { id: 'clean_miss', injuryMs: 0 }, message: 'unused' },
         }));
         expect(randomFrom).toHaveBeenCalledWith(HUNT_EMPTY_LINES);
-        expect(embed.data.description).toBe(`*${HUNT_EMPTY_LINES[0]}*`);
+        expect(embed.data.description.split('\n')[0]).toBe(`*${HUNT_EMPTY_LINES[0]}*`);
     });
 
     test('a non-clean miss with no animal keeps its own message', () => {
-        expect(hunt(failureResult()).data.description).toBe('*It bolted before you could line up.*');
+        expect(hunt(failureResult()).data.description.split('\n')[0]).toBe('*It bolted before you could line up.*');
         expect(randomFrom).not.toHaveBeenCalled();
     });
 
-    test('a spared hunt annotates the stamina line instead of spending it', () => {
-        expect(fieldsOf(hunt(failureResult({ staminaSpared: true }))).Stamina)
-            .toContain('Clean miss — no stamina spent');
+    test('a spared hunt says so beside the outcome instead of spending stamina', () => {
+        expect(hunt(failureResult({ staminaSpared: true })).data.description)
+            .toContain('clean miss — no stamina spent');
     });
 
     test('a fail streak adds the pity streak field', () => {
@@ -169,8 +168,9 @@ describe('buildHuntEmbed — the failure embed', () => {
     });
 
     test('a missing fail counter is read as no streak', () => {
-        expect(hunt(failureResult(), makeUser({ consecutiveFails: undefined })).data.fields)
-            .toHaveLength(5);
+        // Nothing but the Kit: no streak field for a counter that was never set.
+        expect(hunt(failureResult(), makeUser({ consecutiveFails: undefined })).data.fields.map(f => f.name))
+            .toEqual(['🎒 Kit']);
     });
 
     test('known traits render their name and unknown ones render bare', () => {
@@ -179,10 +179,10 @@ describe('buildHuntEmbed — the failure embed', () => {
         expect(fields['🧬 Traits']).toContain('not_a_trait');
     });
 
-    test('trait effects get their own field, and an empty list gets none', () => {
-        expect(fieldsOf(hunt(failureResult({ traitEffects: [{ msg: 'It gored you on the way past.' }] })))['⚡ Trait Effects'])
-            .toContain('It gored you on the way past.');
-        expect(fieldsOf(hunt(failureResult({ traits: [], traitEffects: [] })))['⚡ Trait Effects'])
+    test('trait effects ride the traits field, and an empty list adds none', () => {
+        expect(fieldsOf(hunt(failureResult({ traitEffects: [{ msg: 'It gored you on the way past.' }] })))['🧬 Traits'])
+            .toContain('• It gored you on the way past.');
+        expect(fieldsOf(hunt(failureResult({ traits: [], traitEffects: [] })))['🧬 Traits'])
             .toBeUndefined();
     });
 
@@ -208,7 +208,7 @@ describe('buildHuntEmbed — death events', () => {
     test('an unsaved death wrecks the weapon and points at the repair command', () => {
         const embed = hunt(failureResult({ deathEvent: { saved: false, weaponName: 'Iron Rifle' } }));
         expect(embed.data.color).toBe(0x8B0000);
-        expect(fieldsOf(embed)['💀 Severe Injury!']).toContain('/hunt shop repair');
+        expect(fieldsOf(embed)['💀 Catastrophe!']).toContain('/hunt shop repair');
     });
 
     // A condemned weapon cannot be repaired at all, so pointing the player at
@@ -219,7 +219,7 @@ describe('buildHuntEmbed — death events', () => {
             makeUser(),
             makeWeapon({ currentDurability: 4, maxDurability: 10, baseDurability: 80 }),
         );
-        const note = fieldsOf(embed)['💀 Severe Injury!'];
+        const note = fieldsOf(embed)['💀 Catastrophe!'];
         expect(note).toContain('condemned');
         expect(note).toContain('/hunt shop weapon');
         expect(note).not.toContain('/hunt shop repair');
@@ -233,12 +233,12 @@ describe('buildHuntEmbed — death events', () => {
             makeUser(),
             makeWeapon({ status: 'broken' }),
         ));
-        expect(fields['❌ Weapon Broke!']).toBeUndefined();
+        expect(fields['⚠️ Heads Up']).toBeUndefined();
     });
 
     test('a broken weapon without a death event gets the plain broke field', () => {
         const embed = hunt(failureResult(), makeUser(), makeWeapon({ status: 'broken' }));
-        expect(fieldsOf(embed)['❌ Weapon Broke!']).toContain('/hunt shop repair');
+        expect(fieldsOf(embed)['⚠️ Heads Up']).toContain('/hunt shop repair');
         expect(embed.data.footer.text).toContain('Tip:');
     });
 });
@@ -265,34 +265,34 @@ describe('buildHuntEmbed — the weapon warnings on a kill', () => {
     });
 
     test('a broken weapon outranks the low-durability warning', () => {
-        const fields = fieldsOf(hunt(killResult(), makeUser(), makeWeapon({ status: 'broken', currentDurability: 0 })));
-        expect(fields['⚠️ Weapon Broke!']).toContain('/hunt shop repair');
-        expect(fields['⚠️ Low Durability']).toBeUndefined();
+        const headsUp = fieldsOf(hunt(killResult(), makeUser(), makeWeapon({ status: 'broken', currentDurability: 0 })))['⚠️ Heads Up'];
+        expect(headsUp).toContain('/hunt shop repair');
+        expect(headsUp).not.toContain('nearly worn out');
     });
 
     test('a worn weapon warns before it breaks', () => {
-        const fields = fieldsOf(hunt(killResult(), makeUser(), makeWeapon({ currentDurability: 8 })));
-        expect(fields['⚠️ Low Durability']).toContain('8/80');
-        expect(fields['⚠️ Weapon Broke!']).toBeUndefined();
+        const headsUp = fieldsOf(hunt(killResult(), makeUser(), makeWeapon({ currentDurability: 8 })))['⚠️ Heads Up'];
+        expect(headsUp).toContain('nearly worn out (8/80)');
+        expect(headsUp).not.toContain('has broken');
     });
 
     test('a healthy weapon raises neither warning', () => {
         const fields = fieldsOf(hunt(killResult()));
-        expect(fields['⚠️ Weapon Broke!']).toBeUndefined();
-        expect(fields['⚠️ Low Durability']).toBeUndefined();
-        expect(fields.Balance).toBe('🪙54,321');
+        expect(fields['⚠️ Heads Up']).toBeUndefined();
+        expect(fields['🎒 Kit']).toContain('🪙54,321');
     });
 
     test('an event find outranks a critical for both colour and headline', () => {
         const embed = hunt(killResult({ tier: 'event', isCrit: true, critMultiplier: 2 }));
         expect(embed.data.color).toBe(parseInt(TIER_COLORS.event.slice(1), 16));
-        expect(embed.data.title).toBe('☄️⚡ MYTHICAL FIND ⚡☄️');
+        expect(embed.data.title).toBe(`☄️ MYTHICAL — ${ANIMALS.rabbit.emoji} CRITICAL! ${ANIMALS.rabbit.name}`);
         expect(embed.data.description).toContain('no business existing');
     });
 
     test('a legendary find gets the legendary headline and lede', () => {
         const embed = hunt(killResult({ tier: 'legendary' }));
-        expect(embed.data.title).toBe('🌟✨ LEGENDARY FIND ✨🌟');
+        // The headline keeps the animal: it is the trophy.
+        expect(embed.data.title).toBe(`🌟 LEGENDARY — ${ANIMALS.rabbit.emoji} ${ANIMALS.rabbit.name}`);
         expect(embed.data.description).toContain('You found something impossible in the wild.');
     });
 
@@ -300,53 +300,58 @@ describe('buildHuntEmbed — the weapon warnings on a kill', () => {
         const embed = hunt(killResult({ tier: 'rare', isCrit: true, critMultiplier: 2.5 }));
         expect(embed.data.color).toBe(0xFFD700);
         expect(embed.data.title).toContain('✨ CRITICAL!');
-        expect(fieldsOf(embed).XP).toBe('+10 XP (crit bonus)');
+        expect(embed.data.description).toContain('**+10 XP** (crit bonus)');
     });
 
     test('an ordinary find is the animal, with the trophy grade in the title', () => {
         const quality = TROPHY_QUALITIES.find(q => q.multiplier > 1);
         const embed = hunt(killResult({ trophyQuality: quality }));
         expect(embed.data.title).toContain(quality.label);
-        expect(fieldsOf(embed).Quality).toContain(quality.label);
+        expect(embed.data.description).toContain(`${quality.label} trophy`);
     });
 
-    test('no trophy grade renders a dash rather than undefined', () => {
-        expect(fieldsOf(hunt(killResult())).Quality).toBe('—');
+    test('no trophy grade leaves the reward line without one rather than printing undefined', () => {
+        const desc = hunt(killResult()).data.description;
+        expect(desc).toContain('**+🪙120**  ·  ✨ **+10 XP**');
+        expect(desc).not.toContain('undefined');
+        expect(desc).not.toContain('trophy');
     });
 
     // At the hard cap finalPayout is already 0, so the strikethrough is drawn
     // over what the cap took rather than over the zero it left.
     test('a capped kill strikes through the forfeited amount and says when it lifts', () => {
-        const reward = fieldsOf(hunt(
+        const reward = hunt(
             killResult({ cappedByHard: true, finalPayout: 0, forfeitedPayout: 900 }),
             makeUser({ dailyWindowStart: new Date() }),
-        )).Reward;
+        ).data.description;
         expect(reward).toContain('~~🪙900~~');
         expect(reward).toContain('Daily cap reached');
     });
 
     test('a capped kill with no recorded forfeit reads as zero', () => {
-        expect(fieldsOf(hunt(killResult({ cappedByHard: true, finalPayout: 0 }))).Reward)
+        expect(hunt(killResult({ cappedByHard: true, finalPayout: 0 })).data.description)
             .toContain('~~🪙0~~');
     });
 
     test('streak, crit and trophy all appear in the multiplier stack', () => {
         const quality = TROPHY_QUALITIES.find(q => q.multiplier > 1);
-        const stack = fieldsOf(hunt(killResult({
+        const desc = hunt(killResult({
             streakMult: 1.5, isCrit: true, critMultiplier: 2, trophyQuality: quality, finalPayout: 900,
-        })))['📈 Multipliers'];
+        })).data.description;
+        const stack = desc.split('\n').find(l => l.startsWith('📈'));
         expect(stack).toContain('1.50x');
         expect(stack).toContain('2.00x crit');
         expect(stack).toContain(`${quality.multiplier.toFixed(2)}x`);
+        expect(stack).toContain(`**${(1.5 * 2 * quality.multiplier).toFixed(2)}x**`);
     });
 
-    test('a flat kill shows no multiplier field', () => {
-        expect(fieldsOf(hunt(killResult({ streakMult: 1 })))['📈 Multipliers']).toBeUndefined();
+    test('a flat kill shows no multiplier line', () => {
+        expect(hunt(killResult({ streakMult: 1 })).data.description).not.toContain('📈');
     });
 
     test('a trophy grade at or below 1x is not a multiplier worth listing', () => {
         const poor = TROPHY_QUALITIES.find(q => q.multiplier <= 1);
-        expect(fieldsOf(hunt(killResult({ trophyQuality: poor })))['📈 Multipliers']).toBeUndefined();
+        expect(hunt(killResult({ trophyQuality: poor })).data.description).not.toContain('📈');
     });
 
     test('every remaining optional field fires at once', () => {
@@ -360,11 +365,11 @@ describe('buildHuntEmbed — the weapon warnings on a kill', () => {
         })));
         expect(fields['🧬 Traits']).toContain(ANIMAL_TRAITS.aggressive.name);
         expect(fields['🧬 Traits']).toContain('not_a_trait');
-        expect(fields['⚡ Trait Effects']).toContain('It gored you on the way down.');
+        expect(fields['🧬 Traits']).toContain('It gored you on the way down.');
         expect(fields['🎁 Special Drop!']).toContain("Rabbit's Foot");
         expect(fields['⬆️ Level Up!']).toContain('**5** → **6**');
-        expect(fields['Buffs Expired']).toContain('premium bait');
-        expect(fields['Buffs Expired']).toContain('luck charm');
+        expect(fields['⚠️ Heads Up']).toContain('premium bait');
+        expect(fields['⚠️ Heads Up']).toContain('luck charm');
     });
 });
 
@@ -427,10 +432,9 @@ describe('buildPityField', () => {
     });
 
     test('the field appears on a hunt once the counter reaches five', () => {
-        expect(Object.keys(fieldsOf(hunt(failureResult(), makeUser({ sinceRare: 4 }))))
-            .some(n => n.includes('Rare Pity'))).toBe(false);
-        expect(Object.keys(fieldsOf(hunt(failureResult(), makeUser({ sinceRare: 5 }))))
-            .some(n => n.includes('Rare Pity'))).toBe(true);
+        // It is a line of the Kit now rather than a field of its own.
+        expect(fieldsOf(hunt(failureResult(), makeUser({ sinceRare: 4 })))['🎒 Kit']).not.toContain('Rare pity');
+        expect(fieldsOf(hunt(failureResult(), makeUser({ sinceRare: 5 })))['🎒 Kit']).toContain(`Rare pity 5/${threshold}`);
     });
 });
 
@@ -483,8 +487,8 @@ describe('the ammo helpers', () => {
 
     test('the warning rides the failure embed when the bag runs thin', () => {
         const fields = fieldsOf(hunt(failureResult(), makeUser({ ammo: { steel_shot: 2 } }), t4()));
-        expect(fields.Ammo).toBe('⚫ Steel Shot ×2');
-        expect(fields['⚠️ Low Ammo']).toBeTruthy();
+        expect(fields['🎒 Kit']).toContain('⚫ Steel Shot ×2');
+        expect(fields['⚠️ Heads Up']).toContain('**2** Steel Shot rounds left');
     });
 });
 
