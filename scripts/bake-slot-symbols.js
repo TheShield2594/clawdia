@@ -26,7 +26,7 @@ const OUT = path.join(__dirname, '..', 'src', 'assets', 'slot-symbols');
 const SYMBOLS = {
     cherry: '1f352', lemon: '1f34b', grape: '1f347', bell: '1f514', diamond: '1f48e',
     star: '1f31f', wild: '1f0cf', boost: '26a1', scatter: '1f338',
-    slots: '1f3b0', fire: '1f525', clover: '1f340', trophy: '1f3c6',
+    slots: '1f3b0', fire: '1f525', clover: '1f340',
 };
 
 async function main() {
