@@ -130,9 +130,29 @@ async function loadAngler(userId, guildId) {
  * The result text embed with a line saying what the angler chose. The picture
  * card leads the message and the text embed follows it; whichever embed is
  * last before any boss result is the text — the one that carries a Balance.
+ *
+ * A fetched message's embeds carry their images as resolved CDN URLs, not the
+ * `attachment://` references they were sent with. Edited back as-is, Discord no
+ * longer counts the card as used by an embed and shows it a second time as a
+ * loose attachment, so images that point at one of the message's own
+ * attachments are pointed back at it by name.
  */
 function withDecision(message, line) {
-    const embeds = (message?.embeds ?? []).map(e => EmbedBuilder.from(e));
+    const names = new Set([...(message?.attachments?.values?.() ?? [])].map(a => a.name).filter(Boolean));
+    const reattach = url => {
+        if (!url || url.startsWith('attachment://')) return null;
+        let name;
+        try { name = decodeURIComponent(new URL(url).pathname.split('/').pop()); } catch { return null; }
+        return names.has(name) ? `attachment://${name}` : null;
+    };
+    const embeds = (message?.embeds ?? []).map(e => {
+        const embed = EmbedBuilder.from(e);
+        const image = reattach(embed.data.image?.url);
+        if (image) embed.setImage(image);
+        const thumbnail = reattach(embed.data.thumbnail?.url);
+        if (thumbnail) embed.setThumbnail(thumbnail);
+        return embed;
+    });
     const at = embeds.findIndex(e => (e.data.fields ?? []).some(f => f.name === 'Balance'));
     if (at < 0) return null;
     embeds[at].addFields({ name: '🎣 Your Call', value: line, inline: false });

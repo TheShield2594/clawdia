@@ -38,6 +38,7 @@ function angler(pending) {
     };
 }
 
+const CDN = 'https://cdn.discordapp.com/attachments/c1/m1';
 const PENDING = { castId: 'cast1', fishId: 'bass', fishName: 'Largemouth Bass', payout: 300, xp: 40 };
 
 function setup({ execute = jest.fn(async () => ({ started: true })) } = {}) {
@@ -60,7 +61,11 @@ function setup({ execute = jest.fn(async () => ({ started: true })) } = {}) {
         const button = {
             customId, user: { id: userId }, guild: { id: 'g1' }, member: {}, channelId: 'c1',
             client: { commands: new Map([['fish', command]]), cooldowns: new Map() },
-            message: { embeds: [new EmbedBuilder().setImage('attachment://fish-result.png').toJSON(), textEmbed.toJSON()] },
+            // As fetched: the card's image is the resolved CDN link, not attachment://.
+            message: {
+                embeds: [new EmbedBuilder().setImage(`${CDN}/fish-result.png?ex=1&is=2`).toJSON(), textEmbed.toJSON()],
+                attachments: new Map([['a1', { name: 'fish-result.png', url: `${CDN}/fish-result.png?ex=1&is=2` }]]),
+            },
             reply: jest.fn(async () => {}), deferUpdate: jest.fn(async () => {}), followUp: jest.fn(async () => {}),
         };
         collector.emit('collect', button);
@@ -191,6 +196,16 @@ test('Keep closes the offer: the release is gone and only Cast again is left', a
     expect(user.save).toHaveBeenCalled();
     expect(chargeExact).not.toHaveBeenCalled();
     expect(ids(edits.at(-1).components)).toEqual([IDS.again]);
+});
+
+test('the edited result points the card back at its attachment, so it is not shown twice', async () => {
+    User.findOne.mockResolvedValue(angler({ ...PENDING }));
+    const { interaction, edits, press } = setup();
+    await attachResultActions(interaction, {});
+    await press(IDS.keep);
+    const [card, text] = edits.at(-1).embeds;
+    expect(card.data.image.url).toBe('attachment://fish-result.png');
+    expect(text.data.image).toBeUndefined();
 });
 
 test('someone else pressing the buttons is turned away', async () => {
