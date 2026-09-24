@@ -429,7 +429,7 @@ describe('a plain shop item', () => {
 });
 
 describe('items nothing in the game handles', () => {
-    it.each(['mystery_thing', 'shift_booster', 'career_badge'])(
+    it.each(['mystery_thing'])(
         'refuses %s rather than consuming it for nothing', async itemId => {
             seedUser({ inventory: [{ itemId, quantity: 1 }] });
             seedGuild();
@@ -619,6 +619,83 @@ describe('autocomplete', () => {
     });
 });
 
+describe('the /work finds', () => {
+    it('names them in the picker', async () => {
+        seedUser({ inventory: [
+            { itemId: 'shift_booster', quantity: 1 },
+            { itemId: 'master_key', quantity: 1 },
+            { itemId: 'career_badge', quantity: 1 },
+        ] });
+        seedGuild();
+
+        const pick = makeInteraction({ options: { focused: '' } });
+        await use.autocomplete(pick);
+
+        expect(pick.respond.mock.calls[0][0].map(c => c.name)).toEqual([
+            '📛 Career Badge — 1 held · +5 shifts toward promotion',
+            '🔑 Master Key — 1 held · opens the supply closet',
+            '📋 Shift Booster — 1 held · lasts 3h',
+        ]);
+    });
+
+    it('starts the Shift Booster, and /work reads it', async () => {
+        seedUser({ inventory: [{ itemId: 'shift_booster', quantity: 1 }] });
+        seedGuild();
+
+        const interaction = await run('shift_booster');
+
+        expect(repliedText(interaction)).toContain('Activated: Shift Booster');
+        expect(slot('shift_booster')).toBeUndefined();
+        const { getShiftMultiplier } = require('../src/services/effectsService');
+        expect(getShiftMultiplier(mockUsers.get(USER_ID))).toBe(1.25);
+    });
+
+    it('opens the supply closet with the Master Key', async () => {
+        seedUser({ inventory: [{ itemId: 'master_key', quantity: 2 }] });
+        seedGuild();
+
+        const interaction = await run('master_key');
+
+        expect(repliedText(interaction)).toContain('Supply Closet Unlocked');
+        expect(repliedText(interaction)).not.toContain('Not Yet in Your Inventory');
+        expect(slot('master_key').quantity).toBe(1);
+    });
+
+    it('counts the Career Badge as five shifts', async () => {
+        seedUser({ shiftsWorked: 8, inventory: [{ itemId: 'career_badge', quantity: 1 }] });
+        seedGuild();
+
+        const interaction = await run('career_badge');
+
+        expect(repliedText(interaction)).toContain('Career Badge Pinned');
+        expect(repliedText(interaction)).toContain('Skilled Worker');
+        expect(mockUsers.get(USER_ID).shiftsWorked).toBe(13);
+        expect(slot('career_badge')).toBeUndefined();
+    });
+
+    it('keeps the Career Badge once the top job tier is reached', async () => {
+        seedUser({ shiftsWorked: 50, inventory: [{ itemId: 'career_badge', quantity: 1 }] });
+        seedGuild();
+
+        const interaction = await run('career_badge');
+
+        expect(repliedText(interaction)).toContain("Couldn't pin the badge on");
+        expect(mockUsers.get(USER_ID).shiftsWorked).toBe(50);
+        expect(slot('career_badge').quantity).toBe(1);
+    });
+
+    // Every item a shift can drop must be something /use activates, or it sits
+    // in the bag under a raw id doing nothing — as these three once did.
+    it('are all things /use can do something with', () => {
+        const { LUCKY_FIND_ITEMS } = require('../src/commands/economy/work').__test__;
+        const { describeItem } = require('../src/utils/itemDisplay');
+        for (const find of LUCKY_FIND_ITEMS) {
+            expect([find.itemId, use.__test__.useStatus(find.itemId, {}).usable]).toEqual([find.itemId, true]);
+            expect(describeItem(find.itemId).name).not.toBe(find.itemId);
+        }
+    });
+});
+
 describe('what /daily drops', () => {
     // The drop table once handed out ids no effect was mapped to, so the item
     // could never be activated. Every drop that lands in the bag must be one
@@ -628,5 +705,18 @@ describe('what /daily drops', () => {
         const { resolveEffectType } = require('../src/services/effectsService');
         const bagged = [...DROP_TABLE, ...RARE_DROP_TABLE].filter(d => !d.streakFlag);
         for (const drop of bagged) expect([drop.itemId, resolveEffectType(drop.itemId)]).toEqual([drop.itemId, expect.any(String)]);
+    });
+
+    // The streak-30 milestone once promised a 2 hr booster. It grants two of
+    // the hour-long ones, so it beats the same item as an ordinary drop.
+    it('gives the streak-30 milestone more than an ordinary day', () => {
+        const { DROP_TABLE, RARE_DROP_TABLE } = require('../src/data/dailyDropTable');
+        const milestone = RARE_DROP_TABLE.filter(d => d.milestone === 30);
+        expect(milestone.length).toBeGreaterThan(0);
+        for (const drop of milestone) {
+            const ordinary = DROP_TABLE.find(d => d.itemId === drop.itemId);
+            expect(drop.quantity ?? 1).toBeGreaterThan(ordinary?.quantity ?? 1);
+            expect(drop.name).toContain(`×${drop.quantity}`);
+        }
     });
 });

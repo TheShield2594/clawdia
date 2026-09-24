@@ -2,16 +2,10 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const User = require('../../models/User');
 const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
-const DEFAULT_TIERS = require('../../data/defaultTiers');
+const { resolveTiers } = require('../../utils/jobTiers');
 const COLORS = require('../../utils/embedColors');
 
 const TIER_EMOJIS = { 1: '🟢', 2: '🔵', 3: '🟣', 4: '🟡' };
-
-function resolveTiers(guildSettings) {
-    const saved = guildSettings?.jobTiers;
-    if (saved?.length === 4) return [...saved].sort((a, b) => a.tier - b.tier);
-    return DEFAULT_TIERS;
-}
 
 const EMBED_DESC_LIMIT = 4096;
 

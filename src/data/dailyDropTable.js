@@ -12,11 +12,16 @@ const DROP_TABLE = [
 ];
 
 // Milestone drops — tiered by streak milestone (7 / 30 / 100)
+//
+// `quantity` (default 1) is how many of the item land in the bag. The streak-30
+// boosters come as a pair: the milestone used to promise a 2 hr booster, and
+// two of the hour-long ones are those two hours — where a single one would be
+// no better than an ordinary day's drop.
 const RARE_DROP_TABLE = [
     { itemId: 'lifesaver',      weight: 50, emoji: '🛟', name: 'Lifesaver',            milestone: 7   },
     { itemId: 'streak_shield',  weight: 30, emoji: '🛡️', name: 'Streak Shield',         milestone: 7   },
-    { itemId: 'coin_booster_2x', weight: 20, emoji: '💰', name: '2x Coin Booster (1hr)', milestone: 30  },
-    { itemId: 'xp_booster_2x',   weight: 20, emoji: '⭐', name: '2x XP Booster (1hr)',   milestone: 30  },
+    { itemId: 'coin_booster_2x', weight: 20, emoji: '💰', name: '2x Coin Booster (1hr) ×2', milestone: 30, quantity: 2 },
+    { itemId: 'xp_booster_2x',   weight: 20, emoji: '⭐', name: '2x XP Booster (1hr) ×2',   milestone: 30, quantity: 2 },
     { itemId: 'lifesaver',      weight: 55, emoji: '🛟', name: 'Lifesaver',             milestone: 100 },
     { itemId: 'revival_token',  weight: 5,  emoji: '💫', name: 'Streak Revival Token',  milestone: 100, streakFlag: true },
 ];

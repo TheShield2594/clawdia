@@ -15,10 +15,12 @@ const { describeItem, findShopRow, findDefaultRow } = require('../../utils/itemD
 const { withUserLock } = require('../../utils/userMutex');
 const { loadAiItems } = require('../../utils/aiItemLookup');
 const { grantItemsOrOwe } = require('../../utils/creditOrOwe');
-const { lootBoxItemPayoutKey, useRoleRefundPayoutKey } = require('../../utils/payoutKey');
+const { lootBoxItemPayoutKey, supplyClosetPayoutKey, useRoleRefundPayoutKey } = require('../../utils/payoutKey');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
 const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../services/petService');
 const { MAX_STAMINA_UPGRADES } = require('../../data/crossSystemData');
+const { getWorkFind, rollSupplyCloset, CAREER_BADGE_SHIFTS } = require('../../data/workFinds');
+const { resolveTiers } = require('../../utils/jobTiers');
 const COLORS = require('../../utils/embedColors');
 
 // itemId of a seasonal loot box -> the event definition that owns it
@@ -78,7 +80,7 @@ function runningLabel(effect) {
 
 /** The catalogue description with its leading emoji stripped, for an embed body. */
 function describeEffect(itemId, shopItems) {
-    const row = findShopRow(itemId, shopItems) ?? findDefaultRow(itemId);
+    const row = findShopRow(itemId, shopItems) ?? findDefaultRow(itemId) ?? getWorkFind(itemId);
     return (row?.description ?? '')
         .replace(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic}|\uFE0F|\u200D)+\s*/u, '')
         .trim();
@@ -104,8 +106,9 @@ function describeEffect(itemId, shopItems) {
  *
  * `hasRole(roleId)` answers whether the member already holds a role, when the
  * caller can tell; a role item they already have is blocked, not spent.
+ * `tiers` is the guild's job ladder (`resolveTiers`), for the Career Badge.
  */
-function useStatus(itemId, user, { shopItems = [], hasRole = () => false } = {}) {
+function useStatus(itemId, user, { shopItems = [], hasRole = () => false, tiers = resolveTiers(null) } = {}) {
     const lower = itemId.toLowerCase();
 
     const effectType = resolveEffectType(itemId);
@@ -126,6 +129,14 @@ function useStatus(itemId, user, { shopItems = [], hasRole = () => false } = {})
         case 'black_market_contract': return capped(user?.crimeContractStacks ?? 0, MAX_CONTRACT_STACKS, 'stacks');
         case 'permanent_stamina':     return capped(user?.staminaUpgrades ?? 0, MAX_STAMINA_UPGRADES, 'upgrades');
         case 'pet_slot_expansion':    return capped(user?.petSlots ?? 0, MAX_SLOT_EXPANSIONS, 'expansions');
+        case 'master_key': return { usable: true, ready: true, status: 'opens the supply closet' };
+        case 'career_badge': {
+            const top = topTierShifts(tiers);
+            const shifts = user?.shiftsWorked ?? 0;
+            return shifts < top
+                ? { usable: true, ready: true, status: `+${CAREER_BADGE_SHIFTS} shifts toward promotion` }
+                : { usable: true, ready: false, status: 'already at the top job tier' };
+        }
         case 'revive_scroll': {
             const fallen = user?.deceasedPets?.[0];
             if (!fallen) return { usable: true, ready: false, status: 'no fallen pet to revive' };
@@ -176,6 +187,9 @@ function useStatus(itemId, user, { shopItems = [], hasRole = () => false } = {})
     };
 }
 
+/** Shifts needed for the guild's top job tier; a Career Badge does nothing past it. */
+const topTierShifts = tiers => Math.max(0, ...tiers.map(t => t.minShifts ?? 0));
+
 /** How many of an item are left after a use, from the post-update document. */
 const leftInBag = (user, itemId) => Math.max(0, user.inventory.find(e => e.itemId === itemId)?.quantity ?? 0);
 const leftField = (user, itemId) => ({ name: '🎒 Left in bag', value: `${leftInBag(user, itemId)}x`, inline: true });
@@ -204,7 +218,7 @@ module.exports = {
             const [user, guildSettings] = await Promise.all([
                 User.findOne(
                     { userId: interaction.user.id, guildId: interaction.guild.id },
-                    'inventory activeEffects streak crimeContractStacks staminaUpgrades petSlots deceasedPets'
+                    'inventory activeEffects streak crimeContractStacks staminaUpgrades petSlots deceasedPets shiftsWorked'
                 ).lean(),
                 getGuildSettings(interaction.guild.id),
             ]);
@@ -222,7 +236,7 @@ module.exports = {
                 .map(e => ({
                     quantity: e.quantity,
                     item: describeItem(e.itemId, { shopItems }),
-                    status: useStatus(e.itemId, user, { shopItems, hasRole }),
+                    status: useStatus(e.itemId, user, { shopItems, hasRole, tiers: resolveTiers(guildSettings) }),
                 }))
                 .filter(c => c.status.usable);
 
@@ -304,7 +318,8 @@ module.exports = {
         // No settings (a guild that never saved any) means no custom shop, so
         // an unknown item there is refused like any other. A settings read that
         // fails throws out of the Promise.all above, before anything is spent.
-        const status = useStatus(canonicalId, preview, { shopItems });
+        const tiers  = resolveTiers(guildSettings);
+        const status = useStatus(canonicalId, preview, { shopItems, tiers });
         if (!status.usable) {
             let shown = item;
             if (item.kind === 'forged') {
@@ -626,6 +641,86 @@ module.exports = {
             return interaction.reply({ embeds: [embed] });
         }
 
+        // ── Master Key (a /work find) ──────────────────────────────────────────
+        if (canonicalId.toLowerCase() === 'master_key') {
+            const found = rollSupplyCloset();
+
+            // Spend the key first, then grant what it opened: the loot box's
+            // shape, and for the same reason — a grant that misses is recorded
+            // as owed under the key rather than lost.
+            const user = await User.findOneAndUpdate(
+                { ...userFilter, inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } } },
+                { $inc: { 'inventory.$.quantity': -1 } },
+                { new: true }
+            );
+            if (!user) {
+                return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
+            }
+
+            const grant = await grantItemsOrOwe(
+                { userId: userFilter.userId, guildId: userFilter.guildId },
+                found.itemId, 1,
+                {
+                    payoutKey: supplyClosetPayoutKey(interaction.id),
+                    service: 'use',
+                    jobName: 'supplyClosetItem',
+                },
+            );
+            await dropEmptyInventorySlots();
+
+            const embed = new EmbedBuilder()
+                .setColor(item.color ?? COLORS.SUCCESS)
+                .setTitle('🔑 Supply Closet Unlocked')
+                .setDescription(`Behind the door marked *Authorized Personnel Only*, you find a ${found.emoji} **${found.name}**.`)
+                .addFields(leftField(user, canonicalId))
+                .setTimestamp();
+            if (!grant.granted) {
+                embed.addFields({
+                    name: '⚠️ Not Yet in Your Inventory',
+                    value: grant.owed
+                        ? `**${found.name}** couldn't be added just now and has been recorded as owed — it'll appear once the problem clears. Tell an admin if it doesn't.`
+                        : `**${found.name}** couldn't be added and could not be recorded — please contact a server admin.`,
+                });
+            }
+            return interaction.reply({ embeds: [embed] });
+        }
+
+        // ── Career Badge (a /work find) ────────────────────────────────────────
+        if (canonicalId.toLowerCase() === 'career_badge') {
+            const top = topTierShifts(tiers);
+            // `status` above already refused a player at the top tier; the
+            // filter repeats it so a shift worked in between can't waste one.
+            const user = await User.findOneAndUpdate(
+                {
+                    ...userFilter,
+                    inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } },
+                    shiftsWorked: { $lt: top },
+                },
+                { $inc: { 'inventory.$.quantity': -1, shiftsWorked: CAREER_BADGE_SHIFTS } },
+                { new: true }
+            );
+            if (!user) {
+                return interaction.reply({ content: "Couldn't pin the badge on — you may already be at the top job tier, or no longer have one.", flags: MessageFlags.Ephemeral });
+            }
+            await dropEmptyInventorySlots();
+
+            const shifts = user.shiftsWorked ?? 0;
+            const current = [...tiers].reverse().find(t => shifts >= t.minShifts) ?? tiers[0];
+            const next = tiers.find(t => t.minShifts > shifts);
+            const embed = new EmbedBuilder()
+                .setColor(item.color ?? COLORS.SUCCESS)
+                .setTitle('📛 Career Badge Pinned')
+                .setDescription(
+                    `HR counts it as **${CAREER_BADGE_SHIFTS} shifts** on your record.\n\n`
+                    + `**${current.name}** · ${shifts.toLocaleString()} shifts\n`
+                    + (next
+                        ? `Next up: ${next.name} in **${(next.minShifts - shifts).toLocaleString()}** more shifts`
+                        : '✅ Top job tier reached — `/work` now picks from every job.'))
+                .addFields(leftField(user, canonicalId))
+                .setTimestamp();
+            return interaction.reply({ embeds: [embed] });
+        }
+
         // ── Seasonal loot boxes ────────────────────────────────────────────────
         const lootBoxEvent = LOOT_BOX_EVENTS.get(canonicalId.toLowerCase());
         if (lootBoxEvent) {
@@ -793,3 +888,5 @@ module.exports = {
             : redeem();
     }
 };
+
+module.exports.__test__ = { useStatus };
