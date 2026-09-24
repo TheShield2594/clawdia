@@ -55,6 +55,18 @@ describe('the landing page\'s decorative graphics', () => {
         expect(art.getAttribute('aria-hidden')).toBe('true');
     });
 
+    test('the hero idle loop is hidden from assistive technology and never autoplays', () => {
+        const video = document.querySelector('.cw-hero-video');
+
+        expect(video).not.toBeNull();
+        expect(video.getAttribute('aria-hidden')).toBe('true');
+        expect(video.hasAttribute('muted')).toBe(true);
+        // Left to the script, so reduced motion and no-JS keep the still.
+        expect(video.hasAttribute('autoplay')).toBe(false);
+        expect(video.getAttribute('preload')).toBe('none');
+        expect(video.querySelector('source').getAttribute('src')).toMatch(/^\/clawdia-hero\.mp4\?v=/);
+    });
+
     test('the heatmap demo renders its cells, and hides all of them', () => {
         const heatmap = document.getElementById('insights-heatmap');
 
@@ -71,5 +83,62 @@ describe('the landing page\'s decorative graphics', () => {
 
         expect(cells.map(cell => cell.textContent.trim()).filter(Boolean)).toEqual([]);
         expect(cells.every(cell => cell.getAttribute('aria-label') === null)).toBe(true);
+    });
+});
+
+describe('the hero idle loop and reduced motion', () => {
+    const originalMatchMedia = window.matchMedia;
+    const originalPlay = window.HTMLMediaElement.prototype.play;
+    const originalPause = window.HTMLMediaElement.prototype.pause;
+    let play;
+    let pause;
+
+    beforeEach(() => {
+        play = jest.fn(() => Promise.resolve());
+        pause = jest.fn();
+        window.HTMLMediaElement.prototype.play = play;
+        window.HTMLMediaElement.prototype.pause = pause;
+    });
+
+    afterEach(() => {
+        window.matchMedia = originalMatchMedia;
+        window.HTMLMediaElement.prototype.play = originalPlay;
+        window.HTMLMediaElement.prototype.pause = originalPause;
+    });
+
+    const prefersReduced = matches => {
+        window.matchMedia = jest.fn(() => ({ matches, addEventListener: jest.fn() }));
+    };
+
+    test('plays when motion is welcome, and shows the video once it is painting', () => {
+        prefersReduced(false);
+        renderLanding();
+
+        expect(play).toHaveBeenCalledTimes(1);
+        const cat = document.querySelector('.cw-hero-cat');
+        expect(cat.classList.contains('is-playing')).toBe(false);
+        document.querySelector('.cw-hero-video').dispatchEvent(new window.Event('playing'));
+        expect(cat.classList.contains('is-playing')).toBe(true);
+    });
+
+    test('a playing event that lands after reduced motion is switched on keeps the still', () => {
+        const query = { matches: false, addEventListener: jest.fn() };
+        window.matchMedia = jest.fn(q => (/reduced-motion/.test(q) ? query : { matches: false, addEventListener: jest.fn() }));
+        renderLanding();
+
+        query.matches = true;
+        for (const [, onChange] of query.addEventListener.mock.calls) onChange();
+        document.querySelector('.cw-hero-video').dispatchEvent(new window.Event('playing'));
+
+        expect(pause).toHaveBeenCalled();
+        expect(document.querySelector('.cw-hero-cat').classList.contains('is-playing')).toBe(false);
+    });
+
+    test('stays on the still under prefers-reduced-motion', () => {
+        prefersReduced(true);
+        renderLanding();
+
+        expect(play).not.toHaveBeenCalled();
+        expect(document.querySelector('.cw-hero-cat').classList.contains('is-playing')).toBe(false);
     });
 });
