@@ -82,7 +82,7 @@ const MID_LABEL = { 4: 'EPIC', 5: 'LEGENDARY', 6: 'EVENT' };
  *
  * @param {object} interaction already deferred or replied; this only edits.
  * @param {string|null} tier the drop's rarity name, or null for a miss.
- * @param {object} finalEmbed the result embed to land on.
+ * @param {object|object[]} finalEmbed the result embed to land on, or several.
  * @param {string} activity which grind's copy to use — a key of REVEAL_COPY.
  * @param {Array} [files] attachments the final embed references (e.g. the catch
  *   art `finalEmbed.setThumbnail('attachment://…')` points at). Only the final
@@ -100,7 +100,10 @@ async function stagedLootReveal(interaction, tier, finalEmbed, activity, files =
     // Only the final edit carries the attachments, and only when there are any —
     // the fog/reveal beats show their own art-free embeds, so an empty `files`
     // would just tell Discord to clear attachments that were never added.
-    const finalPayload = files.length ? { embeds: [finalEmbed], files } : { embeds: [finalEmbed] };
+    // An array lands several embeds at once — /hunt's picture card above its
+    // result text.
+    const finalEmbeds = Array.isArray(finalEmbed) ? finalEmbed : [finalEmbed];
+    const finalPayload = files.length ? { embeds: finalEmbeds, files } : { embeds: finalEmbeds };
     if (components) finalPayload.components = components;
 
     const tierNum = TIER_NUM[tier] ?? 0;

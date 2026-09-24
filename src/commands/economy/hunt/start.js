@@ -44,6 +44,7 @@ const {
 const { buildBonusLines, buildHuntEmbed, sceneAuthor, fitEmbeds } = require('./embeds');
 const { buildResultActions, attachResultActions } = require('./actions');
 const { runApexDuel } = require('./apex');
+const { cardChips, renderHuntResultCard } = require('./resultCard');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
 const { attachResultThumbnail } = require('../../../utils/itemImageHelper');
@@ -233,12 +234,25 @@ async function executeStart(interaction) {
         // ── The result card ──────────────────────────────────────────────────
         const embed = buildHuntEmbed(result, user, zone, weapon, currency, interaction.user);
 
-        // Result artwork — the hunted animal's icon as the embed thumbnail (emoji
-        // fallback). Threaded through every render of this embed, apex phases
-        // included, so the attachment rides with each one.
-        const catchFiles = result.success
-            ? await attachResultThumbnail(embed, 'hunt', result.animal, interaction.guild.id)
-            : [];
+        // The picture card leads a kill: the animal's art, the payout and how
+        // the run went, drawn above this text (hunt/resultCard). If it cannot
+        // be drawn the art falls back to the embed's thumbnail, as before.
+        // Either attachment rides every later render of the message, apex
+        // phases included.
+        const cardArgs = {
+            result, zone,
+            chips: cardChips({
+                result, stealth, aim, quick, flushed, isFeaturedZone, rarePetDrop,
+                featuredPct: Math.round(FEATURED_PAYOUT_BONUS * 100),
+            }),
+        };
+        const card = await renderHuntResultCard(cardArgs);
+        const lead = card ? [card.embed] : [];
+        const catchFiles = card
+            ? [card.file]
+            : result.success
+                ? await attachResultThumbnail(embed, 'hunt', result.animal, interaction.guild.id)
+                : [];
 
         const chips = buildRunChips({ stealth, aim, quick, flushed, encounter, isFeaturedZone, zone });
         const petLine = result.success ? petFlavorLine(user, { isPetActive, PET_DEFS, TRAIT_FLAVOR }) : null;
@@ -282,7 +296,7 @@ async function executeStart(interaction) {
         const currentFooter = embed.data.footer?.text;
         embed.setFooter({ text: [currentFooter, `${timeBand.emoji} ${timeBand.label} · ${leaderNote}`].filter(Boolean).join('\n') });
 
-        fitEmbeds([embed]);
+        fitEmbeds([...lead, embed]);
 
         // Staged loot reveal for rare+ drops. A quick hunt skips the ceremony —
         // the fog-and-fanfare build-up is the same forced wait the player opted
@@ -290,7 +304,7 @@ async function executeStart(interaction) {
         // the final render only, so nothing can be pressed under the fog; an
         // apex duel follows instead of them when one triggers.
         const components = result.apexEncounter ? [] : buildResultActions(user, weapon, quick);
-        await stagedLootReveal(interaction, !quick && result.success ? result.tier : null, embed, 'hunt', catchFiles, { components });
+        await stagedLootReveal(interaction, !quick && result.success ? result.tier : null, [...lead, embed], 'hunt', catchFiles, { components });
 
         // Everything the channel hears about this hunt comes after the card
         // has landed: a "quest complete" posted under the fog gave the result
@@ -306,7 +320,8 @@ async function executeStart(interaction) {
 
         if (result.apexEncounter) {
             await runApexDuel(interaction, {
-                embed, catchFiles, result, user, zone, zoneId, weaponIndex, currency, guildSettings,
+                embed, lead, cardArgs: card ? cardArgs : null, catchFiles,
+                result, user, zone, zoneId, weaponIndex, currency, guildSettings,
             });
         } else {
             await attachResultActions(interaction, weaponIndex);

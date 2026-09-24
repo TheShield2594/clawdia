@@ -806,5 +806,7 @@ module.exports = {
     INV_GEAR_COLS,
     INV_TILE_COLS,
     _resetCache,
+    // The drawing kit, for the other cards in the family (utils/grindResultCard).
+    primitives: { FONT, themeFor, loadIcon, drawEntry, roundRect, fitText, shade, paintBackground },
     __test__: { initials, shade },
 };

@@ -69,7 +69,7 @@ const huntService = require('../src/services/huntService');
 const questService = require('../src/services/questService');
 const { attachResultActions } = require('../src/commands/economy/hunt/actions');
 const { __setRandomSourceForTests } = require('../src/utils/secureRandom');
-const { ANIMALS, ANIMALS_BY_TIER, APEX_TYPES, ZONES, WEAPON_TIERS } = require('../src/data/huntData');
+const { ANIMALS, ANIMALS_BY_TIER, ZONES, WEAPON_TIERS } = require('../src/data/huntData');
 const { executeStart, runApproach } = require('../src/commands/economy/hunt/start');
 const { runApexDuel, APEX_PHASE_MS } = require('../src/commands/economy/hunt/apex');
 const { APPROACH_PROFILES } = require('../src/commands/economy/hunt/aim');
@@ -266,8 +266,37 @@ describe('executeStart', () => {
         expect(interaction.deferReply).toHaveBeenCalled();
         const card = interaction.renders.at(-1);
         expect(card.components?.[0]?.components.map(b => b.data.label)).toContain('🏹 Hunt again');
-        expect(card.embeds[0].data.description).toContain('⚡ Quick hunt');
+        expect(card.embeds[1].data.description).toContain('⚡ Quick hunt');
         expect(attachResultActions).toHaveBeenCalledWith(interaction, 0);
+    });
+
+    test('a kill leads with its picture card, and the text beneath loses the thumbnail it replaces', async () => {
+        randomSequence([0.01]);
+        hunter();
+        const interaction = fakeInteraction({ quick: true });
+
+        await executeStart(interaction);
+
+        const final = interaction.renders.at(-1);
+        const [picture, text] = final.embeds;
+        expect(picture.data.image.url).toBe('attachment://hunt-result.png');
+        expect(picture.data.description).toBeUndefined();
+        expect(text.data.thumbnail).toBeUndefined();
+        expect(final.files.map(f => f.name)).toEqual(['hunt-result.png']);
+        expect(final.files[0].description).toMatch(/^Hunt result: /);
+        expect(final.files[0].description).toContain('Quick hunt');
+    });
+
+    test('a miss has no picture card — just the text', async () => {
+        randomSequence([0.01, 0.01, 0.999]);
+        hunter();
+        const interaction = fakeInteraction({ quick: true });
+
+        await executeStart(interaction);
+
+        const final = interaction.renders.at(-1);
+        expect(final.embeds).toHaveLength(1);
+        expect(final.embeds[0].data.image).toBeUndefined();
     });
 
     test('the channel hears about quests only after the card has landed', async () => {

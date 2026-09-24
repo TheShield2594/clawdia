@@ -22,6 +22,7 @@ const { gatherPayoutKey } = require('../../../utils/payoutKey');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { sceneAuthor, fitEmbeds } = require('./embeds');
 const { buildResultActions, attachResultActions } = require('./actions');
+const { renderHuntResultCard } = require('./resultCard');
 
 // Per apex phase.
 const APEX_PHASE_MS = 30_000;
@@ -47,7 +48,7 @@ function apexOutcomeFeedback(last, nerveLost) {
  * phase number, so a stale press on an earlier phase's buttons is ignored
  * rather than answering the current one.
  */
-async function runApexDuel(interaction, { embed, catchFiles, result, user, zone, zoneId, weaponIndex, currency, guildSettings }) {
+async function runApexDuel(interaction, { embed, lead = [], cardArgs = null, catchFiles, result, user, zone, zoneId, weaponIndex, currency, guildSettings }) {
     const prey       = result.apexEncounter.animal;
     const apexType   = rollApexType(prey);
     const phaseCount = apexType.phases.length;
@@ -86,7 +87,7 @@ async function runApexDuel(interaction, { embed, catchFiles, result, user, zone,
     };
 
     await interaction.editReply({
-        embeds: fitEmbeds([embed, phaseEmbed(0, [], null, new Date(Date.now() + APEX_PHASE_MS))]),
+        embeds: fitEmbeds([...lead, embed, phaseEmbed(0, [], null, new Date(Date.now() + APEX_PHASE_MS))]),
         components: [phaseRow(0)],
         files: catchFiles,
     });
@@ -135,7 +136,7 @@ async function runApexDuel(interaction, { embed, catchFiles, result, user, zone,
         if (nerveNow <= 0 || i === phaseCount - 1) break;
 
         await interaction.editReply({
-            embeds: fitEmbeds([embed, phaseEmbed(i + 1, results, apexOutcomeFeedback(results.at(-1), nerveBefore - nerveNow), new Date(Date.now() + APEX_PHASE_MS))]),
+            embeds: fitEmbeds([...lead, embed, phaseEmbed(i + 1, results, apexOutcomeFeedback(results.at(-1), nerveBefore - nerveNow), new Date(Date.now() + APEX_PHASE_MS))]),
             components: [phaseRow(i + 1)],
             files: catchFiles,
         });
@@ -150,7 +151,7 @@ async function runApexDuel(interaction, { embed, catchFiles, result, user, zone,
     await stripped;
     if (!freshUser) {
         console.error(`[hunt apex] user document vanished mid-encounter — user=${interaction.user.id} guild=${interaction.guild.id}`);
-        return interaction.editReply({ content: 'Something went wrong resolving the encounter — your hunt rewards were already saved.', embeds: [embed], components: [], files: catchFiles }).catch(() => {});
+        return interaction.editReply({ content: 'Something went wrong resolving the encounter — your hunt rewards were already saved.', embeds: [...lead, embed], components: [], files: catchFiles }).catch(() => {});
     }
     await attachGrind(freshUser);
     ensureHuntData(freshUser);
@@ -208,7 +209,7 @@ async function runApexDuel(interaction, { embed, catchFiles, result, user, zone,
         if (!apexPaid.credited) apexPayoutOwed = apexResult.bonusPayout;
     } catch (saveErr) {
         console.error('[hunt apex] save error:', saveErr);
-        return interaction.editReply({ content: 'Something went wrong saving your apex result — the encounter is lost and cannot be retried. Your original hunt rewards were already saved.', embeds: [embed], components: [], files: catchFiles }).catch(() => {});
+        return interaction.editReply({ content: 'Something went wrong saving your apex result — the encounter is lost and cannot be retried. Your original hunt rewards were already saved.', embeds: [...lead, embed], components: [], files: catchFiles }).catch(() => {});
     }
 
     const phaseScoreLine = apexResult.phaseResults.map((p, i) => {
@@ -247,11 +248,27 @@ async function runApexDuel(interaction, { embed, catchFiles, result, user, zone,
         });
     }
 
+    // The picture card is redrawn with the duel's outcome banked on it.
+    let finalLead = lead, finalFiles = catchFiles;
+    if (cardArgs) {
+        const cardTitles = {
+            perfect:  `PERFECT — ${apexType.name} brought down`,
+            win:      `${apexType.name} defeated`,
+            survived: `Survived the ${apexType.name}`,
+            escaped:  `The ${apexType.name} escaped`,
+        };
+        const redrawn = await renderHuntResultCard({
+            ...cardArgs,
+            apex: { outcome: apexResult.outcome, title: cardTitles[apexResult.outcome], payout: apexResult.bonusPayout },
+        });
+        if (redrawn) { finalLead = [redrawn.embed]; finalFiles = [redrawn.file]; }
+    }
+
     const apexWeapon = freshUser.hunt.weapons[weaponIndex];
     await interaction.editReply({
-        embeds: fitEmbeds([embed, apexEmbed]),
+        embeds: fitEmbeds([...finalLead, embed, apexEmbed]),
         components: apexWeapon ? buildResultActions(freshUser, apexWeapon, freshUser.hunt.quickHunt ?? false) : [],
-        files: catchFiles,
+        files: finalFiles,
     }).catch(() => {});
 
     if (apexQuestsDone.length || apexQuestsNear.length) {
