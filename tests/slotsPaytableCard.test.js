@@ -17,11 +17,20 @@ const { SYMBOLS, TRIPLE_WILD_MULT, TRIPLE_BOOST_MULT, JACKPOT_CAP_MULT } = requi
 const ART = path.join(__dirname, '..', 'src', 'assets', 'slot-symbols');
 
 describe('the paytable image', () => {
-    it('renders a 1600×1000 PNG', async () => {
-        const buffer = await paytableImage();
-        const img = await loadImage(buffer);
-        expect([img.width, img.height]).toEqual([1600, 1000]);
+    it('renders a portrait PNG, narrower than the grind cards so it reads on a phone', async () => {
+        const img = await loadImage(await paytableImage());
+        expect(img.width).toBe(820);
+        expect(img.height).toBeGreaterThan(img.width * 1.5);
     }, 20_000);
+
+    it('is drawn with the Hunt / Fish cards’ primitives and a palette from their theme table', () => {
+        const { THEMES, primitives } = require('../src/utils/grindProfileCard');
+        expect(Object.keys(THEMES.slots).sort()).toEqual(Object.keys(THEMES.fish).sort());
+        expect(Object.keys(primitives)).toEqual(expect.arrayContaining(['FONT', 'roundRect', 'fitText', 'paintBackground']));
+        const source = fs.readFileSync(require.resolve('../src/games/casino/slotsPaytableCard.js'), 'utf8');
+        expect(source).toContain('THEMES.slots');
+        expect(source).toContain('primitives');
+    });
 
     it('is drawn once and kept', async () => {
         expect(paytableImage()).toBe(paytableImage());
