@@ -270,6 +270,29 @@ describe('rules and rebet', () => {
         expect(JSON.stringify(pressed.reply.mock.calls[0][0])).toMatch(/House rules/);
     });
 
+    // A bystander's press on the turn collector used to reset its idle timer,
+    // so Rules pressed by anyone could keep an abandoned hand from standing.
+    test('a bystander pressing Rules never reaches the turn collector', async () => {
+        mockDeck = stack('10♠', '7♥', '9♦', '8♣');
+        const interaction = makeInteraction({ options: { bet: BET }, userId: USER_ID, guildId: GUILD_ID, holdCollectors: true });
+        const opened = [];
+        const create = interaction.message.createMessageComponentCollector;
+        interaction.message.createMessageComponentCollector = opts => { opened.push(opts); return create(opts); };
+        await blackjack.execute(interaction, { releaseLock: jest.fn() });
+        await flush();
+
+        const as = (prefix, user = USER_ID) => ({ customId: buttonId(interaction, prefix), user: { id: user }, reply: jest.fn().mockResolvedValue() });
+        const turn = opened.find(o => o.idle && o.filter(as('bj_hit_')));
+        expect(turn).toBeDefined();
+        // Neither the owner's Rules press nor a bystander's counts toward the turn.
+        expect(turn.filter(as('bj_rules_'))).toBe(false);
+        expect(turn.filter(as('bj_rules_', 'someone-else'))).toBe(false);
+        // The Rules collector takes them instead, from anyone.
+        const rules = opened.find(o => o.filter(as('bj_rules_', 'someone-else')));
+        expect(rules).toBeDefined();
+        expect(rules.idle).toBeUndefined();
+    });
+
     test('Rebet deals a new hand on a fresh wager', async () => {
         const { interaction, onWager } = await deal(['A♠', 'K♥', '5♦', '9♣']);
         expect(onWager).toHaveBeenCalledTimes(1);

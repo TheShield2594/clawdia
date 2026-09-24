@@ -80,17 +80,22 @@ const RULES = [
  * — without it ♥ is a colour emoji on most phones.
  */
 const cardText = card => `\`${card.value}${card.suit}︎\``;
+/** A hand as text cards, with the hole card shown as `??` while it is face down. */
 const handText = (cards, holeHidden = false) =>
     cards.map((c, i) => (holeHidden && i === 1 ? '`??`' : cardText(c))).join(' ');
 
+/** A signed coin amount with the currency: +💰150, −💰50. */
 const signed = (currency, n) => `${n >= 0 ? '+' : '−'}${currency}${Math.abs(n).toLocaleString()}`;
+/** A signed, abbreviated amount for the table image: +12.5K. */
 const signedShort = n => `${n >= 0 ? '+' : '−'}${shortAmount(Math.abs(n))}`;
 
+/** The dealer's total as shown: the up-card while the hole card is hidden, then the full label. */
 function dealerLabel(s) {
     if (s.holeHidden) return `showing ${s.dealer[0].value}`;
     return totalLabel(s.dealer);
 }
 
+/** A player hand's label; a split hand's two-card 21 is not called blackjack. */
 function handLabel(hand) {
     return totalLabel(hand.cards, { natural: !hand.fromSplit });
 }
@@ -147,6 +152,7 @@ function tableView(s) {
     };
 }
 
+/** The embed for one moment of the hand: narration, both sides' cards, the stake or the payout, and the record. */
 function buildEmbed(interaction, s) {
     const split = s.hands.length > 1;
     const embed = new EmbedBuilder()
@@ -239,6 +245,7 @@ async function buildPayload(interaction, s, components) {
     return payload;
 }
 
+/** A button with its emoji set as an emoji rather than typed into the label. */
 function button(customId, label, style, emoji, disabled = false) {
     const b = new ButtonBuilder().setCustomId(customId).setLabel(label).setStyle(style).setDisabled(disabled);
     if (emoji) b.setEmoji(emoji);
@@ -354,7 +361,9 @@ async function playHand(ctx) {
 
     const render = async components => {
         try {
-            return await table.show(await buildPayload(interaction, s, components));
+            const shown = await table.show(await buildPayload(interaction, s, components));
+            openRules();
+            return shown;
         } catch (err) {
             console.error('[blackjack] could not update the table:', err);
             return null;
@@ -383,14 +392,27 @@ async function playHand(ctx) {
         flags: MessageFlags.Ephemeral,
     }).catch(() => {});
 
+    /** The owner's buttons, which answer only the owner. */
+    const ownerFilter = ids => ownedBy(interaction.user.id, i => ids.includes(i.customId), "This isn't your hand.");
+
     /**
-     * The owner's buttons answer only the owner; Rules answers anyone at the
-     * table, since reading the rules costs nobody anything.
+     * Rules answers anyone at the table, so it has a collector of its own, open
+     * for the life of the hand. Sharing the turn collector would let a
+     * bystander's press reset that collector's idle timer, and with it keep an
+     * abandoned hand — and the player's casino lock — from ever auto-standing.
+     * The ceiling is a backstop for a hand that never reaches its Rebet window,
+     * whose end is what normally closes this.
      */
-    const ownerFilter = ids => {
-        const owned = ownedBy(interaction.user.id, i => ids.includes(i.customId), "This isn't your hand.");
-        return i => i.customId === rulesId || owned(i);
+    let rulesCollector = null;
+    const openRules = () => {
+        if (rulesCollector || !table.message) return;
+        rulesCollector = table.message.createMessageComponentCollector({
+            filter: i => i.customId === rulesId,
+            time: TABLE_TTL_MS,
+        });
+        rulesCollector.on('collect', showRules);
     };
+    const closeRules = () => rulesCollector?.stop('closed');
 
     // ── Settlement ───────────────────────────────────────────────────────────
 
@@ -585,7 +607,6 @@ async function playHand(ctx) {
         const collector = message.createMessageComponentCollector({ filter: ownerFilter(ids), idle: REBET_IDLE_MS });
 
         collector.on('collect', async press => {
-            if (press.customId === rulesId) return showRules(press);
             if (taken) return press.deferUpdate().catch(() => {});
             taken = true;
             const next = amounts.find(r => cid(r.key) === press.customId).amount;
@@ -624,6 +645,7 @@ async function playHand(ctx) {
         });
 
         collector.on('end', (_, reason) => {
+            closeRules();
             if (reason === 'rebet') return;
             table.show({ components: [] }).catch(() => {});
         });
@@ -658,18 +680,15 @@ async function playHand(ctx) {
 
             let answer = null;
             if (table.message) {
-                const filter = ownerFilter([cid(yes), cid(no)]);
-                const deadline = Date.now() + PROMPT_MS;
-                // Rules presses answer and keep waiting; only yes or no ends the prompt.
-                while (!answer && Date.now() < deadline) {
-                    try {
-                        const press = await table.message.awaitMessageComponent({ filter, time: deadline - Date.now() });
-                        if (press.customId === rulesId) { showRules(press); continue; }
-                        await press.deferUpdate().catch(() => {});
-                        answer = press.customId;
-                    } catch {
-                        break;
-                    }
+                try {
+                    const press = await table.message.awaitMessageComponent({
+                        filter: ownerFilter([cid(yes), cid(no)]),
+                        time: PROMPT_MS,
+                    });
+                    await press.deferUpdate().catch(() => {});
+                    answer = press.customId;
+                } catch {
+                    // Unanswered: declined.
                 }
             }
 
@@ -731,7 +750,6 @@ async function playHand(ctx) {
     let busy = false;
 
     collector.on('collect', async press => {
-        if (press.customId === rulesId) return showRules(press);
         if (busy || s.phase !== 'play') return press.deferUpdate().catch(() => {});
         busy = true;
         try {
@@ -765,6 +783,7 @@ async function playHand(ctx) {
         return total;
     }
 
+    /** Applies one of the owner's actions to the hand in play, then moves play on or settles. */
     async function act(customId) {
         const h = hand();
         const prefix = s.hands.length > 1 ? `Hand ${s.active + 1}: ` : '';

@@ -49,6 +49,7 @@ const TONES = {
  * @property {?Tag} [banner]   the round's result, drawn across the middle of the felt
  */
 
+/** Traces a rounded rectangle as the current path. */
 function roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -62,6 +63,7 @@ function roundRect(ctx, x, y, w, h, r) {
 // ── Suits ────────────────────────────────────────────────────────────────────
 // Each is drawn centred on (x, y) inside a box roughly `s` tall.
 
+/** Traces a heart, which the spade reuses upside down. */
 function heartPath(ctx, x, y, s) {
     ctx.beginPath();
     ctx.moveTo(x, y + s * 0.42);
@@ -72,6 +74,7 @@ function heartPath(ctx, x, y, s) {
     ctx.closePath();
 }
 
+/** Draws one suit symbol as a vector shape in its colour. */
 function drawSuit(ctx, suit, x, y, s) {
     ctx.save();
     ctx.fillStyle = suit === '♥' || suit === '♦' ? RED : BLACK;
@@ -108,6 +111,7 @@ function drawSuit(ctx, suit, x, y, s) {
     ctx.restore();
 }
 
+/** The flared stem under a spade or a club. */
 function stem(ctx, x, y, s) {
     ctx.beginPath();
     ctx.moveTo(x, y + s * 0.1);
@@ -119,6 +123,7 @@ function stem(ctx, x, y, s) {
 
 // ── Cards ────────────────────────────────────────────────────────────────────
 
+/** The drop shadow every card casts on the felt. */
 function cardShadow(ctx) {
     ctx.shadowColor = 'rgba(0,0,0,0.45)';
     ctx.shadowBlur = 10;
@@ -126,6 +131,7 @@ function cardShadow(ctx) {
     ctx.shadowOffsetY = 4;
 }
 
+/** A face-up card: corner indices, and a large pip or a framed court letter in the middle. */
 function drawCardFace(ctx, card, x, y) {
     ctx.save();
     cardShadow(ctx);
@@ -179,6 +185,7 @@ function drawCardFace(ctx, card, x, y) {
     ctx.restore();
 }
 
+/** The dealer's face-down hole card. */
 function drawCardBack(ctx, x, y) {
     ctx.save();
     cardShadow(ctx);
@@ -223,6 +230,7 @@ function fanPositions(count, cx, maxW) {
 
 // ── Labels, chips and banners ────────────────────────────────────────────────
 
+/** A rounded label centred on (cx, cy), coloured by tone. */
 function pill(ctx, text, cx, cy, tone = 'info', size = 18) {
     const { fill, text: ink } = TONES[tone] ?? TONES.info;
     ctx.save();
@@ -263,6 +271,7 @@ const CHIP_COLORS = [
     [0,   '#b91c1c', '#ffffff'],
 ];
 
+/** A short chip stack showing the stake, coloured by denomination. */
 function drawChip(ctx, amount, cx, cy) {
     const [, body, ink] = CHIP_COLORS.find(([min]) => amount >= min);
     const r = 30;
@@ -310,6 +319,7 @@ function drawChip(ctx, amount, cx, cy) {
     ctx.restore();
 }
 
+/** The table itself: felt, grain, the printed arc and the rail. */
 function drawFelt(ctx) {
     const g = ctx.createRadialGradient(W / 2, H * 0.42, 60, W / 2, H * 0.5, W * 0.72);
     g.addColorStop(0, '#23895a');
@@ -352,6 +362,7 @@ function drawFelt(ctx) {
     ctx.restore();
 }
 
+/** The payout rules printed on the felt, shown while no result banner covers them. */
 function drawRulesPrint(ctx) {
     ctx.save();
     ctx.textAlign = 'center';
@@ -365,6 +376,7 @@ function drawRulesPrint(ctx) {
     ctx.restore();
 }
 
+/** The round's result, across the middle of the table. */
 function drawBanner(ctx, banner) {
     const { fill } = TONES[banner.tone] ?? TONES.info;
     ctx.save();
@@ -389,6 +401,7 @@ function drawBanner(ctx, banner) {
     ctx.restore();
 }
 
+/** Draws a fanned hand and returns where it landed, for the chip and highlight around it. */
 function drawGroup(ctx, cards, cx, top, maxW, holeHidden = false) {
     const { xs, left, width } = fanPositions(cards.length, cx, maxW);
     cards.forEach((card, i) => {
