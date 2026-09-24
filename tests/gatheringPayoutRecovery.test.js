@@ -252,7 +252,7 @@ describe('the detached item grants say when a prize is only owed', () => {
     });
 
     test('a loot-box prize that could not be granted is shown as owed', () => {
-        const src = read('use.js');
+        const src = read('use/lootBoxes.js');
         expect(src).toMatch(/grantItemsOrOwe/);
         expect(src).toMatch(/lootBoxItemPayoutKey/);
         expect(src).toMatch(/Not Yet in Your Inventory/);

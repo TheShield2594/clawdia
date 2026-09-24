@@ -102,6 +102,12 @@
             "functions": 41,
             "lines": 57
         },
+        "src/commands/economy/use": {
+            "statements": 88,
+            "branches": 67,
+            "functions": 90,
+            "lines": 88
+        },
         "src/commands/fun": {
             "statements": 31,
             "branches": 24,
@@ -452,7 +458,6 @@
         "src/commands/economy/hunt/shop/repair.js",
         "src/commands/economy/hunt/shop/unlock.js",
         "src/commands/economy/hunt/shop/upgrade.js",
-        "src/commands/economy/hunt/shop/use.js",
         "src/commands/economy/jobs.js",
         "src/commands/economy/mine/profile.js",
         "src/commands/economy/mine/quests.js",
@@ -462,7 +467,6 @@
         "src/commands/economy/mine/shop/repair.js",
         "src/commands/economy/mine/shop/unlock.js",
         "src/commands/economy/mine/shop/upgrade.js",
-        "src/commands/economy/mine/shop/use.js",
         "src/commands/economy/rob/status.js",
         "src/commands/economy/rob/trap.js",
         "src/commands/economy/synergies.js",

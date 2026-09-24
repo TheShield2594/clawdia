@@ -747,6 +747,62 @@ const applyXp = (user, xpGain) => grind.applyXp(user, xpGain, 'hunt');
 // ─── CONSUMABLE MANAGEMENT ───────────────────────────────────────────────────
 
 /**
+ * Whether the Stamina Tonic count belongs to an earlier daily window. The
+ * window is the one the other daily counters use (h.dailyWindowStart), so the
+ * count can't desync from applyDailyReset.
+ */
+function tonicCountStale(h) {
+    return !h.lastTonicDayReset
+        || Boolean(h.dailyWindowStart && h.lastTonicDayReset.getTime() < h.dailyWindowStart.getTime());
+}
+
+/** Stamina Tonics used in the current daily window. */
+const tonicsUsedToday = h => (tonicCountStale(h) ? 0 : (h.staminaTonicsToday ?? 0));
+
+/**
+ * What `activateConsumable` would do with `consumableId` right now, for the
+ * `/hunt shop use` picker: `ready` is false exactly when it would refuse, and
+ * `status` is the short tag the picker shows (`active · 2 hunts left`,
+ * `lasts 5 hunts`, `stamina 7/10 · +3`).
+ *
+ * Reads only. Call applyStaminaRegen first for a current stamina figure, as
+ * activateConsumable itself does.
+ */
+function consumableStatus(user, consumableId) {
+    const h = user.hunt;
+    const { CONSUMABLES } = require('../data/huntData');
+    const def = CONSUMABLES[consumableId];
+    if (!def) return { ready: false, status: 'not a hunting consumable' };
+
+    // The slot a bait or charm fills holds one at a time, of any kind.
+    const slot = (activeId, left) => {
+        if (!activeId) return { ready: true, status: `lasts ${def.huntsLeft} hunts` };
+        const which = activeId === consumableId ? 'active' : `${CONSUMABLES[activeId]?.name ?? activeId} active`;
+        return { ready: false, status: `${which} · ${left} hunt${left === 1 ? '' : 's'} left` };
+    };
+
+    if (def.type === 'bait')  return slot(h.activeBait, h.activeBaitHuntsLeft);
+    if (def.type === 'charm') return slot(h.activeCharm, h.activeCharmHuntsLeft);
+    if (def.type === 'instant' && (consumableId === 'hunters_focus' || consumableId === 'xp_scroll')) {
+        const queued = consumableId === 'hunters_focus' ? h.activeFocus : h.activeXpScroll;
+        return queued
+            ? { ready: false, status: 'queued for your next hunt' }
+            : { ready: true, status: 'applies to your next hunt' };
+    }
+    if (def.type === 'stamina') {
+        const used = tonicsUsedToday(h);
+        const max  = getMaxStamina(user);
+        if (used >= LIMITS.STAMINA_TONICS_PER_DAY) {
+            return { ready: false, status: `daily limit reached · ${used}/${LIMITS.STAMINA_TONICS_PER_DAY} today` };
+        }
+        if (h.stamina >= max) return { ready: false, status: `stamina full · ${h.stamina}/${max}` };
+        return { ready: true, status: `stamina ${h.stamina}/${max} · +${def.staminaRestore}` };
+    }
+    if (def.type === 'repair') return { ready: false, status: 'use it with /hunt shop repair' };
+    return { ready: false, status: "can't be activated" };
+}
+
+/**
  * Activates a consumable from the player's stock.
  * Returns { success, error }
  */
@@ -778,9 +834,10 @@ function activateConsumable(user, consumableId) {
         h.consumables[consumableId] -= 1;
         h.activeXpScroll = true;
     } else if (def.type === 'stamina') {
-        // Tonic count tracks the same rolling window as the rest of the daily
-        // counters (h.dailyWindowStart), so it can't desync from applyDailyReset.
-        if (!h.lastTonicDayReset || (h.dailyWindowStart && h.lastTonicDayReset.getTime() < h.dailyWindowStart.getTime())) {
+        // Passive regen first, so "already full" is judged on the real bar
+        // rather than the one last written — as /fish does.
+        applyStaminaRegen(user);
+        if (tonicCountStale(h)) {
             h.staminaTonicsToday = 0;
             h.lastTonicDayReset  = h.dailyWindowStart ? new Date(h.dailyWindowStart.getTime()) : new Date();
         }
@@ -1650,6 +1707,7 @@ module.exports = {
     xpToNextLevel,
     applyXp,
     activateConsumable,
+    consumableStatus,
     tickConsumables,
     rollTrophyQuality,
     executeHunt,

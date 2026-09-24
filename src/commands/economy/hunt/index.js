@@ -26,9 +26,8 @@ const { buildWeaponPages, WEAPON_SEPARATOR } = require('./inventory');
 const {
     isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS,
 } = require('./shop');
-// The one shared constant the command definition itself needs: /hunt shop use
-// offers exactly the items /hunt shop buy knows how to activate.
-const { ACTIVATABLE } = require('./shared');
+// /hunt shop use picks from the consumables the player holds.
+const { autocompleteUse } = require('./shop/use');
 
 // ─── SHARED CHOICE LISTS ──────────────────────────────────────────────────────
 
@@ -160,9 +159,10 @@ module.exports = {
                         .setDescription('Activate a consumable buff')
                         .addStringOption(o =>
                             o.setName('item')
-                                .setDescription('Consumable to activate')
+                                .setDescription('Consumable to activate — start typing to pick from what you hold')
                                 .setRequired(true)
-                                .addChoices(...ACTIVATABLE.map(id => ({ name: CONSUMABLES[id].name, value: id })))))
+                                .setMaxLength(100)
+                                .setAutocomplete(true)))
                 .addSubcommand(sub =>
                     sub.setName('repair')
                         .setDescription('Repair your equipped weapon at the shop or use a repair kit')
@@ -209,6 +209,16 @@ module.exports = {
                                 .setDescription('Zone to switch to')
                                 .setRequired(true)
                                 .addChoices(...ZONE_SET_CHOICES)))),
+
+    // Only `shop use` autocompletes: the consumables the player holds, with how
+    // many and whether each is ready (utils/grindUsePicker).
+    async autocomplete(interaction) {
+        if (interaction.options.getSubcommandGroup(false) === 'shop'
+            && interaction.options.getSubcommand(false) === 'use') {
+            return autocompleteUse(interaction);
+        }
+        return interaction.respond([]);
+    },
 
     async execute(interaction) {
         const group = interaction.options.getSubcommandGroup(false);

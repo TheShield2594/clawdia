@@ -257,6 +257,21 @@ describe('the pet slot expansion', () => {
 });
 
 describe('the revive scroll', () => {
+    it('reads as blocked in the picker exactly where /use refuses it', () => {
+        const { useStatus } = use.__test__;
+        const { petCapacity } = require('../src/services/petService');
+        const fallen = { _id: 'grave-1', petId: 'dog', name: 'Rex' };
+
+        expect(useStatus('revive_scroll', { deceasedPets: [fallen], pets: [] }))
+            .toMatchObject({ ready: true, status: 'revives Rex' });
+        expect(useStatus('revive_scroll', { deceasedPets: [fallen], pets: [{ petId: 'dog' }] }))
+            .toMatchObject({ ready: false, status: 'you already have another Dog' });
+
+        const full = Array.from({ length: petCapacity({}) }, () => ({ petId: 'cat' }));
+        expect(useStatus('revive_scroll', { deceasedPets: [fallen], pets: full }))
+            .toMatchObject({ ready: false, status: 'no free pet slot for Rex' });
+    });
+
     const fallen = { _id: 'dead-1', petId: 'cat', name: 'Mittens', level: 4, battleWins: 2, battleLosses: 1 };
 
     it('refuses when no pet has starved', async () => {
@@ -718,5 +733,37 @@ describe('what /daily drops', () => {
             expect(drop.quantity ?? 1).toBeGreaterThan(ordinary?.quantity ?? 1);
             expect(drop.name).toContain(`×${drop.quantity}`);
         }
+    });
+});
+
+describe('seasonal loot boxes', () => {
+    const { SEASONAL_EVENTS } = require('../src/data/seasonalEvents');
+    const winter = Object.values(SEASONAL_EVENTS).find(ev => ev.lootBox?.itemId === 'winter_loot_box');
+
+    it('spends one box, grants one prize from its table, and counts what is left', async () => {
+        seedUser({ inventory: [{ itemId: 'winter_loot_box', quantity: 2 }] });
+        seedGuild();
+
+        const interaction = await run('winter_loot_box');
+
+        const embed = interaction.replies[0].embeds[0].data;
+        expect(embed.title).toBe('🎁 Opened: Winter Loot Box');
+        expect(embed.fields[0]).toMatchObject({ name: '🎒 Left in bag', value: '1x Winter Loot Box' });
+        expect(repliedText(interaction)).not.toContain('Not Yet in Your Inventory');
+        expect(slot('winter_loot_box').quantity).toBe(1);
+        // The grant itself is stubbed in this suite; the prize named is one of
+        // the table's.
+        const names = winter.lootBox.items.map(i => i.name);
+        expect(names.some(n => embed.description.includes(`**${n}**`))).toBe(true);
+    });
+
+    it('picks the box by its display name too', async () => {
+        seedUser({ inventory: [{ itemId: 'winter_loot_box', quantity: 1 }] });
+        seedGuild();
+
+        const interaction = await run('Winter Loot Box');
+
+        expect(repliedText(interaction)).toContain('Opened: Winter Loot Box');
+        expect(slot('winter_loot_box')).toBeUndefined();
     });
 });

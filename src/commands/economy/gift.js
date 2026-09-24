@@ -10,6 +10,7 @@ const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { describeItem } = require('../../utils/itemDisplay');
 const { loadAiItems } = require('../../utils/aiItemLookup');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { matchesName, rankByName } = require('../../utils/pickerRank');
 const {
     BUDGETS, giftLimits, budgetState, spendBudgetGuarded, spendBudgetPipelineGuarded,
 } = require('../../utils/giftCaps');
@@ -168,20 +169,9 @@ module.exports = {
 
             // Matched on the display name *and* the raw id: a player who knows
             // the id can still type it, and one who only knows the label gets
-            // there too.
-            const matches = focused
-                ? items.filter(i => i.name.toLowerCase().includes(focused) || i.itemId.toLowerCase().includes(focused))
-                : items;
-
-            // Prefix matches first, then substring — same ranking /shop buy uses,
-            // so typing "pet" surfaces "Pet Food" ahead of "Carpet".
-            const ranked = focused
-                ? [...matches].sort((a, b) => {
-                    const aPre = a.name.toLowerCase().startsWith(focused) ? 0 : 1;
-                    const bPre = b.name.toLowerCase().startsWith(focused) ? 0 : 1;
-                    return aPre - bPre || a.name.localeCompare(b.name);
-                })
-                : [...matches].sort((a, b) => a.name.localeCompare(b.name));
+            // there too. Prefix matches first, then substring, so typing "pet"
+            // surfaces "Pet Food" ahead of "Carpet".
+            const ranked = rankByName(items.filter(i => matchesName(i, focused)), focused);
 
             await interaction.respond(ranked.slice(0, 25).map(toChoice));
         } catch (err) {

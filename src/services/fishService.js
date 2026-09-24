@@ -425,6 +425,65 @@ const applyXp = (user, xpGain) => grind.applyXp(user, xpGain, 'fish');
 
 // ─── CONSUMABLE MANAGEMENT ───────────────────────────────────────────────────
 
+/** Energy Drinks (and Hunter's Brews) used in the current daily drink window. */
+function drinksUsedToday(f) {
+    const inWindow = f.lastDrinkDayReset && (Date.now() - f.lastDrinkDayReset.getTime() < LIMITS.DAILY_WINDOW_MS);
+    return inWindow ? (f.energyDrinksToday ?? 0) : 0;
+}
+
+/**
+ * What `activateConsumable` would do with `consumableId` right now, for the
+ * `/fish shop use` picker: `ready` is false exactly when it would refuse, and
+ * `status` is the short tag the picker shows (`active · 2 casts left`,
+ * `lasts 3 casts`, `stamina 7/10 · +3`).
+ *
+ * Reads only. Call applyStaminaRegen first for a current stamina figure, as
+ * activateConsumable itself does.
+ */
+function consumableStatus(user, consumableId) {
+    const f = user.fishing;
+    const { CONSUMABLES } = require('../data/fishData');
+    const { CROSS_CONSUMABLES } = require('../data/crossSystemData');
+    const def = CONSUMABLES[consumableId] ?? CROSS_CONSUMABLES[consumableId];
+    if (!def) return { ready: false, status: 'not a fishing consumable' };
+
+    if (def.type === 'bait' || def.type === 'fish_bait') {
+        if (!f.activeBait) return { ready: true, status: `lasts ${def.castsLeft} casts` };
+        const active = CONSUMABLES[f.activeBait] ?? CROSS_CONSUMABLES[f.activeBait];
+        const which  = f.activeBait === consumableId ? 'active' : `${active?.name ?? f.activeBait} active`;
+        const left   = f.activeBaitCastsLeft;
+        return { ready: false, status: `${which} · ${left} cast${left === 1 ? '' : 's'} left` };
+    }
+    if (def.type === 'instant' && (consumableId === 'anglers_luck' || consumableId === 'fish_xp_scroll')) {
+        const queued = consumableId === 'anglers_luck' ? f.activeLuck : f.activeXpScroll;
+        return queued
+            ? { ready: false, status: 'queued for your next cast' }
+            : { ready: true, status: 'applies to your next cast' };
+    }
+    if (def.type === 'stamina' || def.type === 'dual_stamina') {
+        const used = drinksUsedToday(f);
+        const max  = getMaxStamina(user);
+        if (used >= LIMITS.ENERGY_DRINKS_PER_DAY) {
+            return { ready: false, status: `daily limit reached · ${used}/${LIMITS.ENERGY_DRINKS_PER_DAY} today` };
+        }
+        if (def.type === 'stamina') {
+            if (f.stamina >= max) return { ready: false, status: `stamina full · ${f.stamina}/${max}` };
+            return { ready: true, status: `stamina ${f.stamina}/${max} · +${def.staminaRestore}` };
+        }
+        // Hunter's Brew refills the hunting bar too, and is refused only when
+        // both are full.
+        const h = user.hunt;
+        const huntMax = grind.getMaxStamina(user, 'hunt');
+        const huntNow = h?.stamina ?? huntMax;
+        const both = `fish ${f.stamina}/${max} · hunt ${huntNow}/${huntMax}`;
+        return f.stamina >= max && huntNow >= huntMax
+            ? { ready: false, status: `both bars full · ${both}` }
+            : { ready: true, status: `${both} · +${def.staminaRestore} each` };
+    }
+    if (def.type === 'repair') return { ready: false, status: 'use it with /fish shop repair' };
+    return { ready: false, status: "can't be activated" };
+}
+
 function activateConsumable(user, consumableId) {
     const f = user.fishing;
     const { CONSUMABLES } = require('../data/fishData');
@@ -1365,6 +1424,7 @@ module.exports = {
     xpToNextLevel,
     applyXp,
     activateConsumable,
+    consumableStatus,
     tickConsumables,
     executeCast,
     resolveBossEncounter,

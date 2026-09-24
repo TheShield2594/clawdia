@@ -26,9 +26,8 @@ const { handleQuests } = require('./quests');
 const { handleShop } = require('./shop');
 const { handleMap } = require('./map');
 const { handleRaid } = require('./raid');
-// /mine shop use offers exactly the items /mine shop buy knows how to activate,
-// which is why the command definition needs these two.
-const { ACTIVATABLE, resolveConsumableDef } = require('./shared');
+// /mine shop use picks from the consumables the player holds.
+const { autocompleteUse } = require('./shop/use');
 
 const DEPTH_CHOICES    = DEPTH_LIST.map(d => ({ name: d.name, value: d.id }));
 const PICKAXE_CHOICES  = PICKAXE_TIERS.map(p => ({ name: `${p.emoji} ${p.name} — ${p.cost.toLocaleString()} coins`, value: p.slug }));
@@ -167,9 +166,10 @@ module.exports = {
                         .setDescription('Activate a consumable buff')
                         .addStringOption(o =>
                             o.setName('item')
-                                .setDescription('Consumable to activate')
+                                .setDescription('Consumable to activate — start typing to pick from what you hold')
                                 .setRequired(true)
-                                .addChoices(...ACTIVATABLE.map(id => ({ name: resolveConsumableDef(id)?.name ?? id, value: id })))))
+                                .setMaxLength(100)
+                                .setAutocomplete(true)))
                 .addSubcommand(sub =>
                     sub.setName('repair')
                         .setDescription('Repair your equipped pickaxe at the shop or use a repair kit')
@@ -190,6 +190,16 @@ module.exports = {
                                 .setDescription('Depth to unlock')
                                 .setRequired(true)
                                 .addChoices(...UNLOCK_CHOICES)))),
+
+    // Only `shop use` autocompletes: the consumables the player holds, with how
+    // many and whether each is ready (utils/grindUsePicker).
+    async autocomplete(interaction) {
+        if (interaction.options.getSubcommandGroup(false) === 'shop'
+            && interaction.options.getSubcommand(false) === 'use') {
+            return autocompleteUse(interaction);
+        }
+        return interaction.respond([]);
+    },
 
     async execute(interaction) {
         const group = interaction.options.getSubcommandGroup(false);
