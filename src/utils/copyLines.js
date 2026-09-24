@@ -1,3 +1,5 @@
+const { securePick } = require('./secureRandom');
+
 function randomFrom(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -119,10 +121,12 @@ const CRIME_NARRATIVE = {
 };
 
 // Returns per-crime narrative flavor text or falls back to generic lines.
+// Drawn from the shared CSPRNG like every other /crime roll, so the command
+// has one random source (and one test seam) rather than two.
 function getCrimeFlavorText(crimeName, outcome) {
     const lines = CRIME_NARRATIVE[crimeName]?.[outcome];
-    if (!lines?.length) return randomFrom(outcome === 'win' ? CRIME_WIN_LINES : CRIME_BUST_LINES);
-    return randomFrom(lines);
+    if (!lines?.length) return securePick(outcome === 'win' ? CRIME_WIN_LINES : CRIME_BUST_LINES);
+    return securePick(lines);
 }
 
 const SLOTS_LOSE_LINES = [

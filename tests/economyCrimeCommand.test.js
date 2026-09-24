@@ -460,3 +460,171 @@ describe('the switches that turn it off', () => {
         expect(mockUsers.writes).toEqual([]);
     });
 });
+
+describe('the prompts keep the player\'s picks', () => {
+    it('keeps a pick whose acknowledgement missed its window, rather than rolling a random one', async () => {
+        // A `deferUpdate()` that threw used to share the timeout's catch, which
+        // replaced the job just picked with a random one. 0.1 would make that
+        // random fallback the first method — feather touch — so a bold grab in
+        // the result can only be the player's own.
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run([
+            { customId: PICKPOCKET, deferRejects: true },
+            { customId: BOLD_GRAB, deferRejects: true },
+        ]);
+
+        // The result alone — the step-2 prompt lists every method by name.
+        const result = interaction.replies.at(-1).embeds[0].data;
+        expect(result.title).toContain('Quick Snatch — Clean Getaway');
+        expect(result.footer.text).toContain('Bold grab');
+    });
+
+    it('quotes odds that include every bonus the roll will use', async () => {
+        // A Lucky Charm is +20%: feather touch's 72% is rolled at 92%, and the
+        // buttons used to say 72% anyway.
+        rolls([], 0.1);
+        seedUser({
+            balance: 1000,
+            activeEffects: [{ type: 'lucky_charm', expiresAt: new Date(Date.now() + 3_600_000), charges: -1 }],
+        });
+        seedGuild();
+
+        const interaction = await run();
+
+        const text = repliedText(interaction);
+        expect(text).toContain('92%');
+        expect(text).toContain('Lucky Charm +20%');
+    });
+});
+
+describe('when the job never runs', () => {
+    it('gives the cooldown back when the first prompt cannot be sent', async () => {
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = makeInteraction();
+        interaction.reply = jest.fn()
+            .mockRejectedValueOnce(new Error('Unknown interaction'))
+            .mockResolvedValue(undefined);
+        await crime.execute(interaction);
+
+        expect(mockUsers.get(USER_ID).lastCrime).toBeNull();
+        expect(mockUsers.get(USER_ID).balance).toBe(1000);
+        expect(interaction.reply).toHaveBeenLastCalledWith(expect.objectContaining({
+            content: expect.stringContaining("cooldown wasn't used"),
+        }));
+    });
+
+    it('restores the previous cooldown stamp, not a blank one, when the message goes away mid-prompt', async () => {
+        const previous = new Date(Date.now() - COOLDOWN_MS - 60_000);
+        seedUser({ balance: 1000, lastCrime: previous });
+        seedGuild();
+
+        const interaction = makeInteraction({ components: [{ customId: PICKPOCKET }] });
+        interaction.editReply = jest.fn()
+            .mockRejectedValueOnce(new Error('Unknown Message'))
+            .mockResolvedValue(undefined);
+        await crime.execute(interaction);
+
+        expect(mockUsers.get(USER_ID).lastCrime.getTime()).toBe(previous.getTime());
+    });
+
+    it('keeps the cooldown and says the job stood when only the result fails to render', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = makeInteraction({ components: [{ customId: PICKPOCKET }, { customId: FEATHER_TOUCH }] });
+        const render = interaction.editReply;
+        let edits = 0;
+        // The step-2 prompt and the suspense frame land; the result does not.
+        interaction.editReply = jest.fn(payload => (++edits === 3 ? Promise.reject(new Error('Unknown Message')) : render(payload)));
+        await crime.execute(interaction);
+
+        const stored = mockUsers.get(USER_ID);
+        expect(stored.balance).toBeGreaterThan(1000);
+        expect(stored.lastCrime).toBeInstanceOf(Date);
+        expect(interaction.editReply).toHaveBeenLastCalledWith(expect.objectContaining({
+            content: expect.stringContaining('The job went through'),
+        }));
+    });
+});
+
+describe('failure bookkeeping', () => {
+    it('runs the cooldown from the claim on a failure too, rather than restamping it', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        await run();
+
+        const claim = mockUsers.writes.find(w => w.update?.$set?.lastCrime);
+        expect(mockUsers.get(USER_ID).lastCrime.getTime()).toBe(claim.update.$set.lastCrime.getTime());
+        expect(mockUsers.writes.filter(w => w.update?.$set?.lastCrime || w.update?.[0]?.$set?.lastCrime)).toHaveLength(1);
+    });
+
+    it('shows when the next job opens — the heat, not a flat 1.5h, after a loud failure', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        const interaction = await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }]);
+
+        const wanted = mockUsers.get(USER_ID).wantedUntil;
+        const text = repliedText(interaction);
+        expect(text).toContain(`Next job <t:${Math.floor(wanted.getTime() / 1000)}:R>`);
+        expect(text).not.toContain('Cooldown: 1.5h');
+    });
+
+    it('applies the method\'s fine multiplier before the wallet cap, so the cap holds', async () => {
+        // 300 coins caps the fine at 60. Bold grab's ×1.35 applied after the
+        // cap made that 81 — 27% of a wallet capped at 20%.
+        rolls([], 0.99);
+        seedUser({ balance: 300 });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }]);
+
+        expect(mockUsers.get(USER_ID).balance).toBe(240);
+    });
+
+    it('does not spend a Lifesaver when there is nothing to absorb', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 0, activeEffects: [{ type: 'lifesaver', expiresAt: null, charges: 1 }] });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(repliedText(interaction)).not.toContain('Saved by the Lifesaver');
+        expect(mockUsers.get(USER_ID).activeEffects).toHaveLength(1);
+    });
+
+    it('shows a member frozen mid-job their real balance, not zero', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000, economyFrozen: true });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(repliedText(interaction)).toContain('💰10,000');
+        expect(mockUsers.get(USER_ID).balance).toBe(10_000);
+    });
+
+    it('names today\'s featured job on the Still Wanted screen rather than a fixed one', async () => {
+        seedUser({
+            balance: 1000,
+            lastCrime: new Date(Date.now() - COOLDOWN_MS - 1000),
+            wantedUntil: new Date(Date.now() + 3_600_000),
+        });
+        seedGuild();
+
+        const interaction = await run();
+
+        const text = repliedText(interaction);
+        expect(text).toContain('Quick Snatch');
+        expect(text).not.toContain('Casino Con is next');
+    });
+});
