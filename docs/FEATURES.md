@@ -528,7 +528,7 @@ third of the code. The sections below cover it in full.
                        with each bet, or to a Triple Wild on /casino slots. Either pays
                        the pool up to a cap set by the winning bet; the rest stays in it.
 /casino slots        - 3-reel slot machine on real reel strips: 3×3 window, Wilds, Boosts,
-                       Scatter free spins, a Heat meter (every 10th paid spin is a Hot Spin),
+                       Scatter free spins, a Heat meter (10 paid spins fill it; the next is a Hot Spin),
                        Spin / ½ / 2× / Max buttons and a paytable with the odds. Returns 94%.
 /casino slotsconfig  - (Admin) Triple Wild announcement: on/off, @here, and channel
 /quiz                - Answer trivia for rewards
