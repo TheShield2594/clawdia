@@ -97,10 +97,17 @@ beforeEach(() => {
 afterEach(() => errorSpy.mockRestore());
 
 /** Deals a hand on a stacked deck and leaves its collectors open. */
+const { claimCommandCooldown } = require('../src/utils/commandPolicy');
+// The claim casino.js hands every game, against the real /casino command's
+// cooldown settings.
+const casinoCommand = { data: { name: 'casino' }, cooldownKey: i => `casino:${i.options.getSubcommand()}`, cooldownAmount: () => 3 };
+
 async function deal(cards, { components = [], onWager = jest.fn(), releaseLock = jest.fn() } = {}) {
     mockDeck = stack(...cards);
     const interaction = makeInteraction({ options: { bet: BET }, userId: USER_ID, guildId: GUILD_ID, components, holdCollectors: true });
-    await blackjack.execute(interaction, { releaseLock, onWager });
+    interaction.client.cooldowns = new Map();
+    const claimCooldown = (asCommand, settings) => claimCommandCooldown(interaction.client, casinoCommand, asCommand, settings);
+    await blackjack.execute(interaction, { releaseLock, onWager, claimCooldown });
     await flush();
     return { interaction, onWager, releaseLock };
 }
@@ -269,6 +276,17 @@ describe('rules and rebet', () => {
         await press(interaction, 'bj_rebet_');
         expect(onWager).toHaveBeenCalledTimes(2);
         expect(keyedCredits()).toHaveLength(2);
+    });
+
+    test('Rebet spends the command cooldown, and a press inside it deals nothing', async () => {
+        const { getGuildSettings } = require('../src/utils/guildSettingsCache');
+        getGuildSettings.mockResolvedValue({ economy: {}, commandPolicies: { cooldownOverrides: [] } });
+        const { interaction, onWager } = await deal(['A♠', 'K♥', '5♦', '9♣']);
+        // The typed command spent it a moment ago.
+        interaction.client.cooldowns.set(`${GUILD_ID}:casino:blackjack`, new Map([[USER_ID, Date.now()]]));
+        const pressed = await press(interaction, 'bj_rebet_');
+        expect(pressed.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringMatching(/on cooldown/) }));
+        expect(onWager).toHaveBeenCalledTimes(1);
     });
 
     test('Rebet is refused once the table has outlived its token', async () => {

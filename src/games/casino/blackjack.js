@@ -39,6 +39,8 @@ const { ownedBy } = require('../../utils/collectorOwner');
 const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
 const { renderTable, shortAmount } = require('./blackjackTable');
 const { recordBlackjackRound, statsLine } = require('./blackjackStats');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
+const { getPolicyDecision } = require('../../utils/commandPolicy');
 
 const MIN_BET = 10;
 const MAX_BET = 1_000_000_000;
@@ -241,6 +243,36 @@ function button(customId, label, style, emoji, disabled = false) {
     const b = new ButtonBuilder().setCustomId(customId).setLabel(label).setStyle(style).setDisabled(disabled);
     if (emoji) b.setEmoji(emoji);
     return b;
+}
+
+/**
+ * The gates the dispatcher applies to a typed `/casino blackjack`, applied to a
+ * Rebet press: the server's command policy, then the command's cooldown — the
+ * same bucket, with the guild's per-role overrides — so a button is never a way
+ * round a limit an admin set. The economy freeze needs no check here; it rides
+ * placeWager's own filter. Returns a refusal to show, or null to deal.
+ */
+async function rebetGateRefusal(press, interaction, claimCooldown) {
+    let guildSettings;
+    try {
+        guildSettings = await getGuildSettings(interaction.guild.id);
+    } catch {
+        return 'Could not load server settings. Try again in a moment.';
+    }
+    // What the dispatcher would have seen had the player typed the command.
+    const asCommand = {
+        user:      press.user,
+        member:    press.member ?? interaction.member,
+        guild:     interaction.guild,
+        channelId: press.channelId ?? interaction.channelId,
+        commandName: 'casino',
+        options: { getSubcommand: () => 'blackjack', getSubcommandGroup: () => null },
+    };
+    const policy = getPolicyDecision(asCommand, guildSettings, 'casino');
+    if (!policy.allowed) return policy.reason;
+    // The dispatcher hands the claim down: the cooldown belongs to the
+    // /casino command, which lives a layer above this game.
+    return claimCooldown ? claimCooldown(asCommand, guildSettings) : null;
 }
 
 // ── The table message ────────────────────────────────────────────────────────
@@ -572,6 +604,12 @@ async function playHand(ctx) {
                 return press.reply({ content: refused, flags: MessageFlags.Ephemeral }).catch(() => {});
             }
 
+            const gated = await rebetGateRefusal(press, interaction, ctx.claimCooldown);
+            if (gated) {
+                taken = false;
+                return press.reply({ content: gated, flags: MessageFlags.Ephemeral }).catch(() => {});
+            }
+
             const debited = await placeWager(userFilter, next, { onWager: ctx.onWager });
             if (!debited) {
                 taken = false;
@@ -801,7 +839,7 @@ module.exports = {
                 .setMinValue(MIN_BET)
                 .setMaxValue(MAX_BET)),
 
-    async execute(interaction, { releaseLock, onWager } = {}) {
+    async execute(interaction, { releaseLock, onWager, claimCooldown } = {}) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const currency = guildSettings?.economy?.currency || '💰';
         const bet      = interaction.options.getInteger('bet');
@@ -839,6 +877,6 @@ module.exports = {
         }
 
         const table = createTable(interaction, alreadyReplied);
-        return playHand({ interaction, table, bet, currency, user: debited, guildSettings, releaseLock, onWager });
+        return playHand({ interaction, table, bet, currency, user: debited, guildSettings, releaseLock, onWager, claimCooldown });
     },
 };

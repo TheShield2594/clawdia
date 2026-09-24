@@ -7,6 +7,7 @@ const { advanceMissions } = require('../../services/seasonMissionService');
 const { tryAcquire, release } = require('../../utils/activeGameLock');
 const { checkAndAwardAtomic, announceAchievements } = require('../../services/achievementService');
 const { economyLockKey, casinoLockKey, busyMessage, GRIND_TTL_MS } = require('../../utils/economyLock');
+const { claimCommandCooldown } = require('../../utils/commandPolicy');
 
 const games = [
     require('../../games/casino/blackjack'),
@@ -257,8 +258,15 @@ module.exports = {
             }
         };
 
+        // For a game whose result buttons deal another hand: the claim a typed
+        // command makes, so a button is never a way round this command's
+        // cooldown or a guild's per-role override of it. `asCommand` is the
+        // press dressed as the invocation it stands in for.
+        const claimCooldown = (asCommand, settings) =>
+            claimCommandCooldown(interaction.client, module.exports, asCommand, settings);
+
         try {
-            return await game.execute(interaction, { releaseLock, onWager });
+            return await game.execute(interaction, { releaseLock, onWager, claimCooldown });
         } catch (err) {
             releaseLock();
             throw err;
