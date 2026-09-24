@@ -2,7 +2,7 @@
 
 A record of the subsystems that have been through a line-by-line audit, and what
 was found and fixed in each. **It is not a survey of the whole bot.** Nine
-long-stable, low-churn subsystems have been audited, and twenty-two passes over the
+long-stable, low-churn subsystems have been audited, and twenty-four passes over the
 economy — the escrow and payout paths of `/duel`, `/heist` and `/syndicate`, the
 casino's progressive jackpot, the unwind paths of `/gift` and `/market`, the
 casino's hand payouts, the core currency commands (`balance`, `bank`,
@@ -21,9 +21,11 @@ consumers, the map views, the `/explore` views, the season pass's
 non-reward surface, season XP, tier claims and mission progress, and the
 gathering commands' profiles, inventories and prestige, the rest of
 `/market` and `/gift` with `/trade`, and the heist, syndicate and duel
-lobbies (#873). The majority of the
-codebase, and most of the economy, has never been audited; see
-[Not yet reviewed](#not-yet-reviewed) for the full list.
+lobbies, the seasonal-event definition surface, and the casino's odds (#873),
+followed by a re-check of the economy changes that landed after the last pass.
+Every area of the economy has now had a pass. The majority of the codebase
+outside it has never been audited; see [Not yet reviewed](#not-yet-reviewed)
+for the full list.
 
 A subsystem appearing here means it was audited on the date at the bottom of
 this file and the findings were resolved. A subsystem *not* appearing here means
@@ -2466,6 +2468,56 @@ Blackjack and poker were simulated over 1–4 million hands each.
 
 ---
 
+## Economy — Re-check After the Audit
+
+**Status: Re-checked — no findings** ✓
+
+Not a twenty-fifth pass: a read of what changed in the economy after pass 24
+merged (#1138), done because the economy list below treats any change to it as
+a reason to re-check. Four pull requests landed in that window (#1162–#1165);
+two of them touch economy code.
+
+**Files reviewed:**
+- `src/data/workFinds.js` (added), `src/commands/economy/use/workFinds.js` (added)
+- `src/commands/economy/work.js`, `src/utils/jobTiers.js` (added), `jobs.js`
+- `src/services/effectsService.js`, `src/data/effectConfigs.js`
+- `src/data/dailyDropTable.js`, `src/commands/economy/daily.js`
+- `src/commands/economy/use/` (the split of `use.js`)
+- `src/services/huntService.js`, `fishService.js`, `mineService.js`, `src/utils/grindUsePicker.js`
+- `src/commands/economy/{hunt,fish,mine}/shop/use.js`
+- `src/services/marketPriceService.js`
+
+### Reviewed and found sound
+
+- **The Master Key** spends the key with a guarded `$inc` before it rolls the
+  supply closet, and grants the item through `grantItemsOrOwe` under its own
+  `supplyClosetPayoutKey` — the loot box's shape from pass 6. A grant that
+  misses is recorded as owed, not lost.
+- **The Career Badge** spends the badge and credits its shifts in one guarded
+  write, conditioned on the player still being below the top job tier, so a
+  shift worked between the check and the write can't waste one.
+- **The Shift Booster** is a new effect with its own 1.25× factor, read into
+  `/work`'s combined multiplier *before* `clampMultiplier`, so it cannot lift a
+  shift past `MAX_COMBINED_MULTIPLIER`. Its charges are held by the same
+  `activeEffects` rules pass 15 set.
+- **The streak-30 milestone's pair of boosters** goes through `daily.js`'s
+  existing drop write (`inventoryAddExpr` with the row's `quantity`), which
+  commits the item and the milestone claim together in one pipeline update.
+  Nothing was added outside that write.
+- **The `/use` split** moved pass 14's paths into `use/` without changing their
+  shape: every item is still spent by a guarded `findOneAndUpdate` first, and
+  the loot-box grant and the role refund still go through `grantItemsOrOwe`
+  under their keys.
+- **The grind shops' `use` pickers** load the user document, apply stamina
+  regen and never save; autocomplete writes nothing. Hunt's
+  `activateConsumable` now applies regen itself before judging a Stamina Tonic,
+  as `/fish` already did. The regen advances `staminaLastRegen` by exactly the
+  intervals it credits, so applying it a second time in one run adds nothing.
+- **The market's price range** only reads sale history for the hint and the
+  receipt's price check; no listing, sale or fee path changed.
+
+---
+
 ## Not yet reviewed
 
 The economy list below maps which pass of #873 audited each area; the
@@ -2523,6 +2575,7 @@ non-reward surface on 2026-09-23; season XP, tier claims and mission
 progress on 2026-09-23; the gathering commands' remaining surface on
 2026-09-23; the player market, gifts and trades on 2026-09-23; the heist,
 syndicate and duel lobbies on 2026-09-23; the seasonal-event definition
-surface on 2026-09-23; and the casino's odds on 2026-09-23. The "Everything
+surface on 2026-09-23; the casino's odds on 2026-09-23; and the post-audit
+economy changes were re-checked on 2026-09-24. The "Everything
 else uncovered" list carries no review date, because nothing in it has been
 reviewed.*

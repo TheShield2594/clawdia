@@ -21,8 +21,13 @@ that needed a migration to clamp. It is also the area with the least audit
 coverage, which is [#873](https://github.com/TheShield2594/clawdia/issues/873):
 audit coverage is widest exactly where the risk is not.
 
-So net-new game features wait, and every currency-mutation path gets the
-treatment the nine long-stable subsystems got. Twenty-four passes have landed under
+So net-new game features waited, and every currency-mutation path got the
+treatment the nine long-stable subsystems got. **That condition is now met**:
+every area in the audit log's economy list has had a pass, and the changes that
+landed after the last one were re-checked with no findings. The freeze is
+lifted. What stays is the rule the passes kept proving: a change to the economy
+is a reason to re-check it, recorded in the audit log like any other pass.
+Twenty-four passes landed under
 that decision already — `/duel` escrow and the `/heist` and `/syndicate` crew
 splits in v4.5.2, the casino's progressive jackpot in v4.6.0, `/gift` and
 `/market` in v4.6.1, the casino's hand payouts in v4.7.0, the core currency
@@ -84,14 +89,12 @@ so that there is only ever one copy to correct.
    they hold about a third of each directory's branches and need no new
    scaffolding.
 
-   `fish/shop` still has branch and function floors of 0, and `hunt/shop`
-   (10% branches) and `mine/shop` (9%) are barely above it. Those three are the
-   remaining hole, and they are one shape: seven near-identical handlers each —
+   `fish/shop` has since earned a floor of 92% branches from a suite of its
+   own. `hunt/shop` (7% branches) and `mine/shop` (6%) are what is left, and
+   they have the same shape as `fish/shop`: seven near-identical handlers each —
    buy, list, repair, unlock, upgrade, use, and the one that sells the tool
-   itself (`rod`, `weapon`, `pickaxe`) — so a harness written for one folder
-   covers the other two. This will not happen as a side effect of the audit;
-   four passes have now gone where the money-moving code is rather than where
-   the coverage is worst, and those are not the same ordering.
+   itself (`weapon`, `pickaxe`) — so the `fish/shop` suite is the harness to
+   copy.
 
 ## The audit queue
 
