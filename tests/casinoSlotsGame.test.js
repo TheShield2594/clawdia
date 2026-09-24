@@ -173,6 +173,26 @@ describe('free spins', () => {
         expect(repliedText(spin)).not.toContain('Lost');
     }, 20_000);
 
+    test('the intro does not show a balance that already counts spins not yet played', async () => {
+        // Both payouts settle before the show, so the intro used to print the
+        // balance after the free spins — giving away their total before one
+        // had been played.
+        let wallet = 10_000;
+        User.findOneAndUpdate.mockImplementation((filter, update) => {
+            if (filter?.balance?.$gte !== undefined) wallet -= filter.balance.$gte;
+            else if (Array.isArray(update) && filter?.['paidPayouts.key']) wallet += update[0].$set.balance.$add[1];
+            return Promise.resolve(walletDoc({ balance: wallet }));
+        });
+        const spin = await play([SCATTERED(), ...runOf(FREE_SPINS[2].spins)]);
+
+        const embeds = spin.replies.flatMap(r => r?.embeds ?? []);
+        const intro = embeds.find(e => e.data.title?.startsWith('🌸 FREE SPINS'));
+        const line = BET * BY_NAME.get('Bell').three;
+        const free = BET * BY_NAME.get('Star').three;
+        expect(field(intro, 'Balance')).toBe(`**${(10_000 - BET + line).toLocaleString()}**`);
+        expect(field(resultOf(spin).embeds[0], 'Balance')).toBe(`**${(10_000 - BET + line + free).toLocaleString()}**`);
+    }, 20_000);
+
     test('are introduced with the scatters in view, then shown one by one', async () => {
         const { spins } = FREE_SPINS[2];
         const spin = await play([SCATTERED(), ...runOf(spins)]);

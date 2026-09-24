@@ -597,6 +597,9 @@ async function playSlots(ctx) {
         const linePay = result.payout;
         const paid = await payHand(userFilter, linePay, { game: 'slots', handId, phase: 'settle' });
         let balanceAfter = await settledBalance(userFilter, paid.balance);
+        // What the free-spin intro shows: the balance before the free spins it
+        // is about to play have been counted.
+        const lineBalance = balanceAfter;
         notes.push(payoutNote(paid));
         if (freeTotal > 0) {
             const freePaid = await payHand(userFilter, freeTotal, { game: 'slots', handId, phase: 'free-spins' });
@@ -645,7 +648,7 @@ async function playSlots(ctx) {
         if (freeSpins) {
             // The spin that won them, with the scatters in view, then the spins.
             await surface.edit({
-                embeds: [resultEmbed({ ...show, session: sessionBefore }, view, { ...outcome, freeTotal: 0, freeRuns: [] })
+                embeds: [resultEmbed({ ...show, session: sessionBefore }, view, { ...outcome, freeTotal: 0, freeRuns: [], balance: lineBalance })
                     .setColor(PALETTE.free)
                     .setTitle(`🌸 FREE SPINS × ${freeSpins.spins}${freeSpins.mult > 1 ? ` at ${freeSpins.mult}×` : ''}`)],
                 components: [],
