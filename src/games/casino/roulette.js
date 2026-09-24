@@ -10,7 +10,7 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
-const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
+const { casinoLuck } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
@@ -250,9 +250,11 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock, onWag
         let result   = spin();
         const betDef   = BETS[betKey];
         let won        = betDef.matches(result, target);
-        // Lucky Charm: on loss, 20% chance to re-spin (low-stakes bets only)
+        // Lucky Charm: a losing spin sometimes spins again (low-stakes bets
+        // only). It was 20%, which paid 116% on a straight number (#873, pass 26).
         let charmTriggered = false;
-        if (!won && luckySaveEligible(bet) && hasEffect(debited, 'lucky_charm') && Math.random() < 0.20) {
+        const { charm } = casinoLuck('roulette', debited, bet);
+        if (!won && charm > 0 && Math.random() < charm) {
             result = spin();
             won    = betDef.matches(result, target);
             charmTriggered = true;

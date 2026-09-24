@@ -2518,6 +2518,122 @@ two of them touch economy code.
 
 ---
 
+## Economy — Slots Rebuilt
+
+**Status: Audited — all findings resolved** ✓
+
+The twenty-fifth pass of #873, over `/casino slots` alone, after a full review
+of the game found two ways to farm it and a presentation well short of the
+rest of the bot. The owner set the target: **94% return to player**. It is now
+exact, over every one of the 64³ stop combinations, in
+`tests/casinoSlotsReels.test.js`.
+
+| Measured | Before | After |
+|---|---|---|
+| reels and features | 92.3% | 92.5% |
+| with the progressive (capped) | unbounded at small stakes | 94.0% |
+| Lucky Charm / Lucky Streak / both | 101.9% / 104.8% / 113.1% | 94.8% / 95.0% / 97.2% (+ ≤1.5% progressive) |
+| 2× Coin Booster | ~169% | not applied |
+
+**Files reviewed/fixed:**
+- `src/games/casino/slots.js` (rewritten), `slotsReels.js` (rewritten)
+- `src/services/casinoJackpotService.js`, `src/commands/economy/casino.js`
+- `src/utils/confirmBet.js`, `src/utils/copyLines.js`, `src/models/User.js`
+- `tests/casinoSlotsReels.test.js` (rewritten), `tests/casinoSlotsGame.test.js`,
+  `tests/helpers/slotsSpins.js` (added)
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 1 | **The luck items made slots pay its players.** Lucky Charm re-spun 20% of losses and Lucky Streak refunded 25%: 102%, 105% and 113% together, on bets up to 25,000. At about 1,000 spins an hour, both items (3,500 coins) were worth about +3M coins an hour | On slots they are 3% each, so both together stay under 100% with the whole progressive included | `slotsReels.js` |
+| 2 | **The progressive jackpot paid the same pot to any stake.** A Triple Wild (1 in 16,581) won the whole pool on a 10-coin spin, so slots at the minimum paid more than 100% whenever the pool held more than ~12,700 coins — above its 10,000 seed, nearly always. The random per-bet drop, shared by every casino game, had the same flaw | Both claims are capped in proportion to the winning bet: a Triple Wild takes up to `JACKPOT_CAP_MULT` (327) × the bet, worth 1% of the stake; a random drop up to bet × 0.5% ÷ its trigger chance, worth 0.5%. What a cap leaves stays in the pool. The claim and the remainder are one pipeline write, as before | `casinoJackpotService.js`, `slots.js` |
+| 3 | **A 2× Coin Booster made slots pay about 169%.** It doubled the profit on every win, and slots' wins pay several times the stake | Boosters do not apply to slots, and the paytable says so. Blackjack, keno, cup game, higher-or-lower and poker applied boosters the same way; pass 26 below removed them | `slots.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 4 | About a quarter of all spins were a Cherry or Lemon pair paying 0.5× or 0.75× — a loss shown as a "Two of a Kind" win | Pairs pay only for Bell, Diamond and Star, at 2× or more; every line win pays more than the bet | `slotsReels.js` |
+| 5 | The Hot Reel fired after three losses in a row, so it paid best to whoever kept chasing | A Heat meter fills on every paid spin; the 11th is a Hot Spin. It is claimed atomically, as the streak was | `slots.js`, `User.js` |
+| 6 | 🃏🃏⚡ and 🃏🃏🌸 lost outright under a footer promising Wilds substitute for any symbol — and the loss card added "Wild card assisted!" and "2x Boost applied!" | Wilds substitute for everything but a Scatter and the line is read the way that pays best; a loss card lists nothing that did not help | `slotsReels.js`, `slots.js` |
+| 7 | Free spins: the triggering reel was never shown, the final card said free spins were "incoming" after they had played, labelled the spin "💀 Lost" with Net −bet, and dropped their winnings. Scatters replaced the line win instead of adding to it | The spin that won them is shown with the Scatters in view, then each free spin, then one card with the line, the free spins and their total. Scatters count anywhere in the window, on top of the line | `slots.js`, `slotsReels.js` |
+| 8 | "Spin Again" edited the command's own reply forever, and that token expires fifteen minutes after the command. Past it, coins moved and the message stopped updating | Each replay renders through the button press, which carries a fresh token | `slots.js` |
+| 9 | A bet that needed the large-bet confirmation played inside that private prompt, with "✅ Bet confirmed." above every spin | It plays in a public follow-up | `slots.js` |
+| 10 | A Lucky Charm re-spin of a Hot Reel spin re-rolled the locked reel and still said it was locked | The re-spin keeps reel 1 | `slots.js`, `slotsReels.js` |
+| 11 | The Triple Wild broadcast was posted before the winner's last reel stopped | It follows the winner's result | `slots.js` |
+| 12 | Big-win announcements ignored free-spin winnings, and repeated a win in the channel it was played in | Both counted; the same channel is skipped | `slots.js` |
+| 13 | `slots.announceJackpot`, `jackpotPingHere` and `jackpotChannelId` were read but nothing could set them | `/casino slotsconfig` (Manage Server) | `casino.js` |
+| 14 | "Three Cherrys"; an error left the "Spinning…" card under its message; a break-even pair read as a "partial win!" | Plurals are on the symbol table; an error replaces the reels with an error card; no pair breaks even any more | `slots.js`, `slotsReels.js` |
+
+---
+
+### Presentation
+
+Real reel strips shown through a 3×3 window (the rows above and below the line
+are what the strip holds, so a near miss is genuine), reels that stop one at a
+time with a held last reel when two Wilds, two Scatters or a top pair are
+showing, win tiers (Big / Mega / Epic / Jackpot), a heat meter, a session total,
+Spin / ½ / 2× / Max / Paytable buttons (2× and Max will not step past the guild limit, the
+wallet or the large-bet confirmation), and a paytable that prints each line's
+odds and the return. Autoplay was deliberately left out: the UK Gambling
+Commission banned it on online slots in 2021 as a harm driver.
+
+---
+
+## Economy — Boosters and Luck in the Casino
+
+**Status: Audited — all findings resolved** ✓
+
+The twenty-sixth pass of #873, following pass 25's finding that a coin booster
+made slots pay about 169%. Every casino game was measured with the 2× Coin
+Booster, the server coin boost (1.5× by default, stacking to 3×) and Lucky
+Charm / Lucky Streak, exactly where the game is closed-form and by simulation
+for blackjack (1.5M hands, basic strategy) and poker (300k hands, calling every
+hand).
+
+| Game | Base | 1.5× server | 2× booster | Both luck items, before → after |
+|---|---|---|---|---|
+| keno | 92.3% | 120.1% | 148.0% | 117.6% → 98.5% |
+| cup game (take round one) | 93.3% | 123.3% | 153.3% | 120.0% → 98.6% |
+| higher-or-lower (worst call) | 95.0% | 138.3% | 181.7% | 131.7% → 98.6% (any session ≤ 99.0%) |
+| roulette (straight number) | 97.3% | — | — | 116.2% → 98.7% |
+| blackjack | ~99.9% | 123.0% | 146.3% | 110.8% → no save |
+| poker (call every hand) | 97.4% | 117.6% | 137.8% | 108.1% → no save |
+| crash (host holds a charm) | 99.0% | — | — | 118.8% → no save |
+| slots | 94.0% | — | ~169% (pass 25) | 97.2% + ≤1.5% progressive (pass 25) |
+
+Coinflip and dice read neither boosters nor luck items.
+
+**Files reviewed/fixed:**
+- `src/games/casino/{blackjack,keno,cupgame,higherlower,poker,roulette,crash,slots,settlement}.js`
+- `src/services/effectsService.js`, `src/data/defaultShopItems.js`, `src/data/seasonalEvents.js`, `src/commands/economy/boost.js`
+- `tests/casinoLuckAndBoosters.test.js` (added), `tests/pass24CasinoOdds.test.js`, `tests/casinoSettlement.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 1 | **A coin booster made every casino game that read one pay its players.** It multiplied the profit on a win, and casino wins are the whole of a game's return above the stake: even the server's own 1.5× boost took keno to 120% and higher-or-lower to 138% | No coin multiplier reaches any casino payout. `settlement.js` lost `boostedPayout` and the blackjack helpers their multiplier argument; the 🚀 notes are gone from the result cards | all five games, `settlement.js` |
+| 2 | **The luck items made every game with a save pay its players.** 20% and 25% everywhere, sized for no game in particular | One table, `CASINO_LUCK` in `effectsService.js`, sized per game so that both items together stay under 99% under the best strategy the game allows. Blackjack, poker and crash return 99% or more before any save, so they get none | `effectsService.js`, every game with a save |
+| 3 | A crash host's Lucky Charm scaled the crash point by 1.2 for the whole lobby — a 1.2× return on every target, 119% for everyone in it | Removed | `crash.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 4 | The shop said the 2× Coin Booster doubled "coin earnings from all sources", Lucky Streak gave "+25% win chance on games", and `/boost`'s coin boost "multiplies all coin earnings" | Each says what it does now, and that the casino is excluded or how little the save is. Descriptions already copied into a guild's shop keep their old text until the shop is re-seeded | `defaultShopItems.js`, `seasonalEvents.js`, `boost.js` |
+
+---
+
 ## Not yet reviewed
 
 The economy list below maps which pass of #873 audited each area; the

@@ -11,14 +11,12 @@ const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
-const { getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { buildDeck, handStr, compareTuple, bestHand, rankHand } = require('./pokerHands');
 const {
     ANTE_PAYTABLE, CALL_MULTIPLE, anteOdds, dealerQualifies, paytableName, settleCalled,
 } = require('./holdemRules');
-const { boostedPayout } = require('./settlement');
 
 // /casino poker is Casino Hold'em: ante, see your two cards and the flop, then
 // fold or call twice the ante; the dealer qualifies with a pair of fours. The
@@ -61,8 +59,6 @@ async function playPoker(interaction, ante, releaseLock, onWager) {
     let playerStake = ante;
 
     try {
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-
         // Asked here, before the ante, so "Play Again" asks it too: a player
         // down to less than the full stake after a hand used to ante into one
         // they could only fold.
@@ -167,18 +163,12 @@ async function playPoker(interaction, ante, releaseLock, onWager) {
         // ── Showdown ──────────────────────────────────────────────────────────
         const playerBest = bestHand([...playerHole, ...community]);
         const dealerBest = bestHand([...dealerHole, ...community]);
-        let { outcome, gross } = settleCalled(ante, playerBest, dealerBest, compareTuple(playerBest, dealerBest));
-
-        // The lucky streak turns a loss into a push, stakes returned, before the
-        // payout is computed, so the embed reads off the settled outcome.
-        const streakBonus = getLuckyStreakBonus(debited);
-        if (outcome === 'lose' && luckySaveEligible(playerStake) && streakBonus > 0 && Math.random() < streakBonus) {
-            outcome = 'push';
-            gross   = playerStake;
-        }
-
-        const totalCoinMult = getCoinMultiplier(debited) * getServerCoinMultiplier(guildSettings);
-        const payout = boostedPayout(playerStake, gross, totalCoinMult);
+        // The paytable, and nothing on top of it (#873, pass 26). Casino
+        // Hold'em returns about 99% of the stake under good play, so there was
+        // no room for either: a 2× coin booster paid back 138% of the stake
+        // calling every hand, and the Lucky Streak's 25% push on a lost hand 108%.
+        const { outcome, gross } = settleCalled(ante, playerBest, dealerBest, compareTuple(playerBest, dealerBest));
+        const payout = gross;
 
         const showdown = await payHand(userFilter, payout, { game: 'poker', handId, phase: 'showdown' });
         settled = true;
@@ -197,9 +187,6 @@ async function playPoker(interaction, ante, releaseLock, onWager) {
             lose: { color: '#e74c3c', title: "♠ Casino Hold'em — Dealer Wins", line: 'The ante and the call are lost.' },
         }[outcome];
 
-        let boostNote = '';
-        if (totalCoinMult > 1.0 && payout > playerStake) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
-
         const replayId = `poker_replay_${interaction.id}_${Date.now()}`;
 
         await interaction.editReply({
@@ -211,7 +198,7 @@ async function playPoker(interaction, ante, releaseLock, onWager) {
                 .setDescription(
                     `**Your best hand:** ${paytableName(playerBest)}\n` +
                     `**Dealer's best hand:** ${paytableName(dealerBest)}${qualifies ? '' : ' *(does not qualify)*'}\n\n` +
-                    `${verdict.line}${boostNote}`)
+                    `${verdict.line}`)
                 .addFields(
                     { name: '🃏 Your Hole Cards',   value: handStr(playerHole), inline: true },
                     { name: '🤖 Dealer Hole Cards', value: handStr(dealerHole), inline: true },

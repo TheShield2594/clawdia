@@ -10,13 +10,13 @@ const DEFAULT_SHOP_ITEMS = [
     { name: 'Knife',              itemId: 'knife',             rarity: 'Uncommon', price: 3000,  description: '🔪 +15% /rob success chance for 1 hour.',                          lore: "Not for cooking. Definitely not for cooking." },
     { name: 'Robbery Bag',        itemId: 'robbery_bag',       rarity: 'Uncommon', price: 3500,  description: '💼 +10% coins stolen on successful /rob attempts for 1 hour.',     lore: "Surprisingly roomy. Comes pre-stained with someone else's misfortune." },
     { name: 'Lifesaver',          itemId: 'lifesaver',         rarity: 'Rare',     price: 15000, description: '🛟 Absorbs the next /rob fine or /crime loss — one-time use.',     lore: "Inexplicably shows up right when you need it most. Nobody knows where it comes from." },
-    { name: 'Lucky Charm',        itemId: 'lucky_charm',       rarity: 'Common',   price: 2000,  description: '🍀 2-hour luck boost across games and /crime (casino saves apply to bets up to 25k).',                    lore: "Found at the bottom of a leprechaun's pocket. Still faintly smells of gold." },
+    { name: 'Lucky Charm',        itemId: 'lucky_charm',       rarity: 'Common',   price: 2000,  description: '🍀 2-hour luck boost for /crime, plus a small chance to save a losing casino bet up to 25k (not blackjack, poker or crash).',                    lore: "Found at the bottom of a leprechaun's pocket. Still faintly smells of gold." },
     { name: 'Streak Shield',      itemId: 'streak_shield',     rarity: 'Uncommon', price: 2500,  description: '🔥🛡️ Protects your message streak from one missed day.',          lore: "A small ember that refuses to go out, no matter how bad your week gets." },
     { name: 'Streak Freeze',      itemId: 'streak_freeze',     rarity: 'Rare',     price: 4500,  description: '🧊 Banks one streak freeze (max 2). A freeze auto-consumes when you miss a day, preserving your streak.', lore: "Time suspended in ice. One day borrowed from the future, paid in advance." },
     { name: 'Tier Skip Token',    itemId: 'tier_skip_token',   rarity: 'Epic',     price: 50000, description: '⏭️ Instantly advance one season pass tier (use with /season tier-skip).', lore: "The battle pass waits for no one. Except you, apparently." },
-    { name: '2x Coin Booster',    itemId: 'coin_booster_2x',   rarity: 'Uncommon', price: 2500,  description: '💰🚀 2x coin earnings from all sources for 1 hour.',               lore: "Temporarily rewires your brain to see money everywhere. Side effects may include greed." },
+    { name: '2x Coin Booster',    itemId: 'coin_booster_2x',   rarity: 'Uncommon', price: 2500,  description: '💰🚀 2x coin earnings for 1 hour, from everything but the casino.',               lore: "Temporarily rewires your brain to see money everywhere. Side effects may include greed." },
     { name: '2x XP Booster',      itemId: 'xp_booster_2x',    rarity: 'Uncommon', price: 2500,  description: '⭐🚀 2x XP from chat and activities for 1 hour.',                  lore: "A jolt of clarity disguised as a beverage. Caffeine for the soul." },
-    { name: 'Lucky Streak',       itemId: 'lucky_streak',      rarity: 'Common',   price: 1500,  description: '🎯 +25% win chance on games for 30 minutes (casino saves apply to bets up to 25k).',                      lore: "The universe owes you one. This is collecting." },
+    { name: 'Lucky Streak',       itemId: 'lucky_streak',      rarity: 'Common',   price: 1500,  description: '🎯 For 30 minutes, a small chance to get back a losing casino bet up to 25k (not blackjack, poker or crash).',                      lore: "The universe owes you one. This is collecting." },
     { name: 'Salary Raise',       itemId: 'salary_raise',      rarity: 'Rare',     price: 4000,  description: '📈 1.5x earnings on /work shifts for 2 hours.',                    lore: "A briefly forged memo your boss won't remember signing." },
     { name: 'Pet Food',           itemId: 'pet_food',          rarity: 'Common',   price: 250,   description: '🍖 Feeds any pet, restoring 10 hunger (use with /pet feed). Not a favorite food, so no bonus XP boost.', lore: "Generic, slightly bland, and always in stock. Pets prefer their favorites, but won't say no in a pinch." },
     { name: 'Revive Scroll',      itemId: 'revive_scroll',     rarity: 'Rare',     price: 15000, description: '📜 Calls home the pet that most recently ran away hungry, with its level, bond and battle record intact (use with /use).', lore: "The ink is still wet. Somewhere, a very hungry animal decides it isn't finished with you yet." },
@@ -115,15 +115,40 @@ function isEndgameItem(itemId) {
 // New top-level item categories (e.g. 'black_market' added with the prestige
 // system) are backfilled even on already-seeded guilds so existing servers pick
 // them up without a manual reseed.
+// Default descriptions that stopped being true, by item id. A guild's shop holds
+// its own copy of each default item, made when the shop was seeded, so a copy
+// still carrying one of these word for word is brought up to date; one an admin
+// has edited is theirs and is left alone. #873, pass 26 took coin boosters off
+// casino payouts and cut the luck items' casino saves.
+const RETIRED_DESCRIPTIONS = {
+    lucky_charm:     ['🍀 2-hour luck boost across games and /crime (casino saves apply to bets up to 25k).'],
+    coin_booster_2x: ['💰🚀 2x coin earnings from all sources for 1 hour.'],
+    lucky_streak:    ['🎯 +25% win chance on games for 30 minutes (casino saves apply to bets up to 25k).'],
+};
+
+function refreshRetiredDescriptions(shop) {
+    let changed = false;
+    for (const item of shop) {
+        const retired = RETIRED_DESCRIPTIONS[item.itemId];
+        if (!retired?.includes(item.description)) continue;
+        const current = DEFAULT_SHOP_ITEMS.find(d => d.itemId === item.itemId)?.description;
+        if (!current) continue;
+        item.description = current;
+        changed = true;
+    }
+    return changed;
+}
+
 function ensureDefaultShopItems(guildSettings) {
     if (!guildSettings) return false;
     if (!Array.isArray(guildSettings.shop)) guildSettings.shop = [];
+    const refreshed = refreshRetiredDescriptions(guildSettings.shop);
 
     const existingIds   = new Set(guildSettings.shop.map(i => (i.itemId || '').toLowerCase()));
     const existingNames = new Set(guildSettings.shop.map(i => i.name.toLowerCase()));
     const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market', 'endgame', 'p8_black_market']);
     const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food', 'streak_freeze', 'tier_skip_token', 'revive_scroll']);
-    let changed = false;
+    let changed = refreshed;
 
     if (!guildSettings.shopDefaultsSeeded) {
         for (const item of DEFAULT_SHOP_ITEMS) {

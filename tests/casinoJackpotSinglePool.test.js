@@ -40,19 +40,30 @@ jest.mock('../src/models/Guild', () => ({
 jest.mock('../src/models/ActiveLock', () => require('./helpers/fakeActiveLock'));
 jest.mock('../src/utils/placeWager', () => ({ placeWager: jest.fn().mockResolvedValue(true) }));
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
+// A payout that cannot be credited is written down as owed; the real store is a
+// database this suite does not have, and waits out its buffering timeout.
+jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
+jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
+// Fixed spins, when a test queues them: see tests/helpers/slotsSpins.js.
+let mockSpins = [];
+jest.mock('../src/games/casino/slotsReels', () => {
+    const actual = jest.requireActual('../src/games/casino/slotsReels');
+    return { ...actual, spin: (...args) => (mockSpins.length ? mockSpins.shift() : actual.spin(...args)) };
+});
 
 const User  = require('../src/models/User');
 const Guild = require('../src/models/Guild');
 const { makeInteraction, walletDoc, GUILD_ID, BET } = require('./helpers/casinoInteraction');
+const { view } = require('./helpers/slotsSpins');
+const { TRIPLE_WILD_MULT, JACKPOT_CAP_MULT } = jest.requireActual('../src/games/casino/slotsReels');
 
 const slots   = require('../src/games/casino/slots');
 const casino  = require('../src/commands/economy/casino');
 
-// Reel weights run 28/22/18/12/8/5 for the six regular symbols, then 4 for Wild,
-// out of 102 — so Wild is the band from 93 to 97. spinReel takes a single
-// Math.random() per reel, which makes a pinned value a pinned set of reels.
-const ALL_WILD    = 94 / 102;  // 🃏🃏🃏 — the jackpot hand
-const ALL_CHERRY  = 5 / 102;   // 🍒🍒🍒 — an ordinary three-of-a-kind
+const ALL_WILD   = () => view(['Wild', 'Wild', 'Wild']);        // the jackpot hand
+const ALL_CHERRY = () => view(['Cherry', 'Cherry', 'Cherry']);  // an ordinary three-of-a-kind
+// What a Triple Wild pays on the line, from the machine, beside the pot.
+const LINE_PAY = BET * TRIPLE_WILD_MULT;
 
 const POOL = 12_345;
 const SEED = 10_000;
@@ -71,7 +82,7 @@ const guildDoc = (overrides = {}) => ({
 function poolShownBySlots(interaction) {
     for (const payload of [...interaction.replies].reverse()) {
         for (const embed of payload?.embeds ?? []) {
-            const field = (embed.data?.fields ?? []).find(f => f.name.includes('Jackpot'));
+            const field = (embed.data?.fields ?? []).find(f => f.name.includes('Progressive'));
             if (field) return field.value;
         }
     }
@@ -101,11 +112,11 @@ const totalCredited = () => keyedCoinCredits()
 /** The keyed credits the jackpot service issued for the pot itself. */
 const keyedCredits = () => keyedCoinCredits().filter(({ key }) => key.startsWith('jackpot:'));
 
-let randomSpy;
 let errorSpy;
 
 beforeEach(() => {
     jest.clearAllMocks();
+    mockSpins = [];
     errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     Guild.findOne.mockImplementation(() => guildQuery(guildDoc()));
     Guild.updateOne.mockResolvedValue({});
@@ -119,13 +130,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-    randomSpy?.mockRestore();
     errorSpy.mockRestore();
 });
 
 describe('the two commands report the same pool', () => {
     test('`/casino jackpot` and a spin quote the same figure from the same field', async () => {
-        randomSpy = jest.spyOn(Math, 'random').mockReturnValue(ALL_CHERRY);
+        mockSpins = [ALL_CHERRY()];
 
         const lookup = makeInteraction({});
         lookup.options.getSubcommand = () => 'jackpot';
@@ -154,7 +164,7 @@ describe('a Triple Wild claims the shared pool', () => {
     const CLAIMED = 42_000;
 
     beforeEach(() => {
-        randomSpy = jest.spyOn(Math, 'random').mockReturnValue(ALL_WILD);
+        mockSpins = [ALL_WILD()];
         // findOneAndUpdate on the guild is the atomic claim: it reseeds the pool
         // and records what it took in the same write, and answers with the
         // document that update produced.
@@ -164,21 +174,39 @@ describe('a Triple Wild claims the shared pool', () => {
         });
     });
 
-    test('the winner is paid the pool exactly once', async () => {
+    test('the winner is paid the pool exactly once, beside the line pay', async () => {
         const spin = makeInteraction({ bet: BET });
         await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
 
-        // casinoJackpotService credits the win itself, under the claim's payout
-        // key. Slots crediting its own result.payout on top — which is what it
-        // does for every other outcome — would hand the player the whole pot
-        // twice, so the spin's own write has to be for nothing.
+        // casinoJackpotService credits the pot itself, under the claim's payout
+        // key. The spin's own credit is the line pay the machine owes for the
+        // hand — TRIPLE_WILD_MULT × the bet — and never includes the pot, which
+        // would hand the player the whole pool twice.
         expect(keyedCredits()).toHaveLength(1);
-        expect(totalCredited()).toBe(0);
-        // The spin's own payout is now keyed like the pot's, and a zero credit
-        // is short-circuited before it reaches the database — so the assertion
-        // is that no `casino:` credit was issued at all, not that one was
-        // issued for nothing.
-        expect(keyedCoinCredits().map(({ key }) => key.split(':')[0])).toEqual(['jackpot']);
+        expect(totalCredited()).toBe(LINE_PAY);
+        expect(keyedCoinCredits().map(({ key }) => key.split(':')[0]).sort()).toEqual(['casino', 'jackpot']);
+    }, 20_000);
+
+    test('the claim is capped at JACKPOT_CAP_MULT × the bet', async () => {
+        // #873, pass 25: uncapped, a 10-coin spin won the same pot as a
+        // 100,000-coin one, and slots at the minimum paid back more than it took.
+        const spin = makeInteraction({ bet: BET });
+        await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
+
+        const [, pipeline] = Guild.findOneAndUpdate.mock.calls[0];
+        const claimed = pipeline[0].$set['casinoJackpot.lastWonAmount'];
+        expect(claimed.$min[1]).toBe(BET * JACKPOT_CAP_MULT);
+    }, 20_000);
+
+    test('the channel hears about it after the winner has seen it land', async () => {
+        const spin = makeInteraction({ bet: BET });
+        await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
+
+        const resultRender = spin.editReply.mock.calls
+            .findIndex(([payload]) => payload?.components?.length && payload.embeds?.[0]?.data?.title?.includes('J A C K P O T'));
+        expect(resultRender).toBeGreaterThanOrEqual(0);
+        expect(spin.channel.send.mock.invocationCallOrder[0])
+            .toBeGreaterThan(spin.editReply.mock.invocationCallOrder[resultRender]);
     }, 20_000);
 
     test('the pool is reseeded, and the reseeded figure is what the spin reports', async () => {
@@ -201,10 +229,13 @@ describe('a Triple Wild claims the shared pool', () => {
         await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
 
         // The pot is out of the pool and recorded against the player under its
-        // key. Paying the 25x fallback on top of that pays the same Triple Wild
-        // twice — and it used to, over a rolled-back pool and a credit that may
-        // well have committed and only lost its response.
-        expect(totalCredited()).toBe(0);
+        // key. The spin's own credits are the line pay and nothing else: paying
+        // a consolation on top of that pays the same Triple Wild twice — and it
+        // used to, over a rolled-back pool and a credit that may well have
+        // committed and only lost its response.
+        const spinCredits = keyedCoinCredits().filter(({ key }) => key.startsWith('casino:'));
+        expect(spinCredits.length).toBeGreaterThan(0);
+        expect(spinCredits.every(({ amount }) => amount === LINE_PAY)).toBe(true);
         expect(Guild.updateOne).not.toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({ $inc: expect.objectContaining({ 'casinoJackpot.pool': expect.anything() }) }),
@@ -226,7 +257,8 @@ describe('a Triple Wild claims the shared pool', () => {
         await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
 
         expect(Guild.findOneAndUpdate).not.toHaveBeenCalled();
-        expect(totalCredited()).toBe(BET * 25);
+        // Nothing to claim, so the line pay is the whole of it — never nothing.
+        expect(totalCredited()).toBe(LINE_PAY);
     }, 20_000);
 
     test('the channel hears the same thing the winner does', async () => {
@@ -238,7 +270,8 @@ describe('a Triple Wild claims the shared pool', () => {
 
         // The broadcast announces the drop to everyone. Saying the player
         // "walked away with the entire pool" over a pot that has not arrived
-        // contradicts the winner's own result embed for the same spin.
+        // contradicts the winner's own result embed for the same spin, and
+        // that is what it once said.
         const broadcast = spin.channel.sent.at(-1).embeds[0].data.description;
         expect(broadcast).toContain('not delivered yet');
         expect(broadcast).not.toContain('walked away');
@@ -249,7 +282,8 @@ describe('a Triple Wild claims the shared pool', () => {
         await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
 
         const broadcast = spin.channel.sent.at(-1).embeds[0].data.description;
-        expect(broadcast).toContain('walked away with the entire pool');
+        // The line pay and the pot, together: what the spin won.
+        expect(broadcast).toContain(`Won **${(LINE_PAY + CLAIMED).toLocaleString()}** coins`);
         expect(broadcast).not.toContain('not delivered yet');
     }, 20_000);
 

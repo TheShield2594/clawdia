@@ -49,6 +49,8 @@ const THEMES = {
     mine:    { top: '#2e2622', bottom: '#0d0a08', accent: '#e07b39', muted: '#cdb4a0', panel: 'rgba(255,255,255,0.06)' },
     // /inventory's Items tab — not one grind but all of them, so Discord blurple.
     items:   { top: '#1f2244', bottom: '#0a0b18', accent: '#7c86f7', muted: '#b6bbe9', panel: 'rgba(255,255,255,0.06)' },
+    // /casino slots' paytable (games/casino/slotsPaytableCard.js), drawn in this family's style.
+    slots:   { top: '#271a4a', bottom: '#0c0818', accent: '#b08cff', muted: '#c4b7ea', panel: 'rgba(255,255,255,0.06)' },
 };
 
 /** The avatar ring for each prestige rank; rank 0 uses the activity accent. */
@@ -807,7 +809,7 @@ module.exports = {
     INV_TILE_COLS,
     _resetCache,
     // The drawing primitives, for the other cards in the family (the /fish
-    // cast catch card) so they share the palette, the art loading and the
+    // cast catch card, the slots paytable) so they share the palette, the art loading and the
     // medallion fallback instead of growing their own.
     primitives: { FONT, themeFor, paintBackground, drawEntry, roundRect, fitText, shade },
     __test__: { initials, shade },

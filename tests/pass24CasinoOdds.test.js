@@ -14,7 +14,8 @@
  *     along won every round, and its "tell" was right 60% of the time;
  *   - higher-or-lower added +0.5× per correct call whatever the odds (about
  *     115% on the first call alone);
- *   - slots paid two-of-a-kind at half the row (about 153% a spin).
+ *   - slots paid two-of-a-kind at half the row (about 153% a spin); pass 25
+ *     rebuilt its paytable, and holds the coin booster off it here.
  *
  * The pure odds are pinned in casinoPayoutTables.test.js and
  * casinoSlotsReels.test.js. This file drives the games themselves.
@@ -40,11 +41,22 @@ jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 // A stacked deck, when a test sets one: cards are dealt off the end, player
 // first, so the last four are player, player, dealer up-card, dealer hole card.
 let mockDeck = null;
-// Fixed reels, when a test sets them: spinReel hands them out in order.
-let mockReels = null;
+// Fixed spins, when a test queues them: see tests/helpers/slotsSpins.js.
+let mockSpins = [];
 jest.mock('../src/games/casino/slotsReels', () => {
     const actual = jest.requireActual('../src/games/casino/slotsReels');
-    return { ...actual, spinReel: (...args) => (mockReels?.length ? mockReels.shift() : actual.spinReel(...args)) };
+    return { ...actual, spin: (...args) => (mockSpins.length ? mockSpins.shift() : actual.spin(...args)) };
+});
+// A fixed keno draw and a stacked poker deck, when a test sets them.
+let mockDraw = null;
+jest.mock('../src/games/casino/kenoPaytable', () => {
+    const actual = jest.requireActual('../src/games/casino/kenoPaytable');
+    return { ...actual, drawNumbers: (...args) => (mockDraw ? [...mockDraw] : actual.drawNumbers(...args)) };
+});
+let mockPokerDeck = null;
+jest.mock('../src/games/casino/pokerHands', () => {
+    const actual = jest.requireActual('../src/games/casino/pokerHands');
+    return { ...actual, buildDeck: (...args) => (mockPokerDeck ? [...mockPokerDeck] : actual.buildDeck(...args)) };
 });
 jest.mock('../src/games/casino/blackjackHands', () => {
     const actual = jest.requireActual('../src/games/casino/blackjackHands');
@@ -58,7 +70,10 @@ const cupgame = require('../src/games/casino/cupgame');
 const higherlower = require('../src/games/casino/higherlower');
 const blackjack = require('../src/games/casino/blackjack');
 const slots = require('../src/games/casino/slots');
-const { SYMBOLS } = jest.requireActual('../src/games/casino/slotsReels');
+const keno = require('../src/games/casino/keno');
+const poker = require('../src/games/casino/poker');
+const { BY_NAME } = jest.requireActual('../src/games/casino/slotsReels');
+const { view } = require('./helpers/slotsSpins');
 const { deleteLobby } = require('../src/utils/crashLobby');
 const { walletDoc, GUILD_ID, USER_ID, BET } = require('./helpers/casinoInteraction');
 const { makeInteraction } = require('./helpers/fakeInteraction');
@@ -277,13 +292,11 @@ describe('blackjack insurance', () => {
     }, 20_000);
 });
 
-// ── slots: a pair that returns less than the stake is a loss ─────────────────
+// ── slots: what a spin pays is the paytable's, and nothing multiplies it ─────
 
-describe('slots below-stake pairs', () => {
-    const sym = name => SYMBOLS.find(x => x.name === name);
-
-    async function spin(reels, doc = {}) {
-        mockReels = [...reels];
+describe('slots pays the paytable', () => {
+    async function spin(spins, doc = {}) {
+        mockSpins = [...spins];
         User.findOne.mockImplementation(() => query(walletDoc(doc)));
         // The wager's own write hands back the document the game reads effects off.
         const real = User.findOneAndUpdate.getMockImplementation();
@@ -294,17 +307,135 @@ describe('slots below-stake pairs', () => {
         const run = slots.execute(hand, { releaseLock: jest.fn(), onWager: jest.fn() });
         for (let i = 0; i < 100; i++) await jest.advanceTimersByTimeAsync(250);
         await run;
-        mockReels = null;
+        mockSpins = [];
         return { hand, credits: keyedCredits().filter(c => c.key.startsWith('casino:slots:')) };
     }
 
-    // A Cherry pair pays 100 × 2 × 0.25 = 50 on a 100 stake. The booster
-    // multiplied its "profit" of −50 into −100 and credited nothing.
-    test('a coin booster does not deepen the loss on a pair that returns less than the stake', async () => {
+    // #873, pass 25. A booster multiplied the profit on a slots win, and slots'
+    // wins pay many times the stake: a 2× booster turned the 94% machine into
+    // one that paid back about 169%, for 2,500 coins an hour.
+    test('a coin booster does not multiply a slots win', async () => {
         const booster = { activeEffects: [{ type: 'coin_booster_2x', expiresAt: new Date(Date.now() + 3.6e6) }] };
-        const { hand, credits } = await spin([sym('Cherry'), sym('Cherry'), sym('Lemon')], booster);
+        const { credits } = await spin([view(['Bell', 'Bell', 'Bell'])], booster);
 
-        expect(credits.map(c => c.amount)).toEqual([50]);
-        expect(JSON.stringify(hand.replies)).toContain('part of your bet back');
+        expect(credits.map(c => c.amount)).toEqual([BET * BY_NAME.get('Bell').three]);
     }, 20_000);
+
+    // The old two-of-a-kind paid a quarter of the row, so a Cherry pair
+    // returned half the stake and was shown as a win.
+    test('a low pair pays nothing and says so, rather than returning part of the bet as a "win"', async () => {
+        const { hand, credits } = await spin([view(['Cherry', 'Cherry', 'Lemon'])]);
+
+        expect(credits).toEqual([]);
+        const result = hand.replies.filter(r => r?.components?.length).at(-1).embeds[0].data;
+        expect(result.title).toContain('No Win');
+    }, 20_000);
+});
+
+// ── #873, pass 26: no coin booster reaches a casino payout ──────────────────
+//
+// A 2× Coin Booster multiplied the profit on every casino win, and a server
+// coin boost stacked on it. Measured, a 2× booster alone paid back: keno 148%,
+// the cup game 153%, higher-or-lower 182% (a long-shot call), blackjack 146%,
+// poker 138% — slots 169% before pass 25. Each game below is dealt a win with
+// both boosts active (3× together) and must credit exactly its table odds.
+
+describe('no coin booster reaches a casino payout', () => {
+    const BOOSTED = {
+        activeEffects: [{ type: 'coin_booster_2x', expiresAt: new Date(Date.now() + 3.6e6) }],
+    };
+    const SERVER_BOOST = { type: 'coin', multiplier: 1.5, expiresAt: new Date(Date.now() + 3.6e6) };
+
+    beforeEach(() => {
+        User.findOne.mockImplementation(() => query(walletDoc(BOOSTED)));
+        User.findOneAndUpdate.mockImplementation((filter, update) =>
+            Promise.resolve(Array.isArray(update) ? walletDoc(BOOSTED) : walletDoc(BOOSTED)));
+        Guild.findOne.mockImplementation(() => {
+            const doc = { guildId: GUILD_ID, economy: {}, serverBoost: SERVER_BOOST };
+            const q = Promise.resolve(doc);
+            q.lean = () => Object.assign(Promise.resolve(doc), { catch: () => Promise.resolve(doc) });
+            return q;
+        });
+    });
+
+    afterEach(() => {
+        mockDraw = null;
+        mockPokerDeck = null;
+        mockDeck = null;
+    });
+
+    /** Plays `game` with presses queued by id prefix; returns its keyed credits. */
+    async function playGame(game, options, presses = [], rolls = null) {
+        if (rolls) {
+            const queue = [...rolls];
+            jest.spyOn(Math, 'random').mockImplementation(() => queue.shift() ?? 0);
+        }
+        jest.useFakeTimers();
+        let hand = null;
+        const shownId = prefix => hand?.replies
+            .flatMap(r => r?.components ?? [])
+            .flatMap(row => row.components ?? [])
+            .map(c => c.data?.custom_id)
+            .filter(id => id?.startsWith(prefix))
+            .at(-1);
+        hand = makeInteraction({
+            options, userId: USER_ID, guildId: GUILD_ID,
+            components: presses.map(prefix => ({ get customId() { return shownId(prefix); } })),
+        });
+        const run = game.execute(hand, { releaseLock: jest.fn(), onWager: jest.fn() });
+        for (let i = 0; i < 400; i++) await jest.advanceTimersByTimeAsync(250);
+        await run;
+        const text = JSON.stringify(hand.replies);
+        return { credits: keyedCredits().filter(c => c.key.startsWith('casino:')), text };
+    }
+
+    test('keno pays five matches at 150×, unboosted', async () => {
+        mockDraw = [3, 12, 21, 33, 39, 1, 2, 4, 5, 6];
+        const { credits, text } = await playGame(keno, { bet: BET, numbers: '3 12 21 33 39' });
+
+        expect(credits.map(c => c.amount)).toEqual([BET * 150]);
+        expect(text).not.toContain('Coin Booster');
+    }, 30_000);
+
+    test('the cup game pays a taken round-one win at 2.8×, unboosted', async () => {
+        // The Queen starts under card 1; three swaps of cards 1 and 2 leave her
+        // under card 2. Then take the money rather than doubling.
+        const rolls = [0, 0, 0.4, 0, 0.4, 0, 0.4];
+        const { credits, text } = await playGame(cupgame, { bet: BET }, ['monte_2_', 'monte_take_'], rolls);
+
+        expect(credits.map(c => c.amount)).toEqual([280]);
+        expect(text).not.toContain('Coin Booster');
+    }, 30_000);
+
+    test('higher-or-lower cashes an even-money call out at 1.90×, unboosted', async () => {
+        // 7 → King on "higher", then cash out.
+        const { credits } = await playGame(higherlower, { bet: BET }, ['hl_up', 'hl_cash'], [0.47, 0, 0.99, 0]);
+
+        expect(credits.map(c => c.amount)).toEqual([190]);
+    }, 30_000);
+
+    test('blackjack pays a natural at 3:2, unboosted', async () => {
+        const card = value => ({ suit: '♠', value });
+        // Dealt off the end: player A and K, dealer 9 up and 7 down.
+        mockDeck = [card('2'), card('3'), card('4'), card('7'), card('9'), card('K'), card('A')];
+        const { credits, text } = await playGame(blackjack, { bet: BET });
+
+        expect(credits.map(c => c.amount)).toEqual([BET + 150]);
+        expect(text).not.toContain('🚀');
+    }, 30_000);
+
+    test('poker pays a called royal flush by the paytable, unboosted', async () => {
+        const c = (value, suit) => ({ value, suit });
+        // Popped from the end: player A♠ K♠, dealer 4♥ 4♦ (qualifies), then the
+        // board Q♠ J♠ 10♠ 2♣ 3♦ — a royal flush against a pair of fours.
+        mockPokerDeck = [
+            c('3', '♦'), c('2', '♣'), c('10', '♠'), c('J', '♠'), c('Q', '♠'),
+            c('4', '♦'), c('4', '♥'), c('K', '♠'), c('A', '♠'),
+        ];
+        const { credits, text } = await playGame(poker, { bet: BET }, ['pk_call_']);
+
+        // Ante back plus 100:1, and the 2× call back plus 1:1.
+        expect(credits.map(c2 => c2.amount)).toEqual([BET + BET * 100 + BET * 2 * 2]);
+        expect(text).not.toContain('Coin Booster');
+    }, 30_000);
 });

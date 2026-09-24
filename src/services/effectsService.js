@@ -280,15 +280,47 @@ function getXpMultiplier(user) {
     return hasEffect(user, 'xp_booster_2x') ? 2.0 : 1.0;
 }
 
-// Returns the lucky_streak win-rate bonus (0.25 if active, else 0)
-function getLuckyStreakBonus(user) {
-    return hasEffect(user, 'lucky_streak') ? 0.25 : 0.0;
-}
-
 // Lucky Charm / Lucky Streak loss-saves only apply to bets at or below this size.
-// A 20-25% loss refund on an unbounded bet flips every casino game's house edge
-// player-positive, so the saves are capped to low-stakes play.
 const LUCKY_SAVE_MAX_BET = 25_000;
+
+// What Lucky Charm and Lucky Streak are worth in each casino game: the chance a
+// losing hand is saved. `charm` and `streak` are each game's own mechanic —
+// a re-spin in slots and roulette, a refund of the stake everywhere else.
+//
+// Sized per game so that holding both items never takes a game past 99% return
+// under the best strategy the game allows (#873, pass 26). They used to be 20%
+// and 25% everywhere, and every game with a save paid its players: keno 118%,
+// the cup game 120%, higher-or-lower 132% on a long-shot call, roulette 116% on
+// a straight number, blackjack 111%, poker 108%, and a crash lobby whose host
+// held a charm 119%. The figures are pinned in tests/casinoLuckAndBoosters.test.js.
+//
+// Blackjack, poker and crash return 99% or more before any save, so there is no
+// save small enough to fit, and the items do nothing there.
+const { LUCKY_CHARM_RESPIN, LUCKY_STREAK_REFUND } = require('../games/casino/slotsReels');
+const CASINO_LUCK = Object.freeze({
+    slots:       Object.freeze({ charm: LUCKY_CHARM_RESPIN, streak: LUCKY_STREAK_REFUND }),
+    keno:        Object.freeze({ charm: 0.05,  streak: 0.05 }),
+    cupgame:     Object.freeze({ charm: 0.04,  streak: 0.04 }),
+    higherlower: Object.freeze({ charm: 0.02,  streak: 0.02 }),
+    roulette:    Object.freeze({ charm: 0.015, streak: 0 }),
+    blackjack:   Object.freeze({ charm: 0,     streak: 0 }),
+    poker:       Object.freeze({ charm: 0,     streak: 0 }),
+    crash:       Object.freeze({ charm: 0,     streak: 0 }),
+});
+
+/**
+ * The save chances this player has in this casino game for this bet:
+ * `{ charm, streak }`, each 0 when the item is not active, the bet is over
+ * LUCKY_SAVE_MAX_BET, or the game gives the item nothing.
+ */
+function casinoLuck(game, user, bet) {
+    const rates = CASINO_LUCK[game];
+    if (!rates || !luckySaveEligible(bet)) return { charm: 0, streak: 0 };
+    return {
+        charm:  hasEffect(user, 'lucky_charm')  ? rates.charm  : 0,
+        streak: hasEffect(user, 'lucky_streak') ? rates.streak : 0,
+    };
+}
 
 // Whether lucky loss-save effects (charm re-spin / streak push) may trigger for this bet.
 function luckySaveEligible(bet) {
@@ -338,7 +370,8 @@ module.exports = {
     getSalaryMultiplier,
     getShiftMultiplier,
     getXpMultiplier,
-    getLuckyStreakBonus,
+    CASINO_LUCK,
+    casinoLuck,
     LUCKY_SAVE_MAX_BET,
     luckySaveEligible,
     getServerCoinMultiplier,
