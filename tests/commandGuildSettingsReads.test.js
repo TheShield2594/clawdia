@@ -95,7 +95,8 @@ describe('commands do not hydrate the whole guild document', () => {
             'src/commands/economy/boost.js': 1,
 
             // A positional projection over an array, narrower than anything the
-            // cache could hand back.
+            // cache could hand back: the standing fish record a catch fell
+            // short of, read for the catch card.
             'src/commands/economy/fish/cast.js': 1,
         });
     });

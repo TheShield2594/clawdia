@@ -336,6 +336,8 @@ const guildSchema = new Schema({
         userId:   { type: String },
         username: { type: String },
         date:     { type: Date },
+        // The weight table the record was weighed on (fishData.FISH_WEIGHT_SCALE).
+        scale:    { type: Number },
     }],
 
     // Progressive jackpot pool fed by all casino bets

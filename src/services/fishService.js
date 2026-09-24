@@ -15,7 +15,13 @@ const {
     SIZE_TIERS,
     FISH_BASE_WEIGHTS,
     TIME_OF_DAY_BONUSES,
+    FISH_WEIGHTS,
+    FISH_WEIGHT_SCALE,
     BOSS_TYPES,
+    BOSS_ROUNDS,
+    BOSS_LINE_INTEGRITY,
+    FIGHT_MOVES,
+    FIGHT_CUES,
     getTimeOfDay
 } = require('../data/fishData');
 const { getCurrentWeather } = require('./weatherService');
@@ -27,6 +33,12 @@ const { WILDERNESS_YIELD_BONUS } = require('../data/crossSystemData');
 const { randomInt } = require('crypto');
 
 const DAILY_QUEST_COUNT = 3;
+
+// Keep / release (see releaseCatch). A released fish hands back its coins for
+// the XP again and a charge of river karma, which shifts this share of the
+// common weight up the ladder on the next fish; charges stack up to the cap.
+const RELEASE_KARMA_SHIFT = 0.10;
+const RELEASE_KARMA_MAX   = 3;
 const WEEK_MS = 7 * 24 * 3_600_000;
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
@@ -69,6 +81,9 @@ function ensureFishingData(user) {
     if (f.personalBest         == null) f.personalBest         = { fish: null, weight: 0, payout: 0 };
     if (f.weeklyRecord         == null) f.weeklyRecord         = { fish: null, weight: 0, userId: null, username: null, weekStart: null };
     if (f.lastBossEncounter    == null) f.lastBossEncounter    = null;
+    if (f.releaseKarma         == null) f.releaseKarma         = 0;
+    if (f.fishReleased         == null) f.fishReleased         = 0;
+    if (f.pendingRelease === undefined) f.pendingRelease       = null;
     if (!Array.isArray(f.trophies)) f.trophies = [];
     if (!f.catalog || typeof f.catalog !== 'object' || Array.isArray(f.catalog)) f.catalog = {};
 
@@ -219,6 +234,16 @@ function rollTier(user, location, rod) {
         w.epic      += shiftEpic;
     }
 
+    // River karma — a charge earned by releasing a catch (see releaseCatch):
+    // the next fish comes from a little further up the rarity ladder. The
+    // charge itself is spent by executeCast, which knows the cast reached here.
+    if ((f.releaseKarma ?? 0) > 0) {
+        const shift = w.common * RELEASE_KARMA_SHIFT;
+        w.common = Math.max(0, w.common - shift);
+        w.rare  += shift * 0.7;
+        w.epic  += shift * 0.3;
+    }
+
     // Rod rarity boost
     const rodData = ROD_BY_TIER[rod.tier];
     const rarityBoost = (rodData?.rarityBoost ?? 0) +
@@ -303,21 +328,18 @@ function applyPayoutModifiers(user, rawPayout, location) {
     const presBonus = PRESTIGE_BONUSES[p].payoutBonus;
     if (presBonus > 0) payout *= (1 + presBonus);
 
-    if (f.dailyCasts >= LIMITS.DIM_RETURNS_THRESHOLD_3) {
-        payout *= 0.55;
-    } else if (f.dailyCasts >= LIMITS.DIM_RETURNS_THRESHOLD_2) {
-        payout *= 0.70;
-    } else if (f.dailyCasts >= LIMITS.DIM_RETURNS_THRESHOLD_1) {
-        payout *= 0.85;
-    }
+    const fatigueMult = castFatigueMult(f.dailyCasts);
+    payout *= fatigueMult;
 
     payout = Math.round(payout);
 
     // The daily soft cap, the hard cap and the gathering-yield doubling are the
     // same rules in all three gear grinds and live in the engine (#892).
+    // What each of them took is reported alongside the payout, so the result
+    // can say why a catch paid less than it looked like it should.
     const throttle = grind.dailyThrottle(user, 'fish');
     if (throttle.cappedByHard) {
-        return { adjustedPayout: 0, cappedByHard: true, gatheringYield: null };
+        return { adjustedPayout: 0, cappedByHard: true, gatheringYield: null, fatigueMult, softCapped: false, uncappedPayout: payout };
     }
 
     const basePayout    = throttle.settle(payout);
@@ -334,7 +356,21 @@ function applyPayoutModifiers(user, rawPayout, location) {
         adjustedPayout: gatheringYield ? doubledPayout : basePayout,
         cappedByHard:   false,
         gatheringYield,
+        fatigueMult,
+        softCapped:     throttle.softCapped,
+        uncappedPayout: payout,
     };
+}
+
+/**
+ * The diminishing-returns multiplier for the next cast, given how many casts
+ * the angler has made in the current daily window.
+ */
+function castFatigueMult(dailyCasts = 0) {
+    if (dailyCasts >= LIMITS.DIM_RETURNS_THRESHOLD_3) return 0.55;
+    if (dailyCasts >= LIMITS.DIM_RETURNS_THRESHOLD_2) return 0.70;
+    if (dailyCasts >= LIMITS.DIM_RETURNS_THRESHOLD_1) return 0.85;
+    return 1;
 }
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
@@ -630,7 +666,8 @@ function executeCast(user, locationId, options = {}) {
         if (catchType === 'junk') {
             const junk         = weightedRoll(JUNK_ITEMS);
             const payout       = Math.round(randInt(junk.payoutMin, junk.payoutMax) * streakMult * reactionFactor);
-            const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payout, location);
+            const { adjustedPayout, cappedByHard, fatigueMult, softCapped, uncappedPayout } = applyPayoutModifiers(user, payout, location);
+            Object.assign(result, { fatigueMult, softCapped, uncappedPayout });
 
             applyDurabilityLoss(rod, 1);
             result.durabilityLost = 1;
@@ -655,7 +692,8 @@ function executeCast(user, locationId, options = {}) {
         } else if (catchType === 'treasure') {
             const treasure     = weightedRoll(TREASURE_ITEMS);
             const payout       = Math.round(randInt(treasure.payoutMin, treasure.payoutMax) * streakMult * reactionFactor);
-            const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payout, location);
+            const { adjustedPayout, cappedByHard, fatigueMult, softCapped, uncappedPayout } = applyPayoutModifiers(user, payout, location);
+            Object.assign(result, { fatigueMult, softCapped, uncappedPayout });
 
             applyDurabilityLoss(rod, 1);
             result.durabilityLost = 1;
@@ -682,6 +720,10 @@ function executeCast(user, locationId, options = {}) {
             // Fish catch
             const tier = rollTier(user, location, rod);
             const fish = rollFish(tier, locationId ?? f.activeLocation);
+            if ((f.releaseKarma ?? 0) > 0) {
+                f.releaseKarma -= 1;
+                result.karmaUsed = true;
+            }
 
             // ── Trait effects ──────────────────────────────────────────────
             const traits = fish.traits ?? {};
@@ -724,9 +766,7 @@ function executeCast(user, locationId, options = {}) {
                         sizeLabel       = st.label;
                         sizeMultiplier  = st.multiplier;
                         // Calculate weight
-                        const baseW = FISH_BASE_WEIGHTS[fish.tier] ?? { min: 1, max: 10 };
-                        const base  = baseW.min + secureRandom() * (baseW.max - baseW.min);
-                        weightLbs   = parseFloat((base * st.weightMult).toFixed(1));
+                        weightLbs       = rollFishWeight(fish, st);
                         break;
                     }
                 }
@@ -746,8 +786,9 @@ function executeCast(user, locationId, options = {}) {
             const critMultiplier = isCrit ? (1.5 + secureRandom() * 1.0) : 1.0;
             const preModPayout   = Math.round(sizedPayout * critMultiplier * traitPayoutMult * streakMult * reactionFactor);
 
-            const { adjustedPayout, cappedByHard, gatheringYield } = applyPayoutModifiers(user, preModPayout, location);
+            const { adjustedPayout, cappedByHard, gatheringYield, fatigueMult, softCapped, uncappedPayout } = applyPayoutModifiers(user, preModPayout, location);
             result.gatheringYield = gatheringYield;
+            Object.assign(result, { fatigueMult, softCapped, uncappedPayout });
 
             // ── Special material drop ──────────────────────────────────────
             let specialDrop = null;
@@ -785,39 +826,11 @@ function executeCast(user, locationId, options = {}) {
             f.dailyCoins   += adjustedPayout;
             if (adjustedPayout > f.bestPayout) f.bestPayout = adjustedPayout;
 
-            // ── Personal best / weight record ──────────────────────────────
-            let isPersonalBest = false, newRecord = null;
-            if (fish.sizeVariance && weightLbs > 0) {
-                if (!f.personalBest || weightLbs > f.personalBest.weight) {
-                    f.personalBest = { fish: fish.name, weight: weightLbs, payout: adjustedPayout, caughtAt: new Date() };
-                    isPersonalBest = true;
-                }
-                // Per-player heaviest catch of the current week. The server-wide
-                // records live on the guild document (see checkAndUpdateWorldRecord).
-                // Roll the window over first, otherwise the "weekly" best is just an
-                // all-time best that can never be beaten by a lighter fish.
-                const weekStart = f.weeklyRecord?.weekStart;
-                const weekExpired = !weekStart || (Date.now() - new Date(weekStart).getTime()) >= WEEK_MS;
-                if (weekExpired) {
-                    f.weeklyRecord = { fish: null, weight: 0, userId: null, username: null, weekStart: new Date() };
-                }
-                if (weightLbs > (f.weeklyRecord.weight ?? 0)) {
-                    f.weeklyRecord = {
-                        fish:      fish.name,
-                        weight:    weightLbs,
-                        userId:    user.userId ?? null,
-                        username:  options.username ?? f.weeklyRecord.username ?? null,
-                        weekStart: f.weeklyRecord.weekStart ?? new Date(),
-                    };
-                    newRecord = { type: 'weekly', fish: fish.name, weight: weightLbs };
-                }
-            }
-
             f.successfulCasts += 1;
             f.consecutiveFails = 0;
             if (tier === 'legendary') f.legendaryCatches += 1;
             if (tier === 'event')     f.eventCatches     += 1;
-            recordCatalogCatch(f, fish, weightLbs);
+            const { isPersonalBest, firstCatch, previousBest, newRecord } = recordLandedFish(user, fish, weightLbs, adjustedPayout, options.username);
 
             const lvResult = applyXp(user, xpGain);
 
@@ -827,7 +840,7 @@ function executeCast(user, locationId, options = {}) {
                 sizeLabel, sizeTierId, weightLbs, specialDrop, xpEarned: xpGain,
                 levelUp: lvResult.leveledUp ? lvResult : null, cappedByHard,
                 traitEffects: Object.keys(traits).filter(t => traits[t]),
-                isPersonalBest, newRecord,
+                isPersonalBest, firstCatch, previousBest, newRecord,
                 streakMult
             });
 
@@ -984,44 +997,82 @@ function updateFishQuestProgress(user, result, locationId) {
     user.markModified('quests');
 }
 
-// ─── BOSS ENCOUNTER RESOLUTION ────────────────────────────────────────────────
+// ─── FIGHTS: REEL-IN AND BOSS ENCOUNTERS ─────────────────────────────────────
 
 /**
- * Pick a random boss type for this encounter.
+ * Roll `count` fight cues (see FIGHT_CUES): what the fish does each beat, and
+ * the move that answers it. `tendency` biases the draw towards one move by
+ * `tendencyWeight`; the rest are uniform, so any move can come up. The same
+ * line never shows twice in one fight.
+ *
+ * @returns {{correct: 'reel'|'hold'|'slack', text: string}[]}
  */
+function rollFightCues(count, tendency = null, tendencyWeight = 0) {
+    const moves = Object.keys(FIGHT_CUES);
+    const used  = new Set();
+    const cues  = [];
+    for (let i = 0; i < count; i++) {
+        const correct = tendency && secureRandom() < tendencyWeight
+            ? tendency
+            : moves[Math.floor(secureRandom() * moves.length)];
+        const pool = FIGHT_CUES[correct].filter(t => !used.has(t));
+        const text = pool[Math.floor(secureRandom() * pool.length)];
+        used.add(text);
+        cues.push({ correct, text });
+    }
+    return cues;
+}
+
+/**
+ * Score one answer to a fight cue. A wrong move costs the line integrity its
+ * FIGHT_MOVES entry says; anything that is not a move at all (a timeout)
+ * costs one.
+ */
+function scoreFightMove(cue, chosen) {
+    const correct = chosen === cue.correct;
+    const cost    = correct ? 0 : (FIGHT_MOVES[chosen]?.snapCost ?? 1);
+    return { correct, cost };
+}
+
+/** Pick a random boss for this encounter. */
 function rollBossType() {
     const keys = Object.keys(BOSS_TYPES);
     return BOSS_TYPES[keys[Math.floor(secureRandom() * keys.length)]];
 }
 
+/** A boss and the rounds it will fight, rolled up front. */
+function rollBossFight() {
+    const boss = rollBossType();
+    return { boss, rounds: rollFightCues(BOSS_ROUNDS, boss.tendency, boss.tendencyWeight) };
+}
+
 /**
- * Resolve a single phase of the multi-phase boss fight.
- * choices: array of 'match'|'hold'|'safe' strings, one per phase played so far
- * Returns { phaseResults: [{correct, chosen}], correct, lineIntegrity }
+ * Walk the answers given so far against the fight's rounds. The line starts at
+ * BOSS_LINE_INTEGRITY and each wrong move takes its cost off; at zero the line
+ * has snapped and the rounds after it are never fought.
  */
-function resolveBossPhases(bossType, choicesMade) {
-    let lineIntegrity = 3; // 3 strikes before line snaps
+function resolveBossPhases(rounds, choicesMade) {
+    let lineIntegrity = BOSS_LINE_INTEGRITY;
     const phaseResults = [];
-    for (let i = 0; i < choicesMade.length; i++) {
-        const phase   = bossType.phases[i];
-        const chosen  = choicesMade[i];
-        const correct = chosen === phase.correct;
-        if (!correct && chosen !== 'safe') {
-            lineIntegrity = Math.max(0, lineIntegrity - 1);
-        }
-        phaseResults.push({ correct, chosen, correctChoice: phase.correct });
+    for (let i = 0; i < choicesMade.length && i < rounds.length; i++) {
+        const chosen = choicesMade[i];
+        const { correct, cost } = scoreFightMove(rounds[i], chosen);
+        lineIntegrity = Math.max(0, lineIntegrity - cost);
+        phaseResults.push({ correct, chosen, correctChoice: rounds[i].correct });
+        if (lineIntegrity === 0) break;
     }
     return { phaseResults, lineIntegrity };
 }
 
 /**
- * Resolve the final boss outcome after all phases.
- * Returns { outcome, bonusPayout, durabilityLost, correctCount, message, tournamentMultiplier }
+ * Resolve the boss outcome once the fight is over.
+ * Returns { outcome, bonusPayout, durabilityLost, correctCount, phaseResults,
+ * lineSnapped, bossType, tournamentMultiplier, message }.
  */
-function resolveBossEncounter(user, fish, tier, choicesMade, bossType) {
+function resolveBossEncounter(user, fish, tier, choicesMade, fight) {
     const rod = user.fishing?.rods[user.fishing.equippedRodIndex];
-    const bt  = bossType ?? rollBossType();
-    const { phaseResults, lineIntegrity } = resolveBossPhases(bt, choicesMade);
+    const { boss: bt, rounds } = fight ?? rollBossFight();
+    const { phaseResults, lineIntegrity } = resolveBossPhases(rounds, choicesMade);
 
     const correctCount = phaseResults.filter(p => p.correct).length;
     const lineSnapped  = lineIntegrity <= 0;
@@ -1030,7 +1081,7 @@ function resolveBossEncounter(user, fish, tier, choicesMade, bossType) {
 
     if (lineSnapped || correctCount === 0) {
         outcome = 'escaped';
-        if (rod) { applyDurabilityLoss(rod, 4); durabilityLost = 4; }
+        if (rod) { applyDurabilityLoss(rod, lineSnapped ? 4 : 2); durabilityLost = lineSnapped ? 4 : 2; }
     } else if (correctCount === 1) {
         outcome = 'survived';
         bonusPayout = Math.round(randInt(fish.payoutMin, fish.payoutMax) * 0.4);
@@ -1040,7 +1091,6 @@ function resolveBossEncounter(user, fish, tier, choicesMade, bossType) {
         bonusPayout = Math.round(randInt(fish.payoutMin, fish.payoutMax) * 1.0);
         if (rod) { applyDurabilityLoss(rod, 2); durabilityLost = 2; }
     } else {
-        // 3/3 correct
         outcome = 'perfect';
         bonusPayout = Math.round(randInt(fish.payoutMin, fish.payoutMax) * 1.5);
         if (rod) { applyDurabilityLoss(rod, 1); durabilityLost = 1; }
@@ -1049,14 +1099,16 @@ function resolveBossEncounter(user, fish, tier, choicesMade, bossType) {
     const tournamentMultiplier = outcome === 'perfect' ? 1.5 : outcome === 'win' ? 1.2 : 1.0;
 
     const messages = {
-        perfect:  `🏆 **FLAWLESS** — You read the ${bt.name} perfectly. Maximum reward!`,
-        win:      `✅ You wrestled the ${bt.name} under control. Solid payout earned.`,
-        survived: `😓 Barely held on — the ${bt.name} nearly escaped. Partial reward.`,
-        escaped:  `💀 The ${bt.name} snapped your line and vanished into the deep!`
+        perfect:  `🏆 **FLAWLESS** — you read every move the ${bt.name} made. Maximum reward!`,
+        win:      `✅ You wrestled the ${bt.name} to the surface. Solid payout earned.`,
+        survived: `😓 You barely held on — the ${bt.name} tore free at the boat. Partial reward.`,
+        escaped:  lineSnapped
+            ? `💀 The ${bt.name} snapped your line and vanished into the deep!`
+            : `🌊 The ${bt.name} shook free and slipped away. It'll be back.`,
     };
 
     if (rod) user.markModified('fishing');
-    return { outcome, bonusPayout, durabilityLost, correctCount, phaseResults, bossType: bt, tournamentMultiplier, message: messages[outcome] };
+    return { outcome, bonusPayout, durabilityLost, correctCount, phaseResults, lineSnapped, bossType: bt, tournamentMultiplier, message: messages[outcome] };
 }
 
 // ─── CAST TRANSACTION LAYER (#613) ───────────────────────────────────────────
@@ -1207,8 +1259,76 @@ function recordCatalogCatch(f, fish, weightLbs) {
     if (!f.catalog || typeof f.catalog !== 'object') f.catalog = {};
     const entry = f.catalog[fish.id] ?? { count: 0, heaviest: 0 };
     entry.count += 1;
-    if (weightLbs > (entry.heaviest ?? 0)) entry.heaviest = weightLbs;
+    if (weightLbs > heaviestOnScale(entry)) {
+        entry.heaviest = weightLbs;
+        entry.scale    = FISH_WEIGHT_SCALE;
+    }
     f.catalog[fish.id] = entry;
+}
+
+/**
+ * The heaviest weight on a catalog entry, or 0 when it was weighed on an older
+ * weight table and so is not comparable (see FISH_WEIGHT_SCALE).
+ */
+function heaviestOnScale(entry) {
+    return entry?.scale === FISH_WEIGHT_SCALE ? (entry.heaviest ?? 0) : 0;
+}
+
+/**
+ * A fish's weight in lbs for the size tier it rolled: somewhere in the species'
+ * own range (FISH_WEIGHTS, falling back to its tier's), scaled by the size.
+ */
+function rollFishWeight(fish, sizeTier) {
+    const range = FISH_WEIGHTS[fish.id] ?? FISH_BASE_WEIGHTS[fish.tier] ?? { min: 1, max: 10 };
+    const lbs   = (range.min + secureRandom() * (range.max - range.min)) * (sizeTier?.weightMult ?? 1);
+    // One decimal, except under a pound, where that would round a minnow to 0.
+    return lbs < 1 ? Math.max(0.01, parseFloat(lbs.toFixed(2))) : parseFloat(lbs.toFixed(1));
+}
+
+/**
+ * Everything landing a fish writes about it: the species catalog, the
+ * per-species personal best, the heaviest-ever catch and the heaviest of the
+ * week. A personal best is per species — the heaviest of that fish the player
+ * has landed — and the first of a species is a first catch rather than a best.
+ */
+function recordLandedFish(user, fish, weightLbs, payout, username) {
+    const f = user.fishing;
+    const prior = f.catalog?.[fish.id];
+    const firstCatch = !(prior?.count > 0);
+    const previousBest = heaviestOnScale(prior);
+    let isPersonalBest = false, newRecord = null;
+
+    if (fish.sizeVariance && weightLbs > 0) {
+        isPersonalBest = !firstCatch && weightLbs > previousBest;
+
+        const heaviestEver = f.personalBest?.scale === FISH_WEIGHT_SCALE ? (f.personalBest.weight ?? 0) : 0;
+        if (weightLbs > heaviestEver) {
+            f.personalBest = { fish: fish.name, weight: weightLbs, payout, caughtAt: new Date(), scale: FISH_WEIGHT_SCALE };
+        }
+
+        // Per-player heaviest catch of the current week. The server-wide
+        // records live on the guild document (see checkAndUpdateWorldRecord).
+        // Roll the window over first, otherwise the "weekly" best is just an
+        // all-time best that can never be beaten by a lighter fish.
+        const weekStart = f.weeklyRecord?.weekStart;
+        const weekExpired = !weekStart || (Date.now() - new Date(weekStart).getTime()) >= WEEK_MS;
+        if (weekExpired) {
+            f.weeklyRecord = { fish: null, weight: 0, userId: null, username: null, weekStart: new Date() };
+        }
+        if (weightLbs > (f.weeklyRecord.weight ?? 0)) {
+            f.weeklyRecord = {
+                fish:      fish.name,
+                weight:    weightLbs,
+                userId:    user.userId ?? null,
+                username:  username ?? f.weeklyRecord.username ?? null,
+                weekStart: f.weeklyRecord.weekStart ?? new Date(),
+            };
+            newRecord = { type: 'weekly', fish: fish.name, weight: weightLbs };
+        }
+    }
+
+    recordCatalogCatch(f, fish, weightLbs);
+    return { isPersonalBest, firstCatch, previousBest, newRecord };
 }
 
 /**
@@ -1275,23 +1395,69 @@ function revertEscapedCast(user, snapshot, result) {
 /**
  * A rare (optional) reel-in was missed: downgrade the payout by ~65% to
  * simulate Uncommon yield. Mutates the user and the result in place.
+ *
+ * `snapshot` is the pre-cast snapshotCastRewards reading. executeCast already
+ * recorded the full payout as the best payout (and on the personal-best entry);
+ * both are brought back down to what the player actually received, so the
+ * profile never shows a payout that was never paid.
  */
-function downgradeOptionalMiss(user, result) {
-    const reduction = Math.round(result.finalPayout * 0.65);
+function downgradeOptionalMiss(user, result, snapshot = null, { locationId = null, username = null } = {}) {
+    const f = user.fishing;
+    const fullPayout = result.finalPayout;
+    const reduction  = Math.round(fullPayout * 0.65);
     result.finalPayout        -= reduction;
     result.rawPayout          -= reduction;
     user.balance              -= reduction;
-    user.fishing.totalEarned  -= reduction;
-    user.fishing.dailyCoins   -= reduction;
+    f.totalEarned             -= reduction;
+    f.dailyCoins              -= reduction;
     result.tier = 'uncommon';
+
+    // The rare fish got away; what comes up instead is an actual Uncommon, not
+    // the rare species relabelled. Everything landing the rare one recorded —
+    // its catalog entry, its weight records, its material drop — is taken back
+    // and the Uncommon is recorded in its place, at the same size.
+    if (result.fish && snapshot) {
+        f.catalog   = snapshot.catalog;
+        f.materials = snapshot.materials;
+        if (snapshot.personalBest !== null) f.personalBest = snapshot.personalBest;
+        if (snapshot.weeklyRecord !== null) f.weeklyRecord = snapshot.weeklyRecord;
+
+        const fish      = rollFish('uncommon', locationId ?? f.activeLocation);
+        const sizeTier  = SIZE_TIERS.find(t => t.id === result.sizeTierId) ?? SIZE_TIERS.find(t => t.id === 'average');
+        const weightLbs = fish.sizeVariance ? rollFishWeight(fish, sizeTier) : 0;
+        const landed    = recordLandedFish(user, fish, weightLbs, result.finalPayout, username);
+        Object.assign(result, {
+            escapedFish:  result.fish,
+            fish,
+            weightLbs,
+            sizeLabel:    weightLbs > 0 ? sizeTier.label : null,
+            specialDrop:  null,
+            traitEffects: Object.keys(fish.traits ?? {}).filter(t => fish.traits[t]),
+            ...landed,
+        });
+    }
+
+    if (reduction > 0 && f.bestPayout === fullPayout) {
+        f.bestPayout = Math.max(snapshot?.bestPayout ?? 0, result.finalPayout);
+    }
+    if (f.personalBest && result.fish && f.personalBest.fish === result.fish.name && f.personalBest.weight === result.weightLbs) {
+        f.personalBest.payout = result.finalPayout;
+    }
+    // A boss fight is rolled off a rare-or-better catch. The player was just
+    // told the catch slipped to Uncommon, so it no longer qualifies.
+    result.bossEncounter = null;
+    user.markModified?.('fishing');
 }
 
 
 /**
  * The post-roll bonus stack: pity counter, pet yield, featured-spot bonus,
- * Wilderness district bonus (clamped to the daily hard cap), and the
- * best-payout stat. Mutates the user and annotates the result with
- * petYieldBonus / featuredSpotBonus / wildernessBonus for the renderer.
+ * Wilderness district bonus, and the best-payout stat. Each bonus stacks on the
+ * payout as it stands after the one before it, and every one of them is clamped
+ * to the headroom left under the daily hard cap — the cap applyPayoutModifiers
+ * enforces on the roll itself, which a bonus added afterwards must not walk
+ * past. Mutates the user and annotates the result with petYieldBonus /
+ * featuredSpotBonus / wildernessBonus for the renderer.
  */
 function applyCastBonuses(user, result, { petFishYieldPct = 0, isFeaturedSpot = false, featuredPayoutBonus = 0, wildernessActive = false } = {}) {
     // Pity counter: reset on rare+ success, increment otherwise
@@ -1301,40 +1467,21 @@ function applyCastBonuses(user, result, { petFishYieldPct = 0, isFeaturedSpot = 
         user.fishing.sinceRare = (user.fishing.sinceRare ?? 0) + 1;
     }
 
-    if (result.success && result.finalPayout > 0 && petFishYieldPct > 0) {
-        const bonus = Math.round(result.finalPayout * petFishYieldPct / 100);
-        if (bonus > 0) {
-            user.balance             += bonus;
-            user.fishing.totalEarned += bonus;
-            user.fishing.dailyCoins  += bonus;
-            result.finalPayout       += bonus;
-            result.petYieldBonus      = bonus;
-        }
-    }
+    const credit = (rate, field) => {
+        if (!result.success || !(result.finalPayout > 0) || !(rate > 0)) return;
+        const headroom = LIMITS.DAILY_HARD_CAP - (user.fishing.dailyCoins ?? 0);
+        const bonus    = Math.max(0, Math.min(Math.round(result.finalPayout * rate), headroom));
+        if (bonus <= 0) return;
+        user.balance             += bonus;
+        user.fishing.totalEarned += bonus;
+        user.fishing.dailyCoins  += bonus;
+        result.finalPayout       += bonus;
+        result[field]             = bonus;
+    };
 
-    if (result.success && result.finalPayout > 0 && isFeaturedSpot) {
-        const featBonus = Math.round(result.finalPayout * featuredPayoutBonus);
-        if (featBonus > 0) {
-            user.balance             += featBonus;
-            user.fishing.totalEarned += featBonus;
-            user.fishing.dailyCoins  += featBonus;
-            result.finalPayout       += featBonus;
-            result.featuredSpotBonus  = featBonus;
-        }
-    }
-
-    if (result.success && result.finalPayout > 0 && wildernessActive) {
-        const remaining = LIMITS.DAILY_HARD_CAP - user.fishing.dailyCoins;
-        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
-        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
-        if (bonus > 0) {
-            user.balance             += bonus;
-            user.fishing.totalEarned += bonus;
-            user.fishing.dailyCoins  += bonus;
-            result.finalPayout       += bonus;
-            result.wildernessBonus    = bonus;
-        }
-    }
+    credit(petFishYieldPct / 100, 'petYieldBonus');
+    if (isFeaturedSpot)   credit(featuredPayoutBonus, 'featuredSpotBonus');
+    if (wildernessActive) credit(WILDERNESS_YIELD_BONUS, 'wildernessBonus');
 
     if (result.success && result.finalPayout > user.fishing.bestPayout) {
         user.fishing.bestPayout = result.finalPayout;
@@ -1388,6 +1535,68 @@ async function commitCast(user, balanceAtLoad, { payoutKey } = {}) {
     return { payoutOwed: payout.credited ? 0 : balanceDelta };
 }
 
+// ─── KEEP / RELEASE ───────────────────────────────────────────────────────────
+//
+// A landed fish is sold on the spot — its coins are in the result. The result
+// then offers the choice to let it go instead: the coins go back, and the angler
+// gets the catch's XP a second time and a charge of river karma (a better shot
+// at a rare fish next cast). It is a real trade — coins now for progress and
+// luck — so it has to cost exactly what the catch paid.
+//
+// The cast records what it would cost as `pendingRelease`, keyed by the
+// interaction that cast it. Only that cast's buttons can spend it, only once,
+// and the next cast replaces it — so a stale result cannot release a fish the
+// angler has since moved on from.
+
+/** The pending-release record a cast leaves for its result's buttons. */
+function recordPendingRelease(user, castId, result) {
+    const f = user.fishing;
+    const releasable = result.success && result.catchType === 'fish' && result.fish && (result.finalPayout ?? 0) > 0;
+    f.pendingRelease = releasable ? {
+        castId,
+        fishId:   result.fish.id,
+        fishName: result.fish.name,
+        payout:   result.finalPayout,
+        xp:       Math.max(1, result.xpEarned ?? 0),
+        at:       new Date(),
+    } : null;
+    user.markModified?.('fishing');
+    return f.pendingRelease;
+}
+
+/** The release `castId`'s result may still offer, or null when it is gone. */
+function releasePlan(user, castId) {
+    const pending = user.fishing?.pendingRelease;
+    if (!pending || pending.castId !== castId || !(pending.payout > 0)) return null;
+    return pending;
+}
+
+/**
+ * Applies a release whose coins have already been taken back (the caller does
+ * that atomically, with chargeExact, so a player who has spent them since is
+ * refused rather than overdrawn). Returns { xp, karma, levelUp }.
+ */
+function applyRelease(user, plan) {
+    const f = user.fishing;
+    f.totalEarned  = Math.max(0, (f.totalEarned ?? 0) - plan.payout);
+    // The coins never happened, so they stop counting towards today's caps.
+    f.dailyCoins   = Math.max(0, (f.dailyCoins ?? 0) - plan.payout);
+    f.fishReleased = (f.fishReleased ?? 0) + 1;
+    f.releaseKarma = Math.min(RELEASE_KARMA_MAX, (f.releaseKarma ?? 0) + 1);
+    f.pendingRelease = null;
+    const lv = applyXp(user, plan.xp);
+    user.markModified('fishing');
+    return { xp: plan.xp, karma: f.releaseKarma, levelUp: lv.leveledUp ? lv : null };
+}
+
+/** Keeping the fish: the coins stay, and the release is no longer on offer. */
+function declineRelease(user, castId) {
+    if (!releasePlan(user, castId)) return false;
+    user.fishing.pendingRelease = null;
+    user.markModified('fishing');
+    return true;
+}
+
 // ─── FORMATTING HELPERS ───────────────────────────────────────────────────────
 
 const formatMs = grind.formatMs;
@@ -1428,7 +1637,19 @@ module.exports = {
     tickConsumables,
     executeCast,
     resolveBossEncounter,
+    resolveBossPhases,
     rollBossType,
+    rollBossFight,
+    rollFightCues,
+    scoreFightMove,
+    rollFishWeight,
+    recordLandedFish,
+    castFatigueMult,
+    recordPendingRelease,
+    releasePlan,
+    applyRelease,
+    declineRelease,
+    RELEASE_KARMA_MAX,
     assignDailyFishQuests,
     updateFishQuestProgress,
     prepareCastUser,

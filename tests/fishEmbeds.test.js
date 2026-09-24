@@ -151,16 +151,17 @@ describe('buildCastEmbed — treasure', () => {
         const embed = cast(fishResult({ catchType: 'treasure', treasureItem: treasure, finalPayout: 4321 }));
         expect(embed.data.title).toContain('Treasure!');
         expect(fieldsOf(embed).Reward).toBe('**🪙4,321**');
-        expect(fieldsOf(embed)['⚠️ Daily Cap']).toBeUndefined();
+        expect(fieldsOf(embed)['Daily Limits']).toBeUndefined();
     });
 
-    test('a capped treasure haul warns that rewards were reduced', () => {
+    test('a capped treasure haul says the cap took it, and what it would have paid', () => {
         const embed = cast(fishResult({
-            catchType: 'treasure', treasureItem: treasure, finalPayout: 100,
-            levelUp: { oldLevel: 9, newLevel: 10 }, cappedByHard: true,
+            catchType: 'treasure', treasureItem: treasure, finalPayout: 0,
+            levelUp: { oldLevel: 9, newLevel: 10 }, cappedByHard: true, uncappedPayout: 240,
         }));
         const fields = fieldsOf(embed);
-        expect(fields['⚠️ Daily Cap']).toContain('Daily coin limit reached');
+        expect(fields['Daily Limits']).toContain('Daily coin cap reached');
+        expect(fields['Daily Limits']).toContain('🪙240');
         expect(fields['⬆️ Level Up!']).toContain('**9** → **10**');
     });
 });
@@ -228,9 +229,10 @@ describe('buildCastEmbed — fish, optional fields', () => {
         expect(embed.data.title).not.toContain('lbs');
     });
 
-    test('a capped payout strikes the number through and names the cap', () => {
-        const embed = cast(fishResult({ cappedByHard: true, finalPayout: 40 }));
-        expect(fieldsOf(embed).Reward).toBe('~~🪙40~~ (daily cap)');
+    test('a capped payout says nothing was paid and names the cap', () => {
+        // A capped roll pays 0; striking through a zero told the player nothing.
+        const embed = cast(fishResult({ cappedByHard: true, finalPayout: 0 }));
+        expect(fieldsOf(embed).Reward).toBe('Nothing *(daily cap reached)*');
     });
 
     test('weather that helps this location becomes a banner above the flavour', () => {
@@ -478,13 +480,12 @@ describe('buildFooter', () => {
 
     // The time-of-day segment is the one part that follows the clock rather than
     // the fixture, so it is asserted as "one of the four" rather than pinned.
-    test('a plain footer is the cooldown, the weather and the time of day', () => {
+    test('a plain footer is the weather and the time of day', () => {
         const segments = buildFooter(makeUser()).split(' • ');
-        expect(segments).toHaveLength(3);
-        expect(segments[0]).toBe('Cooldown: 45s');
-        expect(segments[1]).toBe('☀️ Clear Skies');
+        expect(segments).toHaveLength(2);
+        expect(segments[0]).toBe('☀️ Clear Skies');
         expect(Object.values(TIME_OF_DAY_BONUSES).map(t => t.description))
-            .toContain(segments[2]);
+            .toContain(segments[1]);
     });
 
     test('each queued consumable adds its own segment', () => {
@@ -492,9 +493,9 @@ describe('buildFooter', () => {
             activeBait: 'worms', activeBaitCastsLeft: 4,
             activeLuck: true, activeXpScroll: true,
         }));
-        expect(footer).toContain('Bait (4 casts left)');
-        expect(footer).toContain('Luck (queued)');
-        expect(footer).toContain('XP Scroll (queued)');
+        expect(footer).toContain('Bait ×4');
+        expect(footer).toContain('Luck ready');
+        expect(footer).toContain('XP Scroll ready');
     });
 
     test('no consumables means no consumable segments', () => {

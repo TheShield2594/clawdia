@@ -13,7 +13,7 @@ const {
     applyCastBonuses,
     rollWinterHuntMaterial,
 } = require('../src/services/fishService');
-const { LIMITS, ROD_TIERS } = require('../src/data/fishData');
+const { LIMITS, ROD_TIERS, FISH, FISH_WEIGHT_SCALE } = require('../src/data/fishData');
 
 function makeUser(fishingOverrides = {}) {
     const bamboo = ROD_TIERS[0];
@@ -149,6 +149,67 @@ describe('downgradeOptionalMiss', () => {
         expect(result.tier).toBe('uncommon');
         expect(user.balance).toBe(makeUser().balance + 350);
     });
+
+    test('the best payout falls back to what was actually paid, not the full roll', () => {
+        const user = makeUser({ bestPayout: 200 });
+        const snapshot = snapshotCastRewards(user);
+        // executeCast recorded the full roll as the new best.
+        user.fishing.bestPayout = 1000;
+        const result = { success: true, finalPayout: 1000, rawPayout: 1000, tier: 'rare' };
+
+        downgradeOptionalMiss(user, result, snapshot);
+        expect(user.fishing.bestPayout).toBe(350);
+
+        // …and when the old best beats the downgraded payout, the old best stands.
+        const user2 = makeUser({ bestPayout: 600 });
+        const snapshot2 = snapshotCastRewards(user2);
+        user2.fishing.bestPayout = 1000;
+        downgradeOptionalMiss(user2, { success: true, finalPayout: 1000, rawPayout: 1000, tier: 'rare' }, snapshot2);
+        expect(user2.fishing.bestPayout).toBe(600);
+    });
+
+    test('a heaviest-ever entry set by the catch records the downgraded payout', () => {
+        const user = makeUser({ personalBest: { fish: 'Pike', weight: 12, payout: 1000 } });
+        const result = { success: true, finalPayout: 1000, rawPayout: 1000, tier: 'rare', weightLbs: 12, fish: { name: 'Pike' } };
+        downgradeOptionalMiss(user, result);
+        expect(user.fishing.personalBest.payout).toBe(350);
+    });
+
+    test('the rare that got away is swapped for a real Uncommon, recorded in its place', () => {
+        const user = makeUser();
+        const snapshot = snapshotCastRewards(user);
+        const rare = FISH.salmon;
+        // What executeCast recorded for the rare catch.
+        user.fishing.catalog = { [rare.id]: { count: 1, heaviest: 20, scale: FISH_WEIGHT_SCALE } };
+        user.fishing.materials = { [rare.specialDrop?.itemId ?? 'x']: 1 };
+        const result = {
+            success: true, catchType: 'fish', fish: rare, tier: 'rare', finalPayout: 1000, rawPayout: 1000,
+            sizeTierId: 'large', sizeLabel: 'Large', weightLbs: 20, specialDrop: rare.specialDrop ?? null,
+        };
+
+        downgradeOptionalMiss(user, result, snapshot, { locationId: 'pond', username: 'bob' });
+
+        expect(result.tier).toBe('uncommon');
+        expect(result.fish.tier).toBe('uncommon');
+        expect(result.escapedFish).toBe(rare);
+        expect(result.specialDrop).toBeNull();
+        expect(user.fishing.materials).toEqual({});
+        // The rare never joins the catalog; the Uncommon does.
+        expect(user.fishing.catalog[rare.id]).toBeUndefined();
+        expect(user.fishing.catalog[result.fish.id].count).toBe(1);
+        expect(result.firstCatch).toBe(true);
+        if (result.fish.sizeVariance) {
+            expect(result.sizeLabel).toBe('Large');
+            expect(result.weightLbs).toBeGreaterThan(0);
+        }
+    });
+
+    test('a catch downgraded to Uncommon no longer starts a boss fight', () => {
+        const user = makeUser();
+        const result = { success: true, finalPayout: 1000, rawPayout: 1000, tier: 'rare', bossEncounter: { fish: {}, tier: 'rare' } };
+        downgradeOptionalMiss(user, result, snapshotCastRewards(user));
+        expect(result.bossEncounter).toBeNull();
+    });
 });
 
 describe('applyCastBonuses', () => {
@@ -184,6 +245,30 @@ describe('applyCastBonuses', () => {
         const result = { success: true, tier: 'common', finalPayout: 1000 };
         applyCastBonuses(user, result, { wildernessActive: true });
         expect(result.wildernessBonus).toBe(5);
+    });
+
+    test('pet and featured-spot bonuses are clamped to the daily hard cap too', () => {
+        const user = makeUser({ dailyCoins: LIMITS.DAILY_HARD_CAP - 30 });
+        const result = { success: true, tier: 'common', finalPayout: 1000 };
+        applyCastBonuses(user, result, {
+            petFishYieldPct: 10,          // wants +100, 30 of headroom
+            isFeaturedSpot: true,
+            featuredPayoutBonus: 0.25,    // no headroom left
+            wildernessActive: true,
+        });
+        expect(result.petYieldBonus).toBe(30);
+        expect(result.featuredSpotBonus).toBeUndefined();
+        expect(result.wildernessBonus).toBeUndefined();
+        expect(user.fishing.dailyCoins).toBe(LIMITS.DAILY_HARD_CAP);
+        expect(user.balance).toBe(1000 + 30);
+    });
+
+    test('a player already at the hard cap earns no bonus at all', () => {
+        const user = makeUser({ dailyCoins: LIMITS.DAILY_HARD_CAP });
+        const result = { success: true, tier: 'common', finalPayout: 500 };
+        applyCastBonuses(user, result, { petFishYieldPct: 50, isFeaturedSpot: true, featuredPayoutBonus: 0.25, wildernessActive: true });
+        expect(result.finalPayout).toBe(500);
+        expect(user.balance).toBe(1000);
     });
 
     test('failed casts earn no bonuses', () => {
