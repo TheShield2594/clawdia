@@ -3112,5 +3112,338 @@
     "rim": "sapphire-blue",
     "rimHex": "#3498DB",
     "prompt": "Achievement badge icon: an ornate antique skeleton key whose bow holds a glowing keyhole-shaped gem. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 346,
+    "key": "achievement:first_message",
+    "file": "achievement__first_message.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a single small white speech bubble with three dots inside, a tiny sparkle at its corner. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 347,
+    "key": "achievement:chatty",
+    "file": "achievement__chatty.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: two overlapping speech bubbles, one blue and one white, bouncing off each other. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 348,
+    "key": "achievement:level_10",
+    "file": "achievement__level_10.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a single bright yellow star rising on a short upward arrow, a small sparkle beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 349,
+    "key": "achievement:first_blood",
+    "file": "achievement__first_blood.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a single wooden hunting arrow with a red fletching stuck in a round straw target. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 350,
+    "key": "achievement:gone_fishing",
+    "file": "achievement__gone_fishing.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a bobbing red-and-white fishing float on a calm blue ripple, a thin line rising out of frame. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 351,
+    "key": "achievement:first_footsteps",
+    "file": "achievement__first_footsteps.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a single worn leather hiking boot beside a trail of three small footprints in the dirt. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 352,
+    "key": "achievement:first_companion",
+    "file": "achievement__first_companion.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a single brown paw print inside a small heart-shaped name tag on a red collar loop. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 353,
+    "key": "achievement:lucky",
+    "file": "achievement__lucky.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a single green four-leaf clover resting on a white six-sided die. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 354,
+    "key": "achievement:petty_thief",
+    "file": "achievement__petty_thief.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a small brown coin pouch with a single gold coin slipping out, a black eye-mask lying beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 355,
+    "key": "achievement:hunter_bronze",
+    "file": "achievement__hunter_bronze.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a crossed pair of wooden hunting bows behind a large bronze arrowhead trophy. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 356,
+    "key": "achievement:angler_bronze",
+    "file": "achievement__angler_bronze.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a crossed pair of fishing rods behind a large bronze fish-shaped trophy. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 357,
+    "key": "achievement:miner_bronze",
+    "file": "achievement__miner_bronze.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a crossed pair of iron pickaxes behind a large raw bronze nugget glinting in a rocky cave wall. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 358,
+    "key": "achievement:gambler_bronze",
+    "file": "achievement__gambler_bronze.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Achievement badge icon: a crossed pair of playing cards behind a large bronze poker chip. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 359,
+    "key": "achievement:chatterbox",
+    "file": "achievement__chatterbox.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a brass megaphone blasting a burst of colorful speech bubbles. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 360,
+    "key": "achievement:level_25",
+    "file": "achievement__level_25.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: two stacked golden stars on a small blue chevron rank insignia. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 361,
+    "key": "achievement:seasoned_hunter",
+    "file": "achievement__seasoned_hunter.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a leather quiver packed with feathered arrows, a curved hunting dagger strapped to its side. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 362,
+    "key": "achievement:weekend_angler",
+    "file": "achievement__weekend_angler.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a wicker fishing creel basket with its lid open and a fish tail poking out, a fishing hook hanging beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 363,
+    "key": "achievement:angler_pro",
+    "file": "achievement__angler_pro.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a sleek fishing reel spinning with a taut line, a silver fish leaping beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 364,
+    "key": "achievement:week_warrior",
+    "file": "achievement__week_warrior.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a small torn calendar page with a row of check marks, a small flame flickering above it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 365,
+    "key": "achievement:fortnight",
+    "file": "achievement__fortnight.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a bright full moon behind two small calendar pages side by side, a small flame between them. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 366,
+    "key": "achievement:quest_novice",
+    "file": "achievement__quest_novice.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a rolled parchment quest scroll tied with a red ribbon and sealed with a wax stamp. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 367,
+    "key": "achievement:coin_hoarder",
+    "file": "achievement__coin_hoarder.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a round clay piggy bank stuffed with gold coins, one coin balanced on the slot. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 368,
+    "key": "achievement:wealthy",
+    "file": "achievement__wealthy.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a large faceted blue diamond resting on a tidy stack of gold bars. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 369,
+    "key": "achievement:gambler",
+    "file": "achievement__gambler.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a fanned hand of playing cards showing a royal flush, a tall stack of poker chips beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 370,
+    "key": "achievement:thief",
+    "file": "achievement__thief.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a sly masked raccoon clutching a stolen gold coin to its chest. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 371,
+    "key": "achievement:robber_baron",
+    "file": "achievement__robber_baron.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a black top hat with a purple band beside a bulging sack of loot marked with a coin symbol. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 372,
+    "key": "achievement:wayfarer",
+    "file": "achievement__wayfarer.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a brass compass with its lid open, lying on a folded trail map beside a walking staff. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 373,
+    "key": "achievement:four_corners",
+    "file": "achievement__four_corners.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a round world map divided into five colored regions, a small flag planted in each one. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 374,
+    "key": "achievement:loremonger",
+    "file": "achievement__loremonger.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a leather-bound journal bursting with loose torn parchment pages, a quill tucked in its spine. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 375,
+    "key": "achievement:relic_runner",
+    "file": "achievement__relic_runner.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: an ancient clay urn with painted glyphs carried in a rope sling, dust puffing around it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 376,
+    "key": "achievement:trap_connoisseur",
+    "file": "achievement__trap_connoisseur.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a sprung iron jaw trap with a small bandage stuck on one tooth and a crumpled receipt beside it. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 377,
+    "key": "achievement:full_house",
+    "file": "achievement__full_house.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a cozy little wooden pet house with three different paw prints on the roof. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 378,
+    "key": "achievement:well_fed",
+    "file": "achievement__well_fed.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a heaping pet food bowl with a meaty bone on top, a small paw print on the bowl. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 379,
+    "key": "achievement:hunter_silver",
+    "file": "achievement__hunter_silver.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a crossed pair of wooden hunting bows behind a large silver arrowhead trophy. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 380,
+    "key": "achievement:angler_silver",
+    "file": "achievement__angler_silver.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a crossed pair of fishing rods behind a large silver fish-shaped trophy. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 381,
+    "key": "achievement:miner_silver",
+    "file": "achievement__miner_silver.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a crossed pair of iron pickaxes behind a large raw silver nugget glinting in a rocky cave wall. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 382,
+    "key": "achievement:gambler_silver",
+    "file": "achievement__gambler_silver.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Achievement badge icon: a crossed pair of playing cards behind a large silver poker chip. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
   }
 ]

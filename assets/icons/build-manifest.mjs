@@ -425,8 +425,8 @@ explore.RELIC_LIST.forEach((r) => add(`relic:${r.slug}`, RELIC_RARITY[r.rarity],
 // Rarity comes from xpReward via the shared scale in src/utils/achievementTier.js
 // (also the unlock card's label and the embed colour), which lines up with the
 // rim palette.
-// Subjects are filled in as they're generated (issue: remaining achievement
-// icons). Secret achievements do get art, but it must only ever render after the
+// Every built-in achievement has a subject (the last 37 came in issue #1108).
+// Secret achievements do get art, but it must only ever render after the
 // achievement is earned — a locked list or dashboard must not show it.
 const { ACHIEVEMENTS } = require('../../src/data/achievements.js');
 const ACHIEVEMENT_STYLE = (rarityName) => {
@@ -483,6 +483,45 @@ const ACHIEVEMENT_SUBJECT = {
     gambler_gold:        GAMBLER_BADGE('gold'),
     no_blank_spaces:     'an unrolled parchment map completely filled in with forests, mountains and rivers, a quill pen resting on it.',
     keeper_of_secrets:   'an ornate antique skeleton key whose bow holds a glowing keyhole-shaped gem.',
+    // common (issue #1108)
+    first_message:   'a single small white speech bubble with three dots inside, a tiny sparkle at its corner.',
+    chatty:          'two overlapping speech bubbles, one blue and one white, bouncing off each other.',
+    level_10:        'a single bright yellow star rising on a short upward arrow, a small sparkle beside it.',
+    first_blood:     'a single wooden hunting arrow with a red fletching stuck in a round straw target.',
+    gone_fishing:    'a bobbing red-and-white fishing float on a calm blue ripple, a thin line rising out of frame.',
+    first_footsteps: 'a single worn leather hiking boot beside a trail of three small footprints in the dirt.',
+    first_companion: 'a single brown paw print inside a small heart-shaped name tag on a red collar loop.',
+    lucky:           'a single green four-leaf clover resting on a white six-sided die.',
+    petty_thief:     'a small brown coin pouch with a single gold coin slipping out, a black eye-mask lying beside it.',
+    hunter_bronze:   HUNTER_BADGE('bronze'),
+    angler_bronze:   ANGLER_BADGE('bronze'),
+    miner_bronze:    MINER_BADGE('bronze'),
+    gambler_bronze:  GAMBLER_BADGE('bronze'),
+    // uncommon (issue #1108)
+    chatterbox:       'a brass megaphone blasting a burst of colorful speech bubbles.',
+    level_25:         'two stacked golden stars on a small blue chevron rank insignia.',
+    seasoned_hunter:  'a leather quiver packed with feathered arrows, a curved hunting dagger strapped to its side.',
+    weekend_angler:   'a wicker fishing creel basket with its lid open and a fish tail poking out, a fishing hook hanging beside it.',
+    angler_pro:       'a sleek fishing reel spinning with a taut line, a silver fish leaping beside it.',
+    week_warrior:     'a small torn calendar page with a row of check marks, a small flame flickering above it.',
+    fortnight:        'a bright full moon behind two small calendar pages side by side, a small flame between them.',
+    quest_novice:     'a rolled parchment quest scroll tied with a red ribbon and sealed with a wax stamp.',
+    coin_hoarder:     'a round clay piggy bank stuffed with gold coins, one coin balanced on the slot.',
+    wealthy:          'a large faceted blue diamond resting on a tidy stack of gold bars.',
+    gambler:          'a fanned hand of playing cards showing a royal flush, a tall stack of poker chips beside it.',
+    thief:            'a sly masked raccoon clutching a stolen gold coin to its chest.',
+    robber_baron:     'a black top hat with a purple band beside a bulging sack of loot marked with a coin symbol.',
+    wayfarer:         'a brass compass with its lid open, lying on a folded trail map beside a walking staff.',
+    four_corners:     'a round world map divided into five colored regions, a small flag planted in each one.',
+    loremonger:       'a leather-bound journal bursting with loose torn parchment pages, a quill tucked in its spine.',
+    relic_runner:     'an ancient clay urn with painted glyphs carried in a rope sling, dust puffing around it.',
+    trap_connoisseur: 'a sprung iron jaw trap with a small bandage stuck on one tooth and a crumpled receipt beside it.',
+    full_house:       'a cozy little wooden pet house with three different paw prints on the roof.',
+    well_fed:         'a heaping pet food bowl with a meaty bone on top, a small paw print on the bowl.',
+    hunter_silver:    HUNTER_BADGE('silver'),
+    angler_silver:    ANGLER_BADGE('silver'),
+    miner_silver:     MINER_BADGE('silver'),
+    gambler_silver:   GAMBLER_BADGE('silver'),
 };
 const ACHIEVEMENT_IDS = new Set(ACHIEVEMENTS.map((a) => a.id));
 Object.entries(ACHIEVEMENT_SUBJECT).forEach(([id, subject]) => {

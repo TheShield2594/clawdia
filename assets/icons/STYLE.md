@@ -343,6 +343,17 @@ Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
 
+- **2026-09-24** — **Achievement badges: 72 of 72.** Generated the remaining 37
+  (issue #1108): all 13 Common (silver-grey rim) and all 24 Uncommon
+  (emerald-green rim), same settings as the rest (`gpt_image_2_5`,
+  `quality: high`, `1k`, transparent, steel_rifle anchor). High quality now
+  preflights at 1.5 credits per image, not 2, so the run cost ~55.5. The
+  Bronze and Silver ladder tiers use the existing `*_BADGE(metal)` templates, so
+  they share the Gold badges' silhouettes. `week_warrior` and `fortnight` carry a
+  small flame so the streak progression through `devoted` and `century` stays
+  readable. Job ids + urls in `icons.map.json` (now 383 items). Run the
+  **Bake item icons** workflow on the branch to bake the new PNGs into
+  `src/assets/item-icons/`.
 - **2026-09-23** — **Achievement badges: 35 of 72.** Achievements are often
   abstract ("have 100 coins", "30 days without a warning"), so they get their own
   `ACHIEVEMENT_STYLE`/`achievementPrompt` in `build-manifest.mjs`: a round medal
