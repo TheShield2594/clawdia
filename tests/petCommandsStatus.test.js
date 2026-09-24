@@ -130,7 +130,7 @@ describe('/pet status card', () => {
         expect(card.embeds).toHaveLength(1);
         expect(repliedText({ replies: [card] })).toContain('Pet 1 of 1');
         expect(card.components.flatMap(r => r.components.map(c => c.data.custom_id)))
-            .toEqual([`pet_play:${USER}:0`, `pet_rest:${USER}:0`, `pet_showcase:${USER}:0`]);
+            .toEqual([`pet_play:${USER}:0:pet-dog`, `pet_rest:${USER}:0:pet-dog`, `pet_showcase:${USER}:0:pet-dog`]);
         // A day of decay at 10/day, written back by the status save.
         expect(stored().pets[0].hunger).toBeCloseTo(70, 3);
     });
@@ -369,5 +369,74 @@ describe('/pet status — showcase', () => {
         const { i } = await press(interaction, 'showcase', 0);
 
         expect(i.reply.mock.calls[0][0].content).toBe('❌ Failed to save. Please try again.');
+    });
+});
+
+describe('/pet status — review fixes', () => {
+    const pressId = (interaction, action, idx, petId) => interaction.press({ customId: `pet_${action}:${USER}:${idx}:${petId}` });
+
+    test('an action button follows its pet by id when the roster shifts under the open card', async () => {
+        seedUser({ pets: [makePet({ petId: 'cat' }), makePet({ petId: 'dog' }), makePet({ petId: 'fish' })] });
+        const interaction = await openStatus();
+
+        // The cat is released while the card is open: the dog moves from index 1
+        // to 0 and the fish takes index 1.
+        stored().pets.splice(0, 1);
+        await pressId(interaction, 'play', 1, 'pet-dog');
+
+        const [dog, fish] = stored().pets;
+        expect(dog.lastPlay).toBeInstanceOf(Date);
+        expect(fish.lastPlay).toBeUndefined();
+    });
+
+    test('an action button for a pet that is gone says so rather than picking another', async () => {
+        seedUser({ pets: [makePet({ petId: 'cat' }), makePet({ petId: 'dog' })] });
+        const interaction = await openStatus();
+
+        stored().pets.splice(1, 1);
+        const i = await pressId(interaction, 'play', 0, 'pet-dog');
+
+        expect(i.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Pet not found.' }));
+        expect(stored().pets[0].lastPlay).toBeUndefined();
+    });
+
+    test('showcase is on a per-pet cooldown, so it cannot be mashed', async () => {
+        seedUser({ pets: [makePet({ name: 'Rex' })] });
+        const interaction = await openStatus();
+
+        await press(interaction, 'showcase', 0);
+        const { i } = await press(interaction, 'showcase', 0);
+
+        expect(i.reply.mock.calls[0][0].content).toBe('📷 **Rex** was just shown off! Showcase again in **10m**.');
+        expect(stored().pets[0].weeklyInteractions).toBe(1);
+    });
+
+    test('Pet of the Week credit stops at the daily cap, but the care still happens', async () => {
+        const today = Math.floor(Date.now() / DAY);
+        seedUser({ pets: [makePet({ weeklyInteractions: 7, interactionDay: today, interactionsToday: 3 })] });
+        const interaction = await openStatus();
+
+        await press(interaction, 'play', 0);
+
+        expect(stored().pets[0].lastPlay).toBeInstanceOf(Date);
+        expect(stored().pets[0].xp).toBe(10);
+        expect(stored().pets[0].weeklyInteractions).toBe(7);
+    });
+
+    test('resting settles pending decay first, so an earlier rest window keeps its half-speed credit', async () => {
+        seedUser({ pets: [makePet({ hunger: 80 })] });
+        const interaction = await openStatus();
+
+        // Three hours of decay still owed, two of them inside a rest that ended
+        // an hour ago: 2h at 5/day plus 1h at 10/day.
+        const now = Date.now();
+        stored().pets[0].hunger      = 80;
+        stored().pets[0].lastDecayAt = new Date(now - 3 * HOUR);
+        stored().pets[0].restUntil   = new Date(now - HOUR);
+        await press(interaction, 'rest', 0);
+
+        expect(stored().pets[0].hunger).toBeCloseTo(80 - 20 / 24, 2);
+        expect(stored().pets[0].lastDecayAt.getTime()).toBeGreaterThanOrEqual(now);
+        expect(stored().pets[0].restUntil.getTime()).toBeGreaterThan(now);
     });
 });

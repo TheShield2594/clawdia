@@ -78,7 +78,7 @@ const PET_DEFINITIONS = {
 
 const RARE_PET_DROP_CHANCE = 0.04;
 
-/** The unpurchasable companion tied to a grind system ('hunt'|'fish'|'mine'). */
+/** The unpurchasable companion tied to a grind system ('hunt'|'fish'|'mine'|'explore'). */
 function rarePetForSource(source) {
     return Object.values(PET_DEFINITIONS)
         .find(d => !d.purchasable && d.materialSource === source) ?? null;
@@ -132,7 +132,7 @@ function tryGrantRarePet(user, source, tier, rng = Math.random) {
 // ── Pet slots ─────────────────────────────────────────────────────────────────
 //
 // The shop has always sold a Pet Slot Expansion, but nothing enforced a limit,
-// so the item did nothing. Only *purchasable* pets consume a slot: the three
+// so the item did nothing. Only *purchasable* pets consume a slot: the four
 // rare companions can each drop at most once ever and are exempt, so they can
 // never be locked out by a full roster.
 //
@@ -431,9 +431,48 @@ function feedPet(pet, materialId, now = Date.now()) {
     const isFavorite = def.favoriteMaterial === materialId;
     const restored = isFavorite ? HUNGER_RESTORE_FAVORITE : HUNGER_RESTORE_OTHER;
     // Feed from decay-aware hunger so restoring never resurrects a stale value.
-    const newHunger = Math.min(100, effectiveHunger(pet, now) + restored);
+    const before    = effectiveHunger(pet, now);
+    const newHunger = Math.min(100, before + restored);
 
-    return { hunger: newHunger, restored, isFavorite };
+    // `restored` is the food's nominal value; `gained` is what actually landed
+    // once the 100 cap is applied, which is what the player should be told.
+    return { hunger: newHunger, restored, gained: Math.round(newHunger - before), isFavorite };
+}
+
+/**
+ * Whether a pet is full enough that feeding would be wasted. Uses the same
+ * rounding the hunger bar shows, so a pet displayed at 100% is refused rather
+ * than eating a material for a fraction of a point.
+ */
+function isPetFull(pet, now = Date.now()) {
+    return Math.round(effectiveHunger(pet, now)) >= 100;
+}
+
+// ── Pet of the Week credit ────────────────────────────────────────────────────
+//
+// Pet of the Week pays coins to the pet with the most weekly interactions, so
+// the counter cannot be something a player can mash: Showcase had no cooldown
+// and feeding a full pet still counted, so the week went to whoever clicked the
+// most. Each pet now earns at most POTW_DAILY_INTERACTION_CAP credits per UTC
+// day, which makes the ribbon reward caring on many days rather than clicking
+// on one.
+
+const POTW_DAILY_INTERACTION_CAP = 3;
+
+/**
+ * Count one care interaction toward Pet of the Week, subject to the daily cap.
+ * Mutates `pet`. Returns true when the interaction counted.
+ */
+function recordPetInteraction(pet, now = Date.now()) {
+    const day = Math.floor(now / MS_PER_DAY);
+    if (pet.interactionDay !== day) {
+        pet.interactionDay    = day;
+        pet.interactionsToday = 0;
+    }
+    if ((pet.interactionsToday ?? 0) >= POTW_DAILY_INTERACTION_CAP) return false;
+    pet.interactionsToday  = (pet.interactionsToday ?? 0) + 1;
+    pet.weeklyInteractions = (pet.weeklyInteractions ?? 0) + 1;
+    return true;
 }
 
 /**
@@ -501,6 +540,7 @@ const EVOLVED_EMOJI = {
     eagle:       { 2: '🦅',  3: '⚡' },
     shark:       { 2: '🦈',  3: '🌊' },
     crystal_fox: { 2: '💎',  3: '🔮' },
+    lantern_owl: { 2: '🦉',  3: '🏮' },
 };
 
 // Total XP required to *reach* a given level (cumulative). Gentle quadratic curve.
@@ -521,7 +561,11 @@ function stageForLevel(level) {
  * Display emoji + name for a pet, accounting for its evolution stage.
  */
 function getPetDisplay(pet) {
-    const def   = PET_DEFINITIONS[pet.petId] ?? { emoji: '🐾', name: pet.petId };
+    // Wild opponents are not in PET_DEFINITIONS but carry their own emoji, so
+    // a battle against one no longer renders as a bare paw print.
+    const def   = PET_DEFINITIONS[pet.petId]
+        ?? WILD_OPPONENTS.find(w => w.petId === pet.petId)
+        ?? { emoji: '🐾', name: pet.petId };
     const stage = pet.evolutionStage ?? 1;
     const emoji = EVOLVED_EMOJI[pet.petId]?.[stage] ?? def.emoji;
     const title = EVOLUTION_TITLES[stage] ?? '';
@@ -603,8 +647,10 @@ function simulateBattle(petA, petB, rng = Math.random) {
     let hpA = a.hp, hpB = b.hp;
     const rounds = [];
 
-    // Faster pet strikes first each round.
-    let turnA = a.spd >= b.spd;
+    // Faster pet strikes first. Striking first is worth a lot in an even fight
+    // (~78% of mirror matches), so a speed tie is a coin flip rather than
+    // going to the challenger by default.
+    let turnA = a.spd === b.spd ? rng() < 0.5 : a.spd > b.spd;
     const MAX_ROUNDS = 30;
 
     for (let r = 0; r < MAX_ROUNDS && hpA > 0 && hpB > 0; r++) {
@@ -623,12 +669,15 @@ function simulateBattle(petA, petB, rng = Math.random) {
         turnA = !turnA;
     }
 
-    // On HP tie / round cap, higher remaining HP fraction wins; final tiebreak: A.
+    // At the round cap the higher remaining HP fraction wins; an exact tie is
+    // a coin flip rather than a free win for the challenger.
     let winner;
-    if (hpA <= 0 && hpB <= 0) winner = hpA >= hpB ? 'a' : 'b';
-    else if (hpB <= 0) winner = 'a';
+    if (hpB <= 0) winner = 'a';
     else if (hpA <= 0) winner = 'b';
-    else winner = (hpA / a.hp) >= (hpB / b.hp) ? 'a' : 'b';
+    else {
+        const fracA = hpA / a.hp, fracB = hpB / b.hp;
+        winner = fracA === fracB ? (rng() < 0.5 ? 'a' : 'b') : fracA > fracB ? 'a' : 'b';
+    }
 
     return { winner, rounds, finalHpA: hpA, finalHpB: hpB };
 }
@@ -640,12 +689,38 @@ function simulateBattle(petA, petB, rng = Math.random) {
 // makeWildPet) so that roster is discoverable — src/data/activityItems.js keys
 // pet art off PET_DEFINITIONS plus these.
 const WILD_OPPONENTS = [
-    { petId: 'wild_boar',   name: 'Wild Boar',   personality: 'energetic' },
-    { petId: 'feral_cat',   name: 'Feral Cat',   personality: 'mischievous' },
-    { petId: 'stray_hound', name: 'Stray Hound', personality: 'loyal' },
-    { petId: 'cave_bat',    name: 'Cave Bat',    personality: 'energetic' },
+    { petId: 'wild_boar',   name: 'Wild Boar',   emoji: '🐗', personality: 'energetic' },
+    { petId: 'feral_cat',   name: 'Feral Cat',   emoji: '🐈‍⬛', personality: 'mischievous' },
+    { petId: 'stray_hound', name: 'Stray Hound', emoji: '🐕', personality: 'loyal' },
+    { petId: 'cave_bat',    name: 'Cave Bat',    emoji: '🦇', personality: 'energetic' },
 ];
 const WILD_PET_IDS = WILD_OPPONENTS.map(w => w.petId);
+
+/**
+ * A copy of `pet` fighting at `level` — the stage follows the level, and
+ * everything else (personality, species) is kept.
+ *
+ * Wagered battles fight both pets at the lower of the two levels. Stats scale
+ * so steeply with level that a single level's lead wins ~97% of fights and
+ * three win all of them, so without this a wager was a near-certain payout for
+ * whoever had the higher-level pet, whatever the level-gap limit allowed.
+ */
+function atLevel(pet, level) {
+    return { ...petSnapshotFields(pet), level, evolutionStage: stageForLevel(level) };
+}
+
+function petSnapshotFields(pet) {
+    return {
+        petId: pet.petId, name: pet.name, personality: pet.personality,
+        level: pet.level ?? 1, evolutionStage: pet.evolutionStage ?? 1,
+    };
+}
+
+/** Both fighters scaled to the lower of their two levels. */
+function levelMatched(petA, petB) {
+    const level = Math.min(petA.level ?? 1, petB.level ?? 1);
+    return [atLevel(petA, level), atLevel(petB, level)];
+}
 
 /**
  * Build a scaled "wild" opponent pet near the given level for PvE battles.
@@ -712,7 +787,10 @@ async function selectPetOfTheWeek(client) {
                 { $match: { guildId, 'pets.0': { $exists: true } } },
                 { $unwind: '$pets' },
                 { $match: { 'pets.weeklyInteractions': { $gt: 0 } } },
-                { $sort: { 'pets.weeklyInteractions': -1 } },
+                // Capped daily credit makes ties at the top common, so break
+                // them on progression rather than on whatever order the
+                // documents happen to come back in.
+                { $sort: { 'pets.weeklyInteractions': -1, 'pets.level': -1, 'pets.xp': -1, 'pets.adoptedAt': 1 } },
                 { $limit: 1 },
                 { $project: { _id: 0, userId: 1, pet: '$pets' } },
             ]);
@@ -847,6 +925,9 @@ module.exports = {
     MAX_STACKED_BONUS_PCT,
     checkRunaway,
     feedPet,
+    isPetFull,
+    POTW_DAILY_INTERACTION_CAP,
+    recordPetInteraction,
     getPetBonus,
     getTotalBonus,
     getMoodLine,
@@ -869,6 +950,7 @@ module.exports = {
     getPetStats,
     simulateBattle,
     makeWildPet,
+    levelMatched,
     // Scheduled work (see services/scheduler/index.js)
     selectPetOfTheWeek,
 };

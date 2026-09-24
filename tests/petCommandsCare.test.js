@@ -399,7 +399,7 @@ describe('/pet feed', () => {
         const interaction = await run('feed', { material: 'rabbits_foot' });
 
         expect(stored().pets[0]).toEqual(expect.objectContaining({ level: 10, evolutionStage: 2 }));
-        expect(textOf(interaction)).toMatch(/Dog evolved!\*\* Now an \*\*Seasoned Dog\*\* \(Stage 2\)/);
+        expect(textOf(interaction)).toMatch(/Dog evolved!\*\* Say hello to \*\*Seasoned Dog\*\* \(Stage 2\)/);
     });
 
     test('with no pets it says so', async () => {
@@ -448,6 +448,47 @@ describe('/pet feed', () => {
 
         expect(textOf(interaction)).toContain('**Rex** is completely full');
         expect(stored().hunt.materials.rabbits_foot).toBe(1);
+    });
+
+    test('a pet the bar shows at 100% is refused too, not fed for a fraction of a point', async () => {
+        seedUser({
+            pets: [makePet({ hunger: 99.7, name: 'Rex', lastDecayAt: new Date() })],
+            hunt: { materials: { rabbits_foot: 1 } },
+        });
+
+        const interaction = await run('feed', { material: 'rabbits_foot' });
+
+        expect(textOf(interaction)).toContain('**Rex** is completely full');
+        expect(stored().hunt.materials.rabbits_foot).toBe(1);
+        expect(stored().pets[0].weeklyInteractions).toBeUndefined();
+    });
+
+    test('a favourite fed near full reports the hunger that actually landed', async () => {
+        seedUser({
+            pets: [makePet({ hunger: 95, name: 'Rex', lastDecayAt: new Date() })],
+            hunt: { materials: { rabbits_foot: 1 } },
+        });
+
+        const interaction = await run('feed', { material: 'rabbits_foot' });
+
+        expect(stored().pets[0].hunger).toBe(100);
+        expect(textOf(interaction)).toContain('favorite food — +5 hunger!');
+        expect(textOf(interaction)).not.toContain('+25 hunger');
+    });
+
+    test('feeding past the daily Pet of the Week cap still feeds, but earns no more credit', async () => {
+        seedUser({
+            pets: [makePet({
+                hunger: 50, weeklyInteractions: 4,
+                interactionDay: Math.floor(Date.now() / 86_400_000), interactionsToday: 3,
+            })],
+            hunt: { materials: { rabbits_foot: 1 } },
+        });
+
+        await run('feed', { material: 'rabbits_foot' });
+
+        expect(stored().pets[0].hunger).toBeCloseTo(75, 1);
+        expect(stored().pets[0].weeklyInteractions).toBe(4);
     });
 
     test('a pet type with no definition cannot be fed', async () => {

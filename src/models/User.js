@@ -25,6 +25,11 @@ const petFields = () => ({
     restUntil:          { type: Date,    default: null },
     potw:               { type: Boolean, default: false },
     weeklyInteractions: { type: Number,  default: 0    },
+    // Daily cap on Pet of the Week credit: the UTC day index the counter below
+    // belongs to, and how many interactions have counted on that day.
+    interactionDay:     { type: Number,  default: null },
+    interactionsToday:  { type: Number,  default: 0    },
+    lastShowcase:       { type: Date,    default: null },
     personality:        { type: String,  default: null },
     // Progression (Phase 4): pets gain XP from feeding and battles, level up,
     // and evolve through stages that scale their passive bonus.

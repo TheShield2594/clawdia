@@ -116,8 +116,13 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
  * The button rows under a status card: a prev/next nav row (only when the owner
  * has more than one pet) and the play/rest/showcase action row. `userId` is
  * baked into every custom id so the collector can reject other users' clicks.
+ *
+ * The action buttons also carry the pet's stable `_id`: the card stays open for
+ * 90s, and a release or a starvation death in that window shifts every later
+ * index, which used to land a Play/Rest/Showcase click on a different pet.
  */
-function buildNavComponents(userId, index, total) {
+function buildNavComponents(userId, index, total, petId = null) {
+    const ref = petId != null ? `${index}:${petId}` : `${index}`;
     const rows = [];
 
     if (total > 1) {
@@ -139,9 +144,9 @@ function buildNavComponents(userId, index, total) {
 
     rows.push(
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`pet_play:${userId}:${index}`)     .setLabel('🎾 Play')     .setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId(`pet_rest:${userId}:${index}`)     .setLabel('🛏️ Rest')    .setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId(`pet_showcase:${userId}:${index}`) .setLabel('📷 Showcase') .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`pet_play:${userId}:${ref}`)     .setLabel('🎾 Play')     .setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`pet_rest:${userId}:${ref}`)     .setLabel('🛏️ Rest')    .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId(`pet_showcase:${userId}:${ref}`) .setLabel('📷 Showcase') .setStyle(ButtonStyle.Secondary),
         )
     );
 
@@ -160,7 +165,7 @@ async function renderPetStatus(pet, index, total, ownerAvatarURL, guildId, userI
     const art   = await petArt(pet.petId, guildId, label);
     return {
         embeds:      [buildPetEmbed(pet, index, total, ownerAvatarURL, art?.url ?? null)],
-        components:  buildNavComponents(userId, index, total),
+        components:  buildNavComponents(userId, index, total, pet._id != null ? String(pet._id) : null),
         files:       art ? [art.attachment] : [],
         attachments: [],
     };

@@ -111,6 +111,11 @@ describe('buildNavComponents', () => {
         expect(ids).toEqual(['pet_play:u1:0', 'pet_rest:u1:0', 'pet_showcase:u1:0']);
     });
 
+    test("the action buttons carry the pet's id when given one", () => {
+        const ids = buildNavComponents('u1', 2, 3, 'abc123')[1].toJSON().components.map(c => c.custom_id);
+        expect(ids).toEqual(['pet_play:u1:2:abc123', 'pet_rest:u1:2:abc123', 'pet_showcase:u1:2:abc123']);
+    });
+
     test('multiple pets get a nav row, with the ends disabled at the ends', () => {
         const first = buildNavComponents('u1', 0, 3)[0].toJSON().components;
         expect(first[0].disabled).toBe(true);  // prev at index 0

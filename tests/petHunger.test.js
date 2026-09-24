@@ -8,6 +8,9 @@ const {
     feedPet,
     getTotalBonus,
     getPetBonus,
+    isPetFull,
+    recordPetInteraction,
+    POTW_DAILY_INTERACTION_CAP,
     HUNGER_DECAY_PER_DAY,
     REST_DURATION_MS,
     STARVING_THRESHOLD,
@@ -212,5 +215,39 @@ describe('starvation clock', () => {
         const clinging = { ...petAged(0), hunger: 0, starvingStartAt: new Date(NOW - (RUNAWAY_DAYS - 1) * MS_PER_DAY) };
         expect(checkRunaway([dying], NOW).ranAwayPets).toHaveLength(1);
         expect(checkRunaway([clinging], NOW).ranAwayPets).toHaveLength(0);
+    });
+});
+
+describe('feedPet reports what landed', () => {
+    test('gained is capped by the 100 ceiling while restored stays nominal', () => {
+        const pet = { petId: 'wolf', hunger: 90, lastDecayAt: new Date(NOW) };
+        const fed = feedPet(pet, 'wolf_pelt', NOW);
+        expect(fed).toEqual(expect.objectContaining({ hunger: 100, restored: 25, gained: 10, isFavorite: true }));
+    });
+});
+
+describe('isPetFull', () => {
+    test('matches the rounded hunger bar', () => {
+        expect(isPetFull({ petId: 'wolf', hunger: 99.6, lastDecayAt: new Date(NOW) }, NOW)).toBe(true);
+        expect(isPetFull({ petId: 'wolf', hunger: 99.4, lastDecayAt: new Date(NOW) }, NOW)).toBe(false);
+    });
+});
+
+describe('recordPetInteraction', () => {
+    test('counts up to the daily cap, then stops', () => {
+        const pet = {};
+        const counted = [];
+        for (let i = 0; i < POTW_DAILY_INTERACTION_CAP + 3; i++) counted.push(recordPetInteraction(pet, NOW));
+        expect(counted.filter(Boolean)).toHaveLength(POTW_DAILY_INTERACTION_CAP);
+        expect(pet.weeklyInteractions).toBe(POTW_DAILY_INTERACTION_CAP);
+    });
+
+    test('a new UTC day resets the allowance without touching the weekly total', () => {
+        const pet = {};
+        for (let i = 0; i < POTW_DAILY_INTERACTION_CAP; i++) recordPetInteraction(pet, NOW);
+        expect(recordPetInteraction(pet, NOW)).toBe(false);
+        expect(recordPetInteraction(pet, NOW + MS_PER_DAY)).toBe(true);
+        expect(pet.weeklyInteractions).toBe(POTW_DAILY_INTERACTION_CAP + 1);
+        expect(pet.interactionsToday).toBe(1);
     });
 });
