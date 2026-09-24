@@ -459,7 +459,7 @@ const TIER_COLORS = {
 
 const LIMITS = {
     MINE_COOLDOWN_MS:        30_000,
-    INJURY_PENALTY_MS:       15 * 60_000,
+    INJURY_PENALTY_MS:      15 * 60_000,
     STAMINA_REGEN_MS:        6 * 60_000,
     MAX_STAMINA_BASE:        10,
     DAILY_WINDOW_MS:         24 * 3_600_000,
@@ -477,20 +477,69 @@ const LIMITS = {
 // ─── DIG INTENSITY ───────────────────────────────────────────────────────────
 //
 // How hard the miner pushes on a given dig: more payout for more chance of the roof
-// coming down, and more wear on the pickaxe either way.
+// coming down, and more wear on the pickaxe either way. Named for how the miner
+// swings, not for where they are — the depths (Surface Quarry, The Abyss…) are
+// places, and a ladder that reused their names read as "digging Abyss in the
+// Surface Quarry".
+//
+// `blastCost` is how many of the pickaxe's charges it takes to blast clear of a
+// cave-in at that rung. A charge used to buy back any haul for a few coins, which
+// made the risk on every rung above Careful free for anyone carrying charges.
+//
+// Careful is the rung for a miner who cannot afford wear: it pays less, never
+// caves in and costs the pickaxe nothing. At 0.7× with the same wear as Steady it
+// was strictly worse than Steady for everyone and nobody picked it.
 
 const INTENSITY_LEVELS = [
-    { level: 1, name: 'Surface',  emoji: '☀️',  multiplier: 0.7, caveInRisk: 0.00, durLoss: 1 },
-    { level: 2, name: 'Shallow',  emoji: '🪨',  multiplier: 1.0, caveInRisk: 0.05, durLoss: 1 },
-    { level: 3, name: 'Mid',      emoji: '🔩',  multiplier: 1.4, caveInRisk: 0.12, durLoss: 2 },
-    { level: 4, name: 'Deep',     emoji: '💎',  multiplier: 2.0, caveInRisk: 0.20, durLoss: 3 },
-    { level: 5, name: 'Abyss',    emoji: '🌑',  multiplier: 3.0, caveInRisk: 0.30, durLoss: 4 },
+    { level: 1, name: 'Careful',  emoji: '🪶', multiplier: 0.8, caveInRisk: 0.00, durLoss: 0, blastCost: 0 },
+    { level: 2, name: 'Steady',   emoji: '🪨', multiplier: 1.0, caveInRisk: 0.05, durLoss: 1, blastCost: 1 },
+    { level: 3, name: 'Hard',     emoji: '🔨', multiplier: 1.4, caveInRisk: 0.12, durLoss: 2, blastCost: 2 },
+    { level: 4, name: 'Reckless', emoji: '🧨', multiplier: 2.0, caveInRisk: 0.20, durLoss: 3, blastCost: 3 },
+    { level: 5, name: 'Frenzied', emoji: '🌋', multiplier: 3.0, caveInRisk: 0.30, durLoss: 4, blastCost: 4 },
 ];
 
-// The rungs a miner may choose before digging. The Abyss is not among them: its 3×
-// is what a correct vein read pays someone already working Deep, not a selection.
+// The rungs a miner may choose before digging. Frenzied is not among them: its 3×
+// is what a good or rich seam pays someone already digging Reckless or Hard.
 const CHOOSABLE_INTENSITY     = INTENSITY_LEVELS.filter(l => l.level <= 4);
 const DEFAULT_INTENSITY_LEVEL = 2;
+
+// ─── ROCK SURVEY ─────────────────────────────────────────────────────────────
+//
+// Before each dig the miner's lamp reads the face: how rich the seam is and how
+// sound the rock around it is. The two readings are what make the intensity choice
+// a decision — push hard on a rich seam in solid rock, hold back when the rock is
+// fractured — rather than the same answer every dig.
+//
+// The seam grade is read exactly and lifts the payout multiplier by `promote`
+// rungs (never the risk). Its weights keep the average payout where the old vein
+// read left it: that read promoted one rung on nearly every attentive dig.
+const SEAM_GRADES = [
+    { id: 'thin', name: 'Thin seam', emoji: '▫️', promote: 0, weight: 30 },
+    { id: 'good', name: 'Good seam', emoji: '✨', promote: 1, weight: 50 },
+    { id: 'rich', name: 'Rich seam', emoji: '💎', promote: 2, weight: 20 },
+];
+
+// Stability scales the rung's cave-in risk for this dig. Weighted so the average
+// multiplier is ~1: across many digs the ladder's risks still hold.
+const ROCK_STABILITY = [
+    { id: 'solid',     name: 'Solid rock',     emoji: '🟩', riskMult: 0.50, weight: 30 },
+    { id: 'seamed',    name: 'Seamed rock',    emoji: '🟨', riskMult: 1.00, weight: 45 },
+    { id: 'fractured', name: 'Fractured rock', emoji: '🟥', riskMult: 1.75, weight: 25 },
+];
+
+// Stability is only *read*, and the read can be wrong — off by one step, never
+// wildly. Better gear reads truer; a Miner's Lamp helps.
+const ROCK_READ = {
+    BASE_ACCURACY:    0.60,   // Wooden Pickaxe
+    PER_PICKAXE_TIER: 0.07,   // Void Pickaxe: 0.88
+    LAMP_BONUS:       0.10,
+    MAX_ACCURACY:     0.95,
+};
+
+// Digging out of a cave-in by hand, for a miner with no charges to blast with —
+// including every Wooden Pickaxe, which takes none. It saves the ore but not the
+// intensity bonus, and it costs stamina: the next dig or two, for this haul.
+const CAVE_IN_DIG_OUT_STAMINA = 2;
 
 // ─── PRESTIGE BONUSES ────────────────────────────────────────────────────────
 
@@ -748,6 +797,10 @@ module.exports = {
     LIMITS,
     INTENSITY_LEVELS,
     CHOOSABLE_INTENSITY,
+    SEAM_GRADES,
+    ROCK_STABILITY,
+    ROCK_READ,
+    CAVE_IN_DIG_OUT_STAMINA,
     DEFAULT_INTENSITY_LEVEL,
     PRESTIGE_BONUSES,
     MATERIAL_NAMES,

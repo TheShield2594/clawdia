@@ -75,6 +75,8 @@ const COLLECTIONS = [
     { module: 'mineData', export: 'DEPTH_LIST',      kind: 'mining depth',           system: 'mining', command: '/mine dig' },
     { module: 'mineData', export: 'ORES',            kind: 'ore',                    system: 'mining', command: '/mine dig' },
     { module: 'mineData', export: 'INTENSITY_LEVELS', kind: 'mining intensity',      system: 'mining', command: '/mine dig' },
+    { module: 'mineData', export: 'SEAM_GRADES',     kind: 'mining seam grade (rock survey)', system: 'mining', command: '/mine dig' },
+    { module: 'mineData', export: 'ROCK_STABILITY',  kind: 'mining rock stability (rock survey)', system: 'mining', command: '/mine dig' },
     { module: 'mineData', export: 'CRAFT_RECIPES',   kind: 'crafting recipe',        system: 'crafting', command: '/craft make' },
     { module: 'mineData', export: 'MINE_QUEST_TEMPLATES', kind: 'mining quest',      system: 'mining', command: '/mine quests view' },
 

@@ -52,10 +52,10 @@ module.exports = {
                         .addChoices(...DEPTH_CHOICES))
                 .addIntegerOption(o =>
                     o.setName('intensity')
-                        .setDescription('How hard to push. Higher pays more and risks a cave-in. Skips the prompt.')
+                        .setDescription('How hard to push. Skips the prompt, so you dig without reading the rock first.')
                         .setRequired(false)
                         .addChoices(...CHOOSABLE_INTENSITY.map(l => ({
-                            name:  `${l.emoji} ${l.name} — ${l.multiplier}× payout, ${Math.round(l.caveInRisk * 100)}% cave-in`,
+                            name:  `${l.emoji} ${l.name} — ${l.multiplier}× base payout, ${Math.round(l.caveInRisk * 100)}% base cave-in risk`,
                             value: l.level,
                         })))))
         .addSubcommand(sub =>
