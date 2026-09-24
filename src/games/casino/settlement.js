@@ -91,6 +91,15 @@ function blackjackWinCredit(bet, coinMultiplier) {
 }
 
 /**
+ * Total credit when a player holding a natural takes even money against a
+ * dealer's ace: paid 1:1 at once, whatever the hole card. It is the same coins
+ * as an ordinary win, and boosted the same way.
+ */
+function evenMoneyCredit(bet, coinMultiplier) {
+    return blackjackWinCredit(bet, coinMultiplier);
+}
+
+/**
  * What insurance credits when the dealer turns over a natural.
  *
  * Insurance costs half the bet and pays 2:1, so the credit is the insurance
@@ -173,6 +182,7 @@ module.exports = {
     blackjackWinProfit,
     blackjackWinCredit,
     blackjackHandCredit,
+    evenMoneyCredit,
     insuranceCredit,
     insuranceProfit,
     insuranceCost,
