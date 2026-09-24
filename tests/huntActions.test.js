@@ -15,6 +15,7 @@ jest.mock('../src/utils/economyFreeze', () => ({
     FROZEN_NOTICE: 'frozen',
     FREEZE_UNKNOWN_NOTICE: 'freeze unknown',
 }));
+jest.mock('../src/utils/commandCooldowns', () => ({ claimIfAvailable: jest.fn().mockResolvedValue(0) }));
 jest.mock('../src/utils/economyLock', () => ({
     withEconomyLock: fn => fn,
 }));
@@ -22,6 +23,7 @@ jest.mock('../src/utils/economyLock', () => ({
 const User = require('../src/models/User');
 const { getGuildSettings } = require('../src/utils/guildSettingsCache');
 const { isEconomyFrozen } = require('../src/utils/economyFreeze');
+const cooldownStore = require('../src/utils/commandCooldowns');
 const { ensureHuntData, quoteRepair } = require('../src/services/huntService');
 const { WEAPON_TIERS, AMMO_PACKS } = require('../src/data/huntData');
 const {
@@ -118,8 +120,41 @@ describe('a button dressed as the subcommand it runs', () => {
 });
 
 describe('the gates a press passes', () => {
-    const button = { user: { id: 'u1' }, member: { roles: { cache: new Map() } }, channelId: 'c1', guild: { id: 'g1' } };
-    const command = { category: 'economy', data: { name: 'hunt' } };
+    const button = { user: { id: 'u1' }, member: { roles: { cache: new Map([['vip', {}]]) } }, channelId: 'c1', guild: { id: 'g1' }, client: { cooldowns: new Map() } };
+    const command = { category: 'economy', cooldown: 5, data: { name: 'hunt' } };
+
+    test('spends the same cooldown a typed /hunt does, and refuses while it runs', async () => {
+        const until = Date.now() + 4_000;
+        cooldownStore.claimIfAvailable.mockResolvedValueOnce(until);
+
+        const refusal = await gateRefusal(button, command);
+
+        expect(cooldownStore.claimIfAvailable).toHaveBeenLastCalledWith(button.client, {
+            bucket: 'hunt', userId: 'u1', guildId: 'g1', cooldownMs: 5_000,
+        });
+        expect(refusal).toBe(`Please wait, you are on cooldown. You can use \`/hunt\` again <t:${Math.round(until / 1000)}:R>.`);
+    });
+
+    test('honours an admin\'s per-role cooldown override', async () => {
+        getGuildSettings.mockResolvedValueOnce({
+            commandPolicies: { cooldownOverrides: [{ command: 'hunt', roleId: 'vip', cooldownSeconds: 60 }] },
+        });
+        await gateRefusal(button, command);
+        expect(cooldownStore.claimIfAvailable.mock.calls.at(-1)[1].cooldownMs).toBe(60_000);
+    });
+
+    test('a press that runs no command spends no cooldown', async () => {
+        cooldownStore.claimIfAvailable.mockClear();
+        expect(await gateRefusal(button, command, { claimCooldown: false })).toBeNull();
+        expect(cooldownStore.claimIfAvailable).not.toHaveBeenCalled();
+    });
+
+    test('a blocked press is refused before any cooldown is spent', async () => {
+        cooldownStore.claimIfAvailable.mockClear();
+        isEconomyFrozen.mockResolvedValueOnce(true);
+        await gateRefusal(button, command);
+        expect(cooldownStore.claimIfAvailable).not.toHaveBeenCalled();
+    });
 
     test('a server policy blocking /hunt here blocks the button too', async () => {
         getGuildSettings.mockResolvedValueOnce({
@@ -167,7 +202,7 @@ describe('the session on the card', () => {
         const press = async customId => {
             const btn = {
                 customId, user: { id: 'u1' }, guild: { id: 'g1' }, channelId: 'c1', member: {},
-                client: { commands: new Map([['hunt', { category: 'economy', data: { name: 'hunt' }, execute }]]) },
+                client: { cooldowns: new Map(), commands: new Map([['hunt', { category: 'economy', data: { name: 'hunt' }, execute }]]) },
                 reply: jest.fn().mockResolvedValue(), deferUpdate: jest.fn().mockResolvedValue(),
             };
             await collector.handlers.collect(btn);
@@ -245,13 +280,25 @@ describe('the session on the card', () => {
         const user = makeUser({ quickHunt: false });
         User.findOne.mockResolvedValue(user);
 
+        cooldownStore.claimIfAvailable.mockClear();
         const btn = await h.press(IDS.quick);
 
+        expect(cooldownStore.claimIfAvailable).not.toHaveBeenCalled();
         expect(btn.deferUpdate).toHaveBeenCalled();
         expect(user.hunt.quickHunt).toBe(true);
         expect(user.save).toHaveBeenCalled();
         const rows = h.interaction.editReply.mock.calls.at(-1)[0].components;
         expect(labels(rows)).toContain('⚡ Quick mode: On');
+    });
+
+    test('Hunt again on cooldown is refused privately and runs nothing', async () => {
+        const h = harness();
+        await attachResultActions(h.interaction, 0);
+        cooldownStore.claimIfAvailable.mockResolvedValueOnce(Date.now() + 3_000);
+
+        const btn = await h.press(IDS.again);
+        expect(h.execute).not.toHaveBeenCalled();
+        expect(btn.reply.mock.calls[0][0].content).toMatch(/you are on cooldown/);
     });
 
     test('a blocked press is refused privately and runs nothing', async () => {

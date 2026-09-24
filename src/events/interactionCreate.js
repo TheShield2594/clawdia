@@ -19,14 +19,13 @@ const {
     notifyQuestComplete, notifyQuestNearComplete,
 } = require('../services/questService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
-const { getPolicyDecision } = require('../utils/commandPolicy');
+const { getPolicyDecision, claimCommandCooldown } = require('../utils/commandPolicy');
 const {
     commandIsFreezeGated, isEconomyFrozen, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
 } = require('../utils/economyFreeze');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const { questRewardPayoutKey } = require('../utils/payoutKey');
 const { resolveDeferral, markDeferred, sendEphemeralResponse } = require('../utils/interactionAck');
-const cooldownStore = require('../utils/commandCooldowns');
 const { recordCommandMetric } = require('../utils/commandMetricsBuffer');
 // Giveaway entry/withdrawal.
 //
@@ -193,39 +192,6 @@ function missingRequiredPermissions(interaction, command) {
 
     const missing = interaction.memberPermissions.missing(required);
     return missing.length ? missing : null;
-}
-
-// Node's setTimeout treats delays > 2^31-1 ms as 1 ms, which would wipe the
-// cooldown timestamp almost immediately and let the next call slip past the
-// gate. Clamp cooldown seconds so seconds * 1000 stays within timer bounds.
-const MAX_TIMER_MS = 2_147_483_647;
-const MAX_COOLDOWN_SECONDS = Math.floor(MAX_TIMER_MS / 1000);
-
-function coerceCooldown(value, fallback) {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < 0) return fallback;
-    return Math.floor(Math.min(n, MAX_COOLDOWN_SECONDS));
-}
-
-function getCooldownSeconds(command, interaction, guildSettings) {
-    const rawBase = typeof command.cooldownAmount === 'function'
-        ? command.cooldownAmount(interaction)
-        : (command.cooldown ?? 3);
-    const baseCooldown = coerceCooldown(rawBase, 3);
-    const overrides = guildSettings?.commandPolicies?.cooldownOverrides || [];
-    const matches = overrides.filter(entry =>
-        entry.command === command.data.name &&
-        Number.isFinite(Number(entry.cooldownSeconds)) &&
-        Number(entry.cooldownSeconds) >= 0 &&
-        interaction.member?.roles?.cache?.has(entry.roleId));
-    if (!matches.length) return baseCooldown;
-    return coerceCooldown(Math.min(...matches.map(match => Number(match.cooldownSeconds))), baseCooldown);
-}
-
-function getCooldownKey(command, interaction) {
-    return typeof command.cooldownKey === 'function'
-        ? command.cooldownKey(interaction)
-        : command.data.name;
 }
 
 module.exports = {
@@ -443,27 +409,9 @@ module.exports = {
         // Short cooldowns are process-local; anything from 15 minutes up is read
         // from and written to the User document, so a deploy no longer hands
         // every long window back (#621). See utils/commandCooldowns.js.
-        const cooldownBucket = getCooldownKey(command, interaction);
-        const cooldownAmount = getCooldownSeconds(command, interaction, guildSettings) * 1000;
-        const cooldownScope = {
-            bucket: cooldownBucket,
-            userId: interaction.user.id,
-            guildId: interaction.guild.id,
-            cooldownMs: cooldownAmount,
-        };
-
-        // One operation, not a check followed by a claim: the yield between two
-        // awaits was a window in which a user firing the same command twice
-        // passed the check twice.
-        const expirationTime = await cooldownStore.claimIfAvailable(client, cooldownScope);
-        if (expirationTime) {
-            const expiredTimestamp = Math.round(expirationTime / 1000);
-            const longCooldown = (expirationTime - Date.now()) > 12 * 60 * 60 * 1000;
-            const exactTime = longCooldown ? ` (<t:${expiredTimestamp}:F>)` : '';
-
-            return sendEphemeralResponse(interaction, {
-                content: `Please wait, you are on cooldown. You can use \`/${command.data.name}\` again <t:${expiredTimestamp}:R>${exactTime}.`,
-            });
+        const cooldownRefusal = await claimCommandCooldown(client, command, interaction, guildSettings);
+        if (cooldownRefusal) {
+            return sendEphemeralResponse(interaction, { content: cooldownRefusal });
         }
 
         try {
