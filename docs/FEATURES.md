@@ -605,6 +605,9 @@ Cave in and you choose again:
 
 Leave the prompt and you blast clear if you can afford to, and flee if not.
 
+Every result ends with **⛏️ Dig again**, which digs the same depth and reads the
+rock afresh, and a live countdown to when your next dig opens.
+
 **Miner prestige** (`/mine prestige`) opens at Miner Level 50 and runs to P5. Each
 rank resets Miner Level and XP and keeps everything else — pickaxes, unlocked
 depths, materials, consumables and lifetime stats:

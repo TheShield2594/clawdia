@@ -31,7 +31,6 @@ const { getTimeBand } = require('../../../utils/timeBand');
 const {
     LIMITS, CHOOSABLE_INTENSITY, DEFAULT_INTENSITY_LEVEL, PICKAXE_BY_TIER, CAVE_IN_DIG_OUT_STAMINA,
 } = require('../../../data/mineData');
-const { WILDERNESS_YIELD_BONUS } = require('../../../data/crossSystemData');
 const { isDistrictActive } = require('../../../services/districtService');
 const { refundEffectCharge } = require('../../../services/effectsService');
 const { ensureQuests, onMine, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../../services/questService');
@@ -42,7 +41,8 @@ const { logBigWin } = require('../../../utils/bigWinLogger');
 const { addWeeklyChampionProgress, getWeeklyChampionLeader } = require('../../../utils/weeklyChampion');
 const { randomFrom, MINE_CAVE_LINES } = require('../../../utils/copyLines');
 const { PITY_COPY } = require('../../../utils/pityBonus');
-const { buildMineEmbed } = require('./embeds');
+const { buildMineEmbed, nextDigLine } = require('./embeds');
+const { attachResultActions, buildResultActions } = require('./actions');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
 const { attachResultThumbnail } = require('../../../utils/itemImageHelper');
@@ -251,7 +251,7 @@ async function handleDig(interaction) {
                     : `💥 ~~Blast clear~~ — your ${pickaxe.name} takes no charges.`,
                 canDigOut
                     ? `⛏️ **Dig out** — ${CAVE_IN_DIG_OUT_STAMINA} stamina (you have ${m.stamina}). Keeps the ore's **${orePayout.toLocaleString()}**` +
-                      (escrow > 0 ? `, loses the ${escrow.toLocaleString()} ${chosenIntensity.name} bonus.` : '.')
+                      (escrow > 0 ? `, loses the ${escrow.toLocaleString()}-coin ${pickedIntensity.name} bonus.` : '.')
                     : `⛏️ ~~Dig out~~ — needs ${CAVE_IN_DIG_OUT_STAMINA} stamina, you have ${m.stamina}.`,
                 `🏃 **Flee** — keep your skin, lose the haul.`,
             ];
@@ -400,22 +400,15 @@ async function handleDig(interaction) {
             const desc = embed.data.description ?? '';
             embed.setDescription(desc + '\n' + digSummaryLines(result, pickedIntensity, chosenIntensity, survey).join('\n'));
         }
-        if (result.featuredDepthBonus > 0) {
-            embed.addFields({ name: '🌟 Featured Depth Bonus', value: `+${result.featuredDepthBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
-        }
-        if (result.petYieldBonus > 0) {
-            embed.addFields({ name: '💎 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petMineYieldPct}% yield)`, inline: true });
-        }
-        if (result.wildernessBonus > 0) {
-            embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+${Math.round(WILDERNESS_YIELD_BONUS * 100)}% yield)`, inline: true });
-        }
+        // Featured depth, pet and Wilderness bonuses are rows of the 📈 Multipliers
+        // field; they used to get a field each as well, saying the same thing twice.
 
         // Weekly champion race footer
         const leaderNote = weeklyLeader
             ? `👑 Miner of the Week so far: ${weeklyLeader.username} — ${(weeklyLeader.total ?? 0).toLocaleString()} coins mined`
             : '👑 No Miner of the Week yet — be the first!';
         const existingFooter = embed.data.footer?.text ?? '';
-        embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });
+        embed.setFooter({ text: existingFooter ? `${existingFooter} · ${leaderNote}` : leaderNote });
 
         // Rare companion drop — announced prominently; this is the only way to get one.
         if (rarePetDrop) {
@@ -432,6 +425,9 @@ async function handleDig(interaction) {
         const petLine = kept ? petCompanionLine(user.pets, 'mine') : null;
         if (petLine) embed.setDescription(`${embed.data.description ?? ''}\n${petLine}`);
 
+        // Last line of the description: when the next dig opens, as a live countdown.
+        embed.setDescription(`${embed.data.description ?? ''}\n\n${nextDigLine(user)}`);
+
         // Result artwork — the mined ore's icon as the embed thumbnail (emoji
         // fallback). An abandoned haul shows no ore art, gets no staged reveal and
         // is not announced: fanfare for ore left behind in a collapse reads as a
@@ -441,7 +437,9 @@ async function handleDig(interaction) {
             : [];
 
         // Staged loot reveal for rare+ drops
-        await stagedLootReveal(interaction, kept ? result.tier : null, embed, 'mine', oreFiles);
+        // "Dig again" rides the final render only: it must not be pressable while
+        // the fog is still hiding what came up.
+        await stagedLootReveal(interaction, kept ? result.tier : null, embed, 'mine', oreFiles, { components: buildResultActions() });
 
         if (kept && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
@@ -484,6 +482,9 @@ async function handleDig(interaction) {
                 .setTimestamp();
             announceChannel.send({ embeds: [caveEmbed] }).catch(() => null);
         }
+
+        await attachResultActions(interaction, { depthId });
+        return { started: true };
     } catch (err) {
         if (!mineCommitted) await releaseMineClaim();
         throw err;

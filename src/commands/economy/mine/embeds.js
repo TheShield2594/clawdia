@@ -13,6 +13,7 @@ const {
     formatMs,
     msUntilDailyReset,
     getMaxStamina,
+    msUntilNextStamina,
     xpToNextLevel
 } = require('../../../services/mineService');
 const { FEATURED_PAYOUT_BONUS } = require('../../../data/featuredRotation');
@@ -75,13 +76,13 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
             .setColor(color)
             .setTitle(embedTitle)
             .setDescription(embedDesc)
+            // One row of three: what you got, what you learned, what it cost you.
+            // This was eight standing fields (Depth, Tier, Reward, XP, Pickaxe,
+            // Stamina, Balance, Miner XP) before a single event had been reported.
             .addFields(
-                { name: 'Depth',    value: `${depth.emoji} ${depth.name}`,         inline: true },
-                { name: 'Tier',     value: tierLabel,                               inline: true },
-                { name: 'Reward',   value: payoutDisplay,                           inline: true },
-                { name: 'XP',       value: `+${xpEarned} XP${isCrit ? ' (crit bonus)' : ''}`, inline: true },
-                { name: 'Pickaxe',  value: `${pickaxe.name} ${pickaxeStatusEmoji(pickaxe.status)}\n${durabilityBar(pickaxe.currentDurability, pickaxe.maxDurability)} ${pickaxe.currentDurability}/${pickaxe.maxDurability}`, inline: true },
-                { name: 'Stamina',  value: buildStaminaLine(user),                  inline: true }
+                { name: 'Reward', value: `${payoutDisplay}\n${tierLabel} · ${depth.emoji} ${depth.name}\nBalance ${currency}${user.balance.toLocaleString()}`, inline: true },
+                { name: 'XP',     value: `+${xpEarned} XP${isCrit ? ' (crit bonus)' : ''}\n${buildXpLine(user)}`, inline: true },
+                { name: 'Gear',   value: buildGearLine(user, pickaxe), inline: true },
             );
 
         // Every multiplicative factor that touched this haul, so the arithmetic on
@@ -132,8 +133,11 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
             embed.addFields({ name: '⬆️ Level Up!', value: `Miner Level **${levelUp.oldLevel}** → **${levelUp.newLevel}** (${ld.title})`, inline: false });
         }
 
-        if (result.expiredMagnet) embed.addFields({ name: '🧲 Magnet Expired', value: `Your ${result.expiredMagnet.replace(/_/g, ' ')} has worn off.`, inline: false });
-        if (result.expiredLamp)   embed.addFields({ name: '🪔 Lamp Expired',    value: `Your miner's lamp has flickered out.`, inline: false });
+        const expired = [
+            result.expiredMagnet ? `🧲 Your ${result.expiredMagnet.replace(/_/g, ' ')} has worn off.` : null,
+            result.expiredLamp   ? `🪔 Your miner's lamp has flickered out.` : null,
+        ].filter(Boolean);
+        if (expired.length) embed.addFields({ name: '⌛ Buff Ended', value: expired.join('\n'), inline: false });
 
         if (pickaxe.status === 'broken') {
             embed.addFields({ name: '⚠️ Pickaxe Broke!', value: `Your **${pickaxe.name}** has broken! Use \`/mine shop repair\` before mining again.`, inline: false });
@@ -144,11 +148,9 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
         const throttleField = buildThrottleField(user, result, currency);
         if (throttleField) embed.addFields(throttleField);
 
-        embed.addFields(
-            { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`,   inline: true },
-            { name: 'Miner XP',  value: buildXpLine(user),                               inline: true }
-        );
-        embed.setFooter({ text: `Cooldown: ${formatMs(LIMITS.MINE_COOLDOWN_MS)} • ${buildDailyProgressLine(user, currency)} • ${buildActiveConsumablesLine(user)}` });
+        // The cooldown is a live countdown in the description (nextDigLine), which
+        // a footer cannot render.
+        embed.setFooter({ text: `${buildDailyProgressLine(user, currency)} • ${buildActiveConsumablesLine(user)}` });
         embed.setTimestamp();
         return embed;
     }
@@ -157,17 +159,14 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
     const embed = new EmbedBuilder()
         .setColor(COLORS.ERROR)
         .setTitle(buildFailureTitle(failure.severity.id))
-        .setDescription(`*${failure.message}*`)
+        .setDescription(`*${failure.message}*\n${depth.emoji} ${depth.name} · nothing came up.`)
         .addFields(
-            { name: 'Depth',   value: `${depth.emoji} ${depth.name}`,  inline: true },
-            { name: 'Reward',  value: 'Nothing',                        inline: true },
-            { name: 'XP',      value: xpEarned > 0 ? `+${xpEarned} XP` : 'None', inline: true },
-            { name: 'Pickaxe', value: `${pickaxe.name} ${pickaxeStatusEmoji(pickaxe.status)}\n${durabilityBar(pickaxe.currentDurability, pickaxe.maxDurability)} ${pickaxe.currentDurability}/${pickaxe.maxDurability}`, inline: true },
+            { name: 'XP',   value: xpEarned > 0 ? `+${xpEarned} XP` : 'None', inline: true },
             {
-                name: 'Stamina',
+                name: 'Gear',
                 value: result.staminaSpared
-                    ? `${buildStaminaLine(user)}\n*Empty vein — no stamina spent*`
-                    : buildStaminaLine(user),
+                    ? `${buildGearLine(user, pickaxe)}\n*Empty vein — no stamina spent*`
+                    : buildGearLine(user, pickaxe),
                 inline: true
             }
         );
@@ -197,6 +196,32 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
     embed.setFooter({ text: 'Tip: Use consumables from /mine shop to boost your success chance' });
     embed.setTimestamp();
     return embed;
+}
+
+/** The pickaxe's condition and the miner's stamina, in one compact block. */
+function buildGearLine(user, pickaxe) {
+    return `${pickaxe.name} ${pickaxeStatusEmoji(pickaxe.status)}\n` +
+           `${durabilityBar(pickaxe.currentDurability, pickaxe.maxDurability)} ${pickaxe.currentDurability}/${pickaxe.maxDurability}\n` +
+           `${buildStaminaLine(user)}`;
+}
+
+/**
+ * When the miner can dig next, as a live Discord timestamp — the countdown ticks
+ * on the client, which a static "Cooldown: 30s" in a footer never could. Reads
+ * the longest of the cooldown and an injury; an empty stamina bar reports when
+ * the next point lands instead.
+ */
+function nextDigLine(user, now = Date.now()) {
+    const m = user.mining;
+    const unix = ms => `<t:${Math.ceil(ms / 1000)}:R>`;
+    if ((m.stamina ?? 0) <= 0) {
+        const wait = msUntilNextStamina(user);
+        return wait != null ? `😮‍💨 Out of stamina — next point ${unix(now + wait)}` : '😮‍💨 Out of stamina';
+    }
+    const cooldownAt = m.lastMine ? new Date(m.lastMine).getTime() + LIMITS.MINE_COOLDOWN_MS : 0;
+    const injuryAt   = m.injuryUntil ? new Date(m.injuryUntil).getTime() : 0;
+    const readyAt    = Math.max(cooldownAt, injuryAt);
+    return readyAt > now ? `⛏️ Next dig ${unix(readyAt)}` : '⛏️ Ready to dig again';
 }
 
 function buildThrottleField(user, result, currency) {
@@ -297,6 +322,7 @@ module.exports = {
     buildActiveConsumablesLine,
     buildDailyProgressLine,
     buildFailureTitle,
+    buildGearLine,
     buildMineEmbed,
     buildProgressBar,
     buildStaminaLine,
@@ -304,5 +330,6 @@ module.exports = {
     buildXpBar,
     buildXpLine,
     formatExpiry,
+    nextDigLine,
     prestigeBonusLines,
 };

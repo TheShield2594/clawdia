@@ -22,6 +22,7 @@ const {
     buildXpBar,
     buildXpLine,
     formatExpiry,
+    nextDigLine,
     prestigeBonusLines,
 } = require('../src/commands/economy/mine/embeds');
 
@@ -115,13 +116,13 @@ describe('buildMineEmbed — headline tiers', () => {
         const embed = dig(digResult({ tier: 'rare', isCrit: true, critMultiplier: 2.5 }));
         expect(embed.data.color).toBe(0xFFD700);
         expect(embed.data.title).toContain('✨ CRITICAL!');
-        expect(fieldsOf(embed).XP).toBe('+10 XP (crit bonus)');
+        expect(fieldsOf(embed).XP).toMatch(/^\+10 XP \(crit bonus\)\n/);
     });
 
     test('an ordinary strike is just the ore and its flavour', () => {
         const embed = dig(digResult());
         expect(embed.data.title).toBe(`${ORES.stone.emoji} ${ORES.stone.name} `);
-        expect(fieldsOf(embed).Tier).toBe('Common');
+        expect(fieldsOf(embed).Reward).toContain(`Common · ${quarry.emoji} ${quarry.name}`);
         expect(embed.data.description).toContain(ORES.stone.flavor);
     });
 
@@ -140,19 +141,19 @@ describe('buildMineEmbed — headline tiers', () => {
 
 describe('buildMineEmbed — payout display', () => {
     test('an uncapped haul prints the payout it actually paid', () => {
-        expect(fieldsOf(dig(digResult({ finalPayout: 1234 }))).Reward).toBe('**🪙1,234**');
+        expect(fieldsOf(dig(digResult({ finalPayout: 1234 }))).Reward.split('\n')[0]).toBe('**🪙1,234**');
     });
 
     // The strikethrough used to be drawn over finalPayout, which is already 0 at
     // the hard cap — it struck out the wrong number and never said what the cap
     // cost. It is drawn over the forfeited amount instead.
     test('a capped haul strikes through what the cap took, not the zero it left', () => {
-        expect(fieldsOf(dig(digResult({ cappedByHard: true, finalPayout: 0, forfeited: 900 }))).Reward)
+        expect(fieldsOf(dig(digResult({ cappedByHard: true, finalPayout: 0, forfeited: 900 }))).Reward.split('\n')[0])
             .toBe('~~🪙900~~ → **🪙0**');
     });
 
     test('a capped haul with no recorded forfeit reads as zero rather than undefined', () => {
-        expect(fieldsOf(dig(digResult({ cappedByHard: true, finalPayout: 0 }))).Reward)
+        expect(fieldsOf(dig(digResult({ cappedByHard: true, finalPayout: 0 }))).Reward.split('\n')[0])
             .toBe('~~🪙0~~ → **🪙0**');
     });
 });
@@ -259,10 +260,10 @@ describe('buildMineEmbed — optional fields', () => {
         const fields = fieldsOf(embed);
         expect(fields['🪨 Material Drop!']).toContain('Rock Fragment');
         expect(fields['⬆️ Level Up!']).toContain('**5** → **6**');
-        expect(fields['🧲 Magnet Expired']).toContain('premium magnet');
-        expect(fields['🪔 Lamp Expired']).toBeTruthy();
+        expect(fields['⌛ Buff Ended']).toContain('premium magnet');
+        expect(fields['⌛ Buff Ended']).toContain('lamp has flickered out');
         expect(fields['⚠️ Low Durability']).toContain('8/80');
-        expect(fields.Balance).toBe('🪙98,765');
+        expect(fields.Reward).toContain('Balance 🪙98,765');
     });
 
     test('a broken pickaxe outranks the low-durability warning', () => {
@@ -280,16 +281,18 @@ describe('buildMineEmbed — optional fields', () => {
     test('a throttled dig carries the throttle field into the success embed', () => {
         const embed = dig(digResult({ softCapped: true }), makeUser({ dailyCoins: 90_000 }));
         expect(fieldsOf(embed)['⏳ Daily Throttle']).toContain('payouts are halved');
-        expect(embed.data.footer.text).toContain('Cooldown: 30s');
+        expect(embed.data.footer.text).toContain('Today:');
+        expect(embed.data.footer.text).not.toContain('Cooldown');
     });
 });
 
 describe('buildMineEmbed — failure', () => {
     test('a plain failure reports no reward and no XP', () => {
-        const fields = fieldsOf(dig(failureResult()));
-        expect(fields.Reward).toBe('Nothing');
+        const embed  = dig(failureResult());
+        const fields = fieldsOf(embed);
+        expect(embed.data.description).toContain('nothing came up');
         expect(fields.XP).toBe('None');
-        expect(fields.Stamina).toBe('7/11 ⚡');
+        expect(fields.Gear.split('\n').pop()).toBe('7/11 ⚡');
     });
 
     test('a failure that still paid XP prints the amount', () => {
@@ -297,18 +300,18 @@ describe('buildMineEmbed — failure', () => {
     });
 
     test('an empty vein annotates the stamina line instead of spending it', () => {
-        expect(fieldsOf(dig(failureResult({ staminaSpared: true }))).Stamina)
+        expect(fieldsOf(dig(failureResult({ staminaSpared: true }))).Gear)
             .toContain('Empty vein — no stamina spent');
     });
 
     test('a fail streak adds the pity field', () => {
         expect(dig(failureResult(), makeUser({ consecutiveFails: 3 })).data.fields.length)
-            .toBeGreaterThan(5);
+            .toBeGreaterThan(2);
     });
 
     test('a missing fail counter is read as no streak', () => {
         expect(dig(failureResult(), makeUser({ consecutiveFails: undefined })).data.fields)
-            .toHaveLength(5);
+            .toHaveLength(2);
     });
 
     test('an injury and a level-up both annotate the same failure', () => {
@@ -491,5 +494,33 @@ describe('formatters', () => {
                 '+10% all payouts',
                 '+2% rarity boost',
             ]);
+    });
+});
+
+describe('the result card stays lean', () => {
+    test('a plain strike carries three fields, not eight', () => {
+        expect(dig(digResult()).data.fields.map(f => f.name)).toEqual(['Reward', 'XP', 'Gear']);
+    });
+});
+
+describe('nextDigLine', () => {
+    const now = 1_800_000_000_000;
+
+    test('counts down to the end of the cooldown as a live timestamp', () => {
+        const user = makeUser({ lastMine: new Date(now - 10_000) });
+        expect(nextDigLine(user, now)).toBe(`⛏️ Next dig <t:${Math.ceil((now + 20_000) / 1000)}:R>`);
+    });
+
+    test('an injury that outlasts the cooldown is what it counts to', () => {
+        const user = makeUser({ lastMine: new Date(now), injuryUntil: new Date(now + 900_000) });
+        expect(nextDigLine(user, now)).toContain(`<t:${Math.ceil((now + 900_000) / 1000)}:R>`);
+    });
+
+    test('says so when nothing is in the way', () => {
+        expect(nextDigLine(makeUser({ lastMine: new Date(now - 60_000) }), now)).toBe('⛏️ Ready to dig again');
+    });
+
+    test('an empty stamina bar is the thing to wait for', () => {
+        expect(nextDigLine(makeUser({ stamina: 0 }), now)).toMatch(/^😮‍💨 Out of stamina/);
     });
 });
