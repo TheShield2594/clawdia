@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const GuildAnalytics = require('../../../models/GuildAnalytics');
 const User = require('../../../models/User');
-const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
+const { checkAuth, checkGuildAccess, requireGuildPermission, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId, logAuditEvent, readAdjustAmount, MAX_ADJUST_TOTAL } = require('../../lib/apiHelpers');
 const { topByNetWorth } = require('../../../utils/netWorth');
 const { cachedAggregate, invalidatePrefix } = require('../../lib/aggregateCache');
@@ -70,7 +70,8 @@ router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (
 });
 
 // Gives, takes, resets, freezes or unfreezes one member's balance, and writes an audit entry.
-router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+// Administrator, matching /boost, the bot's own economy admin command (#1154).
+router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, requireGuildPermission('Administrator'), checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { userId, action, amount } = req.body;
 

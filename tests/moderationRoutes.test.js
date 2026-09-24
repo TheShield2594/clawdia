@@ -14,9 +14,14 @@ const express = require('express');
 const request = require('supertest');
 
 jest.mock('../src/models/Case', () => ({ find: jest.fn(), countDocuments: jest.fn(), findOne: jest.fn(), updateOne: jest.fn(async () => ({})) }));
+// The permission gate is exercised on its own in tests/guildPermissionGate.test.js;
+// here it only has to show which permission each route names.
+const mockDeniedPermissions = new Set();
 jest.mock('../src/dashboard/lib/middleware', () => ({
     checkAuth: (req, _res, next) => { req.user = { id: 'admin-1', username: 'admin' }; next(); },
     checkGuildAccess: (_req, _res, next) => next(),
+    requireGuildPermission: (...names) => (_req, res, next) => (
+        names.some(name => mockDeniedPermissions.has(name)) ? res.status(403).json({ error: 'Forbidden' }) : next()),
     checkWriteRateLimit: (_req, _res, next) => next(),
 }));
 jest.mock('../src/dashboard/lib/apiHelpers', () => ({
@@ -47,6 +52,7 @@ let errors;
 
 beforeEach(() => {
     jest.clearAllMocks();
+    mockDeniedPermissions.clear();
     errors = jest.spyOn(console, 'error').mockImplementation(() => {});
 
     bot = {
@@ -298,13 +304,21 @@ describe('POST /guild/:guildId/sanctions/unban/:userId', () => {
         expect((await unban(USER_ID)).status).toBe(404);
     });
 
-    it('surfaces the Discord error message on a failure', async () => {
+    it('answers a failure generically, keeping Discord\'s text in the log (#1154)', async () => {
         bot.unban.mockRejectedValue(new Error('Unknown Ban'));
 
         const res = await unban(USER_ID);
 
         expect(res.status).toBe(500);
-        expect(res.body.error).toBe('Unknown Ban');
+        expect(res.body.error).toBe('Failed to unban the user');
+        expect(errors).toHaveBeenCalled();
+    });
+
+    it('requires Ban Members, not just dashboard access (#1154)', async () => {
+        mockDeniedPermissions.add('BanMembers');
+
+        expect((await unban(USER_ID)).status).toBe(403);
+        expect(bot.unban).not.toHaveBeenCalled();
     });
 });
 
@@ -336,12 +350,19 @@ describe('POST /guild/:guildId/sanctions/untimeout/:userId', () => {
         expect(res.body.error).toBe(expected);
     });
 
-    it('surfaces the Discord error message on a failure', async () => {
+    it('answers a failure generically, keeping Discord\'s text in the log (#1154)', async () => {
         bot.clearTimeout.mockRejectedValue(new Error('Missing Permissions'));
 
         const res = await untimeout(USER_ID);
 
         expect(res.status).toBe(500);
-        expect(res.body.error).toBe('Missing Permissions');
+        expect(res.body.error).toBe('Failed to remove the timeout');
+    });
+
+    it('requires Moderate Members, not just dashboard access (#1154)', async () => {
+        mockDeniedPermissions.add('ModerateMembers');
+
+        expect((await untimeout(USER_ID)).status).toBe(403);
+        expect(bot.clearTimeout).not.toHaveBeenCalled();
     });
 });

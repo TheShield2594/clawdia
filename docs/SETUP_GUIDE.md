@@ -795,7 +795,9 @@ knowing about before an upgrade rather than during one:
 `mongo:7` and the `node:24-alpine` base are pinned by `@sha256:` digest rather
 than by tag, so `docker-compose pull` fetches the exact images the release was
 tested against and a rebuild for a rollback cannot quietly pick up a newer base.
-Dependabot raises the bumps; there is nothing to do by hand.
+Dependabot raises the bumps for the Dockerfile and `docker-compose.yml`. It does
+not read `portainer-stack.yml`, so a compose bump fails CI until the same digest
+is copied into the stack file; that copy is the one step done by hand.
 
 ### Viewing Logs
 
