@@ -308,6 +308,13 @@ const userSchema = new Schema({
 
     casinoStats: {
         slotsLossStreak: { type: Number, default: 0 },
+        // /casino blackjack's record, shown in its footer. A streak counts
+        // consecutive rounds that came out ahead; a push leaves it alone.
+        bjHands:      { type: Number, default: 0 },
+        bjWins:       { type: Number, default: 0 },
+        bjBlackjacks: { type: Number, default: 0 },
+        bjStreak:     { type: Number, default: 0 },
+        bjBestStreak: { type: Number, default: 0 },
     },
 
     grandPrestige: {
