@@ -101,8 +101,7 @@ function playDealerHand(hand, deck) {
 }
 
 /**
- * Which way a finished hand went, before any lucky-charm save or coin
- * multiplier is applied.
+ * Which way a finished hand went.
  *
  * A natural outranks any other 21, so the flags say which side holds one: a
  * dealer's two-card 21 beats a player's drawn 21 rather than pushing it.
