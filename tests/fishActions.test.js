@@ -15,12 +15,14 @@ jest.mock('../src/utils/economyFreeze', () => ({
 jest.mock('../src/utils/grindProfile', () => ({ attachGrind: jest.fn(async () => {}) }));
 jest.mock('../src/models/User', () => ({ findOne: jest.fn() }));
 jest.mock('../src/utils/balanceDebit', () => ({ chargeExact: jest.fn(), refundCharge: jest.fn(async () => {}) }));
+jest.mock('../src/utils/commandCooldowns', () => ({ claimIfAvailable: jest.fn().mockResolvedValue(0) }));
 
 const User = require('../src/models/User');
 const { chargeExact, refundCharge } = require('../src/utils/balanceDebit');
 const { getGuildSettings } = require('../src/utils/guildSettingsCache');
 const { EmbedBuilder } = require('discord.js');
-const { attachResultActions, buildResultActions, IDS } = require('../src/commands/economy/fish/actions');
+const cooldownStore = require('../src/utils/commandCooldowns');
+const { attachResultActions, buildResultActions, gateRefusal, IDS } = require('../src/commands/economy/fish/actions');
 const { RELEASE_KARMA_MAX } = require('../src/services/fishService');
 
 const ids = rows => rows.flatMap(r => r.toJSON().components.map(c => c.custom_id));
@@ -53,11 +55,11 @@ function setup({ execute = jest.fn(async () => ({ started: true })) } = {}) {
         editReply: async p => { edits.push(p); },
     };
     const textEmbed = new EmbedBuilder().setTitle('Largemouth Bass').addFields({ name: 'Balance', value: '🪙900' });
-    const command = { execute };
+    const command = { execute, category: 'economy', cooldown: 5, data: { name: 'fish' } };
     const press = async (customId, userId = 'u1') => {
         const button = {
             customId, user: { id: userId }, guild: { id: 'g1' }, member: {}, channelId: 'c1',
-            client: { commands: new Map([['fish', command]]) },
+            client: { commands: new Map([['fish', command]]), cooldowns: new Map() },
             message: { embeds: [new EmbedBuilder().setImage('attachment://fish-result.png').toJSON(), textEmbed.toJSON()] },
             reply: jest.fn(async () => {}), deferUpdate: jest.fn(async () => {}), followUp: jest.fn(async () => {}),
         };
@@ -197,4 +199,45 @@ test('someone else pressing the buttons is turned away', async () => {
     const button = await press(IDS.again, 'u2');
     expect(command.execute).not.toHaveBeenCalled();
     expect(button.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringMatching(/belongs to <@u1>/) }));
+});
+
+describe('the command cooldown', () => {
+    const button = { user: { id: 'u1' }, member: { roles: { cache: new Map([['vip', {}]]) } }, channelId: 'c1', guild: { id: 'g1' }, client: { cooldowns: new Map() } };
+    const command = { category: 'economy', cooldown: 5, data: { name: 'fish' } };
+
+    test('Cast again spends the same cooldown a typed /fish does, and refuses while it runs', async () => {
+        const until = Date.now() + 4_000;
+        cooldownStore.claimIfAvailable.mockResolvedValueOnce(until);
+        const refusal = await gateRefusal(button, command);
+        expect(cooldownStore.claimIfAvailable).toHaveBeenLastCalledWith(button.client, {
+            bucket: 'fish', userId: 'u1', guildId: 'g1', cooldownMs: 5_000,
+        });
+        expect(refusal).toBe(`Please wait, you are on cooldown. You can use \`/fish\` again <t:${Math.round(until / 1000)}:R>.`);
+    });
+
+    test('honours an admin\'s per-role cooldown override', async () => {
+        getGuildSettings.mockResolvedValueOnce({
+            commandPolicies: { cooldownOverrides: [{ command: 'fish', roleId: 'vip', cooldownSeconds: 60 }] },
+        });
+        await gateRefusal(button, command);
+        expect(cooldownStore.claimIfAvailable.mock.calls.at(-1)[1].cooldownMs).toBe(60_000);
+    });
+
+    test('keep and release run no command and spend no cooldown', async () => {
+        User.findOne.mockResolvedValue(angler({ ...PENDING }));
+        const { interaction, press } = setup();
+        await attachResultActions(interaction, {});
+        cooldownStore.claimIfAvailable.mockClear();
+        await press(IDS.keep);
+        expect(cooldownStore.claimIfAvailable).not.toHaveBeenCalled();
+    });
+
+    test('a Cast again on cooldown is refused without casting', async () => {
+        cooldownStore.claimIfAvailable.mockResolvedValueOnce(Date.now() + 3_000);
+        const { interaction, press, command } = setup();
+        await attachResultActions(interaction, {});
+        const button = await press(IDS.again);
+        expect(command.execute).not.toHaveBeenCalled();
+        expect(button.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringMatching(/on cooldown/) }));
+    });
 });

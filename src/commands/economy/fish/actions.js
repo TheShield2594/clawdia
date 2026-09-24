@@ -22,7 +22,7 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags
 const User = require('../../../models/User');
 const { createReplaySession } = require('../../../utils/replaySession');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
-const { getPolicyDecision } = require('../../../utils/commandPolicy');
+const { getPolicyDecision, claimCommandCooldown } = require('../../../utils/commandPolicy');
 const {
     commandIsFreezeGated, isEconomyFrozen, FROZEN_NOTICE, FREEZE_UNKNOWN_NOTICE,
 } = require('../../../utils/economyFreeze');
@@ -89,10 +89,13 @@ function asFishSubcommand(button, { group = null, sub, strings = {}, integers = 
 
 /**
  * The gates the command dispatcher applies before any /fish runs
- * (events/interactionCreate.js): server command policy, then the economy
- * freeze. Returns a refusal to send, or null to go ahead.
+ * (events/interactionCreate.js), in its order: server command policy, the
+ * economy freeze, then the command's cooldown — the same bucket a typed /fish
+ * spends, with the guild's per-role overrides, so a button is never a way round
+ * a cooldown an admin set. `claimCooldown: false` is for a press that runs no
+ * command (keep / release). Returns a refusal to send, or null to go ahead.
  */
-async function gateRefusal(button, command) {
+async function gateRefusal(button, command, { claimCooldown = true } = {}) {
     let guildSettings;
     try {
         guildSettings = await getGuildSettings(button.guild.id);
@@ -108,6 +111,9 @@ async function gateRefusal(button, command) {
         } catch {
             return FREEZE_UNKNOWN_NOTICE;
         }
+    }
+    if (claimCooldown) {
+        return claimCommandCooldown(button.client, command, asFishSubcommand(button, { sub: 'cast' }), guildSettings);
     }
     return null;
 }
@@ -208,7 +214,7 @@ async function attachResultActions(interaction, { locationId = null } = {}) {
             if (!command) {
                 return button.reply({ content: 'Fishing is unavailable right now.', flags: MessageFlags.Ephemeral });
             }
-            const refusal = await gateRefusal(button, command);
+            const refusal = await gateRefusal(button, command, { claimCooldown: button.customId === IDS.again });
             if (refusal) return button.reply({ content: refusal, flags: MessageFlags.Ephemeral }).catch(() => {});
 
             if (button.customId === IDS.again) {
