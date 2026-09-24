@@ -33,7 +33,7 @@ async function executeRelease(interaction) {
             .setDescription(
                 `${getPetDisplay(pet).emoji} **${getPetDisplay(pet).titledName}** — Lv.${level}, ` +
                 `${bondDays} day${bondDays === 1 ? '' : 's'} of bond, ${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L.\n\n` +
-                `**This cannot be undone.** A Revive Scroll only restores pets lost to starvation, not released ones.`
+                `**This cannot be undone.** A Revive Scroll only calls back pets that ran away hungry, not released ones.`
             )],
         components: [new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(confirmId).setLabel('Release').setStyle(ButtonStyle.Danger),

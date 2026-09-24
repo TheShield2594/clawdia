@@ -409,25 +409,28 @@ const PET_SPRITE_COLORS = {
     eagle:       { bg: '#795548', ring: '#4e342e' },
     shark:       { bg: '#607d8b', ring: '#37474f' },
     crystal_fox: { bg: '#7c4dff', ring: '#311b92' },
+    lantern_owl: { bg: '#ffb300', ring: '#5d4037' },
 };
 
 // Mirrors EVOLUTION_STAGE emoji in petService so a showcased Apex pet is
 // visibly different from a stage 1 of the same species.
 const EVOLVED_PET_EMOJIS = {
-    dog:         { 2: '🐕', 3: '🐺' },
+    dog:         { 2: '🐕', 3: '🐕‍🦺' },
     cat:         { 2: '🐈', 3: '🐅' },
-    bird:        { 2: '🦜', 3: '🦅' },
-    fish:        { 2: '🐟', 3: '🦈' },
-    fox:         { 2: '🦊', 3: '🌟' },
-    wolf:        { 2: '🐺', 3: '🌑' },
-    eagle:       { 2: '🦅', 3: '⚡' },
-    shark:       { 2: '🦈', 3: '🌊' },
-    crystal_fox: { 2: '💎', 3: '🔮' },
+    bird:        { 2: '🦜', 3: '🦚' },
+    fish:        { 2: '🐟', 3: '🐡' },
+    fox:         { 2: '🍂', 3: '🔥' },
+    wolf:        { 2: '🌕', 3: '🌑' },
+    eagle:       { 2: '🪶', 3: '⚡' },
+    shark:       { 2: '🌊', 3: '🔱' },
+    crystal_fox: { 2: '💠', 3: '🔮' },
+    lantern_owl: { 2: '🕯️', 3: '🏮' },
 };
 
 const PET_SPRITE_EMOJIS = {
     dog: '🐶', cat: '🐱', bird: '🐦', fish: '🐠',
     fox: '🦊', wolf: '🐺', eagle: '🦅', shark: '🦈', crystal_fox: '💎',
+    lantern_owl: '🦉',
 };
 
 // An evolved pet should not look identical to a hatchling: stage 2 and 3 swap in
@@ -709,3 +712,6 @@ async function createSeasonRecapCard(user, seasonName, leaderboardRank, totalPla
 }
 
 module.exports = { createWelcomeCard, createRankCard, createWarVictoryBanner, createWealthTierBanner, generatePetSprite, createAchievementCard, createSeasonRecapCard };
+
+// The sprite palettes, for the test that keeps them covering every species.
+module.exports.__test__ = { PET_SPRITE_COLORS, PET_SPRITE_EMOJIS, EVOLVED_PET_EMOJIS };

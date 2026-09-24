@@ -8,7 +8,9 @@ const {
     getPetStats,
     simulateBattle,
     makeWildPet,
+    levelMatched,
     getPetDisplay,
+    PET_DEFINITIONS,
     PET_MAX_LEVEL,
 } = require('../src/services/petService');
 
@@ -175,5 +177,141 @@ describe('getPetDisplay', () => {
         expect(getPetDisplay({ petId: 'wolf', name: 'Rex', evolutionStage: 1 }).titledName).toBe('Rex');
         expect(getPetDisplay({ petId: 'wolf', name: 'Rex', evolutionStage: 2 }).titledName).toBe('Seasoned Rex');
         expect(getPetDisplay({ petId: 'wolf', name: 'Rex', evolutionStage: 3 }).titledName).toBe('Apex Rex');
+    });
+});
+
+// ─── Review fixes: fairness of who strikes first, and level-matched wagers ─────
+
+describe('simulateBattle fairness', () => {
+    const twin = { petId: 'dog', level: 15, evolutionStage: 2, personality: 'loyal' };
+
+    test('a speed tie is decided by the rng, not handed to the challenger', () => {
+        // First roll decides who opens; 0.9 hands it to B.
+        let calls = 0;
+        const rng = () => (calls++ === 0 ? 0.9 : 0.5);
+        const res = simulateBattle(twin, { ...twin }, rng);
+        expect(res.rounds[0].attacker).toBe('b');
+    });
+
+    test('a faster pet opens more often, but not always', () => {
+        const rng = seededRng(0xFA57);
+        const fast = { ...twin, personality: 'energetic' };
+        let bOpened = 0;
+        const N = 2000;
+        for (let i = 0; i < N; i++) if (simulateBattle({ ...twin }, fast, rng).rounds[0].attacker === 'b') bOpened++;
+        expect(bOpened / N).toBeGreaterThan(0.53);
+        expect(bOpened / N).toBeLessThan(0.75);
+    });
+
+    test('an even mirror match is a coin flip for the challenger, not ~78%', () => {
+        const rng = seededRng(0xC0FFEE);
+        let wins = 0;
+        const N = 4000;
+        for (let i = 0; i < N; i++) if (simulateBattle(twin, { ...twin }, rng).winner === 'a') wins++;
+        expect(wins / N).toBeGreaterThan(0.45);
+        expect(wins / N).toBeLessThan(0.55);
+    });
+});
+
+describe('personality balance', () => {
+    // Personality is rolled once at adoption and never changes, so no roll may
+    // be a lasting handicap. Every pairing, both seats, at low, mid and high
+    // level, stays within 42–58% (the tuning keeps it near ±4%).
+    const KEYS = ['energetic', 'mischievous', 'loyal', 'lazy'];
+
+    test.each([1, 15, 28])('every pairing is close to even at level %i', (level) => {
+        const rng = seededRng(0xBA1A + level);
+        const stage = level >= 20 ? 3 : level >= 10 ? 2 : 1;
+        const N = 1500;
+        for (const x of KEYS) {
+            for (const y of KEYS) {
+                if (x === y) continue;
+                let wins = 0;
+                for (let i = 0; i < N; i++) {
+                    const px = { petId: 'dog', level, evolutionStage: stage, personality: x };
+                    const py = { petId: 'dog', level, evolutionStage: stage, personality: y };
+                    if (simulateBattle(px, py, rng).winner === 'a') wins++;
+                    if (simulateBattle(py, px, rng).winner === 'b') wins++;
+                }
+                const pct = wins / (2 * N);
+                expect([x, y, pct > 0.42 && pct < 0.58]).toEqual([x, y, true]);
+            }
+        }
+    });
+});
+
+describe('levelMatched', () => {
+    test('scales both fighters to the lower level and leaves the originals alone', () => {
+        const high = { petId: 'wolf', name: 'Rex', level: 22, evolutionStage: 3, personality: 'loyal', xp: 9000 };
+        const low  = { petId: 'cat',  name: 'Tom', level: 12, evolutionStage: 2, personality: 'lazy' };
+
+        const [a, b] = levelMatched(high, low);
+
+        expect(a).toEqual({ petId: 'wolf', name: 'Rex', personality: 'loyal', level: 12, evolutionStage: 2 });
+        expect(b).toEqual({ petId: 'cat', name: 'Tom', personality: 'lazy', level: 12, evolutionStage: 2 });
+        expect(high.level).toBe(22);
+        expect(high.evolutionStage).toBe(3);
+    });
+
+    test('a level lead no longer decides a wager', () => {
+        const rng = seededRng(0xBEEF);
+        const high = { petId: 'dog', level: 15, evolutionStage: 2, personality: 'loyal' };
+        const low  = { petId: 'cat', level: 10, evolutionStage: 2, personality: 'loyal' };
+        let wins = 0;
+        const N = 4000;
+        for (let i = 0; i < N; i++) {
+            const [a, b] = levelMatched(high, low);
+            if (simulateBattle(a, b, rng).winner === 'a') wins++;
+        }
+        expect(wins / N).toBeGreaterThan(0.45);
+        expect(wins / N).toBeLessThan(0.55);
+    });
+});
+
+describe('getPetDisplay for wild opponents and the Lantern Owl', () => {
+    test('a wild opponent shows its own emoji rather than a paw print', () => {
+        expect(getPetDisplay(makeWildPet(5, () => 0)).emoji).toBe('🐗');
+        expect(getPetDisplay({ petId: 'cave_bat', name: 'Cave Bat' }).emoji).toBe('🦇');
+    });
+
+    test('the Lantern Owl changes look as it evolves', () => {
+        expect(getPetDisplay({ petId: 'lantern_owl', evolutionStage: 1 }).emoji).toBe('🦉');
+        expect(getPetDisplay({ petId: 'lantern_owl', evolutionStage: 3 }).emoji).toBe('🏮');
+    });
+
+    test('no evolved look repeats the stage before it, another species, or the Pet of the Week star', () => {
+        const baseIcons = Object.values(PET_DEFINITIONS).map(d => d.emoji);
+        for (const [petId, def] of Object.entries(PET_DEFINITIONS)) {
+            const looks = [1, 2, 3].map(stage => getPetDisplay({ petId, evolutionStage: stage }).emoji);
+            expect([petId, new Set(looks).size]).toEqual([petId, 3]);
+            for (const look of looks.slice(1)) {
+                const clash = look === '🌟' || baseIcons.some(icon => icon === look && icon !== def.emoji);
+                expect([petId, look, clash]).toEqual([petId, look, false]);
+            }
+        }
+    });
+
+    test('every species has an evolved look at every stage', () => {
+        for (const petId of Object.keys(PET_DEFINITIONS)) {
+            for (const stage of [2, 3]) {
+                expect([petId, stage, getPetDisplay({ petId, evolutionStage: stage }).emoji])
+                    .not.toEqual([petId, stage, '🐾']);
+            }
+        }
+    });
+});
+
+describe('pet sprite palettes', () => {
+    const { __test__: sprites } = require('../src/utils/cardGenerator');
+
+    test('cover every species, so none renders as a grey paw print', () => {
+        for (const petId of Object.keys(PET_DEFINITIONS)) {
+            expect([petId, Boolean(sprites.PET_SPRITE_COLORS[petId])]).toEqual([petId, true]);
+            expect([petId, Boolean(sprites.PET_SPRITE_EMOJIS[petId])]).toEqual([petId, true]);
+            for (const stage of [2, 3]) {
+                expect([petId, stage, sprites.EVOLVED_PET_EMOJIS[petId]?.[stage]])
+                    .toEqual([petId, stage, getPetDisplay({ petId, evolutionStage: stage }).emoji]);
+            }
+        }
     });
 });

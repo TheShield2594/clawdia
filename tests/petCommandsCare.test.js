@@ -171,6 +171,24 @@ describe('/pet adopt', () => {
         expect(announceAchievements).toHaveBeenCalledTimes(1);
     });
 
+    test('an adoption name has mentions and formatting taken out', async () => {
+        seedUser({ balance: 5000 });
+
+        await run('adopt', { type: 'dog', name: '**Rex**_the_<@123>' });
+
+        expect(stored().pets[0].name).toBe('Rex the');
+    });
+
+    test('an adoption name with nothing usable left is refused before any charge', async () => {
+        seedUser({ balance: 5000 });
+
+        const interaction = await run('adopt', { type: 'dog', name: '<@1> ~~' });
+
+        expect(textOf(interaction)).toContain('That name has nothing left');
+        expect(stored().balance).toBe(5000);
+        expect(stored().pets).toHaveLength(0);
+    });
+
     test('an unknown type is refused before anything is read', async () => {
         const interaction = await run('adopt', { type: 'dragon' });
 
@@ -399,7 +417,7 @@ describe('/pet feed', () => {
         const interaction = await run('feed', { material: 'rabbits_foot' });
 
         expect(stored().pets[0]).toEqual(expect.objectContaining({ level: 10, evolutionStage: 2 }));
-        expect(textOf(interaction)).toMatch(/Dog evolved!\*\* Now an \*\*Seasoned Dog\*\* \(Stage 2\)/);
+        expect(textOf(interaction)).toMatch(/Dog evolved!\*\* Say hello to \*\*Seasoned Dog\*\* \(Stage 2\)/);
     });
 
     test('with no pets it says so', async () => {
@@ -448,6 +466,47 @@ describe('/pet feed', () => {
 
         expect(textOf(interaction)).toContain('**Rex** is completely full');
         expect(stored().hunt.materials.rabbits_foot).toBe(1);
+    });
+
+    test('a pet the bar shows at 100% is refused too, not fed for a fraction of a point', async () => {
+        seedUser({
+            pets: [makePet({ hunger: 99.7, name: 'Rex', lastDecayAt: new Date() })],
+            hunt: { materials: { rabbits_foot: 1 } },
+        });
+
+        const interaction = await run('feed', { material: 'rabbits_foot' });
+
+        expect(textOf(interaction)).toContain('**Rex** is completely full');
+        expect(stored().hunt.materials.rabbits_foot).toBe(1);
+        expect(stored().pets[0].weeklyInteractions).toBeUndefined();
+    });
+
+    test('a favourite fed near full reports the hunger that actually landed', async () => {
+        seedUser({
+            pets: [makePet({ hunger: 95, name: 'Rex', lastDecayAt: new Date() })],
+            hunt: { materials: { rabbits_foot: 1 } },
+        });
+
+        const interaction = await run('feed', { material: 'rabbits_foot' });
+
+        expect(stored().pets[0].hunger).toBe(100);
+        expect(textOf(interaction)).toContain('favorite food — +5 hunger!');
+        expect(textOf(interaction)).not.toContain('+25 hunger');
+    });
+
+    test('feeding past the daily Pet of the Week cap still feeds, but earns no more credit', async () => {
+        seedUser({
+            pets: [makePet({
+                hunger: 50, weeklyInteractions: 4,
+                interactionDay: Math.floor(Date.now() / 86_400_000), interactionsToday: 3,
+            })],
+            hunt: { materials: { rabbits_foot: 1 } },
+        });
+
+        await run('feed', { material: 'rabbits_foot' });
+
+        expect(stored().pets[0].hunger).toBeCloseTo(75, 1);
+        expect(stored().pets[0].weeklyInteractions).toBe(4);
     });
 
     test('a pet type with no definition cannot be fed', async () => {
@@ -518,8 +577,8 @@ describe('/pet feed', () => {
         expect(stored().deceasedPets).toHaveLength(1);
         expect(stored().deceasedPets[0]).toEqual(expect.objectContaining({ petId: 'cat', name: 'Ghost' }));
         expect(stored().deceasedPets[0]._id).toBeUndefined();
-        expect(interaction.channel.sent[0].content).toMatch(/player\*\*'s pet 🐱 \*\*Ghost\*\* passed away/);
-        expect(textOf(interaction)).toContain('Your pet died from starvation: 🐱 **Ghost**');
+        expect(interaction.channel.sent[0].content).toMatch(/player\*\*'s pet 🐱 \*\*Ghost\*\* got too hungry and ran off/);
+        expect(textOf(interaction)).toContain('After days without food, 🐱 **Ghost** ran away.');
     });
 
     test('two pets starving together are named together', async () => {
@@ -538,8 +597,8 @@ describe('/pet feed', () => {
 
         expect(stored().pets.map(p => p._id)).toEqual(['c']);
         expect(stored().deceasedPets.map(p => p.petId)).toEqual(['bird', 'cat']);
-        expect(interaction.channel.sent[0].content).toContain("'s pets 🐱 **Cat**, 🐦 **Bird** passed away");
-        expect(textOf(interaction)).toContain('Your pets died from starvation');
+        expect(interaction.channel.sent[0].content).toContain("'s pets 🐱 **Cat**, 🐦 **Bird** got too hungry and ran off");
+        expect(textOf(interaction)).toContain('After days without food, 🐱 **Cat**, 🐦 **Bird** ran away.');
     });
 
     // #873. Every early return in /pet feed skipped its save, so a death was
@@ -693,6 +752,24 @@ describe('/pet rename', () => {
         expect(textOf(interaction)).toBe('🦊 Pet renamed to **Vixen**!');
     });
 
+    test('mentions and formatting are taken out of the new name', async () => {
+        seedUser({ pets: [makePet({ _id: 'a' })] });
+
+        const interaction = await run('rename', { slot: 'a', name: '<@123> **sir_fluff**' });
+
+        expect(stored().pets[0].name).toBe('sir fluff');
+        expect(textOf(interaction)).toBe('🐶 Pet renamed to **sir fluff**!');
+    });
+
+    test('a name with nothing usable left is refused and the old name kept', async () => {
+        seedUser({ pets: [makePet({ _id: 'a', name: 'Rex' })] });
+
+        const interaction = await run('rename', { slot: 'a', name: '<@123> ***' });
+
+        expect(stored().pets[0].name).toBe('Rex');
+        expect(textOf(interaction)).toContain('That name has nothing left');
+    });
+
     test('a pet that is not there is refused', async () => {
         seedUser({ pets: [] });
 
@@ -756,27 +833,28 @@ describe('/pet leaderboard', () => {
         const embed = interaction.replies.at(-1).embeds[0].data;
         expect(embed.title).toContain('Highest Level Pets');
         expect(embed.description.split('\n')).toEqual([
-            '🥇 🐺 **Alpha** 🌟 — Lv**25** — <@u1>',
-            '🥈 🐶 **Dog** ✨ — Lv**12** — <@u2>',
-            '🥉 🐾 **nope**  — Lv**1** — <@u3>',
+            '🥇 🌑 **Apex Alpha** ⭐⭐⭐ — Lv**25** — <@u1>',
+            '🥈 🐕 **Seasoned Dog** ⭐⭐ — Lv**12** — <@u2>',
+            '🥉 🐾 **nope** ⭐ — Lv**1** — <@u3>',
         ]);
         expect(pipelineOf()[3]).toEqual({ $sort: { petLevel: -1 } });
     });
 
-    test('by wins shows each record', async () => {
+    test('by wins ranks member-vs-member results only', async () => {
         mockUsers.model.aggregate.mockResolvedValueOnce([
-            { userId: 'u1', pet: { petId: 'fox', name: 'Red', battleWins: 9, battleLosses: 2 } },
+            { userId: 'u1', pet: { petId: 'fox', name: 'Red', battleWins: 40, battleLosses: 12, pvpWins: 9, pvpLosses: 2 } },
             { userId: 'u2', pet: { petId: 'bogus' } },
         ]);
 
         const interaction = await run('leaderboard', { type: 'wins' });
 
         const embed = interaction.replies.at(-1).embeds[0].data;
-        expect(embed.title).toContain('Most Battle Wins');
+        expect(embed.title).toContain('Most PvP Wins');
         expect(embed.description.split('\n')).toEqual([
-            '🥇 🦊 **Red** — ⚔️ 9W / 2L — <@u1>',
-            '🥈 🐾 **bogus** — ⚔️ 0W / 0L — <@u2>',
+            '🥇 🦊 **Red** — ⚔️ 9W / 2L vs members — <@u1>',
+            '🥈 🐾 **bogus** — ⚔️ 0W / 0L vs members — <@u2>',
         ]);
+        expect(pipelineOf()[3]).toEqual({ $sort: { petWins: -1, petLosses: 1 } });
     });
 
     test('an empty server says so', async () => {

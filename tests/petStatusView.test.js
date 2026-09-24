@@ -9,6 +9,10 @@ jest.mock('../src/utils/itemImageHelper', () => ({
     getItemImageAttachment: jest.fn(),
 }));
 const { getItemImageAttachment } = require('../src/utils/itemImageHelper');
+// The canvas itself is covered by tests/petStatusCard.test.js; here it is a
+// stub, so these tests are about what the view does with a card or without one.
+jest.mock('../src/utils/petStatusCard', () => ({ createPetStatusCard: jest.fn(async () => Buffer.from('card')) }));
+const { createPetStatusCard } = require('../src/utils/petStatusCard');
 
 const {
     HUNGER_BAR_LENGTH,
@@ -17,6 +21,8 @@ const {
     buildPetEmbed,
     buildNavComponents,
     renderPetStatus,
+    petCardOptions,
+    cardAltText,
 } = require('../src/services/petStatusView');
 
 const DAY = 86400000;
@@ -53,6 +59,10 @@ describe('hungerBar', () => {
     test('is green when fed and red when starving', () => {
         expect(hungerBar(90)).toContain('🟩');
         expect(hungerBar(5)).toContain('🟥');
+        // Orange while it is asking but the bonus still holds, red once it lapses.
+        expect(hungerBar(45)).toContain('🟧');
+        expect(hungerBar(30)).toContain('🟧');
+        expect(hungerBar(29)).toContain('🟥');
     });
 
     test('clamps junk input to 0', () => {
@@ -111,6 +121,11 @@ describe('buildNavComponents', () => {
         expect(ids).toEqual(['pet_play:u1:0', 'pet_rest:u1:0', 'pet_showcase:u1:0']);
     });
 
+    test("the action buttons carry the pet's id when given one", () => {
+        const ids = buildNavComponents('u1', 2, 3, 'abc123')[1].toJSON().components.map(c => c.custom_id);
+        expect(ids).toEqual(['pet_play:u1:2:abc123', 'pet_rest:u1:2:abc123', 'pet_showcase:u1:2:abc123']);
+    });
+
     test('multiple pets get a nav row, with the ends disabled at the ends', () => {
         const first = buildNavComponents('u1', 0, 3)[0].toJSON().components;
         expect(first[0].disabled).toBe(true);  // prev at index 0
@@ -136,7 +151,31 @@ describe('petArt / renderPetStatus', () => {
         expect(await petArt('dog', 'g1', 'Rex')).toBeNull();
     });
 
-    test('renderPetStatus attaches the portrait when art exists', async () => {
+    test('renderPetStatus leads with the companion card, every number still in the text', async () => {
+        const payload = await renderPetStatus(makePet(), 0, 2, 'https://avatar', 'g1', 'u1', 'TheShield');
+
+        expect(payload.files).toHaveLength(1);
+        expect(payload.files[0].name).toBe('pet-card.png');
+        expect(payload.files[0].description)
+            .toBe('Companion card for Seasoned Rex, a level 12 loyal Dog, Pet of the Week: hunger 80%, bond 40 days, '
+                + 'passive +9.2% work earnings active, record 3 wins and 1 loss.');
+        expect(payload.attachments).toEqual([]);
+        const json = payload.embeds[0].toJSON();
+        expect(json.image.url).toBe('attachment://pet-card.png');
+        expect(json.thumbnail).toBeUndefined();
+        expect(json.description).toMatch(/📈 Lv \*\*\d+\*\*/);
+        expect(json.description).toContain('Favourite food `rabbits_foot`');
+        expect(json.footer.text).toMatch(/^Pet 1 of 2 • Last fed/);
+        expect(createPetStatusCard).toHaveBeenCalledWith(expect.objectContaining({
+            kicker: "TheShield's companion", footerLeft: 'Pet 1 of 2',
+        }));
+        // The card is drawn from the bundled portrait, not a per-guild lookup.
+        expect(getItemImageAttachment).not.toHaveBeenCalled();
+    });
+
+    test('renderPetStatus attaches the portrait when the card cannot be drawn', async () => {
+        createPetStatusCard.mockRejectedValueOnce(new Error('no canvas'));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
         const attachment = { name: 'item-pet_dog.png' };
         getItemImageAttachment.mockResolvedValue({ attachment, url: 'attachment://item-pet_dog.png' });
         const payload = await renderPetStatus(makePet(), 0, 2, 'https://avatar', 'g1', 'u1');
@@ -146,10 +185,46 @@ describe('petArt / renderPetStatus', () => {
         expect(payload.components.length).toBeGreaterThan(0);
     });
 
-    test('renderPetStatus falls back to no files when no art ships', async () => {
+    test('renderPetStatus falls back to no files when neither card nor art is available', async () => {
+        createPetStatusCard.mockRejectedValueOnce(new Error('no canvas'));
+        jest.spyOn(console, 'error').mockImplementation(() => {});
         getItemImageAttachment.mockResolvedValue(null);
         const payload = await renderPetStatus(makePet({ name: null }), 0, 1, 'https://avatar', 'g1', 'u1');
         expect(payload.files).toEqual([]);
         expect(payload.embeds[0].toJSON().thumbnail).toBeUndefined();
+    });
+});
+
+describe('petCardOptions', () => {
+    test('reads the pet the way the text does', () => {
+        const now = Date.now();
+        const o = petCardOptions(makePet({ personality: 'mischievous', level: 12, evolutionStage: 2, potw: true }),
+            { kicker: 'K', footerLeft: 'L', footerRight: 'R' }, now);
+
+        expect(o).toEqual(expect.objectContaining({
+            petId: 'dog', iconId: 'pet:dog', kicker: 'K', titledName: 'Seasoned Rex', species: 'Dog',
+            personality: 'Mischievous', rare: false, potw: true, stage: 2, stageName: 'Stage 2 - Seasoned',
+            level: 12, maxed: false, threshold: 30, footerLeft: 'L', footerRight: 'R',
+        }));
+        expect(o.boosted.sort()).toEqual(['atk', 'crit']);
+        expect(o.stats.crit).toBeCloseTo(0.2);
+        expect(o.bonus).toEqual({ pct: expect.any(Number), label: 'work earnings', active: true });
+    });
+
+    test('XP past the level is clamped, never printed as more than the level needs', () => {
+        const o = petCardOptions(makePet({ level: 17, xp: 999_999, evolutionStage: 2 }), { kicker: 'K' });
+        expect(o.xpInLevel).toBe(o.xpToNext);
+    });
+
+    test('a rare companion at max level is flagged as such', () => {
+        const o = petCardOptions(makePet({ petId: 'lantern_owl', level: 30, evolutionStage: 3 }), { kicker: 'K' });
+        expect(o.rare).toBe(true);
+        expect(o.maxed).toBe(true);
+        expect(o.xpToNext).toBe(0);
+    });
+
+    test('the alt text names the pet and its state', () => {
+        const o = petCardOptions(makePet({ potw: false, hunger: 10, battleWins: 1, battleLosses: 0 }), { kicker: 'K' });
+        expect(cardAltText(o)).toMatch(/^Companion card for Seasoned Rex, a level 12 loyal Dog: hunger \d+%, bond 40 days, passive \+9\.2% work earnings inactive, record 1 win and 0 losses\.$/);
     });
 });

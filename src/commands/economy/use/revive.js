@@ -12,7 +12,7 @@ async function useReviveScroll({ interaction, userFilter, preview, canonicalId, 
     const fallen = preview.deceasedPets?.[0];
     if (!fallen) {
         return interaction.reply({
-            content: '📜 The scroll finds no one to call back — none of your pets have starved. Keep it for a rainier day.',
+            content: '📜 The scroll finds no one to call back — none of your pets have run away. Keep it for a rainier day.',
             flags: MessageFlags.Ephemeral,
         });
     }

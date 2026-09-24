@@ -12,6 +12,7 @@ const {
     getPetStats,
     simulateBattle,
     makeWildPet,
+    levelMatched,
     applyPetXp,
     resolvePetRef,
     XP_BATTLE_WIN,
@@ -23,6 +24,7 @@ const { isVersionError } = require('../../../utils/versionRetry');
 const { logTransaction } = require('../../../utils/logTransaction');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const COLORS = require('../../../utils/embedColors');
+const { petArt } = require('../../../services/petStatusView');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const {
     payBattleWinner, refundBattleStake, refundBothStakes, battleRefundNote, stakeRefundNote,
@@ -118,7 +120,16 @@ async function executeBattle(interaction) {
         }
         throw sync.saveError;
     }
-    await user.save().catch(() => {});
+    // Persist the decay just applied. This used to swallow every error, which
+    // hid a failed write behind a battle that then went ahead on stale state.
+    try {
+        await user.save();
+    } catch (err) {
+        if (isVersionError(err)) {
+            return interaction.reply({ content: 'Edit conflict — please try again.', flags: MessageFlags.Ephemeral });
+        }
+        throw err;
+    }
 
     const mine = resolvePetRef(user?.pets, petRef);
     if (!mine) return interaction.reply({ content: NO_SUCH_PET, flags: MessageFlags.Ephemeral });
@@ -189,11 +200,15 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
     const won    = result.winner === 'a';
 
     const da = getPetDisplay(mySnap), db = getPetDisplay(wild);
+    // The wild species ship portrait art (issue #1082); show it on both frames.
+    const wildArt = await petArt(wild.petId, interaction.guild.id, db.name);
+    const artFiles = wildArt ? [wildArt.attachment] : [];
     const intro = new EmbedBuilder()
         .setColor(COLORS.RARE)
         .setTitle('⚔️ A wild challenger appears!')
         .setDescription(`${da.emoji} **${da.titledName}** squares off against ${db.emoji} **${db.name}** (Lv.${wild.level})…`);
-    await interaction.editReply({ embeds: [intro] });
+    if (wildArt) intro.setThumbnail(wildArt.url);
+    await interaction.editReply({ embeds: [intro], files: artFiles });
     await _delay(1500);
 
     const xpRes = applyPetXp(myPet, won ? XP_WILD_WIN : XP_WILD_LOSS);
@@ -223,15 +238,15 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
     }
     announcePetAchievements(interaction, user, guildSettings, earned);
 
-    return interaction.editReply({
-        embeds: [battleResultEmbed({
-            color: won ? '#2ecc71' : '#e74c3c',
-            title: won ? `🏆 ${da.titledName} won the wild battle!` : `💀 ${da.titledName} was beaten back…`,
-            petA: mySnap, petB: wild, result, currency,
-            payoutLine: null,
-            xpLineA: petXpLine(da.titledName, xpRes),
-        })],
+    const resultEmbed = battleResultEmbed({
+        color: won ? '#2ecc71' : '#e74c3c',
+        title: won ? `🏆 ${da.titledName} won the wild battle!` : `💀 ${da.titledName} was beaten back…`,
+        petA: mySnap, petB: wild, result, currency,
+        payoutLine: null,
+        xpLineA: petXpLine(da.titledName, xpRes),
     });
+    if (wildArt) resultEmbed.setThumbnail(wildArt.url);
+    return interaction.editReply({ embeds: [resultEmbed], files: artFiles, attachments: [] });
 }
 
 async function pvpBattle(interaction, ctx) {
@@ -255,7 +270,9 @@ async function pvpBattle(interaction, ctx) {
             // Name the defending pet up front — it is chosen automatically as the
             // closest level match, and accepting blind to which pet fights is unfair.
             (db ? `\n\n${db.emoji} **${db.titledName}** (Lv.${oppPet.level ?? 1}) will answer the call.` : '') +
-            (bet > 0 ? `\n\n💰 Wager: **${currency}${bet.toLocaleString()}** each — winner takes the pot.` : '\n\n*Friendly match — pet XP only.*')
+            (bet > 0
+                ? `\n\n💰 Wager: **${currency}${bet.toLocaleString()}** each — winner takes the pot.\n⚖️ *Wagered battles are level-matched: both pets fight at the lower pet's level.*`
+                : '\n\n*Friendly match — pet XP only.*')
         )
         .setFooter({ text: 'Accept within 60 seconds' });
 
@@ -325,9 +342,13 @@ async function pvpBattle(interaction, ctx) {
             return refundAndCancel(`The pets that would fight are now more than ${BATTLE_MAX_LEVEL_GAP} levels apart, the limit for a wagered battle`);
         }
 
-        // Pre-battle snapshots for consistent result rendering (applyPetXp below mutates levels)
-        const aSnap = petSnapshot(aPet), bSnap = petSnapshot(bPet);
-        const result = simulateBattle(aPet, bPet);
+        // A wager fights both pets at the lower level, so the coins ride on the
+        // matchup rather than on who has grinded further (see levelMatched).
+        // The snapshots are what fought, so the HP bars and levels in the
+        // result embed match the stats the simulation used.
+        const [aFighter, bFighter] = bet > 0 ? levelMatched(aPet, bPet) : [aPet, bPet];
+        const aSnap = petSnapshot(aFighter), bSnap = petSnapshot(bFighter);
+        const result = simulateBattle(aFighter, bFighter);
         const aWon   = result.winner === 'a';
 
         const intro = new EmbedBuilder()
@@ -339,8 +360,11 @@ async function pvpBattle(interaction, ctx) {
         // XP + records
         const aXp = applyPetXp(aPet, aWon ? XP_BATTLE_WIN : XP_BATTLE_LOSS);
         const bXp = applyPetXp(bPet, aWon ? XP_BATTLE_LOSS : XP_BATTLE_WIN);
-        if (aWon) { aPet.battleWins = (aPet.battleWins ?? 0) + 1; bPet.battleLosses = (bPet.battleLosses ?? 0) + 1; }
-        else      { bPet.battleWins = (bPet.battleWins ?? 0) + 1; aPet.battleLosses = (aPet.battleLosses ?? 0) + 1; }
+        const [winPet, losePet] = aWon ? [aPet, bPet] : [bPet, aPet];
+        winPet.battleWins  = (winPet.battleWins ?? 0) + 1;
+        winPet.pvpWins     = (winPet.pvpWins ?? 0) + 1;
+        losePet.battleLosses = (losePet.battleLosses ?? 0) + 1;
+        losePet.pvpLosses    = (losePet.pvpLosses ?? 0) + 1;
         aPet.lastBattle = new Date(); bPet.lastBattle = new Date();
         chUser.markModified('pets'); opUser.markModified('pets');
 

@@ -32,7 +32,7 @@ jest.mock('../src/utils/bigWinLogger', () => ({ logBigWin: jest.fn() }));
 jest.mock('../src/utils/balanceDelta', () => ({ saveWithBalanceDelta: jest.fn(async () => ({ credited: true })) }));
 jest.mock('../src/services/seasonalEventService', () => ({ getEventCrossSystemType: () => null }));
 jest.mock('../src/services/petService', () => ({
-    getTotalBonus: () => 0, PET_DEFINITIONS: {}, isPetActive: () => false, TRAIT_FLAVOR: {}, tryGrantRarePet: () => null,
+    getTotalBonus: () => 0, petCompanionLine: () => null, tryGrantRarePet: () => null,
 }));
 jest.mock('../src/services/fishService', () => {
     const actual = jest.requireActual('../src/services/fishService');

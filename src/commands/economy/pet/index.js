@@ -90,7 +90,7 @@ module.exports = {
                         .addChoices(
                             { name: 'Bond Days (Most Loyal)', value: 'bonds' },
                             { name: 'Level (Highest Level)', value: 'level' },
-                            { name: 'Battle Wins',            value: 'wins'  }
+                            { name: 'PvP Wins (vs members)',  value: 'wins'  }
                         )
                 )
         )

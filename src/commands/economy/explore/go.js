@@ -23,7 +23,7 @@ const {
     getRelicBonus, getSecretOdds, executeExplore, applyExploreXpBonus,
     resolveEncounter, getEncounterStakes, addJournalEntry, randomFrom, formatMs,
 } = require('../../../services/exploreService');
-const { getTotalBonus, tryGrantRarePet } = require('../../../services/petService');
+const { getTotalBonus, tryGrantRarePet, petCompanionLine } = require('../../../services/petService');
 const { checkAndAward, announceAchievements } = require('../../../services/achievementService');
 const { ensureQuests, onExplore, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../../services/questService');
 const { recordMissionProgress } = require('../../../services/seasonMissionService');
@@ -651,6 +651,9 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
             `Everything it pays you from here carries a standing **+${Math.round(result.surveyBonus * 100)}%**. The map keeps its debts.`,
         );
     }
+
+    const petLine = petCompanionLine(user?.pets, 'explore');
+    if (petLine) lines.push('', petLine);
 
     embed.setDescription(lines.join('\n'));
 

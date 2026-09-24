@@ -5,8 +5,9 @@ const User = require('../../../models/User');
 const {
     PET_DEFINITIONS,
     STARVING_THRESHOLD,
-    effectiveHunger,
     feedPet,
+    isPetFull,
+    recordPetInteraction,
     getPetDisplay,
     applyPetXp,
     resolvePetRef,
@@ -58,8 +59,9 @@ async function executeFeed(interaction) {
     const pet    = user.pets[petIndex];
     const def    = PET_DEFINITIONS[pet.petId];
 
-    // Refuse rather than consume the material for nothing.
-    if (effectiveHunger(pet) >= 100) {
+    // Refuse rather than consume the material for nothing. Rounded the way the
+    // hunger bar rounds, so a pet shown at 100% is full here too.
+    if (isPetFull(pet)) {
         const fullName = pet.name || def?.name || pet.petId;
         return interaction.editReply(`${getPetDisplay(pet).emoji} **${fullName}** is completely full — save that \`${materialId}\` for later.`);
     }
@@ -74,7 +76,7 @@ async function executeFeed(interaction) {
     // cursor so the restored hunger isn't immediately docked again.
     user.pets[petIndex].lastDecayAt     = new Date();
     user.pets[petIndex].starving        = result.hunger < STARVING_THRESHOLD;
-    user.pets[petIndex].weeklyInteractions = (user.pets[petIndex].weeklyInteractions || 0) + 1;
+    recordPetInteraction(user.pets[petIndex]);
     if (result.hunger > 0) user.pets[petIndex].starvingStartAt = null;
     const feedXp = applyPetXp(user.pets[petIndex], result.isFavorite ? XP_FEED_FAVORITE : XP_FEED_OTHER);
     user.markModified('pets');
@@ -103,9 +105,12 @@ async function executeFeed(interaction) {
     announcePetAchievements(interaction, user, guildSettings, earned);
 
     const displayName  = pet.name || def?.name || pet.petId;
-    const favoriteNote = result.isFavorite ? ' *(favorite food — +25 hunger!)*' : ' *(not favorite — +10 hunger)*';
+    // Say what actually landed: a favourite fed at 95% restores 5, not 25.
+    const favoriteNote = result.isFavorite
+        ? ` *(favorite food — +${result.gained} hunger!)*`
+        : ` *(not favorite — +${result.gained} hunger)*`;
     const progressNote = feedXp.evolved
-        ? `\n🌟 **${displayName} evolved!** Now an **${getPetDisplay(user.pets[petIndex]).titledName}** (Stage ${feedXp.toStage})!`
+        ? `\n🌟 **${displayName} evolved!** Say hello to **${getPetDisplay(user.pets[petIndex]).titledName}** (Stage ${feedXp.toStage})!`
         : feedXp.leveledUp
         ? `\n🎉 **${displayName} reached Level ${feedXp.toLevel}!**`
         : '';

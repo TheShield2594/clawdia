@@ -286,7 +286,7 @@ async function handleDig(interaction) {
         await interaction.editReply({ embeds: [confirmEmbed], components: [] });
 
         // Crystal Fox pet: +15% mine yield (only if hunger >= 30)
-        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../../services/petService');
+        const { getTotalBonus, petCompanionLine, tryGrantRarePet } = require('../../../services/petService');
         const petMineYieldPct = getTotalBonus(user.pets || [], 'mine_yield');
 
         const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
@@ -510,19 +510,9 @@ async function handleDig(interaction) {
             });
         }
 
-        // Pet narrative: show active pet's personality flavor in description
-        if (result.success) {
-            const activePet = (user.pets || []).find(p => isPetActive(p));
-            if (activePet) {
-                const petDef = PET_DEFS[activePet.petId];
-                const petName = activePet.name || petDef?.name || activePet.petId;
-                const flavorFn = TRAIT_FLAVOR[activePet.personality]?.mine;
-                if (flavorFn && petDef) {
-                    const desc = embed.data.description ?? '';
-                    embed.setDescription(desc + `\n> ${flavorFn(petName, petDef.emoji)}`);
-                }
-            }
-        }
+        // Pet narrative: the companion helping with this activity says its line.
+        const petLine = result.success ? petCompanionLine(user.pets, 'mine') : null;
+        if (petLine) embed.setDescription(`${embed.data.description ?? ''}\n${petLine}`);
 
         // Result artwork — the mined ore's icon as the embed thumbnail (emoji
         // fallback). An abandoned cave-in keeps result.success true but revokes

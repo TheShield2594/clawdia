@@ -169,7 +169,7 @@ async function executeStart(interaction) {
         }
 
         // Wolf pet: +10% coin yield; Eagle pet: +15% XP (only if hunger >= 30)
-        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../../services/petService');
+        const { getTotalBonus, petCompanionLine, tryGrantRarePet } = require('../../../services/petService');
         const petYieldPct = getTotalBonus(user.pets || [], 'hunt_yield');
         const petXpPct    = getTotalBonus(user.pets || [], 'hunt_xp');
 
@@ -267,7 +267,7 @@ async function executeStart(interaction) {
                 : [];
 
         const chips = buildRunChips({ stealth, aim, quick, flushed, encounter, isFeaturedZone, zone });
-        const petLine = result.success ? petFlavorLine(user, { isPetActive, PET_DEFS, TRAIT_FLAVOR }) : null;
+        const petLine = result.success ? petCompanionLine(user.pets, 'hunt') : null;
         if (chips || petLine) {
             embed.setDescription([embed.data.description, '', chips, petLine].filter(v => v !== null && v !== undefined).join('\n'));
         }
@@ -453,15 +453,6 @@ function buildRunChips({ stealth, aim, quick, flushed, encounter, isFeaturedZone
     if (quick) chips.push('⚡ Quick hunt');
     if (isFeaturedZone) chips.push(`🌟 Featured zone ${zone.emoji} +${Math.round(FEATURED_PAYOUT_BONUS * 100)}%`);
     return chips.length ? chips.join('  ·  ') : null;
-}
-
-function petFlavorLine(user, { isPetActive, PET_DEFS, TRAIT_FLAVOR }) {
-    const activePet = (user.pets || []).find(p => isPetActive(p));
-    if (!activePet) return null;
-    const petDef = PET_DEFS[activePet.petId];
-    const flavorFn = TRAIT_FLAVOR[activePet.personality]?.hunt;
-    if (!flavorFn || !petDef) return null;
-    return `> ${flavorFn(activePet.name || petDef.name || activePet.petId, petDef.emoji)}`;
 }
 
 // ─── ANNOUNCEMENTS ────────────────────────────────────────────────────────────

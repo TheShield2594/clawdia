@@ -47,6 +47,7 @@ const pet = require('../src/commands/economy/pet');
 const { logTransaction } = require('../src/utils/logTransaction');
 const { recordOwedPayout } = require('../src/utils/owedPayout');
 const { onPetCare } = require('../src/services/questService');
+const { getItemImageAttachment } = require('../src/utils/itemImageHelper');
 
 const GUILD = 'guild-1';
 const USER = 'user-1';
@@ -264,6 +265,8 @@ describe('/pet battle refusals', () => {
 
 describe('/pet battle against a wild pet', () => {
     test('a win records the win, the XP and the cooldown, and shows the fight', async () => {
+        // Low rolls: a Lv.4 Wild Boar, Rex opens, and no crits.
+        Math.random.mockReturnValue(0.1);
         seed(USER, { pets: [makePet({ name: 'Rex' })] });
 
         const interaction = await battle();
@@ -271,15 +274,30 @@ describe('/pet battle against a wild pet', () => {
         const stored = petOf(USER);
         expect(stored.battleWins).toBe(1);
         expect(stored.battleLosses).toBe(0);
+        expect(stored.pvpWins).toBeUndefined(); // wild wins never count toward PvP
         expect(stored.xp).toBe(22);
         expect(stored.lastBattle).toBeInstanceOf(Date);
         expect(interaction.replies[1].embeds[0].data.title).toBe('⚔️ A wild challenger appears!');
-        expect(interaction.replies[1].embeds[0].data.description).toContain('Stray Hound** (Lv.5)');
+        expect(interaction.replies[1].embeds[0].data.description).toContain('Wild Boar** (Lv.4)');
         const result = interaction.replies.at(-1).embeds[0].data;
         expect(result.title).toBe('🏆 Rex won the wild battle!');
         expect(result.description).toContain('✨ **Rex** +22 XP');
-        expect(result.description).toMatch(/• \*\*Rex\*\* hits \*\*Stray Hound\*\* for \*\*\d+\*\*/);
+        expect(result.description).toMatch(/• \*\*Rex\*\* hits \*\*Wild Boar\*\* for \*\*\d+\*\*/);
         expect(onPetCare).toHaveBeenCalledTimes(1);
+    });
+
+    test('the wild opponent shows its own emoji and its portrait when one ships', async () => {
+        getItemImageAttachment.mockResolvedValueOnce({ url: 'attachment://wild.png', attachment: { name: 'wild.png' } });
+        seed(USER, { pets: [makePet({ name: 'Rex' })] });
+
+        const interaction = await battle();
+
+        const intro = interaction.replies[1];
+        expect(intro.embeds[0].data.description).toContain('🐕 **Stray Hound**'); // Math.random pinned at 0.5
+        expect(intro.embeds[0].data.thumbnail.url).toBe('attachment://wild.png');
+        const last = interaction.replies.at(-1);
+        expect(last.embeds[0].data.thumbnail.url).toBe('attachment://wild.png');
+        expect(last.files).toHaveLength(1);
     });
 
     test('a loss records the loss and the smaller XP', async () => {
@@ -295,6 +313,7 @@ describe('/pet battle against a wild pet', () => {
     });
 
     test('a win that levels the pet up says so', async () => {
+        Math.random.mockReturnValue(0.1); // a Lv.1 Wild Boar, and the Dog opens
         seed(USER, { pets: [makePet({ level: 1, xp: 50 })] });
 
         const interaction = await battle();
@@ -304,6 +323,7 @@ describe('/pet battle against a wild pet', () => {
     });
 
     test('the pet named in the slot option is the one that fights', async () => {
+        Math.random.mockReturnValue(0.1); // a Lv.4 opponent Red opens on, so Red wins
         seed(USER, { pets: [makePet({ _id: 'a', hunger: 5 }), makePet({ _id: 'b', petId: 'fox', name: 'Red' })] });
 
         await battle({ slot: 'b' });
@@ -341,8 +361,10 @@ describe('/pet battle against a wild pet', () => {
 
 describe('/pet battle against a member', () => {
     beforeEach(() => {
-        seed(USER, { pets: [makePet({ _id: 'mine', name: 'Rex' })], balance: 1000 });
-        seed(RIVAL, { pets: [makePet({ _id: 'theirs', petId: 'cat', personality: 'lazy', name: 'Tom' })], balance: 1000 });
+        // With Math.random pinned at 0.5 the fight is deterministic, and a Loyal
+        // Lv.5 beats an Energetic Lv.5 — so Rex wins unless a test says otherwise.
+        seed(USER, { pets: [makePet({ _id: 'mine', name: 'Rex', personality: 'loyal' })], balance: 1000 });
+        seed(RIVAL, { pets: [makePet({ _id: 'theirs', petId: 'cat', personality: 'energetic', name: 'Tom' })], balance: 1000 });
     });
 
     test('the challenge names both pets and the terms', async () => {
@@ -397,8 +419,8 @@ describe('/pet battle against a member', () => {
 
         await interaction.press(ACCEPT);
 
-        expect(petOf(USER)).toEqual(expect.objectContaining({ battleWins: 1, battleLosses: 0, xp: 30 }));
-        expect(petOf(RIVAL)).toEqual(expect.objectContaining({ battleWins: 0, battleLosses: 1, xp: 10 }));
+        expect(petOf(USER)).toEqual(expect.objectContaining({ battleWins: 1, battleLosses: 0, pvpWins: 1, xp: 30 }));
+        expect(petOf(RIVAL)).toEqual(expect.objectContaining({ battleWins: 0, battleLosses: 1, pvpLosses: 1, xp: 10 }));
         expect(petOf(USER).lastBattle).toBeInstanceOf(Date);
         expect(petOf(RIVAL).lastBattle).toBeInstanceOf(Date);
         expect(wallet(USER)).toBe(1000);
@@ -426,11 +448,46 @@ describe('/pet battle against a member', () => {
         expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ userId: USER, amount: 90, balance: 1090, note: 'Pet battle win' }));
     });
 
+    test('a wager is fought level-matched, so a level lead does not decide it', async () => {
+        // Rex is five levels up on Tom. Unmatched, that lead wins every time;
+        // matched, both fight at Lv.5, where this Loyal Tom beats this Energetic Rex.
+        mockUsers.get(USER).pets[0].level = 10;
+        mockUsers.get(USER).pets[0].evolutionStage = 2;
+        mockUsers.get(USER).pets[0].personality = 'energetic';
+        mockUsers.get(RIVAL).pets[0].personality = 'loyal';
+
+        const interaction = await challenge({ bet: 100 });
+        expect(textOf(interaction)).toContain('Wagered battles are level-matched');
+        await interaction.press(ACCEPT);
+
+        const result = interaction.replies.at(-1).embeds[0].data;
+        expect(result.title).toBe('🏆 Tom wins the battle!');
+        expect(result.description).toContain('(Lv.5)  🆚');
+        expect(result.description).not.toContain('(Lv.10)');
+        // The real pets keep their own levels and records.
+        expect(petOf(USER).level).toBe(10);
+        expect(petOf(RIVAL).battleWins).toBe(1);
+    });
+
+    test('a friendly match is not level-matched', async () => {
+        mockUsers.get(USER).pets[0].level = 10;
+        mockUsers.get(USER).pets[0].evolutionStage = 2;
+        mockUsers.get(USER).pets[0].personality = 'energetic';
+        mockUsers.get(RIVAL).pets[0].personality = 'loyal';
+
+        const interaction = await challenge();
+        await interaction.press(ACCEPT);
+
+        const result = interaction.replies.at(-1).embeds[0].data;
+        expect(result.title).toBe('🏆 Seasoned Rex wins the battle!');
+        expect(result.description).toContain('(Lv.10)');
+    });
+
     test('the opponent can win, and a guild with no house cut pays the whole pot', async () => {
         mockGuilds.reset();
         mockGuilds.seed({ guildId: GUILD, economy: { enabled: true, currency: '🪙', duelHouseCut: 0 } });
-        mockUsers.get(USER).pets[0].personality = 'lazy';
-        mockUsers.get(RIVAL).pets[0].personality = 'energetic';
+        mockUsers.get(USER).pets[0].personality = 'energetic';
+        mockUsers.get(RIVAL).pets[0].personality = 'loyal';
 
         const interaction = await challenge({ bet: 100 });
         await interaction.press(ACCEPT);

@@ -15,16 +15,30 @@ const {
     getPetDisplay,
     getEffectiveBonusPct,
     applyPetXp,
+    applyHungerDecay,
+    recordPetInteraction,
     REST_DURATION_MS,
 } = require('../../../services/petService');
 const { generatePetSprite } = require('../../../utils/cardGenerator');
-const { hungerBar, buildNavComponents, renderPetStatus } = require('../../../services/petStatusView');
+const { hungerBar, buildNavComponents, renderPetStatus, renderPetCard } = require('../../../services/petStatusView');
 const { applyXpGain, announceLevelUp } = require('../../../services/levelingService');
 const { isVersionError } = require('../../../utils/versionRetry');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const { questRewardPayoutKey } = require('../../../utils/payoutKey');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { resolveUser, syncHungerAndRunaway, creditPetCare } = require('./shared');
+
+const PLAY_COOLDOWN_MS     = 60 * 60 * 1000; // 1 hour
+// Showcase posts a public embed, so it is rate-limited per pet to keep a
+// channel from being flooded by one player mashing the button.
+const SHOWCASE_COOLDOWN_MS = 10 * 60 * 1000;
+
+/** Minutes left on a per-pet cooldown stamped at `last`, or 0 when it has run out. */
+function cooldownMinutesLeft(last, cooldownMs, now = Date.now()) {
+    if (!last) return 0;
+    const left = cooldownMs - (now - new Date(last).getTime());
+    return left > 0 ? Math.ceil(left / 60000) : 0;
+}
 
 async function executeStatus(interaction) {
     await interaction.deferReply();
@@ -54,10 +68,11 @@ async function executeStatus(interaction) {
 
     let currentIndex = 0;
     const ownerAvatarURL = interaction.user.displayAvatarURL();
+    const ownerName      = interaction.member?.displayName ?? interaction.user.username;
     const guildId = interaction.guild.id;
 
     const reply = await interaction.editReply(
-        await renderPetStatus(user.pets[currentIndex], currentIndex, user.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+        await renderPetStatus(user.pets[currentIndex], currentIndex, user.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
     );
 
     const collector = reply.createMessageComponentCollector({
@@ -68,10 +83,16 @@ async function executeStatus(interaction) {
     collector.on('collect', async (btn) => {
         const parts  = btn.customId.split(':');
         const action = parts[0];
-        const idx    = parseInt(parts[2], 10);
+        const petRef = parts[3] ?? null;
 
         // Re-fetch user so mutations from concurrent actions are reflected
         const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        // Action buttons name their pet by _id, so a roster that changed while
+        // the card was open cannot redirect the click onto another pet; the
+        // nav buttons only carry the index they were rendered at.
+        const idx = petRef != null
+            ? (freshUser?.pets ?? []).findIndex(p => String(p._id) === petRef)
+            : parseInt(parts[2], 10);
         if (!freshUser || !freshUser.pets[idx]) {
             return btn.reply({ content: 'Pet not found.', flags: MessageFlags.Ephemeral });
         }
@@ -79,32 +100,36 @@ async function executeStatus(interaction) {
         if (action === 'pet_prev') {
             currentIndex = Math.max(0, idx - 1);
             await btn.update(
-                await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+                await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             );
 
         } else if (action === 'pet_next') {
             currentIndex = Math.min(freshUser.pets.length - 1, idx + 1);
             await btn.update(
-                await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+                await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             );
 
         } else if (action === 'pet_play') {
             const pet  = freshUser.pets[idx];
             const def  = PET_DEFINITIONS[pet.petId];
             const name = pet.name || def?.name || pet.petId;
-            const now  = Date.now();
-            const PLAY_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
-
-            if (pet.lastPlay && (now - new Date(pet.lastPlay).getTime()) < PLAY_COOLDOWN_MS) {
-                const remaining = Math.ceil((PLAY_COOLDOWN_MS - (now - new Date(pet.lastPlay).getTime())) / 60000);
-                return btn.reply({ content: `🎾 **${name}** is tired from playing! Try again in **${remaining}m**.`, flags: MessageFlags.Ephemeral });
+            const playLeft = cooldownMinutesLeft(pet.lastPlay, PLAY_COOLDOWN_MS);
+            if (playLeft > 0) {
+                return btn.reply({ content: `🎾 **${name}** is tired from playing! Try again in **${playLeft}m**.`, flags: MessageFlags.Ephemeral });
             }
 
-            const rolledXp = 15 + Math.floor(Math.random() * 11); // 15–25 XP
-            const { leveled, gained: xpGain } = applyXpGain(freshUser, rolledXp);
+            // Player XP from Play is once an hour per player, not per pet: the
+            // per-pet cooldown alone let a ten-pet roster pay ten times as much.
+            // The pet still gets its own XP from every play.
+            const ownerPlayedRecently = freshUser.pets.some((other, i) =>
+                i !== idx && cooldownMinutesLeft(other.lastPlay, PLAY_COOLDOWN_MS) > 0);
+            const rolledXp = ownerPlayedRecently ? 0 : 15 + Math.floor(Math.random() * 11); // 15–25 XP
+            const { leveled, gained: xpGain } = rolledXp > 0
+                ? applyXpGain(freshUser, rolledXp)
+                : { leveled: false, gained: 0 };
             const petXpResult = applyPetXp(freshUser.pets[idx], 10);
-            freshUser.pets[idx].lastPlay           = new Date();
-            freshUser.pets[idx].weeklyInteractions = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
+            freshUser.pets[idx].lastPlay = new Date();
+            recordPetInteraction(freshUser.pets[idx]);
             freshUser.markModified('pets');
             // A completed pet-care quest pays coins. `save()` writes `balance` as an
             // absolute `$set`, so the credit is folded out of the save and applied as
@@ -142,9 +167,12 @@ async function executeStatus(interaction) {
                 : petXpResult.leveledUp
                 ? `\n📈 **${name} reached pet Level ${petXpResult.toLevel}!**`
                 : '';
-            await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n✨ **+${xpGain} XP** for you, **+${petXpResult.gained} XP** for ${name}!${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
+            const xpLine = xpGain > 0
+                ? `✨ **+${xpGain} XP** for you, **+${petXpResult.gained} XP** for ${name}!`
+                : `✨ **+${petXpResult.gained} XP** for ${name}! *(You've had your play XP for this hour.)*`;
+            await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n${xpLine}${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
             await interaction.editReply(
-                await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+                await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             ).catch(() => {});
 
         } else if (action === 'pet_rest') {
@@ -157,8 +185,18 @@ async function executeStatus(interaction) {
                 return btn.reply({ content: `🛏️ **${name}** is already resting! ${remaining}m remaining.`, flags: MessageFlags.Ephemeral });
             }
 
-            freshUser.pets[idx].restUntil           = new Date(Date.now() + REST_DURATION_MS);
-            freshUser.pets[idx].weeklyInteractions  = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
+            // Settle the decay owed so far before replacing restUntil. Decay only
+            // knows about the latest rest window, so overwriting it with decay
+            // still pending charged any earlier, unsettled rest at full speed.
+            const [settled] = applyHungerDecay([freshUser.pets[idx]]);
+            if (settled !== freshUser.pets[idx]) {
+                freshUser.pets[idx].hunger          = settled.hunger;
+                freshUser.pets[idx].lastDecayAt     = settled.lastDecayAt;
+                freshUser.pets[idx].starving        = settled.starving;
+                freshUser.pets[idx].starvingStartAt = settled.starvingStartAt ?? null;
+            }
+            freshUser.pets[idx].restUntil = new Date(Date.now() + REST_DURATION_MS);
+            recordPetInteraction(freshUser.pets[idx]);
             freshUser.markModified('pets');
             // A completed pet-care quest pays coins. `save()` writes `balance` as an
             // absolute `$set`, so the credit is folded out of the save and applied as
@@ -186,7 +224,7 @@ async function executeStatus(interaction) {
 
             await btn.reply({ content: `🛏️ **${name}** is now resting! Hunger will decay at half speed for **2 hours**.`, flags: MessageFlags.Ephemeral });
             await interaction.editReply(
-                await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id)
+                await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             ).catch(() => {});
 
         } else if (action === 'pet_showcase') {
@@ -196,7 +234,13 @@ async function executeStatus(interaction) {
             const bondDays = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
             const hunger   = effectiveHunger(pet);
 
-            freshUser.pets[idx].weeklyInteractions = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
+            const showLeft = cooldownMinutesLeft(pet.lastShowcase, SHOWCASE_COOLDOWN_MS);
+            if (showLeft > 0) {
+                return btn.reply({ content: `📷 **${name}** was just shown off! Showcase again in **${showLeft}m**.`, flags: MessageFlags.Ephemeral });
+            }
+
+            freshUser.pets[idx].lastShowcase = new Date();
+            recordPetInteraction(freshUser.pets[idx]);
             freshUser.markModified('pets');
 
             try {
@@ -211,7 +255,7 @@ async function executeStatus(interaction) {
 
             const showcaseEmbed = new EmbedBuilder()
                 .setColor(getMoodColor(hunger))
-                .setTitle(`${def?.emoji ?? '🐾'} ${name}`)
+                .setTitle(`${getPetDisplay(pet).emoji} ${name}`)
                 .setAuthor({ name: `Owned by ${interaction.user.username}`, iconURL: ownerAvatarURL })
                 .setDescription(`*${getMoodLine(pet)}*${pet.potw ? '\n🌟 **Pet of the Week**' : ''}`)
                 .addFields(
@@ -223,18 +267,30 @@ async function executeStatus(interaction) {
                 .setFooter({ text: `${def?.name ?? pet.petId} • Use /pet status to check on yours!` })
                 .setTimestamp();
 
-            // Try to attach a pet sprite
+            // The companion card leads the showcase, as it does /pet status. The
+            // old emoji-on-a-circle sprite is only the fallback now, for when
+            // the card cannot be drawn.
             let files = [];
-            try {
-                const spriteBuf = await generatePetSprite(pet.petId, 80, pet.evolutionStage ?? 1);
-                if (spriteBuf) {
-                    showcaseEmbed.setThumbnail('attachment://pet_sprite.png');
-                    files = [new AttachmentBuilder(spriteBuf, {
-                        name: 'pet_sprite.png',
-                        description: `Pixel-art sprite of ${name}.`,
-                    })];
-                }
-            } catch { /* non-critical */ }
+            const card = await renderPetCard(pet, {
+                kicker:      `Showcased by ${ownerName}`,
+                footerLeft:  'Showcase',
+                footerRight: 'Check on yours with /pet status',
+            }, 'pet-showcase.png');
+            if (card) {
+                showcaseEmbed.setImage(`attachment://${card.name}`);
+                files = [card];
+            } else {
+                try {
+                    const spriteBuf = await generatePetSprite(pet.petId, 80, pet.evolutionStage ?? 1);
+                    if (spriteBuf) {
+                        showcaseEmbed.setThumbnail('attachment://pet_sprite.png');
+                        files = [new AttachmentBuilder(spriteBuf, {
+                            name: 'pet_sprite.png',
+                            description: `Pixel-art sprite of ${name}.`,
+                        })];
+                    }
+                } catch { /* non-critical */ }
+            }
 
             await btn.reply({ embeds: [showcaseEmbed], files });
         }
@@ -242,7 +298,8 @@ async function executeStatus(interaction) {
 
     collector.on('end', async () => {
         try {
-            const disabled = buildNavComponents(interaction.user.id, currentIndex, user.pets.length)
+            const shownId  = user.pets[currentIndex]?._id;
+            const disabled = buildNavComponents(interaction.user.id, currentIndex, user.pets.length, shownId != null ? String(shownId) : null)
                 .map(row => ActionRowBuilder.from(row).setComponents(
                     row.components.map(b => ButtonBuilder.from(b).setDisabled(true))
                 ));
