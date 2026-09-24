@@ -219,7 +219,13 @@ async function openTicket({ guild, member, subject = '', settings }) {
     if (cleanSubject) embed.addFields({ name: 'Subject', value: cleanSubject, inline: false });
 
     const mentions = [`<@${member.id}>`, ...(cfg.supportRoleIds || []).map(id => `<@&${id}>`)].join(' ');
-    await thread.send({ content: mentions, embeds: [embed], components: [ticketControlRow()] }).catch(err => {
+    await thread.send({
+        content: mentions,
+        embeds: [embed],
+        components: [ticketControlRow()],
+        // The client default pings users only; the support roles are meant to be.
+        allowedMentions: { users: [member.id], roles: cfg.supportRoleIds || [] }
+    }).catch(err => {
         console.error(`[tickets] failed to post opening message for ticket ${ticketId} in guild ${guild.id}:`, err.message);
     });
 

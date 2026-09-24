@@ -110,6 +110,7 @@ function makeClient(channel, member = makeMember()) {
             fetch: jest.fn().mockResolvedValue(member),
         },
         channels: { cache: { get: jest.fn().mockReturnValue(channel) } },
+        roles: { cache: new Map([['role1', { id: 'role1', permissions: 0n }]]) },
     };
     return {
         guilds: { cache: { get: jest.fn().mockReturnValue(guild) } },

@@ -408,6 +408,8 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 : interaction.channel;
             await targetChannel?.send({
                 content: pingHere ? '@here' : undefined,
+                // The client default never parses @here; this opt-in is the one place it should.
+                allowedMentions: pingHere ? { parse: ['everyone'] } : { parse: [] },
                 embeds: [jackpotBroadcastEmbed(interaction, result.payout, finalJackpotPool, jackpotDelivery)],
             }).catch(err => console.error(`[Slots] jackpot broadcast failed — channel:${targetChannel?.id} interaction:${interaction.id}`, err));
         }

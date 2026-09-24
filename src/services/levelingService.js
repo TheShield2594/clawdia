@@ -9,6 +9,7 @@
 // module is a service, and now sits with the one it depends on.
 
 const { getTotalBonus } = require('./petService');
+const { grantableRole } = require('../utils/sensitiveRolePermissions');
 
 const TIER_STYLES = [
     { min: 0,   color: '#cd7f32', label: 'Bronze',  glyph: '⬡' },
@@ -122,7 +123,8 @@ async function announceLevelUp(user, guildSettings, member, guild, fallbackChann
         const reward = guildSettings.levelRoles
             .filter(lr => lr.level <= user.level)
             .sort((a, b) => b.level - a.level)[0];
-        if (reward) await member.roles.add(reward.roleId).catch(console.error);
+        const role = reward && grantableRole(member.guild, reward.roleId, 'level-reward', member.id);
+        if (role) await member.roles.add(role.id).catch(console.error);
     }
 }
 

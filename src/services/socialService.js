@@ -112,7 +112,9 @@ function datedItems(parsedFeed) {
         .sort((a, b) => a.date - b.date);
 }
 
-async function fetchSendableChannel(client, channelId) {
+// Refuses a channel outside `guildId`: `channels.fetch` resolves an id in any
+// guild the bot is in (#1140).
+async function fetchSendableChannel(client, channelId, guildId) {
     let channel;
     try {
         channel = await client.channels.fetch(channelId);
@@ -121,6 +123,7 @@ async function fetchSendableChannel(client, channelId) {
     }
     if (!channel || typeof channel.send !== 'function') return null;
     if (typeof channel.isTextBased === 'function' && !channel.isTextBased()) return null;
+    if (channel.guildId !== guildId) return null;
     return channel;
 }
 
@@ -439,7 +442,7 @@ async function deliverSocialUpdate(client, guild, feed, parsedFeed, entries) {
     let cursor = null;
 
     try {
-        const channel = await fetchSendableChannel(client, feed.channelId);
+        const channel = await fetchSendableChannel(client, feed.channelId, guild.guildId);
         // No channel is not a delivery: advancing here would drop the burst for
         // good on a channel that was only briefly unreachable.
         if (!channel) return 0;

@@ -209,7 +209,10 @@ function normalizeArticleLink(link = '') {
 }
 
 
-async function fetchSendableChannel(client, channelId) {
+// `guildId` is the guild the subscription belongs to. `channels.fetch` resolves
+// an id in any guild the bot is in, so a channel from somewhere else is
+// refused here rather than posted to (#1140).
+async function fetchSendableChannel(client, channelId, guildId) {
     let channel;
 
     try {
@@ -220,6 +223,10 @@ async function fetchSendableChannel(client, channelId) {
 
     if (!channel || typeof channel.send !== 'function') return null;
     if (typeof channel.isTextBased === 'function' && !channel.isTextBased()) return null;
+    if (channel.guildId !== guildId) {
+        console.error(`[rss] refusing to post to channel ${channelId}: it is not in guild ${guildId}`);
+        return null;
+    }
 
     return channel;
 }
@@ -489,7 +496,7 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, entries) {
 
     if (toPost.length) {
         try {
-            const channel = await fetchSendableChannel(client, feed.channelId);
+            const channel = await fetchSendableChannel(client, feed.channelId, guild.guildId);
 
             // No channel is not a delivery. Recording the burst here would drop
             // it for good on a channel that was only briefly unreachable —
@@ -727,7 +734,7 @@ function digestLink(url) {
 }
 
 async function sendDailyNewsForProfile(client, guild, profile) {
-    const channel = await fetchSendableChannel(client, profile.channelId);
+    const channel = await fetchSendableChannel(client, profile.channelId, guild.guildId);
     if (!channel) {
         console.error(`Daily news channel not found for guild ${guild.guildId}, profile ${profile.profileId}`);
         return;

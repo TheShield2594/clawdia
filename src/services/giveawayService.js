@@ -129,7 +129,11 @@ async function endGiveaway(client, guildSettings, ga) {
     await msg.edit({ embeds: [endEmbed], components: [] }).catch(console.error);
 
     if (winners.length) {
-        await channel.send(`🎉 Congratulations ${winnerText}! You won **${ga.prize}**!`).catch(console.error);
+        await channel.send({
+            content: `🎉 Congratulations ${winnerText}! You won **${ga.prize}**!`,
+            // The prize is host-typed text; only the winners are pinged.
+            allowedMentions: { users: winners }
+        }).catch(console.error);
     }
 }
 
