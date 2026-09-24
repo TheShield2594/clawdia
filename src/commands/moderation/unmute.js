@@ -48,18 +48,24 @@ module.exports = {
 
         try {
             await member.timeout(null);
-
-            const embed = new EmbedBuilder()
-                .setColor(COLORS.SUCCESS)
-                .setTitle('User Unmuted')
-                .setDescription(`**${user.globalName ?? user.username}** has been unmuted.`)
-                .setTimestamp();
-
-            await sendPublicResponse(interaction, { embeds: [embed] });
-            await logModeration(interaction.guild.id, 'unmute', user, interaction.user, 'No reason provided');
         } catch (error) {
             console.error('Unmute error:', error);
-            await sendEphemeralResponse(interaction, { content: 'Failed to unmute the user.' }).catch(() => {});
+            return sendEphemeralResponse(interaction, { content: 'Failed to unmute the user.' }).catch(() => {});
         }
+
+        // Recorded before the reply: once the timeout is lifted the case has to
+        // exist whether or not Discord accepts the reply that announces it.
+        await logModeration(interaction.guild.id, 'unmute', user, interaction.user, 'No reason provided');
+
+        const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle('User Unmuted')
+            .setDescription(`**${user.globalName ?? user.username}** has been unmuted.`)
+            .setTimestamp();
+
+        // A failed reply is not a failed unmute, so it is logged rather than
+        // reported to the moderator as one.
+        await sendPublicResponse(interaction, { embeds: [embed] })
+            .catch(error => console.error('Unmute reply error:', error));
     }
 };

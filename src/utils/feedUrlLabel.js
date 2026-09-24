@@ -7,11 +7,10 @@ const crypto = require('crypto');
  *
  * Private feeds often carry an access token in the query string (GitHub's
  * private Atom feeds, podcast hosts, some news providers), and a URL logged
- * whole puts that token wherever the logs ship. The label keeps the part an
- * operator needs to recognise the feed, origin plus path, and drops the query,
- * fragment and any userinfo. When something was dropped, a short hash of the
- * full URL is appended so two subscriptions that differ only in their query
- * can still be told apart in the logs.
+ * whole puts that token wherever the logs ship. Some put it in the path
+ * instead (podcast hosts' private feed URLs), so the label is the origin only,
+ * which is what an operator needs to recognise the source, plus a short hash of
+ * the full URL so two feeds on one host can still be told apart in the logs.
  */
 function feedUrlLabel(raw) {
     const text = String(raw ?? '');
@@ -22,9 +21,7 @@ function feedUrlLabel(raw) {
     } catch {
         return `[unparseable feed URL #${hash}]`;
     }
-    const base = `${url.origin}${url.pathname}`;
-    const stripped = url.search || url.hash || url.username || url.password;
-    return stripped ? `${base} #${hash}` : base;
+    return `${url.origin} #${hash}`;
 }
 
 module.exports = { feedUrlLabel };

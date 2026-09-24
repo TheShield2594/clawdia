@@ -166,7 +166,8 @@ The **Requires** column lists what a caller must satisfy beyond the read limit:
 - **session** — logged in (`checkAuth`)
 - **guild admin** — administers this `:guildId`, verified live (`checkGuildAccess`)
 - **Ban Members**, **Moderate Members**, **Administrator** — also holds that
-  Discord permission in the guild, verified live (`requireGuildPermission`).
+  Discord permission in the guild (`requireGuildPermission`), checked live
+  first and against the login-time snapshot only when Discord cannot be asked.
   Manage Server alone is not enough for these routes
 - **write limit** — counts against the 60/minute write budget
   (`checkWriteRateLimit`), on top of the read limit when the route is a `GET`

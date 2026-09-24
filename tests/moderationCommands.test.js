@@ -566,6 +566,34 @@ describe('/mute and /unmute', () => {
         expect(member.timeout).toHaveBeenCalledWith(null);
     });
 
+    test('unmute records the case even when the public reply fails', async () => {
+        const member = target();
+        const guild = makeGuild({ cached: [member] });
+        const interaction = makeInteraction({
+            guild, invoker: modMember(), deferredAs: 'public', options: { user: makeUser(member.id) },
+        });
+        interaction.editReply.mockRejectedValueOnce(new Error('Unknown interaction'));
+        await command('unmute').execute(interaction);
+
+        expect(member.timeout).toHaveBeenCalledWith(null);
+        expect(logModeration).toHaveBeenCalledWith(GUILD_ID, 'unmute', expect.anything(), expect.anything(), expect.any(String));
+        // The unmute happened, so the moderator is not told it failed.
+        expect(interaction.followUp).not.toHaveBeenCalled();
+    });
+
+    test('a failed unmute records no case and says so', async () => {
+        const member = target();
+        member.timeout.mockRejectedValueOnce(new Error('Missing Permissions'));
+        const guild = makeGuild({ cached: [member] });
+        const interaction = makeInteraction({
+            guild, invoker: modMember(), options: { user: makeUser(member.id) },
+        });
+        await command('unmute').execute(interaction);
+
+        expect(logModeration).not.toHaveBeenCalled();
+        expect(lastReply(interaction)).toMatch(/Failed to unmute/i);
+    });
+
     test('unmute refuses a user who is not in the guild', async () => {
         const interaction = makeInteraction({
             guild: makeGuild(), invoker: modMember(), options: { user: makeUser('outsider') },
