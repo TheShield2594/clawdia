@@ -16,13 +16,15 @@
 
 const { SlashCommandBuilder } = require('discord.js');
 const {
-    LOCATION_LIST, ROD_UPGRADES, BAIT_PACKS, CONSUMABLES, SHOP_CONSUMABLES, ROD_TIERS,
+    LOCATION_LIST, ROD_UPGRADES, BAIT_PACKS, SHOP_CONSUMABLES, ROD_TIERS,
     FISH_CRAFT_RECIPES
 } = require('../../../data/fishData');
 const { handleCast } = require('./cast');
 const { handleProfile, handlePrestige, handleInv, handleEquip } = require('./profile');
 const { handleQuests } = require('./quests');
 const { handleShop } = require('./shop');
+// /fish shop use picks from the consumables the player holds.
+const { autocompleteUse } = require('./shop/use');
 const { handleCraft } = require('./craft');
 const { handleLocation } = require('./location');
 const { handleTournament, handleRecords } = require('./tournament');
@@ -33,10 +35,6 @@ const SHOP_CHOICES = [
     ...BAIT_PACKS.map(p => ({ name: `${p.emoji} ${p.name} — ${p.cost} coins`, value: p.id })),
     ...SHOP_CONSUMABLES.map(c => ({ name: `${c.emoji} ${c.name} — ${c.cost} coins`, value: c.id }))
 ];
-
-const USE_CHOICES = Object.values(CONSUMABLES)
-    .filter(c => c.type !== 'repair')
-    .map(c => ({ name: `${c.emoji} ${c.name}`, value: c.id }));
 
 const ROD_CHOICES     = ROD_TIERS.map(r => ({ name: `${r.emoji} ${r.name} (${r.cost.toLocaleString()} coins)`, value: r.slug }));
 
@@ -148,9 +146,10 @@ module.exports = {
                         .setDescription('Activate a consumable (bait / luck / xp scroll / energy drink)')
                         .addStringOption(o =>
                             o.setName('item')
-                                .setDescription('Which consumable to activate')
+                                .setDescription('Consumable to activate — start typing to pick from what you hold')
                                 .setRequired(true)
-                                .addChoices(...USE_CHOICES)))
+                                .setMaxLength(100)
+                                .setAutocomplete(true)))
                 .addSubcommand(sub =>
                     sub.setName('repair')
                         .setDescription('Repair your equipped rod at the shop or use a repair kit')
@@ -236,6 +235,16 @@ module.exports = {
                                 .setDescription('Entry fee per participant (0 = free)')
                                 .setMinValue(0)
                                 .setRequired(false)))),
+
+    // Only `shop use` autocompletes: the consumables the player holds, with how
+    // many and whether each is ready (utils/grindUsePicker).
+    async autocomplete(interaction) {
+        if (interaction.options.getSubcommandGroup(false) === 'shop'
+            && interaction.options.getSubcommand(false) === 'use') {
+            return autocompleteUse(interaction);
+        }
+        return interaction.respond([]);
+    },
 
     async execute(interaction) {
         const group = interaction.options.getSubcommandGroup(false);

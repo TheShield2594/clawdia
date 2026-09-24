@@ -9,17 +9,8 @@ const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { isSoulbound } = require('../../../data/soulboundItems');
 const { itemDescriber } = require('../../../utils/aiItemLookup');
 const { priceSnapshot, shortHint } = require('../../../services/marketPriceService');
+const { matchesName, rankByName } = require('../../../utils/pickerRank');
 const { live } = require('./shared');
-
-/** Prefix matches first, then substring, then alphabetical — as /shop buy ranks. */
-function rankByName(items, typed) {
-    if (!typed) return [...items].sort((a, b) => a.name.localeCompare(b.name));
-    return [...items].sort((a, b) => {
-        const aPre = a.name.toLowerCase().startsWith(typed) ? 0 : 1;
-        const bPre = b.name.toLowerCase().startsWith(typed) ? 0 : 1;
-        return aPre - bPre || a.name.localeCompare(b.name);
-    });
-}
 
 /** What the seller is holding and is allowed to list, for `/market list`. */
 async function inventoryChoices(interaction, typed) {
@@ -34,7 +25,7 @@ async function inventoryChoices(interaction, typed) {
 
     const items = held
         .map(e => ({ quantity: e.quantity, ...describe(e.itemId) }))
-        .filter(i => !typed || i.name.toLowerCase().includes(typed) || i.itemId.toLowerCase().includes(typed));
+        .filter(i => matchesName(i, typed));
     const shown = rankByName(items, typed).slice(0, 25);
 
     // The seller's price comes next, so the price hint belongs here — looked up
@@ -62,7 +53,7 @@ async function listedItemChoices(interaction, typed) {
 
     const items = itemIds
         .map(describe)
-        .filter(i => !typed || i.name.toLowerCase().includes(typed) || i.itemId.toLowerCase().includes(typed));
+        .filter(i => matchesName(i, typed));
 
     return rankByName(items, typed).slice(0, 25).map(i => ({
         name: `${i.emoji} ${i.name}`.slice(0, 100),

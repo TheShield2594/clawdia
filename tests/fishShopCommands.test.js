@@ -568,13 +568,13 @@ describe('shop use', () => {
     test('an unknown consumable', async () => {
         seedPlayer();
         const interaction = await run('use', { options: { item: 'nope' } });
-        expect(repliedText(interaction)).toBe('Unknown consumable.');
+        expect(repliedText(interaction)).toBe('Unknown consumable. Nothing was used.');
     });
 
     test('one the player has none of', async () => {
         seedPlayer();
         const interaction = await run('use', { options: { item: 'chum_bait' } });
-        expect(repliedText(interaction)).toBe("You don't have any **Chum Bait**.");
+        expect(repliedText(interaction)).toBe("You don't have any **Chum Bait**. Nothing was used.");
     });
 
     test('bait is activated, taken from the bag and listed as a buff', async () => {
@@ -585,7 +585,8 @@ describe('shop use', () => {
         expect(fishing().consumables.chum_bait).toBe(1);
         const embed = interaction.replies[0].embeds[0].data;
         expect(embed.title).toBe(`${CONSUMABLES.chum_bait.emoji} Chum Bait Activated!`);
-        expect(embed.fields[0].value).toBe('🐟 chum bait active (3 casts left)');
+        expect(embed.fields[0].value).toBe('🐟 Chum Bait active (3 casts left)');
+        expect(embed.fields[1]).toMatchObject({ name: '🎒 Left in bag', value: '1x' });
     });
 
     test('every queued buff is listed', async () => {
@@ -604,13 +605,21 @@ describe('shop use', () => {
         expect(interaction.replies[0].embeds[0].data.fields[0].value).toBe('None');
     });
 
-    test('a cross-system item with no fishing entry still renders', async () => {
+    test('a crafted cross-system lure renders under its own name', async () => {
         seedPlayer({ fishing: { consumables: { predators_eye: 1 } } });
         const interaction = await run('use', { options: { item: 'predators_eye' } });
         const embed = interaction.replies[0].embeds[0].data;
-        expect(embed.title).toBe('✅ predators_eye Activated!');
-        expect(embed.description).toBe('*Effect applied.*');
+        expect(embed.title).toBe("👁️ Predator's Eye Activated!");
+        expect(embed.description).toBe('*+30% rare fish tier chance for 3 casts*');
+        expect(embed.fields[0].value).toBe("🐟 Predator's Eye active (3 casts left)");
         expect(fishing().activeBait).toBe('predators_eye');
+    });
+
+    test('a display name typed by hand finds the consumable', async () => {
+        seedPlayer({ fishing: { consumables: { anglers_luck: 1 } } });
+        await run('use', { options: { item: "  angler's LUCK " } });
+        expect(fishing().activeLuck).toBe(true);
+        expect(fishing().consumables.anglers_luck).toBe(0);
     });
 
     test('a save that fails says so', async () => {
@@ -620,6 +629,78 @@ describe('shop use', () => {
         expect(repliedText(interaction)).toBe('Something went wrong. Please try again.');
         expect(fishing().consumables.fish_xp_scroll).toBe(1);
         expect(fishing().activeXpScroll).toBeFalsy();
+    });
+});
+
+describe('the shop use picker', () => {
+    const fish = require('../src/commands/economy/fish');
+
+    /** Runs the `item` autocomplete of `/fish shop use` and returns the choices. */
+    async function pick(focused = '', { group = 'shop', sub = 'use' } = {}) {
+        const interaction = makeInteraction({ subcommand: sub, options: { focused } });
+        interaction.options.getSubcommandGroup = () => group;
+        await fish.autocomplete(interaction);
+        return interaction.replies[0].choices;
+    }
+
+    test('offers only what is held, with count and status, ready ones first', async () => {
+        seedPlayer({
+            fishing: {
+                consumables: { chum_bait: 2, premium_chum: 0, anglers_luck: 1, fish_xp_scroll: 3, predators_eye: 1 },
+                activeXpScroll: true,
+            },
+        });
+        const choices = await pick();
+        expect(choices).toEqual([
+            { name: "🍀 Angler's Luck — 1 held · applies to your next cast", value: 'anglers_luck' },
+            { name: '🐟 Chum Bait — 2 held · lasts 3 casts', value: 'chum_bait' },
+            { name: "👁️ Predator's Eye — 1 held · lasts 3 casts", value: 'predators_eye' },
+            { name: '📜 XP Scroll — 3 held · queued for your next cast', value: 'fish_xp_scroll' },
+        ]);
+    });
+
+    test('a running bait blocks every bait, and says which one is running', async () => {
+        seedPlayer({
+            fishing: { consumables: { chum_bait: 1, premium_chum: 1 }, activeBait: 'chum_bait', activeBaitCastsLeft: 1 },
+        });
+        expect((await pick()).map(c => c.name)).toEqual([
+            '🐟 Chum Bait — 1 held · active · 1 cast left',
+            '🦐 Premium Chum — 1 held · Chum Bait active · 1 cast left',
+        ]);
+    });
+
+    test('an energy drink shows the stamina bar and the daily allowance', async () => {
+        seedPlayer({ fishing: { consumables: { energy_drink: 2 }, stamina: 4, staminaLastRegen: new Date() } });
+        expect((await pick())[0].name).toMatch(/^⚡ Energy Drink — 2 held · stamina 4\/\d+ · \+3$/);
+
+        mockProfiles.reset();
+        seedPlayer({
+            fishing: {
+                consumables: { energy_drink: 2 }, stamina: 0, staminaLastRegen: new Date(),
+                energyDrinksToday: 2, lastDrinkDayReset: new Date(),
+            },
+        });
+        expect((await pick())[0].name).toBe('⚡ Energy Drink — 2 held · daily limit reached · 2/2 today');
+    });
+
+    test('matches on name or id, prefix matches first', async () => {
+        seedPlayer({ fishing: { consumables: { chum_bait: 1, premium_chum: 1, anglers_luck: 1 } } });
+        expect((await pick('chum')).map(c => c.value)).toEqual(['chum_bait', 'premium_chum']);
+        expect((await pick('anglers')).map(c => c.value)).toEqual(['anglers_luck']);
+    });
+
+    test('nothing held, no player, or another option offers nothing', async () => {
+        expect(await pick()).toEqual([]);
+        seedPlayer();
+        expect(await pick()).toEqual([]);
+        seedPlayer({ fishing: { consumables: { chum_bait: 1 } } });
+        expect(await pick('', { sub: 'buy' })).toEqual([]);
+    });
+
+    test('a failed read answers with no suggestions', async () => {
+        seedPlayer({ fishing: { consumables: { chum_bait: 1 } } });
+        User.findOne.mockImplementationOnce(() => Promise.reject(new Error('db down')));
+        expect(await pick()).toEqual([]);
     });
 });
 

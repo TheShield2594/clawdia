@@ -12,8 +12,14 @@ const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 
-const USE_SRC = fs.readFileSync(
-    path.join(__dirname, '..', 'src', 'commands', 'economy', 'use.js'), 'utf8');
+// /use is a folder now (index.js routes, one file per kind of item); the rules
+// below hold across all of it, so it is read as one text.
+const USE_DIR = path.join(__dirname, '..', 'src', 'commands', 'economy', 'use');
+const USE_SRC = fs.readdirSync(USE_DIR)
+    .filter(f => f.endsWith('.js'))
+    .sort()
+    .map(f => fs.readFileSync(path.join(USE_DIR, f), 'utf8'))
+    .join('\n');
 
 describe('the mongoose contract the cleanup relies on', () => {
     // Behavioural, against the real User schema: if a mongoose upgrade ever made

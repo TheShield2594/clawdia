@@ -205,8 +205,10 @@ The option itself also has to be built with `.setAutocomplete(true)`, or
 Discord never sends the interaction. A command with an autocompleting option
 and no `autocomplete` method answers with an empty list rather than failing,
 and a method that throws is logged and answers empty too — the user sees no
-suggestions, not an error. `ai.js`, `pet.js`, `shop.js`, `craft.js` and
-`use.js` implement it.
+suggestions, not an error. `ai.js`, `pet.js`, `shop.js`, `craft.js`,
+`use/index.js` and the `shop use` pickers of `/hunt`, `/fish` and `/mine`
+(`utils/grindUsePicker.js`) implement it. `utils/pickerRank.js` holds the
+ranking they share: prefix matches first, then A–Z.
 
 #### Permissions
 

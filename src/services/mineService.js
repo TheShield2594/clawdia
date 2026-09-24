@@ -439,6 +439,69 @@ const applyXp = (user, xpGain) => grind.applyXp(user, xpGain, 'mine');
 
 // ─── CONSUMABLE MANAGEMENT ───────────────────────────────────────────────────
 
+/** Energy Tonics used in the current daily tonic window. */
+function tonicsUsedToday(m) {
+    const inWindow = m.lastTonicDayReset && (Date.now() - m.lastTonicDayReset.getTime() < LIMITS.DAILY_WINDOW_MS);
+    return inWindow ? (m.energyTonicsToday ?? 0) : 0;
+}
+
+/**
+ * What `activateConsumable` would do with `consumableId` right now, for the
+ * `/mine shop use` picker: `ready` is false exactly when it would refuse, and
+ * `status` is the short tag the picker shows (`active · 2 mines left`,
+ * `lasts 5 mines`, `stamina 7/10 · +3`).
+ *
+ * Reads only. Call applyStaminaRegen first for a current stamina figure, as
+ * activateConsumable itself does.
+ */
+function consumableStatus(user, consumableId) {
+    const m = user.mining;
+    const { CONSUMABLES } = require('../data/mineData');
+    const { CROSS_CONSUMABLES } = require('../data/crossSystemData');
+    const def = CONSUMABLES[consumableId] ?? CROSS_CONSUMABLES[consumableId];
+    if (!def) return { ready: false, status: 'not a mining consumable' };
+
+    const minesLeft = n => `${n} mine${n === 1 ? '' : 's'} left`;
+    // The slot a magnet or lamp fills holds one at a time, of any kind.
+    const slot = (activeId, left) => {
+        if (!activeId) return { ready: true, status: `lasts ${def.minesLeft} mines` };
+        const active = CONSUMABLES[activeId] ?? CROSS_CONSUMABLES[activeId];
+        const which  = activeId === consumableId ? 'active' : `${active?.name ?? activeId} active`;
+        return { ready: false, status: `${which} · ${minesLeft(left)}` };
+    };
+
+    if (def.type === 'magnet') return slot(m.activeMagnet, m.activeMagnetMinesLeft);
+    if (def.type === 'lamp')   return slot(m.activeLamp, m.activeLampMinesLeft);
+    if (def.type === 'instant' && (consumableId === 'miners_instinct' || consumableId === 'xp_scroll')) {
+        const queued = consumableId === 'miners_instinct' ? m.activeInstinct : m.activeXpScroll;
+        return queued
+            ? { ready: false, status: 'queued for your next mine' }
+            : { ready: true, status: 'applies to your next mine' };
+    }
+    if (def.type === 'stamina') {
+        const used = tonicsUsedToday(m);
+        const max  = getMaxStamina(user);
+        if (used >= LIMITS.ENERGY_TONICS_PER_DAY) {
+            return { ready: false, status: `daily limit reached · ${used}/${LIMITS.ENERGY_TONICS_PER_DAY} today` };
+        }
+        if (m.stamina >= max) return { ready: false, status: `stamina full · ${m.stamina}/${max}` };
+        return { ready: true, status: `stamina ${m.stamina}/${max} · +${def.staminaRestore}` };
+    }
+    if (def.type === 'mine_immunity') {
+        const left = m.activeReinforcedTrapMinesLeft ?? 0;
+        return left > 0
+            ? { ready: false, status: `active · ${minesLeft(left)}` }
+            : { ready: true, status: `lasts ${def.minesLeft} mines` };
+    }
+    if (def.type === 'defense' && consumableId === 'mine_lock') {
+        return m.mineLockActive
+            ? { ready: false, status: 'armed until a raider trips it' }
+            : { ready: true, status: 'arms against the next raid' };
+    }
+    if (def.type === 'repair') return { ready: false, status: 'use it with /mine shop repair' };
+    return { ready: false, status: "can't be activated" };
+}
+
 function activateConsumable(user, consumableId) {
     const m = user.mining;
     const { CONSUMABLES } = require('../data/mineData');
@@ -468,6 +531,9 @@ function activateConsumable(user, consumableId) {
         m.consumables[consumableId] -= 1;
         m.activeXpScroll = true;
     } else if (def.type === 'stamina') {
+        // Passive regen first, so "already full" is judged on the real bar
+        // rather than the one last written — as /fish does.
+        applyStaminaRegen(user);
         const now = Date.now();
         const tonicWindowOk = m.lastTonicDayReset && (now - m.lastTonicDayReset.getTime() < LIMITS.DAILY_WINDOW_MS);
         if (!tonicWindowOk) {
@@ -1206,6 +1272,7 @@ module.exports = {
     xpToNextLevel,
     applyXp,
     activateConsumable,
+    consumableStatus,
     tickConsumables,
     promoteIntensity,
     executeMine,

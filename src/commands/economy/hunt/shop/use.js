@@ -1,18 +1,36 @@
 'use strict';
 
-// `/hunt shop use` — activating a consumable already in the bag.
+// `/hunt shop use` — activating a consumable already in the bag, and the
+// picker that offers what is held (utils/grindUsePicker).
 
 const { MessageFlags, EmbedBuilder } = require('discord.js');
-const { activateConsumable, getMaxStamina } = require('../../../../services/huntService');
+const {
+    activateConsumable, applyStaminaRegen, consumableStatus, ensureHuntData, getMaxStamina,
+} = require('../../../../services/huntService');
 const { CONSUMABLES } = require('../../../../data/huntData');
+const { leftInBagField, resolveConsumableId, respondWithConsumables } = require('../../../../utils/grindUsePicker');
 const COLORS = require('../../../../utils/embedColors');
+const { ACTIVATABLE } = require('../shared');
+
+const USE_PICKER = {
+    key: 'hunt',
+    label: 'hunt shop',
+    activatable: ACTIVATABLE,
+    defOf: id => CONSUMABLES[id],
+    ensure: ensureHuntData,
+    applyStaminaRegen,
+    consumableStatus,
+};
+
+/** The `item` autocomplete: held consumables, with count and status. */
+const autocompleteUse = interaction => respondWithConsumables(interaction, USE_PICKER);
 
 async function handleUse(interaction, user) {
-    const itemId = interaction.options.getString('item');
+    const itemId = resolveConsumableId(interaction.options.getString('item'), USE_PICKER);
     const { success, error } = activateConsumable(user, itemId);
 
     if (!success) {
-        return interaction.reply({ content: error, flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: `${error} Nothing was used.`, flags: MessageFlags.Ephemeral });
     }
 
     await user.save();
@@ -33,9 +51,10 @@ async function handleUse(interaction, user) {
                 .setColor(COLORS.SUCCESS)
                 .setTitle(`${def.emoji} ${def.name} Activated!`)
                 .setDescription(`${def.description}\n${statusMsg}`)
+                .addFields(leftInBagField(user, USE_PICKER, itemId))
                 .setFooter({ text: 'Go hunt! Use /hunt start' })
         ]
     });
 }
 
-module.exports = { handleUse };
+module.exports = { USE_PICKER, autocompleteUse, handleUse };
