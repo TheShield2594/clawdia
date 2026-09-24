@@ -4,7 +4,7 @@
     "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
     "style": "B3 (rarity rim, flat 2-tone, no gloss)",
     "date": "2026-09-21",
-    "count": 346,
+    "count": 383,
     "resultsAdded": {
       "date": "2026-09-21",
       "count": 144,
@@ -27,7 +27,13 @@
       "date": "2026-09-23",
       "count": 35,
       "quality": "high",
-      "note": "achievement badges: 5-icon pilot + all Legendary, secret and Rare (30); Common/Uncommon pending"
+      "note": "achievement badges: 5-icon pilot + all Legendary, secret and Rare (30)"
+    },
+    "achievementsCompleted": {
+      "date": "2026-09-24",
+      "count": 37,
+      "quality": "high",
+      "note": "remaining achievement badges: all Common (13) and Uncommon (24) (issue #1108)"
     }
   },
   "items": {
@@ -3836,6 +3842,413 @@
       "model": "gpt_image_2_5",
       "date": "2026-09-23",
       "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260923_130454_cd25a604-c734-4c07-bdb8-5cb5c914ddc0.png"
+    },
+    "achievement:first_message": {
+      "file": "achievement__first_message.png",
+      "jobId": "f0a14127-b885-4ea2-9d65-36a3e69cf5aa",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034129_f0a14127-b885-4ea2-9d65-36a3e69cf5aa.png"
+    },
+    "achievement:chatty": {
+      "file": "achievement__chatty.png",
+      "jobId": "a096bed4-4236-4b4b-a4fb-df3b3abe6df1",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034129_a096bed4-4236-4b4b-a4fb-df3b3abe6df1.png"
+    },
+    "achievement:level_10": {
+      "file": "achievement__level_10.png",
+      "jobId": "9106c0c1-059d-4223-b513-65db7e645453",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034129_9106c0c1-059d-4223-b513-65db7e645453.png"
+    },
+    "achievement:first_blood": {
+      "file": "achievement__first_blood.png",
+      "jobId": "a69f5d6d-4cbf-4c9c-82d7-db6c8778d13f",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034129_a69f5d6d-4cbf-4c9c-82d7-db6c8778d13f.png"
+    },
+    "achievement:gone_fishing": {
+      "file": "achievement__gone_fishing.png",
+      "jobId": "c10a7d25-d94b-48e5-bfdd-9036ae71f219",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034218_c10a7d25-d94b-48e5-bfdd-9036ae71f219.png"
+    },
+    "achievement:first_footsteps": {
+      "file": "achievement__first_footsteps.png",
+      "jobId": "b2010928-2ef0-4558-98a4-f7426244e133",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034218_b2010928-2ef0-4558-98a4-f7426244e133.png"
+    },
+    "achievement:first_companion": {
+      "file": "achievement__first_companion.png",
+      "jobId": "dc178d39-6bca-4a4c-ab99-7c28b443a4ea",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034218_dc178d39-6bca-4a4c-ab99-7c28b443a4ea.png"
+    },
+    "achievement:lucky": {
+      "file": "achievement__lucky.png",
+      "jobId": "85b237b3-f75d-4da0-934a-235299a5d74d",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034218_85b237b3-f75d-4da0-934a-235299a5d74d.png"
+    },
+    "achievement:petty_thief": {
+      "file": "achievement__petty_thief.png",
+      "jobId": "1b6bcdc7-d8e5-48bc-b815-e47bc9b951c8",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034259_1b6bcdc7-d8e5-48bc-b815-e47bc9b951c8.png"
+    },
+    "achievement:hunter_bronze": {
+      "file": "achievement__hunter_bronze.png",
+      "jobId": "bbeb8ee9-39a3-496b-9982-23fb9a2907c4",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034259_bbeb8ee9-39a3-496b-9982-23fb9a2907c4.png"
+    },
+    "achievement:angler_bronze": {
+      "file": "achievement__angler_bronze.png",
+      "jobId": "ad6b0387-2d96-43b1-8843-646433e1fdbc",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034259_ad6b0387-2d96-43b1-8843-646433e1fdbc.png"
+    },
+    "achievement:miner_bronze": {
+      "file": "achievement__miner_bronze.png",
+      "jobId": "5dba1e00-49d0-4c2f-be68-2f08751bd3d0",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034259_5dba1e00-49d0-4c2f-be68-2f08751bd3d0.png"
+    },
+    "achievement:gambler_bronze": {
+      "file": "achievement__gambler_bronze.png",
+      "jobId": "36aeeb07-7ed6-4c14-8d05-e870ee0001bc",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034339_36aeeb07-7ed6-4c14-8d05-e870ee0001bc.png"
+    },
+    "achievement:chatterbox": {
+      "file": "achievement__chatterbox.png",
+      "jobId": "27348a4e-f572-433a-99da-c102b3c4712f",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034339_27348a4e-f572-433a-99da-c102b3c4712f.png"
+    },
+    "achievement:level_25": {
+      "file": "achievement__level_25.png",
+      "jobId": "e8db788a-13ae-4051-8e7a-dd16ba0364a9",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034339_e8db788a-13ae-4051-8e7a-dd16ba0364a9.png"
+    },
+    "achievement:seasoned_hunter": {
+      "file": "achievement__seasoned_hunter.png",
+      "jobId": "fa748d8e-bcf9-433e-9642-9970f0e25f6c",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034338_fa748d8e-bcf9-433e-9642-9970f0e25f6c.png"
+    },
+    "achievement:weekend_angler": {
+      "file": "achievement__weekend_angler.png",
+      "jobId": "eb64c9d8-d451-42fd-af31-3d42c73a37f0",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034419_eb64c9d8-d451-42fd-af31-3d42c73a37f0.png"
+    },
+    "achievement:angler_pro": {
+      "file": "achievement__angler_pro.png",
+      "jobId": "aaabfc55-800d-4ad3-a977-7e4f81d23f47",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034419_aaabfc55-800d-4ad3-a977-7e4f81d23f47.png"
+    },
+    "achievement:week_warrior": {
+      "file": "achievement__week_warrior.png",
+      "jobId": "51a8ec19-c5f0-4fca-b2c3-926eb94a7234",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034419_51a8ec19-c5f0-4fca-b2c3-926eb94a7234.png"
+    },
+    "achievement:fortnight": {
+      "file": "achievement__fortnight.png",
+      "jobId": "e4ed65ba-0b51-4845-adf7-7e257ebe6125",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034419_e4ed65ba-0b51-4845-adf7-7e257ebe6125.png"
+    },
+    "achievement:quest_novice": {
+      "file": "achievement__quest_novice.png",
+      "jobId": "bd375946-a09b-4150-9897-5269f1299747",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034501_bd375946-a09b-4150-9897-5269f1299747.png"
+    },
+    "achievement:coin_hoarder": {
+      "file": "achievement__coin_hoarder.png",
+      "jobId": "164184a5-b62d-4c37-9503-afbdce0d009e",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034501_164184a5-b62d-4c37-9503-afbdce0d009e.png"
+    },
+    "achievement:wealthy": {
+      "file": "achievement__wealthy.png",
+      "jobId": "aee3c43f-11be-4d3a-bbf0-5d62ce69c325",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034501_aee3c43f-11be-4d3a-bbf0-5d62ce69c325.png"
+    },
+    "achievement:gambler": {
+      "file": "achievement__gambler.png",
+      "jobId": "5edf0ac8-e29e-4720-8f5c-ce8d5f80d862",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034501_5edf0ac8-e29e-4720-8f5c-ce8d5f80d862.png"
+    },
+    "achievement:thief": {
+      "file": "achievement__thief.png",
+      "jobId": "baf024d2-d456-4e64-8a70-a9b60e379558",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034547_baf024d2-d456-4e64-8a70-a9b60e379558.png"
+    },
+    "achievement:robber_baron": {
+      "file": "achievement__robber_baron.png",
+      "jobId": "8ff6ab8c-03c6-48e6-8c53-a3144f52e80d",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034548_8ff6ab8c-03c6-48e6-8c53-a3144f52e80d.png"
+    },
+    "achievement:wayfarer": {
+      "file": "achievement__wayfarer.png",
+      "jobId": "950c4b94-ba9e-441b-8a37-3ec77bd30a07",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034549_950c4b94-ba9e-441b-8a37-3ec77bd30a07.png"
+    },
+    "achievement:four_corners": {
+      "file": "achievement__four_corners.png",
+      "jobId": "d32fe592-112d-4d29-9883-93ef1c8d23d2",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034547_d32fe592-112d-4d29-9883-93ef1c8d23d2.png"
+    },
+    "achievement:loremonger": {
+      "file": "achievement__loremonger.png",
+      "jobId": "18842533-5bee-430e-8fe6-59edc74f88a7",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034629_18842533-5bee-430e-8fe6-59edc74f88a7.png"
+    },
+    "achievement:relic_runner": {
+      "file": "achievement__relic_runner.png",
+      "jobId": "f78c2708-b490-434f-a93e-29a775bb81db",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034628_f78c2708-b490-434f-a93e-29a775bb81db.png"
+    },
+    "achievement:trap_connoisseur": {
+      "file": "achievement__trap_connoisseur.png",
+      "jobId": "b97c6ff6-6ea9-4a00-8731-21fc2ac11fcf",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034627_b97c6ff6-6ea9-4a00-8731-21fc2ac11fcf.png"
+    },
+    "achievement:full_house": {
+      "file": "achievement__full_house.png",
+      "jobId": "92a4c6a3-6aae-4be8-bfff-24a57ee6b232",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034627_92a4c6a3-6aae-4be8-bfff-24a57ee6b232.png"
+    },
+    "achievement:well_fed": {
+      "file": "achievement__well_fed.png",
+      "jobId": "84c1f15e-b291-4f63-8cc7-9e6dc6d88364",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034717_84c1f15e-b291-4f63-8cc7-9e6dc6d88364.png"
+    },
+    "achievement:hunter_silver": {
+      "file": "achievement__hunter_silver.png",
+      "jobId": "f91d7d33-7b1c-4edb-a2c0-a31f031cf5a5",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034716_f91d7d33-7b1c-4edb-a2c0-a31f031cf5a5.png"
+    },
+    "achievement:angler_silver": {
+      "file": "achievement__angler_silver.png",
+      "jobId": "7f03fd03-0f95-49e2-af84-f5d43ec8ad40",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034716_7f03fd03-0f95-49e2-af84-f5d43ec8ad40.png"
+    },
+    "achievement:miner_silver": {
+      "file": "achievement__miner_silver.png",
+      "jobId": "8778b08a-43fe-4e7f-8876-13eef347141f",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034743_8778b08a-43fe-4e7f-8876-13eef347141f.png"
+    },
+    "achievement:gambler_silver": {
+      "file": "achievement__gambler_silver.png",
+      "jobId": "d1d6a114-578c-457f-964d-4980e40f6b28",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-09-24",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034809_d1d6a114-578c-457f-964d-4980e40f6b28.png"
     }
   }
 }
