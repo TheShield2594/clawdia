@@ -121,6 +121,19 @@ describe('the hero idle loop and reduced motion', () => {
         expect(cat.classList.contains('is-playing')).toBe(true);
     });
 
+    test('a playing event that lands after reduced motion is switched on keeps the still', () => {
+        const query = { matches: false, addEventListener: jest.fn() };
+        window.matchMedia = jest.fn(q => (/reduced-motion/.test(q) ? query : { matches: false, addEventListener: jest.fn() }));
+        renderLanding();
+
+        query.matches = true;
+        for (const [, onChange] of query.addEventListener.mock.calls) onChange();
+        document.querySelector('.cw-hero-video').dispatchEvent(new window.Event('playing'));
+
+        expect(pause).toHaveBeenCalled();
+        expect(document.querySelector('.cw-hero-cat').classList.contains('is-playing')).toBe(false);
+    });
+
     test('stays on the still under prefers-reduced-motion', () => {
         prefersReduced(true);
         renderLanding();

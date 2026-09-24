@@ -527,7 +527,11 @@
         var started = video.play();
         if (started && started.catch) started.catch(function() {});
     };
-    video.addEventListener('playing', function() { cat.classList.add('is-playing'); });
+    // A `playing` already queued when the preference flips to reduce would
+    // otherwise put the paused video back over the still.
+    video.addEventListener('playing', function() {
+        if (!reduce || !reduce.matches) cat.classList.add('is-playing');
+    });
     if (reduce && reduce.addEventListener) reduce.addEventListener('change', sync);
     sync();
 })();
