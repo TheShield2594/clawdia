@@ -9,9 +9,11 @@
 jest.mock('../src/models/MarketSale', () => ({ aggregate: jest.fn(), create: jest.fn() }));
 jest.mock('../src/models/MarketListing', () => ({ find: jest.fn() }));
 
-const { shortHint, priceCheck, median, priceSnapshot } = require('../src/services/marketPriceService');
+const { shortHint, priceCheck, median, priceSnapshot, countOutliers } = require('../src/services/marketPriceService');
 const MarketSale = require('../src/models/MarketSale');
 const MarketListing = require('../src/models/MarketListing');
+
+beforeEach(() => jest.clearAllMocks());
 
 const forged = { kind: 'forged', value: 5000 };
 const event  = { kind: 'event', value: 0 };
@@ -56,6 +58,47 @@ describe('priceCheck', () => {
 
     it('is null with nothing to compare against', () => {
         expect(priceCheck(undefined, event, '💰', 100)).toBeNull();
+    });
+});
+
+// #1133. A snapshot as priceSnapshot builds it from a list of recent prices.
+const fromSales = prices => {
+    const medianPrice = median(prices);
+    return {
+        lastPrice: prices[0], medianPrice, sales: prices.length,
+        minPrice: Math.min(...prices), maxPrice: Math.max(...prices),
+        outliers: countOutliers(prices, medianPrice),
+    };
+};
+
+describe('a thin history planted through an alt', () => {
+    it('shows the range, keeping the real sale in view, when the planted sales outvote it', () => {
+        // One real sale at 3,000, two self-dealt at 50,000: the median is 50,000.
+        expect(shortHint(fromSales([50_000, 50_000, 3000]), forged, '💰')).toBe('sold 💰3,000–💰50,000');
+    });
+
+    it('still lets the median outvote a single odd sale among ordinary ones', () => {
+        expect(shortHint(fromSales([50_000, 3000, 3100, 2900, 3000]), forged, '💰')).toBe('sells for ~💰3,000');
+    });
+
+    it('catches a planted low price the same way', () => {
+        expect(shortHint(fromSales([1, 1, 3000]), forged, '💰')).toBe('sold 💰1–💰3,000');
+    });
+
+    it('passes no verdict against sales that disagree, and says why', () => {
+        const text = priceCheck(fromSales([50_000, 50_000, 3000]), { kind: 'event', value: 0 }, '💰', 3000);
+        expect(text).toContain('range from **💰3,000** to **💰50,000**');
+        expect(text).not.toContain('Well below');
+    });
+
+    it('is worked out by priceSnapshot from the stored prices', async () => {
+        MarketSale.aggregate.mockResolvedValueOnce([{ _id: 'gem', lastPrice: 50_000, lastSoldAt: new Date(), prices: [50_000, 50_000, 3000] }]);
+        MarketListing.find.mockReturnValue({ lean: async () => [] });
+
+        const snap = await priceSnapshot('g1', ['gem']);
+
+        expect(snap.get('gem')).toMatchObject({ medianPrice: 50_000, minPrice: 3000, maxPrice: 50_000, outliers: 1, sales: 3 });
+        expect(shortHint(snap.get('gem'), forged, '💰')).toBe('sold 💰3,000–💰50,000');
     });
 });
 
