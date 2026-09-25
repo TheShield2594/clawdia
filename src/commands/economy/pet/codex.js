@@ -58,7 +58,7 @@ async function executeCodex(interaction) {
             { name: '🛒 From the shop (/pet adopt)', value: shop.map(codexLine).join('\n'), inline: false },
             { name: '✨ Rare companions', value: rare.map(codexLine).join('\n'), inline: false },
         )
-        .setFooter({ text: 'Rare companions are never sold — each one can only find you once.' });
+        .setFooter({ text: 'Rare companions are never sold — they only turn up alongside a legendary find, and never while you already have one.' });
 
     const entry = color => ({ def, owned: got }) => ({ iconId: petItemId(def.petId), name: def.name, owned: got, color });
     const card = await renderAttachment(() => createGrindCollectionCard({

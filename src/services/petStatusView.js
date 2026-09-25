@@ -34,6 +34,7 @@ const {
     trainingPct,
     getSpeciesMove,
     isOnVacation,
+    isPetActive,
 } = require('./petService');
 const { MATERIAL_RARITY } = require('../data/materialRarity');
 const { getItemImageAttachment } = require('../utils/itemImageHelper');
@@ -78,7 +79,8 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
     const hunger      = effectiveHunger(pet);
     const moodLine    = getMoodLine(pet);
     const moodColor   = getMoodColor(hunger);
-    const bonusActive = hunger >= STARVING_THRESHOLD;
+    // Off on vacation too, not only when hungry (#1181).
+    const bonusActive = isPetActive(pet);
     const bonusEmoji  = bonusActive ? '✅' : '❌';
     const effPct      = getEffectiveBonusPct(pet);
     const bonusLabel  = `${formatPetBonus(def?.bonusType, effPct)}${bonusActive ? '' : ' *(inactive)*'}`;
@@ -91,7 +93,8 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
         ? `${lastFedH}h ago`
         : `${Math.floor(lastFedH / 24)}d ago`;
 
-    const potwLine   = (pet.potw ? '\n🌟 **Pet of the Week**' : '') + (vacationLine(pet) ? `\n${vacationLine(pet)}` : '');
+    const away       = vacationLine(pet);
+    const potwLine   = (pet.potw ? '\n🌟 **Pet of the Week**' : '') + (away ? `\n${away}` : '');
     const move       = getSpeciesMove(pet.petId);
 
     const personalityDef = pet.personality ? PERSONALITY_TRAITS[pet.personality] : null;
@@ -283,7 +286,7 @@ function petCardOptions(pet, { kicker, footerLeft = null, footerRight = null }, 
         bonus:       def ? {
             pct:    getEffectiveBonusPct(pet, now),
             ...petBonusParts(def.bonusType),
-            active: hunger >= STARVING_THRESHOLD,
+            active: isPetActive(pet, now),
         } : null,
         stats:       getPetStats(pet),
         boosted,
@@ -341,7 +344,9 @@ function buildPetCardEmbed(pet, index, total, ownerAvatarURL, cardName, now = Da
     const hunger  = effectiveHunger(pet, now);
     const level   = pet.level ?? 1;
     const action  = getMoodAction(pet, now);
-    const bonusOn = hunger >= STARVING_THRESHOLD;
+    const bonusOn = isPetActive(pet, now);
+    // On vacation the passive is off whatever the hunger, so "feed above 30%" would mislead.
+    const bonusHint = bonusOn || isOnVacation(pet, now) ? '' : ` *(feed above ${STARVING_THRESHOLD}%)*`;
     const xpNote  = level >= PET_MAX_LEVEL
         ? 'MAX'
         : `${(pet.xp ?? 0) - xpForLevel(level)}/${xpForLevel(level + 1) - xpForLevel(level)} XP`;
@@ -356,7 +361,7 @@ function buildPetCardEmbed(pet, index, total, ownerAvatarURL, cardName, now = Da
         '',
         `📈 Lv **${level}** (${xpNote}) · 🍖 **${Math.round(hunger)}%** · ❤️ **${getBondTier(pet, now).title}** ${Math.floor(effectiveBond(pet, now))}/${BOND_MAX} · `
             + `${bonusOn ? '✅' : '❌'} ${formatPetBonus(def?.bonusType, getEffectiveBonusPct(pet, now))}`
-            + `${bonusOn ? '' : ` *(feed above ${STARVING_THRESHOLD}%)*`}`,
+            + bonusHint,
         `⚔️ ${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L · PvP ${pet.pvpWins ?? 0}-${pet.pvpLosses ?? 0}`
             + `${move ? ` · 🌀 **${move.name}** — ${move.desc}` : ''}`,
         `🏋️ ${trainingText(pet)}`,

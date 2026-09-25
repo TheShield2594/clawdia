@@ -818,7 +818,7 @@ function trainCooldownMinutes(pet, now = Date.now()) {
 
 /**
  * Whether a pet can train `focus` now. Returns `{ ok: true }` or
- * `{ ok: false, reason: 'focus'|'maxed'|'cooldown'|'hungry', minutes? }`.
+ * `{ ok: false, reason: 'focus'|'maxed'|'cooldown'|'vacation'|'hungry', minutes? }`.
  * Decay-aware, like every other read of hunger.
  */
 function canTrain(pet, focus, now = Date.now()) {
@@ -826,6 +826,7 @@ function canTrain(pet, focus, now = Date.now()) {
     if (trainingSessions(pet, focus) >= TRAIN_MAX_SESSIONS) return { ok: false, reason: 'maxed' };
     const minutes = trainCooldownMinutes(pet, now);
     if (minutes > 0) return { ok: false, reason: 'cooldown', minutes };
+    if (isOnVacation(pet, now)) return { ok: false, reason: 'vacation' };
     if (!isPetActive(pet, now)) return { ok: false, reason: 'hungry' };
     return { ok: true };
 }

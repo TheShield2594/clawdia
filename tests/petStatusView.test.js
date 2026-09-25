@@ -23,6 +23,7 @@ const {
     renderPetStatus,
     petCardOptions,
     cardAltText,
+    buildPetCardEmbed,
 } = require('../src/services/petStatusView');
 
 const DAY = 86400000;
@@ -247,5 +248,27 @@ describe('petCardOptions', () => {
         expect(o.move).toBe('Pack Howl');
         expect(o.trained).toEqual({ atk: '+2%', spd: '+12%', crit: '+2 pts' });
         expect(o.stats.crit).toBeCloseTo(0.10 + 0.02, 6); // base 10%, +2 pts from four Agility sessions
+    });
+});
+
+// #1181: a fed pet on vacation earns nothing, so no part of the view may say
+// its passive is on — nor tell the owner to feed it to turn the passive back on.
+describe('a pet on vacation', () => {
+    const away = () => makePet({ hunger: 90, vacationFrom: new Date(Date.now() - DAY), vacationUntil: new Date(Date.now() + DAY) });
+
+    test('the text card shows the passive as inactive and says why', () => {
+        const json = buildPetEmbed(away(), 0, 1, null).toJSON();
+        const bonus = json.fields.find(f => f.name.includes('Bonus'));
+        expect(bonus.name).toContain('❌');
+        expect(bonus.value).toContain('*(inactive)*');
+        expect(json.description).toContain('On vacation');
+    });
+
+    test('the companion card and its embed agree', () => {
+        expect(petCardOptions(away(), { kicker: 'x' }).bonus.active).toBe(false);
+        const text = buildPetCardEmbed(away(), 0, 1, null, 'pet-card.png').toJSON().description;
+        expect(text).toContain('❌');
+        expect(text).not.toContain('feed above');
+        expect(text).toContain('On vacation');
     });
 });

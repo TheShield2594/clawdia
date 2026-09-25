@@ -92,8 +92,15 @@ async function claimWarning(guildId, userId, petId, flag) {
 async function sendPetHungerWarnings(client, now = Date.now()) {
     let warned = 0;
     let dms    = 0;
+    // Scoped to this shard's guilds in the query, so N shards do not each read
+    // every pet owner; handlesGuild below stays as the guard.
+    const guildIds = [...(client.guilds?.cache?.keys?.() ?? [])];
     const cursor = User.find(
-        { 'pets.0': { $exists: true }, 'notifications.pets.hunger': { $ne: false } },
+        {
+            'pets.0': { $exists: true },
+            'notifications.pets.hunger': { $ne: false },
+            ...(guildIds.length ? { guildId: { $in: guildIds } } : {}),
+        },
         { userId: 1, guildId: 1, pets: 1 },
     ).lean().cursor();
 

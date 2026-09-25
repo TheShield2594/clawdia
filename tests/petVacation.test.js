@@ -124,7 +124,7 @@ describe('a pet on vacation cannot be used to farm', () => {
 
     test('it is never picked to defend and cannot train', () => {
         expect(pickDefenderPet([away()], 1, NOW + 1000)).toBeNull();
-        expect(canTrain(away(), 'power', NOW + 1000)).toEqual({ ok: false, reason: 'hungry' });
+        expect(canTrain(away(), 'power', NOW + 1000)).toEqual({ ok: false, reason: 'vacation' });
     });
 
     test('it earns no Pet of the Week credit', () => {

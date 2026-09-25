@@ -209,6 +209,7 @@ async function executeStatus(interaction) {
                     focus:    'That training focus no longer exists.',
                     maxed:    `${f?.emoji ?? '🏋️'} **${name}** has mastered ${f?.label ?? 'that'} training (${TRAIN_MAX_SESSIONS}/${TRAIN_MAX_SESSIONS}). Pick another focus.`,
                     cooldown: `🏋️ **${name}** is still sore from the last session! Train again in **${check.minutes >= 60 ? `${Math.floor(check.minutes / 60)}h ${check.minutes % 60}m` : `${check.minutes}m`}**.`,
+                    vacation: `🏖️ **${name}** is on vacation. End it with \`/pet vacation off\` to train.`,
                     hungry:   `🍖 **${name}** is too hungry to train. Feed it above **${STARVING_THRESHOLD}%** first.`,
                 }[check.reason];
                 return btn.reply({ content: why, flags: MessageFlags.Ephemeral });

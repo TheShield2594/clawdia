@@ -131,6 +131,18 @@ describe('sendPetHungerWarnings', () => {
         expect(User.find.mock.calls[0][0]).toMatchObject({ 'notifications.pets.hunger': { $ne: false } });
     });
 
+    test("each shard reads only its own guilds' pet owners", async () => {
+        docs = [];
+        await sendPetHungerWarnings(client(), NOW);
+        expect(User.find.mock.calls[0][0]).toMatchObject({ guildId: { $in: ['g1'] } });
+    });
+
+    test('with no guild cache it falls back to the unscoped query', async () => {
+        docs = [];
+        await sendPetHungerWarnings({ users: { fetch: jest.fn() } }, NOW);
+        expect(User.find.mock.calls[0][0]).not.toHaveProperty('guildId');
+    });
+
     test('the DM says how to feed, pause and opt out', () => {
         const msg = warningMessage('Paw Club', ['line']);
         expect(msg).toContain('/pet feed');
