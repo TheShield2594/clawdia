@@ -63,7 +63,7 @@ beforeEach(() => {
     svc._resetCooldowns();
     jest.spyOn(console, 'error').mockImplementation(() => {});
     Guild.findOneAndUpdate.mockResolvedValue({ tickets: { nextTicketId: 1 } });
-    Guild.updateOne.mockResolvedValue({});
+    Guild.updateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
     createCase.mockResolvedValue({ caseId: 7 });
 });
 
@@ -107,12 +107,63 @@ describe('openTicket', () => {
         expect(createArgs.type).toBe(ChannelType.PrivateThread);
         // Recorded before wiring the thread up, so a partial failure still leaves a row.
         expect(Guild.updateOne).toHaveBeenCalledWith(
-            { guildId: GUILD_ID },
+            expect.objectContaining({ guildId: GUILD_ID, $expr: expect.anything() }),
             expect.objectContaining({ $push: expect.objectContaining({ 'tickets.open': expect.objectContaining({ ticketId: 1, openerId: 'alice', subject: 'help me' }) }) }),
-            expect.anything(),
         );
         expect(thread.members.add).toHaveBeenCalledWith('alice');
         expect(thread.send).toHaveBeenCalled();
+    });
+
+    // #1159: the cap is enforced by the write, not just the pre-check.
+    it('makes the record conditional on the stored count being under the cap', async () => {
+        const settings = baseSettings();
+        settings.tickets.perUserCap = 2;
+        await svc.openTicket({ guild: makeGuild({ thread: makeThread() }), member: makeMember('alice'), settings });
+        const [filter] = Guild.updateOne.mock.calls[0];
+        const [count, cap] = filter.$expr.$lt;
+        expect(cap).toBe(2);
+        expect(count.$size.$filter.cond).toEqual({ $eq: ['$$this.openerId', { $literal: 'alice' }] });
+    });
+
+    it('deletes the thread and refuses when the conditional record does not land', async () => {
+        Guild.updateOne.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+        const thread = makeThread();
+        thread.delete = jest.fn().mockResolvedValue(undefined);
+        const res = await svc.openTicket({ guild: makeGuild({ thread }), member: makeMember('alice'), settings: baseSettings() });
+        expect(res).toMatchObject({ ok: false, code: 'capped' });
+        expect(thread.delete).toHaveBeenCalled();
+        // Nobody was added or pinged on the surplus thread.
+        expect(thread.members.add).not.toHaveBeenCalled();
+        expect(thread.send).not.toHaveBeenCalled();
+    });
+
+    it('refuses a second open from the same member while the first is in flight', async () => {
+        let release;
+        const guild = makeGuild({ thread: makeThread() });
+        guild.channels.cache.get('parent-1').threads.create
+            .mockImplementationOnce(() => new Promise(resolve => { release = () => resolve(makeThread()); }));
+
+        const first = svc.openTicket({ guild, member: makeMember('alice'), settings: baseSettings() });
+        await new Promise(setImmediate);
+        const second = await svc.openTicket({ guild, member: makeMember('alice'), settings: baseSettings() });
+        expect(second).toMatchObject({ ok: false, code: 'cooldown' });
+
+        release();
+        expect((await first).ok).toBe(true);
+        // A different member is not held up by alice's open.
+        const other = await svc.openTicket({ guild, member: makeMember('bob'), settings: baseSettings() });
+        expect(other.ok).toBe(true);
+    });
+
+    it('does not start the cooldown when the open fails', async () => {
+        const settings = baseSettings();
+        settings.tickets.cooldownSeconds = 60;
+        const guild = makeGuild({ thread: makeThread() });
+        guild.channels.cache.get('parent-1').threads.create.mockRejectedValueOnce(new Error('Missing Permissions'));
+        const failed = await svc.openTicket({ guild, member: makeMember('carol'), settings });
+        expect(failed).toMatchObject({ ok: false, code: 'create-failed' });
+        const retry = await svc.openTicket({ guild, member: makeMember('carol'), settings });
+        expect(retry.ok).toBe(true);
     });
 
     it('reports a create failure without throwing', async () => {

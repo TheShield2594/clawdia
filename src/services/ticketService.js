@@ -62,9 +62,22 @@ function cooldownKey(guildId, userId) {
     return `${guildId}:${userId}`;
 }
 
+// Members whose open is in flight, keyed like the cooldown (#1159). Opening
+// awaits Discord (thread create) between the cap check and the write, so two
+// modal submits or `/ticket open` calls from one member could both pass the
+// check. This refuses the second while the first is still running; the
+// conditional write in openTicket is what holds the cap across processes and
+// against a stale settings cache.
+const openInFlight = new Set();
+
 /** Test seam: forget every recorded open cooldown. */
 function _resetCooldowns() {
     lastOpenAt.clear();
+    openInFlight.clear();
+}
+
+function cappedMessage(count) {
+    return `You already have ${count} open ticket(s). Close one before opening another.`;
 }
 
 // Atomic per-guild ticket counter, initialised to 1 when absent, in one
@@ -146,22 +159,45 @@ async function openTicket({ guild, member, subject = '', settings }) {
         return { ok: false, code: 'no-channel', message: 'The configured tickets channel no longer exists.' };
     }
 
-    // Per-member cap: how many of this member's tickets are already open.
+    const key = cooldownKey(guild.id, member.id);
+    if (openInFlight.has(key)) {
+        return { ok: false, code: 'cooldown', message: 'Your ticket is already being opened — give it a moment.' };
+    }
+    openInFlight.add(key);
+    try {
+        return await openTicketExclusive({ guild, member, subject, cfg, parent, key });
+    } finally {
+        openInFlight.delete(key);
+    }
+}
+
+// The rest of openTicket, run while `key` holds the in-flight slot.
+async function openTicketExclusive({ guild, member, subject, cfg, parent, key }) {
+    // Per-member cap: how many of this member's tickets are already open. A
+    // cheap pre-check against the settings we have, so an ordinary refusal
+    // costs no ticket id and no thread; the write below is the real guard.
     const openForMember = (cfg.open || []).filter(t => t.openerId === member.id).length;
     const cap = cfg.perUserCap ?? 1;
     if (openForMember >= cap) {
-        return { ok: false, code: 'capped', message: `You already have ${openForMember} open ticket(s). Close one before opening another.` };
+        return { ok: false, code: 'capped', message: cappedMessage(openForMember) };
     }
 
-    // Open cooldown.
+    // Open cooldown. Stamped now, before the awaits below, so a second open
+    // arriving after this one finishes sees it; rolled back if this one fails.
     const cooldownMs = (cfg.cooldownSeconds ?? 0) * 1000;
+    const previousOpenAt = lastOpenAt.get(key);
     if (cooldownMs > 0) {
-        const last = lastOpenAt.get(cooldownKey(guild.id, member.id)) || 0;
-        const remaining = last + cooldownMs - Date.now();
+        const remaining = (previousOpenAt || 0) + cooldownMs - Date.now();
         if (remaining > 0) {
             return { ok: false, code: 'cooldown', message: `Please wait ${Math.ceil(remaining / 1000)}s before opening another ticket.` };
         }
+        lastOpenAt.set(key, Date.now());
     }
+    const releaseCooldown = () => {
+        if (cooldownMs <= 0) return;
+        if (previousOpenAt === undefined) lastOpenAt.delete(key);
+        else lastOpenAt.set(key, previousOpenAt);
+    };
 
     const cleanSubject = String(subject || '').trim().slice(0, 200);
     const ticketId = await getNextTicketId(guild.id);
@@ -176,6 +212,7 @@ async function openTicket({ guild, member, subject = '', settings }) {
             reason: `Ticket #${ticketId} opened by ${member.user.tag}`,
         });
     } catch (err) {
+        releaseCooldown();
         console.error(`[tickets] failed to create thread in guild ${guild.id}:`, err.message);
         return { ok: false, code: 'create-failed', message: 'I could not open a ticket thread. Check my Create Private Threads permission on the tickets channel.' };
     }
@@ -183,15 +220,34 @@ async function openTicket({ guild, member, subject = '', settings }) {
     // Record the ticket before wiring the thread up, so a failure adding members
     // or posting the embed still leaves a row the sweep and the close path can
     // find rather than a live thread nothing tracks.
-    await Guild.updateOne(
-        { guildId: guild.id },
+    //
+    // The push only lands while the member is still under the cap *as stored*
+    // (#1159): the count and the push are one atomic update, so opens racing
+    // from another process, or checked against a cached settings document that
+    // predates this member's last ticket, cannot go past `perUserCap`. A refused
+    // push means the thread is surplus — nobody has been added to it or pinged
+    // yet — so it is deleted and the member told they are at the cap.
+    const recorded = await Guild.updateOne(
+        {
+            guildId: guild.id,
+            $expr: { $lt: [
+                { $size: { $filter: {
+                    input: { $ifNull: ['$tickets.open', []] },
+                    cond: { $eq: ['$$this.openerId', { $literal: member.id }] },
+                } } },
+                cap,
+            ] },
+        },
         { $push: { 'tickets.open': {
             ticketId, threadId: thread.id, channelId: parent.id,
             openerId: member.id, subject: cleanSubject, claimedBy: null, openedAt: new Date(),
         } } },
-        { upsert: true }
     );
-    if (cooldownMs > 0) lastOpenAt.set(cooldownKey(guild.id, member.id), Date.now());
+    if (!recorded?.matchedCount) {
+        releaseCooldown();
+        await thread.delete('Ticket refused: member already at the open-ticket cap').catch(() => {});
+        return { ok: false, code: 'capped', message: cappedMessage(cap) };
+    }
 
     // Add the opener, then support staff from the role caches (best-effort,
     // capped); the opening message also pings the roles so anyone the cache
