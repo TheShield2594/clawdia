@@ -509,6 +509,61 @@ describe('/pet feed', () => {
         expect(stored().pets[0].weeklyInteractions).toBe(4);
     });
 
+    // #1188: one command can use up to ten items, but never more than the pet
+    // can take.
+    test('quantity 5 on a pet at 60% uses only the four items it takes to fill it', async () => {
+        const now = Date.now();
+        jest.spyOn(Date, 'now').mockReturnValue(now);
+        seedUser({
+            pets: [makePet({ hunger: 60, name: 'Rex', lastDecayAt: new Date(now) })],
+            inventory: [{ itemId: 'pet_food', quantity: 7 }],
+        });
+
+        const interaction = await run('feed', { material: 'pet_food', quantity: 5 });
+
+        const fed = stored().pets[0];
+        expect(fed.hunger).toBe(100);
+        expect(fed.xp).toBe(4 * 4);
+        expect(fed.weeklyInteractions).toBe(1);
+        expect(stored().inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
+        const text = textOf(interaction);
+        expect(text).toContain('`pet_food` ×4');
+        expect(text).toContain('not favorite — +40 hunger');
+        expect(text).toContain('+16 pet XP');
+        expect(text).toContain('Used **4** of 5 — full now · 3 left');
+    });
+
+    test('quantity stops at the pile, and the last item may top the pet up past what it needed', async () => {
+        const now = Date.now();
+        jest.spyOn(Date, 'now').mockReturnValue(now);
+        seedUser({
+            pets: [makePet({ hunger: 10, lastDecayAt: new Date(now) })],
+            hunt: { materials: { rabbits_foot: 2 } },
+        });
+
+        const interaction = await run('feed', { material: 'rabbits_foot', quantity: 10 });
+
+        expect(stored().pets[0].hunger).toBe(60);
+        expect(stored().pets[0].xp).toBe(16);
+        expect(stored().hunt.materials.rabbits_foot).toBe(0);
+        expect(textOf(interaction)).toContain('favorite food — +50 hunger!');
+        expect(textOf(interaction)).toContain('Used **2** of 10 — that was all you had · 0 left');
+    });
+
+    test('a quantity that is all used says so without a reason', async () => {
+        const now = Date.now();
+        jest.spyOn(Date, 'now').mockReturnValue(now);
+        seedUser({
+            pets: [makePet({ hunger: 20, lastDecayAt: new Date(now) })],
+            inventory: [{ itemId: 'pet_food', quantity: 5 }],
+        });
+
+        const interaction = await run('feed', { material: 'pet_food', quantity: 3 });
+
+        expect(stored().pets[0].hunger).toBe(50);
+        expect(textOf(interaction)).toContain('Used **3** of 3 · 2 left');
+    });
+
     test('a pet type with no definition cannot be fed', async () => {
         seedUser({ pets: [makePet({ petId: 'unicorn', hunger: 20 })], inventory: [{ itemId: 'pet_food', quantity: 1 }] });
 
