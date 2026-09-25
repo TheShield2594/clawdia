@@ -503,6 +503,22 @@ Set a moderation log channel to track:
 /leaderboard         - Server leaderboard
 ```
 
+Every ranked board leads with a picture card: the top three on a podium with
+their avatars in gold, silver and bronze (a crown on first), the rest as rows
+whose bar measures them against first place, and your own standing under the
+board when you are off it. The same card draws `/leaderboard` (every type),
+`/achievements leaderboard`, `/streak`,
+`/pet leaderboard` (each pet in its species' portrait), `/season leaderboard`,
+`/duel leaderboard`, `/syndicate leaderboard` (under the leader's avatar) and
+`/fish tournament status`, each in its own colours. The text board stays under
+the card with every name and number on it; if the card cannot be drawn the text
+goes out alone.
+
+The Hall of Champions is drawn as a wall of plaques instead: a row per week,
+newest first and labelled with its dates, and a plaque per track (hunter,
+miner, angler, explorer) in that track's colours with the champion's avatar,
+name and total. A track nobody won that week keeps an empty plaque.
+
 **Customization:**
 - XP rate multiplier
 - Level-up message

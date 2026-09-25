@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const { getStreakMultiplier, getNextMultiplierTier, getNextMilestone } = require('../../utils/streakMultiplier');
+const { sendBoard, avatarUrlOf, displayNameOf } = require('../../utils/leaderboardCard');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -83,18 +84,21 @@ module.exports = {
         const medals = ['🥇', '🥈', '🥉'];
         const div = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
-        // Resolve display names for top 5
+        // Resolve display names (and, for the picture card, avatars) for the top 5
         const nameCache = new Map();
+        const memberCache = new Map();
         await Promise.allSettled(
             topUsers.map(async u => {
                 try {
                     const member = await interaction.guild.members.fetch(u.userId);
                     nameCache.set(u.userId, member.displayName);
+                    memberCache.set(u.userId, member);
                 } catch {
                     nameCache.set(u.userId, `<@${u.userId}>`);
                 }
             })
         );
+        const dayCount = n => `${n.toLocaleString('en-US')} day${n !== 1 ? 's' : ''}`;
 
         const leaderboardLines = topUsers.map((u, i) => {
             const prefix = medals[i] ?? `${i + 1}.`;
@@ -110,6 +114,7 @@ module.exports = {
         // Self rank
         const selfCurrent = selfUser?.streak?.current ?? 0;
         let selfRankText = 'You have no active streak.';
+        let selfCard = null;
         if (selfCurrent > 0) {
             const aheadCount = await User.countDocuments({
                 guildId: interaction.guild.id,
@@ -119,6 +124,13 @@ module.exports = {
             const rankMedals = { 1: '🥇', 2: '🥈', 3: '🥉' };
             const rankBadge = rankMedals[selfRank] ? `${rankMedals[selfRank]} ` : '';
             selfRankText = `Your streak: 🔥 **${selfCurrent}** day${selfCurrent !== 1 ? 's' : ''}  ·  ${rankBadge}Rank #${selfRank}`;
+            selfCard = {
+                rank: selfRank,
+                name: interaction.member?.displayName ?? displayNameOf(interaction.user),
+                avatarUrl: avatarUrlOf(interaction.user),
+                value: dayCount(selfCurrent),
+                score: selfCurrent,
+            };
         }
 
         const description = leaderboardLines.join('\n') +
@@ -131,6 +143,26 @@ module.exports = {
             .setFooter({ text: 'Claim /daily every day to build your streak' })
             .setTimestamp();
 
-        await interaction.reply({ embeds: [embed] });
+        if (topUsers.length === 0) return interaction.reply({ embeds: [embed] });
+
+        await sendBoard(interaction, embed, {
+            theme: 'streak',
+            kicker: interaction.guild.name,
+            title: 'Streak Leaderboard',
+            subtitle: 'Top 5 active daily streaks',
+            entries: topUsers.map((u, i) => {
+                const member = memberCache.get(u.userId);
+                return {
+                    rank: i + 1,
+                    name: member?.displayName ?? 'Unknown member',
+                    avatarUrl: avatarUrlOf(member),
+                    value: dayCount(u.streak.current),
+                    score: u.streak.current,
+                    you: u.userId === interaction.user.id,
+                };
+            }),
+            you: selfCard,
+            footer: 'Claim /daily every day to build your streak',
+        });
     }
 };

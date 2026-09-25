@@ -4,7 +4,36 @@ const { EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { heartBar, getPetDisplay, effectiveBond, bondTierFor } = require('../../../services/petService');
 const COLORS = require('../../../utils/embedColors');
+const { petItemId } = require('../../../data/activityItems');
+const { sendBoard, displayNameOf } = require('../../../utils/leaderboardCard');
 const { ratingLeaderboard } = require('../../../services/petLadderService');
+
+/**
+ * Sends a pet board with its picture card: each pet in its species' portrait,
+ * its owner beneath. `cardValue(e)` gives the row's value, score and any
+ * extra detail; `titleLabel` heads the card.
+ */
+async function sendPetBoard(interaction, embed, top, titleLabel, cardValue) {
+    const owners = await Promise.all(top.map(e => interaction.client.users.fetch(e.userId).catch(() => null)));
+    return sendBoard(interaction, embed, {
+        theme: 'pets',
+        kicker: interaction.guild.name,
+        title: 'Pet Leaderboard',
+        subtitle: titleLabel,
+        entries: top.map((e, i) => {
+            const { detail, ...value } = cardValue(e);
+            const owner = `with ${displayNameOf(owners[i]) ?? 'Unknown member'}`;
+            return {
+                rank: i + 1,
+                name: `${getPetDisplay(e.pet).titledName}${e.pet.potw ? ' · POTW' : ''}`,
+                iconId: petItemId(e.pet.petId),
+                detail: detail ? `${owner} · ${detail}` : owner,
+                you: e.userId === interaction.user.id,
+                ...value,
+            };
+        }),
+    });
+}
 
 /** The pet ladder (#1185): rated pets by rating, this season. */
 async function ratingBoard(interaction) {
@@ -23,7 +52,13 @@ async function ratingBoard(interaction) {
             : '*No rated battles this season yet — `/pet battle opponent:@member rated:True` starts one.*')
         .setFooter({ text: 'Rated battles are level-matched • top three pets earn a season title' })
         .setTimestamp();
-    return interaction.editReply({ embeds: [embed] });
+    if (rows.length === 0) return interaction.editReply({ embeds: [embed] });
+
+    return sendPetBoard(interaction, embed, rows, `Pet Ladder · Season ${seasonId}`, e => ({
+        value: `${e.rating} rating`,
+        detail: `${e.tier.label} · ${e.wins}W / ${e.losses}L`,
+        score: e.rating,
+    }));
 }
 
 async function executeLeaderboard(interaction) {
@@ -32,7 +67,7 @@ async function executeLeaderboard(interaction) {
     const sortType = interaction.options.getString('type') ?? 'bonds';
     if (sortType === 'rating') return ratingBoard(interaction);
 
-    let sortStage, addFieldsStage, titleLabel, lineBuilder;
+    let sortStage, addFieldsStage, titleLabel, lineBuilder, cardValue;
     let rerank = rows => rows;
     let poolSize = 10;
 
@@ -47,6 +82,7 @@ async function executeLeaderboard(interaction) {
             const stars = '⭐'.repeat(e.pet.evolutionStage ?? 1);
             return `${rank} ${emoji} **${titledName}** ${stars} — Lv**${e.pet.level ?? 1}** — <@${e.userId}>`;
         };
+        cardValue = e => ({ value: `Level ${e.pet.level ?? 1}`, score: e.pet.level ?? 1 });
     } else if (sortType === 'wins') {
         // PvP only: wild wins are a count of time spent grinding, and anyone
         // can rack them up. Fewer losses breaks a tie in wins.
@@ -57,6 +93,7 @@ async function executeLeaderboard(interaction) {
             const { emoji, titledName } = getPetDisplay(e.pet);
             return `${rank} ${emoji} **${titledName}** — ⚔️ ${e.pet.pvpWins ?? 0}W / ${e.pet.pvpLosses ?? 0}L vs members — <@${e.userId}>`;
         };
+        cardValue = e => ({ value: `${e.pet.pvpWins ?? 0}W / ${e.pet.pvpLosses ?? 0}L`, score: e.pet.pvpWins ?? 0 });
     } else {
         // Default: bond. It used to be days since adoption, which ranked pets
         // by age (#1186); it is now the care-earned bond, oldest pet first on a
@@ -69,6 +106,7 @@ async function executeLeaderboard(interaction) {
             const potw = e.pet.potw ? ' 🌟' : '';
             return `${rank} ${emoji} **${titledName}**${potw} — ${heartBar(e.bond)} ${bondTierFor(e.bond).title} ${Math.floor(e.bond)} — <@${e.userId}>`;
         };
+        cardValue = e => ({ value: `${bondTierFor(e.bond).title} · ${Math.floor(e.bond)}`, score: e.bond });
         // The stored bond does not yet include the hungry-time drain owed by a
         // player who has not run a pet command since; the embed shows the
         // decay-aware value and re-sorts on it, from a slightly wider pool.
@@ -98,7 +136,9 @@ async function executeLeaderboard(interaction) {
         .setFooter({ text: 'Pet of the Week is chosen weekly by most interactions • 🌟 = current POTW' })
         .setTimestamp();
 
-    return interaction.editReply({ embeds: [embed] });
+    if (top.length === 0) return interaction.editReply({ embeds: [embed] });
+
+    return sendPetBoard(interaction, embed, top, titleLabel, cardValue);
 }
 
 module.exports = { executeLeaderboard };

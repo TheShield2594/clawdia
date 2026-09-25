@@ -13,6 +13,7 @@ const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { isDistrictActive } = require('../../services/districtService');
 const { START_ELO, tierFor, applyElo, makeSeasonId } = require('../../utils/duelElo');
 const COLORS = require('../../utils/embedColors');
+const { sendBoard, avatarUrlOf, displayNameOf } = require('../../utils/leaderboardCard');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { takeEscrow, refundEscrow, payWinner, refundNote } = require('../../utils/duelEscrow');
 const { frozenTargetNotice } = require('../../utils/economyFreeze');
@@ -764,6 +765,7 @@ async function runLeaderboard(interaction) {
         return interaction.reply({ content: 'No one has played a ranked duel yet on this server.', flags: MessageFlags.Ephemeral });
     }
 
+    const entries = [];
     const lines = await Promise.all(top.map(async (row, idx) => {
         const elo = row.ranked?.elo ?? START_ELO;
         const tier = tierFor(elo);
@@ -771,6 +773,15 @@ async function runLeaderboard(interaction) {
         const name = u?.username ?? row.userId;
         const wl = `${row.ranked?.rankedWins ?? 0}W/${row.ranked?.rankedLosses ?? 0}L`;
         const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `\`#${String(idx + 1).padStart(2, ' ')}\``;
+        entries[idx] = {
+            rank: idx + 1,
+            name: displayNameOf(u) ?? name,
+            avatarUrl: avatarUrlOf(u),
+            value: `${elo} ELO`,
+            detail: `${tier.label} · ${wl}`,
+            score: elo,
+            you: row.userId === interaction.user.id,
+        };
         return `${medal}  ${tier.icon} **${name}** — ${elo} ELO · ${wl}`;
     }));
 
@@ -788,7 +799,14 @@ async function runLeaderboard(interaction) {
         .setFooter({ text: 'Top 3 at season end earn coins, a title, and bragging rights.' })
         .setTimestamp();
 
-    return interaction.reply({ embeds: [embed] });
+    return sendBoard(interaction, embed, {
+        theme: 'duel',
+        kicker: interaction.guild.name,
+        title: 'Ranked Duel Ladder',
+        subtitle: seasonId,
+        entries,
+        footer: 'Top 3 at season end earn coins, a title, and bragging rights.',
+    });
 }
 
 module.exports = {

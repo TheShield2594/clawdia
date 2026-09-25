@@ -10,6 +10,8 @@ const {
     WEEKLY_CATEGORY_LABELS,
     WEEKLY_CATEGORY_ORDER,
 } = require('./weeklyChampion');
+const { avatarUrlOf, displayNameOf } = require('./leaderboardCard');
+const championsHallCard = require('./championsHallCard');
 
 // The four grind tracks the README calls "far and away the largest part" of the
 // bot, none of which had a board before #1016. Each maps a `/leaderboard type`
@@ -52,6 +54,27 @@ function runNote(runs) {
     return runs > 1 ? ` over ${runs.toLocaleString()} runs` : '';
 }
 
+/** One board row for the picture card (utils/leaderboardCard). */
+function cardEntry(interaction, rank, userId, user, fallbackName, fields) {
+    return {
+        rank,
+        name: displayNameOf(user) ?? fallbackName ?? 'Unknown',
+        avatarUrl: avatarUrlOf(user),
+        you: userId === interaction.user.id,
+        ...fields,
+    };
+}
+
+/** The caller's own row for the picture card, drawn under the board when they are off it. */
+function callerEntry(interaction, rank, fields) {
+    return {
+        rank,
+        name: interaction.member?.displayName ?? displayNameOf(interaction.user) ?? 'You',
+        avatarUrl: avatarUrlOf(interaction.user),
+        ...fields,
+    };
+}
+
 /**
  * The live weekly race for one track: the same standings, in the same order,
  * that Monday's sweep will crown from (both read `getWeeklyChampionStandings`).
@@ -73,10 +96,16 @@ async function buildWeekBoard(interaction, track) {
 
     const tags = await fetchTags(interaction.client, rows.map(r => r.userId));
     let description = `Top 10 this week by ${unit}\n\n`;
+    const entries = [];
     for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const name = tags[i]?.tag ?? row.username ?? `<@${row.userId}>`;
         description += `${medal(i)} ${name} — **${(row.total ?? 0).toLocaleString()} ${unit}**${runNote(row.runs ?? 0)}\n`;
+        entries.push(cardEntry(interaction, i + 1, row.userId, tags[i], row.username, {
+            value: `${(row.total ?? 0).toLocaleString('en-US')} ${unit}`,
+            detail: (row.runs ?? 0) > 1 ? `${row.runs.toLocaleString('en-US')} runs` : null,
+            score: row.total ?? 0,
+        }));
     }
 
     // Caller's own standing. Rank counts rows with a strictly higher total,
@@ -108,7 +137,16 @@ async function buildWeekBoard(interaction, track) {
         .setDescription(description + callerLine)
         .setFooter({ text: 'Live standings. The leader on Monday is crowned Champion of the Week.' })
         .setTimestamp();
-    return { embeds: [embed] };
+    const card = {
+        theme: track.category,
+        kicker: interaction.guild.name,
+        title: `${track.name} — This Week's Race`,
+        subtitle: `Top 10 this week by ${unit}`,
+        entries,
+        you: callerEntry(interaction, callerRank, { value: `${callerTotal.toLocaleString('en-US')} ${unit}`, detail: standing.replace(/^👑 /, ''), score: callerTotal }),
+        footer: 'The leader on Monday is crowned Champion of the Week.',
+    };
+    return { embeds: [embed], card };
 }
 
 /**
@@ -136,12 +174,18 @@ async function buildAllTimeBoard(interaction, track) {
 
     const tags = await fetchTags(interaction.client, rows.map(r => r.userId));
     let description = 'Top 10 all-time by level\n\n';
+    const entries = [];
     for (let i = 0; i < rows.length; i++) {
         const data = rows[i].data ?? {};
         const name = tags[i]?.tag ?? `<@${rows[i].userId}>`;
         const prestige = (data.prestige ?? 0) > 0 ? ` ✨P${data.prestige}` : '';
         const earned = (data.totalEarned ?? 0).toLocaleString();
         description += `${medal(i)} ${name} — Level ${data.level ?? 0}${prestige} (${earned} coins earned)\n`;
+        entries.push(cardEntry(interaction, i + 1, rows[i].userId, tags[i], null, {
+            value: `Level ${data.level ?? 0}${(data.prestige ?? 0) > 0 ? ` · P${data.prestige}` : ''}`,
+            detail: `${(data.totalEarned ?? 0).toLocaleString('en-US')} coins earned`,
+            score: data.level ?? 0,
+        }));
     }
 
     // Caller's rank by the same two-key order the board sorts on, so "#12" agrees
@@ -151,6 +195,7 @@ async function buildAllTimeBoard(interaction, track) {
         .maxTimeMS(QUERY_TIMEOUT_MS)
         .lean();
     let callerLine = '';
+    let you = null;
     if (callerProfile) {
         const cLevel = callerProfile.data?.level ?? 0;
         const cEarned = callerProfile.data?.totalEarned ?? 0;
@@ -162,6 +207,9 @@ async function buildAllTimeBoard(interaction, track) {
             ],
         }).maxTimeMS(QUERY_TIMEOUT_MS);
         callerLine = `\n${DIVIDER}\n📍 You: **#${ahead + 1}** — Level ${cLevel} (${cEarned.toLocaleString()} coins earned)`;
+        you = callerEntry(interaction, ahead + 1, {
+            value: `Level ${cLevel}`, detail: `${cEarned.toLocaleString('en-US')} coins earned`, score: cLevel,
+        });
     }
 
     const embed = new EmbedBuilder()
@@ -169,13 +217,23 @@ async function buildAllTimeBoard(interaction, track) {
         .setTitle(`${track.emoji} ${track.name} — All-Time — ${interaction.guild.name}`)
         .setDescription(description + callerLine)
         .setTimestamp();
-    return { embeds: [embed] };
+    const card = {
+        theme: track.category,
+        kicker: interaction.guild.name,
+        title: `${track.name} — All-Time`,
+        subtitle: 'Top 10 all-time by level, then coins earned',
+        entries,
+        you,
+    };
+    return { embeds: [embed], card };
 }
 
 /**
  * A grind-track board. `period` is 'week' (the live race) or 'all-time' (level
  * then lifetime coins). Returns a reply payload; the command owns the single
- * reply and its error handling.
+ * reply and its error handling. A board with rows also carries `card`, the
+ * picture card's options (utils/leaderboardCard), which the command draws
+ * above the text — it is not a reply field, so it is taken off before sending.
  */
 async function buildGrindBoard(interaction, type, period) {
     const track = GRIND_TRACKS[type];
@@ -236,7 +294,37 @@ async function buildChampionsHall(interaction) {
         .setDescription(sections.join('\n\n'))
         .setFooter({ text: 'Past weekly champions. New winners crowned every Monday.' })
         .setTimestamp();
-    return { embeds: [embed] };
+
+    // The picture card: a wall of plaques, a row per week. Each champion is
+    // drawn with their avatar; one who has since left keeps their stored name.
+    const ids = [...new Set(winners.map(w => w.userId))];
+    const users = new Map((await fetchTags(interaction.client, ids)).map((u, i) => [ids[i], u]));
+    const weeks = [...byWeek].map(([week, rows]) => ({
+        week,
+        champions: Object.fromEntries(rows
+            .filter(w => WEEKLY_CATEGORY_LABELS[w.category])
+            .map(w => {
+                const meta = WEEKLY_CATEGORY_LABELS[w.category];
+                const user = users.get(w.userId);
+                return [w.category, {
+                    role: championsHallCard.roleOf(meta.title, w.category),
+                    name: displayNameOf(user) ?? w.username ?? 'Unknown',
+                    avatarUrl: avatarUrlOf(user),
+                    total: w.total ?? 0,
+                    unit: meta.unit,
+                    runs: w.runs ?? 0,
+                }];
+            })),
+    }));
+    const card = {
+        draw: championsHallCard.createChampionsHallCard,
+        describe: championsHallCard.altText,
+        fileName: championsHallCard.CARD_FILE,
+        kicker: interaction.guild.name,
+        weeks,
+        footer: 'New champions are crowned every Monday.',
+    };
+    return { embeds: [embed], card };
 }
 
 module.exports = {

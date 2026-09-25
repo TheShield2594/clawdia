@@ -4,6 +4,8 @@ const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const { netWorthOf, topByNetWorth, netWorthRank } = require('../../utils/netWorth');
 const COLORS = require('../../utils/embedColors');
 const { GRIND_TRACKS, buildGrindBoard, buildChampionsHall } = require('../../utils/grindLeaderboard');
+const { sendBoard, replyBoard, avatarUrlOf, displayNameOf } = require('../../utils/leaderboardCard');
+const { sendEphemeralResponse } = require('../../utils/interactionAck');
 
 // A leaderboard page prints ten names and one number each. Hydrating whole user
 // documents to do it dragged the pet, inventory, achievement and quest arrays
@@ -21,6 +23,18 @@ const ROW_FIELDS = {
 // caller's row is read once with the union of what those branches read. `_id`
 // comes back regardless and is what netWorthRank ties-breaks on.
 const CALLER_FIELDS = 'userId level xp balance bank duelWins duelLosses achievementsCount';
+
+// The picture card's palette and heading for each of this command's own boards.
+const CARD = {
+    levels:          { theme: 'board',        title: 'Level Leaderboard' },
+    economy:         { theme: 'board',        title: 'Richest Members' },
+    streaks:         { theme: 'streak',       title: 'Daily Streaks' },
+    streaks_longest: { theme: 'streak',       title: 'All-Time Streak Records' },
+    duels:           { theme: 'duel',         title: 'Duel Leaderboard' },
+    achievements:    { theme: 'achievements', title: 'Achievements' },
+};
+
+const plural = (n, word) => `${n.toLocaleString('en-US')} ${word}${n !== 1 ? 's' : ''}`;
 
 module.exports = {
     cooldown: 10,
@@ -62,10 +76,10 @@ module.exports = {
             // a reply payload; the single reply and the catch below are shared.
             if (GRIND_TRACKS[type]) {
                 const period = interaction.options.getString('period') === 'week' ? 'week' : 'all-time';
-                return interaction.reply(await buildGrindBoard(interaction, type, period));
+                return replyBoard(interaction, await buildGrindBoard(interaction, type, period));
             }
             if (type === 'champions') {
-                return interaction.reply(await buildChampionsHall(interaction));
+                return replyBoard(interaction, await buildChampionsHall(interaction));
             }
 
             let users;
@@ -135,6 +149,11 @@ module.exports = {
                 .setTitle(`${title} — ${interaction.guild.name}`)
                 .setTimestamp();
 
+            // The picture card's rows, and the caller's own row, built alongside
+            // the text from the same numbers.
+            const cardEntries = [];
+            let callerCard = null;
+
             // Find caller's rank for streak leaderboards
             let callerRankLine = '';
             if (type === 'streaks' || type === 'streaks_longest') {
@@ -161,6 +180,7 @@ module.exports = {
                     } else if (callerRank <= 10) {
                         callerRankLine = `\n${div}\n📍 You: **#${callerRank}** — 🔥 ${callerVal} day${callerVal !== 1 ? 's' : ''}`;
                     }
+                    if (callerRankLine) callerCard = { rank: callerRank, value: plural(callerVal, 'day'), score: callerVal };
                 }
             }
 
@@ -181,11 +201,20 @@ module.exports = {
                 if (!discordUser) continue;
 
                 const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `**${i + 1}.**`;
+                const card = {
+                    rank: i + 1,
+                    name: displayNameOf(discordUser) ?? discordUser.tag,
+                    avatarUrl: avatarUrlOf(discordUser),
+                    you: discordUser.id === interaction.user.id,
+                };
+                cardEntries.push(card);
 
                 if (type === 'levels') {
                     description += `${medal} ${discordUser.tag} — Level ${user.level} (${user.xp} XP)\n`;
+                    Object.assign(card, { value: `Level ${user.level}`, detail: `${(user.xp ?? 0).toLocaleString('en-US')} XP`, score: user.level });
                 } else if (type === 'economy') {
                     description += `${medal} ${discordUser.tag} — ${user.netWorth.toLocaleString()} coins\n`;
+                    Object.assign(card, { value: `${user.netWorth.toLocaleString('en-US')} coins`, score: user.netWorth });
                 } else if (type === 'streaks') {
                     const days    = user.streak?.current ?? 0;
                     const freezes = user.streak?.freezes ?? 0;
@@ -197,16 +226,25 @@ module.exports = {
                         (user.streak?.revivalToken) ? '💫 Revival Token' : null,
                     ].filter(Boolean).join('  ');
                     description += `${medal} ${discordUser.tag} — 🔥 ${days} day${days !== 1 ? 's' : ''}${badges ? `  ${badges}` : ''}\n`;
+                    const cardDetail = [
+                        topMilestone ? `${topMilestone}-day milestone` : null,
+                        freezes > 0 ? plural(freezes, 'freeze') + ' banked' : null,
+                        user.streak?.revivalToken ? 'Revival Token' : null,
+                    ].filter(Boolean).join(' · ');
+                    Object.assign(card, { value: plural(days, 'day'), detail: cardDetail || null, score: days });
                 } else if (type === 'streaks_longest') {
                     const days = user.streak?.longest ?? 0;
                     description += `${medal} ${discordUser.tag} — 🔥 ${days} day${days !== 1 ? 's' : ''}\n`;
+                    Object.assign(card, { value: plural(days, 'day'), score: days });
                 } else if (type === 'achievements') {
                     const count = user.achievementsCount ?? 0;
                     description += `${medal} ${discordUser.tag} — 🏅 ${count} achievement${count !== 1 ? 's' : ''}\n`;
+                    Object.assign(card, { value: plural(count, 'achievement'), score: count });
                 } else {
                     const wins   = user.duelWins   ?? 0;
                     const losses = user.duelLosses ?? 0;
                     description += `${medal} ${discordUser.tag} — ⚔️ ${wins}W / ${losses}L\n`;
+                    Object.assign(card, { value: `${wins}W / ${losses}L`, score: wins });
                 }
             }
 
@@ -228,10 +266,12 @@ module.exports = {
                             ],
                         }) + 1;
                         callerDisplay = `Lv${callerUser.level} (${callerUser.xp} XP)`;
+                        callerCard = { value: `Level ${callerUser.level}`, detail: `${(callerUser.xp ?? 0).toLocaleString('en-US')} XP`, score: callerUser.level };
                     } else if (type === 'economy') {
                         const callerTotal = netWorthOf(callerUser);
                         callerRank = await netWorthRank(User, interaction.guild.id, callerTotal, callerUser._id);
                         callerDisplay = `${callerTotal.toLocaleString()} coins`;
+                        callerCard = { value: `${callerTotal.toLocaleString('en-US')} coins`, score: callerTotal };
                     } else if (type === 'duels') {
                         const callerWins = callerUser.duelWins ?? 0;
                         callerRank = await User.countDocuments({
@@ -239,6 +279,7 @@ module.exports = {
                             duelWins: { $gt: callerWins },
                         }) + 1;
                         callerDisplay = `${callerWins}W / ${callerUser.duelLosses ?? 0}L`;
+                        callerCard = { value: callerDisplay, score: callerWins };
                     } else if (type === 'achievements') {
                         const callerAch = callerUser.achievementsCount ?? 0;
                         callerRank = await User.countDocuments({
@@ -246,19 +287,37 @@ module.exports = {
                             achievementsCount: { $gt: callerAch },
                         }) + 1;
                         callerDisplay = `${callerAch} achievement${callerAch !== 1 ? 's' : ''}`;
+                        callerCard = { value: plural(callerAch, 'achievement'), score: callerAch };
                     }
 
                     if (callerRank !== undefined) {
                         callerRankLine = `\n${div}\n📍 You: **#${callerRank}** — ${callerDisplay}`;
+                        if (callerCard) callerCard.rank = callerRank;
                     }
                 }
             }
 
             embed.setDescription(description + callerRankLine);
-            await interaction.reply({ embeds: [embed] });
+
+            // The card leads, the text beneath it stays the record.
+            const you = callerCard && !cardEntries.some(e => e.you)
+                ? {
+                    ...callerCard,
+                    name: interaction.member?.displayName ?? displayNameOf(interaction.user),
+                    avatarUrl: avatarUrlOf(interaction.user),
+                }
+                : null;
+            await sendBoard(interaction, embed, {
+                theme: CARD[type].theme,
+                kicker: interaction.guild.name,
+                title: CARD[type].title,
+                subtitle: descriptionHeader,
+                entries: cardEntries,
+                you,
+            });
         } catch (error) {
             console.error('Leaderboard error:', error);
-            await interaction.reply({ content: 'Failed to fetch leaderboard.', flags: MessageFlags.Ephemeral });
+            await sendEphemeralResponse(interaction, { content: 'Failed to fetch leaderboard.' }).catch(() => {});
         }
     }
 };
