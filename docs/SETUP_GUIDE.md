@@ -434,7 +434,11 @@ malformed config disables the connector, it never stops the bot from starting.
   Anthropic, the one provider with two routes. Their connector opens the
   connections on their side and the bot never sees the calls, so approvals, the
   tool line in replies and the activity rollup do not apply on it. `auto` takes
-  the connector unless approvals are on, `connector` and `client` force either.
+  the connector unless approvals are on; `connector` does the same — an approval
+  policy (`Ask before a tool runs` other than *Never*, or any connection's
+  approval list) or an OAuth connection moves requests to Clawdia's own client,
+  because the connector would otherwise skip the approvals silently. `client`
+  always uses Clawdia's client.
   Every other provider has only ever had the client route.
 - `/ai mcp` gives the same answers in Discord, for admins with Manage Server:
   `servers`, `tools <server>`, `test <server>` and `activity`. All of them
@@ -952,7 +956,11 @@ That matters more than it usually would, because of what these migrations do:
 **Both stack files set `MIGRATION_BACKUP=require` for you.** Immediately before
 any irreversible migration the runner takes a `mongodump` into
 `MIGRATION_BACKUP_DIR` (default `./backups`, which both stack files mount) named
-`pre-migration-<timestamp>.gz`. Under `require` a backup that fails or cannot be
+`pre-migration-<timestamp>.gz`, readable only by its owner (mode 0600). With
+`BACKUP_ENCRYPTION_PASSPHRASE` set the dump is staged outside that directory and
+sealed the same way the nightly archives are, landing as
+`pre-migration-<timestamp>.gz.enc` — so `./backups` holds no plaintext copy of
+the database. Under `require` a backup that fails or cannot be
 taken aborts the startup, so the destructive step never runs unprotected; the
 image ships `mongodb-tools`, so `mongodump` is on `PATH` there. With
 `MIGRATION_BACKUP` unset — which is what a bare checkout gets — a missing or
@@ -1372,7 +1380,8 @@ on the host to bind-mount:
 
 The bot mounts the same location at `/app/backups`, which is where
 `src/migrations/runner.js` puts its pre-migration dump. Those archives are named
-`pre-migration-*.gz` and are pruned on the same schedule.
+`pre-migration-*.gz` (`.gz.enc` when `BACKUP_ENCRYPTION_PASSPHRASE` is set) and
+are pruned on the same schedule.
 
 To copy an archive out of the Portainer volume:
 
@@ -1535,10 +1544,11 @@ Two deliberate choices in it:
 - **It does not upload unencrypted archives.** Sending a readable copy of the
   database to a third party is a wider exposure than the one off-site
   replication closes, not a narrower one. Plaintext archives are skipped with a
-  line saying how many — the bot's own `pre-migration-*.gz` dump has no
-  passphrase to seal it with, so one turns up after every irreversible migration
-  and stays for the retention window, and refusing the whole run over it would
-  take the off-site copy away for a month. A run that would send *nothing* is
+  line saying how many — a bot that was not handed
+  `BACKUP_ENCRYPTION_PASSPHRASE` writes its `pre-migration-*.gz` dump in the
+  clear, so one can turn up after an irreversible migration and stay for the
+  retention window, and refusing the whole run over it would take the off-site
+  copy away for a month. A run that would send *nothing* is
   refused instead, which is what an install with no
   `BACKUP_ENCRYPTION_PASSPHRASE` gets. Set
   `BACKUP_REMOTE_ALLOW_PLAINTEXT=true` only when the remote encrypts for you —

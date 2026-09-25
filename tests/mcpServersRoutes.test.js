@@ -681,8 +681,15 @@ describe('the route the panel is told about', () => {
         expect((await api('GET', '/guild/g1/mcp-servers')).body.effectiveRoute).toBe('client');
     });
 
-    test('an explicit choice is reported as itself, not re-derived', async () => {
-        expect((await listWith({ mcpRoute: 'connector', mcpConfirm: 'always' })).effectiveRoute).toBe('connector');
+    test('an explicit client choice is reported as itself', async () => {
+        expect((await listWith({ mcpRoute: 'client', mcpConfirm: 'off' })).effectiveRoute).toBe('client');
+    });
+
+    // #1149: the connector cannot put up an approval prompt, so a guild that
+    // asked to be consulted must not lose that by naming the connector.
+    test('an approval policy overrides an explicit connector choice', async () => {
+        expect((await listWith({ mcpRoute: 'connector', mcpConfirm: 'always' })).effectiveRoute).toBe('client');
+        expect((await listWith({ mcpRoute: 'connector', mcpConfirm: 'off' })).effectiveRoute).toBe('connector');
     });
 });
 

@@ -180,8 +180,12 @@ function usesClientRoute({ useMcp = true, mcpRoute, mcpConfirm, mcpServers, botT
     if (usesOAuth(mcpServers)) return true;
     if (route === 'client') return true;
     // A guild that named the connector gets the connector, and its actions stay
-    // on the text protocol.
-    if (route === 'connector') return false;
+    // on the text protocol — unless its approval policy could stop a call. The
+    // connector runs calls on Anthropic's side, where no approval prompt can be
+    // put up, so taking it would switch `mcpConfirm` and every `confirmTools`
+    // list off without a word to the admin who set them (#1149). Approvals win
+    // over the route preference, the same way an OAuth connection does above.
+    if (route === 'connector') return requiresApproval(mcpConfirm, mcpServers);
 
     // `auto` below. Bot tools with nothing for the connector to carry is not a
     // choice between two routes: the connector would open no connections at all,

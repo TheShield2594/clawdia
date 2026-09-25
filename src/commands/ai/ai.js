@@ -5,7 +5,7 @@ const {
     resolveMcpServers,
     forGuild,
     getMcpServers,
-    requiresApproval,
+    effectiveMcpRoute,
     DEFAULT_CONFIRM_MODE,
     DEFAULT_MCP_ROUTE
 } = require('../../config/mcpServers');
@@ -523,9 +523,7 @@ async function handleMcp(interaction) {
                 mcpSupported: Boolean(mcpMode(provider)),
                 confirmMode,
                 route,
-                effectiveRoute: route !== 'auto'
-                    ? route
-                    : (requiresApproval(confirmMode, forGuild(interaction.guild.id, ai.mcpServers)) ? 'client' : 'connector')
+                effectiveRoute: effectiveMcpRoute(route, confirmMode, forGuild(interaction.guild.id, ai.mcpServers))
             })],
             flags: MessageFlags.Ephemeral
         });

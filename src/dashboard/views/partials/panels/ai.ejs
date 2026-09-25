@@ -344,7 +344,7 @@
                             <label class="field-label" for="mcp-route">Route</label>
                             <select id="mcp-route">
                                 <option value="auto">Automatic — Anthropic's connector unless approval is on</option>
-                                <option value="connector">Anthropic's connector</option>
+                                <option value="connector">Anthropic's connector, unless approval is on</option>
                                 <option value="client">Clawdia's own MCP client</option>
                             </select>
                             <small id="mcp-route-hint">Anthropic's connector opens the connections on their side, which is cheaper but means Clawdia never sees the calls — so approval prompts, the tool line in replies and the activity below do not apply on that route. Every other provider only has the second option.</small>
