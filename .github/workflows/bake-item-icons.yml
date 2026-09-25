@@ -28,18 +28,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.ref_name }}
+          # The write token is handed only to the final push step, so it is not
+          # sitting in .git/config while third-party install scripts run.
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
 
       - name: Install sharp
-        run: npm install --no-save sharp
+        # Pinned: sharp is not in package-lock.json, so an unpinned install would run
+        # whatever the latest release's install scripts are.
+        run: npm install --no-save sharp@0.35.4
 
       - name: Download and bake icons
         run: node assets/icons/bake-icons.mjs
 
       - name: Commit baked icons
+        env:
+          # Passed through env so the branch name is never parsed as shell.
+          REF: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "TheShield2594"
           git config user.email "82059300+TheShield2594@users.noreply.github.com"
@@ -49,4 +58,4 @@ jobs:
             exit 0
           fi
           git commit -m "Bake item icons into src/assets/item-icons (from icons.map.json)"
-          git push origin HEAD:${{ github.ref_name }}
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${REF}"
