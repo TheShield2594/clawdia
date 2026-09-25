@@ -679,6 +679,22 @@ describe('the balance', () => {
         expect(loud / standard).toBeLessThan(1.4);
     });
 
+    it('evens the loud play out at one level of heat and sinks it at two', () => {
+        const { HEAT_FINE_STEP, HEAT_LOUD_PENALTY } = crime.__test__;
+        const hot = (m, h) => ({
+            ...m,
+            fineMult: m.fineMult * (1 + h * HEAT_FINE_STEP),
+            successRate: m.successRate - (m.wantedMs > 0 ? h * HEAT_LOUD_PENALTY : 0),
+        });
+        for (const c of CRIMES) {
+            const [, standard, loud] = EXECUTION_METHODS[c.name].methods;
+            const ratio = h => expectedValue(c, hot(loud, h)) / expectedValue(c, hot(standard, h));
+            expect(ratio(1)).toBeGreaterThan(0.6);
+            expect(ratio(1)).toBeLessThan(1.1);
+            expect(ratio(2)).toBeLessThan(0.85);
+        }
+    });
+
     it('pays more on average for each step up the ladder', () => {
         const standards = CRIMES.map(c => expectedValue(c, EXECUTION_METHODS[c.name].methods[1]));
         for (let i = 1; i < standards.length; i++) expect(standards[i]).toBeGreaterThan(standards[i - 1]);
@@ -954,5 +970,68 @@ describe('the hour, on the player\'s clock', () => {
         const interaction = await run();
 
         expect(interaction.replies[0].embeds[0].data.footer.text).toContain('(UTC — /timezone set for yours)');
+    });
+});
+
+describe('standing heat', () => {
+    const HOUR = 3_600_000;
+    const heatOf = () => mockUsers.get(USER_ID).crimeHeat;
+
+    it('rises with a loud job, landed or not', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }]);
+
+        expect(heatOf().level).toBe(1);
+        expect(repliedText(interaction)).toContain('Heat 🟥⬛⬛⬛⬛ 1/5 ▲');
+    });
+
+    it('cools with a careful one, keeping the hours already waited out', async () => {
+        rolls([], 0.1);
+        const updatedAt = new Date(Date.now() - 2 * HOUR);
+        seedUser({ balance: 1000, crimeHeat: { level: 2, updatedAt } });
+        seedGuild();
+
+        await run();
+
+        expect(heatOf().level).toBe(1);
+        // Two hours into the six it takes to cool a level on its own: still two.
+        const since = Date.now() - heatOf().updatedAt.getTime();
+        expect(since).toBeGreaterThanOrEqual(2 * HOUR - 1000);
+        expect(since).toBeLessThan(2 * HOUR + 60_000);
+    });
+
+    it('leaves it alone on the standard play', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: 'exec_quick_snatch' }]);
+
+        expect(heatOf()?.level ?? 0).toBe(0);
+    });
+
+    it('cools a level every six hours on its own', () => {
+        const { heatNow } = crime.__test__;
+        const now = Date.now();
+        expect(heatNow({ level: 3, updatedAt: new Date(now - 5 * HOUR) }, now)).toBe(3);
+        expect(heatNow({ level: 3, updatedAt: new Date(now - 13 * HOUR) }, now)).toBe(1);
+        expect(heatNow({ level: 3, updatedAt: new Date(now - 30 * HOUR) }, now)).toBe(0);
+    });
+
+    it('puts 10% a level on the fine, and says so up front', async () => {
+        // 84 × 0.75 is 63 cold; at 5 heat it is 63 × 1.5, rounded: 95.
+        rolls([], 0.99);
+        seedUser({ balance: 10_000, crimeHeat: { level: 5, updatedAt: new Date() } });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(mockUsers.get(USER_ID).balance).toBe(10_000 - 95);
+        expect(interaction.replies[0].embeds[0].data.description).toContain('fines +50%, loud jobs −15%');
+        // Bold grab's 50% at five heat.
+        expect(interaction.replies[1].embeds[0].data.description).toContain('35% success');
     });
 });

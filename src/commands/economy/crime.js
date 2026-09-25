@@ -41,6 +41,18 @@ const CRIT_CAP_FINES = 2;
 // of it, scaled onto this, is added to the lockout. Without it an empty
 // wallet made every failure free and the loudest approach always correct.
 const HOLDING_MAX_MS = 1.5 * 3_600_000;
+// Standing heat. Every loud job — landed or not — draws attention (+1), every
+// careful one lets it settle (−1), and it cools a level every six hours on its
+// own. Each level puts 10% on every fine and takes 3% off the loud approach's
+// odds. The loud slot is tuned ~25% ahead of standard per attempt at no heat;
+// one level about evens it and two put it well behind, so going loud twice in
+// a row is a choice with a price and the careful play has a job beyond the
+// grind. (Fines alone could not do this: they rise for every approach, and at
+// five levels loud was still ahead.)
+const HEAT_MAX          = 5;
+const HEAT_FINE_STEP    = 0.10;
+const HEAT_LOUD_PENALTY = 0.03;
+const HEAT_DECAY_MS     = 6 * 3_600_000;
 
 // Balance. Every crime is tuned so its standard approach
 // averages more per attempt than the tier below it, the safe approach about
@@ -141,6 +153,19 @@ const TIME_EDGES = {
     Dusk:    { why: 'shift change',           favours: (c, m) => m.wantedMs > 0 },
     Night:   { why: 'cover of dark',          favours: (c, m) => m.payoutMult < 1 },
 };
+
+// Heat as it stands now, from the level recorded at `updatedAt` less a level
+// per HEAT_DECAY_MS since.
+function heatNow(record, now = Date.now()) {
+    const level = record?.level ?? 0;
+    if (level <= 0 || !record?.updatedAt) return 0;
+    const cooled = Math.floor((now - new Date(record.updatedAt).getTime()) / HEAT_DECAY_MS);
+    return Math.max(0, Math.min(HEAT_MAX, level - cooled));
+}
+
+// What a job does to heat: the loud slot raises it, the careful one lowers it.
+const heatDelta = method => (method.wantedMs > 0 ? 1 : method.payoutMult < 1 ? -1 : 0);
+const heatMeter = level => `${'🟥'.repeat(level)}${'⬛'.repeat(HEAT_MAX - level)}`;
 
 const timeEdge = (band, crime, method) => (TIME_EDGES[band.label]?.favours(crime, method) ? TIME_EDGE : 0);
 
@@ -392,6 +417,13 @@ module.exports = {
             const petCrimeBonus = getTotalBonus(user.pets || [], 'crime_success') / 100;
             const oddsBonus = masteryBonus + contractBonus + luckyBonus + petCrimeBonus;
 
+            // Standing heat puts a share on every fine this job could bring.
+            const heat = heatNow(user.crimeHeat, claimNow.getTime());
+            const heatMult = 1 + heat * HEAT_FINE_STEP;
+            const heatLine = heat > 0
+                ? `\n> 🌡️ *Heat ${heatMeter(heat)} ${heat}/${HEAT_MAX} — fines +${pct(heat * HEAT_FINE_STEP)}, loud jobs −${pct(heat * HEAT_LOUD_PENALTY)}. Careful jobs cool it.*`
+                : '';
+
             const bonusParts = [
                 masteryBonus > 0 && `🏆 mastery +${pct(masteryBonus)}`,
                 contractBonus > 0 && `📜 contracts +${pct(contractBonus)}`,
@@ -434,7 +466,7 @@ module.exports = {
                 return (
                     `**${isFeatured ? '🌟 ' : ''}${c.emoji} ${c.displayName}** ${c.riskEmoji}\n` +
                     `${c.riskLabel}\n` +
-                    `🎯 ${pct(methodOdds(standardOf(c), oddsBonus + timeEdge(timeBand, c, standardOf(c))))} success · pays ${moneyRange(c.minPayout, c.maxPayout)} · fine ${moneyRange(c.minFine, c.maxFine)}` +
+                    `🎯 ${pct(methodOdds(standardOf(c), oddsBonus + timeEdge(timeBand, c, standardOf(c))))} success · pays ${moneyRange(c.minPayout, c.maxPayout)} · fine ${moneyRange(c.minFine * heatMult, c.maxFine * heatMult)}` +
                     (timeEdge(timeBand, c, standardOf(c)) ? ` · ${timeBand.emoji} +${pct(TIME_EDGE)}` : '') +
                     featuredTag
                 );
@@ -443,7 +475,7 @@ module.exports = {
             const selectionEmbed = new EmbedBuilder()
                 .setColor(COLORS.WARN)
                 .setTitle('🌆 Tonight\'s Jobs')
-                .setDescription(`Three options on the table. Pick your play — or let the clock decide.\n\n${crimeLines}${bonusLine}\n\n⏳ Decide ${pickDeadline()}`)
+                .setDescription(`Three options on the table. Pick your play — or let the clock decide.\n\n${crimeLines}${bonusLine}${heatLine}\n\n⏳ Decide ${pickDeadline()}`)
                 .setFooter({ text: `${timeBand.emoji} ${timeBand.label}${timeBand.local ? '' : ' (UTC — /timezone set for yours)'} · No pick and the clock chooses.` })
                 .setTimestamp();
 
@@ -463,7 +495,8 @@ module.exports = {
                 ? ''
                 : `⏳ *You hesitated — the crew picked **${crime.displayName}** for you.*\n\n`;
 
-            const odds = m => methodOdds(m, oddsBonus + timeEdge(timeBand, crime, m));
+            const loudPenalty = m => (m.wantedMs > 0 ? heat * HEAT_LOUD_PENALTY : 0);
+            const odds = m => methodOdds(m, oddsBonus + timeEdge(timeBand, crime, m) - loudPenalty(m));
             const edgeLine = execData.methods.some(m => timeEdge(timeBand, crime, m))
                 ? `\n> ${timeBand.emoji} *${timeBand.label} — ${TIME_EDGES[timeBand.label].why}: +${pct(TIME_EDGE)} on the marked approach*`
                 : '';
@@ -472,15 +505,17 @@ module.exports = {
                 const edgeMark = timeEdge(timeBand, crime, m) ? ` ${timeBand.emoji}` : '';
                 const rateStr = `${pct(odds(m))}${edgeMark}`;
                 const payoutStr = m.payoutRange || m.payoutMult !== 1.0 ? ` · ${payoutLabel(m)} payout` : '';
-                const fineStr = ` · fine ${moneyRange(crime.minFine * m.fineMult, crime.maxFine * m.fineMult)}`;
+                const fineStr = ` · fine ${moneyRange(crime.minFine * m.fineMult * heatMult, crime.maxFine * m.fineMult * heatMult)}`;
+                const delta = heatDelta(m);
+                const heatStr = delta > 0 ? ' · 🌡️ +1 heat' : delta < 0 && heat > 0 ? ' · ❄️ −1 heat' : '';
                 const wantedStr = m.wantedMs > 0 ? ` · 🔥 ${hours(m.wantedMs)}h heat on fail` : '';
-                return `**${m.label}** — ${m.desc}\n🎯 ${rateStr} success${payoutStr}${fineStr}${wantedStr}`;
+                return `**${m.label}** — ${m.desc}\n🎯 ${rateStr} success${payoutStr}${fineStr}${wantedStr}${heatStr}`;
             }).join('\n\n');
 
             const execEmbed = new EmbedBuilder()
                 .setColor('#e67e22')
                 .setTitle(`${crime.emoji} ${crime.displayName} — Choose Your Approach`)
-                .setDescription(`${hesitated}🎯 ${execData.situation}\n\n${execMethodLines}${bonusLine}${edgeLine}\n\n⏳ Decide ${pickDeadline()}`)
+                .setDescription(`${hesitated}🎯 ${execData.situation}\n\n${execMethodLines}${bonusLine}${edgeLine}${heatLine}\n\n⏳ Decide ${pickDeadline()}`)
                 .setFooter({ text: 'No pick and you play it safe.' })
                 .setTimestamp();
 
@@ -529,12 +564,21 @@ module.exports = {
             const attempts = (user.crimeRecord?.totalCrimes ?? 0) + 1;
             const cleanJobs = (user.crimeRecord?.successfulCrimes ?? 0) + (success ? 1 : 0);
             const MASTERY_CAP = 150;
+            // Heat after this job. Anchored so that part-way progress toward the
+            // next level of cooling is kept — a careful job should not cost the
+            // player the hours they had already waited out.
+            const newHeat = Math.max(0, Math.min(HEAT_MAX, heat + heatDelta(execMethod)));
+            const heatStatus = newHeat > 0 || heat > 0
+                ? `\n🌡️ Heat ${heatMeter(newHeat)} ${newHeat}/${HEAT_MAX}${newHeat > heat ? ' ▲' : newHeat < heat ? ' ▼' : ''}`
+                : '';
+
             const careerField = {
                 name: '📒 Record',
                 value: `${cleanJobs}–${attempts - cleanJobs} · ${pct(cleanJobs / attempts)} clean\n` +
                     (attempts >= MASTERY_CAP
                         ? '🏆 Mastery maxed · +15%'
-                        : `🏆 Mastery ${attempts}/${MASTERY_CAP} · +${pct(Math.min(0.15, attempts * 0.001))}`),
+                        : `🏆 Mastery ${attempts}/${MASTERY_CAP} · +${pct(Math.min(0.15, attempts * 0.001))}`) +
+                    heatStatus,
                 inline: true,
             };
 
@@ -654,8 +698,8 @@ module.exports = {
                 let loss;
                 if (isCriticalFailure) {
                     const lossRate = DEATH_LOSS_MIN + secureRandom() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
-                    const bustFine = Math.round((crime.minFine + secureRandom() * (crime.maxFine - crime.minFine)) * execMethod.fineMult);
-                    const critCap = Math.round(crime.maxFine * execMethod.fineMult * CRIT_CAP_FINES);
+                    const bustFine = Math.round((crime.minFine + secureRandom() * (crime.maxFine - crime.minFine)) * execMethod.fineMult * heatMult);
+                    const critCap = Math.round(crime.maxFine * execMethod.fineMult * heatMult * CRIT_CAP_FINES);
                     loss = Math.max(bustFine, Math.min(Math.floor(balanceNow * lossRate), critCap));
                 } else {
                     const rawFine = Math.floor(crime.minFine + secureRandom() * (crime.maxFine - crime.minFine));
@@ -663,7 +707,7 @@ module.exports = {
                     // the cap is a real ceiling — applied after it, a ×1.8 fine
                     // could take 36% of a wallet "capped" at 20%.
                     const cap = Math.max(crime.minFine, Math.floor(balanceNow * 0.20));
-                    loss = Math.min(Math.round(rawFine * execMethod.fineMult), cap);
+                    loss = Math.min(Math.round(rawFine * execMethod.fineMult * heatMult), cap);
                 }
                 const undergroundActive = !isCriticalFailure && isDistrictActive(guildSettings, 'underground');
                 if (undergroundActive) loss = Math.floor(loss * 0.85);
@@ -788,6 +832,17 @@ module.exports = {
                 }
             }
 
+            if (newHeat !== heat) {
+                const recorded = user.crimeHeat?.updatedAt ? new Date(user.crimeHeat.updatedAt).getTime() : null;
+                const since = heat > 0 && recorded ? (crimeTime.getTime() - recorded) % HEAT_DECAY_MS : 0;
+                // Not a coin write, and the job has already settled: a heat
+                // update that misses is logged, not allowed to fail the result.
+                await User.updateOne(
+                    userFilter,
+                    { $set: { crimeHeat: { level: newHeat, updatedAt: new Date(crimeTime.getTime() - since) } } },
+                ).catch(err => console.error('[crime] heat update failed:', err));
+            }
+
             // Season pass: the mission is "Attempt a crime", so it counts the
             // attempt — every settled outcome, caught or clean, lifesaver or
             // fine. Placed after both branches so a failure advances it too.
@@ -834,4 +889,4 @@ module.exports = {
 };
 
 // The tables the balance test holds to its targets.
-module.exports.__test__ = { CRIMES, EXECUTION_METHODS, DEATH_RATE, CRIT_CAP_FINES };
+module.exports.__test__ = { CRIMES, EXECUTION_METHODS, DEATH_RATE, CRIT_CAP_FINES, HEAT_FINE_STEP, HEAT_LOUD_PENALTY, heatNow };
