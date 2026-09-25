@@ -1,6 +1,7 @@
 // Mockup for the slots table image (see the linked issue). Run: node docs/mockups/slots-machine-table.js
 // Draws /casino slots in blackjackTable.js's visual language: the felt, the rail, the pills,
-// the chip and the banner, with a reel window where the cards go. Not wired into the game.
+// the chip and the banner, with a reel window where the cards go. The game draws the real
+// thing with src/games/casino/slotsTable.js (#1199); this sketch is kept for reference.
 const R = require('path').join(__dirname, '..', '..') + '/';
 const { createCanvas, loadImage } = require('canvas');
 const { ensureFontsRegistered } = require(R + 'src/utils/registerFonts');

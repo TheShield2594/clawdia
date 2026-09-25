@@ -2,7 +2,8 @@
 
 /**
  * The drawing primitives the casino's table renderers share: the palette, the
- * rounded rectangle, the label pill and the chip stack.
+ * rounded rectangle, the label pill, the felt's grain and rail, the result
+ * banner and the chip stack.
  *
  * They started in blackjackTable.js, and moved here when roulette grew a table
  * of its own, so the two games draw the same chip for the same stake and the
@@ -22,6 +23,7 @@ const TONES = {
     lose: { fill: '#c62839', text: '#ffffff' },
     push: { fill: '#e0a526', text: '#1b1300' },
     gold: { fill: GOLD,      text: '#2a1d00' },
+    hot:  { fill: '#ff7a1a', text: '#2a1000' },
     info: { fill: 'rgba(0,0,0,0.55)', text: '#ffffff' },
 };
 
@@ -53,6 +55,65 @@ function pill(ctx, text, cx, cy, tone = 'info', size = 18) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, cx, cy + 1);
+    ctx.restore();
+}
+
+/**
+ * Felt grain: a faint diagonal weave over whatever the felt's gradient is,
+ * deterministic so frames do not shimmer.
+ */
+function feltGrain(ctx, w, h) {
+    ctx.save();
+    ctx.globalAlpha = 0.035;
+    ctx.strokeStyle = '#ffffff';
+    for (let d = -h; d < w; d += 6) {
+        ctx.beginPath();
+        ctx.moveTo(d, 0);
+        ctx.lineTo(d + h, h);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+/** The wooden rail round the edge of a `w`×`h` table, with its lit inner lip. */
+function drawRail(ctx, w, h) {
+    ctx.save();
+    roundRect(ctx, 7, 7, w - 14, h - 14, 26);
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = '#4a2a14';
+    ctx.stroke();
+    roundRect(ctx, 14, 14, w - 28, h - 28, 20);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,214,150,0.35)';
+    ctx.stroke();
+    ctx.restore();
+}
+
+/**
+ * The glowing result banner, centred on (cx, cy): the tone's colour for the
+ * glow, the rim and the words, over a dark `backing` in the felt's own hue.
+ * Never wider than `maxW`; a longer text is squeezed to fit.
+ */
+function drawBanner(ctx, banner, cx, cy, maxW, backing = 'rgba(8,20,14,0.82)') {
+    const { fill } = TONES[banner.tone] ?? TONES.info;
+    ctx.save();
+    ctx.font = `bold 38px ${FONT}`;
+    const w = Math.min(maxW, ctx.measureText(banner.text).width + 80);
+    const h = 60;
+    ctx.shadowColor = fill;
+    ctx.shadowBlur = 28;
+    roundRect(ctx, cx - w / 2, cy - h / 2, w, h, 14);
+    ctx.fillStyle = backing;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = fill;
+    ctx.stroke();
+    // The info tone's fill is a translucent black: fine as a rim, unreadable as ink.
+    ctx.fillStyle = fill === TONES.info.fill ? '#ffffff' : fill;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(banner.text, cx, cy + 2, w - 40);
     ctx.restore();
 }
 
@@ -125,4 +186,7 @@ function drawChip(ctx, amount, cx, cy) {
     ctx.restore();
 }
 
-module.exports = { FONT, RED, BLACK, GOLD, TONES, roundRect, pill, shortAmount, drawChip };
+module.exports = {
+    FONT, RED, BLACK, GOLD, TONES,
+    roundRect, pill, feltGrain, drawRail, drawBanner, shortAmount, drawChip,
+};

@@ -37,11 +37,15 @@ jest.mock('../src/models/ActiveLock', () => require('./helpers/fakeActiveLock'))
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
-// The roulette table is drawn on node-canvas, whose encode finishes on libuv's
-// thread pool — outside the fake clock these replays run on. The image is
-// tested on its own in tests/casinoRoulette.test.js.
+// The roulette table and the slot machine are drawn on node-canvas, whose
+// encode finishes on libuv's thread pool — outside the fake clock these
+// replays run on. The images are tested on their own in
+// tests/casinoRoulette.test.js and tests/casinoSlotsTable.test.js.
 jest.mock('../src/games/casino/rouletteTable', () => ({
     renderRouletteTable: jest.fn(async () => Buffer.from('jpg')),
+}));
+jest.mock('../src/games/casino/slotsTable', () => ({
+    renderMachine: jest.fn(async () => Buffer.from('jpg')),
 }));
 // A replay reads the settings as they are *now*; the first hand read them off
 // its own Guild query. Mocking the cache is what lets a test change them in
@@ -235,9 +239,11 @@ describe('/casino slots — a full Heat meter is claimed, not read', () => {
         const run = slots.execute(interaction, { releaseLock: jest.fn(), onWager: jest.fn() });
         for (let i = 0; i < 40; i++) await jest.advanceTimersByTimeAsync(250);
         await run;
-        const result = interaction.replies.filter(r => r?.components?.length).at(-1).embeds[0].data;
-        const grid = result.description.split('\n');
-        return { hot: result.description.includes('Hot Spin'), payline: grid[1] };
+        const final = interaction.replies.filter(r => r?.components?.length).at(-1);
+        const result = final.embeds[0].data;
+        // The reels are in the machine image; its alt text names the payline.
+        const payline = final.files[0].description.match(/Payline: ([^.]+)\./)[1].split(', ');
+        return { hot: result.description.includes('Hot Spin'), payline };
     }
 
     const heatWrites = () => User.updateOne.mock.calls
@@ -249,9 +255,7 @@ describe('/casino slots — a full Heat meter is claimed, not read', () => {
 
         expect(hot).toBe(true);
         // Reel 1 of a Hot Spin lands a high-value symbol on the payline.
-        const { SYMBOLS } = jest.requireActual('../src/games/casino/slotsReels');
-        const highValue = SYMBOLS.filter(s => HIGH_VALUE_SYMBOLS.includes(s.name)).map(s => s.emoji);
-        expect(highValue.some(emoji => payline.startsWith(`▶️ ${emoji}`))).toBe(true);
+        expect(HIGH_VALUE_SYMBOLS).toContain(payline[0]);
 
         const [[filter, update]] = User.findOneAndUpdate.mock.calls.filter(([f]) => isClaim(f));
         expect(filter).toMatchObject({ userId: USER_ID, guildId: GUILD_ID, 'casinoStats.slotsHeat': { $gte: HEAT_MAX } });

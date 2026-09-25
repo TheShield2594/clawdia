@@ -23,6 +23,7 @@ const { ownedBy } = require('../../utils/collectorOwner');
 const { delay } = require('../../utils/delay');
 const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
 const { paytableImage, paytableAltText } = require('./slotsPaytableCard');
+const { renderMachine } = require('./slotsTable');
 const {
     SYMBOLS,
     HEAT_MAX,
@@ -41,6 +42,7 @@ const {
 } = require('./slotsReels');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b0.png';
+const IMAGE_NAME = 'slots.jpg';
 
 const MIN_BET = 10;
 const MAX_BET = 1_000_000_000;
@@ -51,7 +53,12 @@ const FRAME_MS      = 700;
 const TEASE_MS      = 1_500;
 const CHARM_MS      = 1_200;
 const FREE_INTRO_MS = 1_500;
-const FREE_SPIN_MS  = 700;
+const FREE_BATCH_MS = 1_200;
+
+// Free spins play out on one image, a tile per spin, filled in this many
+// edits whatever the count: fifteen spins at an edit each ran into Discord's
+// edit rate limit, and uploaded fifteen images to say one thing.
+const FREE_BATCHES = 3;
 
 // A win this many times the stake or more is announced in the guild's
 // announcement channel, when it has one.
@@ -127,12 +134,21 @@ function sessionText(session) {
 function teaseFor(window) {
     const [a, b] = window[1];
     const wild = s => s.type === 'wild';
-    if (wild(a) && wild(b)) return '🃏🃏 **One more Wild for the jackpot…**';
+    if (wild(a) && wild(b)) return { status: '🃏🃏 **One more Wild for the jackpot…**', pill: 'ONE MORE WILD FOR THE JACKPOT' };
     const scatters = window.flatMap(row => row.slice(0, 2)).filter(s => s.type === 'scatter').length;
-    if (scatters >= 2) return '🌸🌸 **Free spins locked in — one more Scatter for 15…**';
+    if (scatters >= 2) {
+        return {
+            status: `🌸🌸 **Free spins locked in — one more Scatter for ${FREE_SPINS[3].spins}…**`,
+            pill:   `ONE MORE SCATTER FOR ${FREE_SPINS[3].spins} FREE SPINS`,
+        };
+    }
     const top = s => s.name === 'Diamond' || s.name === 'Star';
     if ((top(a) || wild(a)) && (top(b) || wild(b)) && (a === b || wild(a) || wild(b))) {
-        return `${a.emoji}${b.emoji} **Last reel…**`;
+        const target = wild(a) ? b : a;
+        return {
+            status: `${a.emoji}${b.emoji} **Last reel…**`,
+            pill:   wild(target) ? 'LAST REEL…' : `ONE MORE ${target.name.toUpperCase()} FOR ${target.three}×`,
+        };
     }
     return null;
 }
@@ -145,13 +161,17 @@ function statusFields(ctx) {
     ];
 }
 
-function frameEmbed(ctx, window, { revealed, status, color = PALETTE.spin }) {
+/**
+ * A reel frame. With the machine image beside it the image shows the reels, so
+ * the text grid is only drawn when the image could not be.
+ */
+function frameEmbed(ctx, window, { revealed, status, color = PALETTE.spin, withImage = false }) {
     return new EmbedBuilder()
         .setAuthor(embedAuthor(ctx.interaction))
         .setThumbnail(THUMB)
         .setColor(color)
         .setTitle('🎰 Slots')
-        .setDescription(`${status}\n\n${gridText(window, revealed)}`)
+        .setDescription(withImage ? status : `${status}\n\n${gridText(window, revealed)}`)
         .addFields(statusFields(ctx))
         .setFooter({ text: sessionText(ctx.session) });
 }
@@ -162,14 +182,26 @@ async function reveal(surface, ctx, view) {
     const lead  = ctx.hot ? '🔥 **Hot Spin!** Reel 1 locked.' : '🎰 **Spinning…**';
     for (let revealed = first; revealed < 3; revealed++) {
         const tease = revealed === 2 ? teaseFor(view.window) : null;
-        await surface.edit({
-            embeds: [frameEmbed(ctx, view.window, {
+        const machine = {
+            ...machineBase(ctx),
+            reels:  reelsView(view.window, {
                 revealed,
-                status: tease ?? lead,
+                glow: { 0: ctx.hot ? 'hot' : undefined, 2: tease ? 'gold' : undefined },
+            }),
+            tag:    tease ? { text: tease.pill, tone: 'gold' }
+                : ctx.hot ? { text: 'HOT SPIN · REEL 1 LOCKED', tone: 'hot' } : null,
+            status: tease ? null : 'SPINNING…',
+        };
+        await surface.edit(await machinePayload(
+            machine,
+            revealAltText(ctx, view.window, revealed, machine.tag),
+            withImage => frameEmbed(ctx, view.window, {
+                revealed,
+                status: tease?.status ?? lead,
                 color: tease ? PALETTE.tease : PALETTE.spin,
-            })],
-            components: [],
-        });
+                withImage,
+            }),
+        ));
         await delay(tease ? TEASE_MS : FRAME_MS);
     }
 }
@@ -198,14 +230,14 @@ function lineHeadline(result) {
     }
 }
 
-function resultEmbed(ctx, view, spinOutcome) {
+function resultEmbed(ctx, view, spinOutcome, withImage = false) {
     const {
         result, linePay, pot, freeTotal, freeRuns, freeSpins, balance, notes, jackpotWon, charm,
     } = spinOutcome;
     const total = linePay + pot + freeTotal;
     const tier  = tierFor(total, ctx.bet, jackpotWon);
 
-    const lines = [gridText(view.window), ''];
+    const lines = withImage ? [] : [gridText(view.window), ''];
     const headline = lineHeadline(result);
     if (headline) lines.push(headline);
     if (freeSpins) {
@@ -246,16 +278,159 @@ function resultEmbed(ctx, view, spinOutcome) {
         .setTimestamp();
 }
 
-function freeSpinFrame(ctx, run, index, count, runningTotal, mult) {
-    const headline = lineHeadline(run.result);
+/**
+ * The free spins played so far, `played` of them. The image carries every
+ * spin's line; the text lists the ones that paid, and without the image, every
+ * line in a row of its own.
+ */
+function freeSpinsEmbed(ctx, runs, played, runningTotal, mult, withImage = false) {
+    const lines = runs.slice(0, played).map((run, i) => {
+        const pay = run.pay > 0 ? `${lineHeadline(run.result)} → **+${fmt(run.pay)}**` : null;
+        if (withImage) return pay && `\`${i + 1}\` ${pay}`;
+        return `\`${i + 1}\` ${run.view.line.map(s => s.emoji).join(' ')}  ${pay ?? '*no win*'}`;
+    }).filter(Boolean);
     return new EmbedBuilder()
         .setAuthor(embedAuthor(ctx.interaction))
         .setThumbnail(THUMB)
         .setColor(PALETTE.free)
-        .setTitle(`🌸 Free Spin ${index + 1} of ${count}${mult > 1 ? ` · ${mult}×` : ''}`)
-        .setDescription(`${gridText(run.view.window)}\n\n${run.pay > 0 ? `${headline} → **+${fmt(run.pay)}**` : '*No win*'}`)
+        .setTitle(`🌸 Free Spins · ${played} of ${runs.length}${mult > 1 ? ` · ${mult}×` : ''}`)
+        .setDescription(lines.length ? lines.join('\n') : '*No wins yet…*')
         .addFields({ name: '🎁 Free spin total', value: `**+${fmt(runningTotal)}**`, inline: true })
         .setFooter({ text: sessionText(ctx.session) });
+}
+
+// ─── The machine image ────────────────────────────────────────────────────────
+//
+// Every frame carries a picture of the machine (slotsTable.js) beside its
+// embed, the way blackjack carries its table. The embed keeps the numbers —
+// line, payout, balance, session — and the attachment gets alt text saying
+// what the reels show.
+
+const artName = symbol => symbol.name.toLowerCase();
+
+/** The status row every frame shares. */
+function machineBase(ctx) {
+    return { bet: ctx.bet, pot: ctx.pool, heat: ctx.heat, heatMax: HEAT_MAX, hot: ctx.hot };
+}
+
+/**
+ * The three reels of a window for the image. Reels at or past `revealed` are
+ * still spinning. `hits` are `[row, reel]` cells to outline; `glow` is by reel.
+ */
+function reelsView(window, { revealed = 3, hits = [], glow = {} } = {}) {
+    return [0, 1, 2].map(reel => ({
+        cells: reel < revealed ? window.map(row => artName(row[reel])) : null,
+        glow:  glow[reel],
+        hits:  hits.filter(([, c]) => c === reel).map(([r]) => r),
+    }));
+}
+
+/** The payline cells a line win used: every cell of a three, the pair's own and its helpers. */
+function lineCells(result, line) {
+    switch (result.outcome) {
+        case 'jackpot':
+        case 'mult3':
+        case 'three':
+            return [0, 1, 2];
+        case 'pair':
+            // The pair's own symbols, and the Wilds and Boosts that helped it.
+            return line.map((s, i) => (s === result.symbol || s.type === 'wild' || s.type === 'multiplier' ? i : -1))
+                .filter(i => i >= 0);
+        default:
+            return [];
+    }
+}
+
+/** The line win as a pill, in the image's capitals. */
+function lineTag(result, jackpotWon) {
+    const { outcome, symbol, lineMult, multFactor } = result;
+    const boosted = multFactor > 1 ? ` · BOOST ×${multFactor}` : '';
+    switch (outcome) {
+        case 'jackpot': return { text: `TRIPLE WILD · ${TRIPLE_WILD_MULT}×${jackpotWon ? ' + THE POT' : ''}`, tone: 'gold' };
+        case 'mult3':   return { text: `TRIPLE BOOST · ${TRIPLE_BOOST_MULT}×`, tone: 'win' };
+        case 'three':   return { text: `THREE ${symbol.plural.toUpperCase()} · ${lineMult}×${boosted}`, tone: 'win' };
+        case 'pair':    return { text: `PAIR OF ${symbol.plural.toUpperCase()} · ${lineMult}×${boosted}`, tone: 'win' };
+        case 'push':    return { text: 'LUCKY STREAK · BET BACK', tone: 'push' };
+        default:        return null;
+    }
+}
+
+/** The result banner by win tier, with what the spin made over its stake. */
+function tierBanner(tier, net) {
+    switch (tier.key) {
+        case 'jackpot': return { text: `JACKPOT  +${fmt(net)}`, tone: 'gold' };
+        case 'epic':    return { text: `EPIC WIN  +${fmt(net)}`, tone: 'gold' };
+        case 'mega':    return { text: `MEGA WIN  +${fmt(net)}`, tone: 'gold' };
+        case 'big':     return { text: `BIG WIN  +${fmt(net)}`, tone: 'gold' };
+        case 'win':     return { text: `WIN  +${fmt(net)}`, tone: 'win' };
+        case 'push':    return { text: 'MONEY BACK', tone: 'push' };
+        default:        return { text: 'NO WIN', tone: 'lose' };
+    }
+}
+
+const freeAward = (spins, mult) => `${spins} FREE SPINS${mult > 1 ? ` AT ${mult}×` : ''}`;
+
+/** A settled spin's window, its winning cells outlined — the Scatters too, when they paid. */
+function resultReels(view, result) {
+    const hits = lineCells(result, view.line).map(reel => [1, reel]);
+    if (result.freeSpins) {
+        view.window.forEach((row, r) => row.forEach((s, c) => { if (s.type === 'scatter') hits.push([r, c]); }));
+    }
+    const glow = result.outcome === 'jackpot' ? { 0: 'gold', 1: 'gold', 2: 'gold' } : {};
+    return reelsView(view.window, { hits, glow });
+}
+
+/** The free-spin strip: a tile for each spin played, an empty one for each to come. */
+function stripView(runs, played) {
+    return runs.map((run, i) => (i < played ? { cells: run.view.line.map(artName), pay: run.pay } : null));
+}
+
+const names = symbols => symbols.map(s => s.name).join(', ');
+
+function revealAltText(ctx, window, revealed, tag) {
+    const reels = [0, 1, 2].map(reel => (reel < revealed
+        ? `reel ${reel + 1} stopped on ${window[1][reel].name}`
+        : `reel ${reel + 1} spinning`));
+    return `Slot machine, bet ${fmt(ctx.bet)}: ${reels.join(', ')}.${tag ? ` ${tag.text}.` : ''}`;
+}
+
+function resultAltText(ctx, view, tag, banner) {
+    return `Slot machine, bet ${fmt(ctx.bet)}. Payline: ${names(view.line)}. ` +
+        `Above it: ${names(view.window[0])}. Below it: ${names(view.window[2])}.` +
+        `${tag ? ` ${tag.text}.` : ''} ${banner.text}.`;
+}
+
+function stripAltText(runs, played, tag, banner) {
+    const spins = runs.slice(0, played)
+        .map((run, i) => `${i + 1}: ${names(run.view.line)}, ${run.pay > 0 ? `+${fmt(run.pay)}` : 'no win'}`);
+    return `Free spins, ${played} of ${runs.length} played. ${spins.join('; ')}.` +
+        `${tag ? ` ${tag.text}.` : ''} ${banner.text}.`;
+}
+
+let renderFailureLogged = false;
+
+/**
+ * One frame's message: the embed, the machine image and the buttons. The image
+ * is a nicety — the embed says everything in words too — so a render failure is
+ * logged once and the spin plays on in text. `embedFor(withImage)` builds the
+ * embed, told whether the image made it, so it can draw the text grid in its
+ * place.
+ */
+async function machinePayload(view, alt, embedFor, components = []) {
+    let image = null;
+    try {
+        image = new AttachmentBuilder(await renderMachine(view), { name: IMAGE_NAME, description: alt.slice(0, 1024) });
+    } catch (err) {
+        if (!renderFailureLogged) {
+            renderFailureLogged = true;
+            console.error('[Slots] machine render failed; continuing without the image:', err);
+        }
+    }
+    const embed = embedFor(Boolean(image));
+    if (image) embed.setImage(`attachment://${IMAGE_NAME}`);
+    // `attachments: []` replaces the last frame's image rather than stacking
+    // a new one beside it.
+    return { embeds: [embed], components, files: image ? [image] : [], attachments: [] };
 }
 
 /**
@@ -643,14 +818,17 @@ async function playSlots(ctx) {
 
         if (charm) {
             await reveal(surface, frameCtx, firstView);
-            await surface.edit({
-                embeds: [frameEmbed(frameCtx, firstView.window, {
+            const tag = { text: 'LUCKY CHARM · SECOND CHANCE', tone: 'gold' };
+            await surface.edit(await machinePayload(
+                { ...machineBase(frameCtx), reels: reelsView(firstView.window), tag },
+                `Slot machine, bet ${fmt(bet)}. Payline: ${names(firstView.line)}. ${tag.text}.`,
+                withImage => frameEmbed(frameCtx, firstView.window, {
                     revealed: 3,
                     status: '🍀 **Lucky Charm!** Second chance…',
                     color: PALETTE.tease,
-                })],
-                components: [],
-            });
+                    withImage,
+                }),
+            ));
             await delay(CHARM_MS);
         }
         await reveal(surface, frameCtx, view);
@@ -668,20 +846,37 @@ async function playSlots(ctx) {
             result, linePay, pot, freeTotal, freeRuns, freeSpins, balance: balanceAfter, notes, jackpotWon, charm,
         };
 
+        const resultBase = { ...machineBase(show), heat: heatAfter, hot: false };
+        const total  = linePay + pot + freeTotal;
+        const banner = tierBanner(tierFor(total, bet, jackpotWon), total - bet);
+        const scatterTag = freeSpins && { text: `${view.scatterCount} SCATTERS · ${freeAward(freeSpins.spins, freeSpins.mult)}`, tone: 'gold' };
+        const line = lineTag(result, jackpotWon) ?? scatterTag;
+
         if (freeSpins) {
             // The spin that won them, with the scatters in view, then the spins.
-            await surface.edit({
-                embeds: [resultEmbed({ ...show, session: sessionBefore }, view, { ...outcome, freeTotal: 0, freeRuns: [], balance: lineBalance })
+            const introCtx = { ...show, session: sessionBefore };
+            const introBanner = { text: `FREE SPINS × ${freeSpins.spins}${freeSpins.mult > 1 ? ` AT ${freeSpins.mult}×` : ''}`, tone: 'gold' };
+            await surface.edit(await machinePayload(
+                { ...resultBase, reels: resultReels(view, result), tag: line, banner: introBanner },
+                resultAltText(introCtx, view, line, introBanner),
+                withImage => resultEmbed(introCtx, view, { ...outcome, freeTotal: 0, freeRuns: [], balance: lineBalance }, withImage)
                     .setColor(PALETTE.free)
-                    .setTitle(`🌸 FREE SPINS × ${freeSpins.spins}${freeSpins.mult > 1 ? ` at ${freeSpins.mult}×` : ''}`)],
-                components: [],
-            });
+                    .setTitle(`🌸 FREE SPINS × ${freeSpins.spins}${freeSpins.mult > 1 ? ` at ${freeSpins.mult}×` : ''}`),
+            ));
             await delay(FREE_INTRO_MS);
-            let running = 0;
-            for (const [index, run] of freeRuns.entries()) {
-                running += run.pay;
-                await surface.edit({ embeds: [freeSpinFrame(frameCtx, run, index, freeRuns.length, running, freeSpins.mult)], components: [] });
-                await delay(FREE_SPIN_MS);
+            // A few tiles at a time, not an edit per spin.
+            const step = Math.ceil(freeRuns.length / FREE_BATCHES);
+            for (let shown = 0; shown < freeRuns.length; shown += step) {
+                const upto = Math.min(shown + step, freeRuns.length);
+                const running = freeRuns.slice(0, upto).reduce((sum, run) => sum + run.pay, 0);
+                const tag = { text: `FREE SPIN ${upto} OF ${freeRuns.length}${freeSpins.mult > 1 ? ` · ${freeSpins.mult}×` : ''}`, tone: 'info' };
+                const runningBanner = { text: `FREE SPINS  +${fmt(running)}`, tone: running > 0 ? 'gold' : 'info' };
+                await surface.edit(await machinePayload(
+                    { ...resultBase, free: stripView(freeRuns, upto), tag, banner: runningBanner },
+                    stripAltText(freeRuns, upto, tag, runningBanner),
+                    withImage => freeSpinsEmbed(frameCtx, freeRuns, upto, running, freeSpins.mult, withImage),
+                ));
+                await delay(FREE_BATCH_MS);
             }
         }
 
@@ -694,10 +889,26 @@ async function playSlots(ctx) {
             paytable: `slots_pay_${interaction.id}_${stamp}`,
         };
         const stakes = stakeOptions(bet, balanceAfter, guildSettings);
-        await surface.edit({
-            embeds: [resultEmbed(show, view, outcome)],
-            components: [controls(ids, bet, balanceAfter, stakes)],
-        });
+        // After free spins the last picture is the finished strip, under the
+        // whole spin's banner; the line that won them was shown on the intro.
+        const hitCount = freeRuns.filter(run => run.pay > 0).length;
+        const finalView = freeSpins
+            ? {
+                ...resultBase,
+                free:   stripView(freeRuns, freeRuns.length),
+                tag:    { text: `${hitCount} OF ${freeRuns.length} FREE SPINS HIT · +${fmt(freeTotal)}`, tone: freeTotal > 0 ? 'win' : 'info' },
+                banner,
+            }
+            : { ...resultBase, reels: resultReels(view, result), tag: line, banner };
+        const finalAlt = freeSpins
+            ? `Payline: ${names(view.line)}.${line ? ` ${line.text}.` : ''} ${stripAltText(freeRuns, freeRuns.length, finalView.tag, banner)}`
+            : resultAltText(show, view, line, banner);
+        await surface.edit(await machinePayload(
+            finalView,
+            finalAlt,
+            withImage => resultEmbed(show, view, outcome, withImage),
+            [controls(ids, bet, balanceAfter, stakes)],
+        ));
 
         // The channel hears about a Triple Wild after the winner has seen it land.
         if (jackpotWon && (guildSettings?.slots?.announceJackpot ?? true)) {
@@ -716,13 +927,13 @@ async function playSlots(ctx) {
 
         // ── Big win announcement ────────────────────────────────────────────
         // The whole spin counts — a free-spin run is as much a win as a line.
-        const total = linePay + freeTotal;
+        const won = linePay + freeTotal;
         const announceChannelId = guildSettings?.economy?.announcementChannelId ?? null;
-        if (!jackpotWon && total >= WIN_ANNOUNCE_MULT * bet && announceChannelId && announceChannelId !== interaction.channelId) {
+        if (!jackpotWon && won >= WIN_ANNOUNCE_MULT * bet && announceChannelId && announceChannelId !== interaction.channelId) {
             const what = result.symbol ? `Three ${result.symbol.plural}` : freeSpins ? 'free-spin run' : 'win';
             const bigWinEmbed = new EmbedBuilder()
                 .setColor(PALETTE.epic)
-                .setDescription(`🎰 ${interaction.user} just hit a **${Math.floor(total / bet)}× ${what}** on slots for **${fmt(total)} coins**!`)
+                .setDescription(`🎰 ${interaction.user} just hit a **${Math.floor(won / bet)}× ${what}** on slots for **${fmt(won)} coins**!`)
                 .setTimestamp();
             const ch = interaction.guild?.channels?.cache?.get(announceChannelId);
             if (ch?.isTextBased?.()) ch.send({ embeds: [bigWinEmbed] }).catch(() => {});
@@ -775,6 +986,7 @@ async function playSlots(ctx) {
             : rolled.credited ? 'Your wager was refunded — please try again.' : 'Your wager could not be refunded.';
         await surface.edit({
             content: '',
+            attachments: [],
             embeds: [new EmbedBuilder()
                 .setColor(PALETTE.error)
                 .setTitle('🎰 Slots hit a snag')

@@ -19,7 +19,9 @@
 const { createCanvas } = require('canvas');
 const { ensureFontsRegistered } = require('../../utils/registerFonts');
 const { encodeCanvas } = require('../../utils/canvasEncode');
-const { FONT, RED, BLACK, GOLD, TONES, roundRect, pill, shortAmount, drawChip } = require('./tableArt');
+const {
+    FONT, RED, BLACK, GOLD, roundRect, pill, feltGrain, drawRail, drawBanner, shortAmount, drawChip,
+} = require('./tableArt');
 
 ensureFontsRegistered();
 
@@ -30,7 +32,7 @@ const CARD_H = 128;
 
 /**
  * @typedef {{ value: string, suit: string }} Card
- * @typedef {{ text: string, tone: keyof TONES }} Tag
+ * @typedef {{ text: string, tone: keyof import('./tableArt').TONES }} Tag
  * @typedef {object} TableView
  * @property {{ cards: Card[], holeHidden: boolean, label: string, tone?: string }} dealer
  * @property {{ cards: Card[], label: string, bet: number, active?: boolean, tag?: ?Tag }[]} hands
@@ -216,17 +218,7 @@ function drawFelt(ctx) {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
 
-    // Felt grain: a faint diagonal weave, deterministic so frames do not shimmer.
-    ctx.save();
-    ctx.globalAlpha = 0.035;
-    ctx.strokeStyle = '#ffffff';
-    for (let d = -H; d < W; d += 6) {
-        ctx.beginPath();
-        ctx.moveTo(d, 0);
-        ctx.lineTo(d + H, H);
-        ctx.stroke();
-    }
-    ctx.restore();
+    feltGrain(ctx, W, H);
 
     // The printed arc and the table's rules, the way a real layout carries them.
     ctx.save();
@@ -237,17 +229,7 @@ function drawFelt(ctx) {
     ctx.stroke();
     ctx.restore();
 
-    // The rail.
-    ctx.save();
-    roundRect(ctx, 7, 7, W - 14, H - 14, 26);
-    ctx.lineWidth = 14;
-    ctx.strokeStyle = '#4a2a14';
-    ctx.stroke();
-    roundRect(ctx, 14, 14, W - 28, H - 28, 20);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255,214,150,0.35)';
-    ctx.stroke();
-    ctx.restore();
+    drawRail(ctx, W, H);
 }
 
 /** The payout rules printed on the felt, shown while no result banner covers them. */
@@ -261,31 +243,6 @@ function drawRulesPrint(ctx) {
     ctx.fillStyle = 'rgba(244,197,66,0.42)';
     ctx.font = `bold 13px ${FONT}`;
     ctx.fillText('DEALER STANDS ON SOFT 17  ·  INSURANCE PAYS 2 TO 1', W / 2, 264);
-    ctx.restore();
-}
-
-/** The round's result, across the middle of the table. */
-function drawBanner(ctx, banner) {
-    const { fill } = TONES[banner.tone] ?? TONES.info;
-    ctx.save();
-    ctx.font = `bold 38px ${FONT}`;
-    const w = Math.min(W - 120, ctx.measureText(banner.text).width + 80);
-    const h = 60;
-    const x = W / 2 - w / 2;
-    const y = 250 - h / 2;
-    ctx.shadowColor = fill;
-    ctx.shadowBlur = 28;
-    roundRect(ctx, x, y, w, h, 14);
-    ctx.fillStyle = 'rgba(8,20,14,0.82)';
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = fill;
-    ctx.stroke();
-    ctx.fillStyle = fill;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(banner.text, W / 2, 252, w - 40);
     ctx.restore();
 }
 
@@ -310,7 +267,7 @@ async function renderTable(view) {
     const ctx = canvas.getContext('2d');
 
     drawFelt(ctx);
-    if (view.banner) drawBanner(ctx, view.banner);
+    if (view.banner) drawBanner(ctx, view.banner, W / 2, 250, W - 120);
     else drawRulesPrint(ctx);
 
     // Dealer.
