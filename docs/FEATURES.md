@@ -655,7 +655,7 @@ evolution track.
 /pet release <slot>       - Release a pet permanently
 ```
 
-- **Six purchasable pets** — Dog and Cat (2,000), Bird and Fish (3,000), Fox (5,000), Wolf (8,000) — each granting a different passive: work earnings, crime success, XP gain, fish yield, rob success, or hunt yield.
+- **Six purchasable pets** — Dog and Cat (2,000), Bird and Fish (3,000), Fox (5,000), Wolf (8,000) — each granting a different passive: work earnings, crime success, XP gain, fish yield, rob success, or hunt yield. Rob and crime passives add percentage points to the success chance and are shown as "pts"; the others multiply a payout and are shown as "%".
 - **Four rare pets** — Eagle, Shark, Crystal Fox, and Lantern Owl — are not sold anywhere. Each is tied to one grind track and drops at a 4% chance alongside a legendary-tier result there. Rare pets are exempt from the slot limit, so a full roster can never lock one out.
 - **Progression:** pets level to 30 across three evolution stages (1–9, 10–19, 20+), with stage multipliers of 1.0×/1.5×/2.0× on the passive plus per-level growth. Stacked bonuses of the same type cap at **40%**.
 - **Upkeep:** hunger decays 10/day (5/day while resting). Below 30 a pet's passive switches off, and a pet left at zero hunger for 3 days runs away; a Revive Scroll calls it home with its level, bond and record intact. Base capacity is 3 slots, expandable 3 times.

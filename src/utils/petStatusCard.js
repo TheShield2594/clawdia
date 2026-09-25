@@ -363,9 +363,12 @@ function drawBondBar(ctx, o, y) {
 function drawPassive(ctx, o, y) {
     const b = o.bonus;
     if (!b) return;
+    // `unit` is ' pts' for the success-chance passives, which add points
+    // rather than multiply (#1190).
+    const amount = `+${b.pct}${(b.unit ?? '%').toUpperCase()} ${plain(b.label).toUpperCase()}`;
     const label = b.active
-        ? `PASSIVE  +${b.pct}% ${plain(b.label).toUpperCase()}`
-        : `PASSIVE OFF  +${b.pct}% ${plain(b.label).toUpperCase()}  -  FEED ABOVE ${o.threshold}%`;
+        ? `PASSIVE  ${amount}`
+        : `PASSIVE OFF  ${amount}  -  FEED ABOVE ${o.threshold}%`;
     const color = b.active ? '#4cc27a' : '#8a8a8a';
     ctx.save();
     ctx.font = `bold 16px ${FONT}`;
@@ -473,7 +476,7 @@ function drawFooter(ctx, o) {
  * @param {number}  o.threshold     where the passive switches off
  * @param {string}  o.moodColor
  * @param {number}  o.bondDays
- * @param {?{pct: number, label: string, active: boolean}} o.bonus
+ * @param {?{pct: number, unit?: string, label: string, active: boolean}} o.bonus
  * @param {{hp: number, atk: number, def: number, spd: number, crit: number}} o.stats
  * @param {string[]} [o.boosted]    stat keys the personality raises
  * @param {{wins: number, losses: number, pvpWins: number, pvpLosses: number}} o.record

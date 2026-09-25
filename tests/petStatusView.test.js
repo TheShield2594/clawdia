@@ -208,7 +208,7 @@ describe('petCardOptions', () => {
         }));
         expect(o.boosted.sort()).toEqual(['atk', 'crit']);
         expect(o.stats.crit).toBeCloseTo(0.2);
-        expect(o.bonus).toEqual({ pct: expect.any(Number), label: 'work earnings', active: true });
+        expect(o.bonus).toEqual({ pct: expect.any(Number), unit: '%', label: 'work earnings', active: true });
     });
 
     test('XP past the level is clamped, never printed as more than the level needs', () => {

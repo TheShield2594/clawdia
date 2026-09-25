@@ -14,6 +14,7 @@ const {
     heartBar,
     getPetDisplay,
     getEffectiveBonusPct,
+    formatPetBonus,
     applyPetXp,
     applyHungerDecay,
     recordPetInteraction,
@@ -262,7 +263,7 @@ async function executeStatus(interaction) {
                     { name: '❤️ Bond',    value: `${heartBar(bondDays)} ${bondDays}d`,               inline: true },
                     { name: '🍖 Hunger', value: hungerBar(hunger),                                    inline: true },
                     { name: `${hunger >= STARVING_THRESHOLD ? '✅' : '❌'} Bonus`,
-                      value: `+${getEffectiveBonusPct(pet)}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}`, inline: false },
+                      value: formatPetBonus(def?.bonusType, getEffectiveBonusPct(pet)), inline: false },
                 )
                 .setFooter({ text: `${def?.name ?? pet.petId} • Use /pet status to check on yours!` })
                 .setTimestamp();

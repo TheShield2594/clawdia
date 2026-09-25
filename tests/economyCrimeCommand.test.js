@@ -35,7 +35,7 @@ jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
 jest.mock('../src/utils/grindProfile', () => ({ attachGrind: jest.fn(async user => user) }));
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 jest.mock('../src/utils/bigWinLogger', () => ({ logBigWin: jest.fn() }));
-jest.mock('../src/services/petService', () => ({ getTotalBonus: jest.fn(() => 0) }));
+jest.mock('../src/services/petService', () => ({ petChanceBonus: jest.fn(() => 0) }));
 jest.mock('../src/services/synergyService', () => ({ getMerchantCoinBonus: jest.fn(() => 0) }));
 jest.mock('../src/services/seasonMissionService', () => ({ advanceMissions: jest.fn(async () => {}) }));
 jest.mock('../src/services/districtService', () => ({ isDistrictActive: jest.fn(() => false) }));

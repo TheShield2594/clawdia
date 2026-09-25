@@ -568,6 +568,41 @@ function getTotalBonus(pets, bonusType, now = Date.now()) {
     return Math.min(total, MAX_STACKED_BONUS_PCT);
 }
 
+// ── Passive units ──────────────────────────────────────────────────────────────
+//
+// Passives come in two units, and they used to be labelled alike (#1190). Rob
+// and crime add *percentage points* to a success chance — a maxed Fox's +20
+// takes a 40% rob to 60% — while every other passive *multiplies* a payout, so
+// a Wolf's +25% hunt yield is ×1.25. Printing both as "+20%" made the Fox look
+// four times weaker than it is. The balance stays; the label now says which it
+// is, and petChanceBonus() is the one place the additive rule lives.
+
+const CHANCE_BONUS_TYPES = new Set(['rob_success', 'crime_success']);
+
+/** Unit and wording for a bonus type: `{ unit: '%'|' pts', label }`. */
+function petBonusParts(bonusType) {
+    const words = String(bonusType ?? '').replace(/_/g, ' ');
+    return CHANCE_BONUS_TYPES.has(bonusType)
+        ? { unit: ' pts', label: `${words} chance` }
+        : { unit: '%',    label: words };
+}
+
+/** A passive as players read it: "+25% hunt yield", "+20 pts rob success chance". */
+function formatPetBonus(bonusType, pct) {
+    const { unit, label } = petBonusParts(bonusType);
+    return `+${pct}${unit} ${label}`;
+}
+
+/**
+ * Percentage points a player's fed pets add to a success chance, as a fraction
+ * to *add* (0.2 for +20 pts). Only for the chance passives; the payout ones go
+ * through getTotalBonus as a multiplier.
+ */
+function petChanceBonus(pets, bonusType, now = Date.now()) {
+    if (!CHANCE_BONUS_TYPES.has(bonusType)) return 0;
+    return getTotalBonus(pets ?? [], bonusType, now) / 100;
+}
+
 // ── Companion lines on grind results ──────────────────────────────────────────
 //
 // The one line of pet flavour a hunt, cast, dig or expedition result carries.
@@ -1057,6 +1092,10 @@ module.exports = {
     recordPetInteraction,
     getPetBonus,
     getTotalBonus,
+    CHANCE_BONUS_TYPES,
+    petBonusParts,
+    formatPetBonus,
+    petChanceBonus,
     getMoodLine,
     getMoodBand,
     getMoodAction,

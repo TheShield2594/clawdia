@@ -11,7 +11,7 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { debitUpTo, incExpr } = require('../../utils/balanceDebit');
 const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
 const { crimePayoutKey } = require('../../utils/payoutKey');
-const { getTotalBonus } = require('../../services/petService');
+const { petChanceBonus } = require('../../services/petService');
 const { getCrimeFlavorText, getCrimeBeats } = require('../../utils/copyLines');
 const { stackBar } = require('../../utils/rewardReveal');
 const { delay } = require('../../utils/delay');
@@ -414,7 +414,9 @@ module.exports = {
             const contractBonus = (user.crimeContractStacks ?? 0) * 0.05;
             const luckyActive = hasEffect(user, 'lucky_charm');
             const luckyBonus = luckyActive ? 0.20 : 0;
-            const petCrimeBonus = getTotalBonus(user.pets || [], 'crime_success') / 100;
+            // Points added to the chance, like every bonus beside it — a maxed
+            // Cat's +12.5 takes a 50% job to 62.5% (#1190).
+            const petCrimeBonus = petChanceBonus(user.pets, 'crime_success');
             const oddsBonus = masteryBonus + contractBonus + luckyBonus + petCrimeBonus;
 
             // Standing heat puts a share on every fine this job could bring.
@@ -895,4 +897,4 @@ module.exports = {
 };
 
 // The tables the balance test holds to its targets.
-module.exports.__test__ = { CRIMES, EXECUTION_METHODS, DEATH_RATE, CRIT_CAP_FINES, HEAT_FINE_STEP, HEAT_LOUD_PENALTY, heatNow };
+module.exports.__test__ = { CRIMES, EXECUTION_METHODS, DEATH_RATE, CRIT_CAP_FINES, HEAT_FINE_STEP, HEAT_LOUD_PENALTY, heatNow, methodOdds };

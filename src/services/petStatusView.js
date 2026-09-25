@@ -22,6 +22,8 @@ const {
     xpForLevel,
     getPetDisplay,
     getEffectiveBonusPct,
+    formatPetBonus,
+    petBonusParts,
 } = require('./petService');
 const { MATERIAL_RARITY } = require('../data/materialRarity');
 const { getItemImageAttachment } = require('../utils/itemImageHelper');
@@ -70,7 +72,7 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
     const bonusActive = hunger >= STARVING_THRESHOLD;
     const bonusEmoji  = bonusActive ? '✅' : '❌';
     const effPct      = getEffectiveBonusPct(pet);
-    const bonusLabel  = `+${effPct}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}${bonusActive ? '' : ' *(inactive)*'}`;
+    const bonusLabel  = `${formatPetBonus(def?.bonusType, effPct)}${bonusActive ? '' : ' *(inactive)*'}`;
 
     const lastFedMs  = pet.lastFed ? Date.now() - new Date(pet.lastFed).getTime() : 0;
     const lastFedH   = Math.floor(lastFedMs / 3600000);
@@ -228,7 +230,7 @@ function petCardOptions(pet, { kicker, footerLeft = null, footerRight = null }, 
         bondDays:    bondDaysOf(pet, now),
         bonus:       def ? {
             pct:    getEffectiveBonusPct(pet),
-            label:  def.bonusType.replace(/_/g, ' '),
+            ...petBonusParts(def.bonusType),
             active: hunger >= STARVING_THRESHOLD,
         } : null,
         stats:       getPetStats(pet),
@@ -298,7 +300,7 @@ function buildPetCardEmbed(pet, index, total, ownerAvatarURL, cardName, now = Da
         rest ? `🛏️ Resting for ${formatMinutes(rest)} — hunger decays at half speed` : null,
         '',
         `📈 Lv **${level}** (${xpNote}) · 🍖 **${Math.round(hunger)}%** · ❤️ **${bondDaysOf(pet, now)}d** · `
-            + `${bonusOn ? '✅' : '❌'} +${getEffectiveBonusPct(pet)}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}`
+            + `${bonusOn ? '✅' : '❌'} ${formatPetBonus(def?.bonusType, getEffectiveBonusPct(pet))}`
             + `${bonusOn ? '' : ` *(feed above ${STARVING_THRESHOLD}%)*`}`,
         `⚔️ ${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L · PvP ${pet.pvpWins ?? 0}-${pet.pvpLosses ?? 0}`,
     ];

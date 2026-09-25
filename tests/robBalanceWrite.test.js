@@ -101,7 +101,7 @@ jest.mock('../src/services/achievementService', () => ({
     announceAchievements: jest.fn(),
 }));
 
-jest.mock('../src/services/petService', () => ({ getTotalBonus: jest.fn(() => 0) }));
+jest.mock('../src/services/petService', () => ({ petChanceBonus: jest.fn(() => 0) }));
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 
 // `/rob attempt` — the heist logic, folded under `/rob` by #1022 but driven

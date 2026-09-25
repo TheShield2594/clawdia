@@ -169,7 +169,7 @@ async function executeStart(interaction) {
         }
 
         // Wolf pet: +10% coin yield; Eagle pet: +15% XP (only if hunger >= 30)
-        const { getTotalBonus, petCompanionLine, tryGrantRarePet } = require('../../../services/petService');
+        const { getTotalBonus, petCompanionLine, tryGrantRarePet, formatPetBonus } = require('../../../services/petService');
         const petYieldPct = getTotalBonus(user.pets || [], 'hunt_yield');
         const petXpPct    = getTotalBonus(user.pets || [], 'hunt_xp');
 
@@ -278,7 +278,7 @@ async function executeStart(interaction) {
             embed.spliceFields(0, 0, {
                 name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
                 value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
-                     + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
+                     + `Passive: **${formatPetBonus(rarePetDrop.bonusType, rarePetDrop.bonusPct)}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
                      + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
                 inline: false,
             });

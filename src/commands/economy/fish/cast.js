@@ -141,7 +141,7 @@ async function handleCast(interaction) {
         await delay(2000 + Math.floor(Math.random() * 3001));
 
         // Fish/Shark pet: +5%/+15% yield (only if hunger >= 30)
-        const { getTotalBonus, petCompanionLine, tryGrantRarePet } = require('../../../services/petService');
+        const { getTotalBonus, petCompanionLine, tryGrantRarePet, formatPetBonus } = require('../../../services/petService');
         const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
 
         const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
@@ -426,7 +426,7 @@ async function handleCast(interaction) {
             embed.addFields({
                 name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
                 value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
-                     + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
+                     + `Passive: **${formatPetBonus(rarePetDrop.bonusType, rarePetDrop.bonusPct)}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
                      + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
                 inline: false,
             });
