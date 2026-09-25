@@ -4,11 +4,33 @@ const { EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { heartBar, getPetDisplay, effectiveBond, bondTierFor } = require('../../../services/petService');
 const COLORS = require('../../../utils/embedColors');
+const { ratingLeaderboard } = require('../../../services/petLadderService');
+
+/** The pet ladder (#1185): rated pets by rating, this season. */
+async function ratingBoard(interaction) {
+    const { seasonId, seasonEndsAt, rows } = await ratingLeaderboard(interaction.guild.id);
+    const medals = ['🥇', '🥈', '🥉'];
+    const lines = rows.map((e, i) => {
+        const { emoji, titledName } = getPetDisplay(e.pet);
+        return `${medals[i] ?? `${i + 1}.`} ${emoji} **${titledName}** — ${e.tier.icon} **${e.rating}** · ${e.wins}W / ${e.losses}L — <@${e.userId}>`;
+    });
+    const ends = seasonEndsAt ? ` · ends <t:${Math.floor(new Date(seasonEndsAt).getTime() / 1000)}:R>` : '';
+    const embed = new EmbedBuilder()
+        .setColor(COLORS.WARN)
+        .setTitle(`🐾 Pet Ladder — ${seasonId}`)
+        .setDescription(lines.length > 0
+            ? `${lines.join('\n')}\n\n*Season ${seasonId}${ends}*`
+            : '*No rated battles this season yet — `/pet battle opponent:@member rated:True` starts one.*')
+        .setFooter({ text: 'Rated battles are level-matched • top three pets earn a season title' })
+        .setTimestamp();
+    return interaction.editReply({ embeds: [embed] });
+}
 
 async function executeLeaderboard(interaction) {
     await interaction.deferReply();
 
     const sortType = interaction.options.getString('type') ?? 'bonds';
+    if (sortType === 'rating') return ratingBoard(interaction);
 
     let sortStage, addFieldsStage, titleLabel, lineBuilder;
     let rerank = rows => rows;

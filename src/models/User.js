@@ -64,6 +64,9 @@ const petFields = () => ({
     // threshold, and empty. Cleared when the pet is fed back above each.
     hungerWarnedLow:    { type: Boolean, default: false },
     hungerWarnedEmpty:  { type: Boolean, default: false },
+    // The pet ladder's season title (#1185), e.g. "S2 Ladder Champion", set
+    // on the top three pets when a season ends and shown on the companion card.
+    ladderTitle:        { type: String,  default: null },
 });
 
 const userSchema = new Schema({

@@ -107,19 +107,22 @@ module.exports = {
                         .addChoices(
                             { name: 'Bond (Most Loyal)',      value: 'bonds' },
                             { name: 'Level (Highest Level)', value: 'level' },
-                            { name: 'PvP Wins (vs members)',  value: 'wins'  }
+                            { name: 'PvP Wins (vs members)',  value: 'wins'  },
+                            { name: 'Rating (pet ladder)',    value: 'rating' }
                         )
                 )
         )
         .addSubcommand(sub =>
             sub.setName('battle')
-                .setDescription('Battle a wild pet for XP, or challenge another member (optionally for coins).')
+                .setDescription('Battle a wild pet for XP, or challenge another member (optionally for coins or rating).')
                 .addUserOption(opt =>
                     opt.setName('opponent').setDescription('Member to challenge (leave empty to fight a wild pet)').setRequired(false))
                 .addStringOption(opt =>
                     opt.setName('slot').setDescription('Which of your pets fights (defaults to your first)').setRequired(false).setAutocomplete(true))
                 .addIntegerOption(opt =>
-                    opt.setName('bet').setDescription('Coins to wager (requires an opponent)').setRequired(false).setMinValue(1))),
+                    opt.setName('bet').setDescription('Coins to wager (requires an opponent)').setRequired(false).setMinValue(1))
+                .addBooleanOption(opt =>
+                    opt.setName('rated').setDescription('A rated battle on the pet ladder (requires an opponent; level-matched)').setRequired(false))),
 
     async autocomplete(interaction) {
         return petAutocomplete(interaction);

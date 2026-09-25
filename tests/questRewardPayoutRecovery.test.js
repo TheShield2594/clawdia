@@ -187,7 +187,8 @@ describe('every quest-reward credit is keyed at its call site', () => {
     });
 
     test('pet battle keys the wild write and each PvP fighter apart', () => {
-        const src = read('commands/economy/pet/battle.js');
+        // The member battle moved to pvp.js in #1184.
+        const src = read('commands/economy/pet/battle.js') + read('commands/economy/pet/pvp.js');
         // Wild (single fighter) plus the two PvP fighters — three keyed writes.
         expect(countOf(src, `questRewardPayoutKey('pet'`)).toBe(3);
         expect(src).toContain(`questRewardPayoutKey('pet', interaction.id)`);       // wild

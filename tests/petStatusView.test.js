@@ -226,6 +226,15 @@ describe('petCardOptions', () => {
         expect(o.bonus).toEqual({ pct: expect.any(Number), unit: '%', label: 'work earnings', active: true });
     });
 
+    test('a ladder season title reaches the card, its alt text and the embed (#1185)', () => {
+        const pet = makePet({ potw: false, ladderTitle: 'S2 Ladder Champion' });
+        const o = petCardOptions(pet, { kicker: 'K' });
+        expect(o.ladderTitle).toBe('S2 Ladder Champion');
+        expect(cardAltText(o)).toContain('Dog, S2 Ladder Champion: hunger');
+        expect(buildPetCardEmbed(pet, 0, 1, null, 'card.png').toJSON().description).toContain('🏅 **S2 Ladder Champion**');
+        expect(petCardOptions(makePet(), { kicker: 'K' }).ladderTitle).toBeNull();
+    });
+
     test('XP past the level is clamped, never printed as more than the level needs', () => {
         const o = petCardOptions(makePet({ level: 17, xp: 999_999, evolutionStage: 2 }), { kicker: 'K' });
         expect(o.xpInLevel).toBe(o.xpToNext);
