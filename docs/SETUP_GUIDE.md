@@ -1024,10 +1024,18 @@ covers writing a new migration.
 
 ### Enabling MongoDB authentication
 
-Strongly recommended. MongoDB sits on an internal-only Docker network with no
+Required in production. MongoDB sits on an internal-only Docker network with no
 published ports, but without authentication that isolation is the *only*
 control: any container joined to `db-network` has full, credential-less access
-to the database.
+to the database — the bot included, so an RCE or SSRF in the bot would be read
+and write access to every server's data.
+
+Since 5.0.0 a bot started with `NODE_ENV=production` refuses to boot when
+`MONGODB_URI` carries no credentials (no `user:pass@`, and no `authMechanism=`
+such as X.509). The four variables below are the fix. If you have decided to
+run without authentication anyway — one host you control, nothing else on
+`db-network` — set `MONGODB_ALLOW_NO_AUTH=true` and the refusal becomes a
+warning on every boot.
 
 **Fresh deployment (empty `mongodb_data` volume):** set all four variables
 before the first `docker compose up` (in `.env`, or in the Portainer stack's
@@ -1078,7 +1086,8 @@ docker compose up -d --force-recreate
 
 If a password is ever lost, the recovery path is the reverse: unset the
 variables, `--force-recreate`, and mongod is back to no-auth so the users can
-be recreated. That works because auth here is driven by the environment, which
+be recreated (set `MONGODB_ALLOW_NO_AUTH=true` for that one boot if the bot
+needs to come up meanwhile). That works because auth here is driven by the environment, which
 is also why the variables must not be quietly removed once set.
 
 ### Running MongoDB as a single-node replica set

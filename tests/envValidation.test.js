@@ -30,7 +30,7 @@ function goodEnv(overrides = {}) {
         DISCORD_TOKEN: 'token',
         CLIENT_ID: '123',
         CLIENT_SECRET: 'secret',
-        // Credentialed: a production URI without credentials is a warning (#648).
+        // Credentialed: a production URI without credentials is an error (#1151).
         MONGODB_URI: 'mongodb://clawdia:pass@mongodb:27017/ultrabot?authSource=ultrabot',
         SESSION_SECRET: 'x'.repeat(SESSION_SECRET_MIN_LENGTH),
         // Set: a production deploy that stores other people's provider keys in
@@ -240,18 +240,41 @@ describe('the values that are read as numbers', () => {
     });
 
     test('mongodb+srv is accepted', () => {
-        expect(errorsFor(goodEnv({ MONGODB_URI: 'mongodb+srv://cluster/db' }))).toEqual([]);
+        expect(errorsFor(goodEnv({ MONGODB_URI: 'mongodb+srv://user:pass@cluster/db' }))).toEqual([]);
     });
 
-    // #648: auth is opt-in so existing deployments keep booting, which is why
-    // this must stay a warning — an error here takes down every deploy that
-    // has not migrated yet.
-    test('a credential-less MONGODB_URI in production is a warning, not an error', () => {
+    // #1151: #648 left this a warning so existing deployments kept booting,
+    // and a warning is easy to scroll past. Without auth, anything in any
+    // container on db-network — the bot included — has the whole database.
+    test('a credential-less MONGODB_URI in production is an error', () => {
+        const { errors } = collectEnvProblems(goodEnv({
+            MONGODB_URI: 'mongodb://mongodb:27017/ultrabot',
+        }));
+        expect(errors.join('\n')).toMatch(/no credentials/);
+        expect(errors.join('\n')).toMatch(/MONGODB_ALLOW_NO_AUTH=true/);
+    });
+
+    test('MONGODB_ALLOW_NO_AUTH=true turns it back into a warning', () => {
         const { errors, warnings } = collectEnvProblems(goodEnv({
             MONGODB_URI: 'mongodb://mongodb:27017/ultrabot',
+            MONGODB_ALLOW_NO_AUTH: 'true',
         }));
         expect(errors).toEqual([]);
         expect(warnings.join('\n')).toMatch(/no credentials/);
+    });
+
+    test.each(['false', '1', 'yes', ''])('MONGODB_ALLOW_NO_AUTH=%p does not opt out', value => {
+        expect(errorsFor(goodEnv({
+            MONGODB_URI: 'mongodb://mongodb:27017/ultrabot',
+            MONGODB_ALLOW_NO_AUTH: value,
+        })).join('\n')).toMatch(/no credentials/);
+    });
+
+    // X.509 and AWS IAM authenticate without a user-info section.
+    test('an authMechanism with no user-info counts as authenticated', () => {
+        expect(errorsFor(goodEnv({
+            MONGODB_URI: 'mongodb://mongodb:27017/ultrabot?tls=true&authMechanism=MONGODB-X509',
+        }))).toEqual([]);
     });
 
     test('a credential-less MONGODB_URI in development warns about nothing', () => {

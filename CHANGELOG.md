@@ -29,6 +29,12 @@ writes guild AI keys in a format the 4.x images cannot read: roll back with
   `enc.v1.` keys (reversible: `down` unbinds them). Decryption also pins the
   GCM tag to 16 bytes and rejects shorter ones, which Node would otherwise
   accept.
+- **Production refuses to run MongoDB without authentication (#1151).** A
+  `NODE_ENV=production` boot now fails when `MONGODB_URI` carries no
+  credentials, where it used to warn. **Action needed** on a deployment still
+  running without auth: follow "Enabling MongoDB authentication" in
+  docs/SETUP_GUIDE.md, or set `MONGODB_ALLOW_NO_AUTH=true` to keep running
+  without it (the old warning is kept).
 
 ## [4.15.0] - 2026-09-25
 

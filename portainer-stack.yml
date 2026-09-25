@@ -71,8 +71,10 @@ services:
     # mongodb_data volume; the image skips initialization when data exists. To
     # enable auth on a deployment that already has data, see "Enabling MongoDB
     # authentication" in docs/SETUP_GUIDE.md — a few mongosh commands, not a wipe.
-    # Left unset, everything behaves exactly as before (no auth), so existing
-    # deployments keep starting; new ones should set all four.
+    # Left unset, mongod runs without auth — and since #1151 the bot refuses to
+    # start in production against a credential-less MONGODB_URI, so set all
+    # four. MONGODB_ALLOW_NO_AUTH=true below is the deliberate opt-out for an
+    # operator who accepts running without auth.
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-}
@@ -357,6 +359,10 @@ services:
       # renaming it does not move data, it just points the bot at an empty
       # database. Change it only alongside a dump-and-restore into the new name.
       - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
+      # A production bot refuses a MONGODB_URI with no credentials (#1151).
+      # `true` accepts running MongoDB without authentication on purpose, and
+      # downgrades that refusal to a warning. See the mongodb service above.
+      - MONGODB_ALLOW_NO_AUTH=${MONGODB_ALLOW_NO_AUTH:-}
       # The port *inside* the container, which is also what the image
       # EXPOSEs and what its own HEALTHCHECK probes. The host-side port is
       # the `ports:` mapping below and is a separate choice.
