@@ -56,16 +56,32 @@ describe('the --config file', () => {
             // Compose escapes `$` for its own interpolation; the shell sees one.
             .replace(/\$\$/g, '$');
         const start = entrypoint.indexOf('if ! TOOLS_CONFIG=');
-        const writer = entrypoint.slice(start, entrypoint.indexOf('fi;', start) + 'fi;'.length);
+        const write = entrypoint.indexOf('printf "uri:', start);
+        const writer = entrypoint.slice(start, entrypoint.indexOf('fi;', write) + 'fi;'.length);
         expect(start).toBeGreaterThan(-1);
+        expect(write).toBeGreaterThan(start);
 
-        const run = spawnSync('sh', ['-c', `umask 077; ${writer} cat "$TOOLS_CONFIG"; rm -f "$TOOLS_CONFIG"`], {
+        // Prints the file and where it was; the EXIT trap has removed it by the
+        // time sh returns.
+        const run = spawnSync('sh', ['-c', `umask 077; ${writer} echo "$TOOLS_CONFIG"; cat "$TOOLS_CONFIG"`], {
             encoding: 'utf8',
             env: { ...process.env, MONGODB_URI: URI, TMPDIR: dir },
         });
 
         expect(run.status).toBe(0);
-        expect(run.stdout).toBe(EXPECTED);
+        const [file, ...config] = run.stdout.split('\n');
+        expect(config.join('\n')).toBe(EXPECTED);
+        expect(fs.existsSync(file)).toBe(false);
+    });
+
+    it.each(STACKS)('%s does not leave the file behind when stopped', (stack) => {
+        const text = fs.readFileSync(path.join(ROOT, stack), 'utf8');
+        // Registered before the URI is written, and reachable on `docker stop`:
+        // a TERM trap, and a sleep the trap can interrupt.
+        expect(text.indexOf('trap remove_tools_config EXIT;'))
+            .toBeLessThan(text.indexOf('printf "uri:'));
+        expect(text).toContain('trap "exit 143" TERM INT;');
+        expect(text).toContain('sleep $$SLEEP & wait $$!;');
     });
 });
 

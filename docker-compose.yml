@@ -608,8 +608,19 @@ services:
         # /tmp, as a YAML double-quoted scalar with backslash and double quote
         # escaped. scripts/lib/mongotools.sh writes the same file for the
         # scripts run by hand.
-        if ! TOOLS_CONFIG=$$(mktemp) ||
-           ! printf "uri: \"%s\"\n" "$$(printf "%s" "$$MONGODB_URI" | sed -e "s/[\\\\\"]/\\\\&/g")" > "$$TOOLS_CONFIG"; then
+        if ! TOOLS_CONFIG=$$(mktemp); then
+          echo "[backup] Could not create the mongo tools config file"; exit 1;
+        fi;
+        # Removed however this ends, a failed write below included, so the
+        # password does not outlive the loop in the stopped container layer.
+        # As PID 1, sh ignores SIGTERM unless it is trapped, so `docker stop`
+        # would otherwise kill it outright and skip the EXIT trap; the sleep
+        # below is backgrounded and waited on for the same reason, since a
+        # trap is not run while a foreground command is still going.
+        remove_tools_config() { rm -f -- "$$TOOLS_CONFIG"; };
+        trap remove_tools_config EXIT;
+        trap "exit 143" TERM INT;
+        if ! printf "uri: \"%s\"\n" "$$(printf "%s" "$$MONGODB_URI" | sed -e "s/[\\\\\"]/\\\\&/g")" > "$$TOOLS_CONFIG"; then
           echo "[backup] Could not write the mongo tools config file"; exit 1;
         fi;
         RETAIN=$${BACKUP_RETENTION_DAYS:-30};
@@ -819,7 +830,7 @@ services:
           if [ $$NOW -ge $$TARGET ]; then TARGET=$$(( $$TARGET + 86400 )); fi;
           SLEEP=$$(( $$TARGET - $$NOW ));
           echo "[backup] Sleeping $${SLEEP}s until next 03:00 UTC";
-          sleep $$SLEEP;
+          sleep $$SLEEP & wait $$!;
           run_backup || true;
           prune;
         done'

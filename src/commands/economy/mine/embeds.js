@@ -235,7 +235,10 @@ function buildThrottleField(user, result, currency) {
         return {
             name: '🛑 Daily Cap Reached',
             value: `You've earned the daily maximum of ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()}. `
-                 + `This haul paid nothing.${resetNote}\nXP, materials and quest progress still count.`,
+                 + `This haul paid nothing.${resetNote}\n${result.caveInAbandoned
+                     // Fled: the swing's XP (#1194) and the drop went with the haul.
+                     ? 'XP and materials were buried with it; the dig still counts toward dig quests.'
+                     : 'XP, materials and quest progress still count.'}`,
             inline: false,
         };
     }
