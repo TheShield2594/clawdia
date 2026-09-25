@@ -48,7 +48,8 @@ const DEFAULTS = {
  * @param {string} [opts.subcommand]  what getSubcommand() returns
  * @param {object} [opts.user]        overrides for interaction.user
  * @param {Array}  [opts.components]  button presses to hand back, in order; each
- *                 may carry `updateRejects: true` to make its own `update` fail
+ *                 may carry `updateRejects: true` to make its own `update` fail,
+ *                 or `deferRejects: true` to make its `deferUpdate` fail
  *                                    is `{ customId, user? }` and becomes a
  *                                    component interaction. Once the queue is
  *                                    empty the window closes, as it does live.
@@ -99,7 +100,11 @@ function makeInteraction({
             if (!press.modal || !accepts(opts.filter, entered)) throw new Error('Collector received no interactions before ending with reason: time');
             return entered;
         }),
-        deferUpdate: jest.fn().mockResolvedValue(undefined),
+        // `deferRejects` is an acknowledgement that missed Discord's 3-second
+        // window — the press was still made, and the command has to keep it.
+        deferUpdate: press.deferRejects
+            ? jest.fn(() => Promise.reject(new Error('Unknown interaction')))
+            : jest.fn().mockResolvedValue(undefined),
         deferReply: jest.fn(record),
         // `updateRejects` makes this press's render fail, which is how a test
         // reaches the catch that runs *after* a hand has already been settled.

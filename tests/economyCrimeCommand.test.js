@@ -25,6 +25,9 @@ const mockFailed = fakeCollection('FailedJob');
 jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/models/Guild', () => mockGuilds.model);
 jest.mock('../src/models/FailedJob', () => mockFailed.model);
+// The result's Remind me button writes the same rows /remind does.
+const mockReminders = fakeCollection('Reminder', { completed: false });
+jest.mock('../src/models/Reminder', () => mockReminders.model);
 jest.mock('../src/utils/guildSettingsCache', () =>
     require('./helpers/guildSettingsCacheMock')());
 
@@ -56,7 +59,14 @@ jest.mock('../src/data/featuredRotation', () => {
     };
 });
 
+// The hour now tilts the odds, so it is pinned like the featured rotation:
+// Morning favours neither the job nor the approaches these tests pick.
+jest.mock('../src/utils/timeBand', () => ({
+    getTimeBand: jest.fn(() => ({ emoji: '🌅', label: 'Morning' })),
+}));
+
 const crime = require('../src/commands/economy/crime');
+const { getTimeBand } = require('../src/utils/timeBand');
 const { __setRandomSourceForTests } = require('../src/utils/secureRandom');
 const { logTransaction } = require('../src/utils/logTransaction');
 const { logBigWin } = require('../src/utils/bigWinLogger');
@@ -69,8 +79,8 @@ const COOLDOWN_MS = 1.5 * 3_600_000;
 // The quietest job and its safest method: fixed rates, no heat, and a payout
 // band narrow enough to assert against.
 const PICKPOCKET = 'pickpocketing';
-const FEATHER_TOUCH = 'exec_feather_touch';   // 72% success, ×0.80 payout, no heat
-const BOLD_GRAB = 'exec_bold_grab';           // 40% success, ×1.60 payout, 2h heat
+const FEATHER_TOUCH = 'exec_feather_touch';   // 70% success, ×0.75 payout, no heat
+const BOLD_GRAB = 'exec_bold_grab';           // 50% success, ×1.80 payout, 2h heat
 
 // Crime's payout-steering rolls draw from src/utils/secureRandom.js, not
 // Math.random (CodeQL js/insecure-randomness). Both are pointed at one shared
@@ -118,11 +128,13 @@ beforeEach(() => {
     mockUsers.reset();
     mockGuilds.reset();
     mockFailed.reset();
+    mockReminders.reset();
     jest.clearAllMocks();
     // `clearAllMocks` clears calls, not implementations, so the
     // `mockReturnValue(true)` in the underground-district test below stayed true
     // for every test that ran after it.
     isDistrictActive.mockReturnValue(false);
+    getTimeBand.mockReturnValue({ emoji: '🌅', label: 'Morning' });
     setRandom(() => 0.5);
 });
 
@@ -130,7 +142,7 @@ afterEach(() => { Math.random.mockRestore(); __setRandomSourceForTests(null); })
 
 describe('a clean getaway', () => {
     it('credits the payout and counts the crime', async () => {
-        // 0.1 is under feather touch's 72%, so the job lands.
+        // 0.1 is under feather touch's 70%, so the job lands.
         rolls([], 0.1);
         seedUser({ balance: 1000 });
         seedGuild();
@@ -245,7 +257,7 @@ describe('a clean getaway', () => {
 
 describe('getting caught', () => {
     it('fines the player, capped at a fifth of the wallet', async () => {
-        // 0.99 misses the 72% success roll and the 8% death roll both.
+        // 0.99 misses the 70% success roll and the 8% death roll both.
         rolls([], 0.99);
         seedUser({ balance: 1000 });
         seedGuild();
@@ -290,7 +302,7 @@ describe('getting caught', () => {
         expect(repliedText(interaction)).toContain('Underground district active');
     });
 
-    it('seizes a share of the wallet on a critical failure', async () => {
+    it('seizes a share of a small wallet on a critical failure', async () => {
         // The success roll misses and the 8% death check — the eighth roll of
         // the run — lands. Pinned by position because the two are the same
         // call, `Math.random()`, and nothing else tells them apart; a refactor
@@ -301,17 +313,28 @@ describe('getting caught', () => {
         // mocked at the top of this file. Without that it shifted with the
         // calendar, which is what made this test fail on 31 Aug.
         rollsUntil(7, 0.99, 0.01);
-        seedUser({ balance: 10_000 });
+        seedUser({ balance: 400 });
         seedGuild();
 
         const interaction = await run();
 
         expect(repliedText(interaction)).toContain('Everything Went Wrong');
-        const stored = mockUsers.get(USER_ID);
-        // 15–30% of the wallet.
-        expect(stored.balance).toBeLessThanOrEqual(8_500);
-        expect(stored.balance).toBeGreaterThanOrEqual(7_000);
-        expectNonNegativeBalance(stored, 'crime critical failure');
+        // 15.15% of 400 is 60 — over the 30-coin fine it floors at, under
+        // the 128-coin cap.
+        expect(mockUsers.get(USER_ID).balance).toBe(340);
+        expectNonNegativeBalance(mockUsers.get(USER_ID), 'crime critical failure');
+    });
+
+    it('caps a critical failure at twice the approach\'s worst fine, however full the wallet', async () => {
+        // Uncapped, this was 1,500+ off a 10,000 wallet over a job worth ~100.
+        // Feather touch's worst fine is 85 × 0.75, so the cap is 128.
+        rollsUntil(7, 0.99, 0.01);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        await run();
+
+        expect(mockUsers.get(USER_ID).balance).toBe(10_000 - 128);
     });
 
     it('spends a Lifesaver instead of coins', async () => {
@@ -458,5 +481,580 @@ describe('the switches that turn it off', () => {
 
         expect(repliedText(interaction)).toContain('at least 7 days old');
         expect(mockUsers.writes).toEqual([]);
+    });
+});
+
+describe('the prompts keep the player\'s picks', () => {
+    it('keeps a pick whose acknowledgement missed its window, rather than rolling a random one', async () => {
+        // A `deferUpdate()` that threw used to share the timeout's catch, which
+        // replaced the job just picked with a random one. 0.1 would make that
+        // random fallback the first method — feather touch — so a bold grab in
+        // the result can only be the player's own.
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run([
+            { customId: PICKPOCKET, deferRejects: true },
+            { customId: BOLD_GRAB, deferRejects: true },
+        ]);
+
+        // The result alone — the step-2 prompt lists every method by name.
+        const result = interaction.replies.at(-1).embeds[0].data;
+        expect(result.title).toContain('Quick Snatch — Clean Getaway');
+        expect(result.footer.text).toContain('Bold grab');
+    });
+
+    it('quotes odds that include every bonus the roll will use', async () => {
+        // A Lucky Charm is +20%: feather touch's 70% is rolled at 90%, and the
+        // buttons used to say 70% anyway.
+        rolls([], 0.1);
+        seedUser({
+            balance: 1000,
+            activeEffects: [{ type: 'lucky_charm', expiresAt: new Date(Date.now() + 3_600_000), charges: -1 }],
+        });
+        seedGuild();
+
+        const interaction = await run();
+
+        const text = repliedText(interaction);
+        expect(text).toContain('90%');
+        expect(text).toContain('Lucky Charm +20%');
+    });
+});
+
+describe('when the job never runs', () => {
+    it('gives the cooldown back when the first prompt cannot be sent', async () => {
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = makeInteraction();
+        interaction.reply = jest.fn()
+            .mockRejectedValueOnce(new Error('Unknown interaction'))
+            .mockResolvedValue(undefined);
+        await crime.execute(interaction);
+
+        expect(mockUsers.get(USER_ID).lastCrime).toBeNull();
+        expect(mockUsers.get(USER_ID).balance).toBe(1000);
+        expect(interaction.reply).toHaveBeenLastCalledWith(expect.objectContaining({
+            content: expect.stringContaining("cooldown wasn't used"),
+        }));
+    });
+
+    it('restores the previous cooldown stamp, not a blank one, when the message goes away mid-prompt', async () => {
+        const previous = new Date(Date.now() - COOLDOWN_MS - 60_000);
+        seedUser({ balance: 1000, lastCrime: previous });
+        seedGuild();
+
+        const interaction = makeInteraction({ components: [{ customId: PICKPOCKET }] });
+        interaction.editReply = jest.fn()
+            .mockRejectedValueOnce(new Error('Unknown Message'))
+            .mockResolvedValue(undefined);
+        await crime.execute(interaction);
+
+        expect(mockUsers.get(USER_ID).lastCrime.getTime()).toBe(previous.getTime());
+    });
+
+    it('keeps the cooldown and says the job stood when only the result fails to render', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = makeInteraction({ components: [{ customId: PICKPOCKET }, { customId: FEATHER_TOUCH }] });
+        const render = interaction.editReply;
+        let edits = 0;
+        // The step-2 prompt and both suspense beats land; the result does not.
+        interaction.editReply = jest.fn(payload => (++edits === 4 ? Promise.reject(new Error('Unknown Message')) : render(payload)));
+        await crime.execute(interaction);
+
+        const stored = mockUsers.get(USER_ID);
+        expect(stored.balance).toBeGreaterThan(1000);
+        expect(stored.lastCrime).toBeInstanceOf(Date);
+        expect(interaction.editReply).toHaveBeenLastCalledWith(expect.objectContaining({
+            content: expect.stringContaining('The job went through'),
+        }));
+    });
+});
+
+describe('failure bookkeeping', () => {
+    it('runs the cooldown from the claim on a failure too, rather than restamping it', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        await run();
+
+        const claim = mockUsers.writes.find(w => w.update?.$set?.lastCrime);
+        expect(mockUsers.get(USER_ID).lastCrime.getTime()).toBe(claim.update.$set.lastCrime.getTime());
+        expect(mockUsers.writes.filter(w => w.update?.$set?.lastCrime || w.update?.[0]?.$set?.lastCrime)).toHaveLength(1);
+    });
+
+    it('shows when the next job opens — the heat, not a flat 1.5h, after a loud failure', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        const interaction = await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }]);
+
+        const wanted = mockUsers.get(USER_ID).wantedUntil;
+        const text = repliedText(interaction);
+        expect(text).toContain(`Next job <t:${Math.floor(wanted.getTime() / 1000)}:R>`);
+        expect(text).not.toContain('Cooldown: 1.5h');
+    });
+
+    it('applies the method\'s fine multiplier before the wallet cap, so the cap holds', async () => {
+        // 300 coins caps the fine at 60. Bold grab's ×1.35 applied after the
+        // cap made that 81 — 27% of a wallet capped at 20%.
+        rolls([], 0.99);
+        seedUser({ balance: 300 });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }]);
+
+        expect(mockUsers.get(USER_ID).balance).toBe(240);
+    });
+
+    it('spends a Lifesaver on an empty wallet too — it absorbs the holding time', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 0, activeEffects: [{ type: 'lifesaver', expiresAt: null, charges: 1 }] });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(repliedText(interaction)).toContain('Saved by the Lifesaver');
+        expect(mockUsers.get(USER_ID).activeEffects).toEqual([]);
+        expect(mockUsers.get(USER_ID).wantedUntil).toBeNull();
+    });
+
+    it('shows a member frozen mid-job their real balance, not zero', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000, economyFrozen: true });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(repliedText(interaction)).toContain('💰 10,000');
+        expect(mockUsers.get(USER_ID).balance).toBe(10_000);
+    });
+
+    it('names today\'s featured job on the Still Wanted screen rather than a fixed one', async () => {
+        seedUser({
+            balance: 1000,
+            lastCrime: new Date(Date.now() - COOLDOWN_MS - 1000),
+            wantedUntil: new Date(Date.now() + 3_600_000),
+        });
+        seedGuild();
+
+        const interaction = await run();
+
+        const text = repliedText(interaction);
+        expect(text).toContain('Quick Snatch');
+        expect(text).not.toContain('Casino Con is next');
+    });
+});
+
+describe('the balance', () => {
+    const { CRIMES, EXECUTION_METHODS, DEATH_RATE, CRIT_CAP_FINES } = crime.__test__;
+
+    // Coins per attempt for a player with a wallet deep enough that neither
+    // the 20% fine cap nor the wallet share of a critical failure binds — the
+    // player the balance has to hold for. No mastery, no boosts.
+    const expectedValue = (c, m) => {
+        const payout = ((c.minPayout + c.maxPayout) / 2) * m.payoutMult;
+        const fine = ((c.minFine + c.maxFine) / 2) * m.fineMult;
+        const crit = c.maxFine * m.fineMult * CRIT_CAP_FINES;
+        const failure = (1 - DEATH_RATE) * fine + DEATH_RATE * crit;
+        return m.successRate * payout - (1 - m.successRate) * failure;
+    };
+
+    it.each(CRIMES.map(c => [c.displayName, c]))('%s: no approach dominates', (_name, c) => {
+        const [safe, standard, loud] = EXECUTION_METHODS[c.name].methods.map(m => expectedValue(c, m));
+        // Every approach pays on average — a choice that loses money is a trap.
+        expect(Math.min(safe, standard, loud)).toBeGreaterThan(0);
+        // Safe and standard sit within 15% of each other; loud earns more per
+        // attempt, but not so much that its heat stops mattering. The old Bluff
+        // was 5×.
+        expect(Math.abs(safe - standard) / standard).toBeLessThan(0.15);
+        expect(loud / standard).toBeGreaterThan(1.1);
+        expect(loud / standard).toBeLessThan(1.4);
+    });
+
+    it('evens the loud play out at one level of heat and sinks it at two', () => {
+        const { HEAT_FINE_STEP, HEAT_LOUD_PENALTY } = crime.__test__;
+        const hot = (m, h) => ({
+            ...m,
+            fineMult: m.fineMult * (1 + h * HEAT_FINE_STEP),
+            successRate: m.successRate - (m.wantedMs > 0 ? h * HEAT_LOUD_PENALTY : 0),
+        });
+        for (const c of CRIMES) {
+            const [, standard, loud] = EXECUTION_METHODS[c.name].methods;
+            const ratio = h => expectedValue(c, hot(loud, h)) / expectedValue(c, hot(standard, h));
+            expect(ratio(1)).toBeGreaterThan(0.6);
+            expect(ratio(1)).toBeLessThan(1.1);
+            expect(ratio(2)).toBeLessThan(0.85);
+        }
+    });
+
+    it('pays more on average for each step up the ladder', () => {
+        const standards = CRIMES.map(c => expectedValue(c, EXECUTION_METHODS[c.name].methods[1]));
+        for (let i = 1; i < standards.length; i++) expect(standards[i]).toBeGreaterThan(standards[i - 1]);
+    });
+
+    it('swings the Bluff\'s cut with how cleanly it lands', async () => {
+        // A roll of 0.01 against 27% is about as clean as it gets:
+        // 1 − 0.01/0.27 of the way from ×1.0 to ×2.6, and 98% of the story.
+        rolls([], 0.01);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run([{ customId: 'grand larceny' }, { customId: 'exec_bluff_in' }]);
+
+        expect(repliedText(interaction)).toContain('⚡ ×2.54');
+        expect(repliedText(interaction)).toContain('They bought 98% of your story');
+    });
+
+    it('plays it safe for a player who never picks an approach', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        const interaction = await run([{ customId: PICKPOCKET }]);
+
+        expect(interaction.replies.at(-1).embeds[0].data.footer.text).toContain('Feather touch');
+        expect(mockUsers.get(USER_ID).wantedUntil).toBeNull();
+    });
+});
+
+describe('a fine the wallet cannot cover', () => {
+    it('is served as holding time on top of the cooldown', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 0 });
+        seedGuild();
+
+        const interaction = await run();
+
+        const claim = mockUsers.writes.find(w => w.update?.$set?.lastCrime).update.$set.lastCrime;
+        // Nothing paid: the whole 1.5h of holding, after the 1.5h cooldown.
+        expect(mockUsers.get(USER_ID).wantedUntil.getTime()).toBe(claim.getTime() + 2 * COOLDOWN_MS);
+        expect(repliedText(interaction)).toContain('90 min in holding');
+    });
+
+    it('scales the time to the share left unpaid', async () => {
+        // A 40-coin fine against a 20-coin wallet: half unpaid, 45 minutes.
+        rolls([], 0.99);
+        seedUser({ balance: 20 });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(mockUsers.get(USER_ID).balance).toBe(0);
+        expect(repliedText(interaction)).toContain('45 min in holding');
+    });
+
+    it('never shortens heat that already runs past it', async () => {
+        // The Bluff's 3h heat against a 20-coin wallet: 140 of a 160-coin fine
+        // unpaid is ~79 min of holding, ending at ~2.8h — so the heat stands.
+        rolls([], 0.99);
+        seedUser({ balance: 20 });
+        seedGuild();
+
+        const interaction = await run([{ customId: 'grand larceny' }, { customId: 'exec_bluff_in' }]);
+
+        expect(repliedText(interaction)).toContain('in holding');
+        expect(mockUsers.get(USER_ID).wantedUntil.getTime()).toBeGreaterThan(Date.now() + 2.95 * 3_600_000);
+    });
+
+    it('costs a paying player no time', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(mockUsers.get(USER_ID).wantedUntil).toBeNull();
+        expect(repliedText(interaction)).not.toContain('in holding');
+    });
+});
+
+describe('what the player sees', () => {
+    const lastEmbed = interaction => interaction.replies.at(-1).embeds[0].data;
+
+    it('counts both prompts down live instead of promising "15 seconds"', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        const prompts = interaction.replies.slice(0, 2).map(p => p.embeds[0].data.description);
+        for (const text of prompts) expect(text).toMatch(/⏳ Decide <t:\d+:R>/);
+    });
+
+    it('says so when the clock made either call', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run([]);
+
+        const text = repliedText(interaction);
+        expect(text).toContain('You hesitated — the crew picked');
+        expect(text).toContain('No call made — you play it safe');
+        expect(lastEmbed(interaction).footer.text).toContain('picked for you');
+    });
+
+    it('builds to the result in three beats', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        const beats = interaction.replies.map(p => p.embeds?.[0]?.data?.description ?? '');
+        expect(beats.some(d => d.endsWith('▰▱▱'))).toBe(true);
+        expect(beats.some(d => d.endsWith('▰▰▱'))).toBe(true);
+    });
+
+    it('writes every amount one way, with the server\'s currency', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild({ currency: '🪙' });
+
+        const interaction = await run();
+
+        const text = repliedText(interaction);
+        expect(text).not.toContain('💵');
+        expect(text).toMatch(/🪙 80–200/);
+        const { fields } = lastEmbed(interaction);
+        expect(fields.find(f => f.name === 'Balance').value).toMatch(/^🪙 [\d,]+$/);
+    });
+
+    it('carries the player\'s record and mastery progress', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000, crimeRecord: { totalCrimes: 39, successfulCrimes: 20 } });
+        seedGuild();
+
+        const interaction = await run();
+
+        const record = lastEmbed(interaction).fields.find(f => f.name === '📒 Record').value;
+        expect(record).toContain('21–19 · 53% clean');
+        expect(record).toContain('Mastery 40/150 · +4%');
+    });
+
+    it('gives a critical failure its own lines, not the ordinary bust\'s', async () => {
+        rollsUntil(7, 0.99, 0.01);
+        seedUser({ balance: 400 });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(lastEmbed(interaction).description).toContain('plainclothes detective');
+    });
+});
+
+describe('the Remind me button', () => {
+    const REMIND = { customId: 'crime_remind' };
+
+    it('sets a reminder for when the next job opens', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: FEATHER_TOUCH }, REMIND]);
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const claim = mockUsers.writes.find(w => w.update?.$set?.lastCrime).update.$set.lastCrime;
+        const [reminder] = mockReminders.all();
+        expect(reminder).toMatchObject({ userId: USER_ID, guildId: GUILD_ID, completed: false });
+        expect(reminder.remindAt.getTime()).toBe(claim.getTime() + COOLDOWN_MS);
+    });
+
+    it('times the reminder to the heat, not the cooldown, after a loud failure', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }, REMIND]);
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const [reminder] = mockReminders.all();
+        expect(reminder.remindAt.getTime()).toBe(mockUsers.get(USER_ID).wantedUntil.getTime());
+    });
+
+    it('moves the one they already have rather than stacking another', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+        mockReminders.seed({
+            userId: USER_ID, guildId: GUILD_ID, channelId: 'channel-1', completed: false,
+            message: 'Your next `/crime` job is open. 🌆', remindAt: new Date(0),
+        });
+
+        await run([{ customId: PICKPOCKET }, { customId: FEATHER_TOUCH }, REMIND]);
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(mockReminders.all()).toHaveLength(1);
+        expect(mockReminders.all()[0].remindAt.getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it('comes off the message once its window closes', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(interaction.replies.at(-1)).toEqual({ components: [] });
+        expect(mockReminders.all()).toEqual([]);
+    });
+});
+
+describe('the hour', () => {
+    it('gives the careful play an edge at night, quoted and rolled', async () => {
+        getTimeBand.mockReturnValue({ emoji: '🌙', label: 'Night' });
+        // 0.72 misses feather touch's 70% — but not its 75% at night.
+        rolls([], 0.72);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        const text = repliedText(interaction);
+        expect(text).toContain('75% 🌙');
+        expect(text).toContain('cover of dark');
+        expect(text).toContain('Clean Getaway');
+        expect(text).toContain('Night played in your favour');
+    });
+
+    it('leaves the odds alone for a job the hour does not favour', async () => {
+        rolls([], 0.72);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(repliedText(interaction)).toContain('Busted');
+    });
+
+    it('marks the jobs the hour favours on the board', async () => {
+        getTimeBand.mockReturnValue({ emoji: '☀️', label: 'Noon' });
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        // Quick Snatch's standard approach is 62%; the noon crowds make it 67%.
+        expect(interaction.replies[0].embeds[0].data.description).toContain('67% success');
+        expect(interaction.replies[0].embeds[0].data.description).toContain('☀️ +5%');
+    });
+});
+
+describe('the hour, on the player\'s clock', () => {
+    it('reads the band in the timezone the player set', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000, timezone: 'Asia/Tokyo' });
+        seedGuild();
+
+        await run();
+
+        expect(getTimeBand).toHaveBeenCalledWith('Asia/Tokyo');
+    });
+
+    it('says the band is UTC for a player who has not set one', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(interaction.replies[0].embeds[0].data.footer.text).toContain('(UTC — /timezone set for yours)');
+    });
+});
+
+describe('standing heat', () => {
+    const HOUR = 3_600_000;
+    const heatOf = () => mockUsers.get(USER_ID).crimeHeat;
+
+    it('rises with a loud job, landed or not', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }]);
+
+        expect(heatOf().level).toBe(1);
+        expect(repliedText(interaction)).toContain('Heat 🟥⬛⬛⬛⬛ 1/5 ▲');
+    });
+
+    it('cools with a careful one, keeping the hours already waited out', async () => {
+        rolls([], 0.1);
+        const updatedAt = new Date(Date.now() - 2 * HOUR);
+        seedUser({ balance: 1000, crimeHeat: { level: 2, updatedAt } });
+        seedGuild();
+
+        await run();
+
+        expect(heatOf().level).toBe(1);
+        // Two hours into the six it takes to cool a level on its own: still two.
+        const since = Date.now() - heatOf().updatedAt.getTime();
+        expect(since).toBeGreaterThanOrEqual(2 * HOUR - 1000);
+        expect(since).toBeLessThan(2 * HOUR + 60_000);
+    });
+
+    it('restarts the cooling clock on a loud job, even at the cap', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000, crimeHeat: { level: 5, updatedAt: new Date(Date.now() - 5 * HOUR) } });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }]);
+
+        expect(heatOf().level).toBe(5);
+        expect(Date.now() - heatOf().updatedAt.getTime()).toBeLessThan(60_000);
+    });
+
+    it('does not carry cooling progress over a loud job', async () => {
+        // Five hours toward the next level: kept, the +1 would be gone in one.
+        rolls([], 0.1);
+        seedUser({ balance: 1000, crimeHeat: { level: 2, updatedAt: new Date(Date.now() - 5 * HOUR) } });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }]);
+
+        expect(heatOf().level).toBe(3);
+        expect(Date.now() - heatOf().updatedAt.getTime()).toBeLessThan(60_000);
+    });
+
+    it('leaves it alone on the standard play', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: 'exec_quick_snatch' }]);
+
+        expect(heatOf()?.level ?? 0).toBe(0);
+    });
+
+    it('cools a level every six hours on its own', () => {
+        const { heatNow } = crime.__test__;
+        const now = Date.now();
+        expect(heatNow({ level: 3, updatedAt: new Date(now - 5 * HOUR) }, now)).toBe(3);
+        expect(heatNow({ level: 3, updatedAt: new Date(now - 13 * HOUR) }, now)).toBe(1);
+        expect(heatNow({ level: 3, updatedAt: new Date(now - 30 * HOUR) }, now)).toBe(0);
+    });
+
+    it('puts 10% a level on the fine, and says so up front', async () => {
+        // 84 × 0.75 is 63 cold; at 5 heat it is 63 × 1.5, rounded: 95.
+        rolls([], 0.99);
+        seedUser({ balance: 10_000, crimeHeat: { level: 5, updatedAt: new Date() } });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(mockUsers.get(USER_ID).balance).toBe(10_000 - 95);
+        expect(interaction.replies[0].embeds[0].data.description).toContain('fines +50%, loud jobs −15%');
+        // Bold grab's 50% at five heat.
+        expect(interaction.replies[1].embeds[0].data.description).toContain('35% success');
     });
 });

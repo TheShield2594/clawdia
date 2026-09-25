@@ -124,6 +124,13 @@ const userSchema = new Schema({
         totalCrimes:      { type: Number, default: 0 },
         successfulCrimes: { type: Number, default: 0 },
     },
+    // /crime's standing heat: loud jobs raise it, careful ones lower it, and it
+    // cools one level per CRIME_HEAT_DECAY_MS on its own. `level` is as of
+    // `updatedAt`; readers apply the decay since then (see crime.js heatNow).
+    crimeHeat: {
+        level:     { type: Number, default: 0, min: 0, max: 5 },
+        updatedAt: { type: Date, default: null },
+    },
     shiftsWorked: { type: Number, default: 0 },
 
     // Daily quiz attempt counters per difficulty (each resets midnight UTC)
