@@ -21,7 +21,7 @@ const { fakeMigrationRecords } = require('./helpers/fakeMigrationRecords');
 const mockRecords = fakeMigrationRecords();
 jest.mock('../src/models/MigrationRecord', () => mockRecords.model);
 
-const { preMigrationBackup, sealArchive } = require('../src/migrations/runner');
+const { preMigrationBackup, sealArchive, archiveTag } = require('../src/migrations/runner');
 
 const IRREVERSIBLE = ['026_backfill_shop_item_ids'];
 const DUMP = Buffer.from('pretend this is a gzipped mongodump archive '.repeat(5000));
@@ -73,9 +73,13 @@ describe('pre-migration backup encryption', () => {
 
         preMigrationBackup(IRREVERSIBLE);
 
-        const files = fs.readdirSync(dir);
-        expect(files).toHaveLength(1);
+        const files = fs.readdirSync(dir).sort();
+        // The sealed dump and its tag (#1161), nothing else.
+        expect(files).toHaveLength(2);
         expect(files[0]).toMatch(/^pre-migration-.*\.gz\.enc$/);
+        expect(files[1]).toBe(`${files[0]}.tag`);
+        expect(fs.readFileSync(path.join(dir, files[1]), 'utf8').trim())
+            .toBe(archiveTag(path.join(dir, files[0]), 'correct horse battery staple'));
 
         // mongodump never wrote into the backup directory at all.
         const archiveArg = childProcess.spawnSync.mock.calls[0][1].find(a => a.startsWith('--archive='));
@@ -114,8 +118,9 @@ describe('pre-migration backup encryption', () => {
             if (pw) process.env.BACKUP_ENCRYPTION_PASSPHRASE = pw;
             fakeMongodump();
             preMigrationBackup(IRREVERSIBLE);
-            const [file] = fs.readdirSync(dir);
-            expect(fs.statSync(path.join(dir, file)).mode & 0o777).toBe(0o600);
+            for (const file of fs.readdirSync(dir)) {
+                expect(fs.statSync(path.join(dir, file)).mode & 0o777).toBe(0o600);
+            }
         });
     }
 
@@ -125,5 +130,58 @@ describe('pre-migration backup encryption', () => {
         fs.writeFileSync(src, '');
         sealArchive(src, dest, 'pw');
         expect(opensslDecrypt(fs.readFileSync(dest), 'pw').length).toBe(0);
+    });
+
+    // restore.sh checks the tag with scripts/lib/archive.sh, so the Node tag
+    // must be that one byte for byte, or every sealed pre-migration dump is
+    // refused as tampered with on the day it is needed.
+    // child_process is mocked for mongodump above; these need the real one.
+    const { spawnSync: realSpawnSync } = jest.requireActual('child_process');
+    const HAS_TOOLS = realSpawnSync('openssl', ['version']).status === 0
+        && realSpawnSync('bash', ['--version']).status === 0;
+    (HAS_TOOLS ? test : test.skip)('archiveTag matches archive.sh archive_tag', () => {
+        const file = path.join(dir, 'x.gz.enc');
+        fs.writeFileSync(file, crypto.randomBytes(3000));
+        const run = realSpawnSync('bash', ['-c', '. "$ARCHIVE_LIB"; archive_tag "$ARCHIVE_PATH"'], {
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                ARCHIVE_LIB: path.join(__dirname, '..', 'scripts', 'lib', 'archive.sh'),
+                ARCHIVE_PATH: file,
+                BACKUP_ENCRYPTION_PASSPHRASE: 'a passphrase with spaces',
+            },
+        });
+        expect(run.status).toBe(0);
+        expect(run.stdout.trim()).toBe(archiveTag(file, 'a passphrase with spaces'));
+    });
+
+    // OpenSSL 1.1.1 writes `Salted__` + the salt ahead of `enc -S` output and
+    // 3.x does not. A wrapper around the real binary stands in for 1.1.1, and
+    // the tag must still be the one Node computes.
+    (HAS_TOOLS ? test : test.skip)('archive_tag matches on an OpenSSL that prefixes the salt', () => {
+        const file = path.join(dir, 'y.gz.enc');
+        fs.writeFileSync(file, crypto.randomBytes(1000));
+        const bin = path.join(dir, 'bin');
+        fs.mkdirSync(bin);
+        const real = realSpawnSync('sh', ['-c', 'command -v openssl'], { encoding: 'utf8' }).stdout.trim();
+        fs.writeFileSync(path.join(bin, 'openssl'), [
+            '#!/bin/sh',
+            'if [ "$1" = enc ]; then printf "Salted__12345678"; fi',
+            `exec "${real}" "$@"`,
+        ].join('\n'));
+        fs.chmodSync(path.join(bin, 'openssl'), 0o755);
+
+        const run = realSpawnSync('bash', ['-c', '. "$ARCHIVE_LIB"; archive_tag "$ARCHIVE_PATH"'], {
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                PATH: `${bin}:${process.env.PATH}`,
+                ARCHIVE_LIB: path.join(__dirname, '..', 'scripts', 'lib', 'archive.sh'),
+                ARCHIVE_PATH: file,
+                BACKUP_ENCRYPTION_PASSPHRASE: 'pw',
+            },
+        });
+        expect(run.status).toBe(0);
+        expect(run.stdout.trim()).toBe(archiveTag(file, 'pw'));
     });
 });

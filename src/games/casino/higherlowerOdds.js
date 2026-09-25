@@ -1,4 +1,5 @@
 'use strict';
+const { secureRandom } = require('../../utils/secureRandom');
 
 // The session multiplier and card odds for `/casino higherlower`, lifted out of
 // higherlower.js (#785). It measured 16.9% lines / 11.8% branches — the streak
@@ -19,8 +20,8 @@ const HOUSE_RETURN = 0.95;
 // A ceiling on what one session can reach, which bounds a single hand's payout.
 const MAX_SESSION_MULT = 25;
 
-/** A card, ace low at 1 through king at 13. `rng` defaults to Math.random. */
-function rollCard(rng = Math.random) {
+/** A card, ace low at 1 through king at 13. `rng` defaults to secureRandom (crypto). */
+function rollCard(rng = secureRandom) {
     return {
         value: Math.floor(rng() * 13) + 1,
         suit:  SUITS[Math.floor(rng() * SUITS.length)],

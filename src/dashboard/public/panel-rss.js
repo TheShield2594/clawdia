@@ -17,7 +17,7 @@ const DAILY_NEWS_CHANNELS = boot('channels');
 onPanel('rss', renderDailyNewsProfiles);
 function dailyNewsChannelOptions(selected = '') {
     return ['<option value="">Select a channel</option>']
-        .concat(DAILY_NEWS_CHANNELS.map(c => `<option value="${c.id}" ${selected === c.id ? 'selected' : ''}>#${c.name}</option>`))
+        .concat(DAILY_NEWS_CHANNELS.map(c => `<option value="${escHtml(c.id)}" ${selected === c.id ? 'selected' : ''}>#${escHtml(c.name)}</option>`))
         .join('');
 }
 

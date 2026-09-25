@@ -5,6 +5,7 @@ const {
     ButtonStyle,
     MessageFlags,
 } = require('discord.js');
+const { secureRandom } = require('../../utils/secureRandom');
 const User  = require('../../models/User');
 const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
@@ -76,7 +77,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
     try {
         const delay = ms => new Promise(r => setTimeout(r, ms));
 
-        let queenPos = Math.floor(Math.random() * 3);
+        let queenPos = Math.floor(secureRandom() * 3);
         const initialCards = buildReveal(queenPos);
 
         const currentPayout = payoutForRound(bet, round);
@@ -124,8 +125,8 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
         for (let step = 0; step < steps; step++) {
             let a, b;
             do {
-                a = Math.floor(Math.random() * 3);
-                b = Math.floor(Math.random() * 3);
+                a = Math.floor(secureRandom() * 3);
+                b = Math.floor(secureRandom() * 3);
             } while (a === b);
 
             if (queenPos === a) queenPos = b;
@@ -222,11 +223,11 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager, hand
         let streakTriggered = false;
         let grossPayout     = won ? currentPayout : 0;
 
-        if (!won && luck.charm > 0 && Math.random() < luck.charm) {
+        if (!won && luck.charm > 0 && secureRandom() < luck.charm) {
             grossPayout    = bet;
             charmTriggered = true;
         }
-        if (!won && !charmTriggered && luck.streak > 0 && Math.random() < luck.streak) {
+        if (!won && !charmTriggered && luck.streak > 0 && secureRandom() < luck.streak) {
             grossPayout     = bet;
             streakTriggered = true;
         }

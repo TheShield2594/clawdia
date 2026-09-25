@@ -1,4 +1,5 @@
 'use strict';
+const { secureRandom } = require('../../utils/secureRandom');
 
 /**
  * The roulette wheel and the table's bets, as data and pure functions.
@@ -91,7 +92,7 @@ function coveredNumbers(betKey, target) {
 }
 
 /** A pocket number, uniformly. */
-function spin(random = Math.random) {
+function spin(random = secureRandom) {
     return Math.floor(random() * POCKETS);
 }
 
@@ -133,7 +134,7 @@ function nearMiss(result, betKey, target) {
  * @param {() => number} [random]  source of the start angle and the bounce
  * @returns {{ wheel: number, ball: number, onTrack: boolean, speed: number, holdMs: number }[]}
  */
-function spinFrames(result, random = Math.random) {
+function spinFrames(result, random = secureRandom) {
     const step = (Math.PI * 2) / POCKETS;
     const TOP  = -Math.PI / 2;
     // Wheel angle is the rotation applied to the wheel image, whose pocket 0 is

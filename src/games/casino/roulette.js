@@ -7,6 +7,7 @@ const {
     AttachmentBuilder,
     MessageFlags,
 } = require('discord.js');
+const { secureRandom } = require('../../utils/secureRandom');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { placeWager } = require('../../utils/placeWager');
@@ -389,7 +390,7 @@ async function playRoulette(ctx) {
         // Lucky Charm: a slice of a lost stake back, sometimes. Never a second
         // spin — see rouletteCharmSettlement for why. How often is CASINO_LUCK's.
         const { charm } = casinoLuck('roulette', debited, bet);
-        const charmSaved = !won && charm > 0 && Math.random() < charm;
+        const charmSaved = !won && charm > 0 && secureRandom() < charm;
         const { profit, credit } = charmSaved
             ? rouletteCharmSettlement(bet)
             : rouletteSettlement(bet, betDef.payout, won);

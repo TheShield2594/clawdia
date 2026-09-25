@@ -50,6 +50,7 @@ jest.mock('../src/games/casino/slotsReels', () => {
     return { ...actual, spin: (...args) => (mockSpins.length ? mockSpins.shift() : actual.spin(...args)) };
 });
 
+const { mockRandom, restoreRandom } = require('./helpers/secureRandom');
 const User  = require('../src/models/User');
 const Guild = require('../src/models/Guild');
 const { recordOwedPayout } = require('../src/utils/owedPayout');
@@ -295,14 +296,14 @@ describe('a crash cash-out whose write does not land', () => {
     beforeEach(() => {
         deleteLobby(CHANNEL_ID);
         User.updateMany.mockResolvedValue({});
-        jest.spyOn(Math, 'random').mockReturnValue(CRASH_AT_495);
+        mockRandom(CRASH_AT_495);
         jest.useFakeTimers();
     });
 
     afterEach(() => {
         deleteLobby(CHANNEL_ID);
         jest.useRealTimers();
-        Math.random.mockRestore();
+        restoreRandom();
     });
 
     test('keeps the marker the restart reconciler pays the stake back from', async () => {
@@ -394,14 +395,14 @@ describe('a cash-out the player pressed for', () => {
     beforeEach(() => {
         deleteLobby(CHANNEL_ID);
         User.updateMany.mockResolvedValue({});
-        jest.spyOn(Math, 'random').mockReturnValue(CRASH_AT_495);
+        mockRandom(CRASH_AT_495);
         jest.useFakeTimers();
     });
 
     afterEach(() => {
         deleteLobby(CHANNEL_ID);
         jest.useRealTimers();
-        Math.random.mockRestore();
+        restoreRandom();
     });
 
     test('is told it succeeded, not that it could not be credited', async () => {
@@ -460,7 +461,7 @@ describe('a Lucky Save whose result cannot be rendered', () => {
             return query;
         });
         const rolls  = [...LOSES_THEN_SAVES];
-        const random = jest.spyOn(Math, 'random').mockImplementation(() => rolls.shift() ?? 0);
+        mockRandom(() => rolls.shift() ?? 0);
 
         // The button ids carry `Date.now()`, which the fake timers pin.
         const now = Date.now();
@@ -476,7 +477,7 @@ describe('a Lucky Save whose result cannot be rendered', () => {
         await jest.advanceTimersByTimeAsync(0);
         for (let i = 0; i < 40; i++) await Promise.resolve();
 
-        random.mockRestore();
+        restoreRandom();
         jest.useRealTimers();
 
         // The save credits the bet and then renders it. A render that threw

@@ -49,7 +49,10 @@ function buildExportFile(dump) {
  */
 function formatDeletionSummary(report) {
     const removed = report.results.filter(r => r.behavior === 'delete' && r.changed > 0);
-    const kept = report.results.filter(r => r.behavior !== 'delete');
+    // A redaction is listed only where it touched something — there are a dozen
+    // shared records a member may never have appeared in — while a retained
+    // collection is always named, since keeping it is the point to disclose.
+    const kept = report.results.filter(r => r.behavior === 'retain' || (r.behavior !== 'delete' && r.changed > 0));
 
     const lines = [];
     if (removed.length) {

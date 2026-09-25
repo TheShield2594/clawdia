@@ -310,10 +310,15 @@ function preMigrationBackup(irreversibleNames) {
         if (passphrase) {
             try {
                 sealArchive(work, archive, passphrase);
+                // restore.sh refuses a sealed archive without a matching tag
+                // (#1161), so the dump that is the only way back from this
+                // migration gets one like every nightly archive does.
+                writeArchiveTag(archive, passphrase);
             } catch (err) {
                 // A half-written .enc is not an archive, and leaving it under
                 // the name restore.sh would reach for reads as a success.
                 fs.rmSync(archive, { force: true });
+                fs.rmSync(`${archive}.tag`, { force: true });
                 return fail(`encrypting the pre-migration backup failed: ${err.message}`);
             }
         }
@@ -364,6 +369,35 @@ function sealArchive(src, dest, passphrase) {
         fs.closeSync(inFd);
         if (outFd !== undefined) fs.closeSync(outFd);
     }
+}
+
+// The tag every sealed archive carries beside it as `<archive>.tag` (#1161):
+// SHA-256 of the ciphertext, encrypted with AES-256-CBC under a key and IV
+// derived from the passphrase and this fixed salt, in hex. It is
+// scripts/lib/archive.sh `archive_tag` byte for byte — see that file for why
+// the MAC takes this shape — and tests/migrationBackupEncryption.test.js holds
+// the two to each other. The salt is the hex of "clawdiam".
+const ARCHIVE_TAG_SALT = Buffer.from('636c61776469616d', 'hex');
+
+/** The hex tag of the sealed archive at `file`. */
+function archiveTag(file, passphrase) {
+    const hash = crypto.createHash('sha256');
+    const fd = fs.openSync(file, 'r');
+    try {
+        const buf = Buffer.alloc(SEAL_CHUNK);
+        let n;
+        while ((n = fs.readSync(fd, buf, 0, SEAL_CHUNK, null)) > 0) hash.update(buf.subarray(0, n));
+    } finally {
+        fs.closeSync(fd);
+    }
+    const derived = crypto.pbkdf2Sync(passphrase, ARCHIVE_TAG_SALT, SEAL_ITERATIONS, 48, 'sha256');
+    const cipher = crypto.createCipheriv('aes-256-cbc', derived.subarray(0, 32), derived.subarray(32, 48));
+    return Buffer.concat([cipher.update(hash.digest()), cipher.final()]).toString('hex');
+}
+
+/** Writes `${archive}.tag`, 0600, beside a freshly sealed archive. */
+function writeArchiveTag(archive, passphrase) {
+    fs.writeFileSync(`${archive}.tag`, `${archiveTag(archive, passphrase)}\n`, { mode: 0o600, flag: 'wx' });
 }
 
 /**
@@ -693,4 +727,5 @@ module.exports = {
     isRecordableMigration,
     preMigrationBackup,
     sealArchive,
+    archiveTag,
 };

@@ -159,6 +159,27 @@ describe('/heist lobby', () => {
 
 // ── /syndicate ───────────────────────────────────────────────────────────────
 
+describe('/syndicate skill check', () => {
+    // #1161: the heist version checked whose button it was and this one did
+    // not. The buttons go out by DM, so nobody else sees them today — but that
+    // is delivery, not a check.
+    test('answers only to the player it was sent to', async () => {
+        const heist = syndicateService.createSyndicateLobby({
+            guildId: GUILD, channelId: 'c', syndicateId: 's1', leaderId: ME,
+            target: Object.keys(syndicateService.SYNDICATE_TARGETS)[0], lobbyDurationSeconds: 60, currentHeat: 0,
+        });
+        syndicateService.joinSyndicateLobby(GUILD, U2, U2, Object.keys(syndicateService.SYNDICATE_ROLES)[0]);
+        syndicateService.endSyndicateLobby(GUILD);
+        heist._skillChecks = { [U2]: { correct: '7' } };
+
+        const btn = press(`syn_skill_${heist.heistId}_${U2}_7`, U3);
+        await syndicate.handleSyndicateButton(btn, {});
+
+        expect(JSON.stringify(btn.replies)).toContain("This isn't your skill check.");
+        expect(heist.players.get(U2).skillPassed).toBeNull();
+    });
+});
+
 describe('/syndicate membership', () => {
     const seedSyndicate = (fields = {}) => {
         const doc = {

@@ -583,6 +583,10 @@ services:
     # tests/stackEntrypointShell.test.js fails on the next one.
     entrypoint: >
       sh -c '
+        # Every file this writes is a copy of the database or says where one
+        # is, so none of them is readable by anyone but root (#1161). Without
+        # this, a plain archive landed 0644 in a directory on the host.
+        umask 077;
         if [ -n "$$MONGODB_URI_FILE" ]; then
           if [ ! -r "$$MONGODB_URI_FILE" ]; then
             echo "[backup] MONGODB_URI_FILE=$$MONGODB_URI_FILE is not readable"; exit 1;
@@ -680,7 +684,7 @@ services:
           # rename are still aged out instead of accumulating forever. The bot
           # lands pre-migration-*.gz (.gz.enc when sealed) in the same directory; those are pruned
           # on the same schedule.
-          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" -o -name "clawdia-*.gz.unverified" -o -name "clawdia-*.gz.enc.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" -o -name "pre-migration-*.gz.enc" \) -mtime +$$RETAIN -delete;
+          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" -o -name "clawdia-*.gz.unverified" -o -name "clawdia-*.gz.enc.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" -o -name "pre-migration-*.gz.enc" -o -name "clawdia-*.gz.enc.tag" -o -name "pre-migration-*.gz.enc.tag" \) -mtime +$$RETAIN -delete;
         };
         run_backup() {
           TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
@@ -740,9 +744,26 @@ services:
               return 1;
             fi;
             rm -f "$$WORK";
+            # The tag restore.sh and verify-backup.sh check before decrypting,
+            # so a substituted or altered archive is refused rather than
+            # restored over the database (#1161). SHA-256 of the ciphertext,
+            # encrypted under a key from the passphrase and a fixed salt: a MAC
+            # built with -pass env:, because openssl only takes an HMAC key on
+            # the command line. Must match scripts/lib/archive.sh archive_tag.
+            TAG=$$(openssl dgst -sha256 -binary "$$ARCHIVE" | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -S 636c61776469616d -pass env:BACKUP_ENCRYPTION_PASSPHRASE | od -An -v -tx1 | tr -d " \n" | sed "s/^53616c7465645f5f[0-9a-f]\{16\}//");
+            # OpenSSL 1.1.1 prefixes Salted__ and the salt even with -S; 3.x
+            # does not. Stripped so the tag is the same on either.
+            # A tag that cannot be written leaves an archive restore refuses,
+            # so that is a failed run like an empty tag, not a success.
+            if [ -z "$$TAG" ] || ! printf "%s\n" "$$TAG" > "$$ARCHIVE.tag"; then
+              rm -f "$$ARCHIVE" "$$ARCHIVE.tag";
+              echo "encrypt-failed $$TIMESTAMP" > "$$STATUS";
+              notify "archive $$TIMESTAMP could not be tagged; nothing was kept for it";
+              return 1;
+            fi;
             if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_PASSPHRASE -in "$$ARCHIVE" -out "$$WORK"; then
               mv "$$ARCHIVE" "$$ARCHIVE.unverified";
-              rm -f "$$WORK";
+              rm -f "$$WORK" "$$ARCHIVE.tag";
               echo "verify-failed $$TIMESTAMP $$ARCHIVE.unverified" > "$$STATUS";
               notify "archive $$TIMESTAMP did not decrypt back; kept as $$ARCHIVE.unverified and not counted as a backup";
               return 1;
@@ -757,7 +778,7 @@ services:
             # --dryRun too). The suffix keeps it off both globs and inside the
             # prune.
             mv "$$ARCHIVE" "$$ARCHIVE.unverified";
-            rm -f "$$WORK";
+            rm -f "$$WORK" "$$ARCHIVE.tag";
             echo "verify-failed $$TIMESTAMP $$ARCHIVE.unverified" > "$$STATUS";
             notify "archive $$TIMESTAMP did not parse back; kept as $$ARCHIVE.unverified and not counted as a backup";
             return 1;

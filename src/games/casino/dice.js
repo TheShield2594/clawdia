@@ -9,6 +9,7 @@
 // a keyed, replayable payout. The casual no-stakes roll was dropped with the old
 // command. The payout maths live in `diceOdds.js`.
 
+const { secureRandom } = require('../../utils/secureRandom');
 const { EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
@@ -125,7 +126,7 @@ async function playDice(interaction, guildSettings, bet, sides, call, releaseLoc
         await delay(300);
     }
 
-    const result = Math.floor(Math.random() * sides) + 1;
+    const result = Math.floor(secureRandom() * sides) + 1;
     const won    = callWon(call, result, sides);
     const payout = won ? grossWin : 0;
 

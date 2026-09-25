@@ -54,6 +54,7 @@ const CONSUMED_OUTSIDE_SRC = new Set([
     'BACKUP_ENCRYPTION_PASSPHRASE',
     'BACKUP_REMOTE',
     'BACKUP_REMOTE_ALLOW_PLAINTEXT',
+    'BACKUP_ALLOW_UNTAGGED',
 ]);
 
 // Where those are allowed to turn up.
