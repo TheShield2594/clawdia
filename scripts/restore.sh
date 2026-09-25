@@ -31,8 +31,10 @@ fi
 
 # Load .env if present and MONGODB_URI is not already set
 if [ -z "${MONGODB_URI:-}" ] && [ -f "$(dirname "$0")/../.env" ]; then
-    # shellcheck disable=SC1090
-    set -a; source "$(dirname "$0")/../.env"; set +a
+    # Parsed as data, never run as shell (#1161) — see scripts/lib/dotenv.sh.
+    # shellcheck source=scripts/lib/dotenv.sh
+    . "$(dirname "$0")/lib/dotenv.sh"
+    load_dotenv "$(dirname "$0")/../.env"
 fi
 
 MONGO_URI="${MONGODB_URI:-mongodb://localhost:27017/ultrabot}"

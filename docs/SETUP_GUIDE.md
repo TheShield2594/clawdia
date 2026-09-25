@@ -1432,6 +1432,16 @@ The bot mounts the same location at `/app/backups`, which is where
 `pre-migration-*.gz` (`.gz.enc` when `BACKUP_ENCRYPTION_PASSPHRASE` is set) and
 are pruned on the same schedule.
 
+Every archive is written readable by its owner only (the backup service runs
+with `umask 077`, and so does `scripts/backup.sh`). On a compose host that owner
+is root, so run `verify-backup.sh`, `restore.sh` and `offsite-sync.sh` as root,
+or from root's crontab. The directory itself is worth closing too — the bot
+writes its pre-migration dumps there as uid 1000, so keep that owner:
+
+```bash
+sudo chown 1000 ./backups && sudo chmod 700 ./backups
+```
+
 To copy an archive out of the Portainer volume:
 
 ```bash
@@ -1532,6 +1542,15 @@ Three things are worth knowing:
   will not open is found the night it is taken rather than on the day you need
   it. One that fails either step is quarantined as `.gz.enc.unverified` and does
   not count as that day's backup.
+- **Every sealed archive is tagged, and the tag is checked before a restore.**
+  CBC has no integrity of its own: an altered archive decrypts to garbage and a
+  substituted one decrypts fine. So each `.gz.enc` is written with a
+  `.gz.enc.tag` beside it — a MAC over the ciphertext keyed by the same
+  passphrase — and `restore.sh` and `verify-backup.sh` refuse an archive whose
+  tag is missing or does not match before anything is decrypted or handed to
+  `mongorestore --drop`. `offsite-sync.sh` copies the tags with the archives.
+  Archives sealed before tags existed have none; open one of those with
+  `BACKUP_ALLOW_UNTAGGED=true` on that one command.
 - **Keep the passphrase somewhere other than `./backups`.** A passphrase stored
   beside the archives it protects protects nothing. It is also not recoverable:
   without it those archives cannot be read, so keep it for at least as long as

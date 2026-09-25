@@ -154,9 +154,10 @@ describe.each(stacks)('%s', (name, doc) => {
             // nothing about a third path that was added silently.
             const body = entrypoint.slice(entrypoint.indexOf('run_backup() {'), entrypoint.indexOf('touch "$$OK_MARKER"'));
             const gaveUp = body.split('return 1;');
-            // Four ways to end without an archive — the dump, the seal, the
-            // decrypt-back and the parse-back — so five segments around them.
-            expect([name, gaveUp.length]).toEqual([name, 5]);
+            // Five ways to end without an archive — the dump, the seal, the
+            // tag (#1161), the decrypt-back and the parse-back — so six
+            // segments around them.
+            expect([name, gaveUp.length]).toEqual([name, 6]);
             for (const segment of gaveUp.slice(0, -1)) {
                 expect([name, /notify "[^"]+";\s*$/.test(segment.trim())]).toEqual([name, true]);
             }
