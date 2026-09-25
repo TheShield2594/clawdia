@@ -8,6 +8,33 @@ const { petItemId } = require('../../../data/activityItems');
 const { sendBoard, displayNameOf } = require('../../../utils/leaderboardCard');
 const { ratingLeaderboard } = require('../../../services/petLadderService');
 
+/**
+ * Sends a pet board with its picture card: each pet in its species' portrait,
+ * its owner beneath. `cardValue(e)` gives the row's value, score and any
+ * extra detail; `titleLabel` heads the card.
+ */
+async function sendPetBoard(interaction, embed, top, titleLabel, cardValue) {
+    const owners = await Promise.all(top.map(e => interaction.client.users.fetch(e.userId).catch(() => null)));
+    return sendBoard(interaction, embed, {
+        theme: 'pets',
+        kicker: interaction.guild.name,
+        title: 'Pet Leaderboard',
+        subtitle: titleLabel,
+        entries: top.map((e, i) => {
+            const { detail, ...value } = cardValue(e);
+            const owner = `with ${displayNameOf(owners[i]) ?? 'Unknown member'}`;
+            return {
+                rank: i + 1,
+                name: `${getPetDisplay(e.pet).titledName}${e.pet.potw ? ' · POTW' : ''}`,
+                iconId: petItemId(e.pet.petId),
+                detail: detail ? `${owner} · ${detail}` : owner,
+                you: e.userId === interaction.user.id,
+                ...value,
+            };
+        }),
+    });
+}
+
 /** The pet ladder (#1185): rated pets by rating, this season. */
 async function ratingBoard(interaction) {
     const { seasonId, seasonEndsAt, rows } = await ratingLeaderboard(interaction.guild.id);
@@ -25,7 +52,13 @@ async function ratingBoard(interaction) {
             : '*No rated battles this season yet — `/pet battle opponent:@member rated:True` starts one.*')
         .setFooter({ text: 'Rated battles are level-matched • top three pets earn a season title' })
         .setTimestamp();
-    return interaction.editReply({ embeds: [embed] });
+    if (rows.length === 0) return interaction.editReply({ embeds: [embed] });
+
+    return sendPetBoard(interaction, embed, rows, `Pet Ladder · Season ${seasonId}`, e => ({
+        value: `${e.rating} rating`,
+        detail: `${e.tier.label} · ${e.wins}W / ${e.losses}L`,
+        score: e.rating,
+    }));
 }
 
 async function executeLeaderboard(interaction) {
@@ -105,22 +138,7 @@ async function executeLeaderboard(interaction) {
 
     if (top.length === 0) return interaction.editReply({ embeds: [embed] });
 
-    // The picture card: each pet in its species' portrait, its owner beneath.
-    const owners = await Promise.all(top.map(e => interaction.client.users.fetch(e.userId).catch(() => null)));
-    return sendBoard(interaction, embed, {
-        theme: 'pets',
-        kicker: interaction.guild.name,
-        title: 'Pet Leaderboard',
-        subtitle: titleLabel,
-        entries: top.map((e, i) => ({
-            rank: i + 1,
-            name: `${getPetDisplay(e.pet).titledName}${e.pet.potw ? ' · POTW' : ''}`,
-            iconId: petItemId(e.pet.petId),
-            detail: `with ${displayNameOf(owners[i]) ?? 'Unknown member'}`,
-            you: e.userId === interaction.user.id,
-            ...cardValue(e),
-        })),
-    });
+    return sendPetBoard(interaction, embed, top, titleLabel, cardValue);
 }
 
 module.exports = { executeLeaderboard };

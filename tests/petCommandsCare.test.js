@@ -1045,12 +1045,17 @@ describe('/pet leaderboard', () => {
 
         const interaction = await run('leaderboard', { type: 'rating' });
 
-        const embed = interaction.replies.at(-1).embeds[0].data;
+        const embed = interaction.replies.at(-1).embeds.at(-1).data;
         expect(embed.title).toBe('🐾 Pet Ladder — S2');
         const lines = embed.description.split('\n');
         expect(lines[0]).toBe('🥇 🌕 **Seasoned Ghost** — 💎 **1512** · 9W / 1L — <@u2>');
         expect(lines[1]).toBe('🥈 🐶 **Rex** — 🥇 **1340** · 6W / 2L — <@u1>');
         expect(mockUsers.model.aggregate).not.toHaveBeenCalled();
+        // The picture card leads, with the same ladder in words.
+        const reply = interaction.replies.at(-1);
+        expect(reply.embeds[0].data.image.url).toBe('attachment://leaderboard.png');
+        expect(reply.files[0].description).toContain('1. Seasoned Ghost, 1512 rating');
+        expect(reply.files[0].description).toContain('Platinum · 9W / 1L');
     });
 
     test('by rating, with no rated battles yet, says how to start one', async () => {
