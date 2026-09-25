@@ -10,6 +10,7 @@ const {
     pickDefenderPet,
     getPetDisplay,
     getPetStats,
+    getSpeciesMove,
     simulateBattle,
     makeWildPet,
     levelMatched,
@@ -49,13 +50,32 @@ function hpBar(current, max, length = 10) {
     return '🟩'.repeat(Math.min(filled, length)) + '⬛'.repeat(Math.max(0, length - filled));
 }
 
-// Compact battle log: highlight up to the last few exchanges of the fight.
+// Lines kept in the battle log, and how many of the last exchanges always show.
+const BATTLE_LOG_MAX  = 8;
+const BATTLE_LOG_TAIL = 4;
+
+/**
+ * Compact battle log, at most BATTLE_LOG_MAX lines: the last few exchanges of
+ * the fight, plus earlier rounds where a signature move fired (#1183), so a
+ * Pack Howl on round two is not cut off by the rounds after it. In a long
+ * fight with many moves, the earliest move rounds are the ones dropped.
+ */
 function battleLogLines(rounds, nameA, nameB) {
-    return rounds.slice(-6).map(rd => {
-        const who = rd.attacker === 'a' ? nameA : nameB;
-        const tgt = rd.attacker === 'a' ? nameB : nameA;
-        const crit = rd.crit ? ' 💥' : '';
-        return `• **${who}** hits **${tgt}** for **${rd.damage}**${crit}`;
+    const nameOf = side => (side === 'a' ? nameA : nameB);
+    const keep = rounds
+        .map((rd, i) => ({ rd, i }))
+        .filter(({ rd, i }) => i >= rounds.length - BATTLE_LOG_TAIL || rd.moves?.length)
+        .slice(-BATTLE_LOG_MAX);
+    return keep.map(({ rd }) => {
+        const who = nameOf(rd.attacker);
+        const tgt = nameOf(rd.attacker === 'a' ? 'b' : 'a');
+        const hit = rd.missed
+            ? `• **${who}** misses **${tgt}**`
+            : `• **${who}** hits **${tgt}** for **${rd.damage}**${rd.crit ? ' 💥' : ''}`;
+        // One mention per move per round, e.g. Crystal Ward soaking a double hit.
+        const moves = [...new Map((rd.moves ?? []).map(m => [`${m.side}:${m.name}`, m])).values()]
+            .map(m => ` · 🌀 ${nameOf(m.side)}'s *${m.name}*`);
+        return hit + moves.join('');
     });
 }
 
@@ -72,7 +92,14 @@ function onBattleCooldown(pet) {
 // Snapshot the combat-relevant fields so result rendering reflects PRE-battle
 // state even after applyPetXp mutates the live pet (level/stage/xp).
 function petSnapshot(pet) {
-    return { petId: pet.petId, name: pet.name, personality: pet.personality, level: pet.level ?? 1, evolutionStage: pet.evolutionStage ?? 1 };
+    const training = pet.training ? { ...(pet.training.toObject ? pet.training.toObject() : pet.training) } : undefined;
+    return { petId: pet.petId, name: pet.name, personality: pet.personality, level: pet.level ?? 1, evolutionStage: pet.evolutionStage ?? 1, training };
+}
+
+/** "Pack Howl" in italics after a name, for the intro lines, or ''. */
+function moveTag(petId) {
+    const move = getSpeciesMove(petId);
+    return move ? ` · 🌀 *${move.name}*` : '';
 }
 
 // petA/petB must be PRE-battle snapshots: result.finalHpA/B and the HP-bar
@@ -207,7 +234,10 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
     const intro = new EmbedBuilder()
         .setColor(COLORS.RARE)
         .setTitle('⚔️ A wild challenger appears!')
-        .setDescription(`${da.emoji} **${da.titledName}** squares off against ${db.emoji} **${db.name}** (Lv.${wild.level})…`);
+        .setDescription(
+            `${da.emoji} **${da.titledName}**${moveTag(mySnap.petId)}\n`
+            + `squares off against ${db.emoji} **${db.name}** (Lv.${wild.level})${moveTag(wild.petId)}…`
+        );
     if (wildArt) intro.setThumbnail(wildArt.url);
     await interaction.editReply({ embeds: [intro], files: artFiles });
     await _delay(1500);
@@ -356,7 +386,10 @@ async function pvpBattle(interaction, ctx) {
 
         const intro = new EmbedBuilder()
             .setColor(COLORS.RARE).setTitle('⚔️ Battle commencing…')
-            .setDescription(`${getPetDisplay(aPet).emoji} **${getPetDisplay(aPet).titledName}**  🆚  ${getPetDisplay(bPet).emoji} **${getPetDisplay(bPet).titledName}**`);
+            .setDescription(
+                `${getPetDisplay(aPet).emoji} **${getPetDisplay(aPet).titledName}**${moveTag(aPet.petId)}\n🆚\n`
+                + `${getPetDisplay(bPet).emoji} **${getPetDisplay(bPet).titledName}**${moveTag(bPet.petId)}`
+            );
         await interaction.editReply({ content: null, embeds: [intro], components: [] }).catch(() => {});
         await _delay(1800);
 

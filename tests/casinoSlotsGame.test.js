@@ -15,6 +15,9 @@
  *     prompt, so the biggest bets were the ones the channel never saw
  *   - an error left the "Spinning…" card up under the error text
  *   - "Three Cherrys"
+ *
+ * And the machine image (#1199): every frame carries a picture of the machine
+ * with alt text, and the embed beside it keeps the numbers.
  */
 
 jest.mock('../src/models/User', () => ({
@@ -34,6 +37,12 @@ jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async ()
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
 jest.mock('../src/utils/guildSettingsCache', () => ({ getGuildSettings: jest.fn() }));
 // Fixed spins, when a test queues them: see tests/helpers/slotsSpins.js.
+// The machine image is drawn for real in tests/casinoSlotsTable.test.js; here
+// it only has to exist, and the views it was asked to draw are what is checked.
+jest.mock('../src/games/casino/slotsTable', () => ({
+    ...jest.requireActual('../src/games/casino/slotsTable'),
+    renderMachine: jest.fn(async () => Buffer.from('jpg')),
+}));
 let mockSpins = [];
 jest.mock('../src/games/casino/slotsReels', () => {
     const actual = jest.requireActual('../src/games/casino/slotsReels');
@@ -45,7 +54,8 @@ const User  = require('../src/models/User');
 const Guild = require('../src/models/Guild');
 const { getGuildSettings } = require('../src/utils/guildSettingsCache');
 const slots = require('../src/games/casino/slots');
-const { BY_NAME, TRIPLE_BOOST_MULT, FREE_SPINS } = jest.requireActual('../src/games/casino/slotsReels');
+const { renderMachine } = require('../src/games/casino/slotsTable');
+const { BY_NAME, TRIPLE_BOOST_MULT, FREE_SPINS, HEAT_MAX } = jest.requireActual('../src/games/casino/slotsReels');
 const { makeInteraction, repliedText } = require('./helpers/fakeInteraction');
 const { walletDoc, GUILD_ID, USER_ID, BET } = require('./helpers/casinoInteraction');
 const { view } = require('./helpers/slotsSpins');
@@ -75,6 +85,8 @@ const debits = () => User.findOneAndUpdate.mock.calls
 const resultOf = interaction => interaction.replies.filter(r => r?.components?.length).at(-1);
 const field = (embed, name) => embed.data.fields.find(f => f.name.includes(name))?.value;
 const buttons = payload => payload.components.flatMap(row => row.components).map(c => c.data);
+/** Every machine view the game asked to draw, in order. */
+const drawn = () => renderMachine.mock.calls.map(([v]) => v);
 
 async function play(spins, { bet = BET, interaction = null, ...opts } = {}) {
     mockSpins = [...spins];
@@ -94,6 +106,7 @@ beforeEach(() => {
     jest.useFakeTimers();
     mockSpins = [];
     errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    renderMachine.mockImplementation(async () => Buffer.from('jpg'));
     guild = { guildId: GUILD_ID, economy: { ...OPEN } };
     Guild.findOne.mockImplementation(() => query(guild));
     Guild.findOneAndUpdate.mockResolvedValue(null);
@@ -136,13 +149,27 @@ describe('the result card', () => {
         expect(credits()).toEqual([]);
     }, 20_000);
 
-    test('shows the whole 3×3 window, payline marked', async () => {
+    test('without the image, shows the whole 3×3 window in text, payline marked', async () => {
+        renderMachine.mockRejectedValue(new Error('no canvas'));
         const spin = await play([view(['Star', 'Star', 'Star'], { above: ['Bell', 'Bell', 'Bell'], below: ['Grape', 'Grape', 'Grape'] })]);
 
-        const [top, line, bottom] = resultOf(spin).embeds[0].data.description.split('\n');
+        const result = resultOf(spin);
+        expect(result.files).toEqual([]);
+        expect(result.embeds[0].data.image).toBeUndefined();
+        const [top, line, bottom] = result.embeds[0].data.description.split('\n');
         expect(top).toBe('▪️ 🔔 🔔 🔔 ▪️');
         expect(line).toBe('▶️ 🌟 🌟 🌟 ◀️');
         expect(bottom).toBe('▪️ 🍇 🍇 🍇 ▪️');
+    }, 20_000);
+
+    test('with the image, the window is in the picture and its alt text, not the embed', async () => {
+        const spin = await play([view(['Star', 'Star', 'Star'], { above: ['Bell', 'Bell', 'Bell'], below: ['Grape', 'Grape', 'Grape'] })]);
+
+        const result = resultOf(spin);
+        expect(result.embeds[0].data.description).not.toContain('▶️');
+        expect(result.files[0].description).toContain('Payline: Star, Star, Star');
+        expect(result.files[0].description).toContain('Above it: Bell, Bell, Bell');
+        expect(result.files[0].description).toContain('Below it: Grape, Grape, Grape');
     }, 20_000);
 });
 
@@ -193,18 +220,147 @@ describe('free spins', () => {
         expect(field(resultOf(spin).embeds[0], 'Balance')).toBe(`**${(10_000 - BET + line + free).toLocaleString()}**`);
     }, 20_000);
 
-    test('are introduced with the scatters in view, then shown one by one', async () => {
+    test('are introduced with the scatters in view, then played on one strip in a few edits', async () => {
         const { spins } = FREE_SPINS[2];
         const spin = await play([SCATTERED(), ...runOf(spins)]);
 
         const titles = spin.replies.flatMap(r => r?.embeds ?? []).map(e => e.data.title ?? '');
         const intro = titles.findIndex(t => t.startsWith('🌸 FREE SPINS'));
         expect(intro).toBeGreaterThanOrEqual(0);
-        const introEmbed = spin.replies.flatMap(r => r?.embeds ?? [])[intro];
-        expect(introEmbed.data.description.split('\n')[0]).toContain('🌸');
-        for (let n = 1; n <= spins; n++) {
-            expect(titles.slice(intro)).toContainEqual(`🌸 Free Spin ${n} of ${spins}`);
+
+        // The intro's picture outlines both Scatters, off the line, and the line.
+        const introView = drawn().find(v => v.banner?.text.startsWith('FREE SPINS ×'));
+        expect(introView.banner).toEqual({ text: `FREE SPINS × ${spins}`, tone: 'gold' });
+        expect(introView.reels.map(r => [...r.hits].sort())).toEqual([[0, 1], [1, 2], [1]]);
+        expect(introView.tag.text).toBe('THREE BELLS · 20×');
+
+        // Three edits fill the strip, not one per spin.
+        const batches = titles.slice(intro).filter(t => t.startsWith('🌸 Free Spins ·'));
+        expect(batches).toEqual([`🌸 Free Spins · 3 of ${spins}`, `🌸 Free Spins · 6 of ${spins}`, `🌸 Free Spins · ${spins} of ${spins}`]);
+        const strips = drawn().filter(v => v.free && v.tag.text.startsWith('FREE SPIN '));
+        expect(strips.map(v => v.free.filter(Boolean).length)).toEqual([3, 6, spins]);
+        expect(strips.every(v => v.free.length === spins)).toBe(true);
+
+        // The running total is on the banner; the Star line paid on the first spin.
+        const star = BET * BY_NAME.get('Star').three;
+        expect(strips[0].banner.text).toBe(`FREE SPINS  +${star.toLocaleString()}`);
+        expect(strips[0].free[0]).toEqual({ cells: ['star', 'star', 'star'], pay: star });
+        expect(strips[0].free[1]).toEqual({ cells: ['cherry', 'lemon', 'grape'], pay: 0 });
+    }, 20_000);
+
+    test('the result keeps the finished strip, under the whole spin’s banner', async () => {
+        const { spins } = FREE_SPINS[2];
+        const spin = await play([SCATTERED(), ...runOf(spins)]);
+
+        const final = drawn().at(-1);
+        const line = BET * BY_NAME.get('Bell').three;
+        const free = BET * BY_NAME.get('Star').three;
+        expect(final.free.every(Boolean)).toBe(true);
+        expect(final.tag.text).toBe(`1 OF ${spins} FREE SPINS HIT · +${free.toLocaleString()}`);
+        expect(final.banner).toEqual({ text: `EPIC WIN  +${(line + free - BET).toLocaleString()}`, tone: 'gold' });
+        expect(resultOf(spin).files[0].description).toContain('Free spins, 8 of 8 played');
+    }, 20_000);
+});
+
+describe('the machine image', () => {
+    const frames = interaction => interaction.replies.filter(r => r?.embeds?.length);
+
+    test('every frame carries the image, with alt text, and replaces the last one', async () => {
+        const spin = await play([LOSER()]);
+
+        const shown = frames(spin);
+        expect(shown.length).toBeGreaterThan(1);
+        for (const frame of shown) {
+            expect(frame.attachments).toEqual([]);
+            expect(frame.files).toHaveLength(1);
+            expect(frame.files[0].name).toBe('slots.jpg');
+            expect(frame.files[0].description.length).toBeGreaterThan(20);
+            expect(frame.embeds[0].data.image.url).toBe('attachment://slots.jpg');
         }
+    }, 20_000);
+
+    test('a spin draws the spinning frame, reel 1, reel 2, then the result', async () => {
+        await play([view(['Star', 'Star', 'Star'])]);
+
+        const views = drawn();
+        expect(views).toHaveLength(4);
+        expect(views.map(v => v.reels.map(r => Boolean(r.cells)))).toEqual([
+            [false, false, false],
+            [true, false, false],
+            [true, true, false],
+            [true, true, true],
+        ]);
+        // The spinning frame is always the same frame: nothing on it but the status row.
+        expect(views[0]).toMatchObject({ tag: null, status: 'SPINNING…' });
+        expect(views[0].reels.every(r => !r.glow)).toBe(true);
+    }, 20_000);
+
+    test('the result outlines the line, names it, and banners the tier; the embed keeps the numbers', async () => {
+        const spin = await play([view(['Star', 'Star', 'Star'])]);
+
+        const result = drawn().at(-1);
+        const won = BET * BY_NAME.get('Star').three;
+        expect(result.reels.map(r => r.hits)).toEqual([[1], [1], [1]]);
+        expect(result.tag).toEqual({ text: 'THREE STARS · 88×', tone: 'win' });
+        expect(result.banner).toEqual({ text: `EPIC WIN  +${(won - BET).toLocaleString()}`, tone: 'gold' });
+
+        const payload = resultOf(spin);
+        expect(payload.files[0].description).toContain('THREE STARS · 88×');
+        expect(payload.files[0].description).toContain('EPIC WIN');
+        const embed = payload.embeds[0];
+        expect(embed.data.description).toContain('Three Stars');
+        expect(field(embed, 'Won')).toBe(`**${won.toLocaleString()}**`);
+        expect(field(embed, 'Balance')).toBeDefined();
+        expect(embed.data.footer.text).toContain('Session · 1 spin · wagered 100');
+    }, 20_000);
+
+    test('a pair outlines only the cells that made it', async () => {
+        await play([view(['Star', 'Cherry', 'Wild'])]);
+        const result = drawn().at(-1);
+        expect(result.reels.map(r => r.hits)).toEqual([[1], [], [1]]);
+        expect(result.tag.text).toBe('PAIR OF STARS · 8×');
+    }, 20_000);
+
+    test('a loss says NO WIN, with no line pill', async () => {
+        await play([LOSER()]);
+        const result = drawn().at(-1);
+        expect(result.banner).toEqual({ text: 'NO WIN', tone: 'lose' });
+        expect(result.tag).toBeNull();
+        expect(result.reels.every(r => r.hits.length === 0)).toBe(true);
+    }, 20_000);
+
+    test('two Wilds hold the last reel with a gold glow and a tease pill', async () => {
+        const spin = await play([view(['Wild', 'Wild', 'Cherry'])]);
+
+        const tease = drawn()[2];
+        expect(tease.reels[2]).toMatchObject({ cells: null, glow: 'gold' });
+        expect(tease.tag).toEqual({ text: 'ONE MORE WILD FOR THE JACKPOT', tone: 'gold' });
+        expect(frames(spin)[2].files[0].description).toContain('ONE MORE WILD FOR THE JACKPOT');
+        expect(frames(spin)[2].embeds[0].data.description).toContain('One more Wild for the jackpot');
+    }, 20_000);
+
+    test('a Hot Spin starts with reel 1 stopped, glowing orange, under a HOT SPIN pill', async () => {
+        const hotWallet = walletDoc({ casinoStats: { slotsHeat: HEAT_MAX } });
+        User.findOneAndUpdate.mockImplementation(() => Promise.resolve(hotWallet));
+        await play([view(['Star', 'Cherry', 'Lemon'])]);
+
+        const [first] = drawn();
+        expect(drawn()).toHaveLength(3);
+        expect(first).toMatchObject({ hot: true, tag: { text: 'HOT SPIN · REEL 1 LOCKED', tone: 'hot' } });
+        expect(first.reels[0]).toMatchObject({ cells: ['cherry', 'star', 'grape'], glow: 'hot' });
+        expect(first.reels[1].cells).toBeNull();
+        // The result's meter reads the heat after the spin: emptied.
+        expect(drawn().at(-1)).toMatchObject({ hot: false, heat: 0 });
+    }, 20_000);
+
+    test('a Triple Wild glows every reel gold, and only claims the pot on the pill when it was paid', async () => {
+        // No pool to claim here (the guild update finds nothing), so the line
+        // pays alone and the pill does not promise the pot.
+        await play([view(['Wild', 'Wild', 'Wild'])]);
+        const result = drawn().at(-1);
+        expect(result.reels.every(r => r.glow === 'gold')).toBe(true);
+        expect(result.tag).toEqual({ text: 'TRIPLE WILD · 100×', tone: 'gold' });
+        expect(result.banner.text).toMatch(/^EPIC WIN {2}\+/);
     }, 20_000);
 });
 
@@ -371,6 +527,21 @@ describe('the big-win announcement', () => {
 
         expect(channel.send).toHaveBeenCalledTimes(1);
         expect(channel.send.mock.calls[0][0].embeds[0].data.description).toContain('Three Stars');
+    }, 20_000);
+
+    test('names a free-spin run as one, not as "Three" of the pair that won it', async () => {
+        guild.economy.announcementChannelId = 'announce-1';
+        const { channel, channels } = announcer();
+        const pairWithScatters = view(['Bell', 'Bell', 'Lemon'], {
+            above: ['Scatter', 'Grape', 'Cherry'],
+            below: ['Grape', 'Scatter', 'Lemon'],
+        });
+        const run = [view(['Star', 'Star', 'Star']), ...Array.from({ length: FREE_SPINS[2].spins - 1 }, LOSER)];
+        await play([pairWithScatters, ...run], { channels });
+
+        const text = channel.send.mock.calls[0][0].embeds[0].data.description;
+        expect(text).toContain('free-spin run');
+        expect(text).not.toContain('Three');
     }, 20_000);
 
     test('is not repeated in the channel the spin is already in', async () => {

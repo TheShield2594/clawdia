@@ -28,6 +28,11 @@ const {
     getEffectiveBonusPct,
     formatPetBonus,
     petBonusParts,
+    TRAIN_FOCUSES,
+    TRAIN_MAX_SESSIONS,
+    trainingSessions,
+    trainingPct,
+    getSpeciesMove,
 } = require('./petService');
 const { MATERIAL_RARITY } = require('../data/materialRarity');
 const { getItemImageAttachment } = require('../utils/itemImageHelper');
@@ -85,9 +90,8 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
         ? `${lastFedH}h ago`
         : `${Math.floor(lastFedH / 24)}d ago`;
 
-    const isResting  = pet.restUntil && new Date(pet.restUntil).getTime() > Date.now();
-    const potwLine   = pet.potw     ? '\n🌟 **Pet of the Week**'               : '';
-    const restLine   = isResting    ? '\n🛏️ *Resting — hunger decays slower*' : '';
+    const potwLine   = pet.potw ? '\n🌟 **Pet of the Week**' : '';
+    const move       = getSpeciesMove(pet.petId);
 
     const personalityDef = pet.personality ? PERSONALITY_TRAITS[pet.personality] : null;
     const personalityLine = personalityDef ? `\n${personalityDef.emoji} *${personalityDef.label}* — ${personalityDef.desc}` : '';
@@ -112,13 +116,15 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
     const embed = new EmbedBuilder()
         .setColor(moodColor)
         .setAuthor({ name: `${getPetDisplay(pet).titledName} • ${def?.name ?? pet.petId}`, iconURL: ownerAvatarURL })
-        .setDescription(`${dispEmoji} *${moodLine}*${personalityLine}${potwLine}${restLine}`)
+        .setDescription(`${dispEmoji} *${moodLine}*${personalityLine}${potwLine}`)
         .addFields(
             { name: '📈 Level',             value: levelLine,                            inline: false },
             { name: '❤️ Bond',              value: bondText(pet),                        inline: false },
             { name: '🍖 Hunger',            value: hungerBar(hunger),                    inline: false },
             { name: `${bonusEmoji} Bonus`,  value: bonusLabel,                           inline: true  },
             { name: '⚔️ Battle Record',     value: record,                               inline: true  },
+            { name: '🌀 Signature Move',    value: move ? `**${move.name}** — ${move.desc}` : '—', inline: false },
+            { name: '🏋️ Training',          value: trainingText(pet),                    inline: false },
             { name: '🍗 Favourite Food',    value: favouriteLine,                        inline: false },
         )
         .setFooter({ text: `Pet ${index + 1} of ${total} • Last fed ${lastFedStr}` })
@@ -129,14 +135,16 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
 
 /**
  * The button rows under a status card: a prev/next nav row (only when the owner
- * has more than one pet) and the play/rest/showcase action row. `userId` is
- * baked into every custom id so the collector can reject other users' clicks.
+ * has more than one pet), the play/showcase row and the three training focuses
+ * (#1182, which replaced Rest). `userId` is baked into every custom id so the
+ * collector can reject other users' clicks. Given the pet, each training button
+ * shows its sessions and is disabled once that focus is maxed.
  *
  * The action buttons also carry the pet's stable `_id`: the card stays open for
  * 90s, and a release or a starvation death in that window shifts every later
- * index, which used to land a Play/Rest/Showcase click on a different pet.
+ * index, which used to land a Play/Train/Showcase click on a different pet.
  */
-function buildNavComponents(userId, index, total, petId = null) {
+function buildNavComponents(userId, index, total, petId = null, pet = null) {
     const ref = petId != null ? `${index}:${petId}` : `${index}`;
     const rows = [];
 
@@ -160,12 +168,37 @@ function buildNavComponents(userId, index, total, petId = null) {
     rows.push(
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`pet_play:${userId}:${ref}`)     .setLabel('🎾 Play')     .setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId(`pet_rest:${userId}:${ref}`)     .setLabel('🛏️ Rest')    .setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId(`pet_showcase:${userId}:${ref}`) .setLabel('📷 Showcase') .setStyle(ButtonStyle.Secondary),
-        )
+        ),
+        new ActionRowBuilder().addComponents(
+            Object.values(TRAIN_FOCUSES).map((f) => {
+                const done = pet ? trainingSessions(pet, f.focus) : null;
+                return new ButtonBuilder()
+                    .setCustomId(`pet_train_${f.focus}:${userId}:${ref}`)
+                    .setLabel(`${f.emoji} Train ${f.label}${done != null ? ` ${done}/${TRAIN_MAX_SESSIONS}` : ''}`)
+                    .setStyle(ButtonStyle.Primary)
+                    .setDisabled(done != null && done >= TRAIN_MAX_SESSIONS);
+            }),
+        ),
     );
 
     return rows;
+}
+
+/**
+ * A pet's training as one line, e.g. "💪 Power +2% ATK (5/10) · 🛡️ Guard — ·
+ * 💨 Agility +9% SPD, +1.5 pts crit (3/10)", or a prompt when it has none.
+ */
+function trainingText(pet) {
+    const parts = Object.values(TRAIN_FOCUSES).map((f) => {
+        const n = trainingSessions(pet, f.focus);
+        if (n === 0) return `${f.emoji} ${f.label} —`;
+        const crit = f.critPerSession ? `, +${Math.round(n * f.critPerSession * 1000) / 10} pts crit` : '';
+        return `${f.emoji} ${f.label} +${trainingPct(n, f.focus)}% ${f.stat.toUpperCase()}${crit} (${n}/${TRAIN_MAX_SESSIONS})`;
+    });
+    return parts.every(p => p.endsWith('—'))
+        ? 'Untrained — use the Train buttons below'
+        : parts.join(' · ');
 }
 
 // ─── The companion card ──────────────────────────────────────────────────────
@@ -182,16 +215,6 @@ function bondText(pet, now = Date.now()) {
 function lastFedText(pet, now = Date.now()) {
     const h = Math.floor((pet.lastFed ? now - new Date(pet.lastFed).getTime() : 0) / 3600000);
     return h < 1 ? 'just now' : h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
-}
-
-/** Minutes of rest left, or 0 when the pet is not resting. */
-function restMinutesLeft(pet, now = Date.now()) {
-    const until = pet.restUntil ? new Date(pet.restUntil).getTime() : 0;
-    return until > now ? Math.ceil((until - now) / 60000) : 0;
-}
-
-function formatMinutes(mins) {
-    return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
 }
 
 /**
@@ -213,6 +236,16 @@ function petCardOptions(pet, { kicker, footerLeft = null, footerRight = null }, 
     const stage   = pet.evolutionStage ?? 1;
     const boosted = Object.entries(PERSONALITY_COMBAT[pet.personality] ?? {})
         .filter(([, v]) => v > 0).map(([k]) => k);
+    // Training shows on the stat tile it raises (#1182), as "+4%" in the
+    // corner; Agility also raises crit, so its crit tile says so too.
+    const trained = {};
+    for (const f of Object.values(TRAIN_FOCUSES)) {
+        const n = trainingSessions(pet, f.focus);
+        if (n === 0) continue;
+        trained[f.stat] = `+${trainingPct(n, f.focus)}%`;
+        if (f.critPerSession) trained.crit = `+${Math.round(n * f.critPerSession * 1000) / 10} pts`;
+    }
+    const move = getSpeciesMove(pet.petId);
     // Clamped: stored XP that ran past its level (older data, a manual edit)
     // would otherwise print "1,340 / 380 XP".
     const xpToNext  = maxed ? 0 : xpForLevel(level + 1) - xpForLevel(level);
@@ -246,6 +279,8 @@ function petCardOptions(pet, { kicker, footerLeft = null, footerRight = null }, 
         } : null,
         stats:       getPetStats(pet),
         boosted,
+        trained,
+        move:        move ? move.name : null,
         record: {
             wins:      pet.battleWins   ?? 0,
             losses:    pet.battleLosses ?? 0,
@@ -264,8 +299,9 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** The card's alt text: what it shows, in words, for anyone who cannot see it. */
 function cardAltText(o) {
     const bonus = o.bonus ? `, passive +${o.bonus.pct}${o.bonus.unit ?? '%'} ${o.bonus.label} ${o.bonus.active ? 'active' : 'inactive'}` : '';
+    const move  = o.move ? `, signature move ${o.move}` : '';
     return `Companion card for ${o.titledName}, a level ${o.level} ${o.personality ? `${o.personality.toLowerCase()} ` : ''}`
-        + `${o.species}${o.potw ? ', Pet of the Week' : ''}: hunger ${Math.round(o.hunger)}%, bond ${o.bondTitle ? `${o.bondTitle.toLowerCase()} ` : ''}${o.bond}/${o.bondMax ?? 100}${bonus}, `
+        + `${o.species}${o.potw ? ', Pet of the Week' : ''}: hunger ${Math.round(o.hunger)}%, bond ${o.bondTitle ? `${o.bondTitle.toLowerCase()} ` : ''}${o.bond}/${o.bondMax ?? 100}${bonus}${move}, `
         + `record ${plural(o.record.wins, 'win')} and ${plural(o.record.losses, 'loss', 'losses')}.`;
 }
 
@@ -302,18 +338,19 @@ function buildPetCardEmbed(pet, index, total, ownerAvatarURL, cardName, now = Da
         ? 'MAX'
         : `${(pet.xp ?? 0) - xpForLevel(level)}/${xpForLevel(level + 1) - xpForLevel(level)} XP`;
     const personalityDef = pet.personality ? PERSONALITY_TRAITS[pet.personality] : null;
-    const rest = restMinutesLeft(pet, now);
+    const move = getSpeciesMove(pet.petId);
 
     const lines = [
         `${display.emoji} ${action ? `*${action}* — ` : ''}${getMoodLine(pet, now)}`,
         personalityDef ? `${personalityDef.emoji} **${personalityDef.label}** — ${personalityDef.desc}` : null,
         pet.potw ? '🌟 **Pet of the Week**' : null,
-        rest ? `🛏️ Resting for ${formatMinutes(rest)} — hunger decays at half speed` : null,
         '',
         `📈 Lv **${level}** (${xpNote}) · 🍖 **${Math.round(hunger)}%** · ❤️ **${getBondTier(pet, now).title}** ${Math.floor(effectiveBond(pet, now))}/${BOND_MAX} · `
             + `${bonusOn ? '✅' : '❌'} ${formatPetBonus(def?.bonusType, getEffectiveBonusPct(pet, now))}`
             + `${bonusOn ? '' : ` *(feed above ${STARVING_THRESHOLD}%)*`}`,
-        `⚔️ ${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L · PvP ${pet.pvpWins ?? 0}-${pet.pvpLosses ?? 0}`,
+        `⚔️ ${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L · PvP ${pet.pvpWins ?? 0}-${pet.pvpLosses ?? 0}`
+            + `${move ? ` · 🌀 **${move.name}** — ${move.desc}` : ''}`,
+        `🏋️ ${trainingText(pet)}`,
     ];
     if (def) {
         const favMeta = MATERIAL_RARITY[def.favoriteMaterial];
@@ -338,12 +375,11 @@ function buildPetCardEmbed(pet, index, total, ownerAvatarURL, cardName, now = Da
  * dangling below the embed.
  */
 async function renderPetStatus(pet, index, total, ownerAvatarURL, guildId, userId, ownerName = null) {
-    const components = buildNavComponents(userId, index, total, pet._id != null ? String(pet._id) : null);
-    const rest = restMinutesLeft(pet);
+    const components = buildNavComponents(userId, index, total, pet._id != null ? String(pet._id) : null, pet);
     const card = await renderPetCard(pet, {
         kicker:      ownerName ? `${ownerName}'s companion` : 'Companion',
         footerLeft:  `Pet ${index + 1} of ${total}`,
-        footerRight: `Last fed ${lastFedText(pet)}${rest ? `  ·  Resting ${formatMinutes(rest)}` : ''}`,
+        footerRight: `Last fed ${lastFedText(pet)}`,
     });
     if (card) {
         return {
@@ -367,5 +403,5 @@ async function renderPetStatus(pet, index, total, ownerAvatarURL, guildId, userI
 
 module.exports = {
     HUNGER_BAR_LENGTH, hungerBar, petArt, buildPetEmbed, buildNavComponents, renderPetStatus,
-    petCardOptions, renderPetCard, buildPetCardEmbed, cardAltText, bondText,
+    petCardOptions, renderPetCard, buildPetCardEmbed, cardAltText, bondText, trainingText,
 };

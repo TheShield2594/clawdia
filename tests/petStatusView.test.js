@@ -45,7 +45,6 @@ function makePet(overrides = {}) {
         battleWins: 3,
         battleLosses: 1,
         potw: true,
-        restUntil: new Date(Date.now() + 3600000),
         ...overrides,
     };
 }
@@ -74,12 +73,14 @@ describe('hungerBar', () => {
 });
 
 describe('buildPetEmbed', () => {
-    test('a fed, resting, POTW pet renders an active bonus and a thumbnail', () => {
+    test('a fed POTW pet renders an active bonus, its move, its training and a thumbnail', () => {
         const json = buildPetEmbed(makePet(), 0, 2, 'https://avatar', 'attachment://pet.png').toJSON();
         expect(json.author.name).toContain('Dog');
         expect(json.thumbnail.url).toBe('attachment://pet.png');
         expect(json.description).toContain('🌟'); // POTW line
-        expect(json.description).toContain('Resting');
+        expect(json.description).not.toContain('Resting');
+        expect(json.fields.find(f => f.name.includes('Signature Move')).value).toBe('**Stand Firm** — Sometimes braces and shrugs off a quarter of a hit.');
+        expect(json.fields.find(f => f.name.includes('Training')).value).toBe('Untrained — use the Train buttons below');
         const bonus = json.fields.find(f => f.name.startsWith('✅'));
         expect(bonus).toBeTruthy();
         expect(json.footer.text).toContain('Pet 1 of 2');
@@ -87,7 +88,7 @@ describe('buildPetEmbed', () => {
 
     test('a starving pet with no personality marks the bonus inactive and sets no thumbnail', () => {
         const json = buildPetEmbed(
-            makePet({ hunger: 0, lastFed: new Date(Date.now() - 30 * DAY), lastDecayAt: new Date(Date.now() - 30 * DAY), personality: null, potw: false, restUntil: null }),
+            makePet({ hunger: 0, lastFed: new Date(Date.now() - 30 * DAY), lastDecayAt: new Date(Date.now() - 30 * DAY), personality: null, potw: false }),
             0, 1, 'https://avatar',
         ).toJSON();
         expect(json.fields.find(f => f.name.startsWith('❌'))).toBeTruthy();
@@ -118,14 +119,23 @@ describe('buildPetEmbed', () => {
 describe('buildNavComponents', () => {
     test('a single pet gets no prev/next row', () => {
         const rows = buildNavComponents('u1', 0, 1);
-        expect(rows).toHaveLength(1); // just the action row
-        const ids = rows[0].toJSON().components.map(c => c.custom_id);
-        expect(ids).toEqual(['pet_play:u1:0', 'pet_rest:u1:0', 'pet_showcase:u1:0']);
+        expect(rows).toHaveLength(2); // the action row and the training row
+        const ids = rows.flatMap(r => r.toJSON().components.map(c => c.custom_id));
+        expect(ids).toEqual(['pet_play:u1:0', 'pet_showcase:u1:0', 'pet_train_power:u1:0', 'pet_train_guard:u1:0', 'pet_train_agility:u1:0']);
     });
 
     test("the action buttons carry the pet's id when given one", () => {
-        const ids = buildNavComponents('u1', 2, 3, 'abc123')[1].toJSON().components.map(c => c.custom_id);
-        expect(ids).toEqual(['pet_play:u1:2:abc123', 'pet_rest:u1:2:abc123', 'pet_showcase:u1:2:abc123']);
+        const ids = buildNavComponents('u1', 2, 3, 'abc123').slice(1).flatMap(r => r.toJSON().components.map(c => c.custom_id));
+        expect(ids).toEqual([
+            'pet_play:u1:2:abc123', 'pet_showcase:u1:2:abc123',
+            'pet_train_power:u1:2:abc123', 'pet_train_guard:u1:2:abc123', 'pet_train_agility:u1:2:abc123',
+        ]);
+    });
+
+    test('given the pet, each Train button shows its sessions and a maxed one is disabled (#1182)', () => {
+        const train = buildNavComponents('u1', 0, 1, 'p', { training: { power: 3, guard: 10 } })[1].toJSON().components;
+        expect(train.map(b => b.label)).toEqual(['💪 Train Power 3/10', '🛡️ Train Guard 10/10', '💨 Train Agility 0/10']);
+        expect(train.map(b => !!b.disabled)).toEqual([false, true, false]);
     });
 
     test('multiple pets get a nav row, with the ends disabled at the ends', () => {
@@ -160,13 +170,15 @@ describe('petArt / renderPetStatus', () => {
         expect(payload.files[0].name).toBe('pet-card.png');
         expect(payload.files[0].description)
             .toBe('Companion card for Seasoned Rex, a level 12 loyal Dog, Pet of the Week: hunger 80%, bond friendly 20/100, '
-                + 'passive +9.2% work earnings active, record 3 wins and 1 loss.');
+                + 'passive +9.2% work earnings active, signature move Stand Firm, record 3 wins and 1 loss.');
         expect(payload.attachments).toEqual([]);
         const json = payload.embeds[0].toJSON();
         expect(json.image.url).toBe('attachment://pet-card.png');
         expect(json.thumbnail).toBeUndefined();
         expect(json.description).toMatch(/📈 Lv \*\*\d+\*\*/);
         expect(json.description).toContain('Favourite food `rabbits_foot`');
+        expect(json.description).toContain('🌀 **Stand Firm**');
+        expect(json.description).toContain('🏋️ Untrained');
         expect(json.footer.text).toMatch(/^Pet 1 of 2 • Last fed/);
         expect(createPetStatusCard).toHaveBeenCalledWith(expect.objectContaining({
             kicker: "TheShield's companion", footerLeft: 'Pet 1 of 2',
@@ -227,6 +239,13 @@ describe('petCardOptions', () => {
 
     test('the alt text names the pet and its state', () => {
         const o = petCardOptions(makePet({ potw: false, hunger: 10, battleWins: 1, battleLosses: 0 }), { kicker: 'K' });
-        expect(cardAltText(o)).toMatch(/^Companion card for Seasoned Rex, a level 12 loyal Dog: hunger \d+%, bond friendly \d+\/100, passive \+9\.2% work earnings inactive, record 1 win and 0 losses\.$/);
+        expect(cardAltText(o)).toMatch(/^Companion card for Seasoned Rex, a level 12 loyal Dog: hunger \d+%, bond friendly \d+\/100, passive \+9\.2% work earnings inactive, signature move Stand Firm, record 1 win and 0 losses\.$/);
+    });
+
+    test('training and the move reach the card (#1182, #1183)', () => {
+        const o = petCardOptions(makePet({ petId: 'wolf', training: { power: 5, agility: 4 } }), { kicker: 'K' });
+        expect(o.move).toBe('Pack Howl');
+        expect(o.trained).toEqual({ atk: '+2%', spd: '+12%', crit: '+2 pts' });
+        expect(o.stats.crit).toBeCloseTo(0.10 + 0.02, 6); // base 10%, +2 pts from four Agility sessions
     });
 });

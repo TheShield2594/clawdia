@@ -18,7 +18,11 @@ const {
     applyHungerDecay,
     recordPetInteraction,
     recordBondCare,
-    REST_DURATION_MS,
+    TRAIN_FOCUSES,
+    TRAIN_MAX_SESSIONS,
+    TRAIN_HUNGER_COST,
+    canTrain,
+    trainPet,
 } = require('../../../services/petService');
 const { generatePetSprite } = require('../../../utils/cardGenerator');
 const { hungerBar, buildNavComponents, renderPetStatus, renderPetCard, bondText } = require('../../../services/petStatusView');
@@ -68,6 +72,10 @@ async function executeStatus(interaction) {
     }
 
     let currentIndex = 0;
+    // The pet and roster size last drawn, so the disabled buttons left when the
+    // window closes keep the Train counts the player last saw.
+    let lastShown = user.pets[0];
+    let lastTotal = user.pets.length;
     const ownerAvatarURL = interaction.user.displayAvatarURL();
     const ownerName      = interaction.member?.displayName ?? interaction.user.username;
     const guildId = interaction.guild.id;
@@ -100,12 +108,16 @@ async function executeStatus(interaction) {
 
         if (action === 'pet_prev') {
             currentIndex = Math.max(0, idx - 1);
+            lastShown = freshUser.pets[currentIndex];
+            lastTotal = freshUser.pets.length;
             await btn.update(
                 await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             );
 
         } else if (action === 'pet_next') {
             currentIndex = Math.min(freshUser.pets.length - 1, idx + 1);
+            lastShown = freshUser.pets[currentIndex];
+            lastTotal = freshUser.pets.length;
             await btn.update(
                 await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             );
@@ -174,23 +186,33 @@ async function executeStatus(interaction) {
                 : `✨ **+${petXpResult.gained} XP** for ${name}! *(You've had your play XP for this hour.)*`;
             const bondNote = bondGained > 0 ? ` ❤️ **+${bondGained} bond**` : '';
             await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n${xpLine}${bondNote}${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
+            lastShown = freshUser.pets[idx];
+            lastTotal = freshUser.pets.length;
             await interaction.editReply(
                 await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             ).catch(() => {});
 
-        } else if (action === 'pet_rest') {
-            const pet  = freshUser.pets[idx];
-            const def  = PET_DEFINITIONS[pet.petId];
-            const name = pet.name || def?.name || pet.petId;
+        } else if (action.startsWith('pet_train_')) {
+            // Train replaced Rest (#1182): a focus, a small permanent stat
+            // edge, paid for in hunger and gated by a per-pet cooldown.
+            const focus = action.slice('pet_train_'.length);
+            const pet   = freshUser.pets[idx];
+            const def   = PET_DEFINITIONS[pet.petId];
+            const name  = pet.name || def?.name || pet.petId;
+            const f     = TRAIN_FOCUSES[focus];
 
-            if (pet.restUntil && new Date(pet.restUntil).getTime() > Date.now()) {
-                const remaining = Math.ceil((new Date(pet.restUntil).getTime() - Date.now()) / 60000);
-                return btn.reply({ content: `🛏️ **${name}** is already resting! ${remaining}m remaining.`, flags: MessageFlags.Ephemeral });
+            const check = canTrain(pet, focus);
+            if (!check.ok) {
+                const why = {
+                    focus:    'That training focus no longer exists.',
+                    maxed:    `${f?.emoji ?? '🏋️'} **${name}** has mastered ${f?.label ?? 'that'} training (${TRAIN_MAX_SESSIONS}/${TRAIN_MAX_SESSIONS}). Pick another focus.`,
+                    cooldown: `🏋️ **${name}** is still sore from the last session! Train again in **${check.minutes >= 60 ? `${Math.floor(check.minutes / 60)}h ${check.minutes % 60}m` : `${check.minutes}m`}**.`,
+                    hungry:   `🍖 **${name}** is too hungry to train. Feed it above **${STARVING_THRESHOLD}%** first.`,
+                }[check.reason];
+                return btn.reply({ content: why, flags: MessageFlags.Ephemeral });
             }
 
-            // Settle the decay owed so far before replacing restUntil. Decay only
-            // knows about the latest rest window, so overwriting it with decay
-            // still pending charged any earlier, unsettled rest at full speed.
+            // Settle the decay owed so far, so the session spends current hunger.
             const [settled] = applyHungerDecay([freshUser.pets[idx]]);
             if (settled !== freshUser.pets[idx]) {
                 freshUser.pets[idx].hunger          = settled.hunger;
@@ -199,8 +221,9 @@ async function executeStatus(interaction) {
                 freshUser.pets[idx].starvingStartAt = settled.starvingStartAt ?? null;
                 freshUser.pets[idx].bond            = settled.bond;
             }
-            freshUser.pets[idx].restUntil = new Date(Date.now() + REST_DURATION_MS);
+            const trained    = trainPet(freshUser.pets[idx], focus);
             recordPetInteraction(freshUser.pets[idx]);
+            const bondGained = recordBondCare(freshUser.pets[idx], 'train');
             freshUser.markModified('pets');
             // A completed pet-care quest pays coins. `save()` writes `balance` as an
             // absolute `$set`, so the credit is folded out of the save and applied as
@@ -212,21 +235,33 @@ async function executeStatus(interaction) {
             try {
                 await saveWithBalanceDelta(User, freshUser, balanceBeforeCare, {
                     service: 'pet',
-                    jobName: 'restQuestReward',
+                    jobName: 'trainQuestReward',
                     guildId: interaction.guild.id,
                     // Keyed on the button interaction (#873, pass 11), like play:
-                    // each rest click is a separate care event and credits once.
+                    // each training click is a separate care event and credits once.
                     payoutKey: questRewardPayoutKey('pet', btn.id),
                 });
             } catch (err) {
                 if (isVersionError(err)) {
                     return btn.reply({ content: '⚠️ Action conflict — please try again.', flags: MessageFlags.Ephemeral });
                 }
-                console.error('[pet] rest save error:', err);
+                console.error('[pet] train save error:', err);
                 return btn.reply({ content: '❌ Failed to save. Please try again.', flags: MessageFlags.Ephemeral });
             }
 
-            await btn.reply({ content: `🛏️ **${name}** is now resting! Hunger will decay at half speed for **2 hours**.`, flags: MessageFlags.Ephemeral });
+            const stat     = f.stat.toUpperCase();
+            const critNote = f.critPerSession ? ` and **+${Math.round(trained.sessions * f.critPerSession * 1000) / 10} pts** crit` : '';
+            const bondNote = bondGained > 0 ? ` ❤️ **+${bondGained} bond**` : '';
+            const offNote  = trained.passiveOff
+                ? `\n⚠️ That took **${name}** below ${STARVING_THRESHOLD}% hunger, so its passive is off until you feed it.`
+                : '';
+            await btn.reply({
+                content: `${f.emoji} **${name}** trained ${f.label}! Now **+${trained.pct}% ${stat}**${critNote} `
+                       + `(${trained.sessions}/${TRAIN_MAX_SESSIONS}). 🍖 −${TRAIN_HUNGER_COST} hunger → **${Math.round(trained.hunger)}%**.${bondNote}${offNote}`,
+                flags: MessageFlags.Ephemeral,
+            });
+            lastShown = freshUser.pets[idx];
+            lastTotal = freshUser.pets.length;
             await interaction.editReply(
                 await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             ).catch(() => {});
@@ -301,8 +336,8 @@ async function executeStatus(interaction) {
 
     collector.on('end', async () => {
         try {
-            const shownId  = user.pets[currentIndex]?._id;
-            const disabled = buildNavComponents(interaction.user.id, currentIndex, user.pets.length, shownId != null ? String(shownId) : null)
+            const shownId  = lastShown?._id;
+            const disabled = buildNavComponents(interaction.user.id, currentIndex, lastTotal, shownId != null ? String(shownId) : null, lastShown)
                 .map(row => ActionRowBuilder.from(row).setComponents(
                     row.components.map(b => ButtonBuilder.from(b).setDisabled(true))
                 ));

@@ -60,3 +60,20 @@ describe('its alt text', () => {
         expect(alt.length).toBeLessThanOrEqual(1024);
     });
 });
+
+describe('symbol art cache', () => {
+    test('a failed load is not cached, so the next call can succeed', async () => {
+        // The module takes loadImage when it loads, so spy on a fresh copy of
+        // canvas before loading a fresh copy of it.
+        jest.resetModules();
+        const canvas = require('canvas');
+        const real = canvas.loadImage;
+        const spy = jest.spyOn(canvas, 'loadImage').mockRejectedValueOnce(new Error('EIO'));
+        const { symbolArt } = require('../src/games/casino/slotsPaytableCard');
+
+        await expect(symbolArt('cherry')).rejects.toThrow('EIO');
+        spy.mockImplementation(real);
+        await expect(symbolArt('cherry')).resolves.toBeTruthy();
+        spy.mockRestore();
+    });
+});

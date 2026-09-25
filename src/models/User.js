@@ -22,7 +22,14 @@ const petFields = () => ({
     starving:           { type: Boolean, default: false },
     starvingStartAt:    { type: Date,    default: null },
     lastPlay:           { type: Date,    default: null },
-    restUntil:          { type: Date,    default: null },
+    // Training (#1182, which replaced Rest and its restUntil): sessions put
+    // into each focus, 0–10, and when the last one ran, for the cooldown.
+    training: {
+        power:   { type: Number, default: 0, min: 0, max: 10 },
+        guard:   { type: Number, default: 0, min: 0, max: 10 },
+        agility: { type: Number, default: 0, min: 0, max: 10 },
+    },
+    lastTrain:          { type: Date,    default: null },
     potw:               { type: Boolean, default: false },
     weeklyInteractions: { type: Number,  default: 0    },
     // Daily cap on Pet of the Week credit: the UTC day index the counter below

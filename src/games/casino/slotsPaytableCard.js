@@ -61,9 +61,19 @@ const ICON = {
     Star: 'star', Wild: 'wild', Boost: 'boost', Scatter: 'scatter',
 };
 
+// Loaded once per process and shared with the machine (slotsTable.js), so the
+// paytable and the reels draw the same bitmaps from one cache.
 const art = new Map();
+/** A symbol's Twemoji bitmap by file name ("cherry", "wild"…), as a promise. */
 function icon(name) {
-    if (!art.has(name)) art.set(name, loadImage(path.join(ART, `${name}.png`)));
+    if (!art.has(name)) {
+        // A failed load is dropped rather than cached, so the next frame (the
+        // machine shares this cache) or paytable can try again.
+        art.set(name, loadImage(path.join(ART, `${name}.png`)).catch((err) => {
+            art.delete(name);
+            throw err;
+        }));
+    }
     return art.get(name);
 }
 
@@ -318,4 +328,4 @@ function paytableAltText() {
     ].join(' ');
 }
 
-module.exports = { paytableImage, paytableAltText };
+module.exports = { paytableImage, paytableAltText, symbolArt: icon };

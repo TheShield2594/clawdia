@@ -14,6 +14,7 @@ jest.mock('discord.js', () => {
         setTitle(t) { this.title = t; return this; }
         setDescription(d) { this.description = d; return this; }
         setThumbnail(t) { this.thumbnail = t; return this; }
+        setImage(i) { this.image = i; return this; }
         setFooter() { return this; }
         setTimestamp() { return this; }
         addFields(...f) { this.fields.push(...f.flat()); return this; }
@@ -30,10 +31,16 @@ jest.mock('../src/utils/cardGenerator', () => ({
     generatePetSprite:      jest.fn(async () => Buffer.from('sprite')),
 }));
 jest.mock('../src/utils/logTransaction', () => ({ logTransaction: jest.fn() }));
+// The companion card (#1189). Drawing it is covered by petStatusCard.test.js;
+// here it is the attachment the announcement carries, or null when it fails.
+jest.mock('../src/services/petStatusView', () => ({
+    renderPetCard: jest.fn(async (pet, ctx, name) => ({ name, description: `Companion card for ${pet.name}`, pet, ctx })),
+}));
 
 const Guild = require('../src/models/Guild');
 const User  = require('../src/models/User');
 const { generatePetSprite } = require('../src/utils/cardGenerator');
+const { renderPetCard } = require('../src/services/petStatusView');
 const { logTransaction } = require('../src/utils/logTransaction');
 const { selectPetOfTheWeek } = require('../src/services/petService');
 
@@ -200,11 +207,49 @@ describe('selectPetOfTheWeek', () => {
         const embed = sent[0].payload.embeds[0];
         expect(embed.title).toBe('🌟 Pet of the Week!');
         expect(embed.description).toContain('**Mochi** — owned by <@u1>');
-        expect(embed.description).toContain('42 interactions this week');
+        expect(embed.description).toContain('42 care interactions this week');
         expect(embed.fields.find(f => f.name.includes('Prize')).value).toBe('5,000 coins');
     });
 
-    test('a sprite that fails to render still lets the announcement go out', async () => {
+    test('carries the winner\'s companion card, ribbon on, with alt text (#1189)', async () => {
+        const client = fakeClient();
+        const guild = await client.guilds.fetch('g1');
+        client.guilds.fetch.mockResolvedValue({ ...guild, members: { fetch: async () => ({ displayName: 'Shield' }) } });
+
+        await selectPetOfTheWeek(client);
+
+        const [pet, ctx, fileName] = renderPetCard.mock.calls[0];
+        expect(pet).toMatchObject({ name: 'Mochi', potw: true });
+        expect(ctx).toEqual({
+            kicker:      'Most beloved pet · owned by Shield',
+            footerLeft:  '42 care interactions this week',
+            footerRight: 'Pet of the Week',
+        });
+        const { embeds: [embed], files } = sent[0].payload;
+        expect(embed.image).toBe(`attachment://${fileName}`);
+        expect(embed.thumbnail).toBeUndefined();
+        expect(files).toHaveLength(1);
+        expect(files[0].description).toContain('Mochi');
+        expect(generatePetSprite).not.toHaveBeenCalled();
+    });
+
+    test('names the owner generically when they cannot be fetched', async () => {
+        await selectPetOfTheWeek(fakeClient());
+        expect(renderPetCard.mock.calls[0][1].kicker).toBe("This week's most beloved pet");
+    });
+
+    test('falls back to the sprite when the card cannot be drawn', async () => {
+        renderPetCard.mockResolvedValueOnce(null);
+
+        await selectPetOfTheWeek(fakeClient());
+
+        const { embeds: [embed], files } = sent[0].payload;
+        expect(embed.thumbnail).toBe('attachment://potw_sprite.png');
+        expect(files.map(f => f.name)).toEqual(['potw_sprite.png']);
+    });
+
+    test('a card and a sprite that both fail still let the announcement go out', async () => {
+        renderPetCard.mockResolvedValueOnce(null);
         generatePetSprite.mockRejectedValueOnce(new Error('canvas unavailable'));
 
         await selectPetOfTheWeek(fakeClient());

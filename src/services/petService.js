@@ -187,13 +187,11 @@ function hasFreePetSlot(user) {
 }
 
 const HUNGER_DECAY_PER_DAY = 10;
-const HUNGER_DECAY_RESTING  = 5;   // half-speed decay while resting
 const HUNGER_RESTORE_FAVORITE = 25;
 const HUNGER_RESTORE_OTHER = 10;
 const STARVING_THRESHOLD = 30;
 const RUNAWAY_DAYS = 3;
 const MS_PER_DAY = 86400000;
-const REST_DURATION_MS = 2 * 60 * 60 * 1000; // a /pet rest lasts 2 hours
 
 // ── Mood system ───────────────────────────────────────────────────────────────
 
@@ -358,29 +356,22 @@ function decayCursor(pet, now = Date.now()) {
     return Number.isFinite(ms) ? ms : now;
 }
 
-/** Milliseconds of the window [from, to] that overlap the pet's rest window. */
-function restedOverlapMs(pet, from, to) {
-    const restUntil = pet.restUntil ? new Date(pet.restUntil).getTime() : 0;
-    if (!Number.isFinite(restUntil) || restUntil <= 0) return 0;
-    const restStart = restUntil - REST_DURATION_MS;
-    return Math.max(0, Math.min(restUntil, to) - Math.max(restStart, from));
-}
-
 /**
  * Decay accrued since the pet's cursor, without persisting anything.
- * Returns { hunger, decay, windowMs, restedMs }.
+ * Returns { hunger, decay, windowMs }.
+ *
+ * Resting used to halve this for two hours (#1182). It saved about 0.4 hunger
+ * a press and was only ever pressed for care credit, so Train replaced it and
+ * decay runs at one speed.
  */
 function decaySince(pet, now = Date.now()) {
     const from     = decayCursor(pet, now);
     const windowMs = Math.max(0, now - from);
     const hunger   = clampHunger(pet.hunger);
-    if (windowMs === 0) return { hunger, decay: 0, windowMs: 0, restedMs: 0 };
+    if (windowMs === 0) return { hunger, decay: 0, windowMs: 0 };
 
-    const restedMs = Math.min(windowMs, restedOverlapMs(pet, from, now));
-    const normalMs = windowMs - restedMs;
-    const decay    = (restedMs * HUNGER_DECAY_RESTING + normalMs * HUNGER_DECAY_PER_DAY) / MS_PER_DAY;
-
-    return { hunger: Math.max(0, hunger - decay), decay, windowMs, restedMs };
+    const decay = (windowMs * HUNGER_DECAY_PER_DAY) / MS_PER_DAY;
+    return { hunger: Math.max(0, hunger - decay), decay, windowMs };
 }
 
 /** A pet's current hunger, including decay not yet written to the database. */
@@ -520,7 +511,7 @@ function isPetFull(pet, now = Date.now()) {
 // pet revived with a Revive Scroll kept counting the days it spent gone. It is
 // now a stored 0–BOND_MAX value that care raises and neglect lowers:
 //
-//  - Feeding, playing and battling (a pet's training) each add a little, and a
+//  - Feeding, playing, training and battling each add a little, and a
 //    pet takes at most BOND_DAILY_CAP a UTC day however much is clicked, the
 //    same shape as the daily cap on Pet of the Week credit.
 //  - It drains slowly while the pet sits below STARVING_THRESHOLD hunger, and
@@ -536,7 +527,7 @@ function isPetFull(pet, now = Date.now()) {
 
 const BOND_MAX             = 100;
 const BOND_DAILY_CAP       = 4;
-const BOND_CARE = Object.freeze({ feed: 2, play: 2, battle: 1 });
+const BOND_CARE = Object.freeze({ feed: 2, play: 2, train: 1, battle: 1 });
 const BOND_HUNGRY_DECAY_PER_DAY = 2;
 const BOND_RUNAWAY_PENALTY = 25;
 
@@ -590,7 +581,7 @@ function getBondTier(pet, now = Date.now()) {
 }
 
 /**
- * Raise a pet's bond for one act of care ('feed'|'play'|'battle'), subject to
+ * Raise a pet's bond for one act of care ('feed'|'play'|'train'|'battle'), subject to
  * the daily cap. Mutates `pet`. Returns the points actually added.
  *
  * Call after the pet's decay has been brought up to date, so the drain owed so
@@ -616,6 +607,109 @@ function recordBondCare(pet, kind, now = Date.now()) {
 /** The bond a pet keeps after running away. Pure. */
 function bondAfterRunaway(pet) {
     return clampBond(clampBond(pet?.bond) - BOND_RUNAWAY_PENALTY);
+}
+
+// ── Training ──────────────────────────────────────────────────────────────────
+//
+// Train replaced Rest (#1182). Rest halved hunger decay for two hours, which
+// saved about 0.4 hunger a press, so it was only pressed for quest and Pet of
+// the Week credit. A training session instead picks a focus and buys a small,
+// permanent, capped edge on one battle stat, paid for in hunger and gated by a
+// per-pet cooldown. Each press is then a choice of which stat to train, and
+// whether it's worth the hunger right now: a pet near the passive threshold
+// can train itself below it.
+//
+// The bonus is a percentage of the level-derived stat, like the personality
+// tilt it stacks on, so it weighs the same at level 1 as at level 30.
+// tests/petBattle.test.js holds fully trained personality pairings to the same
+// 42–58% as untrained ones, and keeps a fully trained pet's edge over an
+// untrained twin (about 75%) near what a single level is worth.
+
+// `perSession` is each focus's step, in fractions of the stat. They differ
+// because the stats are not worth the same: attack goes straight into damage,
+// defence only half, and speed only decides who opens — so Agility also
+// sharpens the pet's crit chance (`critPerSession`, in points). The steps were
+// tuned by simulation so that ten sessions of any one focus are worth about
+// the same.
+const TRAIN_FOCUSES = Object.freeze({
+    power:   Object.freeze({ focus: 'power',   stat: 'atk', label: 'Power',   emoji: '💪', perSession: 0.004 }),
+    guard:   Object.freeze({ focus: 'guard',   stat: 'def', label: 'Guard',   emoji: '🛡️', perSession: 0.01  }),
+    agility: Object.freeze({ focus: 'agility', stat: 'spd', label: 'Agility', emoji: '💨', perSession: 0.03, critPerSession: 0.005 }),
+});
+const TRAIN_FOCUS_KEYS    = Object.keys(TRAIN_FOCUSES);
+const TRAIN_MAX_SESSIONS  = 10;
+const TRAIN_HUNGER_COST   = 8;
+const TRAIN_COOLDOWN_MS   = 8 * 60 * 60 * 1000;
+
+/** Sessions a pet has put into one focus, 0–TRAIN_MAX_SESSIONS. */
+function trainingSessions(pet, focus) {
+    const n = Math.floor(Number(pet?.training?.[focus] ?? 0));
+    return Number.isFinite(n) ? Math.min(TRAIN_MAX_SESSIONS, Math.max(0, n)) : 0;
+}
+
+/**
+ * The trained bonus: `{ atk, def, spd }` as fractions of each stat, and
+ * `crit` in points of crit chance.
+ */
+function trainingBonus(pet) {
+    const out = { atk: 0, def: 0, spd: 0, crit: 0 };
+    for (const f of Object.values(TRAIN_FOCUSES)) {
+        const n = trainingSessions(pet, f.focus);
+        out[f.stat] = n * f.perSession;
+        out.crit   += n * (f.critPerSession ?? 0);
+    }
+    return out;
+}
+
+/** A focus's total bonus after `sessions`, in percent of its stat (one decimal). */
+function trainingPct(sessions, focus) {
+    return Math.round(sessions * (TRAIN_FOCUSES[focus]?.perSession ?? 0) * 1000) / 10;
+}
+
+/** Minutes left on a pet's training cooldown, or 0 when it can train. */
+function trainCooldownMinutes(pet, now = Date.now()) {
+    const last = pet?.lastTrain ? new Date(pet.lastTrain).getTime() : 0;
+    const left = Number.isFinite(last) && last > 0 ? TRAIN_COOLDOWN_MS - (now - last) : 0;
+    return left > 0 ? Math.ceil(left / 60000) : 0;
+}
+
+/**
+ * Whether a pet can train `focus` now. Returns `{ ok: true }` or
+ * `{ ok: false, reason: 'focus'|'maxed'|'cooldown'|'hungry', minutes? }`.
+ * Decay-aware, like every other read of hunger.
+ */
+function canTrain(pet, focus, now = Date.now()) {
+    if (!TRAIN_FOCUSES[focus]) return { ok: false, reason: 'focus' };
+    if (trainingSessions(pet, focus) >= TRAIN_MAX_SESSIONS) return { ok: false, reason: 'maxed' };
+    const minutes = trainCooldownMinutes(pet, now);
+    if (minutes > 0) return { ok: false, reason: 'cooldown', minutes };
+    if (!isPetActive(pet, now)) return { ok: false, reason: 'hungry' };
+    return { ok: true };
+}
+
+/**
+ * Run one training session. Mutates `pet`; call canTrain first, and bring the
+ * pet's decay up to date before this so the hunger it spends is current.
+ * Returns `{ focus, sessions, pct, hunger, passiveOff }`, where `pct` is the
+ * focus's total bonus in whole percent and `passiveOff` says this session
+ * took the pet below the passive threshold.
+ */
+function trainPet(pet, focus, now = Date.now()) {
+    const def    = TRAIN_FOCUSES[focus];
+    const before = clampHunger(pet.hunger);
+    const hunger = Math.max(0, before - TRAIN_HUNGER_COST);
+    const sessions = Math.min(TRAIN_MAX_SESSIONS, trainingSessions(pet, focus) + 1);
+    pet.training  = { ...(pet.training?.toObject ? pet.training.toObject() : pet.training ?? {}), [focus]: sessions };
+    pet.lastTrain = new Date(now);
+    pet.hunger    = hunger;
+    pet.starving  = hunger < STARVING_THRESHOLD;
+    return {
+        focus:      def.focus,
+        sessions,
+        pct:        trainingPct(sessions, focus),
+        hunger,
+        passiveOff: before >= STARVING_THRESHOLD && hunger < STARVING_THRESHOLD,
+    };
 }
 
 // ── Pet of the Week credit ────────────────────────────────────────────────────
@@ -884,22 +978,66 @@ const PERSONALITY_COMBAT = {
 
 const BASE_CRIT_CHANCE = 0.10;
 
+// Rare companions (the four that only drop) fight a little better than a pet
+// from the shop (#1183): a few percent on HP, attack and defence, enough that
+// finding one is felt and not enough to decide a fight. tests/petBattle.test.js
+// states the edge as a win rate and holds it there.
+const RARE_COMBAT_EDGE = 0.01;
+
+// ── Signature moves ──────────────────────────────────────────────────────────
+//
+// Species used to do nothing in a fight (#1183): getPetStats read level, stage
+// and personality, so a 2,000-coin Dog and a 4% legendary Crystal Fox fought
+// identically. Each species now has one move, fired by a chance or a
+// condition and named in the battle log. Wild opponents have them too, so a
+// wild fight is no longer a plain trade of numbers.
+//
+// `kind` is what the engine does; the numbers beside it are its tuning. They
+// were tuned by simulation to keep every species pairing at equal level within
+// 42–58% (tests/petBattle.test.js), the rare edge aside.
+const SPECIES_MOVES = Object.freeze({
+    dog:         { name: 'Stand Firm',      kind: 'brace',   chance: 0.16, mult: 0.75, desc: 'Sometimes braces and shrugs off a quarter of a hit.' },
+    cat:         { name: 'Nine Lives',      kind: 'survive', chance: 0.25,             desc: 'Can survive a lethal hit at 1 HP, once a fight.' },
+    bird:        { name: 'Flurry',          kind: 'double',  chance: 0.10, mult: 0.4,  desc: 'Sometimes pecks again at 40% strength.' },
+    fish:        { name: 'Slippery Scales', kind: 'dodge',   chance: 0.04,             desc: 'Sometimes slips a hit entirely.' },
+    fox:         { name: 'Feint',           kind: 'pierce',  chance: 0.10,             desc: 'Sometimes strikes past the guard, ignoring defence.' },
+    wolf:        { name: 'Pack Howl',       kind: 'empower', chance: 0.25, mult: 1.2,  desc: 'Sometimes howls, and its next hit lands 20% harder.' },
+    eagle:       { name: 'Talon Dive',      kind: 'opener',  mult: 1.2,                desc: 'Opens with a dive: its first strike lands 20% harder.' },
+    shark:       { name: 'Frenzy',          kind: 'frenzy',  mult: 1.08,               desc: 'Hits 8% harder while the opponent is under half HP.' },
+    crystal_fox: { name: 'Crystal Ward',    kind: 'ward',    pct: 0.04,                desc: 'Starts behind a ward that soaks up its first few points of damage.' },
+    lantern_owl: { name: 'Lantern Flare',   kind: 'blind',   chance: 0.04,             desc: 'Sometimes dazzles the opponent, and their next attack misses.' },
+    wild_boar:   { name: 'Gore Charge',     kind: 'opener',  mult: 1.2,                desc: 'Opens with a charge: its first strike lands 20% harder.' },
+    feral_cat:   { name: 'Hiss',            kind: 'weaken',  chance: 0.08, mult: 0.5,  desc: "Sometimes hisses, and the opponent's next hit lands at half strength." },
+    stray_hound: { name: 'Scavenge',        kind: 'mend',    chance: 0.25, pct: 0.04,  desc: 'Sometimes recovers a little HP after a hit.' },
+    cave_bat:    { name: 'Echolocation',    kind: 'dodge',   chance: 0.04,             desc: 'Sometimes slips a hit entirely.' },
+});
+
+/** A species' signature move `{ name, kind, desc, … }`, or null. */
+function getSpeciesMove(petId) {
+    return SPECIES_MOVES[petId] ?? null;
+}
+
 /**
- * Derive battle stats from a pet's level, evolution, and personality.
+ * Derive battle stats from a pet's level, evolution, personality, training
+ * and rarity.
  */
 function getPetStats(pet) {
     const level = pet.level ?? 1;
     const stage = pet.evolutionStage ?? 1;
     const p     = PERSONALITY_COMBAT[pet.personality] ?? {};
+    const t     = trainingBonus(pet);
+    const rare  = PET_DEFINITIONS[pet.petId]?.purchasable === false ? RARE_COMBAT_EDGE : 0;
     // Only HP is rounded (it is shown on the HP bar). Rounding attack at low
     // level turned a 6% edge into a whole point, which is 8% of a level-1 hit.
-    const scale = (base, pct = 0) => base * (1 + pct);
+    // The percentages add: personality, training and the rare edge each tilt
+    // the same level-derived base.
+    const scale = (base, pct) => base * (1 + pct);
     return {
-        hp:   Math.round(scale(40 + level * 6 + stage * 10, p.hp)),
-        atk:  scale(8  + level * 2 + stage * 3,  p.atk),
-        def:  scale(4  + level * 1 + stage * 2,  p.def),
-        spd:  scale(5  + level,                  p.spd),
-        crit: BASE_CRIT_CHANCE + (p.crit ?? 0),
+        hp:   Math.round(scale(40 + level * 6 + stage * 10, (p.hp  ?? 0) + rare)),
+        atk:  scale(8  + level * 2 + stage * 3,  (p.atk ?? 0) + t.atk + rare),
+        def:  scale(4  + level * 1 + stage * 2,  (p.def ?? 0) + t.def + rare),
+        spd:  scale(5  + level,                  (p.spd ?? 0) + t.spd),
+        crit: BASE_CRIT_CHANCE + (p.crit ?? 0) + t.crit,
     };
 }
 
@@ -911,50 +1049,138 @@ function firstStrikeChance(a, b) {
     return (a.spd + FIRST_STRIKE_SMOOTHING) / (a.spd + b.spd + 2 * FIRST_STRIKE_SMOOTHING);
 }
 
+/** One side of a fight: its stats, its move and the state the move keeps. */
+function fighter(pet, side) {
+    const stats = getPetStats(pet);
+    const move  = getSpeciesMove(pet.petId);
+    return {
+        side, stats, move, hp: stats.hp,
+        ward:      move?.kind === 'ward' ? Math.round(stats.hp * move.pct) : 0,
+        opened:    false, // has struck once (opener)
+        empowered: false, // next hit powered up (empower)
+        dazzled:   false, // next attack misses (the opponent's blind)
+        weakened:  false, // next hit halved (the opponent's weaken)
+        survived:  false, // has used its one survival (survive)
+    };
+}
+
+/** Damage through the defender's ward and last stand. Mutates `def`; returns what landed. */
+function landHit(def, damage, moves, rng) {
+    if (def.ward > 0 && damage > 0) {
+        const soaked = Math.min(def.ward, damage);
+        def.ward -= soaked;
+        damage   -= soaked;
+        moves.push({ side: def.side, name: def.move.name });
+    }
+    def.hp = Math.max(0, def.hp - damage);
+    if (def.hp === 0 && def.move?.kind === 'survive' && !def.survived && rng() < def.move.chance) {
+        def.hp = 1;
+        def.survived = true;
+        moves.push({ side: def.side, name: def.move.name });
+    }
+    return damage;
+}
+
+/**
+ * One attack, moves included. Mutates both fighters and returns the round's
+ * `{ damage, crit, missed, moves }`, where `moves` names every signature move
+ * that fired and whose it was.
+ */
+function attack(atk, def, rng) {
+    const moves = [];
+    const mine  = atk.move ?? {};
+    const theirs = def.move ?? {};
+    const opener = mine.kind === 'opener' && !atk.opened;
+    atk.opened = true;
+
+    // The opponent's Lantern Flare: this attack misses outright.
+    if (atk.dazzled) {
+        atk.dazzled = false;
+        moves.push({ side: def.side, name: theirs.name });
+        return { damage: 0, crit: false, missed: true, moves };
+    }
+
+    // Damage = atk - def/2, ±25% variance, min 1; crit (10%, more for
+    // Mischievous) for 1.5x.
+    const pierce   = mine.kind === 'pierce' && rng() < mine.chance;
+    const base     = Math.max(1, atk.stats.atk - (pierce ? 0 : def.stats.def / 2));
+    const variance = 0.75 + rng() * 0.5;
+    const crit     = rng() < atk.stats.crit ? 1.5 : 1.0;
+    let mult = 1;
+    if (pierce) moves.push({ side: atk.side, name: mine.name });
+    if (opener) { mult *= mine.mult; moves.push({ side: atk.side, name: mine.name }); }
+    if (atk.empowered) { mult *= mine.mult; atk.empowered = false; moves.push({ side: atk.side, name: mine.name }); }
+    if (mine.kind === 'frenzy' && def.hp < def.stats.hp / 2) { mult *= mine.mult; moves.push({ side: atk.side, name: mine.name }); }
+    if (atk.weakened) { mult *= theirs.mult; atk.weakened = false; moves.push({ side: def.side, name: theirs.name }); }
+    let damage = Math.max(1, Math.round(base * variance * crit * mult));
+
+    // The defender's own answers to the hit.
+    if (theirs.kind === 'dodge' && rng() < theirs.chance) {
+        moves.push({ side: def.side, name: theirs.name });
+        return { damage: 0, crit: false, missed: true, moves };
+    }
+    if (theirs.kind === 'brace' && rng() < theirs.chance) {
+        damage = Math.max(1, Math.round(damage * theirs.mult));
+        moves.push({ side: def.side, name: theirs.name });
+    }
+
+    let landed = landHit(def, damage, moves, rng);
+
+    // Follow-ups, only while the defender is still standing.
+    if (def.hp > 0 && mine.kind === 'double' && rng() < mine.chance) {
+        moves.push({ side: atk.side, name: mine.name });
+        landed += landHit(def, Math.max(1, Math.round(damage * mine.mult)), moves, rng);
+    }
+    if (def.hp > 0) {
+        if (mine.kind === 'empower' && rng() < mine.chance) atk.empowered = true;
+        if (mine.kind === 'blind'   && rng() < mine.chance) { def.dazzled  = true; moves.push({ side: atk.side, name: mine.name }); }
+        if (mine.kind === 'weaken'  && rng() < mine.chance) { def.weakened = true; moves.push({ side: atk.side, name: mine.name }); }
+        if (mine.kind === 'mend'    && rng() < mine.chance && atk.hp < atk.stats.hp) {
+            atk.hp = Math.min(atk.stats.hp, atk.hp + Math.max(1, Math.round(atk.stats.hp * mine.pct)));
+            moves.push({ side: atk.side, name: mine.name });
+        }
+    }
+
+    return { damage: landed, crit: crit > 1, missed: false, moves };
+}
+
 /**
  * Simulate a battle between two pets. `rng` is injectable for testing.
- * Returns { winner: 'a'|'b', rounds, finalHpA, finalHpB }.
+ * Returns { winner: 'a'|'b', rounds, finalHpA, finalHpB }. Each round is
+ * `{ attacker, damage, crit, missed, moves, hpA, hpB }`; `moves` lists the
+ * signature moves that fired that round as `{ side, name }`.
  */
 function simulateBattle(petA, petB, rng = Math.random) {
-    const a = getPetStats(petA);
-    const b = getPetStats(petB);
-    let hpA = a.hp, hpB = b.hp;
+    const a = fighter(petA, 'a');
+    const b = fighter(petB, 'b');
     const rounds = [];
 
     // Striking first is worth a lot in an even fight (~78% of mirror matches),
     // so it is a speed-weighted roll rather than a sure thing for the faster
     // pet — and never a default in the challenger's favour.
-    let turnA = rng() < firstStrikeChance(a, b);
+    let turnA = rng() < firstStrikeChance(a.stats, b.stats);
     const MAX_ROUNDS = 30;
 
-    for (let r = 0; r < MAX_ROUNDS && hpA > 0 && hpB > 0; r++) {
-        const atk = turnA ? a : b;
-        const def = turnA ? b : a;
-        // Damage = atk - def/2, ±25% variance, min 1; crit (10%, more for
-        // Mischievous) for 1.5x.
-        const base     = Math.max(1, atk.atk - def.def / 2);
-        const variance = 0.75 + rng() * 0.5;
-        const crit     = rng() < atk.crit ? 1.5 : 1.0;
-        const damage   = Math.max(1, Math.round(base * variance * crit));
-
-        if (turnA) hpB = Math.max(0, hpB - damage);
-        else       hpA = Math.max(0, hpA - damage);
-
-        rounds.push({ attacker: turnA ? 'a' : 'b', damage, crit: crit > 1, hpA, hpB });
+    for (let r = 0; r < MAX_ROUNDS && a.hp > 0 && b.hp > 0; r++) {
+        const hit = turnA ? attack(a, b, rng) : attack(b, a, rng);
+        rounds.push({
+            attacker: turnA ? 'a' : 'b', damage: hit.damage, crit: hit.crit, missed: hit.missed,
+            moves: hit.moves, hpA: a.hp, hpB: b.hp,
+        });
         turnA = !turnA;
     }
 
     // At the round cap the higher remaining HP fraction wins; an exact tie is
     // a coin flip rather than a free win for the challenger.
     let winner;
-    if (hpB <= 0) winner = 'a';
-    else if (hpA <= 0) winner = 'b';
+    if (b.hp <= 0) winner = 'a';
+    else if (a.hp <= 0) winner = 'b';
     else {
-        const fracA = hpA / a.hp, fracB = hpB / b.hp;
+        const fracA = a.hp / a.stats.hp, fracB = b.hp / b.stats.hp;
         winner = fracA === fracB ? (rng() < 0.5 ? 'a' : 'b') : fracA > fracB ? 'a' : 'b';
     }
 
-    return { winner, rounds, finalHpA: hpA, finalHpB: hpB };
+    return { winner, rounds, finalHpA: a.hp, finalHpB: b.hp };
 }
 
 // The wild opponents /pet battle fields when a player has no PvP target. They
@@ -985,10 +1211,14 @@ function atLevel(pet, level) {
 }
 
 function petSnapshotFields(pet) {
-    return {
+    const fields = {
         petId: pet.petId, name: pet.name, personality: pet.personality,
         level: pet.level ?? 1, evolutionStage: pet.evolutionStage ?? 1,
     };
+    // Training is a permanent stat edge and travels with the pet into a
+    // level-matched fight, as its personality does.
+    if (pet.training) fields.training = { ...(pet.training.toObject ? pet.training.toObject() : pet.training) };
+    return fields;
 }
 
 /** Both fighters scaled to the lower of their two levels. */
@@ -1026,6 +1256,19 @@ function makeWildPet(level, rng = Math.random) {
 const POTW_COIN_REWARD = 5_000;
 
 /**
+ * The name a member goes by in `guildId`, for text drawn on a card, or null
+ * when neither the member nor the user can be fetched.
+ */
+async function ownerDisplayName(client, guildId, userId) {
+    const settle = p => Promise.resolve(p).catch(() => null);
+    const guild  = await settle(client.guilds.fetch(guildId));
+    const member = await settle(guild?.members?.fetch?.(userId));
+    if (member?.displayName) return member.displayName;
+    const user = await settle(client.users?.fetch?.(userId));
+    return user?.globalName ?? user?.username ?? null;
+}
+
+/**
  * Pick each guild's Pet of the Week and pay its owner — 5,000 coins by default,
  * overridable per guild with `economy.potwReward`.
  *
@@ -1036,6 +1279,8 @@ async function selectPetOfTheWeek(client) {
     const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
     const { generatePetSprite } = require('../utils/cardGenerator');
     const { logTransaction } = require('../utils/logTransaction');
+    // Required here, not at the top: petStatusView requires this module.
+    const { renderPetCard } = require('./petStatusView');
 
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const guilds  = await Guild.find({}, 'guildId economy potwLastRunAt').lean();
@@ -1132,17 +1377,18 @@ async function selectPetOfTheWeek(client) {
             const def      = PET_DEFINITIONS[bestPet.petId];
             const name     = bestPet.name || def?.name || bestPet.petId;
             const bond     = effectiveBond(bestPet);
+            const times    = `${bestCount} care interaction${bestCount !== 1 ? 's' : ''} this week`;
 
             const embed = new EmbedBuilder()
                 .setColor(COLORS.PRIZE)
                 .setTitle('🌟 Pet of the Week!')
                 .setDescription(
                     `This week's most beloved pet is:\n\n` +
-                    `${def?.emoji ?? '🐾'} **${name}** — owned by <@${bestUser.userId}>\n\n` +
-                    `_${bestCount} interaction${bestCount !== 1 ? 's' : ''} this week_`
+                    `${getPetDisplay(bestPet).emoji} **${name}** — owned by <@${bestUser.userId}>\n\n` +
+                    `_${times}_`
                 )
                 .addFields({ name: '❤️ Bond', value: `${heartBar(bond)} ${bondTierFor(bond).title} (${Math.floor(bond)})`, inline: true })
-                .setFooter({ text: 'Earn the ribbon by feeding, playing with, or resting your pet!' })
+                .setFooter({ text: 'Earn the ribbon by feeding, playing with, or training your pet!' })
                 .setTimestamp();
 
             // Only advertise a prize when one is actually paid; potwReward can be 0.
@@ -1150,15 +1396,31 @@ async function selectPetOfTheWeek(client) {
                 embed.addFields({ name: '🏆 Prize', value: `${potwCoins.toLocaleString()} coins`, inline: true });
             }
 
+            // The winner's companion card, as /pet status and Showcase draw it
+            // (#1189), with the ribbon on and the week's care count in the
+            // footer. The emoji-on-a-circle sprite is only the fallback now, for
+            // when the card cannot be drawn. The canvas cannot draw a mention,
+            // so the kicker names the owner by display name.
+            const ownerName = await ownerDisplayName(client, guildId, bestUser.userId);
             let files = [];
-            try {
-                const spriteBuf = await generatePetSprite(bestPet.petId, 80, bestPet.evolutionStage ?? 1);
-                embed.setThumbnail('attachment://potw_sprite.png');
-                files = [new AttachmentBuilder(spriteBuf, {
-                    name: 'potw_sprite.png',
-                    description: `Pixel-art sprite of ${name}, the pet of the week.`,
-                })];
-            } catch { /* non-critical */ }
+            const card = await renderPetCard({ ...bestPet, potw: true }, {
+                kicker:      ownerName ? `Most beloved pet · owned by ${ownerName}` : "This week's most beloved pet",
+                footerLeft:  times,
+                footerRight: 'Pet of the Week',
+            }, 'potw-card.png');
+            if (card) {
+                embed.setImage(`attachment://${card.name}`);
+                files = [card];
+            } else {
+                try {
+                    const spriteBuf = await generatePetSprite(bestPet.petId, 80, bestPet.evolutionStage ?? 1);
+                    embed.setThumbnail('attachment://potw_sprite.png');
+                    files = [new AttachmentBuilder(spriteBuf, {
+                        name: 'potw_sprite.png',
+                        description: `Pixel-art sprite of ${name}, the pet of the week.`,
+                    })];
+                } catch { /* non-critical */ }
+            }
 
             await postAnnouncement(client, guildId, channelId, { embeds: [embed], files });
         } catch (err) {
@@ -1188,9 +1450,7 @@ module.exports = {
     hasFreePetSlot,
     tryGrantRarePet,
     HUNGER_DECAY_PER_DAY,
-    HUNGER_DECAY_RESTING,
     MS_PER_DAY,
-    REST_DURATION_MS,
     STARVING_THRESHOLD,
     RUNAWAY_DAYS,
     MOOD_LINES,
@@ -1229,6 +1489,17 @@ module.exports = {
     getBondTier,
     recordBondCare,
     bondAfterRunaway,
+    TRAIN_FOCUSES,
+    TRAIN_FOCUS_KEYS,
+    TRAIN_MAX_SESSIONS,
+    TRAIN_HUNGER_COST,
+    TRAIN_COOLDOWN_MS,
+    trainingSessions,
+    trainingBonus,
+    trainingPct,
+    trainCooldownMinutes,
+    canTrain,
+    trainPet,
     assignPersonality,
     // Progression & battles
     PET_MAX_LEVEL,
@@ -1246,6 +1517,9 @@ module.exports = {
     getPetStats,
     firstStrikeChance,
     PERSONALITY_COMBAT,
+    RARE_COMBAT_EDGE,
+    SPECIES_MOVES,
+    getSpeciesMove,
     simulateBattle,
     makeWildPet,
     levelMatched,

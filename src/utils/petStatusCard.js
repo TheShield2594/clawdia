@@ -16,7 +16,7 @@
  *   │ ╰────────────╯                                                       │
  *   │  ◤ a low, contented rumble                                           │
  *   │    "Life's pretty chill right now, honestly."                        │
- *   │ PET 1 OF 3                             LAST FED 3H AGO · RESTING     │
+ *   │ PET 1 OF 3                                       LAST FED 3H AGO     │
  *   └──────────────────────────────────────────────────────────────────────┘
  *
  * It is deliberately not the grind result card (utils/grindResultCard.js).
@@ -363,7 +363,19 @@ function drawBondBar(ctx, o, y) {
     text(ctx, num(o.bond ?? 0), x + w + 14, y + h / 2 + 1, { font: `bold 20px ${FONT}`, color: '#ff8fa6', baseline: 'middle' });
 }
 
-function drawPassive(ctx, o, y) {
+/** The signature move (#1183) as a pill at the right end of the passive row. Returns its width. */
+function drawMove(ctx, o, y, accent) {
+    const name = plain(o.move).toUpperCase();
+    if (!name) return 0;
+    const label = `MOVE  ${name}`;
+    ctx.save();
+    ctx.font = `bold 16px ${FONT}`;
+    const w = ctx.measureText(label).width + 28;
+    ctx.restore();
+    return pill(ctx, label, PANEL_X + PANEL_W - w, y, accent);
+}
+
+function drawPassive(ctx, o, y, maxW = PANEL_W) {
     const b = o.bonus;
     if (!b) return;
     // `unit` is ' pts' for the success-chance passives, which add points
@@ -373,11 +385,15 @@ function drawPassive(ctx, o, y) {
         ? `PASSIVE  ${amount}`
         : `PASSIVE OFF  ${amount}  -  FEED ABOVE ${o.threshold}%`;
     const color = b.active ? '#4cc27a' : '#8a8a8a';
+    // Beside the move pill an inactive passive can run out of room: drop the
+    // "feed above" hint (the embed says it too) before cutting the amount.
+    const short = `PASSIVE OFF  ${amount}`;
     ctx.save();
     ctx.font = `bold 16px ${FONT}`;
-    const fits = ctx.measureText(label).width + 28 <= PANEL_W;
+    const fitsIn = str => ctx.measureText(str).width + 28 <= maxW;
+    const shown = fitsIn(label) ? label : fitsIn(short) ? short : fitText(ctx, short, maxW - 28);
     ctx.restore();
-    pill(ctx, fits ? label : fitText(ctx, label, PANEL_W - 28), PANEL_X, y, color);
+    pill(ctx, shown, PANEL_X, y, color);
 }
 
 // ─── Battle stats ────────────────────────────────────────────────────────────
@@ -421,6 +437,16 @@ function drawBattleStats(ctx, o, y, accent) {
         note: `PVP ${num(r.pvpWins)}-${num(r.pvpLosses)}`,
         value: `${num(r.wins)}W ${num(r.losses)}L`,
     }, rx, y, recordW, accent);
+
+    // Training (#1182) as a caption under the tiles it raised, in gold, e.g.
+    // "TRAINED  ATK +4%  ·  SPD +12%  ·  CRIT +2 PTS". The tiles are too narrow to
+    // carry it themselves.
+    const order = ['atk', 'def', 'spd', 'crit'];
+    const parts = order.filter(k => o.trained?.[k]).map(k => `${k.toUpperCase()} ${String(o.trained[k]).toUpperCase()}`);
+    if (parts.length) {
+        text(ctx, `TRAINED   ${parts.join('   ·   ')}`, PANEL_X + 2, y + 84,
+            { font: `bold 13px ${FONT}`, color: GOLD, max: PANEL_W });
+    }
 }
 
 // ─── Speech bubble and footer ────────────────────────────────────────────────
@@ -485,6 +511,8 @@ function drawFooter(ctx, o) {
  * @param {?{pct: number, unit?: string, label: string, active: boolean}} o.bonus
  * @param {{hp: number, atk: number, def: number, spd: number, crit: number}} o.stats
  * @param {string[]} [o.boosted]    stat keys the personality raises
+ * @param {Object<string, string>} [o.trained] per stat key, what training added, e.g. { atk: '+4%' }
+ * @param {?string} [o.move]        the species' signature move, e.g. "Pack Howl"
  * @param {{wins: number, losses: number, pvpWins: number, pvpLosses: number}} o.record
  * @param {?string} o.action        the species gesture
  * @param {string}  o.quote         the mood line
@@ -505,7 +533,8 @@ async function createPetStatusCard(o) {
     drawLevelRing(ctx, opts, accent);
     drawHungerBar(ctx, opts, PAD + 176);
     drawBondBar(ctx, opts, PAD + 222);
-    drawPassive(ctx, opts, PAD + 262);
+    const moveW = drawMove(ctx, opts, PAD + 262, accent);
+    drawPassive(ctx, opts, PAD + 262, PANEL_W - (moveW ? moveW + 12 : 0));
     drawBattleStats(ctx, opts, PAD + 318, accent);
     drawSpeech(ctx, opts, accent);
     drawFooter(ctx, opts);

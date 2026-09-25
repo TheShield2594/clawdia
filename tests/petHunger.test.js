@@ -12,7 +12,6 @@ const {
     recordPetInteraction,
     POTW_DAILY_INTERACTION_CAP,
     HUNGER_DECAY_PER_DAY,
-    REST_DURATION_MS,
     STARVING_THRESHOLD,
     RUNAWAY_DAYS,
     MS_PER_DAY,
@@ -103,22 +102,10 @@ describe('hunger decay is continuous', () => {
     });
 });
 
-describe('resting', () => {
-    test('halves decay for the portion of the window spent resting', () => {
-        const resting = petAged(4 * HOUR, { restUntil: new Date(NOW) });
-        const awake   = petAged(4 * HOUR);
-
-        // 2h rested at half rate + 2h awake at full rate.
-        const expected = 100 - (2 * HOUR * 5 + 2 * HOUR * 10) / MS_PER_DAY;
-        expect(effectiveHunger(resting, NOW)).toBeCloseTo(expected, 6);
-        expect(effectiveHunger(resting, NOW)).toBeGreaterThan(effectiveHunger(awake, NOW));
-    });
-
-    test('rest credit is capped at the rest duration', () => {
-        const pet = petAged(10 * MS_PER_DAY, { restUntil: new Date(NOW) });
-        const fullRate = 100 - 10 * HUNGER_DECAY_PER_DAY;
-        const credit   = (REST_DURATION_MS * (HUNGER_DECAY_PER_DAY - 5)) / MS_PER_DAY;
-        expect(effectiveHunger(pet, NOW)).toBeCloseTo(Math.max(0, fullRate + credit), 6);
+describe('resting is gone (#1182)', () => {
+    test('a stale restUntil from before Train no longer slows decay', () => {
+        const legacy = petAged(4 * HOUR, { restUntil: new Date(NOW) });
+        expect(effectiveHunger(legacy, NOW)).toBeCloseTo(effectiveHunger(petAged(4 * HOUR), NOW), 6);
     });
 });
 

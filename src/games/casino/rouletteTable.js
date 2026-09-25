@@ -20,7 +20,7 @@
 const { createCanvas } = require('canvas');
 const { ensureFontsRegistered } = require('../../utils/registerFonts');
 const { encodeCanvas } = require('../../utils/canvasEncode');
-const { FONT, GOLD, TONES, roundRect, drawChip, shortAmount } = require('./tableArt');
+const { FONT, GOLD, TONES, roundRect, feltGrain, drawRail, drawChip, shortAmount } = require('./tableArt');
 const { WHEEL_ORDER, POCKETS, colorOf } = require('./rouletteWheel');
 
 ensureFontsRegistered();
@@ -346,29 +346,8 @@ function drawFelt(ctx) {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
 
-    // Felt grain, deterministic so frames do not shimmer.
-    ctx.save();
-    ctx.globalAlpha = 0.035;
-    ctx.strokeStyle = '#ffffff';
-    for (let d = -H; d < W; d += 6) {
-        ctx.beginPath();
-        ctx.moveTo(d, 0);
-        ctx.lineTo(d + H, H);
-        ctx.stroke();
-    }
-    ctx.restore();
-
-    // The rail.
-    ctx.save();
-    roundRect(ctx, 7, 7, W - 14, H - 14, 26);
-    ctx.lineWidth = 14;
-    ctx.strokeStyle = '#4a2a14';
-    ctx.stroke();
-    roundRect(ctx, 14, 14, W - 28, H - 28, 20);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255,214,150,0.35)';
-    ctx.stroke();
-    ctx.restore();
+    feltGrain(ctx, W, H);
+    drawRail(ctx, W, H);
 }
 
 // ── The panel ────────────────────────────────────────────────────────────────

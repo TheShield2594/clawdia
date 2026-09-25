@@ -18,7 +18,7 @@ whose schema predates a migration that has already run.
 
 Migrations through `028_seed_pet_bond`.
 
-Pet follow-ups from the design review (#1180).
+Pet follow-ups from the design review (#1180), and slots drawn as a table image (#1199).
 
 - **Pet bond is earned by care, not by age (#1186).** Bond was the number of
   days since adoption, so the Most Loyal board ranked pets by age and a revived
@@ -37,6 +37,40 @@ Pet follow-ups from the design review (#1180).
 - **`/pet feed` takes a `quantity` (#1188),** 1–10. It feeds one item at a time
   and stops once the pet is full, so no item is spent past that point, and the
   reply says how many were used and how many are left.
+- **Train replaces Rest (#1182).** Rest halved hunger decay for two hours,
+  about 0.4 hunger a press, and was only pressed for care credit. The status
+  card now has three Train buttons: Power (+0.4% ATK a session), Guard (+1%
+  DEF) and Agility (+3% SPD and +0.5 pts crit), up to 10 sessions each. A
+  session costs 8 hunger, needs a fed pet, has an 8-hour cooldown per pet, and
+  counts as care (+1 bond). The steps differ because the stats do not weigh
+  the same, and were tuned so that each maxed focus is worth about the same.
+  A fully trained pet beats its untrained twin about as often as a pet one
+  level up would (~75%). The companion card shows training under the battle
+  stats. The tests keep fully trained personality pairings within 42–58%.
+  Hunger decays at one speed now, and a stored `restUntil` is ignored.
+- **Each species has a signature move (#1183),** named in the battle log and
+  on the companion card: Stand Firm, Nine Lives, Flurry, Slippery Scales,
+  Feint, Pack Howl, Talon Dive, Frenzy, Crystal Ward and Lantern Flare. The
+  wild opponents have Gore Charge, Hiss, Scavenge and Echolocation. Every
+  species pairing at equal level stays within 42–58%. The four rare pets get
+  1% on HP, attack and defence, which wins them at most about 62% of fights
+  against a shop or wild pet (55% on average). The battle log shows up to
+  eight lines: the last four rounds, plus earlier rounds where a move fired.
+- **Pet of the Week is announced with the companion card (#1189),** with the
+  ribbon on, the owner in the kicker, the week's care count in the footer,
+  and alt text. The emoji sprite is only the fallback for when the card
+  cannot be drawn.
+- **`/casino slots` is drawn as a table image (#1199),** in blackjack's style.
+  It uses the purple felt, three reel faces with the payline, the chip and
+  the result banner, and Heat, bet and pot along the top. Reels stop one at a
+  time, a tease holds the last reel with a gold glow, and a Hot Spin starts
+  with reel 1 locked and glowing orange. Free spins fill a strip of result
+  tiles on one image in three edits, rather than one edit per spin. Frames
+  are JPEG, the spinning frame is cached, and each image has alt text naming
+  the line and the result. The embed keeps the line, payout, balance and
+  session, and falls back to the text grid if drawing fails. The felt, rail
+  and banner moved into `tableArt.js`, where blackjack and roulette share
+  them.
 
 ## [4.14.0] - 2026-09-24
 
