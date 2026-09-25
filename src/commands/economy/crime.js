@@ -832,9 +832,15 @@ module.exports = {
                 }
             }
 
-            if (newHeat !== heat) {
+            // A loud job always restarts the cooling clock — even at the cap,
+            // where the level cannot rise and a write keyed on a change let
+            // back-to-back loud jobs cool on the old schedule. Only a careful
+            // job keeps the hours already waited out; a loud one carrying them
+            // over could see its +1 cool off again within minutes.
+            const delta = heatDelta(execMethod);
+            if (newHeat !== heat || delta > 0) {
                 const recorded = user.crimeHeat?.updatedAt ? new Date(user.crimeHeat.updatedAt).getTime() : null;
-                const since = heat > 0 && recorded ? (crimeTime.getTime() - recorded) % HEAT_DECAY_MS : 0;
+                const since = delta < 0 && heat > 0 && recorded ? (crimeTime.getTime() - recorded) % HEAT_DECAY_MS : 0;
                 // Not a coin write, and the job has already settled: a heat
                 // update that misses is logged, not allowed to fail the result.
                 await User.updateOne(

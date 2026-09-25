@@ -1003,6 +1003,29 @@ describe('standing heat', () => {
         expect(since).toBeLessThan(2 * HOUR + 60_000);
     });
 
+    it('restarts the cooling clock on a loud job, even at the cap', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000, crimeHeat: { level: 5, updatedAt: new Date(Date.now() - 5 * HOUR) } });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }]);
+
+        expect(heatOf().level).toBe(5);
+        expect(Date.now() - heatOf().updatedAt.getTime()).toBeLessThan(60_000);
+    });
+
+    it('does not carry cooling progress over a loud job', async () => {
+        // Five hours toward the next level: kept, the +1 would be gone in one.
+        rolls([], 0.1);
+        seedUser({ balance: 1000, crimeHeat: { level: 2, updatedAt: new Date(Date.now() - 5 * HOUR) } });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }]);
+
+        expect(heatOf().level).toBe(3);
+        expect(Date.now() - heatOf().updatedAt.getTime()).toBeLessThan(60_000);
+    });
+
     it('leaves it alone on the standard play', async () => {
         rolls([], 0.1);
         seedUser({ balance: 1000 });
