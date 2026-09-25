@@ -194,3 +194,97 @@ describe('deleteUserData', () => {
         expect(await Transaction.countDocuments({ userId: pseudonymize(stranger) })).toBe(0);
     });
 });
+
+// The records #1158 found erasure missing: member ids and usernames stored
+// under other field names, or embedded in the shared Guild document.
+describe('records keyed by other fields or embedded in the guild (#1158)', () => {
+    const Poll = require('../src/models/Poll');
+    const ScheduledTask = require('../src/models/ScheduledTask');
+    const PendingDuel = require('../src/models/PendingDuel');
+    const Guild = require('../src/models/Guild');
+    const { DELETED_USER_NAME } = require('../src/utils/userDataRegistry');
+
+    beforeEach(async () => {
+        await Poll.create({
+            messageId: 'm1', guildId: GUILD, channelId: 'c1', question: 'q?', options: ['a', 'b'],
+            votes: new Map([[USER, 1], [OTHER_USER, 0]]),
+            createdBy: 'member#0001', createdById: USER,
+        });
+        await ScheduledTask.create({ guildId: GUILD, channelId: 'c1', createdBy: USER, prompt: 'hi', fireAt: new Date() });
+        await PendingDuel.create({ duelId: 'd1', guildId: GUILD, challengerId: USER, opponentId: OTHER_USER, amount: 10 });
+        await Transaction.create({
+            userId: OTHER_USER, guildId: GUILD, type: 'transfer', amount: 5, balance: 5, relatedUserId: USER,
+        });
+        await Guild.create({
+            guildId: GUILD,
+            name: 'Test guild',
+            fishingWorldRecords: [
+                { fish: 'Pike', weight: 9, userId: USER, username: 'member' },
+                { fish: 'Carp', weight: 4, userId: OTHER_USER, username: 'other' },
+            ],
+            districts: [{
+                districtId: 'bank', topContributors: [
+                    { userId: USER, username: 'member', amount: 50 },
+                    { userId: OTHER_USER, username: 'other', amount: 20 },
+                ],
+            }],
+            giveaways: [{
+                messageId: 'g1', channelId: 'c1', prize: 'p', endsAt: new Date(), hostId: OTHER_USER,
+                entrantIds: [USER, OTHER_USER], winnerIds: [USER],
+            }],
+            tickets: { open: [{ ticketId: 1, threadId: 't1', channelId: 'c1', openerId: USER, claimedBy: OTHER_USER }] },
+            commandPolicies: { exceptions: { userIds: [USER, OTHER_USER] } },
+            antiNuke: { whitelistUserIds: [USER] },
+        });
+    });
+
+    test('the export finds them without leaking the other member', async () => {
+        const dump = await exportUserData(USER, GUILD);
+        expect(dump.collections.polls.records[0]).toMatchObject({ isCreator: true, vote: 'b' });
+        expect(dump.collections.scheduledTasks.records).toHaveLength(1);
+        expect(dump.collections.pendingDuels.records[0].opponentId).toBe('[redacted]');
+        expect(dump.collections.transactionCounterparty.records).toHaveLength(1);
+        expect(dump.collections.serverRecords.records[0].fishingWorldRecords).toHaveLength(1);
+        expect(dump.collections.giveaways.records[0]).toMatchObject({ entered: true, won: true, isHost: false });
+        expect(dump.collections.openTickets.records[0].role).toBe('opener');
+        expect(dump.collections.policyExceptions.records[0])
+            .toEqual({ commandPolicyException: true, antiNukeWhitelisted: true });
+        expect(JSON.stringify(dump)).not.toContain(OTHER_USER);
+    });
+
+    test('erasure scrubs the member and leaves the other member intact', async () => {
+        await deleteUserData(USER, GUILD);
+        const token = pseudonymize(USER);
+
+        const poll = await Poll.findOne({ messageId: 'm1' }).lean();
+        expect(poll.votes[USER]).toBeUndefined();
+        expect(poll.votes[OTHER_USER]).toBe(0);
+        expect(poll.createdById).toBe(token);
+        expect(poll.createdBy).toBe(DELETED_USER_NAME);
+
+        expect((await ScheduledTask.findOne({ guildId: GUILD }).lean()).createdBy).toBe(token);
+        const duel = await PendingDuel.findOne({ duelId: 'd1' }).lean();
+        expect(duel).toMatchObject({ challengerId: token, opponentId: OTHER_USER });
+        expect((await Transaction.findOne({ userId: OTHER_USER, type: 'transfer' }).lean()).relatedUserId).toBe(token);
+
+        const guild = await Guild.findOne({ guildId: GUILD }).lean();
+        expect(guild.fishingWorldRecords[0]).toMatchObject({ userId: token, username: DELETED_USER_NAME });
+        expect(guild.fishingWorldRecords[1]).toMatchObject({ userId: OTHER_USER, username: 'other' });
+        expect(guild.districts[0].topContributors[0]).toMatchObject({ userId: token, username: DELETED_USER_NAME });
+        expect(guild.districts[0].topContributors[1].userId).toBe(OTHER_USER);
+        expect(guild.giveaways[0].entrantIds).toEqual([OTHER_USER]);
+        expect(guild.giveaways[0].winnerIds).toEqual([]);
+        expect(guild.tickets.open[0]).toMatchObject({ openerId: token, claimedBy: OTHER_USER });
+        expect(guild.commandPolicies.exceptions.userIds).toEqual([OTHER_USER]);
+        expect(guild.antiNuke.whitelistUserIds).toEqual([]);
+
+        // Nothing left anywhere in the guild document names the member.
+        expect(JSON.stringify(guild)).not.toContain(USER);
+    });
+
+    test('a second erasure changes nothing', async () => {
+        await deleteUserData(USER, GUILD);
+        const second = await deleteUserData(USER, GUILD);
+        for (const result of second.results) expect(result.changed).toBe(0);
+    });
+});

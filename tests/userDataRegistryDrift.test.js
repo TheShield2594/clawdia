@@ -73,6 +73,87 @@ describe('user-data registry covers every member-keyed collection', () => {
     });
 });
 
+// ── Member-id-shaped fields, nested ones included (#1158) ──────────────────
+//
+// The top-level-`userId` scan above finds whole collections; it cannot see a
+// member's id stored under another name (`createdBy`, `openerId`) or inside a
+// sub-document of a shared record (a fishing world record in the Guild doc). So
+// this walks every path of every schema and treats any leaf ending in `Id`,
+// `Ids` or `By` as a possible member id, unless its name says it is an id of
+// something else. Each one must be covered by a registry entry's `fields`, or
+// named below with the reason erasure leaves it alone.
+
+// Leaf names that end like an id but name a Discord or bot object, not a member.
+const NOT_A_MEMBER = /(guild|channel|message|role|item|season|quest|pet|session|syndicate|case|ticket|thread|category|client|currency|district|duel|battle|event|profile|seen)Ids?$/i;
+const ID_SHAPED = /(^userIds?$|Ids?$|By$)/;
+
+// `Model:path` → why erasure does not touch it. Every entry here is a record of
+// which member *performed a staff or operator action*, kept like the dashboard
+// audit log is, or a row that expires on its own within minutes.
+const EXEMPT_FIELDS = {
+    'Guild:serverBoost.activatedBy': 'staff action on server config, kept like the audit log',
+    'Guild:ai.mcpServers.addedBy': 'staff action on server config, kept like the audit log',
+    'Guild:ai.mcpServers.oauth.connectedBy': 'staff action on server config, kept like the audit log',
+    'Guild:raidDetection.raidModeActivatedBy': 'staff moderation action, kept like the audit log',
+    'Guild:antiNuke.lockdown.startedBy': 'staff moderation action, kept like the audit log',
+    'Guild:activeEvent.startedBy': 'staff action on server config, kept like the audit log',
+    'KnowledgeBase:addedBy': 'staff curation of the server knowledge base, kept like the audit log',
+    'FailedJob:resolvedBy': 'operator action on the dead-letter queue, kept like the audit log',
+    'FailedJob:claimedBy': 'worker/lease identity on the dead-letter queue, not a member',
+    'McpOAuthState:startedBy': 'an OAuth flow in progress; the TTL index deletes it within minutes',
+};
+
+/** Every id-shaped leaf path in a schema, nested sub-documents included. */
+function idShapedPaths(schema, prefix = '') {
+    const out = [];
+    schema.eachPath((p, type) => {
+        const full = prefix + p;
+        const leaf = full.split('.').pop();
+        if (ID_SHAPED.test(leaf) && !NOT_A_MEMBER.test(leaf)) out.push(full);
+        if (type.schema) out.push(...idShapedPaths(type.schema, `${full}.`));
+    });
+    return out;
+}
+
+describe('every member-id-shaped field is covered or exempted', () => {
+    const models = loadModels();
+    const covered = new Set(USER_DATA_ENTRIES.flatMap(e =>
+        (e.fields || []).map(field => `${e.model.modelName}:${field}`)));
+
+    test('the walk finds nested fields (sanity floor)', () => {
+        const found = Object.values(models).flatMap(m => idShapedPaths(m.schema).map(p => `${m.modelName}:${p}`));
+        expect(found).toEqual(expect.arrayContaining([
+            'Guild:fishingWorldRecords.userId',
+            'Guild:tickets.open.openerId',
+            'Poll:createdBy',
+        ]));
+    });
+
+    test('no id-shaped field is left unaccounted for', () => {
+        const missing = Object.values(models)
+            .flatMap(m => idShapedPaths(m.schema).map(p => `${m.modelName}:${p}`))
+            .filter(key => !covered.has(key) && !EXEMPT_FIELDS[key]);
+        expect(missing).toEqual([]);
+    });
+
+    test('every entry lists the fields it covers, and they exist on its model', () => {
+        for (const entry of USER_DATA_ENTRIES) {
+            expect(Array.isArray(entry.fields) && entry.fields.length).toBeTruthy();
+            const paths = idShapedPaths(entry.model.schema);
+            for (const field of entry.fields) expect(paths).toContain(field);
+        }
+    });
+
+    test('exemptions only name fields that still exist and are not also covered', () => {
+        for (const key of Object.keys(EXEMPT_FIELDS)) {
+            const [modelName, field] = key.split(':');
+            expect(models[modelName]).toBeDefined();
+            expect(idShapedPaths(models[modelName].schema)).toContain(field);
+            expect(covered.has(key)).toBe(false);
+        }
+    });
+});
+
 describe('every registry entry is well-formed', () => {
     test('keys are unique', () => {
         const keys = USER_DATA_ENTRIES.map(e => e.key);

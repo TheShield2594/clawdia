@@ -11,9 +11,10 @@
 // the delete below, and both walk *this* list — so a new collection is covered
 // by both the moment it is registered here, and by neither until it is.
 //
-// The registration is not optional. tests/userDataRegistryDrift.test.js scans
-// src/models for any schema with a top-level `userId` path and fails when one is
-// not accounted for here (the same guard tests/envExampleDrift.test.js puts on
+// The registration is not optional. tests/userDataRegistryDrift.test.js walks
+// every schema in src/models, nested sub-documents included, for any path shaped
+// like a member id (`userId`, `openerId`, `createdBy`, ...) and fails when one is
+// not listed in an entry's `fields` here or exempted there with a reason (the same guard tests/envExampleDrift.test.js puts on
 // `.env.example`): a model that stores member data cannot be added without a
 // deliberate decision about what export and erasure do with it.
 //
@@ -62,6 +63,12 @@ const Syndicate = require('../models/Syndicate');
 const DmSession = require('../models/DmSession');
 const FishingTournament = require('../models/FishingTournament');
 const SeasonRecord = require('../models/SeasonRecord');
+const Poll = require('../models/Poll');
+const ScheduledTask = require('../models/ScheduledTask');
+const PendingDuel = require('../models/PendingDuel');
+const PendingPetBattle = require('../models/PendingPetBattle');
+const AiItem = require('../models/AiItem');
+const Guild = require('../models/Guild');
 
 // The Transaction `type` the accountability record below carries. Kept next to
 // the registry rather than inline so the ledger tooling and the tests name the
@@ -96,6 +103,12 @@ function pseudonymize(userId) {
 const REDACTED_THIRD_PARTY = '[redacted]';
 const redactOther = (id, userId) => (!id || id === userId ? id : REDACTED_THIRD_PARTY);
 
+// What a scrubbed display name reads as in a record the server keeps — a world
+// record, a district's top-contributor board, the last jackpot winner (#1158).
+// Those rows store a username next to the id, and the username is as much the
+// member's data as the id is.
+const DELETED_USER_NAME = 'Deleted user';
+
 // `lean()` everywhere: the export serialises to JSON and the counts only need
 // numbers, so nothing here wants a hydrated Mongoose document.
 const lean = query => query.lean();
@@ -112,6 +125,9 @@ const lean = query => query.lean();
  * @property {string} label    human description, shown in the export and report
  * @property {import('mongoose').Model} model
  * @property {'delete'|'pseudonymize'|'retain'} behavior
+ * @property {string[]} fields the member-id paths on `model` this entry covers,
+ *           nested ones dotted (`tickets.open.openerId`). The drift test holds
+ *           every id-shaped path in src/models to this list.
  * @property {string} [reason] why a pseudonymise/retain keeps the row; required
  *                             for those two so the choice is never silent
  * @property {(userId: string, guildId: string) => Promise<object[]>} collect
@@ -123,6 +139,9 @@ const lean = query => query.lean();
  *           say, a case but no economy profile in a guild.
  */
 
+// The top-level fields of a case that can name a member, as subject or staff.
+const CASE_FIELDS = ['targetUserId', 'moderatorId', 'assignedModId', 'resolvedBy'];
+
 /** @type {RegistryEntry[]} */
 const USER_DATA_ENTRIES = [
     {
@@ -130,6 +149,7 @@ const USER_DATA_ENTRIES = [
         label: 'Economy profile (balances, inventory, levels, timezone, streaks)',
         model: User,
         behavior: 'delete',
+        fields: ['userId'],
         collect: (userId, guildId) => lean(User.find({ userId, guildId })),
         remove: async (userId, guildId) =>
             (await User.deleteMany({ userId, guildId })).deletedCount || 0,
@@ -139,6 +159,7 @@ const USER_DATA_ENTRIES = [
         label: 'AI conversation history and pinned memories',
         model: Conversation,
         behavior: 'delete',
+        fields: ['userId'],
         collect: (userId, guildId) => lean(Conversation.find({ userId, guildId })),
         remove: async (userId, guildId) =>
             (await Conversation.deleteMany({ userId, guildId })).deletedCount || 0,
@@ -148,6 +169,7 @@ const USER_DATA_ENTRIES = [
         label: 'Economy transaction ledger',
         model: Transaction,
         behavior: 'delete',
+        fields: ['userId'],
         collect: (userId, guildId) => lean(Transaction.find({ userId, guildId })),
         // The accountability record deleteUserData writes afterwards is keyed by
         // the pseudonym, not the real id, so it is never matched by this filter —
@@ -160,6 +182,7 @@ const USER_DATA_ENTRIES = [
         label: 'Reminders',
         model: Reminder,
         behavior: 'delete',
+        fields: ['userId'],
         collect: (userId, guildId) => lean(Reminder.find({ userId, guildId })),
         remove: async (userId, guildId) =>
             (await Reminder.deleteMany({ userId, guildId })).deletedCount || 0,
@@ -169,6 +192,7 @@ const USER_DATA_ENTRIES = [
         label: 'Fishing/hunting/mining progression',
         model: GrindProfile,
         behavior: 'delete',
+        fields: ['userId'],
         collect: (userId, guildId) => lean(GrindProfile.find({ userId, guildId })),
         remove: async (userId, guildId) =>
             (await GrindProfile.deleteMany({ userId, guildId })).deletedCount || 0,
@@ -178,6 +202,7 @@ const USER_DATA_ENTRIES = [
         label: 'Big-win feed entries',
         model: BigWin,
         behavior: 'delete',
+        fields: ['userId'],
         collect: (userId, guildId) => lean(BigWin.find({ userId, guildId })),
         remove: async (userId, guildId) =>
             (await BigWin.deleteMany({ userId, guildId })).deletedCount || 0,
@@ -187,6 +212,7 @@ const USER_DATA_ENTRIES = [
         label: 'AI-generated quests',
         model: AiQuest,
         behavior: 'delete',
+        fields: ['userId'],
         collect: (userId, guildId) => lean(AiQuest.find({ userId, guildId })),
         remove: async (userId, guildId) =>
             (await AiQuest.deleteMany({ userId, guildId })).deletedCount || 0,
@@ -196,6 +222,7 @@ const USER_DATA_ENTRIES = [
         label: 'Weekly champion standings',
         model: WeeklyChampion,
         behavior: 'delete',
+        fields: ['userId'],
         collect: (userId, guildId) => lean(WeeklyChampion.find({ userId, guildId })),
         remove: async (userId, guildId) =>
             (await WeeklyChampion.deleteMany({ userId, guildId })).deletedCount || 0,
@@ -205,6 +232,7 @@ const USER_DATA_ENTRIES = [
         label: 'Open market listings',
         model: MarketListing,
         behavior: 'delete',
+        fields: ['sellerId'],
         collect: (userId, guildId) => lean(MarketListing.find({ sellerId: userId, guildId })),
         remove: async (userId, guildId) =>
             (await MarketListing.deleteMany({ sellerId: userId, guildId })).deletedCount || 0,
@@ -215,6 +243,7 @@ const USER_DATA_ENTRIES = [
         label: 'Dungeon-master campaign characters',
         model: DmSession,
         behavior: 'delete',
+        fields: ['hostId', 'players.userId'],
         // A campaign is shared, so the export returns only the member's own
         // character and their relationship to the session — never the other
         // players' characters or the shared story log, which are someone else's
@@ -248,29 +277,37 @@ const USER_DATA_ENTRIES = [
         label: 'Fishing-tournament entries',
         model: FishingTournament,
         behavior: 'delete',
+        fields: ['entries.userId', 'prizes.userId'],
         collect: async (userId, guildId) => {
-            const docs = await lean(FishingTournament.find({ guildId, 'entries.userId': userId }));
+            const docs = await lean(FishingTournament.find(
+                { guildId, $or: [{ 'entries.userId': userId }, { 'prizes.userId': userId }] }));
             // Only the member's own entries, not the whole tournament board.
             return docs.map(doc => ({
                 _id: doc._id,
                 endsAt: doc.endsAt,
                 entries: (doc.entries || []).filter(e => e.userId === userId),
-            })).filter(doc => doc.entries.length);
+                prizes: (doc.prizes || []).filter(p => p.userId === userId),
+            })).filter(doc => doc.entries.length || doc.prizes.length);
         },
+        // A prize row is the member's placement, like their entry; it goes with
+        // them. The tournament pays prizes out as it ends, so an unpaid one here
+        // is owed to a profile the erasure is deleting anyway.
         remove: async (userId, guildId) => {
             const pulled = await FishingTournament.updateMany(
-                { guildId, 'entries.userId': userId },
-                { $pull: { entries: { userId } } },
+                { guildId, $or: [{ 'entries.userId': userId }, { 'prizes.userId': userId }] },
+                { $pull: { entries: { userId }, prizes: { userId } } },
             );
             return pulled.modifiedCount || 0;
         },
-        guilds: userId => FishingTournament.distinct('guildId', { 'entries.userId': userId }),
+        guilds: userId => FishingTournament.distinct('guildId',
+            { $or: [{ 'entries.userId': userId }, { 'prizes.userId': userId }] }),
     },
     {
         key: 'seasonRecords',
         label: 'Ended-season leaderboard placements',
         model: SeasonRecord,
         behavior: 'delete',
+        fields: ['top10.userId'],
         collect: async (userId, guildId) => {
             const docs = await lean(SeasonRecord.find({ guildId, 'top10.userId': userId }));
             return docs.map(doc => ({
@@ -294,6 +331,7 @@ const USER_DATA_ENTRIES = [
         label: 'Crime-syndicate membership',
         model: Syndicate,
         behavior: 'pseudonymize',
+        fields: ['leaderId', 'memberIds'],
         reason: 'a syndicate is the server\'s shared entity; the member is removed '
             + 'from its rosters, and a syndicate they lead keeps its history under a '
             + 'redacted leader rather than being deleted out from under the others.',
@@ -332,6 +370,7 @@ const USER_DATA_ENTRIES = [
         label: 'Moderation cases (as subject or moderator)',
         model: Case,
         behavior: 'pseudonymize',
+        fields: ['targetUserId', 'moderatorId', 'assignedModId', 'resolvedBy', 'notes.moderatorId'],
         reason: 'a case is the server\'s moderation record; the identities inside it '
             + 'are redacted so the account can be forgotten without the server losing '
             + 'the history it is entitled to keep.',
@@ -342,7 +381,7 @@ const USER_DATA_ENTRIES = [
         // exists, its type, reason and outcome.
         collect: async (userId, guildId) => {
             const docs = await lean(Case.find(
-                { guildId, $or: [{ targetUserId: userId }, { moderatorId: userId }, { assignedModId: userId }] }));
+                { guildId, $or: CASE_FIELDS.map(field => ({ [field]: userId })) }));
             return docs.map(doc => ({
                 _id: doc._id,
                 caseId: doc.caseId,
@@ -355,14 +394,14 @@ const USER_DATA_ENTRIES = [
                 targetUserId: redactOther(doc.targetUserId, userId),
                 moderatorId: redactOther(doc.moderatorId, userId),
                 assignedModId: redactOther(doc.assignedModId, userId),
+                resolvedBy: redactOther(doc.resolvedBy, userId),
             }));
         },
-        guilds: userId => Case.distinct('guildId',
-            { $or: [{ targetUserId: userId }, { moderatorId: userId }, { assignedModId: userId }] }),
+        guilds: userId => Case.distinct('guildId', { $or: CASE_FIELDS.map(field => ({ [field]: userId })) }),
         remove: async (userId, guildId) => {
             const token = pseudonymize(userId);
             let changed = 0;
-            for (const field of ['targetUserId', 'moderatorId', 'assignedModId']) {
+            for (const field of CASE_FIELDS) {
                 const res = await Case.updateMany(
                     { guildId, [field]: userId },
                     { $set: { [field]: token } },
@@ -379,10 +418,305 @@ const USER_DATA_ENTRIES = [
         },
     },
     {
+        key: 'transactionCounterparty',
+        label: 'Other members\' ledger rows that name the member as counterparty',
+        model: Transaction,
+        behavior: 'pseudonymize',
+        fields: ['relatedUserId'],
+        reason: 'those rows are the other member\'s ledger (a transfer they received, '
+            + 'a duel they fought); they stay, with the member as counterparty '
+            + 'replaced by a redacted token.',
+        // The row belongs to someone else, so only the fact of it is exported —
+        // not the other member's id, balance or note.
+        collect: async (userId, guildId) => {
+            const rows = await lean(Transaction.find({ guildId, relatedUserId: userId }));
+            return rows.map(tx => ({
+                _id: tx._id,
+                type: tx.type,
+                amount: tx.amount,
+                createdAt: tx.createdAt,
+                userId: REDACTED_THIRD_PARTY,
+            }));
+        },
+        guilds: userId => Transaction.distinct('guildId', { relatedUserId: userId }),
+        remove: async (userId, guildId) => (await Transaction.updateMany(
+            { guildId, relatedUserId: userId },
+            { $set: { relatedUserId: pseudonymize(userId) } },
+        )).modifiedCount || 0,
+    },
+    {
+        key: 'polls',
+        label: 'Polls created and votes cast',
+        model: Poll,
+        behavior: 'pseudonymize',
+        fields: ['createdBy', 'createdById'],
+        reason: 'a poll is posted to the whole server; the member\'s own vote is '
+            + 'removed, and a poll they created stays up with its creator shown as '
+            + 'a deleted user.',
+        // `votes` is a map keyed by voter id, so the member's vote is found by
+        // key. Only their own vote is exported, never the rest of the tally.
+        collect: async (userId, guildId) => {
+            const docs = await lean(Poll.find(
+                { guildId, $or: [{ createdById: userId }, { [`votes.${userId}`]: { $exists: true } }] }));
+            return docs.map(doc => ({
+                _id: doc._id,
+                messageId: doc.messageId,
+                channelId: doc.channelId,
+                question: doc.question,
+                isCreator: doc.createdById === userId,
+                vote: doc.votes?.[userId] !== undefined ? doc.options?.[doc.votes[userId]] ?? null : null,
+            }));
+        },
+        guilds: userId => Poll.distinct('guildId',
+            { $or: [{ createdById: userId }, { [`votes.${userId}`]: { $exists: true } }] }),
+        // Polls created before `createdById` existed store only the creator's
+        // tag, which is not a key erasure can match on; those keep the tag.
+        remove: async (userId, guildId) => {
+            const voted = await Poll.updateMany(
+                { guildId, [`votes.${userId}`]: { $exists: true } },
+                { $unset: { [`votes.${userId}`]: '' } },
+            );
+            const created = await Poll.updateMany(
+                { guildId, createdById: userId },
+                { $set: { createdById: pseudonymize(userId), createdBy: DELETED_USER_NAME } },
+            );
+            return (voted.modifiedCount || 0) + (created.modifiedCount || 0);
+        },
+    },
+    {
+        key: 'scheduledTasks',
+        label: 'Scheduled tasks the member created',
+        model: ScheduledTask,
+        behavior: 'pseudonymize',
+        fields: ['createdBy'],
+        reason: 'a scheduled task posts to a server channel and other members may '
+            + 'rely on it; it keeps running under a redacted creator, and an admin '
+            + 'can remove it from the dashboard.',
+        collect: (userId, guildId) => lean(ScheduledTask.find({ guildId, createdBy: userId })),
+        guilds: userId => ScheduledTask.distinct('guildId', { createdBy: userId }),
+        remove: async (userId, guildId) => (await ScheduledTask.updateMany(
+            { guildId, createdBy: userId },
+            { $set: { createdBy: pseudonymize(userId) } },
+        )).modifiedCount || 0,
+    },
+    {
+        key: 'aiItems',
+        label: 'AI-forged items the member created',
+        model: AiItem,
+        behavior: 'pseudonymize',
+        fields: ['createdBy'],
+        reason: 'a forged item can be traded or gifted, so other members may hold '
+            + 'it; the item definition stays and its creator is redacted.',
+        collect: (userId, guildId) => lean(AiItem.find({ guildId, createdBy: userId })),
+        guilds: userId => AiItem.distinct('guildId', { createdBy: userId }),
+        remove: async (userId, guildId) => (await AiItem.updateMany(
+            { guildId, createdBy: userId },
+            { $set: { createdBy: pseudonymize(userId) } },
+        )).modifiedCount || 0,
+    },
+    ...[
+        { key: 'pendingDuels', label: 'In-flight duel escrow', model: PendingDuel },
+        { key: 'pendingPetBattles', label: 'In-flight pet-battle escrow', model: PendingPetBattle },
+    ].map(({ key, label, model }) => ({
+        key,
+        label,
+        model,
+        behavior: 'pseudonymize',
+        fields: ['challengerId', 'opponentId'],
+        reason: 'the escrow sweep needs the row to refund the other side\'s stake if '
+            + 'the match never settled; the member is redacted, and the row expires '
+            + 'on its own within a week.',
+        collect: async (userId, guildId) => {
+            const docs = await lean(model.find(
+                { guildId, $or: [{ challengerId: userId }, { opponentId: userId }] }));
+            return docs.map(doc => ({
+                _id: doc._id,
+                amount: doc.amount,
+                createdAt: doc.createdAt,
+                challengerId: redactOther(doc.challengerId, userId),
+                opponentId: redactOther(doc.opponentId, userId),
+            }));
+        },
+        guilds: userId => model.distinct('guildId',
+            { $or: [{ challengerId: userId }, { opponentId: userId }] }),
+        remove: async (userId, guildId) => {
+            const token = pseudonymize(userId);
+            let changed = 0;
+            for (const field of ['challengerId', 'opponentId']) {
+                const res = await model.updateMany({ guildId, [field]: userId }, { $set: { [field]: token } });
+                changed += res.modifiedCount || 0;
+            }
+            return changed;
+        },
+    })),
+    {
+        key: 'serverRecords',
+        label: 'Server boards: fishing world records, district top contributors, last jackpot winner',
+        model: Guild,
+        behavior: 'pseudonymize',
+        fields: [
+            'fishingWorldRecords.userId',
+            'districts.topContributors.userId',
+            'casinoJackpot.lastWinnerId',
+        ],
+        reason: 'the boards are the server\'s history; the member\'s entries stay '
+            + 'on them as a deleted user, with the stored username and id removed.',
+        collect: async (userId, guildId) => {
+            const guild = await lean(Guild.findOne({ guildId },
+                'fishingWorldRecords districts casinoJackpot.lastWinnerId casinoJackpot.lastWonAmount'));
+            if (!guild) return [];
+            const records = (guild.fishingWorldRecords || []).filter(r => r.userId === userId);
+            const contributions = (guild.districts || []).flatMap(d =>
+                (d.topContributors || []).filter(c => c.userId === userId)
+                    .map(c => ({ districtId: d.districtId, amount: c.amount })));
+            const jackpot = guild.casinoJackpot?.lastWinnerId === userId
+                ? { lastWonAmount: guild.casinoJackpot.lastWonAmount } : null;
+            if (!records.length && !contributions.length && !jackpot) return [];
+            return [{ fishingWorldRecords: records, districtContributions: contributions, lastJackpotWin: jackpot }];
+        },
+        guilds: userId => Guild.distinct('guildId', { $or: [
+            { 'fishingWorldRecords.userId': userId },
+            { 'districts.topContributors.userId': userId },
+            { 'casinoJackpot.lastWinnerId': userId },
+        ] }),
+        remove: async (userId, guildId) => {
+            const token = pseudonymize(userId);
+            const records = await Guild.updateMany(
+                { guildId, 'fishingWorldRecords.userId': userId },
+                { $set: {
+                    'fishingWorldRecords.$[r].userId': token,
+                    'fishingWorldRecords.$[r].username': DELETED_USER_NAME,
+                } },
+                { arrayFilters: [{ 'r.userId': userId }] },
+            );
+            const contributors = await Guild.updateMany(
+                { guildId, 'districts.topContributors.userId': userId },
+                { $set: {
+                    'districts.$[].topContributors.$[c].userId': token,
+                    'districts.$[].topContributors.$[c].username': DELETED_USER_NAME,
+                } },
+                { arrayFilters: [{ 'c.userId': userId }] },
+            );
+            // A jackpot whose payout is still being recovered keeps its winner:
+            // the recovery reads `lastWinnerId` to finish crediting (or give
+            // up on) that payout, and clears it itself when done.
+            const jackpot = await Guild.updateMany(
+                { guildId, 'casinoJackpot.lastWinnerId': userId, 'casinoJackpot.pendingPayoutKey': null },
+                { $set: {
+                    'casinoJackpot.lastWinnerId': token,
+                    'casinoJackpot.lastWinnerName': DELETED_USER_NAME,
+                } },
+            );
+            return (records.modifiedCount || 0) + (contributors.modifiedCount || 0) + (jackpot.modifiedCount || 0);
+        },
+    },
+    {
+        key: 'giveaways',
+        label: 'Giveaway entries, wins and hosting',
+        model: Guild,
+        behavior: 'pseudonymize',
+        fields: ['giveaways.entrantIds', 'giveaways.winnerIds', 'giveaways.hostId'],
+        reason: 'a giveaway is the server\'s; the member\'s entry and win are '
+            + 'removed, and a giveaway they hosted stays under a redacted host.',
+        collect: async (userId, guildId) => {
+            const guild = await lean(Guild.findOne({ guildId }, 'giveaways'));
+            return (guild?.giveaways || [])
+                .filter(g => g.hostId === userId
+                    || (g.entrantIds || []).includes(userId) || (g.winnerIds || []).includes(userId))
+                .map(g => ({
+                    messageId: g.messageId,
+                    channelId: g.channelId,
+                    prize: g.prize,
+                    endsAt: g.endsAt,
+                    ended: g.ended,
+                    isHost: g.hostId === userId,
+                    entered: (g.entrantIds || []).includes(userId),
+                    won: (g.winnerIds || []).includes(userId),
+                }));
+        },
+        guilds: userId => Guild.distinct('guildId', { $or: [
+            { 'giveaways.entrantIds': userId },
+            { 'giveaways.winnerIds': userId },
+            { 'giveaways.hostId': userId },
+        ] }),
+        remove: async (userId, guildId) => {
+            const pulled = await Guild.updateMany(
+                { guildId, $or: [{ 'giveaways.entrantIds': userId }, { 'giveaways.winnerIds': userId }] },
+                { $pull: { 'giveaways.$[].entrantIds': userId, 'giveaways.$[].winnerIds': userId } },
+            );
+            const hosted = await Guild.updateMany(
+                { guildId, 'giveaways.hostId': userId },
+                { $set: { 'giveaways.$[g].hostId': pseudonymize(userId) } },
+                { arrayFilters: [{ 'g.hostId': userId }] },
+            );
+            return (pulled.modifiedCount || 0) + (hosted.modifiedCount || 0);
+        },
+    },
+    {
+        key: 'openTickets',
+        label: 'Open support tickets (as opener or claimer)',
+        model: Guild,
+        behavior: 'pseudonymize',
+        fields: ['tickets.open.openerId', 'tickets.open.claimedBy'],
+        reason: 'an open ticket is a live thread the support team is working; it '
+            + 'stays open with the member redacted, and closing it files the usual '
+            + 'case under the redacted id.',
+        collect: async (userId, guildId) => {
+            const guild = await lean(Guild.findOne({ guildId }, 'tickets.open'));
+            return (guild?.tickets?.open || [])
+                .filter(t => t.openerId === userId || t.claimedBy === userId)
+                .map(t => ({
+                    ticketId: t.ticketId,
+                    threadId: t.threadId,
+                    subject: t.openerId === userId ? t.subject : undefined,
+                    openedAt: t.openedAt,
+                    role: t.openerId === userId ? 'opener' : 'claimer',
+                }));
+        },
+        guilds: userId => Guild.distinct('guildId',
+            { $or: [{ 'tickets.open.openerId': userId }, { 'tickets.open.claimedBy': userId }] }),
+        remove: async (userId, guildId) => {
+            const token = pseudonymize(userId);
+            let changed = 0;
+            for (const field of ['openerId', 'claimedBy']) {
+                const res = await Guild.updateMany(
+                    { guildId, [`tickets.open.${field}`]: userId },
+                    { $set: { [`tickets.open.$[t].${field}`]: token } },
+                    { arrayFilters: [{ [`t.${field}`]: userId }] },
+                );
+                changed += res.modifiedCount || 0;
+            }
+            return changed;
+        },
+    },
+    {
+        key: 'policyExceptions',
+        label: 'Command-policy and anti-nuke exception lists',
+        model: Guild,
+        behavior: 'delete',
+        fields: ['commandPolicies.exceptions.userIds', 'antiNuke.whitelistUserIds'],
+        collect: async (userId, guildId) => {
+            const guild = await lean(Guild.findOne(
+                { guildId }, 'commandPolicies.exceptions.userIds antiNuke.whitelistUserIds'));
+            if (!guild) return [];
+            const commandPolicyException = (guild.commandPolicies?.exceptions?.userIds || []).includes(userId);
+            const antiNukeWhitelisted = (guild.antiNuke?.whitelistUserIds || []).includes(userId);
+            return commandPolicyException || antiNukeWhitelisted
+                ? [{ commandPolicyException, antiNukeWhitelisted }] : [];
+        },
+        guilds: userId => Guild.distinct('guildId',
+            { $or: [{ 'commandPolicies.exceptions.userIds': userId }, { 'antiNuke.whitelistUserIds': userId }] }),
+        remove: async (userId, guildId) => (await Guild.updateMany(
+            { guildId, $or: [{ 'commandPolicies.exceptions.userIds': userId }, { 'antiNuke.whitelistUserIds': userId }] },
+            { $pull: { 'commandPolicies.exceptions.userIds': userId, 'antiNuke.whitelistUserIds': userId } },
+        )).modifiedCount || 0,
+    },
+    {
         key: 'auditLog',
         label: 'Dashboard audit log',
         model: AuditLog,
         behavior: 'retain',
+        fields: ['userId'],
         reason: 'the audit log is the server\'s security record of who changed what '
             + 'in the dashboard; it is kept intact, and its IP-bearing rows already '
             + 'expire on their own retention clock (AUDIT_LOG_RETENTION_DAYS).',
@@ -394,6 +728,7 @@ const USER_DATA_ENTRIES = [
         label: 'Active temporary bans',
         model: TempBan,
         behavior: 'retain',
+        fields: ['userId', 'moderatorId'],
         reason: 'a temporary ban is active enforcement; deleting it on request would '
             + 'turn erasure into ban evasion, so the row is kept until it expires on '
             + 'its own.',
@@ -526,4 +861,5 @@ module.exports = {
     pseudonymize,
     REDACTED_PREFIX,
     ERASURE_TX_TYPE,
+    DELETED_USER_NAME,
 };

@@ -79,7 +79,7 @@ function scheduleExpiry(msg, question, options, endsAt, createdBy) {
 /**
  * Persists a freshly posted poll and arms its expiry timer.
  */
-async function createPoll({ msg, guildId, channelId, question, options, endsAt, createdBy }) {
+async function createPoll({ msg, guildId, channelId, question, options, endsAt, createdBy, createdById = null }) {
     await Poll.create({
         messageId: msg.id,
         guildId,
@@ -89,6 +89,7 @@ async function createPoll({ msg, guildId, channelId, question, options, endsAt, 
         votes: new Map(),
         endsAt,
         createdBy,
+        createdById,
     });
 
     if (endsAt) scheduleExpiry(msg, question, options, endsAt, createdBy);
