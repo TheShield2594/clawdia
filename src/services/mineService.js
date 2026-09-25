@@ -699,6 +699,9 @@ function executeMine(user, depthId, options = {}) {
     const lampBefore   = m.activeLamp;
 
     const result = { success, xpEarned: 0, durabilityLost: 0, pickaxeBroke: false };
+    // A landed swing's XP, granted once the intensity block below knows whether
+    // the haul caved in (#1194).
+    let swingXp = 0;
 
     if (success) {
         const rolledTier = rollTier(user, depth);
@@ -757,13 +760,13 @@ function executeMine(user, depthId, options = {}) {
         if (tier === 'legendary') m.legendaryFinds += 1;
         if (tier === 'event')     m.eventFinds     += 1;
 
-        const lvResult = applyXp(user, xpGain);
+        swingXp = xpGain;
 
         Object.assign(result, {
             ore, tier, rawPayout, finalPayout: adjustedPayout,
             isCrit, critMultiplier: parseFloat(critMultiplier.toFixed(2)),
-            specialDrop, xpEarned: xpGain,
-            levelUp: lvResult.leveledUp ? lvResult : null,
+            specialDrop,
+            levelUp: null,
             cappedByHard,
             gatheringYield,
             streakMult,
@@ -850,6 +853,16 @@ function executeMine(user, depthId, options = {}) {
         }
     }
 
+    // The swing's XP is paid only for a haul the player keeps (#1194). A cave-in
+    // holds it until mine/dig.js resolves the choice: blasting or digging out
+    // pays it, fleeing forfeits it. Holding it rather than granting and clawing
+    // it back means there is never a level-up to undo. It also means a swing
+    // cannot level the miner into Iron Will and so dodge its own cave-in.
+    if (result.success) {
+        if (result.caveIn) result.caveInXp = swingXp;
+        else grantSwingXp(user, result, swingXp);
+    }
+
     // An empty vein costs time and pickaxe wear but no stamina: a dry run should
     // burn your afternoon, not your ability to keep playing. Every harsher tier
     // still costs a point.
@@ -873,10 +886,17 @@ function executeMine(user, depthId, options = {}) {
 
 // ─── CAVE-IN RESOLUTION ──────────────────────────────────────────────────────
 
+/** Books a landed swing's XP onto the user and the result it is reported from. */
+function grantSwingXp(user, result, xp) {
+    const lvResult = xp > 0 ? applyXp(user, xp) : null;
+    result.xpEarned = xp;
+    result.levelUp  = lvResult?.leveledUp ? lvResult : null;
+}
+
 /**
  * The player blasted clear of a cave-in: spend `cost` charges (the rung's
  * blastCost) and release the escrowed intensity bonus, clamped to the daily hard
- * cap the same way the uninterrupted path clamps it.
+ * cap the same way the uninterrupted path clamps it, and the swing's held XP.
  */
 function blastClearCaveIn(user, result, chargeType, cost = 1) {
     const m = user.mining;
@@ -896,6 +916,7 @@ function blastClearCaveIn(user, result, chargeType, cost = 1) {
         }
     }
     result.caveInEscaped = true;
+    grantSwingXp(user, result, result.caveInXp ?? 0);
     countCaveInOutcome(m, 'blast');
     user.markModified('mining');
 }
@@ -908,8 +929,8 @@ function countCaveInOutcome(m, outcome) {
 
 /**
  * The player dug out of a cave-in by hand: `staminaCost` stamina buys back the
- * ore executeMine already credited, but not the escrowed intensity bonus — you
- * carry out what you can. The option for a miner with no charges to blast with.
+ * ore executeMine already credited and the swing's held XP, but not the
+ * escrowed intensity bonus — you carry out what you can. The option for a miner with no charges to blast with.
  */
 function digOutCaveIn(user, result, staminaCost) {
     const m = user.mining;
@@ -918,6 +939,7 @@ function digOutCaveIn(user, result, staminaCost) {
     result.caveInEscrowLost   = result.caveInEscrow ?? 0;
     result.caveInEscaped      = true;
     result.caveInDugOut       = true;
+    grantSwingXp(user, result, result.caveInXp ?? 0);
     countCaveInOutcome(m, 'digOut');
     user.markModified('mining');
 }
@@ -927,12 +949,16 @@ function digOutCaveIn(user, result, staminaCost) {
  * booked for it — the coins, the gathering-yield charge, the find counters, the
  * material drop and the success tally — and flag the result so every later
  * reader (quests, reveal, announcements, the result embed) treats the find as
- * not kept. `result.success` stays true because the swing itself landed; the
- * XP it earned is kept for the same reason.
+ * not kept. `result.success` stays true because the swing itself landed. The
+ * swing's XP was held back by executeMine and is forfeited with the haul (#1194):
+ * fleeing a legendary must not still pay legendary-tier XP.
  */
 function abandonCaveIn(user, result, { refundEffectCharge } = {}) {
     const m = user.mining;
     result.caveInLostPayout = (result.caveInPayout ?? 0) + (result.caveInEscrow ?? 0);
+    result.caveInLostXp     = result.caveInXp ?? 0;
+    result.xpEarned         = 0;
+    result.levelUp          = null;
 
     if (result.caveInPayout) {
         user.balance   -= result.caveInPayout;

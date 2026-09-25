@@ -81,7 +81,9 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
             // Stamina, Balance, Miner XP) before a single event had been reported.
             .addFields(
                 { name: 'Reward', value: `${payoutDisplay}\n${tierLabel} · ${depth.emoji} ${depth.name}\nBalance ${currency}${user.balance.toLocaleString()}`, inline: true },
-                { name: 'XP',     value: `+${xpEarned} XP${isCrit ? ' (crit bonus)' : ''}\n${buildXpLine(user)}`, inline: true },
+                { name: 'XP',     value: `${abandoned
+                    ? `~~${result.caveInLostXp ?? 0} XP~~ *(buried)*`
+                    : `+${xpEarned} XP${isCrit ? ' (crit bonus)' : ''}`}\n${buildXpLine(user)}`, inline: true },
                 { name: 'Gear',   value: buildGearLine(user, pickaxe), inline: true },
             );
 
@@ -233,7 +235,10 @@ function buildThrottleField(user, result, currency) {
         return {
             name: '🛑 Daily Cap Reached',
             value: `You've earned the daily maximum of ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()}. `
-                 + `This haul paid nothing.${resetNote}\nXP, materials and quest progress still count.`,
+                 + `This haul paid nothing.${resetNote}\n${result.caveInAbandoned
+                     // Fled: the swing's XP (#1194) and the drop went with the haul.
+                     ? 'XP and materials were buried with it; the dig still counts toward dig quests.'
+                     : 'XP, materials and quest progress still count.'}`,
             inline: false,
         };
     }

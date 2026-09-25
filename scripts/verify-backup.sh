@@ -31,6 +31,8 @@ set -euo pipefail
 
 # shellcheck source=scripts/lib/archive.sh
 . "$(dirname "$0")/lib/archive.sh"
+# shellcheck source=scripts/lib/mongotools.sh
+. "$(dirname "$0")/lib/mongotools.sh"
 
 # A scheduled run that fails into a log file nobody reads is the failure mode
 # this script exists to close, so route it to the same place src/index.js sends
@@ -177,11 +179,17 @@ else
     docker cp "${READABLE}" "clawdia-mongodb:${REMOTE_DIR}/verify.gz"
 fi
 
+# The connection string never goes on a command line, where every user of the
+# host can read the password out of `ps` (#1156). mongosh has no config file
+# for it, so it is handed over in the environment and connected to from the
+# script; `docker exec -e NAME` forwards the value without naming it in argv.
 mongo_eval() {
+    local connect='db = connect(process.env.VERIFY_MONGO_URI);'
     if [ "${IN_DOCKER}" -eq 1 ]; then
-        docker exec clawdia-mongodb mongosh "$1" --quiet --eval "$2"
+        VERIFY_MONGO_URI="$1" docker exec -e VERIFY_MONGO_URI clawdia-mongodb \
+            mongosh --nodb --quiet --eval "${connect} $2"
     else
-        mongosh "$1" --quiet --eval "$2"
+        VERIFY_MONGO_URI="$1" mongosh --nodb --quiet --eval "${connect} $2"
     fi
 }
 
@@ -203,12 +211,16 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[verify] Restoring into ${SCRATCH_DB}…"
+# mongorestore takes the URI from a 0600 --config file for the same reason: in
+# WORKDIR here, in the container's private directory (over stdin) there.
 if [ "${IN_DOCKER}" -eq 1 ]; then
-    docker exec clawdia-mongodb mongorestore --uri="$(db_uri "${SOURCE_DB}")" --gzip \
+    write_container_mongo_tools_config clawdia-mongodb "$(db_uri "${SOURCE_DB}")" "${REMOTE_DIR}/tools.yaml"
+    docker exec clawdia-mongodb mongorestore --config="${REMOTE_DIR}/tools.yaml" --gzip \
         --archive="${REMOTE_DIR}/verify.gz" \
         --nsFrom="${SOURCE_DB}.*" --nsTo="${SCRATCH_DB}.*" --drop
 else
-    mongorestore --uri="$(db_uri "${SOURCE_DB}")" --gzip --archive="${READABLE}" \
+    write_mongo_tools_config "$(db_uri "${SOURCE_DB}")" "${WORKDIR}/tools.yaml"
+    mongorestore --config="${WORKDIR}/tools.yaml" --gzip --archive="${READABLE}" \
         --nsFrom="${SOURCE_DB}.*" --nsTo="${SCRATCH_DB}.*" --drop
 fi
 

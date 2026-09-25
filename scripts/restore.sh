@@ -10,6 +10,8 @@ set -euo pipefail
 
 # shellcheck source=scripts/lib/archive.sh
 . "$(dirname "$0")/lib/archive.sh"
+# shellcheck source=scripts/lib/mongotools.sh
+. "$(dirname "$0")/lib/mongotools.sh"
 
 ARCHIVE="${1:-}"
 DROP_FLAG=""
@@ -65,8 +67,11 @@ fi
 READABLE=$(open_archive "${ARCHIVE}" "${WORKDIR}")
 
 if command -v mongorestore &>/dev/null; then
+    # The URI goes in a 0600 file inside WORKDIR, not on the command line where
+    # every user of the host can read the password out of `ps` (#1156).
+    write_mongo_tools_config "${MONGO_URI}" "${WORKDIR}/tools.yaml"
     # shellcheck disable=SC2086
-    mongorestore --uri="${MONGO_URI}" --gzip --archive="${READABLE}" ${DROP_FLAG}
+    mongorestore --config="${WORKDIR}/tools.yaml" --gzip --archive="${READABLE}" ${DROP_FLAG}
 else
     echo "[restore] mongorestore not found locally; attempting via Docker container 'clawdia-mongodb'"
     # Stage the archive in a private directory (mktemp -d is 0700) rather than a
@@ -84,9 +89,12 @@ else
     docker cp "${READABLE}" "clawdia-mongodb:${REMOTE_DIR}/restore.gz"
     # Replace 'localhost' with '127.0.0.1' so the URI resolves inside the container.
     SAFE_URI="${MONGO_URI/localhost/127.0.0.1}"
+    # Over stdin into the container's private directory, so the URI is on
+    # neither mongorestore's command line nor docker exec's.
+    write_container_mongo_tools_config clawdia-mongodb "${SAFE_URI}" "${REMOTE_DIR}/tools.yaml"
     # shellcheck disable=SC2086
     docker exec clawdia-mongodb \
-        mongorestore --uri="${SAFE_URI}" --gzip --archive="${REMOTE_DIR}/restore.gz" ${DROP_FLAG}
+        mongorestore --config="${REMOTE_DIR}/tools.yaml" --gzip --archive="${REMOTE_DIR}/restore.gz" ${DROP_FLAG}
 fi
 
 echo "[restore] Restore complete."

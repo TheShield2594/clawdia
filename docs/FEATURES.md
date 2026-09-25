@@ -618,9 +618,10 @@ Cave in and you choose again:
   the whole haul, multiplier included.
 - **Dig out** — spend 2 stamina and keep the ore, but not the intensity bonus.
   Works with any pickaxe, including the Wooden one, which takes no charges.
-- **Flee** — lose the haul.
+- **Flee** — lose the haul, and the swing's XP with it.
 
-Leave the prompt and you blast clear if you can afford to, and flee if not.
+The swing's XP is held until you choose: blasting or digging out pays it in
+full, fleeing pays none. Leave the prompt and you blast clear if you can afford to, and flee if not.
 
 Every result ends with **⛏️ Dig again**, which digs the same depth and reads the
 rock afresh, and a live countdown to when your next dig opens.

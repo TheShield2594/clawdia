@@ -582,6 +582,28 @@ services:
         if [ -z "$$MONGODB_URI" ]; then
           echo "[backup] Neither MONGODB_URI nor MONGODB_URI_FILE is set"; exit 1;
         fi;
+        # mongodump and mongorestore get the URI from a 0600 --config file and
+        # not from --uri: argv is readable from the host by any user, with no
+        # access to this container at all, and once the URI carries a password
+        # that is the password (#1156). Written once, into this container own
+        # /tmp, as a YAML double-quoted scalar with backslash and double quote
+        # escaped. scripts/lib/mongotools.sh writes the same file for the
+        # scripts run by hand.
+        if ! TOOLS_CONFIG=$$(mktemp); then
+          echo "[backup] Could not create the mongo tools config file"; exit 1;
+        fi;
+        # Removed however this ends, a failed write below included, so the
+        # password does not outlive the loop in the stopped container layer.
+        # As PID 1, sh ignores SIGTERM unless it is trapped, so `docker stop`
+        # would otherwise kill it outright and skip the EXIT trap; the sleep
+        # below is backgrounded and waited on for the same reason, since a
+        # trap is not run while a foreground command is still going.
+        remove_tools_config() { rm -f -- "$$TOOLS_CONFIG"; };
+        trap remove_tools_config EXIT;
+        trap "exit 143" TERM INT;
+        if ! printf "uri: \"%s\"\n" "$$(printf "%s" "$$MONGODB_URI" | sed -e "s/[\\\\\"]/\\\\&/g")" > "$$TOOLS_CONFIG"; then
+          echo "[backup] Could not write the mongo tools config file"; exit 1;
+        fi;
         RETAIN=$${BACKUP_RETENTION_DAYS:-30};
         # The passphrase the archives are sealed with (#886). `mongodump --gzip`
         # is compression: unset, every archive here is a readable copy of the
@@ -683,7 +705,7 @@ services:
             WORK=/tmp/clawdia-$$TIMESTAMP.gz;
           fi;
           echo "[backup] Starting backup at $$TIMESTAMP";
-          if ! mongodump --uri="$$MONGODB_URI" --gzip --archive="$$WORK"; then
+          if ! mongodump --config="$$TOOLS_CONFIG" --gzip --archive="$$WORK"; then
             # mongodump has no rollback: a dump killed part-way through leaves
             # whatever it had written under the real name. Left there, that
             # partial file is what the boot catch-up counts as the backup for
@@ -750,7 +772,7 @@ services:
               return 1;
             fi;
           fi;
-          if ! mongorestore --uri="$$MONGODB_URI" --gzip --archive="$$WORK" --dryRun --quiet; then
+          if ! mongorestore --config="$$TOOLS_CONFIG" --gzip --archive="$$WORK" --dryRun --quiet; then
             # Renamed rather than kept or deleted. Kept under its own name, an
             # unreadable archive is what --latest picks up and what the boot
             # catch-up counts as the backup for that day; deleted, an operator
@@ -789,7 +811,7 @@ services:
           if [ $$NOW -ge $$TARGET ]; then TARGET=$$(( $$TARGET + 86400 )); fi;
           SLEEP=$$(( $$TARGET - $$NOW ));
           echo "[backup] Sleeping $${SLEEP}s until next 03:00 UTC";
-          sleep $$SLEEP;
+          sleep $$SLEEP & wait $$!;
           run_backup || true;
           prune;
         done'
