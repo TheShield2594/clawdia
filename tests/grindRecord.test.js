@@ -35,6 +35,38 @@ describe('serverBest', () => {
         expect(await serverBest('g1', 'mining', 'bestPayout', 'u1')).toBeNull();
     });
 
+    test('gives up on a read that never settles (buffered while disconnected) after ~2s', async () => {
+        jest.useFakeTimers();
+        try {
+            GrindProfile.findOne = jest.fn(() => chain(new Promise(() => {})));
+            const pending = serverBest('g1', 'hunt', 'bestPayout', 'u1');
+            await jest.advanceTimersByTimeAsync(1999);
+            let settled = false;
+            pending.then(() => { settled = true; });
+            await Promise.resolve();
+            expect(settled).toBe(false);
+            await jest.advanceTimersByTimeAsync(1);
+            expect(await pending).toBeNull();
+            expect(jest.getTimerCount()).toBe(0);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('clears its timer when the read settles, either way', async () => {
+        jest.useFakeTimers();
+        try {
+            GrindProfile.findOne = jest.fn(() => chain(Promise.resolve({ data: { bestPayout: 10 } })));
+            expect(await serverBest('g1', 'hunt', 'bestPayout', 'u1')).toBe(10);
+            expect(jest.getTimerCount()).toBe(0);
+            GrindProfile.findOne = jest.fn(() => chain(Promise.reject(new Error('boom'))));
+            expect(await serverBest('g1', 'hunt', 'bestPayout', 'u1')).toBeNull();
+            expect(jest.getTimerCount()).toBe(0);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     test('every field a card asks for has an index to serve it', () => {
         const indexed = GrindProfile.schema.indexes().map(([fields]) => Object.keys(fields).join(','));
         expect(indexed).toContain('guildId,system,data.bestPayout');

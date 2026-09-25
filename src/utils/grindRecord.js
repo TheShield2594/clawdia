@@ -9,7 +9,9 @@
  * One indexed read — every field asked for here has a
  * (guildId, system, data.<field>) index on GrindProfile — bounded so a slow
  * database costs the card its marker rather than the player their result.
- * Null when unknown, which draws no marker.
+ * `maxTimeMS` only bounds the query once it reaches the server; while the
+ * database is disconnected Mongoose buffers it for up to 10s, so a client-side
+ * timer caps the wait too. Null when unknown, which draws no marker.
  *
  * @module utils/grindRecord
  */
@@ -21,17 +23,26 @@
  * @param {string} excludeUserId
  * @returns {Promise<?number>}
  */
+const READ_TIMEOUT_MS = 2000;
+
 async function serverBest(guildId, system, field, excludeUserId) {
+    let timer;
     try {
         const GrindProfile = require('../models/GrindProfile');
         const path = `data.${field}`;
-        const top = await GrindProfile.findOne(
+        const query = GrindProfile.findOne(
             { guildId, system, userId: { $ne: excludeUserId }, [path]: { $gt: 0 } },
             { [path]: 1 },
-        ).sort({ [path]: -1 }).maxTimeMS(2000).lean();
+        ).sort({ [path]: -1 }).maxTimeMS(READ_TIMEOUT_MS).lean();
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('server record read timed out')), READ_TIMEOUT_MS);
+        });
+        const top = await Promise.race([Promise.resolve(query), timeout]);
         return top?.data?.[field] ?? 0;
     } catch {
         return null;
+    } finally {
+        clearTimeout(timer);
     }
 }
 
