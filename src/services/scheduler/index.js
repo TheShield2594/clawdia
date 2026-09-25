@@ -153,6 +153,15 @@ const JOBS = [
         fn: client => require('../petWarningService').sendPetHungerWarnings(client),
     },
     {
+        // Pet ladder seasons (#1185): soft-reset the ratings and title the top
+        // three once a season has run out. Hourly is plenty for a 30-day season.
+        name: 'resolvePetLadderSeasons',
+        scope: SCOPE.GUILD,
+        service: 'petLadderService',
+        schedule: '41 * * * *',
+        fn: client => require('../petLadderService').resolvePetLadderSeasons(client),
+    },
+    {
         name: 'applyBankInterest',
         scope: SCOPE.GUILD,
         service: 'bankService',

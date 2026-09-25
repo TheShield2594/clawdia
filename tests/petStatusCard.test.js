@@ -48,6 +48,11 @@ describe('createPetStatusCard', () => {
         })));
     });
 
+    test('a ladder title draws as the ribbon, however long (#1185)', async () => {
+        await expectCard(await createPetStatusCard(options({ ladderTitle: 'S12 Ladder Runner-Up' })));
+        await expectCard(await createPetStatusCard(options({ ladderTitle: 'S3 Ladder Champion', rare: true })));
+    });
+
     test('out-of-range numbers are clamped rather than thrown on', async () => {
         await expectCard(await createPetStatusCard(options({ hunger: 250, stage: 9, xpInLevel: 900, xpToNext: 100, bond: 5000 })));
         await expectCard(await createPetStatusCard(options({ hunger: -5, stage: 0, xpInLevel: 0, xpToNext: 0 })));

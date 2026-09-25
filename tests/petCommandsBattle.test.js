@@ -21,11 +21,13 @@ const mockUsers = fakeCollection('User', {
 });
 mockUsers.model.DECEASED_PET_LIMIT = 5;
 const mockGuilds = fakeCollection('Guild', {}, { unique: ['guildId'] });
+const mockLadders = fakeCollection('PetLadder', { seasonNumber: 1, rev: 0, ratings: {} }, { unique: ['guildId'] });
 
 let mockAfterLoad = null;
 
 jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/models/Guild', () => mockGuilds.model);
+jest.mock('../src/models/PetLadder', () => mockLadders.model);
 jest.mock('../src/utils/guildSettingsCache', () => require('./helpers/guildSettingsCacheMock')());
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
@@ -93,11 +95,39 @@ const textOf = interaction => interaction.replies
     .map(p => (typeof p === 'string' ? p : repliedText({ replies: [p] })))
     .join('\n');
 
-/** Starts /pet battle. PvP collectors are held open so a test can act before pressing. */
+const tick = () => new Promise(resolve => realSetTimeout(resolve, 0));
+
+/** Polls `check` across ticks until it holds; false if it never does. */
+async function until(check, tries = 400) {
+    for (let i = 0; i < tries; i++) {
+        if (check()) return true;
+        await tick();
+    }
+    return false;
+}
+
+const componentIds = payload => (payload?.components ?? [])
+    .flatMap(row => row.components ?? [])
+    .map(c => c.data?.custom_id);
+// The battle message as it stands: the last payload that was not an ephemeral
+// answer to a press (a stance confirmation, a "not yours").
+const onMessage = interaction => interaction.replies.filter(p => !p?.flags).at(-1);
+const showing = (interaction, prefix) => componentIds(onMessage(interaction)).some(id => id?.startsWith(prefix));
+
+/**
+ * Starts /pet battle. A member battle now runs for several presses — the
+ * accept, the defender's pick, each stance round — so the command is not
+ * awaited to the end: this returns once it has settled or posted its
+ * challenge, and `interaction.done` is the rest of it.
+ */
 async function battle(options = {}, extra = {}) {
     const interaction = makeInteraction({ subcommand: 'battle', options, holdCollectors: true, ...extra });
     interaction.options.get = name => (options[name] == null ? null : { value: options[name] });
-    await pet.execute(interaction);
+    let finished = false;
+    interaction.done = pet.execute(interaction).finally(() => { finished = true; });
+    interaction.finished = () => finished;
+    await until(() => finished || showing(interaction, 'petb_accept_'));
+    await tick();
     return interaction;
 }
 
@@ -147,6 +177,7 @@ beforeEach(() => {
     jest.clearAllMocks();
     mockUsers.reset();
     mockGuilds.reset();
+    mockLadders.reset();
     mockAfterLoad = null;
     mockFailSaveFor = null;
     mockUsers.model.findOne.mockImplementation(findOneLikeMongoose);
@@ -249,16 +280,6 @@ describe('/pet battle refusals', () => {
 
         expect(textOf(interaction)).toContain('rival has no battle-ready pet');
     });
-
-    test('a wagered match more than five levels apart is refused, friendly is offered', async () => {
-        seed(USER, { pets: [makePet({ level: 12 })], balance: 1000 });
-        seed(RIVAL, { pets: [makePet({ _id: 'rp', level: 3 })], balance: 1000 });
-
-        const interaction = await challenge({ bet: 100 });
-
-        expect(textOf(interaction)).toMatch(/limited to a \*\*5-level\*\* gap.*\*\*Lv\.3\*\* against your \*\*Lv\.12\*\*/);
-        expect(wallet(USER)).toBe(1000);
-    });
 });
 
 // ─── Wild battles ───────────────────────────────────────────────────────────────
@@ -358,17 +379,51 @@ describe('/pet battle against a wild pet', () => {
     });
 });
 
+
 // ─── PvP ────────────────────────────────────────────────────────────────────────
+
+const STANCE = (round, stance, user) => ({ customId: `petb_st_interaction-1_${round}_${stance}`, user });
+const PICK = (petId) => ({ customId: 'petb_pick_interaction-1', user: RIVAL, values: [petId] });
+const PICK_DEFAULT = { customId: 'petb_pickgo_interaction-1', user: RIVAL };
+
+/**
+ * Plays the stance rounds of an accepted battle and waits for it to settle.
+ * `mine` and `theirs` are each owner's stance per round; a null leaves that
+ * owner silent, and the round's window is then closed as a timeout.
+ */
+async function play(interaction, { mine = ['guard', 'guard', 'guard'], theirs = ['guard', 'guard', 'guard'] } = {}) {
+    for (let r = 1; r <= 3; r++) {
+        const prefix = `petb_st_interaction-1_${r}_`;
+        if (!await until(() => interaction.finished() || showing(interaction, prefix))) break;
+        if (interaction.finished() || !showing(interaction, prefix)) break;
+        await tick();
+        if (mine[r - 1]) await interaction.press(STANCE(r, mine[r - 1], USER));
+        if (theirs[r - 1]) await interaction.press(STANCE(r, theirs[r - 1], RIVAL));
+        if (!mine[r - 1] || !theirs[r - 1]) interaction.endCollectors('time');
+        // Wait for this round's reveal before looking for the next prompt.
+        await until(() => interaction.finished() || !showing(interaction, prefix));
+    }
+    await interaction.done;
+}
+
+/** Accept, then play it out. */
+async function acceptAndPlay(interaction, stances) {
+    await interaction.press(ACCEPT);
+    await play(interaction, stances);
+}
+
+const lastEmbed = interaction => interaction.replies.filter(p => p?.embeds?.length && !p.flags).at(-1).embeds[0].data;
 
 describe('/pet battle against a member', () => {
     beforeEach(() => {
-        // With Math.random pinned at 0.5 the fight is deterministic, and a Loyal
-        // Lv.5 beats an Energetic Lv.5 — so Rex wins unless a test says otherwise.
+        // With Math.random pinned at 0.5 the fight is deterministic, and when
+        // both owners pick the same stance a Loyal Lv.5 beats an Energetic
+        // Lv.5 — so Rex wins unless a test says otherwise.
         seed(USER, { pets: [makePet({ _id: 'mine', name: 'Rex', personality: 'loyal' })], balance: 1000 });
         seed(RIVAL, { pets: [makePet({ _id: 'theirs', petId: 'cat', personality: 'energetic', name: 'Tom' })], balance: 1000 });
     });
 
-    test('the challenge names both pets and the terms', async () => {
+    test('the challenge names both pets, the terms and the stance rule', async () => {
         const interaction = await challenge();
 
         const posted = interaction.replies[0];
@@ -377,20 +432,26 @@ describe('/pet battle against a member', () => {
         expect(desc).toContain("player's Rex** (Lv.5) challenges <@rival-1> to a battle!");
         expect(desc).toContain('🐱 **Tom** (Lv.5) will answer the call.');
         expect(desc).toContain('*Friendly match — pet XP only.*');
+        expect(desc).toContain('Strike beats 🎭 Trick');
         expect(posted.components[0].components.map(c => c.data.custom_id))
             .toEqual(['petb_accept_interaction-1', 'petb_decline_interaction-1']);
+        interaction.endCollectors('time');
+        await interaction.done;
     });
 
     test('a wagered challenge states the stake', async () => {
         const interaction = await challenge({ bet: 250 });
 
         expect(interaction.replies[0].embeds[0].data.description).toContain('💰 Wager: **🪙250** each — winner takes the pot.');
+        interaction.endCollectors('time');
+        await interaction.done;
     });
 
     test('declining ends it with no coins moved', async () => {
         const interaction = await challenge({ bet: 100 });
 
         await interaction.press(DECLINE);
+        await interaction.done;
 
         expect(interaction.replies.at(-1).embeds[0].data.description).toBe('rival declined the battle.');
         expect(wallet(USER)).toBe(1000);
@@ -405,20 +466,23 @@ describe('/pet battle against a member', () => {
 
         expect(delivered).toBeNull();
         expect(petOf(USER).battleWins).toBe(0);
+        interaction.endCollectors('time');
+        await interaction.done;
     });
 
     test('no answer in time says so', async () => {
         const interaction = await challenge();
 
         interaction.endCollectors('time');
+        await interaction.done;
 
         expect(interaction.replies.at(-1).embeds[0].data.description).toBe("rival didn't respond in time.");
     });
 
-    test('a friendly match records both sides and pays nothing', async () => {
+    test('a friendly match plays stance rounds, names both owners and records both sides', async () => {
         const interaction = await challenge();
 
-        await interaction.press(ACCEPT);
+        await acceptAndPlay(interaction);
 
         expect(petOf(USER)).toEqual(expect.objectContaining({ battleWins: 1, battleLosses: 0, pvpWins: 1, xp: 30 }));
         expect(petOf(RIVAL)).toEqual(expect.objectContaining({ battleWins: 0, battleLosses: 1, pvpLosses: 1, xp: 10 }));
@@ -429,47 +493,125 @@ describe('/pet battle against a member', () => {
         expect(petOf(RIVAL).bond ?? 0).toBe(0);
         expect(wallet(USER)).toBe(1000);
         expect(wallet(RIVAL)).toBe(1000);
-        const result = interaction.replies.at(-1).embeds[0].data;
+        const titles = interaction.replies.map(p => p?.embeds?.[0]?.data?.title).filter(Boolean);
+        expect(titles).toContain('⚔️ Battle commencing…');
+        expect(titles).toContain('⚔️ Round 1 of 3 — choose your stance');
+        expect(titles).toContain('⚔️ Round 1 — 🛡️ Guard vs 🛡️ Guard');
+        const result = lastEmbed(interaction);
         expect(result.title).toBe('🏆 Rex wins the battle!');
+        // Both owners are named.
+        expect(result.description).toContain("**player**'s 🐶 **Rex** (Lv.5)  🆚  **rival**'s 🐱 **Tom** (Lv.5)");
         expect(result.description).toContain('✨ **Rex** +30 XP');
         expect(result.description).toContain('✨ **Tom** +10 XP');
+        expect(result.description).toContain('🎯 Rounds won on stance: **player** 0 · **rival** 0');
         expect(result.description).not.toContain('pot');
-        expect(interaction.replies.some(p => p.embeds?.[0]?.data?.title === '⚔️ Battle commencing…')).toBe(true);
+    });
+
+    test('each pick is confirmed to its owner alone, and a second press does not change it', async () => {
+        const interaction = await challenge();
+        await interaction.press(ACCEPT);
+        await until(() => showing(interaction, 'petb_st_interaction-1_1_'));
+        await tick();
+
+        const first = await interaction.press(STANCE(1, 'strike', USER));
+        const again = await interaction.press(STANCE(1, 'trick', USER));
+        const outsider = await interaction.press(STANCE(1, 'trick', 'bystander'));
+
+        expect(first.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'You chose 🗡️ Strike. Waiting for the reveal…' }));
+        expect(again.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'You already chose 🗡️ Strike this round.' }));
+        expect(outsider).toBeNull();
+        await play(interaction, { mine: [null, 'guard', 'guard'], theirs: ['strike', 'guard', 'guard'] });
+        expect(interaction.replies.map(p => p?.embeds?.[0]?.data?.title)).toContain('⚔️ Round 1 — 🗡️ Strike vs 🗡️ Strike');
+    });
+
+    test('reading the opponent wins a fight the stats would lose', async () => {
+        // On even stances Rex wins (above). Tom's owner reads every round:
+        // Trick beats Guard, so Tom hits harder and takes less each round.
+        const interaction = await challenge();
+
+        await acceptAndPlay(interaction, { mine: ['guard', 'guard', 'guard'], theirs: ['trick', 'trick', 'trick'] });
+
+        const result = lastEmbed(interaction);
+        expect(result.title).toBe('🏆 Tom wins the battle!');
+        expect(result.description).toMatch(/Rounds won on stance: \*\*player\*\* 0 · \*\*rival\*\* [23]/);
+        expect(interaction.replies.some(p => p?.embeds?.[0]?.data?.description?.includes('🎭 **Tom**\'s Trick slips past 🛡️ **Rex**\'s Guard'))).toBe(true);
+        expect(petOf(RIVAL).pvpWins).toBe(1);
+    });
+
+    test('a player who does not pick gets a random stance, and the battle still settles', async () => {
+        const interaction = await challenge({ bet: 100 });
+
+        await acceptAndPlay(interaction, { mine: ['guard', 'guard', 'guard'], theirs: [null, null, null] });
+
+        // Math.random pinned at 0.5 picks Guard, so the rounds are even and Rex wins.
+        expect(interaction.replies.some(p => p?.embeds?.[0]?.data?.description?.includes("rival didn't pick in time — their stance was chosen at random."))).toBe(true);
+        expect(lastEmbed(interaction).title).toBe('🏆 Rex wins the battle!');
+        expect(wallet(USER)).toBe(1090);
+        expect(wallet(RIVAL)).toBe(900);
+    });
+
+    test('a round neither owner picks in abandons the battle and refunds both stakes', async () => {
+        const interaction = await challenge({ bet: 100 });
+
+        await acceptAndPlay(interaction, { mine: [null], theirs: [null] });
+
+        expect(lastEmbed(interaction).description)
+            .toBe('Neither owner picked a stance — the battle was cancelled. Both wagers have been refunded.');
+        expect(wallet(USER)).toBe(1000);
+        expect(wallet(RIVAL)).toBe(1000);
+        expect(petOf(USER).battleWins).toBe(0);
+        expect(petOf(RIVAL).battleLosses).toBe(0);
+        expect(mockUsers.get(USER).paidPayouts.map(p => p.key)).toEqual(['pet:battle:interaction-1:user-1:refund']);
+        expect(mockUsers.get(RIVAL).paidPayouts.map(p => p.key)).toEqual(['pet:battle:interaction-1:rival-1:refund']);
+    });
+
+    test('an error mid-battle hands both stakes back', async () => {
+        const interaction = await challenge({ bet: 100 });
+        // Every read after the escrow fails.
+        mockUsers.model.findOne.mockImplementation(() => { throw new Error('db down'); });
+
+        await interaction.press(ACCEPT);
+        await interaction.done;
+
+        expect(lastEmbed(interaction).description)
+            .toBe('Something went wrong mid-battle — the battle was cancelled. Both wagers have been refunded.');
+        expect(wallet(USER)).toBe(1000);
+        expect(wallet(RIVAL)).toBe(1000);
     });
 
     test('a wagered win pays the pot less the house cut, and the loser keeps the debit', async () => {
         const interaction = await challenge({ bet: 100 });
 
-        await interaction.press(ACCEPT);
+        await acceptAndPlay(interaction);
 
         // Both stakes escrowed (100 each), pot 200, 5% rake → 190 to the winner.
         expect(wallet(USER)).toBe(1090);
         expect(wallet(RIVAL)).toBe(900);
         expect(mockUsers.get(USER).paidPayouts.map(p => p.key)).toContain('pet:battle:interaction-1:user-1:payout');
-        expect(interaction.replies.at(-1).embeds[0].data.description)
+        expect(lastEmbed(interaction).description)
             .toContain('🏆 **player** takes the pot: **+🪙90**  *(house kept 5%)*');
         expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ userId: RIVAL, amount: -100, note: 'Pet battle loss' }));
         expect(logTransaction).toHaveBeenCalledWith(expect.objectContaining({ userId: USER, amount: 90, balance: 1090, note: 'Pet battle win' }));
     });
 
-    test('a wager is fought level-matched, so a level lead does not decide it', async () => {
-        // Rex is five levels up on Tom. Unmatched, that lead wins every time;
-        // matched, both fight at Lv.5, where this Loyal Tom beats this Energetic Rex.
-        mockUsers.get(USER).pets[0].level = 10;
+    test('a wager is fought level-matched, whatever the level gap', async () => {
+        // Rex is eight levels up on Tom — once too far apart to wager at all.
+        // Matched, both fight at Lv.5, where this Loyal Tom beats this Energetic Rex.
+        mockUsers.get(USER).pets[0].level = 13;
         mockUsers.get(USER).pets[0].evolutionStage = 2;
         mockUsers.get(USER).pets[0].personality = 'energetic';
         mockUsers.get(RIVAL).pets[0].personality = 'loyal';
 
         const interaction = await challenge({ bet: 100 });
         expect(textOf(interaction)).toContain('Wagered battles are level-matched');
-        await interaction.press(ACCEPT);
+        await acceptAndPlay(interaction);
 
-        const result = interaction.replies.at(-1).embeds[0].data;
+        const result = lastEmbed(interaction);
         expect(result.title).toBe('🏆 Tom wins the battle!');
         expect(result.description).toContain('(Lv.5)  🆚');
-        expect(result.description).not.toContain('(Lv.10)');
+        expect(result.description).not.toContain('(Lv.13)');
         // The real pets keep their own levels and records.
-        expect(petOf(USER).level).toBe(10);
+        expect(petOf(USER).level).toBe(13);
         expect(petOf(RIVAL).battleWins).toBe(1);
     });
 
@@ -480,9 +622,9 @@ describe('/pet battle against a member', () => {
         mockUsers.get(RIVAL).pets[0].personality = 'loyal';
 
         const interaction = await challenge();
-        await interaction.press(ACCEPT);
+        await acceptAndPlay(interaction);
 
-        const result = interaction.replies.at(-1).embeds[0].data;
+        const result = lastEmbed(interaction);
         expect(result.title).toBe('🏆 Seasoned Rex wins the battle!');
         expect(result.description).toContain('(Lv.10)');
     });
@@ -494,13 +636,13 @@ describe('/pet battle against a member', () => {
         mockUsers.get(RIVAL).pets[0].personality = 'loyal';
 
         const interaction = await challenge({ bet: 100 });
-        await interaction.press(ACCEPT);
+        await acceptAndPlay(interaction);
 
         expect(wallet(USER)).toBe(900);
         expect(wallet(RIVAL)).toBe(1100);
         expect(petOf(RIVAL).battleWins).toBe(1);
         expect(petOf(USER).battleLosses).toBe(1);
-        const desc = interaction.replies.at(-1).embeds[0].data;
+        const desc = lastEmbed(interaction);
         expect(desc.title).toBe('🏆 Tom wins the battle!');
         expect(desc.description).toContain('🏆 **rival** takes the pot: **+🪙100**');
         expect(desc.description).not.toContain('house kept');
@@ -511,6 +653,7 @@ describe('/pet battle against a member', () => {
         mockUsers.get(USER).balance = 50;
 
         await interaction.press(ACCEPT);
+        await interaction.done;
 
         expect(interaction.replies.at(-1).embeds[0].data.description).toBe('player can no longer cover the wager.');
         expect(wallet(USER)).toBe(50);
@@ -523,6 +666,7 @@ describe('/pet battle against a member', () => {
         const interaction = await challenge({ bet: 100 });
 
         await interaction.press(ACCEPT);
+        await interaction.done;
 
         expect(interaction.replies.at(-1).embeds[0].data.description).toBe("rival can't cover the wager. Your wager was refunded.");
         expect(wallet(USER)).toBe(1000);
@@ -535,8 +679,9 @@ describe('/pet battle against a member', () => {
         mockUsers.get(USER).pets = [];
 
         await interaction.press(ACCEPT);
+        await interaction.done;
 
-        expect(interaction.replies.at(-1).embeds[0].data.description)
+        expect(lastEmbed(interaction).description)
             .toBe('A pet is no longer available — the battle was cancelled. Both wagers have been refunded.');
         expect(wallet(USER)).toBe(1000);
         expect(wallet(RIVAL)).toBe(1000);
@@ -544,13 +689,12 @@ describe('/pet battle against a member', () => {
 
     test('a fighter that went hungry after the challenge cancels it', async () => {
         const interaction = await challenge();
-        // Only the challenger's pet is pinned by id; the defender is re-picked
-        // from the ready pets, so it is the challenger's that goes hungry.
         mockUsers.get(USER).pets[0].hunger = 5;
 
         await interaction.press(ACCEPT);
+        await interaction.done;
 
-        expect(interaction.replies.at(-1).embeds[0].data.description)
+        expect(lastEmbed(interaction).description)
             .toBe('A pet is no longer battle-ready — the battle was cancelled.');
         expect(petOf(RIVAL).battleLosses).toBe(0);
     });
@@ -560,24 +704,10 @@ describe('/pet battle against a member', () => {
         mockUsers.get(RIVAL).pets[0].lastBattle = new Date();
 
         await interaction.press(ACCEPT);
+        await interaction.done;
 
-        expect(interaction.replies.at(-1).embeds[0].data.description)
+        expect(lastEmbed(interaction).description)
             .toBe('A pet is now recovering from a recent battle — the battle was cancelled. Both wagers have been refunded.');
-        expect(wallet(USER)).toBe(1000);
-        expect(wallet(RIVAL)).toBe(1000);
-    });
-
-    // #873. The wager's 5-level limit was checked only at the challenge, but the
-    // defender is re-picked at Accept — so a wager could be fought across any
-    // gap, by a pet the challenge never named or one that levelled since.
-    test('a wager whose fighters are now over the level gap cancels and refunds both stakes', async () => {
-        const interaction = await challenge({ bet: 100 });
-        mockUsers.get(RIVAL).pets[0].level = (mockUsers.get(USER).pets[0].level ?? 1) + 6;
-
-        await interaction.press(ACCEPT);
-
-        expect(interaction.replies.at(-1).embeds[0].data.description).toBe(
-            'The pets that would fight are now more than 5 levels apart, the limit for a wagered battle — the battle was cancelled. Both wagers have been refunded.');
         expect(wallet(USER)).toBe(1000);
         expect(wallet(RIVAL)).toBe(1000);
     });
@@ -596,10 +726,10 @@ describe('/pet battle against a member', () => {
             return q;
         });
 
-        await interaction.press(ACCEPT);
+        await acceptAndPlay(interaction);
 
         expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({ jobName: 'petBattlePayout' }));
-        const desc = interaction.replies.at(-1).embeds[0].data.description;
+        const desc = lastEmbed(interaction).description;
         expect(desc).toContain('🏆 **player** won, but the **🪙190** pot could not be paid out — it is recorded and an admin can restore it.');
         expect(desc).not.toContain('takes the pot');
     });
@@ -608,13 +738,128 @@ describe('/pet battle against a member', () => {
         const interaction = await challenge();
         failSaveOf(RIVAL);
 
-        await interaction.press(ACCEPT);
+        await acceptAndPlay(interaction);
 
-        const result = interaction.replies.at(-1).embeds[0].data;
-        const desc = result.description;
+        const result = lastEmbed(interaction);
         expect(result.title).toBe('🏆 Rex wins the battle!');
-        expect(desc).toContain('⚠️ *The battle result could not be saved — pet XP, records and cooldowns were not updated.*');
+        expect(result.description).toContain('⚠️ *The battle result could not be saved — pet XP, records and cooldowns were not updated.*');
         expect(petOf(RIVAL).battleLosses).toBe(0);
         expect(petOf(USER).battleWins).toBe(1);
+    });
+});
+
+describe('/pet battle: the defender picks the pet', () => {
+    beforeEach(() => {
+        seed(USER, { pets: [makePet({ _id: 'mine', name: 'Rex', personality: 'loyal' })], balance: 1000 });
+        seed(RIVAL, { pets: [
+            makePet({ _id: 'close', petId: 'cat', personality: 'energetic', name: 'Tom' }),
+            makePet({ _id: 'far', petId: 'fox', personality: 'lazy', name: 'Red', level: 12, evolutionStage: 2 }),
+            makePet({ _id: 'hungry', petId: 'bird', name: 'Tweety', hunger: 5 }),
+        ], balance: 1000 });
+    });
+
+    test('the challenge suggests the closest match, and accepting opens a menu of the ready pets', async () => {
+        const interaction = await challenge();
+        expect(interaction.replies[0].embeds[0].data.description)
+            .toContain('rival picks which pet answers — the closest match is 🐱 **Tom** (Lv.5).');
+
+        await interaction.press(ACCEPT);
+        await until(() => showing(interaction, 'petb_pick_'));
+
+        const menu = onMessage(interaction).components[0].components[0].toJSON();
+        expect(menu.options.map(o => [o.value, o.default])).toEqual([['close', true], ['far', false]]);
+        expect(onMessage(interaction).components[1].components[0].data.label).toBe('Fight with Tom');
+        interaction.endCollectors('time');
+        await play(interaction);
+    });
+
+    test('the pet the defender chooses is the one that fights', async () => {
+        const interaction = await challenge();
+        await interaction.press(ACCEPT);
+        await until(() => showing(interaction, 'petb_pick_'));
+        await tick();
+
+        await interaction.press(PICK('far'));
+        await play(interaction);
+
+        const rival = mockUsers.get(RIVAL).pets;
+        const far = rival.find(p => p._id === 'far');
+        expect((far.pvpWins ?? 0) + (far.pvpLosses ?? 0)).toBe(1);
+        expect(rival.find(p => p._id === 'close').pvpWins ?? 0).toBe(0);
+        expect(rival.find(p => p._id === 'close').pvpLosses ?? 0).toBe(0);
+        expect(lastEmbed(interaction).description).toContain("**rival**'s 🍂 **Seasoned Red** (Lv.12)");
+    });
+
+    test('taking the suggestion, or not choosing in time, fights with the closest match', async () => {
+        for (const choose of [async i => i.press(PICK_DEFAULT), async i => i.endCollectors('time')]) {
+            mockUsers.get(USER).pets[0].lastBattle = null;
+            for (const p of mockUsers.get(RIVAL).pets) p.lastBattle = null;
+            const interaction = await challenge();
+            await interaction.press(ACCEPT);
+            await until(() => showing(interaction, 'petb_pick_'));
+            await tick();
+
+            await choose(interaction);
+            await play(interaction);
+
+            expect(lastEmbed(interaction).description).toContain('🐱 **Tom** (Lv.5)');
+        }
+    });
+});
+
+describe('/pet battle rated (#1185)', () => {
+    const ladder = () => mockLadders.get(GUILD);
+
+    beforeEach(() => {
+        seed(USER, { pets: [makePet({ _id: 'mine', name: 'Rex', personality: 'loyal' })], balance: 1000 });
+        seed(RIVAL, { pets: [makePet({ _id: 'theirs', petId: 'cat', personality: 'energetic', name: 'Tom' })], balance: 1000 });
+    });
+
+    test('a rated battle needs a member, and two established accounts', async () => {
+        expect(textOf(await battle({ rated: true }))).toBe('Rated battles are against members — challenge someone with `opponent`.');
+        expect(textOf(await battle({ rated: true, opponent: rival({ createdTimestamp: Date.now() }) })))
+            .toBe('Both accounts must be at least 7 days old for rated battles.');
+    });
+
+    test('a rated battle moves both ratings on the ladder in one write, and says so', async () => {
+        const interaction = await challenge({ rated: true });
+        expect(interaction.replies[0].embeds[0].data.title).toBe('⚔️ Rated Pet Battle Challenge!');
+
+        await acceptAndPlay(interaction);
+
+        expect(ladder().ratings.mine).toEqual(expect.objectContaining({ userId: USER, rating: 1216, wins: 1, losses: 0, games: 1 }));
+        expect(ladder().ratings.theirs).toEqual(expect.objectContaining({ userId: RIVAL, rating: 1184, wins: 0, losses: 1, games: 1 }));
+        const ratingWrites = mockLadders.writes.filter(w => w.op === 'findOneAndUpdate' && w.update.$set?.['ratings.mine']);
+        expect(ratingWrites).toHaveLength(1);
+        expect(Object.keys(ratingWrites[0].update.$set)).toEqual(['ratings.mine', 'ratings.theirs']);
+        expect(lastEmbed(interaction).description).toContain('📊 **Rated · S1** — Rex 🥈 **1216** (+16) · Tom 🥈 **1184** (−16)');
+    });
+
+    test('two owners get three rated battles a day against each other, then friendly only', async () => {
+        for (let n = 0; n < 3; n++) {
+            mockUsers.get(USER).pets[0].lastBattle = null;
+            mockUsers.get(RIVAL).pets[0].lastBattle = null;
+            await acceptAndPlay(await challenge({ rated: true }));
+        }
+        const after3 = ladder().ratings.mine.rating;
+        mockUsers.get(USER).pets[0].lastBattle = null;
+        mockUsers.get(RIVAL).pets[0].lastBattle = null;
+
+        const fourth = await challenge({ rated: true });
+
+        expect(textOf(fourth)).toContain("you've already fought **3** rated battles against each other today");
+        expect(ladder().ratings.mine.rating).toBe(after3);
+        expect(ladder().ratings.mine.games).toBe(3);
+    });
+
+    test("a defender whose pets are all outside the rating band can't be challenged rated", async () => {
+        mockLadders.seed({ guildId: GUILD, seasonNumber: 1, rev: 0, ratings: {
+            mine:   { userId: USER,  rating: 1600, peak: 1600, wins: 9, losses: 0, games: 9, recent: [] },
+            theirs: { userId: RIVAL, rating: 1200, peak: 1200, wins: 0, losses: 0, games: 1, recent: [] },
+        } });
+
+        const interaction = await challenge({ rated: true });
+
+        expect(textOf(interaction)).toBe("None of rival's battle-ready pets is within the rating band of yours.");
     });
 });

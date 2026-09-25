@@ -260,11 +260,14 @@ async function drawPortraitWindow(ctx, o, accent) {
 
     // One ribbon across the top of the window: Pet of the Week outranks the
     // rare tag, and a rare pet keeps its gold frame either way.
+    // A ladder season title (#1185) sits between the two.
     const ribbon = o.potw ? { label: 'PET OF THE WEEK', solid: true }
+        : o.ladderTitle ? { label: plain(o.ladderTitle).toUpperCase(), solid: true }
         : o.rare ? { label: 'RARE COMPANION', solid: false }
         : null;
     if (ribbon) {
-        const bw = 190, bh = 32, bx = cx - bw / 2, by = WIN_Y - 14;
+        ctx.font = `bold 15px ${FONT}`;
+        const bw = Math.max(190, Math.ceil(ctx.measureText(ribbon.label).width) + 36), bh = 32, bx = cx - bw / 2, by = WIN_Y - 14;
         roundRect(ctx, bx, by, bw, bh, bh / 2);
         ctx.fillStyle = ribbon.solid ? GOLD : '#2b2100';
         ctx.fill();
@@ -495,6 +498,7 @@ function drawFooter(ctx, o) {
  * @param {?string} o.personality   e.g. "Loyal"
  * @param {boolean} [o.rare]        an unpurchasable companion: gold frame
  * @param {boolean} [o.potw]        Pet of the Week ribbon
+ * @param {string}  [o.ladderTitle] a pet ladder season title, as a ribbon (#1185)
  * @param {number}  o.stage         1–3
  * @param {string}  o.stageName     e.g. "Stage 2 - Seasoned"
  * @param {number}  o.level

@@ -270,6 +270,7 @@ function petCardOptions(pet, { kicker, footerLeft = null, footerRight = null }, 
         personality: PERSONALITY_TRAITS[pet.personality]?.label ?? null,
         rare:        def ? !def.purchasable : false,
         potw:        !!pet.potw,
+        ladderTitle: pet.ladderTitle ?? null,
         stage,
         stageName:   STAGE_NAMES[stage] ?? `Stage ${stage}`,
         level,
@@ -312,7 +313,7 @@ function cardAltText(o) {
     const bonus = o.bonus ? `, passive +${o.bonus.pct}${o.bonus.unit ?? '%'} ${o.bonus.label} ${o.bonus.active ? 'active' : 'inactive'}` : '';
     const move  = o.move ? `, signature move ${o.move}` : '';
     return `Companion card for ${o.titledName}, a level ${o.level} ${o.personality ? `${o.personality.toLowerCase()} ` : ''}`
-        + `${o.species}${o.potw ? ', Pet of the Week' : ''}: hunger ${Math.round(o.hunger)}%, bond ${o.bondTitle ? `${o.bondTitle.toLowerCase()} ` : ''}${o.bond}/${o.bondMax ?? 100}${bonus}${move}, `
+        + `${o.species}${o.potw ? ', Pet of the Week' : ''}${o.ladderTitle ? `, ${o.ladderTitle}` : ''}: hunger ${Math.round(o.hunger)}%, bond ${o.bondTitle ? `${o.bondTitle.toLowerCase()} ` : ''}${o.bond}/${o.bondMax ?? 100}${bonus}${move}, `
         + `record ${plural(o.record.wins, 'win')} and ${plural(o.record.losses, 'loss', 'losses')}.`;
 }
 
@@ -357,6 +358,7 @@ function buildPetCardEmbed(pet, index, total, ownerAvatarURL, cardName, now = Da
         `${display.emoji} ${action ? `*${action}* — ` : ''}${getMoodLine(pet, now)}`,
         personalityDef ? `${personalityDef.emoji} **${personalityDef.label}** — ${personalityDef.desc}` : null,
         pet.potw ? '🌟 **Pet of the Week**' : null,
+        pet.ladderTitle ? `🏅 **${pet.ladderTitle}**` : null,
         vacationLine(pet, now),
         '',
         `📈 Lv **${level}** (${xpNote}) · 🍖 **${Math.round(hunger)}%** · ❤️ **${getBondTier(pet, now).title}** ${Math.floor(effectiveBond(pet, now))}/${BOND_MAX} · `

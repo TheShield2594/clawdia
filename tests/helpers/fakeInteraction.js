@@ -93,6 +93,8 @@ function makeInteraction({
         });
         return {
         customId: press.customId,
+        // A select menu's chosen values, for a press on one.
+        values: press.values ?? [],
         user: { id: press.user ?? userId },
         showModal: jest.fn(modal => { shown = modal; return Promise.resolve(); }),
         awaitModalSubmit: jest.fn(async (opts = {}) => {

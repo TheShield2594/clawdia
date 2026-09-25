@@ -1282,6 +1282,7 @@ function attack(atk, def, rng) {
     if (atk.empowered) { mult *= mine.mult; atk.empowered = false; moves.push({ side: atk.side, name: mine.name }); }
     if (mine.kind === 'frenzy' && def.hp < def.stats.hp / 2) { mult *= mine.mult; moves.push({ side: atk.side, name: mine.name }); }
     if (atk.weakened) { mult *= theirs.mult; atk.weakened = false; moves.push({ side: def.side, name: theirs.name }); }
+    mult *= atk.stanceMult ?? 1;
     let damage = Math.max(1, Math.round(base * variance * crit * mult));
 
     // The defender's own answers to the hit.
@@ -1315,33 +1316,56 @@ function attack(atk, def, rng) {
 }
 
 /**
- * Simulate a battle between two pets. `rng` is injectable for testing.
- * Returns { winner: 'a'|'b', rounds, finalHpA, finalHpB }. Each round is
- * `{ attacker, damage, crit, missed, moves, hpA, hpB }`; `moves` lists the
- * signature moves that fired that round as `{ side, name }`.
+ * A fight in progress: both fighters and whose turn it is. simulateBattle
+ * runs one to the end in a go; a member battle runs it a stance round at a
+ * time (#1184) through runExchanges.
+ *
+ * Striking first is worth a lot in an even fight (~78% of mirror matches),
+ * so it is a speed-weighted roll rather than a sure thing for the faster
+ * pet — and never a default in the challenger's favour.
  */
-function simulateBattle(petA, petB, rng = Math.random) {
+function createBattle(petA, petB, rng = Math.random) {
     const a = fighter(petA, 'a');
     const b = fighter(petB, 'b');
-    const rounds = [];
+    return { a, b, turnA: rng() < firstStrikeChance(a.stats, b.stats), rounds: [] };
+}
 
-    // Striking first is worth a lot in an even fight (~78% of mirror matches),
-    // so it is a speed-weighted roll rather than a sure thing for the faster
-    // pet — and never a default in the challenger's favour.
-    let turnA = rng() < firstStrikeChance(a.stats, b.stats);
-    const MAX_ROUNDS = 30;
+/** Whether both fighters are still standing. */
+function battleOngoing(state) {
+    return state.a.hp > 0 && state.b.hp > 0;
+}
 
-    for (let r = 0; r < MAX_ROUNDS && a.hp > 0 && b.hp > 0; r++) {
-        const hit = turnA ? attack(a, b, rng) : attack(b, a, rng);
-        rounds.push({
-            attacker: turnA ? 'a' : 'b', damage: hit.damage, crit: hit.crit, missed: hit.missed,
+/**
+ * Up to `count` more attacks, alternating, stopping at a knockout. `mult`
+ * scales each side's damage for these attacks only (a stance's edge). Returns
+ * the rounds added, which are also appended to `state.rounds`.
+ */
+function runExchanges(state, count, rng = Math.random, mult = {}) {
+    const { a, b } = state;
+    a.stanceMult = mult.a ?? 1;
+    b.stanceMult = mult.b ?? 1;
+    const added = [];
+    for (let r = 0; r < count && battleOngoing(state); r++) {
+        const hit = state.turnA ? attack(a, b, rng) : attack(b, a, rng);
+        added.push({
+            attacker: state.turnA ? 'a' : 'b', damage: hit.damage, crit: hit.crit, missed: hit.missed,
             moves: hit.moves, hpA: a.hp, hpB: b.hp,
         });
-        turnA = !turnA;
+        state.turnA = !state.turnA;
     }
+    a.stanceMult = 1;
+    b.stanceMult = 1;
+    state.rounds.push(...added);
+    return added;
+}
 
-    // At the round cap the higher remaining HP fraction wins; an exact tie is
-    // a coin flip rather than a free win for the challenger.
+/**
+ * The winner of a fight that has stopped. Short of a knockout the higher
+ * remaining HP fraction wins; an exact tie is a coin flip rather than a free
+ * win for the challenger.
+ */
+function battleVerdict(state, rng = Math.random) {
+    const { a, b } = state;
     let winner;
     if (b.hp <= 0) winner = 'a';
     else if (a.hp <= 0) winner = 'b';
@@ -1349,8 +1373,73 @@ function simulateBattle(petA, petB, rng = Math.random) {
         const fracA = a.hp / a.stats.hp, fracB = b.hp / b.stats.hp;
         winner = fracA === fracB ? (rng() < 0.5 ? 'a' : 'b') : fracA > fracB ? 'a' : 'b';
     }
+    return { winner, rounds: state.rounds, finalHpA: a.hp, finalHpB: b.hp };
+}
 
-    return { winner, rounds, finalHpA: a.hp, finalHpB: b.hp };
+/**
+ * Simulate a battle between two pets. `rng` is injectable for testing.
+ * Returns { winner: 'a'|'b', rounds, finalHpA, finalHpB }. Each round is
+ * `{ attacker, damage, crit, missed, moves, hpA, hpB }`; `moves` lists the
+ * signature moves that fired that round as `{ side, name }`.
+ */
+function simulateBattle(petA, petB, rng = Math.random) {
+    const state = createBattle(petA, petB, rng);
+    runExchanges(state, 30, rng);
+    return battleVerdict(state, rng);
+}
+
+// ── Stances (#1184) ──────────────────────────────────────────────────────────
+//
+// A member battle used to be decided by stats and dice alone. Each stance
+// round, both players now pick a stance in secret: Strike beats Trick, Trick
+// beats Guard, Guard beats Strike. The pet whose owner read the other hits
+// harder for that round's exchanges and takes less; a tie changes nothing.
+// The edge is large on purpose, so reading the opponent can beat a pet that is
+// a little stronger on paper (tests/petStances.test.js holds it to that).
+const STANCES = Object.freeze({
+    strike: { key: 'strike', label: 'Strike', emoji: '🗡️', beats: 'trick',  verb: 'overpowers' },
+    guard:  { key: 'guard',  label: 'Guard',  emoji: '🛡️', beats: 'strike', verb: 'turns aside' },
+    trick:  { key: 'trick',  label: 'Trick',  emoji: '🎭', beats: 'guard',  verb: 'slips past' },
+});
+const STANCE_KEYS = Object.keys(STANCES);
+const STANCE_WIN_MULT  = 1.25;
+const STANCE_LOSE_MULT = 0.8;
+const STANCE_ROUNDS    = 3;   // stance picks per battle, at most
+const STANCE_EXCHANGES = 4;   // attacks per stance round (two each)
+
+/** 'a' or 'b' for the side whose stance wins, or null for a tie. */
+function stanceOutcome(stanceA, stanceB) {
+    if (stanceA === stanceB) return null;
+    return STANCES[stanceA]?.beats === stanceB ? 'a' : 'b';
+}
+
+function randomStance(rng = Math.random) {
+    return STANCE_KEYS[Math.floor(rng() * STANCE_KEYS.length) % STANCE_KEYS.length];
+}
+
+/**
+ * One stance round of a battle in progress: the stance matchup, then that
+ * round's exchanges with the winner's edge applied. Returns
+ * `{ edge: 'a'|'b'|null, rounds }`.
+ */
+function fightStanceRound(state, stanceA, stanceB, rng = Math.random) {
+    const edge = stanceOutcome(stanceA, stanceB);
+    const mult = edge === 'a' ? { a: STANCE_WIN_MULT, b: STANCE_LOSE_MULT }
+        : edge === 'b' ? { a: STANCE_LOSE_MULT, b: STANCE_WIN_MULT }
+        : {};
+    return { edge, rounds: runExchanges(state, STANCE_EXCHANGES, rng, mult) };
+}
+
+/**
+ * A whole stance battle with the picks already known, for tests and balance
+ * checks: `pickA(roundIndex)` / `pickB(roundIndex)` return a stance key.
+ */
+function simulateStanceBattle(petA, petB, pickA, pickB, rng = Math.random) {
+    const state = createBattle(petA, petB, rng);
+    for (let r = 0; r < STANCE_ROUNDS && battleOngoing(state); r++) {
+        fightStanceRound(state, pickA(r), pickB(r), rng);
+    }
+    return battleVerdict(state, rng);
 }
 
 // The wild opponents /pet battle fields when a player has no PvP target. They
@@ -1702,6 +1791,20 @@ module.exports = {
     SPECIES_MOVES,
     getSpeciesMove,
     simulateBattle,
+    createBattle,
+    battleOngoing,
+    runExchanges,
+    battleVerdict,
+    STANCES,
+    STANCE_KEYS,
+    STANCE_WIN_MULT,
+    STANCE_LOSE_MULT,
+    STANCE_ROUNDS,
+    STANCE_EXCHANGES,
+    stanceOutcome,
+    randomStance,
+    fightStanceRound,
+    simulateStanceBattle,
     makeWildPet,
     levelMatched,
     // Scheduled work (see services/scheduler/index.js)

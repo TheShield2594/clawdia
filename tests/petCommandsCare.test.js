@@ -23,6 +23,7 @@ mockUsers.model.DECEASED_PET_LIMIT = 5;
 // each test hands back the rows it wants rendered.
 mockUsers.model.aggregate = jest.fn(async () => []);
 const mockGuilds = fakeCollection('Guild', {}, { unique: ['guildId'] });
+const mockLadders = fakeCollection('PetLadder', { seasonNumber: 1, rev: 0, ratings: {} }, { unique: ['guildId'] });
 
 // Called with every user resolveUser / the autocomplete loads, after the store
 // has handed it over — the seam a test uses to make a save fail or to change
@@ -46,6 +47,7 @@ function mockAsDocument(user) {
 
 jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/models/Guild', () => mockGuilds.model);
+jest.mock('../src/models/PetLadder', () => mockLadders.model);
 jest.mock('../src/utils/guildSettingsCache', () => require('./helpers/guildSettingsCacheMock')());
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
@@ -1028,6 +1030,36 @@ describe('/pet list', () => {
 
 describe('/pet leaderboard', () => {
     const pipelineOf = () => mockUsers.model.aggregate.mock.calls[0][0];
+
+    // #1185: the ladder, read from its own document rather than the pets.
+    test('by rating ranks rated pets this season, with tiers and records', async () => {
+        mockLadders.reset();
+        mockLadders.seed({ guildId: GUILD, seasonNumber: 2, seasonEndsAt: new Date(Date.now() + 5 * DAY), ratings: {
+            p1: { userId: 'u1', rating: 1340, wins: 6, losses: 2, games: 8 },
+            p2: { userId: 'u2', rating: 1512, wins: 9, losses: 1, games: 10 },
+        } });
+        mockUsers.seed(
+            { userId: 'u1', guildId: GUILD, pets: [{ _id: 'p1', petId: 'dog', name: 'Rex' }] },
+            { userId: 'u2', guildId: GUILD, pets: [{ _id: 'p2', petId: 'wolf', name: 'Ghost', evolutionStage: 2, level: 12 }] },
+        );
+
+        const interaction = await run('leaderboard', { type: 'rating' });
+
+        const embed = interaction.replies.at(-1).embeds[0].data;
+        expect(embed.title).toBe('🐾 Pet Ladder — S2');
+        const lines = embed.description.split('\n');
+        expect(lines[0]).toBe('🥇 🌕 **Seasoned Ghost** — 💎 **1512** · 9W / 1L — <@u2>');
+        expect(lines[1]).toBe('🥈 🐶 **Rex** — 🥇 **1340** · 6W / 2L — <@u1>');
+        expect(mockUsers.model.aggregate).not.toHaveBeenCalled();
+    });
+
+    test('by rating, with no rated battles yet, says how to start one', async () => {
+        mockLadders.reset();
+
+        const interaction = await run('leaderboard', { type: 'rating' });
+
+        expect(interaction.replies.at(-1).embeds[0].data.description).toContain('No rated battles this season yet');
+    });
 
     test('defaults to bond, with medals, the POTW star and a numbered fourth place', async () => {
         const fed = { hunger: 100, lastDecayAt: new Date() };
