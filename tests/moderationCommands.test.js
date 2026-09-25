@@ -131,6 +131,20 @@ describe('a moderator cannot act on someone who outranks them', () => {
                 return { interaction, done: member.timeout.mock.calls.length > 0 };
             },
         },
+        {
+            // #1144: a warning is the first rung of a ladder that ends in a
+            // ban, so it is held to the same rule.
+            name: 'warn',
+            run: async member => {
+                const guild = makeGuild({ cached: [member] });
+                const interaction = makeInteraction({
+                    guild, subcommand: 'add', invoker: modMember(),
+                    options: { user: makeUser(member.id), reason: 'x' },
+                });
+                await command('warn').execute(interaction);
+                return { interaction, done: logModeration.mock.calls.length > 0 };
+            },
+        },
     ];
 
     test.each(CASES)('$name refuses a target with a higher role', async ({ run }) => {
@@ -891,6 +905,45 @@ describe('/warn', () => {
         );
         expect(TARGET.send).toHaveBeenCalledWith(expect.stringContaining('being unpleasant'));
         expect(lastReply(interaction)).toMatch(/Total Warnings: 3/);
+    });
+
+    test('asks the dispatcher to defer `add` publicly, and only `add`', () => {
+        const hook = command('warn').deferral;
+        expect(hook(makeInteraction({ subcommand: 'add' }))).toEqual({ ephemeral: false });
+        expect(hook(makeInteraction({ subcommand: 'list' }))).toBeNull();
+        expect(hook(makeInteraction({ subcommand: 'remove' }))).toBeNull();
+    });
+
+    test('still warns a user who has left the server', async () => {
+        // Confirmed absent: no rank to compare, and the record is still wanted.
+        const interaction = warnAdd();
+        await command('warn').execute(interaction);
+
+        expect(logModeration).toHaveBeenCalled();
+        expect(lastReply(interaction)).toMatch(/User Warned/);
+    });
+
+    test('refuses rather than warns when the member lookup fails', async () => {
+        const interaction = makeInteraction({
+            subcommand: 'add',
+            guild: makeGuild({ fetchError: new Error('rate limited') }),
+            options: { user: TARGET, reason: 'x' },
+            deferredAs: 'public',
+        });
+        await command('warn').execute(interaction);
+
+        expect(logModeration).not.toHaveBeenCalled();
+        expect(interaction.deleteReply).toHaveBeenCalledTimes(1);
+        expect(interaction.followUp.mock.calls[0][0].flags).toBe(MessageFlags.Ephemeral);
+        expect(lastReply(interaction)).toMatch(/Could not look that member up/);
+    });
+
+    test('hands the warning moderator to the escalation ladder', async () => {
+        Guild.findOne.mockResolvedValue(ladder({ threshold: 3, action: 'mute', durationMinutes: 10 }));
+        const interaction = warnAdd();
+        await command('warn').execute(interaction);
+
+        expect(applyEscalation).toHaveBeenCalledWith(expect.objectContaining({ moderator: interaction.member }));
     });
 
     test('refuses to warn a bot', async () => {
