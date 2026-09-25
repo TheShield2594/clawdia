@@ -676,9 +676,9 @@ services:
         prune() {
           # Prunes the old ultrabot-* prefix too, so archives written before the
           # rename are still aged out instead of accumulating forever. The bot
-          # lands pre-migration-*.gz in the same directory; those are pruned
+          # lands pre-migration-*.gz (.gz.enc when sealed) in the same directory; those are pruned
           # on the same schedule.
-          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" -o -name "clawdia-*.gz.unverified" -o -name "clawdia-*.gz.enc.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" \) -mtime +$$RETAIN -delete;
+          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" -o -name "clawdia-*.gz.unverified" -o -name "clawdia-*.gz.enc.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" -o -name "pre-migration-*.gz.enc" \) -mtime +$$RETAIN -delete;
         };
         run_backup() {
           TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");

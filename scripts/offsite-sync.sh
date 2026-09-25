@@ -98,10 +98,11 @@ fi
 # BACKUP_ENCRYPTION_PASSPHRASE is set (#886), and `.enc` is how one says so.
 #
 # Skipped rather than refused, because "some of these are plaintext" is the
-# ordinary state of a directory that has encryption on: the bot's own
-# pre-migration dump is written by src/migrations/runner.js, which has no
-# passphrase, so one turns up after every irreversible migration and stays for
-# the retention window. Refusing the whole run over it would take the off-site
+# ordinary state of a directory that has encryption on: an older bot, or one
+# not handed BACKUP_ENCRYPTION_PASSPHRASE, writes its pre-migration dump in the
+# clear (src/migrations/runner.js seals it when it has the passphrase, #1150),
+# so one can turn up after an irreversible migration and stay for the
+# retention window. Refusing the whole run over it would take the off-site
 # copy away for a month, and it is the sealed nightly archives that the copy is
 # for. What is refused is a run that would copy nothing at all — that is an
 # install with no passphrase, and it should hear about it rather than succeed

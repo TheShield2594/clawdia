@@ -372,6 +372,11 @@ services:
       # impossible backup abort the boot instead. Override to `skip` only if
       # you are taking the dump yourself.
       - MIGRATION_BACKUP=${MIGRATION_BACKUP:-require}
+      # The same passphrase the backup service seals its archives with. The
+      # pre-migration dump lands in that same directory, and without this it is
+      # the one plaintext copy of the database there (#1150). Leave it empty
+      # exactly when the backup service's is empty.
+      - BACKUP_ENCRYPTION_PASSPHRASE=${BACKUP_ENCRYPTION_PASSPHRASE:-}
       #
       # --- Secrets as files (recommended) ---------------------------------
       # Uncomment these *and* the matching `secrets:` entries below, then leave
@@ -642,9 +647,9 @@ services:
         prune() {
           # Prunes the old ultrabot-* prefix too, so archives written before the
           # rename are still aged out instead of accumulating forever. The bot
-          # lands pre-migration-*.gz in the same volume; those are pruned
+          # lands pre-migration-*.gz (.gz.enc when sealed) in the same volume; those are pruned
           # on the same schedule.
-          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" -o -name "clawdia-*.gz.unverified" -o -name "clawdia-*.gz.enc.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" \) -mtime +$$RETAIN -delete;
+          find /backups \( -name "clawdia-*.gz" -o -name "clawdia-*.gz.enc" -o -name "clawdia-*.gz.unverified" -o -name "clawdia-*.gz.enc.unverified" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" -o -name "pre-migration-*.gz.enc" \) -mtime +$$RETAIN -delete;
         };
         run_backup() {
           TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
