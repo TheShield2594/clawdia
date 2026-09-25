@@ -62,6 +62,17 @@ describe('mapRegionStates', () => {
     });
 });
 
+describe('the bundled map lettering', () => {
+    test('ships in src/ (the Docker context drops assets/) and resolves on any host', () => {
+        const { resolveFonts } = require('../src/utils/registerFonts');
+        const bundled = resolveFonts().filter(f => ['IM Fell English', 'IM Fell English SC', 'Cinzel Decorative'].includes(f.family));
+        expect(bundled).toHaveLength(4);
+        for (const font of bundled) {
+            expect([font.family, font.style, font.path]).toEqual([font.family, font.style, expect.stringContaining(`${require('path').sep}src${require('path').sep}fonts${require('path').sep}`)]);
+        }
+    });
+});
+
 describe('createExploreMapCard', () => {
     test('every region in the data has its own place on the map', () => {
         for (const r of REGION_LIST) expect([r.id, Boolean(LAYOUT[r.id])]).toEqual([r.id, true]);
