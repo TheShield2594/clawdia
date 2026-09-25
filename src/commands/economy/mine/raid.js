@@ -7,12 +7,17 @@ const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../../utils/grindProfile');
-const { ensureMineData, formatMs, hasRaidableMaterials, planRaidHaul } = require('../../../services/mineService');
+const { ensureMineData, hasRaidableMaterials, planRaidHaul } = require('../../../services/mineService');
 const { RAID_COOLDOWN_MS, RAID_SHIELD_MS, RAID_STEAL_MIN, RAID_STEAL_MAX, MATERIAL_NAMES } = require('../../../data/mineData');
 const GrindProfile = require('../../../models/GrindProfile');
 const { economyLockKey } = require('../../../utils/economyLock');
 const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../../utils/activeGameLock');
 const COLORS = require('../../../utils/embedColors');
+const { secureRandom } = require('../../../utils/secureRandom');
+
+// A Discord timestamp that counts down on the client, where a static "wait 12m"
+// is already wrong by the time it is read.
+const countdown = at => `<t:${Math.ceil(at / 1000)}:R>`;
 
 // ─── RAID ─────────────────────────────────────────────────────────────────────
 
@@ -50,20 +55,18 @@ async function handleRaid(interaction) {
     // Raider cooldown
     const now = Date.now();
     if (raider.mining.lastRaidSent && now - raider.mining.lastRaidSent.getTime() < RAID_COOLDOWN_MS) {
-        const nextAt = new Date(raider.mining.lastRaidSent.getTime() + RAID_COOLDOWN_MS);
-        const remaining = formatMs(nextAt.getTime() - now);
+        const nextAt = raider.mining.lastRaidSent.getTime() + RAID_COOLDOWN_MS;
         return interaction.reply({
-            content: `You need to wait **${remaining}** before raiding again.`,
+            content: `You can raid again ${countdown(nextAt)}.`,
             flags: MessageFlags.Ephemeral
         });
     }
 
     // Defender shield (recently raided)
     if (defender.mining.lastRaidReceived && now - defender.mining.lastRaidReceived.getTime() < RAID_SHIELD_MS) {
-        const shieldEnds = new Date(defender.mining.lastRaidReceived.getTime() + RAID_SHIELD_MS);
-        const remaining  = formatMs(shieldEnds.getTime() - now);
+        const shieldEnds = defender.mining.lastRaidReceived.getTime() + RAID_SHIELD_MS;
         return interaction.reply({
-            content: `**${targetUser.username}**'s mine is still recovering from a recent raid. Wait **${remaining}**.`,
+            content: `**${targetUser.username}**'s mine is still recovering from a recent raid. It opens up ${countdown(shieldEnds)}.`,
             flags: MessageFlags.Ephemeral
         });
     }
@@ -73,6 +76,16 @@ async function handleRaid(interaction) {
     if (rm.equippedPickaxeIndex < 0 || !rm.pickaxes[rm.equippedPickaxeIndex]) {
         return interaction.reply({
             content: "You need a pickaxe equipped to raid! Use `/mine equip`.",
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    // Checked before the Mine Lock, not after: a lock is spent on the raid it
+    // stops, and a raid on a mine with nothing exposed was never going to take
+    // anything. Checked after, any member could burn someone's lock for free.
+    if (!hasRaidableMaterials(defender)) {
+        return interaction.reply({
+            content: `**${targetUser.username}** has nothing worth raiding — no material they hold more than one of.`,
             flags: MessageFlags.Ephemeral
         });
     }
@@ -104,14 +117,6 @@ async function handleRaid(interaction) {
             });
         }
         // Lock was already consumed by a concurrent raid — fall through to normal raid resolution.
-    }
-
-    // Check if there's anything to steal
-    if (!hasRaidableMaterials(defender)) {
-        return interaction.reply({
-            content: `**${targetUser.username}** has nothing worth raiding — no material they hold more than one of.`,
-            flags: MessageFlags.Ephemeral
-        });
     }
 
     // The transfer below is a pair of $inc updates, but a grind profile is saved as a
@@ -149,7 +154,7 @@ async function handleRaid(interaction) {
         // Defender is updated first; the shield CAS ($or on lastRaidReceived) and
         // per-material $gte guards ensure only one raid commits atomically. Raider
         // update follows sequentially with a cooldown CAS to block duplicate commands.
-        const stealFraction = RAID_STEAL_MIN + Math.random() * (RAID_STEAL_MAX - RAID_STEAL_MIN);
+        const stealFraction = RAID_STEAL_MIN + secureRandom() * (RAID_STEAL_MAX - RAID_STEAL_MIN);
         const defenderInc = {};
         const raiderInc   = {};
 
@@ -228,15 +233,20 @@ async function handleRaid(interaction) {
     const stolenLines = Object.entries(stolen).map(([id, qty]) => `• ${MATERIAL_NAMES[id] ?? id} ×${qty}`).join('\n');
     const stolenCount = Object.values(stolen).reduce((sum, qty) => sum + qty, 0);
 
+    // The dig card's shape: what you got, and when each side of the raid opens up
+    // again, as live countdowns rather than a footer that said "1-hour" whatever
+    // RAID_SHIELD_MS was set to.
+    const raidAt = Date.now();
     const embed = new EmbedBuilder()
         .setColor('#e67e22')
         .setTitle('⚔️ Mine Raided!')
-        .setDescription(
-            `You broke into **${targetUser.username}**'s mine and made off with **${stolenCount}** material${stolenCount === 1 ? '' : 's'}!\n\n` +
-            `**Stolen:**\n${stolenLines}\n\n` +
-            `*These are now yours to craft with.*`
+        .setDescription(`You broke into **${targetUser.username}**'s mine and made off with **${stolenCount}** material${stolenCount === 1 ? '' : 's'}. They are yours to craft with.`)
+        .addFields(
+            { name: 'Stolen',       value: stolenLines, inline: true },
+            { name: 'Next raid',    value: countdown(raidAt + RAID_COOLDOWN_MS), inline: true },
+            { name: 'Their shield', value: `Ends ${countdown(raidAt + RAID_SHIELD_MS)}`, inline: true },
         )
-        .setFooter({ text: `${targetUser.username} now has a 1-hour raid shield • Use /mine map to see what of yours is exposed` })
+        .setFooter({ text: 'Use /mine map to see what of yours is exposed' })
         .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });

@@ -89,16 +89,19 @@ async function handleBuyPickaxe(interaction, user, currency) {
                 acquiredAt: new Date()
             };
 
+            // Before the debit, not after it: this write can throw, and thrown
+            // after the charge it fell to the catch below with the coins gone and
+            // no pickaxe and no refund.
+            await persistGrindIfNew(user, 'mining');
             const updated = await User.findOneAndUpdate(
                 { userId: user.userId, guildId: user.guildId, balance: { $gte: pickaxeData.cost } },
                 { $inc: { balance: -pickaxeData.cost } },
                 { new: true }
             );
             if (!updated) {
-                return interaction.editReply({ content: `Insufficient funds. You need ${currency}${pickaxeData.cost.toLocaleString()} but only have ${currency}${user.balance.toLocaleString()}.`, embeds: [], components: [] });
+                return interaction.editReply({ content: `Insufficient funds. You need ${currency}${pickaxeData.cost.toLocaleString()} — check \`/balance\` and try again.`, embeds: [], components: [] });
             }
 
-            await persistGrindIfNew(user, 'mining');
             // The grant stamps the purchase's key alongside the pickaxe (#1058):
             // a `$push` that committed but lost its response threw here and was
             // read as "never granted", so the debit was refunded over a pickaxe

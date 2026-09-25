@@ -10,8 +10,11 @@ const { ensureMineData, assignDailyMineQuests, applyXp, getLevelData } = require
 const { MINE_QUEST_TEMPLATES } = require('../../../data/mineData');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const { questClaimPayoutKey } = require('../../../utils/payoutKey');
-const { buildProgressBar, formatExpiry } = require('./embeds');
+const { buildProgressBar } = require('./embeds');
 const COLORS = require('../../../utils/embedColors');
+
+// Quest expiries render as Discord timestamps, which count down on the client.
+const countdown = date => `<t:${Math.ceil(date.getTime() / 1000)}:R>`;
 
 // ─── QUESTS ───────────────────────────────────────────────────────────────────
 
@@ -59,7 +62,6 @@ async function handleQuests(interaction, sub) {
             const isComplete = !!q.completedAt && !isClaimed;
             const progress   = isClaimed ? template.target : Math.min(q.progress, template.target);
             const bar        = buildProgressBar(progress, template.target);
-            const timeLeft   = formatExpiry(q.expiresAt.getTime() - now);
             const rewardStr  = `${currency}${template.reward.coins.toLocaleString()} · ${template.reward.xp} Miner XP`;
 
             let statusLine;
@@ -71,7 +73,7 @@ async function handleQuests(interaction, sub) {
                 `${template.emoji} **${template.name}**`,
                 `> ${template.description}`,
                 `> ${statusLine}`,
-                `> Reward: ${rewardStr} · Expires: ${timeLeft}`
+                `> Reward: ${rewardStr} · Expires ${countdown(q.expiresAt)}`
             ].join('\n');
         }).filter(Boolean);
 
@@ -155,10 +157,26 @@ async function handleQuests(interaction, sub) {
             return interaction.reply({ content: 'Something went wrong claiming that quest. Please try again.', flags: MessageFlags.Ephemeral });
         }
 
+        const liveQuests = user.quests.filter(q =>
+            q.questId.startsWith('mq_') && q.expiresAt?.getTime() > now
+        );
+        const remaining = liveQuests.filter(q => q.progress !== -1).length;
+
+        // A fresh batch is only assigned once the current one has expired — see the
+        // guard in assign*Quests. Say when that is rather than implying that playing
+        // again brings one sooner. In the description, not the footer, because a
+        // footer cannot render the live countdown.
+        const nextSetAt = liveQuests.length
+            ? new Date(Math.min(...liveQuests.map(q => q.expiresAt.getTime())))
+            : null;
+        const nextLine = remaining > 0
+            ? `${remaining} quest${remaining === 1 ? '' : 's'} still open — see \`/mine quests view\`.`
+            : `All quests claimed. A fresh set arrives ${nextSetAt ? countdown(nextSetAt) : 'in a few hours'}.`;
+
         const embed = new EmbedBuilder()
             .setColor(COLORS.SUCCESS)
             .setTitle(`${template.emoji} Quest Complete — ${template.name}!`)
-            .setDescription(template.description)
+            .setDescription(`${template.description}\n\n${nextLine}`)
             .addFields(
                 { name: `${currency} Coins`,  value: `+${template.reward.coins.toLocaleString()}`,  inline: true },
                 { name: '⭐ Miner XP',         value: `+${template.reward.xp}`,                     inline: true },
@@ -182,21 +200,6 @@ async function handleQuests(interaction, sub) {
             });
         }
 
-        const liveQuests = user.quests.filter(q =>
-            q.questId.startsWith('mq_') && q.expiresAt?.getTime() > now
-        );
-        const remaining = liveQuests.filter(q => q.progress !== -1).length;
-
-        // A fresh batch is only assigned once the current one has expired — see the
-        // guard in assign*Quests. Say when that is rather than implying that playing
-        // again brings one sooner, which is what this footer used to promise.
-        const nextSetIn = liveQuests.length
-            ? formatExpiry(Math.min(...liveQuests.map(q => q.expiresAt.getTime())) - now)
-            : null;
-
-        embed.setFooter({ text: remaining > 0
-            ? `${remaining} quest(s) remaining — use /mine quests view`
-            : `All quests claimed! A fresh set arrives in ${nextSetIn ?? 'a few hours'}.` });
         embed.setTimestamp();
 
         return interaction.reply({ embeds: [embed] });

@@ -18,7 +18,7 @@ jest.mock('../src/utils/grindProfile', () => ({ attachGrind: jest.fn(async () =>
 const Guild = require('../src/models/Guild');
 const User = require('../src/models/User');
 const { handleMap } = require('../src/commands/economy/mine/map');
-const { DEPTHS, MATERIAL_NAMES } = require('../src/data/mineData');
+const { DEPTHS, INTENSITY_LEVELS, MATERIAL_NAMES } = require('../src/data/mineData');
 const { RAID_MAX_PER_MATERIAL } = require('../src/services/mineService');
 
 /**
@@ -90,6 +90,15 @@ describe('the map body', () => {
         expect(text).toContain('0/100 cells explored');
         expect(text).toContain(DEPTHS.surface_quarry.name);
         expect(text).toContain('Yield range');
+    });
+
+    test('the yield range is read off the intensity ladder', async () => {
+        // It said 0.7× for a long while after Careful moved to 0.8×.
+        const mults = INTENSITY_LEVELS.map(l => l.multiplier);
+        seedUser();
+        const interaction = makeInteraction();
+        await handleMap(interaction);
+        expect(repliedText(interaction)).toContain(`${Math.min(...mults).toFixed(1)}×–${Math.max(...mults).toFixed(1)}×`);
     });
 
     test('excavated cells are counted and unexplored ones are not', async () => {

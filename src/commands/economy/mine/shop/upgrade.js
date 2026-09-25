@@ -5,6 +5,7 @@
 const { MessageFlags, EmbedBuilder } = require('discord.js');
 const { persistGrindIfNew, saveGrind } = require('../../../../utils/grindProfile');
 const { PICKAXE_UPGRADES, PICKAXE_BY_TIER } = require('../../../../data/mineData');
+const { isCondemned } = require('../../../../services/mineService');
 const { chargeBalance, refundBalanceOrOwe, shopRefundMessage } = require('../shared');
 const { attachItemThumbnail } = require('../../../../utils/itemImageHelper');
 
@@ -21,7 +22,13 @@ async function handleBuyUpgrade(interaction, user, currency) {
 
     const pickaxe = m.pickaxes[m.equippedPickaxeIndex];
     if (pickaxe.upgrade) {
-        return interaction.reply({ content: `Your **${pickaxe.name}** already has the **${pickaxe.upgrade.replace(/_/g, ' ')}** upgrade installed. Each pickaxe can only have one upgrade.`, flags: MessageFlags.Ephemeral });
+        const installed = PICKAXE_UPGRADES[pickaxe.upgrade]?.name ?? pickaxe.upgrade.replace(/_/g, ' ');
+        return interaction.reply({ content: `Your **${pickaxe.name}** already has the **${installed}** upgrade installed. Each pickaxe can only have one upgrade.`, flags: MessageFlags.Ephemeral });
+    }
+    // A condemned pickaxe cannot be repaired, so it is gone the next time it
+    // breaks, and a permanent module goes with it. Say so before charging for one.
+    if (isCondemned(pickaxe)) {
+        return interaction.reply({ content: `Your **${pickaxe.name}** is condemned — it can't be repaired, and the upgrade would be lost with it. Put the module on a new pickaxe instead.`, flags: MessageFlags.Ephemeral });
     }
 
     const pickaxeData = PICKAXE_BY_TIER[pickaxe.tier];

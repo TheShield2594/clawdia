@@ -310,14 +310,6 @@ function buildProgressBar(current, target, length = 10) {
     return `[${'█'.repeat(filled)}${'░'.repeat(length - filled)}]`;
 }
 
-function formatExpiry(ms) {
-    if (ms <= 0) return 'expired';
-    const hrs  = Math.floor(ms / 3_600_000);
-    const mins = Math.floor((ms % 3_600_000) / 60_000);
-    if (hrs > 0) return `${hrs}h ${mins}m`;
-    return `${mins}m`;
-}
-
 module.exports = {
     buildActiveConsumablesLine,
     buildDailyProgressLine,
@@ -329,7 +321,6 @@ module.exports = {
     buildThrottleField,
     buildXpBar,
     buildXpLine,
-    formatExpiry,
     nextDigLine,
     prestigeBonusLines,
 };
