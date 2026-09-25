@@ -608,6 +608,12 @@ Leave the prompt and you blast clear if you can afford to, and flee if not.
 Every result ends with **⛏️ Dig again**, which digs the same depth and reads the
 rock afresh, and a live countdown to when your next dig opens.
 
+A dig whose ore came up leads with a picture card, the same one `/hunt start`
+and `/fish cast` draw: the ore's art in its tier's colour, the depth behind it,
+the payout set against your best dig and the server record, the coins and XP,
+and a banner for a cave-in you blasted or dug your way out of. A failed swing
+or a haul left in a collapse stays text-only.
+
 **Miner prestige** (`/mine prestige`) opens at Miner Level 50 and runs to P5. Each
 rank resets Miner Level and XP and keeps everything else — pickaxes, unlocked
 depths, materials, consumables and lifetime stats:
@@ -862,6 +868,7 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 - A bare `/explore go` takes the route you used last; `/explore regions` lists what each one does
 - **🔥 Streaks** — every expedition that doesn't end in a trap or a lost encounter adds one, worth +2% coins each up to +20%. A trap or a lost encounter ends it, and so does 30 minutes away. The encounter prompt says when a loss would cost you your streak, so a long streak makes the Deep Wilds and a bold approach a real gamble. Your current and best streaks show on `/explore profile`
 - The staged "Setting out" beat plays when there is something to reveal (an encounter, a secret, a first visit, epic or legendary treasure); routine runs go straight to the result
+- A find leads with a picture card, the same one `/hunt start`, `/fish cast` and `/mine dig` draw: the recovered relic (or the region) in its tier's colour, the haul set against your best and the server record, the coins and XP, and a banner when the trip charts the whole region. Traps, quiet walks and lost encounters stay text-only
 
 **Progression:**
 - **Secret pity** — every expedition into a region that still hides a secret lifts the odds of finding one. Once a drought reaches 10 expeditions the result embed shows the live chance. Regions you have fully uncovered stop building pity instead of promising a secret they can't deliver

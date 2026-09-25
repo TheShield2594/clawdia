@@ -1,10 +1,14 @@
 'use strict';
 
 /**
- * The kill card: the picture a `/hunt start` kill carries above its result
- * text, and the `/fish cast` catch card too: one layout, so the two grinds'
- * results read as one family. The catch card is drawn with `activity: 'fish'`,
- * a weight gauge and a BOSS FIGHT banner (commands/economy/fish/resultCard.js):
+ * The grind result card: the picture a `/hunt start` kill, a `/fish cast`
+ * catch, a `/mine dig` strike and an `/explore go` find carry above their
+ * result text — one layout, so the four grinds' results read as one family.
+ * Each grind has a thin adapter that maps its result onto these options and
+ * writes the alt text (commands/economy/<grind>/resultCard.js): the catch card
+ * is drawn with `activity: 'fish'`, a weight gauge and a BOSS FIGHT banner; the
+ * mine's with a CAVE-IN banner; the explorer's with an encounter or survey one.
+ * The kill card, for reference:
  *
  *   ┌──────────────────────────────────────────────────────────────────────┐
  *   │    ╭──────╮      THESHIELD BAGGED                   (zone art, faint)│
@@ -214,7 +218,7 @@ function statTile(ctx, { label, value, accent, struck = false }, x, y, w, theme)
 
 /**
  * @param {object} opts
- * @param {'hunt'|'fish'|'mine'} opts.activity         picks the palette
+ * @param {'hunt'|'fish'|'mine'|'explore'} opts.activity  picks the palette
  * @param {string}  opts.kicker                        e.g. "THESHIELD BAGGED"
  * @param {{name: string, iconId: ?string}} opts.subject
  * @param {number}  opts.tierNum                       1 common … 6 mythical
@@ -228,8 +232,9 @@ function statTile(ctx, { label, value, accent, struck = false }, x, y, w, theme)
  *        this payout against them — or, with `value`, whatever that measures
  *        (a fish's weight in `unit` lbs, on a bar `max` long)
  * @param {{text: string, tone?: string, color?: string}[]} [opts.badges]
- * @param {?{outcome: string, title: string, payout: number, label?: string}} [opts.apex]
- *        the banner under the badges; `label` names it (default "APEX DUEL")
+ * @param {?{outcome: string, title: string, payout?: number, label?: string, detail?: string}} [opts.apex]
+ *        the banner under the badges; `label` names it (default "APEX DUEL"),
+ *        and `detail`, when given, is said on the right in place of the bonus
  * @returns {Promise<Buffer>} PNG
  */
 async function createGrindResultCard(opts) {
@@ -360,8 +365,9 @@ async function createGrindResultCard(opts) {
         ctx.fillStyle = '#ffffff';
         ctx.fillText(fitText(ctx, plain(opts.apex.title), CARD_W - 100 - 260), 72, y + 48);
         ctx.textAlign = 'right';
-        ctx.fillStyle = opts.apex.payout > 0 ? GOLD : theme.muted;
-        ctx.fillText(opts.apex.payout > 0 ? `+${n(opts.apex.payout)} coins` : 'no bonus', CARD_W - 70, y + 40);
+        const detail = opts.apex.detail != null ? plain(opts.apex.detail) : null;
+        ctx.fillStyle = detail == null && opts.apex.payout > 0 ? GOLD : theme.muted;
+        ctx.fillText(detail ?? (opts.apex.payout > 0 ? `+${n(opts.apex.payout)} coins` : 'no bonus'), CARD_W - 70, y + 40);
         ctx.restore();
     }
 

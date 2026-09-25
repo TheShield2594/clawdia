@@ -10,6 +10,7 @@ const { EmbedBuilder } = require('discord.js');
 const { createGrindResultCard, TIER_COLOR } = require('../../../utils/grindResultCard');
 const { renderAttachment } = require('../../../utils/grindProfileView');
 const { TIER_NUM } = require('../../../data/materialRarity');
+const { standing } = require('../../../utils/grindRecord');
 
 const CARD_FILE = 'hunt-result.png';
 
@@ -46,21 +47,6 @@ function cardChips({ result, stealth, aim, quick, flushed, isFeaturedZone, featu
 }
 
 const TIER_TITLE = { common: 'Common', uncommon: 'Uncommon', rare: 'Rare', epic: 'Epic', legendary: 'Legendary', event: 'Mythical' };
-
-/**
- * Where this payout stands: the hunter's best before this hunt, and the server
- * record before it — the larger of everyone else's best and the hunter's own.
- * Null parts are unknown (a read that failed), and draw nothing.
- */
-function standing(payout, { priorBest = 0, othersBest = null } = {}) {
-    const record = othersBest == null ? null : Math.max(othersBest, priorBest);
-    return {
-        best: priorBest,
-        record,
-        personalBest: priorBest > 0 && payout > priorBest,
-        serverRecord: record != null && payout > 0 && payout > record,
-    };
-}
 
 function cardOptions({ result, zone, chips = [], username = 'Hunter', records = {}, apex = null }) {
     const quality = result.trophyQuality;

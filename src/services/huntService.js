@@ -23,6 +23,7 @@ const { WILDERNESS_YIELD_BONUS } = require('../data/crossSystemData');
 // every roll below draws from the shared CSPRNG rather than Math.random
 // (CodeQL js/insecure-randomness). See src/utils/secureRandom.js.
 const { secureRandom } = require('../utils/secureRandom');
+const { serverBest } = require('../utils/grindRecord');
 
 // Zones where a critical failure can destroy your weapon (death event)
 const DANGEROUS_ZONE_IDS = new Set(['desert_wastes', 'arctic_tundra', 'murky_swamp', 'legendary_peaks']);
@@ -1690,20 +1691,10 @@ function applyHuntBonuses(user, result, zoneId, { petYieldPct = 0, petXpPct = 0,
  * The biggest single hunt anyone but `excludeUserId` has on record in this
  * guild, for the kill card's record marker — the hunter's own best is added by
  * the caller, from before the hunt that is being drawn. One indexed read
- * (guildId, system, data.bestPayout), bounded so a slow database costs the
- * card its marker rather than the player their result. Null when unknown.
+ * (guildId, system, data.bestPayout) — see utils/grindRecord. Null when unknown.
  */
 async function serverBestPayout(guildId, excludeUserId) {
-    const GrindProfile = require('../models/GrindProfile');
-    try {
-        const top = await GrindProfile.findOne(
-            { guildId, system: 'hunt', userId: { $ne: excludeUserId }, 'data.bestPayout': { $gt: 0 } },
-            { 'data.bestPayout': 1 },
-        ).sort({ 'data.bestPayout': -1 }).maxTimeMS(2000).lean();
-        return top?.data?.bestPayout ?? 0;
-    } catch {
-        return null;
-    }
+    return serverBest(guildId, 'hunt', 'bestPayout', excludeUserId);
 }
 
 /**
