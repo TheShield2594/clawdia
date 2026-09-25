@@ -65,6 +65,11 @@ function ensureMineData(user) {
     if (m.eventFinds           == null) m.eventFinds           = 0;
     if (m.bestPayout           == null) m.bestPayout           = 0;
     if (m.consecutiveFails     == null) m.consecutiveFails     = 0;
+    // Tallies for tuning the dig (#1192): which intensity rung each dig was
+    // made at, and how each cave-in ended. Read off the mining GrindProfiles;
+    // nothing in the game reads them.
+    if (!m.intensityPicks || typeof m.intensityPicks !== 'object') m.intensityPicks = {};
+    if (!m.caveInOutcomes || typeof m.caveInOutcomes !== 'object') m.caveInOutcomes = {};
 
     if (!m.unlockedDepths.includes('surface_quarry')) {
         m.unlockedDepths.push('surface_quarry');
@@ -278,8 +283,15 @@ const FAILURE_SEVERITIES = [
     { id: 'cave_in',    label: 'Pinned',        durLoss: 3, injuryMs: LIMITS.INJURY_PENALTY_MS, xp: 0, msg: 'A slab came down and pinned your leg. You crawled out, but you need to rest.' }
 ];
 
-function rollFailureSeverity() {
-    return FAILURE_SEVERITIES[Math.floor(secureRandom() * FAILURE_SEVERITIES.length)];
+/**
+ * One failed-dig outcome. A Pinned injury lasts as long as the depth says: it
+ * used to be a flat 15 minutes everywhere, which fell hardest on new players at
+ * the Surface Quarry, where digs fail most (#1193).
+ */
+function rollFailureSeverity(depth) {
+    const severity = FAILURE_SEVERITIES[Math.floor(secureRandom() * FAILURE_SEVERITIES.length)];
+    if (severity.injuryMs <= 0) return severity;
+    return { ...severity, injuryMs: depth?.pinnedMs ?? LIMITS.INJURY_PENALTY_MS };
 }
 
 // ─── PAYOUT CALCULATION ───────────────────────────────────────────────────────
@@ -763,7 +775,7 @@ function executeMine(user, depthId, options = {}) {
         if (pickaxe.currentDurability <= 0) result.pickaxeBroke = true;
 
     } else {
-        const severity = rollFailureSeverity();
+        const severity = rollFailureSeverity(depth);
         applyDurabilityLoss(pickaxe, severity.durLoss);
         result.durabilityLost = severity.durLoss;
 
@@ -884,7 +896,14 @@ function blastClearCaveIn(user, result, chargeType, cost = 1) {
         }
     }
     result.caveInEscaped = true;
+    countCaveInOutcome(m, 'blast');
     user.markModified('mining');
+}
+
+/** How a cave-in ended — blast, digOut or flee — tallied for tuning (#1192). */
+function countCaveInOutcome(m, outcome) {
+    if (!m.caveInOutcomes || typeof m.caveInOutcomes !== 'object') m.caveInOutcomes = {};
+    m.caveInOutcomes[outcome] = (m.caveInOutcomes[outcome] ?? 0) + 1;
 }
 
 /**
@@ -899,6 +918,7 @@ function digOutCaveIn(user, result, staminaCost) {
     result.caveInEscrowLost   = result.caveInEscrow ?? 0;
     result.caveInEscaped      = true;
     result.caveInDugOut       = true;
+    countCaveInOutcome(m, 'digOut');
     user.markModified('mining');
 }
 
@@ -943,6 +963,7 @@ function abandonCaveIn(user, result, { refundEffectCharge } = {}) {
     if (result.priorConsecutiveFails != null) m.consecutiveFails = result.priorConsecutiveFails;
 
     result.caveInAbandoned = true;
+    countCaveInOutcome(m, 'flee');
     user.markModified('mining');
 }
 

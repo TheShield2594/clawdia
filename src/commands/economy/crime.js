@@ -132,12 +132,11 @@ const EXECUTION_METHODS = {
         methods: [
             { id: 'pick_lock', label: '🔑 Pick the lock',  desc: 'Safer, slower',   successRate: 0.39, ...APPROACH.safe,     wantedMs: 0 },
             { id: 'cut_power', label: '💥 Cut the power',  desc: 'Riskier, faster', successRate: 0.35, ...APPROACH.standard, wantedMs: 0 },
-            // The wildcard is loud-slot odds with a swing on the cut: how well
-            // the story sells decides the multiplier. It used to draw its
-            // *success rate* from 15–75% instead — which, rolled once against
-            // a second draw, is exactly a flat 45%: the best odds on the job
-            // at the biggest multiplier, worth ~5× any other choice in the game.
-            { id: 'bluff_in',  label: '🚨 Bluff your way', desc: 'Wildcard — the better it sells, the bigger the cut', successRate: 0.27, ...APPROACH.loud, payoutRange: [1.0, 2.6], wantedMs: 3 * 3_600_000, wildcard: true },
+            // The wildcard is loud-slot odds with a swing on the cut: how well the story sells decides
+            // the multiplier. It used to draw its *success rate* from 15–75% instead — which, rolled once
+            // against a second draw, is exactly a flat 45%: the best odds on the job at the biggest
+            // multiplier, worth ~5× any other choice. bigWinMult: a cut this clean is announced (#1206).
+            { id: 'bluff_in',  label: '🚨 Bluff your way', desc: 'Wildcard — the better it sells, the bigger the cut', successRate: 0.27, ...APPROACH.loud, payoutRange: [1.0, 2.6], bigWinMult: 2.4, wantedMs: 3 * 3_600_000, wildcard: true },
         ],
     },
 };
@@ -634,8 +633,9 @@ module.exports = {
                 logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: newBalance, note: `${crime.name} (success, ${execMethod.id})${isFeaturedCrime ? ' [featured]' : ''}${credit.credited ? '' : credit.owed ? ' [owed]' : ' [unpaid]'}` });
 
                 const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-                if (credit.credited && earned >= bigWinThreshold) {
-                    logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: earned, source: 'crime', details: crime.displayName });
+                // No crime pays near the 50k default, so a top-end wildcard landing (~3% of Bluffs) counts too.
+                if (credit.credited && (earned >= bigWinThreshold || payoutMult >= (execMethod.bigWinMult ?? Infinity))) {
+                    logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: earned, source: 'crime', details: `${crime.displayName} · ${execMethod.label} ×${payoutMult}` });
                 }
 
                 const flavorWin = getCrimeFlavorText(crime.name, 'win')

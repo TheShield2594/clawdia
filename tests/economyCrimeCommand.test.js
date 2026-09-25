@@ -216,6 +216,32 @@ describe('a clean getaway', () => {
         expect(logBigWin).not.toHaveBeenCalled();
     });
 
+    it('announces a Bluff that lands at the top of its range under the default threshold', async () => {
+        // 0.01 against 27% is ×2.54 — over the ×2.4 line. The payout itself is
+        // nowhere near the 50k default, so only the wildcard trigger reaches it.
+        rolls([], 0.01);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        await run([{ customId: 'grand larceny' }, { customId: 'exec_bluff_in' }]);
+
+        expect(logBigWin).toHaveBeenCalledTimes(1);
+        const [entry] = logBigWin.mock.calls[0];
+        expect(entry).toMatchObject({ source: 'crime', details: expect.stringContaining('×2.54') });
+        expect(entry.amount).toBeLessThan(50_000);
+    });
+
+    it('leaves an ordinary Bluff landing alone under the default threshold', async () => {
+        // 0.1 against 27% is ×2.01: a good landing, not a top-end one.
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        await run([{ customId: 'grand larceny' }, { customId: 'exec_bluff_in' }]);
+
+        expect(logBigWin).not.toHaveBeenCalled();
+    });
+
     it('shows the getaway', async () => {
         rolls([], 0.1);
         seedUser({ balance: 1000 });
