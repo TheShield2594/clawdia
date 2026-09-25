@@ -11,6 +11,7 @@ const {
     WEEKLY_CATEGORY_ORDER,
 } = require('./weeklyChampion');
 const { avatarUrlOf, displayNameOf } = require('./leaderboardCard');
+const championsHallCard = require('./championsHallCard');
 
 // The four grind tracks the README calls "far and away the largest part" of the
 // bot, none of which had a board before #1016. Each maps a `/leaderboard type`
@@ -293,7 +294,37 @@ async function buildChampionsHall(interaction) {
         .setDescription(sections.join('\n\n'))
         .setFooter({ text: 'Past weekly champions. New winners crowned every Monday.' })
         .setTimestamp();
-    return { embeds: [embed] };
+
+    // The picture card: a wall of plaques, a row per week. Each champion is
+    // drawn with their avatar; one who has since left keeps their stored name.
+    const ids = [...new Set(winners.map(w => w.userId))];
+    const users = new Map((await fetchTags(interaction.client, ids)).map((u, i) => [ids[i], u]));
+    const weeks = [...byWeek].map(([week, rows]) => ({
+        week,
+        champions: Object.fromEntries(rows
+            .filter(w => WEEKLY_CATEGORY_LABELS[w.category])
+            .map(w => {
+                const meta = WEEKLY_CATEGORY_LABELS[w.category];
+                const user = users.get(w.userId);
+                return [w.category, {
+                    role: championsHallCard.roleOf(meta.title, w.category),
+                    name: displayNameOf(user) ?? w.username ?? 'Unknown',
+                    avatarUrl: avatarUrlOf(user),
+                    total: w.total ?? 0,
+                    unit: meta.unit,
+                    runs: w.runs ?? 0,
+                }];
+            })),
+    }));
+    const card = {
+        draw: championsHallCard.createChampionsHallCard,
+        describe: championsHallCard.altText,
+        fileName: championsHallCard.CARD_FILE,
+        kicker: interaction.guild.name,
+        weeks,
+        footer: 'New champions are crowned every Monday.',
+    };
+    return { embeds: [embed], card };
 }
 
 module.exports = {

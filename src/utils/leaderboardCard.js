@@ -2,7 +2,8 @@
 
 /**
  * The leaderboard card: the picture every ranked board carries above its text —
- * `/leaderboard` (every type), `/achievements leaderboard`, `/streak`,
+ * `/leaderboard` (every type but the Hall of Champions, which has a card of
+ * its own in utils/championsHallCard), `/achievements leaderboard`, `/streak`,
  * `/pet leaderboard`, `/season leaderboard`, `/duel leaderboard`,
  * `/syndicate leaderboard` and `/fish tournament status`. One layout, so the
  * boards read as one family:
@@ -531,11 +532,19 @@ async function replyBoard(interaction, board) {
 
 const CARD_FILE = 'leaderboard.png';
 
-/** The card as an attachment, or null when it was refused or failed to draw. */
+/**
+ * The card as an attachment, or null when it was refused or failed to draw.
+ * Options with a `draw` of their own (and its `describe`, for the alt text)
+ * are another card in the family — the Hall of Champions
+ * (utils/championsHallCard) — sent the same way; anything else is a board.
+ */
 async function boardAttachment(guildId, cardOpts) {
-    if (!cardOpts?.entries?.length) return null;
+    if (!cardOpts) return null;
+    const draw = cardOpts.draw ?? createLeaderboardCard;
+    const describe = cardOpts.describe ?? altText;
+    if (!cardOpts.draw && !cardOpts.entries?.length) return null;
     return renderQueued(guildId ?? 'dm', () =>
-        renderAttachment(() => createLeaderboardCard(cardOpts), CARD_FILE, altText(cardOpts)));
+        renderAttachment(() => draw(cardOpts), cardOpts.fileName ?? CARD_FILE, describe(cardOpts)));
 }
 
 /** The image-only embed the card rides in, in the text embed's colour. */
@@ -556,5 +565,8 @@ module.exports = {
     avatarUrlOf,
     displayNameOf,
     CARD_FILE,
+    // The drawing pieces, for the other cards in the family (the Hall of
+    // Champions) so a champion's portrait and crown match the podium's.
+    drawing: { loadAvatar, plain, hexToRgba, fitFont, drawPortrait, drawCrown, MEDAL },
     __test__: { plain, cardHeight, initial, avatarCache },
 };

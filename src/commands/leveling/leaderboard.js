@@ -79,7 +79,7 @@ module.exports = {
                 return replyBoard(interaction, await buildGrindBoard(interaction, type, period));
             }
             if (type === 'champions') {
-                return interaction.reply(await buildChampionsHall(interaction));
+                return replyBoard(interaction, await buildChampionsHall(interaction));
             }
 
             let users;
