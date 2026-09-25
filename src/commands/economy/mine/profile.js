@@ -11,16 +11,16 @@ const {
     ensureMineData,
     getLevelData,
     applyStaminaRegen,
+    applyDailyReset,
     xpToNextLevel,
     getMaxStamina,
     msUntilNextStamina,
-    formatMs
 } = require('../../../services/mineService');
 const { PRESTIGE_BONUSES, MINER_LEVELS, DEPTHS, LIMITS } = require('../../../data/mineData');
 const { getActiveSynergies } = require('../../../services/synergyService');
 const GrindProfile = require('../../../models/GrindProfile');
 const { MAX_MINER_LEVEL, MAX_MINE_PRESTIGE, PRESTIGE_BADGES } = require('./shared');
-const { buildXpBar, prestigeBonusLines } = require('./embeds');
+const { buildXpBar, nextDigLine, prestigeBonusLines } = require('./embeds');
 const COLORS = require('../../../utils/embedColors');
 const { checkGrandPrestige } = require('../../../services/grandPrestigeService');
 
@@ -229,7 +229,12 @@ async function handleProfile(interaction) {
     }
 
     ensureMineData(userData);
-    if (isSelf) applyStaminaRegen(userData);
+    // Both bring the loaded snapshot up to now, in memory only — this view never
+    // saves. Regen used to run for the viewer alone, so someone else's profile
+    // showed the stamina they had when they last played, and without the reset a
+    // window that had lapsed kept printing yesterday's mines and coins.
+    applyStaminaRegen(userData);
+    applyDailyReset(userData);
 
     const m         = userData.mining;
     const levelData = getLevelData(m.level);
@@ -279,7 +284,7 @@ async function handleProfile(interaction) {
             },
             {
                 name: '⚡ Stamina',
-                value: `${stamBar}\n${m.stamina}/${maxStam}${m.stamina < maxStam ? `\nNext regen: ${formatMs(regenMs)}` : '\nFull!'}`,
+                value: `${stamBar}\n${m.stamina}/${maxStam}${m.stamina < maxStam ? `\nNext point <t:${Math.ceil((Date.now() + regenMs) / 1000)}:R>` : '\nFull!'}`,
                 inline: true
             },
             {
@@ -347,6 +352,10 @@ async function handleProfile(interaction) {
     } else if (isSelf) {
         embed.setFooter({ text: `Daily: ${m.dailyMines} mines · ${currency}${m.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });
     }
+
+    // The owner's own view says when they can dig next, as the live countdown
+    // the dig card ends on — cooldown, injury and an empty bar included.
+    if (isSelf) embed.setDescription(nextDigLine(userData));
 
     embed.setTimestamp();
     return interaction.reply({ embeds: [embed] });

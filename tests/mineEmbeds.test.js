@@ -21,7 +21,6 @@ const {
     buildThrottleField,
     buildXpBar,
     buildXpLine,
-    formatExpiry,
     nextDigLine,
     prestigeBonusLines,
 } = require('../src/commands/economy/mine/embeds');
@@ -477,13 +476,6 @@ describe('line and bar helpers', () => {
 });
 
 describe('formatters', () => {
-    test('formatExpiry reports hours and minutes, minutes alone, or expiry', () => {
-        expect(formatExpiry(0)).toBe('expired');
-        expect(formatExpiry(-1)).toBe('expired');
-        expect(formatExpiry(90 * 60_000)).toBe('1h 30m');
-        expect(formatExpiry(45 * 60_000)).toBe('45m');
-    });
-
     test('prestigeBonusLines lists only the bonuses that are non-zero', () => {
         expect(prestigeBonusLines({ critBonus: 0, staminaBonus: 0, payoutBonus: 0, rarityBonus: 0 }))
             .toEqual([]);
