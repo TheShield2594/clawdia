@@ -166,11 +166,15 @@ const CONSUMABLES = {
 // a level-1 depth. rollTier now enforces this at runtime too; the weights and the
 // guard are meant to agree.
 
+// pinnedMs: how long a "Pinned" failed dig keeps the miner out. Scaled by depth
+// so the starter quarry — where new players fail most — costs a few minutes
+// and the Abyss keeps the full LIMITS.INJURY_PENALTY_MS.
 const DEPTHS = {
     surface_quarry: {
         id: 'surface_quarry', name: 'Surface Quarry', emoji: '🪨',
         unlockLevel: 1, unlockCost: 0, defaultUnlocked: true,
         difficultyMod: 0.00, payoutBonus: 0.00,
+        pinnedMs: 3 * 60_000,
         tierWeights: { common: 52, uncommon: 32, rare: 16, epic: 0, legendary: 0, event: 0 },
         description: 'A sunlit open-pit quarry. Great for beginners.'
     },
@@ -178,6 +182,7 @@ const DEPTHS = {
         id: 'coal_tunnels', name: 'Coal Tunnels', emoji: '🖤',
         unlockLevel: 10, unlockCost: 3000, defaultUnlocked: false,
         difficultyMod: -0.05, payoutBonus: 0.00,
+        pinnedMs: 5 * 60_000,
         tierWeights: { common: 42, uncommon: 34.5, rare: 23, epic: 0, legendary: 0, event: 0.5 },
         description: 'Sooty tunnels that hide uncommon veins.'
     },
@@ -185,6 +190,7 @@ const DEPTHS = {
         id: 'iron_mines', name: 'Iron Mines', emoji: '🔩',
         unlockLevel: 20, unlockCost: 12000, defaultUnlocked: false,
         difficultyMod: -0.08, payoutBonus: 0.00,
+        pinnedMs: 8 * 60_000,
         tierWeights: { common: 35, uncommon: 28, rare: 23.5, epic: 13, legendary: 0, event: 0.5 },
         description: 'Deep iron deposits where rare gems can form.'
     },
@@ -192,6 +198,7 @@ const DEPTHS = {
         id: 'crystal_caves', name: 'Crystal Caves', emoji: '💠',
         unlockLevel: 30, unlockCost: 30000, defaultUnlocked: false,
         difficultyMod: -0.10, payoutBonus: 0.00,
+        pinnedMs: 11 * 60_000,
         tierWeights: { common: 32, uncommon: 27, rare: 22, epic: 13, legendary: 5, event: 1 },
         description: 'Glittering caverns where crystals grow from every wall.'
     },
@@ -199,6 +206,7 @@ const DEPTHS = {
         id: 'the_abyss', name: 'The Abyss', emoji: '🌑',
         unlockLevel: 50, unlockCost: 75000, defaultUnlocked: false,
         difficultyMod: -0.12, payoutBonus: 0.20,
+        pinnedMs: 15 * 60_000,
         tierWeights: { common: 15, uncommon: 22, rare: 28, epic: 22, legendary: 12, event: 1 },
         description: 'A bottomless fissure of unimaginable riches. Master miners only.'
     }
@@ -459,7 +467,7 @@ const TIER_COLORS = {
 
 const LIMITS = {
     MINE_COOLDOWN_MS:        30_000,
-    INJURY_PENALTY_MS:      15 * 60_000,
+    INJURY_PENALTY_MS:      15 * 60_000,   // Pinned, where a depth sets no pinnedMs of its own
     STAMINA_REGEN_MS:        6 * 60_000,
     MAX_STAMINA_BASE:        10,
     DAILY_WINDOW_MS:         24 * 3_600_000,

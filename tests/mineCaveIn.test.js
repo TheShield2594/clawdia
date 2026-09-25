@@ -228,3 +228,14 @@ describe('the result embed for an abandoned haul', () => {
         expect(embed.data.fields.some(f => f.name === '🪨 Material Drop!')).toBe(false);
     });
 });
+
+describe('cave-in outcome tallies (#1192)', () => {
+    test('each way out of a cave-in is counted on the miner, for tuning', () => {
+        const user = afterStrike();
+        blastClearCaveIn(user, caveInResult(), 'iron_blast');
+        blastClearCaveIn(user, caveInResult(), null);
+        digOutCaveIn(user, caveInResult(), 2);
+        abandonCaveIn(user, caveInResult());
+        expect(user.mining.caveInOutcomes).toEqual({ blast: 2, digOut: 1, flee: 1 });
+    });
+});

@@ -219,8 +219,11 @@ async function handleDig(interaction) {
         // Remembered so the timeout default is the miner's own habit, not ours.
         if (m.preferredIntensity !== pickedIntensity.level) {
             m.preferredIntensity = pickedIntensity.level;
-            user.markModified('mining');
         }
+        // Counted per rung for tuning the survey's payouts (#1192).
+        if (!m.intensityPicks || typeof m.intensityPicks !== 'object') m.intensityPicks = {};
+        m.intensityPicks[pickedIntensity.level] = (m.intensityPicks[pickedIntensity.level] ?? 0) + 1;
+        user.markModified('mining');
 
         // Crystal Fox pet: +15% mine yield (only if hunger >= 30)
         const { getTotalBonus, petCompanionLine, tryGrantRarePet, formatPetBonus } = require('../../../services/petService');
