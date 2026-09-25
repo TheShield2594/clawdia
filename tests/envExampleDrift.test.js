@@ -85,6 +85,13 @@ function walk(dir) {
 // the MCP config file.
 const ENV_READ = /\bprocess\.env(?:\.([A-Z][A-Z0-9_]*)|\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\])/g;
 
+// config/validateEnv.js checks an `env` object it is handed (process.env at
+// every boot, a fixture in its tests), so its reads are `env.NAME`. A variable
+// that only the boot check consults — MONGODB_ALLOW_NO_AUTH — is still one the
+// bot reads.
+const VALIDATE_ENV = path.join(ROOT, 'src', 'config', 'validateEnv.js');
+const VALIDATE_ENV_READ = /\benv\.([A-Z][A-Z0-9_]*)/g;
+
 function readByTheBot() {
     const names = new Map();
     for (const file of walk(path.join(ROOT, 'src'))) {
@@ -92,6 +99,11 @@ function readByTheBot() {
         for (const [, dotted, bracketed] of src.matchAll(ENV_READ)) {
             const name = dotted || bracketed;
             if (!names.has(name)) names.set(name, path.relative(ROOT, file));
+        }
+        if (file === VALIDATE_ENV) {
+            for (const [, name] of src.matchAll(VALIDATE_ENV_READ)) {
+                if (!names.has(name)) names.set(name, path.relative(ROOT, file));
+            }
         }
     }
     return names;

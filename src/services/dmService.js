@@ -94,7 +94,7 @@ async function getActiveSession(guildId, channelId) {
  */
 async function dmProviderConfig(guildId) {
     const gs = await Guild.findOne({ guildId });
-    const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(gs?.ai || {});
+    const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(gs?.ai || {}, { guildId });
     if (provider !== 'ollama' && !apiKey) {
         return { error: 'AI is not configured for this server. An admin must add an API key.' };
     }

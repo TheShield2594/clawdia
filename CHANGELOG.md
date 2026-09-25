@@ -14,6 +14,40 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [5.0.0] - 2026-09-25
+
+Migrations through `029_bind_guild_ai_keys`.
+
+Security fixes from the whole-repo review. **Major**: migration 029 writes guild
+AI keys in a format the 4.x images cannot read (roll back with
+`npm run migrate:rollback` before deploying an older image), and two changes
+below need an operator to act on upgrade.
+
+- **Stored guild AI keys are bound to their guild and field (#1152).** Keys are
+  now sealed with the guild ID and field name as GCM additional authenticated
+  data (`enc.v2.`), so a sealed key copied into another guild's document, or
+  into another field, no longer opens. Migration 029 rewrites the existing
+  `enc.v1.` keys (reversible: `down` unbinds them). Decryption also pins the
+  GCM tag to 16 bytes and rejects shorter ones, which Node would otherwise
+  accept.
+- **Production refuses to run MongoDB without authentication (#1151).** A
+  `NODE_ENV=production` boot now fails when `MONGODB_URI` carries no
+  credentials, where it used to warn. **Action needed** on a deployment still
+  running without auth: follow "Enabling MongoDB authentication" in
+  docs/SETUP_GUIDE.md, or set `MONGODB_ALLOW_NO_AUTH=true` to keep running
+  without it (the old warning is kept).
+- **Guilds need the operator's say-so to spend the bot-wide AI keys (#1147).**
+  A guild with no key of its own used to fall back to `OPENAI_API_KEY` and the
+  other environment keys, limited only by its own settings, where 0 means
+  unlimited. Now only the guilds listed in `AI_ENV_KEY_GUILDS` (or `*` for
+  all) may use them, and that spend is held to operator ceilings a guild can
+  tighten but not lift: `AI_ENV_KEY_USER_LIMIT` (20 messages per user per 10
+  minutes), `AI_ENV_KEY_MONTHLY_COST` ($10) and `AI_ENV_KEY_MONTHLY_TOKENS`
+  (5,000,000) per guild per month. A saved guild key that will not decrypt is
+  now reported to the guild instead of silently replaced by the operator's.
+  **Action needed** if your servers rely on a bot-wide key: set
+  `AI_ENV_KEY_GUILDS`. The boot log warns when it is missing.
+
 ## [4.15.0] - 2026-09-25
 
 Migrations through `028_seed_pet_bond`.

@@ -157,20 +157,14 @@ function collectEnvProblems(env = process.env, { required = REQUIRED_ENV } = {})
             'MONGODB_URI must start with mongodb:// or mongodb+srv:// ' +
             `(got "${env.MONGODB_URI.split(':')[0]}:...")`
         );
-    } else if (env.NODE_ENV === 'production' && env.MONGODB_URI && !env.MONGODB_URI.includes('@')) {
-        // #648: MongoDB auth is opt-in so that existing deployments keep
-        // booting, but a production deploy running credential-less should hear
-        // about it — the internal Docker network is then the only thing
-        // between any co-located container and the full database. A warning,
-        // not an error: failing the boot would take down every deployment that
-        // has not migrated yet.
-        warnings.push(
-            'MONGODB_URI has no credentials. Enable MongoDB authentication — ' +
-            'see "Enabling MongoDB authentication" in docs/SETUP_GUIDE.md.'
-        );
+    } else {
+        const auth = checkMongoAuth(env);
+        errors.push(...auth.errors);
+        warnings.push(...auth.warnings);
     }
 
     warnings.push(...checkSecretEncryption(env));
+    warnings.push(...checkEnvAiKeys(env));
 
     if (env.DASHBOARD_PORT !== undefined && env.DASHBOARD_PORT !== '') {
         const port = Number(env.DASHBOARD_PORT);
@@ -189,6 +183,77 @@ function collectEnvProblems(env = process.env, { required = REQUIRED_ENV } = {})
 }
 
 /**
+ * Whether a production bot is connecting to MongoDB with no credentials (#1151).
+ *
+ * #648 made authentication available but left it opt-in, with a warning, so
+ * that existing deployments kept booting — and a warning is easy to scroll
+ * past. Without auth the internal network is the only control: any process in
+ * any container on db-network, the bot included, has full read/write on every
+ * guild's data, so an RCE or SSRF in the bot becomes the whole database. So a
+ * production boot now refuses a credential-less URI outright.
+ *
+ * An operator who has decided the risk is acceptable — a single-host install
+ * with nothing else on the network, say — says so with MONGODB_ALLOW_NO_AUTH=true
+ * and gets the old warning instead. The point is that the choice is made on
+ * purpose rather than by leaving four variables blank.
+ *
+ * "Credentials" is a user-info section (`user:pass@`), or an authMechanism that
+ * carries none in the URI — X.509 and AWS IAM authenticate without one. Only in
+ * production: a development database on localhost holds test guilds.
+ */
+function checkMongoAuth(env) {
+    const uri = env.MONGODB_URI;
+    if (env.NODE_ENV !== 'production' || !uri) return { errors: [], warnings: [] };
+
+    const hasCredentials = uri.includes('@') || /[?&]authMechanism=/i.test(uri);
+    if (hasCredentials) return { errors: [], warnings: [] };
+
+    if (String(env.MONGODB_ALLOW_NO_AUTH || '').trim().toLowerCase() === 'true') {
+        return {
+            errors: [],
+            warnings: [
+                'MONGODB_URI has no credentials, and MONGODB_ALLOW_NO_AUTH=true accepts that. ' +
+                'Any container on db-network has full access to the database. ' +
+                'See "Enabling MongoDB authentication" in docs/SETUP_GUIDE.md.',
+            ],
+        };
+    }
+
+    return {
+        errors: [
+            'MONGODB_URI has no credentials, so MongoDB is running without authentication and any ' +
+            'container on db-network has full read/write access to the database. Set ' +
+            'MONGODB_ROOT_USERNAME, MONGODB_ROOT_PASSWORD, MONGODB_APP_USERNAME and ' +
+            'MONGODB_APP_PASSWORD and put the app user in MONGODB_URI — see "Enabling MongoDB ' +
+            'authentication" in docs/SETUP_GUIDE.md. To run without authentication anyway, set ' +
+            'MONGODB_ALLOW_NO_AUTH=true.',
+        ],
+        warnings: [],
+    };
+}
+
+/**
+ * An operator AI key that no guild is allowed to use (#1147).
+ *
+ * Since 5.0.0 the environment keys are only spent for the guilds named in
+ * AI_ENV_KEY_GUILDS, and empty means none — so an install upgraded with an
+ * OPENAI_API_KEY and nothing else has, silently, an AI that answers "not
+ * configured" everywhere. Say so at boot instead. A warning, in every
+ * environment: nothing is exposed, it is just a setup that cannot work.
+ */
+function checkEnvAiKeys(env) {
+    const keys = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY']
+        .filter(name => (env[name] || '').trim());
+    if (!keys.length || (env.AI_ENV_KEY_GUILDS || '').trim()) return [];
+
+    return [
+        `${keys.join(', ')} ${keys.length === 1 ? 'is' : 'are'} set, but AI_ENV_KEY_GUILDS is empty, so no ` +
+        'server can use ' + (keys.length === 1 ? 'it' : 'them') + '. Set AI_ENV_KEY_GUILDS to the guild IDs ' +
+        'allowed to spend the bot-wide keys (or `*` for every server) — see .env.example.',
+    ];
+}
+
+/**
  * Whether the credentials this bot stores for other people are stored in the
  * clear (#886).
  *
@@ -199,8 +264,8 @@ function collectEnvProblems(env = process.env, { required = REQUIRED_ENV } = {})
  * service keeps a month of mongodump archives beside it, so "readable with
  * database access" quietly means "readable by anyone who can list ./backups".
  *
- * Warnings rather than errors, the same call the MONGODB_URI credentials check
- * above makes and for the same reason: encryption shipped opt-in
+ * Warnings rather than errors, the call the MONGODB_URI credentials check
+ * above used to make and for the same reason: encryption shipped opt-in
  * (config/secretBox.js), and failing the boot would take down every deployment
  * that has not set the variable yet. What this changes is that the choice stops
  * being a silent one on the deployments where it costs something — a
@@ -339,6 +404,8 @@ module.exports = {
     checkDashboardUrl,
     checkSessionSecret,
     checkSecretEncryption,
+    checkMongoAuth,
+    checkEnvAiKeys,
     checkGatewaySplit,
     DASHBOARD_REQUIRED_ENV,
     resolveDashboardUrl,

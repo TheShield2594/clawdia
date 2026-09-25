@@ -22,8 +22,10 @@ services:
     # mongodb_data volume; the image skips initialization when data exists. To
     # enable auth on a deployment that already has data, see "Enabling MongoDB
     # authentication" in docs/SETUP_GUIDE.md — it is a few mongosh commands, not a
-    # wipe. Left unset, everything behaves exactly as before (no auth), so
-    # existing deployments keep starting; new ones should set all four.
+    # wipe. Left unset, mongod runs without auth — and since #1151 the bot
+    # refuses to start in production against a credential-less MONGODB_URI, so
+    # set all four. MONGODB_ALLOW_NO_AUTH=true in .env is the deliberate
+    # opt-out for an operator who accepts running without auth.
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-}

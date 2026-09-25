@@ -2,6 +2,7 @@ const { DEFAULT_CONFIRM_MODE, DEFAULT_MCP_ROUTE, DEFAULT_MCP_APPROVER, forGuild,
 const { providers, getProvider, DEFAULT_MODELS, supportsStructured } = require('./providers');
 const { recordUsage } = require('./usage');
 const { enforceRateLimit, toolCallBudget } = require('./rateLimit');
+const { applyEnvKeyCeilings } = require('./apiKeys');
 const { requestModelJson, DEFAULT_TOKEN_BUDGETS } = require('../../utils/modelJson');
 
 // Core provider dispatch: resolve a guild's AI settings to a provider config
@@ -20,9 +21,10 @@ const { requestModelJson, DEFAULT_TOKEN_BUDGETS } = require('../../utils/modelJs
  * rate limits for the enforcement below to bind.
  *
  * Credentials come from the provider's own `resolveAuth`, which reads the
- * guild's dashboard-entered key before the bot-wide environment fallback. A
- * provider that resolves neither yields `apiKey: null` rather than throwing —
- * the call fails at the provider, where the error can say which key is missing.
+ * guild's dashboard-entered key before the bot-wide environment fallback — the
+ * fallback only for guilds the operator allows it (services/ai/apiKeys.js). A
+ * provider that resolves neither yields `apiKey: null` rather than throwing,
+ * with `keyError` saying why when there is a reason worth telling someone.
  *
  * @param {object} aiSettings a guild's `ai` settings subdocument
  * @param {object} [options]
@@ -33,7 +35,7 @@ const { requestModelJson, DEFAULT_TOKEN_BUDGETS } = require('../../utils/modelJs
  *   OAuth grants and none of the scoped servers
  * @returns {{provider: string, model: string, temperature: number,
  *   maxTokens: number, contextTokens: ?number, apiKey: ?string,
- *   baseUrl: ?string, mcpServers: object[], mcpConfirm: string,
+ *   keySource: ?string, keyError: ?string, baseUrl: ?string, mcpServers: object[], mcpConfirm: string,
  *   mcpRoute: string, rateLimit: {perUser: number, perChannel: number,
  *   windowMin: number, monthlyTokens: number, monthlyCost: number}}}
  *   `contextTokens` is null when the guild has not overridden it, meaning
@@ -52,7 +54,7 @@ function resolveProviderConfig(aiSettings, { guildId } = {}) {
         ? Number(aiSettings.contextTokens)
         : null;
 
-    const auth = providers.get(providerName)?.resolveAuth(aiSettings) || {};
+    const auth = providers.get(providerName)?.resolveAuth(aiSettings, { guildId }) || {};
 
     // Carried through so every caller that spreads this config keeps the
     // guild's MCP servers attached without having to know they exist.
@@ -75,13 +77,18 @@ function resolveProviderConfig(aiSettings, { guildId } = {}) {
     // The monthly ceilings ride in the same block for the same reason, and are
     // the one limit here that also binds a call nobody sent: the scheduled
     // digests and newspapers spend this guild's money too (#831).
-    const rateLimit = {
+    const guildLimits = {
         perUser: aiSettings.rateLimitPerUser ?? 0,
         perChannel: aiSettings.rateLimitPerChannel ?? 0,
         windowMin: aiSettings.rateLimitWindowMin ?? 10,
         monthlyTokens: aiSettings.monthlyTokenLimit ?? 0,
         monthlyCost: aiSettings.monthlyCostLimit ?? 0
     };
+    // Spend on the operator's environment key is the operator's money, so
+    // their ceilings bind it whatever the guild set (#1147). A guild can only
+    // tighten them — its own limits are 0-for-unlimited, and those zeroes are
+    // exactly how the operator's bill used to be run up.
+    const rateLimit = auth.keySource === 'env' ? applyEnvKeyCeilings(guildLimits) : guildLimits;
 
     return {
         provider: providerName,
@@ -90,6 +97,8 @@ function resolveProviderConfig(aiSettings, { guildId } = {}) {
         maxTokens,
         contextTokens,
         apiKey: auth.apiKey ?? null,
+        keySource: auth.keySource ?? null,
+        keyError: auth.keyError ?? null,
         baseUrl: auth.baseUrl ?? null,
         mcpServers,
         mcpConfirm,
@@ -120,7 +129,10 @@ function resolveProviderConfig(aiSettings, { guildId } = {}) {
  * @returns {AsyncGenerator<string>} text chunks
  * @throws {AiRateLimitError|AiBudgetError} before the provider is touched
  */
-function streamCompletion({ userId, channelId, rateLimit, ...args }) {
+// `keySource` and `keyError` ride on a resolved config for the caller's
+// benefit (services/ai/apiKeys.js) and are dropped here, so a provider module
+// never receives them in its request.
+function streamCompletion({ userId, channelId, rateLimit, keySource, keyError, ...args }) {
     // Before the provider is touched: every route into a paid API goes through
     // here, so this is the only place a limit has to be applied to bound spend.
     // guildId stays in `args` as well — it is what the usage ledger records
@@ -170,7 +182,7 @@ async function* streamProvider({ provider, guildId, mcp = true, usageOut, ...req
  * @returns {Promise<string>} the reply text — not the provider's result object
  * @throws {AiRateLimitError|AiBudgetError} before the provider is touched
  */
-async function getCompletion({ provider, guildId, mcp = true, userId, channelId, rateLimit, ...req }) {
+async function getCompletion({ provider, guildId, mcp = true, userId, channelId, rateLimit, keySource, keyError, ...req }) {
     enforceRateLimit({ guildId, userId, channelId, rateLimit });
     const result = await getProvider(provider).complete({
         ...req,
@@ -215,7 +227,7 @@ async function getCompletion({ provider, guildId, mcp = true, userId, channelId,
  * @returns {Promise<object>} the parsed object
  * @throws {AiRateLimitError|AiBudgetError} before the provider is touched
  */
-async function getStructuredCompletion({ provider, guildId, userId, channelId, rateLimit, schema, schemaName, maxTokens, budgets = DEFAULT_TOKEN_BUDGETS, ...req }) {
+async function getStructuredCompletion({ provider, guildId, userId, channelId, rateLimit, schema, schemaName, maxTokens, budgets = DEFAULT_TOKEN_BUDGETS, keySource, keyError, ...req }) {
     const providerImpl = getProvider(provider);
 
     if (typeof providerImpl.structured === 'function' && supportsStructured(provider, req.model)) {

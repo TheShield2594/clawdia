@@ -175,15 +175,20 @@ describe('registration', () => {
         expect(typeof gemini.resolveAuth).toBe('function');
     });
 
-    it('resolves the key from settings first, then the environment', () => {
+    it('resolves the key from settings first, then the environment for an allowed guild', () => {
         const saved = process.env.GEMINI_API_KEY;
+        const savedGuilds = process.env.AI_ENV_KEY_GUILDS;
         process.env.GEMINI_API_KEY = 'from-env';
+        process.env.AI_ENV_KEY_GUILDS = 'g1';
         try {
             expect(gemini.resolveAuth({ geminiKey: 'from-settings' }).apiKey).toBe('from-settings');
-            expect(gemini.resolveAuth({}).apiKey).toBe('from-env');
+            expect(gemini.resolveAuth({}, { guildId: 'g1' }).apiKey).toBe('from-env');
+            expect(gemini.resolveAuth({}, { guildId: 'g2' }).apiKey).toBeNull();
         } finally {
             if (saved === undefined) delete process.env.GEMINI_API_KEY;
             else process.env.GEMINI_API_KEY = saved;
+            if (savedGuilds === undefined) delete process.env.AI_ENV_KEY_GUILDS;
+            else process.env.AI_ENV_KEY_GUILDS = savedGuilds;
         }
     });
 
