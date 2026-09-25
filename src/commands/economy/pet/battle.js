@@ -55,9 +55,10 @@ const BATTLE_LOG_MAX  = 8;
 const BATTLE_LOG_TAIL = 4;
 
 /**
- * Compact battle log: the last few exchanges of the fight, plus every earlier
- * round where a signature move fired (#1183), so a Pack Howl on round two is
- * not cut off by the six rounds after it.
+ * Compact battle log, at most BATTLE_LOG_MAX lines: the last few exchanges of
+ * the fight, plus earlier rounds where a signature move fired (#1183), so a
+ * Pack Howl on round two is not cut off by the rounds after it. In a long
+ * fight with many moves, the earliest move rounds are the ones dropped.
  */
 function battleLogLines(rounds, nameA, nameB) {
     const nameOf = side => (side === 'a' ? nameA : nameB);

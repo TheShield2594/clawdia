@@ -72,6 +72,10 @@ async function executeStatus(interaction) {
     }
 
     let currentIndex = 0;
+    // The pet and roster size last drawn, so the disabled buttons left when the
+    // window closes keep the Train counts the player last saw.
+    let lastShown = user.pets[0];
+    let lastTotal = user.pets.length;
     const ownerAvatarURL = interaction.user.displayAvatarURL();
     const ownerName      = interaction.member?.displayName ?? interaction.user.username;
     const guildId = interaction.guild.id;
@@ -104,12 +108,16 @@ async function executeStatus(interaction) {
 
         if (action === 'pet_prev') {
             currentIndex = Math.max(0, idx - 1);
+            lastShown = freshUser.pets[currentIndex];
+            lastTotal = freshUser.pets.length;
             await btn.update(
                 await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             );
 
         } else if (action === 'pet_next') {
             currentIndex = Math.min(freshUser.pets.length - 1, idx + 1);
+            lastShown = freshUser.pets[currentIndex];
+            lastTotal = freshUser.pets.length;
             await btn.update(
                 await renderPetStatus(freshUser.pets[currentIndex], currentIndex, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             );
@@ -178,6 +186,8 @@ async function executeStatus(interaction) {
                 : `✨ **+${petXpResult.gained} XP** for ${name}! *(You've had your play XP for this hour.)*`;
             const bondNote = bondGained > 0 ? ` ❤️ **+${bondGained} bond**` : '';
             await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n${xpLine}${bondNote}${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
+            lastShown = freshUser.pets[idx];
+            lastTotal = freshUser.pets.length;
             await interaction.editReply(
                 await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             ).catch(() => {});
@@ -250,6 +260,8 @@ async function executeStatus(interaction) {
                        + `(${trained.sessions}/${TRAIN_MAX_SESSIONS}). 🍖 −${TRAIN_HUNGER_COST} hunger → **${Math.round(trained.hunger)}%**.${bondNote}${offNote}`,
                 flags: MessageFlags.Ephemeral,
             });
+            lastShown = freshUser.pets[idx];
+            lastTotal = freshUser.pets.length;
             await interaction.editReply(
                 await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             ).catch(() => {});
@@ -324,8 +336,8 @@ async function executeStatus(interaction) {
 
     collector.on('end', async () => {
         try {
-            const shownId  = user.pets[currentIndex]?._id;
-            const disabled = buildNavComponents(interaction.user.id, currentIndex, user.pets.length, shownId != null ? String(shownId) : null, user.pets[currentIndex])
+            const shownId  = lastShown?._id;
+            const disabled = buildNavComponents(interaction.user.id, currentIndex, lastTotal, shownId != null ? String(shownId) : null, lastShown)
                 .map(row => ActionRowBuilder.from(row).setComponents(
                     row.components.map(b => ButtonBuilder.from(b).setDisabled(true))
                 ));

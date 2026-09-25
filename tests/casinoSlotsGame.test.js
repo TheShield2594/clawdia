@@ -529,6 +529,21 @@ describe('the big-win announcement', () => {
         expect(channel.send.mock.calls[0][0].embeds[0].data.description).toContain('Three Stars');
     }, 20_000);
 
+    test('names a free-spin run as one, not as "Three" of the pair that won it', async () => {
+        guild.economy.announcementChannelId = 'announce-1';
+        const { channel, channels } = announcer();
+        const pairWithScatters = view(['Bell', 'Bell', 'Lemon'], {
+            above: ['Scatter', 'Grape', 'Cherry'],
+            below: ['Grape', 'Scatter', 'Lemon'],
+        });
+        const run = [view(['Star', 'Star', 'Star']), ...Array.from({ length: FREE_SPINS[2].spins - 1 }, LOSER)];
+        await play([pairWithScatters, ...run], { channels });
+
+        const text = channel.send.mock.calls[0][0].embeds[0].data.description;
+        expect(text).toContain('free-spin run');
+        expect(text).not.toContain('Three');
+    }, 20_000);
+
     test('is not repeated in the channel the spin is already in', async () => {
         guild.economy.announcementChannelId = 'channel-1';
         const channel = { id: 'channel-1', isTextBased: () => true, send: jest.fn() };

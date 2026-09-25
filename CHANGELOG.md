@@ -54,8 +54,8 @@ Pet follow-ups from the design review (#1180), and slots drawn as a table image 
   wild opponents have Gore Charge, Hiss, Scavenge and Echolocation. Every
   species pairing at equal level stays within 42–58%. The four rare pets get
   1% on HP, attack and defence, which wins them at most about 62% of fights
-  against a shop or wild pet (55% on average). The battle log keeps every
-  round where a move fired, not just the last six.
+  against a shop or wild pet (55% on average). The battle log shows up to
+  eight lines: the last four rounds, plus earlier rounds where a move fired.
 - **Pet of the Week is announced with the companion card (#1189),** with the
   ribbon on, the owner in the kicker, the week's care count in the footer,
   and alt text. The emoji sprite is only the fallback for when the card

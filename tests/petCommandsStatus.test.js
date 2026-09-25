@@ -353,6 +353,20 @@ describe('/pet status — train (#1182, which replaced rest)', () => {
         expect(stored().pets[0].training).toEqual({ guard: 10 });
     });
 
+    test('closing the window keeps the Train counts from the last render, not the opening one', async () => {
+        seedUser({ pets: [makePet({ training: { power: 9 } })] });
+        const interaction = await openStatus();
+
+        await press(interaction, 'train_power', 0);
+        interaction.endCollectors();
+        await new Promise(r => setImmediate(r));
+
+        const power = interaction.replies.at(-1).components.flatMap(r => r.components)
+            .find(b => b.data.custom_id.startsWith('pet_train_power'));
+        expect(power.data.label).toBe('💪 Train Power 10/10');
+        expect(power.data.disabled).toBe(true);
+    });
+
     test('a hungry pet cannot train', async () => {
         seedUser({ pets: [makePet({ hunger: 10 })] });
         const interaction = await openStatus();

@@ -930,7 +930,10 @@ async function playSlots(ctx) {
         const won = linePay + freeTotal;
         const announceChannelId = guildSettings?.economy?.announcementChannelId ?? null;
         if (!jackpotWon && won >= WIN_ANNOUNCE_MULT * bet && announceChannelId && announceChannelId !== interaction.channelId) {
-            const what = result.symbol ? `Three ${result.symbol.plural}` : freeSpins ? 'free-spin run' : 'win';
+            // A pair also carries a symbol, so name the three only when it was one.
+            const what = freeTotal > 0 ? 'free-spin run'
+                : result.outcome === 'three' ? `Three ${result.symbol.plural}`
+                : 'win';
             const bigWinEmbed = new EmbedBuilder()
                 .setColor(PALETTE.epic)
                 .setDescription(`🎰 ${interaction.user} just hit a **${Math.floor(won / bet)}× ${what}** on slots for **${fmt(won)} coins**!`)

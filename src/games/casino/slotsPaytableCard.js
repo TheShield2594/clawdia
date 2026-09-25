@@ -66,7 +66,14 @@ const ICON = {
 const art = new Map();
 /** A symbol's Twemoji bitmap by file name ("cherry", "wild"…), as a promise. */
 function icon(name) {
-    if (!art.has(name)) art.set(name, loadImage(path.join(ART, `${name}.png`)));
+    if (!art.has(name)) {
+        // A failed load is dropped rather than cached, so the next frame (the
+        // machine shares this cache) or paytable can try again.
+        art.set(name, loadImage(path.join(ART, `${name}.png`)).catch((err) => {
+            art.delete(name);
+            throw err;
+        }));
+    }
     return art.get(name);
 }
 
