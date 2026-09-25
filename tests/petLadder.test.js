@@ -299,3 +299,13 @@ describe('a season rollover', () => {
         expect(resetRatings({})).toEqual({});
     });
 });
+
+test('the scheduler rolls ladder seasons for each shard, hourly', async () => {
+    const { JOBS, SCOPE } = require('../src/services/scheduler');
+    const job = JOBS.find(j => j.name === 'resolvePetLadderSeasons');
+    expect(job).toMatchObject({ scope: SCOPE.GUILD, schedule: '41 * * * *', service: 'petLadderService' });
+
+    mockLadders.seed({ guildId: GUILD, seasonNumber: 1, rev: 0, seasonEndsAt: new Date(Date.now() - 1000), ratings: {} });
+    await job.fn({});
+    expect(stored().seasonNumber).toBe(2);
+});
