@@ -96,7 +96,9 @@ function isPrivateIp(ip) {
             (g[0] === 0x64 && g[1] === 0xff9b) ||                   // NAT64 64:ff9b::/96 and 64:ff9b:1::/48
             (g[0] === 0x100 && g[1] === 0 && g[2] === 0 && g[3] === 0) || // discard prefix 100::/64 (RFC 6666)
             (g[0] === 0x2001 && g[1] === 0) ||                      // Teredo 2001::/32, which tunnels to an embedded IPv4
+            (g[0] === 0x2001 && g[1] === 0x2 && g[2] === 0) ||      // benchmarking 2001:2::/48 (RFC 5180)
             (g[0] === 0x2001 && g[1] === 0xdb8) ||                  // documentation 2001:db8::/32 (RFC 3849)
+            (g[0] === 0x3fff && (g[1] & 0xf000) === 0) ||           // documentation 3fff::/20 (RFC 9637)
             (g[0] === 0x2002 && isPrivateIpv4(groupsToIpv4(g[1], g[2]))) || // 6to4 2002::/16 wrapping a private IPv4
             (g[0] & 0xfe00) === 0xfc00 ||                           // ULA fc00::/7
             (g[0] & 0xffc0) === 0xfe80 ||                           // link-local fe80::/10

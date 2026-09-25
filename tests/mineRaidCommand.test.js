@@ -23,6 +23,7 @@ const Guild = require('../src/models/Guild');
 const User = require('../src/models/User');
 const GrindProfile = require('../src/models/GrindProfile');
 const { handleRaid } = require('../src/commands/economy/mine/raid');
+const activeGameLock = require('../src/utils/activeGameLock');
 const { RAID_COOLDOWN_MS } = require('../src/data/mineData');
 
 function player(userId, mining = {}) {
@@ -72,6 +73,32 @@ describe('the Mine Lock', () => {
 
         expect(repliedText(interaction)).toContain('Mine Lock Triggered');
         expect(GrindProfile.findOneAndUpdate.mock.calls[0][0]).toMatchObject({ 'data.mineLockActive': true });
+    });
+
+    test('is left armed when the defender is busy', async () => {
+        // A dig holding the defender's lease saves its whole snapshot, so a lock
+        // cleared outside that lease would be written back as armed.
+        activeGameLock.tryAcquire.mockResolvedValueOnce(null);
+        seed(player('user-1'), player('user-2', { mineLockActive: true, materials: { coal_dust: 5 } }));
+        const interaction = makeInteraction({ options: { target } });
+
+        await handleRaid(interaction);
+
+        expect(repliedText(interaction)).toContain('busy right now');
+        expect(GrindProfile.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    test('is consumed while the defender lease is held, and the lease is released', async () => {
+        seed(player('user-1'), player('user-2', { mineLockActive: true, materials: { coal_dust: 5 } }));
+        GrindProfile.findOneAndUpdate.mockResolvedValueOnce({ data: { mineLockActive: false } });
+        const interaction = makeInteraction({ options: { target } });
+
+        await handleRaid(interaction);
+
+        const acquiredAt = activeGameLock.tryAcquire.mock.invocationCallOrder[0];
+        const consumedAt = GrindProfile.findOneAndUpdate.mock.invocationCallOrder[0];
+        expect(acquiredAt).toBeLessThan(consumedAt);
+        expect(activeGameLock.release).toHaveBeenCalledWith(expect.any(String), 'lease-1');
     });
 });
 

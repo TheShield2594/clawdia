@@ -90,35 +90,6 @@ async function handleRaid(interaction) {
         });
     }
 
-    // Mine Lock: defender is protected. Consume atomically so two concurrent
-    // raiders can't both read the lock as active and both bypass it.
-    if (defender.mining.mineLockActive) {
-        const lockConsumed = await GrindProfile.findOneAndUpdate(
-            { userId: defender.userId, guildId: interaction.guild.id, system: 'mining', 'data.mineLockActive': true },
-            { $set: { 'data.mineLockActive': false } },
-            { new: true }
-        ).catch(err => { console.error('[mine raid] lock consume error:', err); return null; });
-
-        if (lockConsumed) {
-            defender.mining.mineLockActive = false;
-            raider.mining.lastRaidSent = new Date();
-            raider.markModified('mining');
-            await raider.save().catch(() => null);
-            return interaction.reply({
-                embeds: [new EmbedBuilder()
-                    .setColor(COLORS.ERROR)
-                    .setTitle('🔒 Mine Lock Triggered!')
-                    .setDescription(
-                        `**${targetUser.username}**'s mine was protected by a **Mine Lock**.\n` +
-                        `The lock absorbed your raid attempt and has now been consumed.`
-                    )
-                    .setTimestamp()
-                ]
-            });
-        }
-        // Lock was already consumed by a concurrent raid — fall through to normal raid resolution.
-    }
-
     // The transfer below is a pair of $inc updates, but a grind profile is saved as a
     // whole `data` document (see utils/grindProfile) — so a defender part-way through
     // their own /mine dig would write their pre-raid snapshot straight back over the
@@ -147,6 +118,38 @@ async function handleRaid(interaction) {
     const stolen = {};
 
     try {
+        // Consumed inside the defender's lease, not before it: a dig holding the
+        // lease saves its whole mining snapshot, which would write the lock
+        // straight back as armed after a raid that was turned away as "busy".
+        //
+        // Mine Lock: defender is protected. Consume atomically so two concurrent
+        // raiders can't both read the lock as active and both bypass it.
+        if (defender.mining.mineLockActive) {
+            const lockConsumed = await GrindProfile.findOneAndUpdate(
+                { userId: defender.userId, guildId: interaction.guild.id, system: 'mining', 'data.mineLockActive': true },
+                { $set: { 'data.mineLockActive': false } },
+                { new: true }
+            ).catch(err => { console.error('[mine raid] lock consume error:', err); return null; });
+
+            if (lockConsumed) {
+                defender.mining.mineLockActive = false;
+                raider.mining.lastRaidSent = new Date();
+                raider.markModified('mining');
+                await raider.save().catch(() => null);
+                return interaction.reply({
+                    embeds: [new EmbedBuilder()
+                        .setColor(COLORS.ERROR)
+                        .setTitle('🔒 Mine Lock Triggered!')
+                        .setDescription(
+                            `**${targetUser.username}**'s mine was protected by a **Mine Lock**.\n` +
+                            `The lock absorbed your raid attempt and has now been consumed.`
+                        )
+                        .setTimestamp()
+                    ]
+                });
+            }
+            // Lock was already consumed by a concurrent raid — fall through to normal raid resolution.
+        }
 
         // Execute the raid: move RAID_STEAL_MIN–RAID_STEAL_MAX of the defender's largest
         // material piles across to the raider. The same `data.materials` map is debited

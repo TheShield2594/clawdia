@@ -54,6 +54,8 @@ describe('isPrivateIp', () => {
         ['2001:0:4136:e378::1', 'Teredo'],
         ['fec0::1', 'IPv6 site-local'],
         ['fe80::1%eth0', 'IPv6 link-local with a zone id'],
+        ['2001:2::1', 'IPv6 benchmarking'],
+        ['3fff:fff::1', 'IPv6 documentation 3fff::/20 upper'],
     ];
 
     it.each(blocked)('blocks %s (%s)', (ip) => {
@@ -75,6 +77,8 @@ describe('isPrivateIp', () => {
         '198.20.0.1',      // just above it
         '2606:4700:4700::1111',
         '2002:808:808::1', // 6to4 wrapping a public IPv4
+        '2001:3::1',       // just past benchmarking 2001:2::/48
+        '3fff:1000::1',    // just past 3fff::/20
     ];
 
     it.each(allowed)('allows public address %s', (ip) => {

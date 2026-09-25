@@ -145,7 +145,7 @@ function overviewEmbed(interaction, m) {
         if (repairable > 0) {
             embed.addFields({
                 name: '🔧 Broken',
-                value: `${repairable} pickaxe${repairable === 1 ? ' needs' : 's need'} a repair — equip it and use \`/mine shop repair\`.`,
+                value: `${repairable} pickaxe${repairable === 1 ? ' needs' : 's need'} a repair — \`/mine equip\` it, then \`/mine shop repair\`.`,
                 inline: false
             });
         }
@@ -320,9 +320,14 @@ async function handleEquip(interaction) {
     }
 
     const pickaxe = m.pickaxes[slot];
-    if (pickaxe.status === 'broken') {
-        return interaction.reply({ content: `**${pickaxe.name}** is broken and can't be equipped. Repair it first with \`/mine shop repair\`.`, flags: MessageFlags.Ephemeral });
+    // A broken pickaxe can be equipped so it can be repaired: /mine shop repair
+    // works on the equipped pickaxe only, and /mine dig refuses a broken one on
+    // its own. Refusing it here left an unequipped broken pickaxe with no way
+    // back. A condemned one cannot be repaired, so there is nothing to equip it for.
+    if (pickaxe.status === 'broken' && isCondemned(pickaxe)) {
+        return interaction.reply({ content: `**${pickaxe.name}** is broken and condemned — it can't be repaired. Clear it out with \`/mine discard\`.`, flags: MessageFlags.Ephemeral });
     }
+    const brokenNote = pickaxe.status === 'broken' ? ' It is broken — repair it with `/mine shop repair` before digging.' : '';
 
     m.equippedPickaxeIndex = slot;
     user.markModified('mining');
@@ -333,7 +338,7 @@ async function handleEquip(interaction) {
             new EmbedBuilder()
                 .setColor('#b5651d')
                 .setTitle('⛏️ Pickaxe Equipped')
-                .setDescription(`You equipped **${pickaxe.name}**.`)
+                .setDescription(`You equipped **${pickaxe.name}**.${brokenNote}`)
                 .addFields(
                     { name: 'Durability', value: `${pickaxe.currentDurability}/${pickaxe.maxDurability}`, inline: true },
                     { name: 'Status',     value: `${pickaxeStatusEmoji(pickaxe.status)} ${pickaxe.status}`, inline: true },

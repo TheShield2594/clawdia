@@ -11,7 +11,11 @@ jest.mock('../src/models/Guild', () => ({ findOne: jest.fn().mockResolvedValue(n
 jest.mock('../src/models/User', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
 jest.mock('../src/models/GrindProfile', () => ({ find: jest.fn(), findOneAndUpdate: jest.fn() }));
 
-const { __test__ } = require('../src/commands/economy/mine/inventory');
+jest.mock('../src/utils/grindProfile', () => ({ attachGrind: jest.fn(async () => {}) }));
+
+const User = require('../src/models/User');
+const { makeInteraction, repliedText } = require('./helpers/fakeInteraction');
+const { __test__, handleEquip } = require('../src/commands/economy/mine/inventory');
 const { overviewEmbed, pickaxePages, chargesEmbed, consumablesEmbed, materialsPages, overviewPayload, inventoryStock, replacementIndex } = __test__;
 
 const MAX_FIELD_VALUE = 1024;
@@ -167,5 +171,41 @@ describe('pickaxes that cannot dig', () => {
     test('with nothing that can dig, the first slot is equipped so /mine dig can say "repair it"', () => {
         expect(replacementIndex([pickaxe({ status: 'broken', currentDurability: 0 })])).toBe(0);
         expect(replacementIndex([])).toBe(-1);
+    });
+});
+
+describe('/mine equip', () => {
+    function seedBelt(pickaxes) {
+        const user = {
+            userId: 'user-1', guildId: 'guild-1',
+            mining: { pickaxes, equippedPickaxeIndex: 0 },
+            markModified: jest.fn(),
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+        User.findOneAndUpdate.mockResolvedValue(user);
+        return user;
+    }
+
+    test('equips a broken pickaxe so it can be repaired, and says it needs one', async () => {
+        // /mine shop repair works on the equipped pickaxe only, so refusing to
+        // equip a broken one left it with no way back.
+        const user = seedBelt([pickaxe(), pickaxe({ name: 'Steel Pickaxe', baseDurability: 100, status: 'broken', currentDurability: 0 })]);
+        const interaction = makeInteraction({ options: { slot: 2 } });
+
+        await handleEquip(interaction);
+
+        expect(user.mining.equippedPickaxeIndex).toBe(1);
+        expect(repliedText(interaction)).toContain('/mine shop repair');
+    });
+
+    test('refuses a broken, condemned pickaxe — no repair will bring it back', async () => {
+        const user = seedBelt([pickaxe(), pickaxe({ baseDurability: 100, maxDurability: 10, status: 'broken', currentDurability: 0 })]);
+        const interaction = makeInteraction({ options: { slot: 2 } });
+
+        await handleEquip(interaction);
+
+        expect(user.mining.equippedPickaxeIndex).toBe(0);
+        expect(user.save).not.toHaveBeenCalled();
+        expect(repliedText(interaction)).toContain('/mine discard');
     });
 });
