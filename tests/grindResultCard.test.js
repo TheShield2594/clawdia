@@ -68,6 +68,22 @@ describe('createGrindResultCard', () => {
         }
     });
 
+    test('a banner can say its outcome in words in place of a bonus, in every palette', async () => {
+        for (const activity of ['hunt', 'fish', 'mine', 'explore']) {
+            const png = await createGrindResultCard(base({
+                activity, apex: { label: 'CAVE-IN', outcome: 'win', title: 'Blasted clear with 2 charges', detail: '⛏️ haul kept' },
+            }));
+            expect(size(png).height).toBeGreaterThan(440);
+        }
+    });
+
+    test('a gauge in its own unit draws against its own scale, even when the payout was capped', async () => {
+        const png = await createGrindResultCard(base({
+            payout: 0, forfeited: 300, gauge: { value: 4.2, unit: 'lbs', max: 12, best: 3.1, record: 9 },
+        }));
+        expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
+    });
+
     test('an enormous name and payout still fit the frame', async () => {
         const png = await createGrindResultCard(base({ subject: { name: 'A'.repeat(200), iconId: null }, payout: 123_456_789_012 }));
         expect(size(png).width).toBe(1000);

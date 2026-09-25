@@ -14,6 +14,7 @@ const { creditEventCurrencyOrOwe } = require('../../../utils/creditOrOwe');
 const { LIMITS, REGIONS, relicSlug } = require('../../../data/exploreData');
 const { relicItemId, exploreRegionItemId } = require('../../../data/activityItems');
 const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
+const { serverBest } = require('../../../utils/grindRecord');
 const {
     commitExpeditionRelic, applyStaminaRegen, applyDailyReset, msUntilNextStamina,
     resolveActiveRegion, executeExplore, applyExploreXpBonus, resolveEncounter,
@@ -38,6 +39,7 @@ const { ownedBy } = require('../../../utils/collectorOwner');
 const { loadContext, regionGateError, EXPLORE_COLORS } = require('./shared');
 const { buildResultEmbed, secretTeaser, summarizeResult } = require('./embeds');
 const { attachResultActions, buildResultActions } = require('./actions');
+const { cardChips, renderExploreResultCard } = require('./resultCard');
 
 // How long an encounter waits for a choice before resolving as "keep your
 // distance".
@@ -205,6 +207,9 @@ async function handleGo(interaction) {
         const isFeatured = region.id === featuredRegion.id;
         const coinMultiplier = getEventCoinMultiplier(guildSettings)
             * (isFeatured ? 1 + FEATURED_PAYOUT_BONUS : 1);
+        // The explorer's best haul before this trip, for the result card's
+        // gauge: the expedition books its own payout into it.
+        const priorBest = e.bestHaul ?? 0;
         const result = executeExplore(user, region, guildSettings, { coinMultiplier, route: route.id });
         result.featured = isFeatured;
         const firstVisit = result.firstVisit;
@@ -541,17 +546,38 @@ async function handleGo(interaction) {
             });
         }
 
-        // Icon on the result: the recovered relic when there is one — the
-        // collectible moment, the way /fish, /hunt and /mine thumbnail the catch
-        // — otherwise the region itself. Bundle-only art, so this no-ops to the
-        // emoji fallback until the icons are baked (src/utils/itemImageHelper.js).
-        const thumbId = result.relic
-            ? relicItemId(relicSlug(result.relic.itemId))
-            : exploreRegionItemId(region.id);
-        const thumbLabel = result.relic ? result.relic.itemId : region.name;
-        const files = await attachItemThumbnail(embed, thumbId, interaction.guild.id, thumbLabel);
+        // The picture card leads a find: the relic (else the region), the haul
+        // against the explorer's best and the server's, drawn above this text
+        // (explore/resultCard), the way /fish, /hunt and /mine lead theirs.
+        // A miss — a trap, a quiet walk, a lost encounter — stays text-only.
+        const card = await renderExploreResultCard({
+            result, region,
+            username: interaction.member?.displayName ?? interaction.user.globalName ?? interaction.user.username,
+            records: {
+                priorBest,
+                othersBest: result.payout > 0
+                    ? await serverBest(interaction.guild.id, 'exploration', 'bestHaul', interaction.user.id)
+                    : null,
+            },
+            chips: cardChips({ result, rarePetDrop, featuredPct: Math.round(FEATURED_PAYOUT_BONUS * 100) }),
+        });
 
-        const resultMessage = await show({ embeds: [embed], components: buildResultActions(result.route), files });
+        // Without a card, the icon on the result: the recovered relic when
+        // there is one, otherwise the region itself. Bundle-only art, so this
+        // no-ops to the emoji fallback until the icons are baked
+        // (src/utils/itemImageHelper.js).
+        let files;
+        if (card) {
+            files = [card.file];
+        } else {
+            const thumbId = result.relic
+                ? relicItemId(relicSlug(result.relic.itemId))
+                : exploreRegionItemId(region.id);
+            const thumbLabel = result.relic ? result.relic.itemId : region.name;
+            files = await attachItemThumbnail(embed, thumbId, interaction.guild.id, thumbLabel);
+        }
+
+        const resultMessage = await show({ embeds: card ? [card.embed, embed] : [embed], components: buildResultActions(result.route), files });
         attachResultActions(interaction, resultMessage, { regionId: region.id });
 
         // Server-wide whisper for secrets

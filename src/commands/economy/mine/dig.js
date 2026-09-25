@@ -46,6 +46,8 @@ const { attachResultActions, buildResultActions } = require('./actions');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { stagedLootReveal } = require('../../../utils/stagedLootReveal');
 const { attachResultThumbnail } = require('../../../utils/itemImageHelper');
+const { serverBest } = require('../../../utils/grindRecord');
+const { cardChips, renderMineResultCard } = require('./resultCard');
 const { gatherPayoutKey } = require('../../../utils/payoutKey');
 
 // Presentation timings for the pre-dig prompt and the cave-in choice. The ladder,
@@ -319,6 +321,10 @@ async function handleDig(interaction) {
             }
         }
 
+        // The miner's best before this dig, for the result card's gauge: the
+        // bonus stack below books this dig's payout into it.
+        const priorBest = user.mining.bestPayout ?? 0;
+
         // Pity counter, featured-depth / pet / Wilderness bonuses, forfeited
         // scaling and best payout — the full post-roll bonus stack.
         applyDigBonuses(user, result, {
@@ -428,18 +434,40 @@ async function handleDig(interaction) {
         // Last line of the description: when the next dig opens, as a live countdown.
         embed.setDescription(`${embed.data.description ?? ''}\n\n${nextDigLine(user)}`);
 
-        // Result artwork — the mined ore's icon as the embed thumbnail (emoji
-        // fallback). An abandoned haul shows no ore art, gets no staged reveal and
-        // is not announced: fanfare for ore left behind in a collapse reads as a
-        // find the player does not have.
-        const oreFiles = kept
-            ? await attachResultThumbnail(embed, 'mine', result.ore, interaction.guild.id)
-            : [];
+        // Result artwork — the picture card leads a kept dig: the ore's art,
+        // the payout against the miner's best and the server record, and how
+        // the dig went, drawn above this text (mine/resultCard). If it cannot
+        // be drawn the ore's icon falls back to the embed thumbnail, as before.
+        // An abandoned haul shows no ore art, gets no staged reveal and is not
+        // announced: fanfare for ore left behind in a collapse reads as a find
+        // the player does not have.
+        const card = kept
+            ? await renderMineResultCard({
+                result, depth, intensity: chosenIntensity,
+                username: interaction.member?.displayName ?? interaction.user.globalName ?? interaction.user.username,
+                records: {
+                    priorBest,
+                    othersBest: result.finalPayout > 0
+                        ? await serverBest(interaction.guild.id, 'mining', 'bestPayout', interaction.user.id)
+                        : null,
+                },
+                chips: cardChips({
+                    result, chosenIntensity, pickedIntensity, isFeaturedDepth, rarePetDrop,
+                    featuredPct: Math.round(FEATURED_PAYOUT_BONUS * 100),
+                }),
+            })
+            : null;
+        const oreFiles = card
+            ? [card.file]
+            : kept
+                ? await attachResultThumbnail(embed, 'mine', result.ore, interaction.guild.id)
+                : [];
+        const finalEmbeds = card ? [card.embed, embed] : embed;
 
         // Staged loot reveal for rare+ drops
         // "Dig again" rides the final render only: it must not be pressable while
         // the fog is still hiding what came up.
-        await stagedLootReveal(interaction, kept ? result.tier : null, embed, 'mine', oreFiles, { components: buildResultActions() });
+        await stagedLootReveal(interaction, kept ? result.tier : null, finalEmbeds, 'mine', oreFiles, { components: buildResultActions() });
 
         if (kept && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
