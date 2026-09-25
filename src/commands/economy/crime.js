@@ -431,7 +431,7 @@ module.exports = {
                 return (
                     `**${isFeatured ? '🌟 ' : ''}${c.emoji} ${c.displayName}** ${c.riskEmoji}\n` +
                     `${c.riskLabel}\n` +
-                    `🎯 ${pct(methodOdds(standardOf(c), oddsBonus + timeEdge(timeBand, c, standardOf(c))))} success · 💰 ${moneyRange(c.minPayout, c.maxPayout)} · 💸 fine ${moneyRange(c.minFine, c.maxFine)}` +
+                    `🎯 ${pct(methodOdds(standardOf(c), oddsBonus + timeEdge(timeBand, c, standardOf(c))))} success · pays ${moneyRange(c.minPayout, c.maxPayout)} · fine ${moneyRange(c.minFine, c.maxFine)}` +
                     (timeEdge(timeBand, c, standardOf(c)) ? ` · ${timeBand.emoji} +${pct(TIME_EDGE)}` : '') +
                     featuredTag
                 );
@@ -469,7 +469,7 @@ module.exports = {
                 const edgeMark = timeEdge(timeBand, crime, m) ? ` ${timeBand.emoji}` : '';
                 const rateStr = `${pct(odds(m))}${edgeMark}`;
                 const payoutStr = m.payoutRange || m.payoutMult !== 1.0 ? ` · ${payoutLabel(m)} payout` : '';
-                const fineStr = ` · 💸 ${moneyRange(crime.minFine * m.fineMult, crime.maxFine * m.fineMult)}`;
+                const fineStr = ` · fine ${moneyRange(crime.minFine * m.fineMult, crime.maxFine * m.fineMult)}`;
                 const wantedStr = m.wantedMs > 0 ? ` · 🔥 ${hours(m.wantedMs)}h heat on fail` : '';
                 return `**${m.label}** — ${m.desc}\n🎯 ${rateStr} success${payoutStr}${fineStr}${wantedStr}`;
             }).join('\n\n');
