@@ -320,13 +320,9 @@ async function handleSyndicateButton(interaction, client) {
         return;
     }
 
-    // syn_skill_{heistId}_{userId}_{answer}
+    // syn_skill_{heistId}_{userId}_{answer}; heistId (syn-guildId-ts) has no underscores
     if (id.startsWith('syn_skill_')) {
-        const afterPrefix = id.slice('syn_skill_'.length);
-        const parts = afterPrefix.split('_');
-        // parts[0] = heistId (syn-guildId-ts, no underscores)
-        // parts[1] = userId
-        // parts[2] = answer
+        const parts = id.slice('syn_skill_'.length).split('_');
         if (parts.length < 3) {
             return interaction.reply({ content: 'Malformed skill-check button.', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
@@ -342,6 +338,9 @@ async function handleSyndicateButton(interaction, client) {
 
         if (!heist || !heist.players.has(userId)) {
             return interaction.reply({ content: 'This skill check has expired.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+        if (interaction.user.id !== userId) { // only the player named in the id answers it (#1161)
+            return interaction.reply({ content: "This isn't your skill check.", flags: MessageFlags.Ephemeral }).catch(() => {});
         }
 
         const player = heist.players.get(userId);

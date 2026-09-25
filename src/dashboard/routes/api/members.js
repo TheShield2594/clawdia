@@ -15,7 +15,10 @@ const { deleteUserData } = require('../../../utils/userDataRegistry');
 // the same envelope as the lists that do page.
 router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
-    const q = (req.query.q || '').trim();
+    // A repeated `?q=` arrives as an array (and `?q[a]=` as an object), which
+    // has no .trim() — a 500 rather than an empty result (#1161). Only a
+    // string is a search.
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     if (q.length < 2) return res.json({ items: [] });
     try {
         const results = await req.bot.searchMembers(guildId, q, 10);
@@ -34,7 +37,7 @@ router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, checkW
 
 // Resolves up to 50 comma-separated user ids in `?ids=` to names and avatars.
 router.get('/guild/:guildId/members/resolve', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
-    const ids = (req.query.ids || '').split(',').map(s => s.trim()).filter(s => /^\d{17,20}$/.test(s)).slice(0, 50);
+    const ids = (typeof req.query.ids === 'string' ? req.query.ids : '').split(',').map(s => s.trim()).filter(s => /^\d{17,20}$/.test(s)).slice(0, 50);
     if (!ids.length) return res.json({});
     try {
         const users = await req.bot.resolveUsers(ids);

@@ -54,7 +54,7 @@ const DEPRECATED_EPHEMERAL = {
 const COMMAND_FILE_MAX_LINES = 900;
 const GRANDFATHERED_COMMANDS = {
     'src/commands/economy/season.js':    1012,
-    'src/commands/economy/syndicate.js': 1038,
+    'src/commands/economy/syndicate.js': 1037,
 };
 
 const shared = {
