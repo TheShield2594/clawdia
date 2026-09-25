@@ -59,7 +59,14 @@ jest.mock('../src/data/featuredRotation', () => {
     };
 });
 
+// The hour now tilts the odds, so it is pinned like the featured rotation:
+// Morning favours neither the job nor the approaches these tests pick.
+jest.mock('../src/utils/timeBand', () => ({
+    getTimeBand: jest.fn(() => ({ emoji: '🌅', label: 'Morning' })),
+}));
+
 const crime = require('../src/commands/economy/crime');
+const { getTimeBand } = require('../src/utils/timeBand');
 const { __setRandomSourceForTests } = require('../src/utils/secureRandom');
 const { logTransaction } = require('../src/utils/logTransaction');
 const { logBigWin } = require('../src/utils/bigWinLogger');
@@ -127,6 +134,7 @@ beforeEach(() => {
     // `mockReturnValue(true)` in the underground-district test below stayed true
     // for every test that ran after it.
     isDistrictActive.mockReturnValue(false);
+    getTimeBand.mockReturnValue({ emoji: '🌅', label: 'Morning' });
     setRandom(() => 0.5);
 });
 
@@ -883,5 +891,46 @@ describe('the Remind me button', () => {
 
         expect(interaction.replies.at(-1)).toEqual({ components: [] });
         expect(mockReminders.all()).toEqual([]);
+    });
+});
+
+describe('the hour', () => {
+    it('gives the careful play an edge at night, quoted and rolled', async () => {
+        getTimeBand.mockReturnValue({ emoji: '🌙', label: 'Night' });
+        // 0.72 misses feather touch's 70% — but not its 75% at night.
+        rolls([], 0.72);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        const text = repliedText(interaction);
+        expect(text).toContain('75% 🌙');
+        expect(text).toContain('cover of dark');
+        expect(text).toContain('Clean Getaway');
+        expect(text).toContain('Night played in your favour');
+    });
+
+    it('leaves the odds alone for a job the hour does not favour', async () => {
+        rolls([], 0.72);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(repliedText(interaction)).toContain('Busted');
+    });
+
+    it('marks the jobs the hour favours on the board', async () => {
+        getTimeBand.mockReturnValue({ emoji: '☀️', label: 'Noon' });
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        // Quick Snatch's standard approach is 62%; the noon crowds make it 67%.
+        expect(interaction.replies[0].embeds[0].data.description).toContain('67% success');
+        expect(interaction.replies[0].embeds[0].data.description).toContain('☀️ +5%');
     });
 });

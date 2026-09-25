@@ -130,6 +130,20 @@ const EXECUTION_METHODS = {
     },
 };
 
+// What the hour favours. A small edge on the jobs the hour suits, so the band
+// the prompt has always shown means something: +5% success, quoted in the
+// odds and folded into the roll like any other bonus. The bands are the
+// shared UTC ones src/utils/timeBand.js hands every command.
+const TIME_EDGE = 0.05;
+const TIME_EDGES = {
+    Morning: { why: 'the banks just opened',  favours: (c)    => c.name === 'hacking ATMs' || c.name === 'art forgery' },
+    Noon:    { why: 'the crowds are thick',   favours: (c)    => c.name === 'pickpocketing' || c.name === 'selling fake merch' },
+    Dusk:    { why: 'shift change',           favours: (c, m) => m.wantedMs > 0 },
+    Night:   { why: 'cover of dark',          favours: (c, m) => m.payoutMult < 1 },
+};
+
+const timeEdge = (band, crime, method) => (TIME_EDGES[band.label]?.favours(crime, method) ? TIME_EDGE : 0);
+
 const FINES = [
     'You were caught by an undercover officer.',
     'A bystander called the police on you.',
@@ -392,6 +406,8 @@ module.exports = {
             // A live countdown rather than "15 seconds" in a footer that was
             // already stale by the time anyone read it.
             const pickDeadline = () => relTime(new Date(Date.now() + PICK_WINDOW_MS));
+            // Step 1 quotes each job at its standard approach.
+            const standardOf = c => EXECUTION_METHODS[c.name].methods[1];
             const timeBand = getTimeBand();
 
             const choices = shuffle(CRIMES).slice(0, 3);
@@ -415,7 +431,8 @@ module.exports = {
                 return (
                     `**${isFeatured ? '🌟 ' : ''}${c.emoji} ${c.displayName}** ${c.riskEmoji}\n` +
                     `${c.riskLabel}\n` +
-                    `🎯 ${pct(Math.min(MAX_SUCCESS, c.successRate + oddsBonus))} success · 💰 ${moneyRange(c.minPayout, c.maxPayout)} · 💸 fine ${moneyRange(c.minFine, c.maxFine)}` +
+                    `🎯 ${pct(methodOdds(standardOf(c), oddsBonus + timeEdge(timeBand, c, standardOf(c))))} success · 💰 ${moneyRange(c.minPayout, c.maxPayout)} · 💸 fine ${moneyRange(c.minFine, c.maxFine)}` +
+                    (timeEdge(timeBand, c, standardOf(c)) ? ` · ${timeBand.emoji} +${pct(TIME_EDGE)}` : '') +
                     featuredTag
                 );
             }).join('\n\n');
@@ -443,8 +460,14 @@ module.exports = {
                 ? ''
                 : `⏳ *You hesitated — the crew picked **${crime.displayName}** for you.*\n\n`;
 
+            const odds = m => methodOdds(m, oddsBonus + timeEdge(timeBand, crime, m));
+            const edgeLine = execData.methods.some(m => timeEdge(timeBand, crime, m))
+                ? `\n> ${timeBand.emoji} *${timeBand.label} — ${TIME_EDGES[timeBand.label].why}: +${pct(TIME_EDGE)} on the marked approach*`
+                : '';
+
             const execMethodLines = execData.methods.map(m => {
-                const rateStr = pct(methodOdds(m, oddsBonus));
+                const edgeMark = timeEdge(timeBand, crime, m) ? ` ${timeBand.emoji}` : '';
+                const rateStr = `${pct(odds(m))}${edgeMark}`;
                 const payoutStr = m.payoutRange || m.payoutMult !== 1.0 ? ` · ${payoutLabel(m)} payout` : '';
                 const fineStr = ` · 💸 ${moneyRange(crime.minFine * m.fineMult, crime.maxFine * m.fineMult)}`;
                 const wantedStr = m.wantedMs > 0 ? ` · 🔥 ${hours(m.wantedMs)}h heat on fail` : '';
@@ -454,14 +477,14 @@ module.exports = {
             const execEmbed = new EmbedBuilder()
                 .setColor('#e67e22')
                 .setTitle(`${crime.emoji} ${crime.displayName} — Choose Your Approach`)
-                .setDescription(`${hesitated}🎯 ${execData.situation}\n\n${execMethodLines}${bonusLine}\n\n⏳ Decide ${pickDeadline()}`)
+                .setDescription(`${hesitated}🎯 ${execData.situation}\n\n${execMethodLines}${bonusLine}${edgeLine}\n\n⏳ Decide ${pickDeadline()}`)
                 .setFooter({ text: 'No pick and you play it safe.' })
                 .setTimestamp();
 
             const execRow = new ActionRowBuilder().addComponents(
                 execData.methods.map(m => new ButtonBuilder()
                     .setCustomId(`exec_${m.id}`)
-                    .setLabel(`${m.label}  ·  ${pct(methodOdds(m, oddsBonus))}`)
+                    .setLabel(`${m.label}  ·  ${pct(odds(m))}`)
                     .setStyle(ButtonStyle.Secondary))
             );
 
@@ -481,7 +504,8 @@ module.exports = {
             await attachGrind(user, ['hunt', 'fishing', 'mining']);
 
             // ── Resolve the crime ───────────────────────────────────────────────
-            const successChance = methodOdds(execMethod, oddsBonus);
+            const hourEdge = timeEdge(timeBand, crime, execMethod);
+            const successChance = odds(execMethod);
             const successRoll = secureRandom();
             const success = successRoll < successChance;
             const crimeTime = new Date();
@@ -571,6 +595,7 @@ module.exports = {
                 if (luckyActive) desc += `\n> 🍀 *Lucky Charm boosted your success chance!*`;
                 if (petCrimeBonus > 0) desc += `\n> 🐾 *Your pet boosted your success chance!*`;
                 if (masteryBonus > 0) desc += `\n> 🏆 *Criminal mastery: +${pct(masteryBonus)} applied*`;
+                if (hourEdge > 0) desc += `\n> ${timeBand.emoji} *${timeBand.label} played in your favour — +${pct(hourEdge)}*`;
                 if (isFeaturedCrime) desc += `\n> 🌟 *Featured job — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout applied!*`;
                 desc += bluffStr;
 
