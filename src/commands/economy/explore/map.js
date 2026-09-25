@@ -5,10 +5,28 @@
 // Exposed as the module's handleMap (see index.js) so sibling commands can
 // render the same Explorer's Map.
 
-const { EmbedBuilder, MessageFlags } = require('discord.js');
+const { EmbedBuilder, MessageFlags, AttachmentBuilder } = require('discord.js');
 const { PRESTIGE_BADGES } = require('../../../data/exploreData');
-const { ensureExploreData, renderMap, getExplorerTitle } = require('../../../services/exploreService');
+const { ensureExploreData, renderMap, mapRegionStates, getExplorerTitle } = require('../../../services/exploreService');
+const { createExploreMapCard, mapAltText } = require('../../../utils/exploreMapCard');
 const { loadReadContext, surveyedCount, EXPLORE_COLORS } = require('./shared');
+
+const MAP_FILE = 'explorer-map.png';
+
+/**
+ * The drawn map as an attachment, or null when it will not render — the text
+ * map below it carries every number, so a failed draw costs the picture only.
+ */
+async function renderMapCard(userData, guildSettings, username) {
+    const states = mapRegionStates(userData, guildSettings);
+    try {
+        const buffer = await createExploreMapCard({ states, username, level: userData.exploration.level });
+        return new AttachmentBuilder(buffer, { name: MAP_FILE, description: mapAltText(states, username).slice(0, 1024) });
+    } catch (err) {
+        console.error('[explore] map card render failed:', err);
+        return null;
+    }
+}
 
 async function handleMap(interaction) {
     const ctx = await loadReadContext(interaction);
@@ -47,7 +65,10 @@ async function handleMap(interaction) {
         .setFooter({ text: 'The blank spaces aren\'t empty. They\'re waiting.' })
         .setTimestamp();
 
-    return interaction.reply({ embeds: [embed] });
+    const card = await renderMapCard(userData, guildSettings, interaction.user.username);
+    if (!card) return interaction.reply({ embeds: [embed] });
+    embed.setImage(`attachment://${MAP_FILE}`);
+    return interaction.reply({ embeds: [embed], files: [card] });
 }
 
 module.exports = {

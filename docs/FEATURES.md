@@ -840,7 +840,7 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 /explore journal       - Reread your most recent finds
 /explore relics        - Open your relic case and see what it earns you
 /explore profile       - Explorer level, stamina, and field record
-/explore map - Unroll your persistent Explorer's Map
+/explore map           - Unroll your Explorer's Map, drawn as a picture of the continent
 /explore prestige      - Reset Explorer Level for a permanent bonus (Lv 30, to P5)
 ```
 
