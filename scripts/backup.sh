@@ -16,6 +16,8 @@ umask 077
 
 # shellcheck source=scripts/lib/archive.sh
 . "$(dirname "$0")/lib/archive.sh"
+# shellcheck source=scripts/lib/mongotools.sh
+. "$(dirname "$0")/lib/mongotools.sh"
 
 BACKUP_DIR="${1:-./backups}"
 TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
@@ -50,17 +52,29 @@ if [ -n "${BACKUP_ENCRYPTION_PASSPHRASE:-}" ]; then
     STAGING=$(mktemp -d)
     WORK="${STAGING}/clawdia-${TIMESTAMP}.gz"
     ARCHIVE="${ARCHIVE}.enc"
-    # However this ends — a failed dump, a failed seal, a Ctrl-C between them.
-    # The Docker branch below replaces this trap and carries the same cleanup.
-    trap 'rm -rf "${STAGING}"' EXIT
 fi
+
+# One trap for everything this leaves behind, however it ends — a failed dump,
+# a failed seal, a Ctrl-C between them: the staged plaintext, the file holding
+# the connection string, and the container's temp directory.
+cleanup() {
+    rm -rf "${STAGING:-}" "${TOOLS_DIR:-}"
+    if [ -n "${REMOTE_DIR:-}" ]; then
+        docker exec clawdia-mongodb rm -rf "${REMOTE_DIR}" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
 
 MONGO_URI_MASKED=$(echo "${MONGO_URI}" | sed 's|://[^@]*@|://***@|')
 echo "[backup] Starting backup → ${ARCHIVE}"
 echo "[backup] URI: ${MONGO_URI_MASKED}"
 
 if command -v mongodump &>/dev/null; then
-    mongodump --uri="${MONGO_URI}" --gzip --archive="${WORK}"
+    # The URI goes in a 0600 file, not on the command line where every user of
+    # the host can read the password out of `ps` (#1156).
+    TOOLS_DIR=$(mktemp -d)
+    write_mongo_tools_config "${MONGO_URI}" "${TOOLS_DIR}/tools.yaml"
+    mongodump --config="${TOOLS_DIR}/tools.yaml" --gzip --archive="${WORK}"
 else
     # Fall back to running mongodump inside the Docker container.
     # Replace 'localhost' with '127.0.0.1' so the URI points to the container's
@@ -79,9 +93,11 @@ else
         echo "[backup] ERROR: could not create a temp directory in clawdia-mongodb" >&2
         exit 1
     fi
-    trap 'docker exec clawdia-mongodb rm -rf "${REMOTE_DIR}" >/dev/null 2>&1 || true; rm -rf "${STAGING:-}"' EXIT
+    # Written inside the container's private directory and handed over stdin,
+    # so the URI is on neither mongodump's command line nor docker exec's.
+    write_container_mongo_tools_config clawdia-mongodb "${CONTAINER_URI}" "${REMOTE_DIR}/tools.yaml"
     docker exec clawdia-mongodb \
-        mongodump --uri="${CONTAINER_URI}" --gzip --archive="${REMOTE_DIR}/backup.gz"
+        mongodump --config="${REMOTE_DIR}/tools.yaml" --gzip --archive="${REMOTE_DIR}/backup.gz"
     docker cp "clawdia-mongodb:${REMOTE_DIR}/backup.gz" "${WORK}"
 fi
 

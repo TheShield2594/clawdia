@@ -271,6 +271,7 @@ function preMigrationBackup(irreversibleNames) {
     // however this ends, so the plaintext never appears where the ciphertext
     // lives — the same staging scripts/backup.sh does.
     let staging = null;
+    let toolsDir = null;
     let work = archive;
     if (passphrase) {
         try {
@@ -282,6 +283,16 @@ function preMigrationBackup(irreversibleNames) {
     }
 
     try {
+        // The URI goes to mongodump in a 0600 --config file, not on its argv,
+        // where every user of the host can read the password out of `ps`
+        // (#1156). Its own private directory (mkdtemp is 0700), removed below.
+        try {
+            toolsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdia-mongotools-'));
+            fs.writeFileSync(path.join(toolsDir, 'tools.yaml'), mongoToolsConfig(uri), { mode: 0o600 });
+        } catch (err) {
+            return fail(`could not write the mongodump config file: ${err.message}`);
+        }
+
         // Created 0600 before mongodump opens it: mongodump truncates an
         // existing file rather than recreating it, so the mode survives, and
         // the dump is never world-readable for even the time it takes to write.
@@ -294,7 +305,7 @@ function preMigrationBackup(irreversibleNames) {
         console.log(`[MIGRATIONS] Taking pre-migration backup → ${archive}`);
         // Synchronous on purpose: this runs at boot before anything is served, and
         // the destructive migration must not start until the dump has finished.
-        const result = spawnSync('mongodump', [`--uri=${uri}`, '--gzip', `--archive=${work}`], {
+        const result = spawnSync('mongodump', [`--config=${path.join(toolsDir, 'tools.yaml')}`, '--gzip', `--archive=${work}`], {
             stdio: ['ignore', 'inherit', 'inherit'],
         });
 
@@ -327,8 +338,18 @@ function preMigrationBackup(irreversibleNames) {
         try { fs.chmodSync(archive, 0o600); } catch { /* best effort */ }
     } finally {
         if (staging) fs.rmSync(staging, { recursive: true, force: true });
+        if (toolsDir) fs.rmSync(toolsDir, { recursive: true, force: true });
     }
     console.log('[MIGRATIONS] Pre-migration backup complete.');
+}
+
+/**
+ * The YAML `mongodump --config` reads, carrying only the URI: a double-quoted
+ * scalar with backslash and double quote escaped. scripts/lib/mongotools.sh and
+ * the stack files' backup entrypoint write the same file.
+ */
+function mongoToolsConfig(uri) {
+    return `uri: "${String(uri).replace(/[\\"]/g, '\\$&')}"\n`;
 }
 
 // The sealed format is `openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt`,
@@ -728,4 +749,5 @@ module.exports = {
     preMigrationBackup,
     sealArchive,
     archiveTag,
+    mongoToolsConfig,
 };

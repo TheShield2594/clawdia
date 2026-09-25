@@ -120,6 +120,13 @@ describe('pre-migration backup', () => {
     test('a pending migration without down() triggers a mongodump first', async () => {
         backupEnv();
         writeMigration('001_a.js', "module.exports = { name: 'a', irreversible: true, async up() {} };");
+        // The config file is removed once mongodump returns, so it is read here.
+        let config = null;
+        spawnSync.mockImplementation((cmd, args) => {
+            const file = args.find(a => a.startsWith('--config=')).slice('--config='.length);
+            config = { text: fs.readFileSync(file, 'utf8'), mode: fs.statSync(file).mode & 0o777, file };
+            return { status: 0 };
+        });
 
         await runMigrations({ dir });
 
@@ -127,10 +134,16 @@ describe('pre-migration backup', () => {
         const [cmd, args] = spawnSync.mock.calls[0];
         expect(cmd).toBe('mongodump');
         expect(args).toEqual(expect.arrayContaining([
-            '--uri=mongodb://localhost/test',
+            expect.stringMatching(/^--config=/),
             '--gzip',
             expect.stringContaining('pre-migration-'),
         ]));
+        // The URI reaches mongodump through a 0600 file, never through argv
+        // where `ps` shows it to every user of the host (#1156).
+        expect(args.join(' ')).not.toContain('mongodb://');
+        expect(config.text).toBe('uri: "mongodb://localhost/test"\n');
+        expect(config.mode).toBe(0o600);
+        expect(fs.existsSync(config.file)).toBe(false);
         expect(records.map(r => r.name)).toEqual(['a']);
     });
 

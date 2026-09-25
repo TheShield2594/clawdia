@@ -1556,6 +1556,15 @@ Three things are worth knowing:
   without it those archives cannot be read, so keep it for at least as long as
   the oldest archive you would ever restore.
 
+The connection string, and the database password in it, never goes on a
+command line (#1156). Every `mongodump` and `mongorestore` — the nightly
+service, the pre-migration dump, `backup.sh`, `restore.sh` and
+`verify-backup.sh` — reads `MONGODB_URI` from a 0600 file passed as `--config`
+(MongoDB Database Tools 100.3 or later), because argv is readable by every user
+of the host through `ps`, a process inside a container included.
+`verify-backup.sh` hands `mongosh` the URI in its environment for the same
+reason.
+
 If the passphrase is set and `openssl` is missing from the image, the backup
 container exits at boot rather than writing plaintext — an operator who believes
 the archives are encrypted and gets readable ones is worse off than one who
