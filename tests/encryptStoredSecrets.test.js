@@ -294,6 +294,20 @@ describe('binding keys to their guild and field', () => {
         expect(stored('g1', 'openaiKey')).toBe(foreign);
     });
 
+    test('029 down has nothing to undo, and needs no key, when nothing is bound', async () => {
+        setKey(undefined);
+        collection.docs = [guild('g1', { openaiKey: 'sk-plain' })];
+
+        await expect(unbindStoredGuildKeys()).resolves.toEqual({ keys: 0, skipped: 0 });
+    });
+
+    test('029 down refuses to touch bound keys it has no key to open', async () => {
+        collection.docs = [guild('g1', { openaiKey: encryptSecret('sk-one', guildSecretBinding('g1', 'ai.openaiKey')) })];
+        setKey(undefined);
+
+        await expect(unbindStoredGuildKeys()).rejects.toThrow('SECRET_ENCRYPTION_KEY');
+    });
+
     test('029 down puts the keys back in the format older code reads', async () => {
         collection.docs = [guild('g1', { openaiKey: encryptSecret('sk-one', guildSecretBinding('g1', 'ai.openaiKey')) })];
 

@@ -59,15 +59,13 @@ async function bindStoredGuildKeys() {
  * The reverse, for `down()`: code from before #1152 cannot open a bound value,
  * so rolling back has to put the keys back in the unbound format first.
  *
+ * An install with no bound keys — including every one that never set
+ * SECRET_ENCRYPTION_KEY — has nothing to undo, and rolls back without it.
+ *
  * @returns {Promise<{ keys: number, skipped: number }>}
  * @throws if a bound value cannot be opened, rather than overwrite it.
  */
 async function unbindStoredGuildKeys() {
-    if (!encryptionEnabled()) {
-        throw new Error('SECRET_ENCRYPTION_KEY is not set — the stored keys cannot be opened, ' +
-            'and overwriting them would destroy them.');
-    }
-
     let keys = 0;
     let skipped = 0;
 
@@ -75,6 +73,11 @@ async function unbindStoredGuildKeys() {
         for (const field of KEY_FIELDS) {
             const value = doc.ai?.[field];
             if (!isBound(value)) continue;
+
+            if (!encryptionEnabled()) {
+                throw new Error('SECRET_ENCRYPTION_KEY is not set — the stored keys cannot be opened, ' +
+                    'and overwriting them would destroy them.');
+            }
 
             const plain = decryptSecret(value, bindingOf(doc, field));
             if (plain === null) {
