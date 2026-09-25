@@ -200,7 +200,13 @@ async function openTicketExclusive({ guild, member, subject, cfg, parent, key })
     };
 
     const cleanSubject = String(subject || '').trim().slice(0, 200);
-    const ticketId = await getNextTicketId(guild.id);
+    let ticketId;
+    try {
+        ticketId = await getNextTicketId(guild.id);
+    } catch (err) {
+        releaseCooldown();
+        throw err;
+    }
 
     let thread;
     try {
@@ -227,22 +233,33 @@ async function openTicketExclusive({ guild, member, subject, cfg, parent, key })
     // predates this member's last ticket, cannot go past `perUserCap`. A refused
     // push means the thread is surplus — nobody has been added to it or pinged
     // yet — so it is deleted and the member told they are at the cap.
-    const recorded = await Guild.updateOne(
-        {
-            guildId: guild.id,
-            $expr: { $lt: [
-                { $size: { $filter: {
-                    input: { $ifNull: ['$tickets.open', []] },
-                    cond: { $eq: ['$$this.openerId', { $literal: member.id }] },
-                } } },
-                cap,
-            ] },
-        },
-        { $push: { 'tickets.open': {
-            ticketId, threadId: thread.id, channelId: parent.id,
-            openerId: member.id, subject: cleanSubject, claimedBy: null, openedAt: new Date(),
-        } } },
-    );
+    // The cap compared against is the stored one too, not the one in the
+    // settings this was handed, so a cap lowered since they were read holds.
+    let recorded;
+    try {
+        recorded = await Guild.updateOne(
+            {
+                guildId: guild.id,
+                $expr: { $lt: [
+                    { $size: { $filter: {
+                        input: { $ifNull: ['$tickets.open', []] },
+                        cond: { $eq: ['$$this.openerId', { $literal: member.id }] },
+                    } } },
+                    { $ifNull: ['$tickets.perUserCap', 1] },
+                ] },
+            },
+            { $push: { 'tickets.open': {
+                ticketId, threadId: thread.id, channelId: parent.id,
+                openerId: member.id, subject: cleanSubject, claimedBy: null, openedAt: new Date(),
+            } } },
+        );
+    } catch (err) {
+        // No record means nothing tracks the thread, so it goes rather than
+        // being left open with no way to close it through the bot.
+        releaseCooldown();
+        await thread.delete('Ticket could not be recorded').catch(() => {});
+        throw err;
+    }
     if (!recorded?.matchedCount) {
         releaseCooldown();
         await thread.delete('Ticket refused: member already at the open-ticket cap').catch(() => {});

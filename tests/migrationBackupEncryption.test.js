@@ -154,4 +154,34 @@ describe('pre-migration backup encryption', () => {
         expect(run.status).toBe(0);
         expect(run.stdout.trim()).toBe(archiveTag(file, 'a passphrase with spaces'));
     });
+
+    // OpenSSL 1.1.1 writes `Salted__` + the salt ahead of `enc -S` output and
+    // 3.x does not. A wrapper around the real binary stands in for 1.1.1, and
+    // the tag must still be the one Node computes.
+    (HAS_TOOLS ? test : test.skip)('archive_tag matches on an OpenSSL that prefixes the salt', () => {
+        const file = path.join(dir, 'y.gz.enc');
+        fs.writeFileSync(file, crypto.randomBytes(1000));
+        const bin = path.join(dir, 'bin');
+        fs.mkdirSync(bin);
+        const real = realSpawnSync('sh', ['-c', 'command -v openssl'], { encoding: 'utf8' }).stdout.trim();
+        fs.writeFileSync(path.join(bin, 'openssl'), [
+            '#!/bin/sh',
+            'if [ "$1" = enc ]; then printf "Salted__12345678"; fi',
+            `exec "${real}" "$@"`,
+        ].join('\n'));
+        fs.chmodSync(path.join(bin, 'openssl'), 0o755);
+
+        const run = realSpawnSync('bash', ['-c', '. "$ARCHIVE_LIB"; archive_tag "$ARCHIVE_PATH"'], {
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                PATH: `${bin}:${process.env.PATH}`,
+                ARCHIVE_LIB: path.join(__dirname, '..', 'scripts', 'lib', 'archive.sh'),
+                ARCHIVE_PATH: file,
+                BACKUP_ENCRYPTION_PASSPHRASE: 'pw',
+            },
+        });
+        expect(run.status).toBe(0);
+        expect(run.stdout.trim()).toBe(archiveTag(file, 'pw'));
+    });
 });

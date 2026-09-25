@@ -69,6 +69,32 @@ test('never executes anything in the file', () => {
     expect(vars.QUOTED).toBe(`$(touch ${marker})`);
 });
 
+// Values the backup scripts and the bot must read identically — a passphrase
+// that differs by a trailing comment opens nothing.
+test('inline comments end a value the way the bot reads them', () => {
+    const vars = load([
+        'HASH=secret#note',
+        'QUOTED_COMMENT="secret" # note',
+        "SINGLE_COMMENT='secret' # note",
+        'QUOTED_HASH="has#hash"',
+        'NEWLINE="a\\nb"',
+    ].join('\n'), ['HASH', 'QUOTED_COMMENT', 'SINGLE_COMMENT', 'QUOTED_HASH', 'NEWLINE']);
+
+    expect(vars).toEqual({
+        HASH: 'secret', QUOTED_COMMENT: 'secret', SINGLE_COMMENT: 'secret', QUOTED_HASH: 'has#hash', NEWLINE: 'a\nb',
+    });
+    // And the bot's own parser agrees on every one of them.
+    const parsed = require('dotenv').parse(fs.readFileSync(path.join(dir, '.env')));
+    expect(vars).toEqual(parsed);
+});
+
+test('a key assigned twice takes its last value, unless the environment set it', () => {
+    const vars = load('MONGODB_URI=first\nMONGODB_URI=second\nKEPT=file-1\nKEPT=file-2\n', ['MONGODB_URI', 'KEPT'], {
+        KEPT: 'from-env',
+    });
+    expect(vars).toEqual({ MONGODB_URI: 'second', KEPT: 'from-env' });
+});
+
 test('a variable already in the environment wins', () => {
     const vars = load('MONGODB_URI=from-file\nOTHER=from-file\n', ['MONGODB_URI', 'OTHER'], {
         MONGODB_URI: 'from-env',

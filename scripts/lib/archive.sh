@@ -42,12 +42,16 @@
 # backup service entrypoint in both stack files and runner.js ARCHIVE_TAG_SALT.
 ARCHIVE_TAG_SALT=636c61776469616d
 
-# Prints the hex tag of the sealed archive $1 (see above).
+# Prints the hex tag of the sealed archive $1 (see above). OpenSSL 1.1.1 writes
+# `Salted__` and the salt ahead of the ciphertext even when the salt is given
+# with -S; 3.x does not. That header is stripped, so the tag is the encrypted
+# digest alone on either version, as runner.js computes it.
 archive_tag() {
     openssl dgst -sha256 -binary "$1" \
         | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -S "${ARCHIVE_TAG_SALT}" \
             -pass env:BACKUP_ENCRYPTION_PASSPHRASE \
-        | od -An -v -tx1 | tr -d ' \n'
+        | od -An -v -tx1 | tr -d ' \n' \
+        | sed 's/^53616c7465645f5f[0-9a-f]\{16\}//'
 }
 
 # Writes `$1.tag` for the sealed archive $1, mode 0600.

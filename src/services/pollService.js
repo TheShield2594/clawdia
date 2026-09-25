@@ -57,7 +57,9 @@ function scheduleExpiry(msg, question, options, endsAt, createdBy) {
         if (!poll || poll.closed) return;
 
         const counts = tallyVotes(poll.votes, options.length);
-        const closedEmbed = buildPollEmbed(question, options, counts, endsAt, createdBy, true);
+        // The stored creator, not the one captured when the timer was armed:
+        // an erasure since then has replaced it with "Deleted user" (#1158).
+        const closedEmbed = buildPollEmbed(question, options, counts, endsAt, poll.createdBy ?? createdBy, true);
         try {
             await msg.edit({ embeds: [closedEmbed], components: [] });
         } catch (err) {

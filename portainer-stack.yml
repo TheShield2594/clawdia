@@ -731,14 +731,17 @@ services:
             # encrypted under a key from the passphrase and a fixed salt: a MAC
             # built with -pass env:, because openssl only takes an HMAC key on
             # the command line. Must match scripts/lib/archive.sh archive_tag.
-            TAG=$$(openssl dgst -sha256 -binary "$$ARCHIVE" | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -S 636c61776469616d -pass env:BACKUP_ENCRYPTION_PASSPHRASE | od -An -v -tx1 | tr -d " \n");
-            if [ -z "$$TAG" ]; then
-              rm -f "$$ARCHIVE";
+            TAG=$$(openssl dgst -sha256 -binary "$$ARCHIVE" | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -S 636c61776469616d -pass env:BACKUP_ENCRYPTION_PASSPHRASE | od -An -v -tx1 | tr -d " \n" | sed "s/^53616c7465645f5f[0-9a-f]\{16\}//");
+            # OpenSSL 1.1.1 prefixes Salted__ and the salt even with -S; 3.x
+            # does not. Stripped so the tag is the same on either.
+            # A tag that cannot be written leaves an archive restore refuses,
+            # so that is a failed run like an empty tag, not a success.
+            if [ -z "$$TAG" ] || ! printf "%s\n" "$$TAG" > "$$ARCHIVE.tag"; then
+              rm -f "$$ARCHIVE" "$$ARCHIVE.tag";
               echo "encrypt-failed $$TIMESTAMP" > "$$STATUS";
               notify "archive $$TIMESTAMP could not be tagged; nothing was kept for it";
               return 1;
             fi;
-            printf "%s\n" "$$TAG" > "$$ARCHIVE.tag";
             if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_PASSPHRASE -in "$$ARCHIVE" -out "$$WORK"; then
               mv "$$ARCHIVE" "$$ARCHIVE.unverified";
               rm -f "$$WORK" "$$ARCHIVE.tag";

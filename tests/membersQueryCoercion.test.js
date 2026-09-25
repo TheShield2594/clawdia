@@ -46,8 +46,10 @@ describe('member search and resolve coerce their query to a string', () => {
     });
 
     test('a repeated ids is an empty resolve, not a 500', async () => {
-        const res = await request(app).get('/api/guild/123/members/resolve?ids=1&ids=2');
+        const res = await request(app)
+            .get('/api/guild/123/members/resolve?ids=12345678901234567&ids=23456789012345678');
         expect(res.status).toBe(200);
         expect(res.body).toEqual({});
+        expect(bot.resolveUsers).not.toHaveBeenCalled();
     });
 });

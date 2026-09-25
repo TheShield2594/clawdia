@@ -115,13 +115,15 @@ describe('openTicket', () => {
     });
 
     // #1159: the cap is enforced by the write, not just the pre-check.
-    it('makes the record conditional on the stored count being under the cap', async () => {
+    it('makes the record conditional on the stored count being under the stored cap', async () => {
         const settings = baseSettings();
         settings.tickets.perUserCap = 2;
         await svc.openTicket({ guild: makeGuild({ thread: makeThread() }), member: makeMember('alice'), settings });
         const [filter] = Guild.updateOne.mock.calls[0];
         const [count, cap] = filter.$expr.$lt;
-        expect(cap).toBe(2);
+        // Against the stored cap, not the one in the settings handed in, so a
+        // cap lowered after those settings were read still holds.
+        expect(cap).toEqual({ $ifNull: ['$tickets.perUserCap', 1] });
         expect(count.$size.$filter.cond).toEqual({ $eq: ['$$this.openerId', { $literal: 'alice' }] });
     });
 
@@ -148,11 +150,37 @@ describe('openTicket', () => {
         const second = await svc.openTicket({ guild, member: makeMember('alice'), settings: baseSettings() });
         expect(second).toMatchObject({ ok: false, code: 'cooldown' });
 
-        release();
-        expect((await first).ok).toBe(true);
-        // A different member is not held up by alice's open.
+        // A different member is not held up by alice's open, while it is still in flight.
         const other = await svc.openTicket({ guild, member: makeMember('bob'), settings: baseSettings() });
         expect(other.ok).toBe(true);
+
+        release();
+        expect((await first).ok).toBe(true);
+    });
+
+    it('deletes the thread and releases the cooldown when the record write throws', async () => {
+        Guild.updateOne.mockRejectedValueOnce(new Error('db down'));
+        const settings = baseSettings();
+        settings.tickets.cooldownSeconds = 60;
+        const thread = makeThread();
+        thread.delete = jest.fn().mockResolvedValue(undefined);
+        const guild = makeGuild({ thread });
+
+        await expect(svc.openTicket({ guild, member: makeMember('dave'), settings })).rejects.toThrow('db down');
+        expect(thread.delete).toHaveBeenCalled();
+        const retry = await svc.openTicket({ guild, member: makeMember('dave'), settings });
+        expect(retry.ok).toBe(true);
+    });
+
+    it('releases the cooldown when the ticket id cannot be taken', async () => {
+        Guild.findOneAndUpdate.mockRejectedValueOnce(new Error('db down'));
+        const settings = baseSettings();
+        settings.tickets.cooldownSeconds = 60;
+        const guild = makeGuild({ thread: makeThread() });
+
+        await expect(svc.openTicket({ guild, member: makeMember('erin'), settings })).rejects.toThrow('db down');
+        const retry = await svc.openTicket({ guild, member: makeMember('erin'), settings });
+        expect(retry.ok).toBe(true);
     });
 
     it('does not start the cooldown when the open fails', async () => {
