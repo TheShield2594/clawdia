@@ -82,7 +82,7 @@ describe('a rated result', () => {
         expect(writes).toHaveLength(1);
         // The filter pins the season and both entries, so the write is conditional.
         expect(writes[0].query).toEqual({
-            guildId: GUILD, seasonNumber: 1,
+            guildId: GUILD, seasonNumber: 1, rev: 0,
             'ratings.pa': { $exists: false }, 'ratings.pb': { $exists: false },
         });
         expect(stored().ratings.pa).toEqual(expect.objectContaining({ userId: 'alice', rating: 1216, peak: 1216, wins: 1, losses: 0, games: 1 }));
@@ -121,6 +121,27 @@ describe('a rated result', () => {
         expect(res.rated).toBe(true);
         expect(res.winner.before).toBe(1250); // recomputed from the fresh read
         expect(stored().ratings.pa.games).toBe(3);
+    });
+
+    // The cap spans all of two owners' pets, so their two rated battles with
+    // different pets touch different entries; the ladder's revision is what
+    // makes the second re-read and meet the cap.
+    test('two owners\' rated battles with different pets landing at once cannot both pass the cap', async () => {
+        for (let i = 0; i < SAME_OPPONENT_DAILY_CAP - 1; i++) await recordRatedResult(GUILD, A, B, NOW);
+        let raced = false;
+        mockLadders.model.findOneAndUpdate.mockImplementation(async (q, u, o) => {
+            if (!raced && u.$set?.['ratings.pa2']) {
+                raced = true;
+                // Alice's other pet's battle against Bob lands first: the cap's last slot.
+                await recordRatedResult(GUILD, A, B, NOW);
+            }
+            return realFindOneAndUpdate(q, u, o);
+        });
+
+        const res = await recordRatedResult(GUILD, side('alice', 'pa2'), side('bob', 'pb2'), NOW);
+
+        expect(res).toEqual({ rated: false, reason: 'cap' });
+        expect(stored().ratings.pa2).toBeUndefined();
     });
 
     test('a write that keeps missing gives up rather than guessing', async () => {

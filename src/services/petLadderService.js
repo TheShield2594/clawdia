@@ -39,7 +39,7 @@ const SAME_OPPONENT_DAILY_CAP = 3;
 const LADDER_SEASON_DAYS      = 30;
 const LADDER_TITLES           = ['Ladder Champion', 'Ladder Runner-Up', 'Ladder Third'];
 const DAY_MS = 86_400_000;
-const WRITE_ATTEMPTS = 3;
+const WRITE_ATTEMPTS = 5;
 
 const seasonEnd = (now, days = LADDER_SEASON_DAYS) => new Date(now + days * DAY_MS);
 
@@ -136,8 +136,9 @@ function entryGuard(petRef, entry) {
 /**
  * Record a rated result: both pets' new ratings, peaks, records and the
  * same-opponent log, in one conditional write on the ladder. The filter pins
- * the season and both entries' versions, so a write computed from numbers
- * someone else has since changed misses, and is recomputed from a fresh read.
+ * the season, the ladder's revision and both entries' versions, so a write
+ * computed from numbers someone else has since changed misses, and is
+ * recomputed from a fresh read.
  *
  * The cap is asked again of that fresh read: two rated battles between the
  * same owners resolving at once cannot both slip under it.
@@ -156,9 +157,14 @@ async function recordRatedResult(guildId, winner, loser, now = Date.now()) {
         const l = entryOf(ladder, loser.petRef);
         const { winnerNewElo, loserNewElo, winnerDelta, loserDelta } = applyElo(w.rating, l.rating, LADDER_K_FACTOR);
 
+        // `rev` too, not only the two entries: the daily cap spans every pet
+        // the two owners have, so two of their rated battles with different
+        // pets touch different entries — pinning the ladder's revision makes
+        // the second one re-read, and re-check the cap, after the first lands.
         const filter = {
             guildId,
             seasonNumber: ladder.seasonNumber,
+            rev: ladder.rev ?? 0,
             ...entryGuard(winner.petRef, w),
             ...entryGuard(loser.petRef, l),
         };

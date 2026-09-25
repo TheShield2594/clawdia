@@ -22,12 +22,14 @@ const mockUsers = fakeCollection('User', {
 mockUsers.model.DECEASED_PET_LIMIT = 5;
 const mockGuilds = fakeCollection('Guild', {}, { unique: ['guildId'] });
 const mockLadders = fakeCollection('PetLadder', { seasonNumber: 1, rev: 0, ratings: {} }, { unique: ['guildId'] });
+const mockPending = fakeCollection('PendingPetBattle', { stakes: [] }, { unique: ['battleId'] });
 
 let mockAfterLoad = null;
 
 jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/models/Guild', () => mockGuilds.model);
 jest.mock('../src/models/PetLadder', () => mockLadders.model);
+jest.mock('../src/models/PendingPetBattle', () => mockPending.model);
 jest.mock('../src/utils/guildSettingsCache', () => require('./helpers/guildSettingsCacheMock')());
 jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn(async () => true) }));
 jest.mock('../src/utils/delay', () => ({ delay: jest.fn(async () => {}) }));
@@ -148,6 +150,7 @@ async function challenge(options = {}) {
  */
 const LEDGER_PATHS = ['balance', 'paidPayouts'];
 const baseFindOne = mockUsers.model.findOne.getMockImplementation();
+const baseUpdateOne = mockUsers.model.updateOne.getMockImplementation();
 let mockFailSaveFor = null;
 function findOneLikeMongoose(query, ...rest) {
     return baseFindOne(query, ...rest).then(doc => {
@@ -178,9 +181,11 @@ beforeEach(() => {
     mockUsers.reset();
     mockGuilds.reset();
     mockLadders.reset();
+    mockPending.reset();
     mockAfterLoad = null;
     mockFailSaveFor = null;
     mockUsers.model.findOne.mockImplementation(findOneLikeMongoose);
+    mockUsers.model.updateOne.mockImplementation(baseUpdateOne);
     mockGuilds.seed({ guildId: GUILD, economy: { enabled: true, currency: '🪙' } });
     jest.spyOn(Math, 'random').mockReturnValue(0.5);
     jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -712,18 +717,86 @@ describe('/pet battle against a member', () => {
         expect(wallet(RIVAL)).toBe(1000);
     });
 
+    test('a wagered battle notes each stake while it runs, and clears the note once settled', async () => {
+        const interaction = await challenge({ bet: 100 });
+        await interaction.press(ACCEPT);
+        await until(() => showing(interaction, 'petb_st_interaction-1_1_'));
+
+        // Mid-battle, both stakes are on record for the restart sweep.
+        expect(mockPending.all()).toEqual([expect.objectContaining({
+            battleId: 'interaction-1', guildId: GUILD, challengerId: USER, opponentId: RIVAL, amount: 100, stakes: [USER, RIVAL],
+        })]);
+        await play(interaction);
+
+        expect(mockPending.all()).toEqual([]);
+        expect(wallet(USER)).toBe(1090);
+    });
+
+    test('an opponent stake debit that throws hands the challenger\'s stake back', async () => {
+        const interaction = await challenge({ bet: 100 });
+        const real = mockUsers.model.findOneAndUpdate.getMockImplementation();
+        mockUsers.model.findOneAndUpdate.mockImplementation(async (q, ...rest) => {
+            if (q.userId === RIVAL && q.balance) throw new Error('db blip');
+            return real(q, ...rest);
+        });
+
+        await interaction.press(ACCEPT);
+        await interaction.done;
+        mockUsers.model.findOneAndUpdate.mockImplementation(real);
+
+        expect(lastEmbed(interaction).description).toBe("rival can't cover the wager. Your wager was refunded.");
+        expect(wallet(USER)).toBe(1000);
+        expect(wallet(RIVAL)).toBe(1000);
+        expect(mockPending.all()).toEqual([]);
+    });
+
+    test('a pet already claimed by another fight cancels this one, refunds it and frees the other pet', async () => {
+        const interaction = await challenge({ bet: 100 });
+        // The defender's pet is entered into another battle the moment before
+        // this one claims it: its claim is lost, the challenger's is handed back.
+        mockUsers.model.updateOne.mockImplementation(async (q, u, o) => {
+            if (q.userId === RIVAL && u.$set?.['pets.$.lastBattle']) {
+                mockUsers.get(RIVAL).pets[0].lastBattle = new Date();
+            }
+            return baseUpdateOne(q, u, o);
+        });
+
+        await interaction.press(ACCEPT);
+        await interaction.done;
+
+        expect(lastEmbed(interaction).description)
+            .toBe('A pet is now recovering from a recent battle — the battle was cancelled. Both wagers have been refunded.');
+        expect(wallet(USER)).toBe(1000);
+        expect(wallet(RIVAL)).toBe(1000);
+        expect(petOf(USER).lastBattle).toBeNull(); // released
+        expect(petOf(USER).battleWins).toBe(0);
+    });
+
+    test('a pet claimed for a battle cannot be entered in a second one until it ends', async () => {
+        const first = await challenge();
+        await first.press(ACCEPT);
+        await until(() => showing(first, 'petb_st_interaction-1_1_'));
+
+        // The challenger's pet is now mid-fight; a second challenge sees it recovering.
+        const second = await battle({ opponent: rival() });
+        expect(textOf(second)).toMatch(/is recovering — ready to battle again in/);
+
+        await play(first);
+        expect(petOf(USER).battleWins).toBe(1);
+    });
+
     test('a pot that cannot be paid is not announced as a win, and is recorded as owed', async () => {
         const interaction = await challenge({ bet: 100 });
-        // The winner's document disappears after the fighters are re-read, so
-        // the keyed payout has nothing to land on.
-        let reads = 0;
-        mockUsers.model.findOne.mockImplementation((...args) => {
-            const q = findOneLikeMongoose(...args);
-            if (++reads === 2) {
+        // The winner's document disappears once both pets are claimed for the
+        // fight, so the keyed payout has nothing to land on.
+        let claims = 0;
+        mockUsers.model.updateOne.mockImplementation(async (...args) => {
+            const res = await baseUpdateOne(...args);
+            if (args[1]?.$set?.['pets.$.lastBattle'] && ++claims === 2) {
                 const all = mockUsers.all();
                 all.splice(all.findIndex(d => d.userId === USER), 1);
             }
-            return q;
+            return res;
         });
 
         await acceptAndPlay(interaction);

@@ -47,10 +47,11 @@ const {
     payBattleWinner, refundBattleStake, refundBothStakes, battleRefundNote, stakeRefundNote,
 } = require('../../../utils/petEconomy');
 const { questRewardPayoutKey } = require('../../../utils/payoutKey');
+const { notePetStake, clearPendingPetBattle } = require('../../../services/petBattleEscrowSweep');
 const { creditPetCare, collectPetAchievements, announcePetAchievements } = require('./shared');
 const { revealEvolution } = require('./evolution');
 const {
-    petUsable, onBattleCooldown, petSnapshot, moveTag, exchangeLine, hpLines, matchupLine,
+    BATTLE_COOLDOWN_MS, petUsable, onBattleCooldown, petSnapshot, moveTag, exchangeLine, hpLines, matchupLine,
     battleResultEmbed, petXpLine,
 } = require('./battleShared');
 
@@ -81,6 +82,29 @@ function defenderChoices(pets, { rated, ladder, challengerPetRef }) {
 function ratingTag(ladder, petRef) {
     const r = entryOf(ladder, petRef).rating;
     return `${tierFor(r).icon} ${r}`;
+}
+
+/**
+ * Claim a pet for this battle: stamp its battle cooldown now, but only if it is
+ * off cooldown. A member battle runs for a minute or more, and the cooldown
+ * used to be only read at the start, so one pet could be entered in two fights
+ * at once and one fight's XP and record written over the other's. The claim is
+ * the cooldown check, made atomic. Resolves to whether it was taken.
+ */
+async function claimPet(userId, guildId, petId, at) {
+    const res = await User.updateOne(
+        { userId, guildId, pets: { $elemMatch: { _id: petId, lastBattle: { $not: { $gt: new Date(at.getTime() - BATTLE_COOLDOWN_MS) } } } } },
+        { $set: { 'pets.$.lastBattle': at } },
+    );
+    return (res?.matchedCount ?? 0) + (res?.modifiedCount ?? 0) > 0;
+}
+
+/** Hand a claim back when the battle does not happen: the pet was off cooldown before it. */
+async function releasePet(userId, guildId, petId, at) {
+    await User.updateOne(
+        { userId, guildId, pets: { $elemMatch: { _id: petId, lastBattle: at } } },
+        { $set: { 'pets.$.lastBattle': null } },
+    ).catch(err => console.error('[pet battle] could not release a pet claim:', err.message));
 }
 
 /**
@@ -216,32 +240,47 @@ async function pvpBattle(interaction, ctx) {
     // nobody anything. Each debit is a guarded compare-and-set read back here,
     // so by the time a refund runs the debit is known to have landed — an
     // unconditional keyed credit is the right compensation (#873, pass 10).
+    //
+    // Each stake that lands is noted on a PendingPetBattle, so a restart in the
+    // stance rounds that follow is swept and refunded rather than stranded
+    // (services/petBattleEscrowSweep.js).
+    const pending = { battleId, guildId, challengerId: interaction.user.id, opponentId: opponent.id, amount: bet };
     if (bet > 0) {
         const ch = await User.findOneAndUpdate({ userId: interaction.user.id, guildId, balance: { $gte: bet } }, { $inc: { balance: -bet } });
         if (!ch) return interaction.editReply(cancelled(`${interaction.user.username} can no longer cover the wager.`)).catch(() => {});
-        const op = await User.findOneAndUpdate({ userId: opponent.id, guildId, balance: { $gte: bet } }, { $inc: { balance: -bet } });
+        await notePetStake(pending, interaction.user.id);
+        // A throw here is as much a stake not taken as a refusal is, and the
+        // challenger's, already taken, has to come back either way.
+        const op = await User.findOneAndUpdate({ userId: opponent.id, guildId, balance: { $gte: bet } }, { $inc: { balance: -bet } })
+            .catch(err => { console.error('[pet battle] opponent stake debit failed:', err); return null; });
         if (!op) {
             const back = await refundBattleStake(interaction.user.id, guildId, bet, battleId);
+            await clearPendingPetBattle(battleId);
             return interaction.editReply(cancelled(`${opponent.username} can't cover the wager.${stakeRefundNote(back)}`)).catch(() => {});
         }
+        await notePetStake(pending, opponent.id);
     }
 
     // From here until the pot is paid, the stakes are in escrow: any way out
     // but a settled fight hands both back.
     let settledPot = false;
+    // The pets this battle has claimed, handed back if it does not happen.
+    const claims = [];
     const refundAndCancel = async (reason) => {
         let note = '';
         if (bet > 0 && !settledPot) {
             settledPot = true;
             note = battleRefundNote(await refundBothStakes(interaction.user.id, opponent.id, guildId, bet, battleId));
+            await clearPendingPetBattle(battleId);
         }
+        await Promise.all(claims.splice(0).map(c => releasePet(c.userId, guildId, c.petId, c.at)));
         return interaction.editReply({ ...cancelled(`${reason} — the battle was cancelled.${note}`), files: [], attachments: [] }).catch(() => {});
     };
 
     try {
         return await fight(interaction, {
-            ...ctx, msg, chosenId, battleId, ownerA, ownerB, matched, refundAndCancel,
-            markSettled: () => { settledPot = true; },
+            ...ctx, msg, chosenId, battleId, ownerA, ownerB, matched, refundAndCancel, claims,
+            markSettled: () => { settledPot = true; claims.length = 0; },
         });
     } catch (err) {
         console.error('[pet battle] member battle failed:', err);
@@ -293,7 +332,7 @@ async function pickDefender(answer, msg, { opponent, choices, suggested, battleI
 }
 
 async function fight(interaction, ctx) {
-    const { opponent, bet, rated, currency, guildSettings, msg, chosenId, battleId, ownerA, ownerB, matched, refundAndCancel, markSettled, myPetId } = ctx;
+    const { opponent, bet, rated, currency, guildSettings, msg, chosenId, battleId, ownerA, ownerB, matched, refundAndCancel, markSettled, myPetId, claims } = ctx;
     const guildId = interaction.guild.id;
 
     // Re-fetch both fighters fresh so concurrent feeds/battles are reflected
@@ -313,6 +352,13 @@ async function fight(interaction, ctx) {
         const ok = ratedEligibility(await getLadder(guildId),
             { userId: interaction.user.id, petRef: myPetId }, { userId: opponent.id, petRef: chosenId });
         if (!ok.ok) return refundAndCancel(`This can no longer be a rated battle: ${ok.reason}`);
+    }
+    // Both pets are claimed for this battle before a stance is picked; losing
+    // either claim means the pet went into another fight since the check above.
+    const claimAt = new Date();
+    for (const [userId, petId] of [[interaction.user.id, myPetId], [opponent.id, chosenId]]) {
+        if (!await claimPet(userId, guildId, petId, claimAt)) return refundAndCancel('A pet is now recovering from a recent battle');
+        claims.push({ userId, petId, at: claimAt });
     }
 
     // A wager or a rated battle fights both pets at the lower level, so what is
@@ -403,6 +449,8 @@ async function fight(interaction, ctx) {
 
     const result = battleVerdict(state);
     const aWon   = result.winner === 'a';
+    // The fight is decided: from here the claims stand as the pets' cooldown.
+    markSettled();
 
     // XP + records
     const aXp = applyPetXp(aPet, aWon ? XP_BATTLE_WIN : XP_BATTLE_LOSS);
@@ -422,7 +470,6 @@ async function fight(interaction, ctx) {
     // for `payouts:replay` rather than lost (#873, pass 10).
     let payoutLine = null;
     if (bet > 0) {
-        markSettled();
         const pot      = bet * 2;
         const houseCut = guildSettings?.economy?.duelHouseCut ?? BATTLE_RAKE;
         const payout   = pot - Math.floor(pot * houseCut);
@@ -431,6 +478,9 @@ async function fight(interaction, ctx) {
         const winnerName = aWon ? interaction.user.username : opponent.username;
 
         const paid = await payBattleWinner(winnerId, guildId, payout, battleId);
+        // Paid or owed under the battle's key: the sweep has nothing left to do.
+        // A pot that did neither keeps its note, and the sweep refunds the stakes.
+        if (paid.credited || paid.owed) await clearPendingPetBattle(battleId);
 
         // chUser/opUser balances are post-escrow; the loser keeps theirs.
         const loserBalance = (aWon ? opUser : chUser).balance ?? 0;
