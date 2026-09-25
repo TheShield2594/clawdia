@@ -76,14 +76,24 @@ function makeTracingFetch({ resolve = id => ({ id, tag: `${id}#0` }) } = {}) {
 }
 
 function makeInteraction(fetch) {
-    return {
+    const interaction = {
         options: { getString: () => 'levels' },
         guild: { id: 'g1', name: 'Test Guild' },
         user: { id: 'caller' },
         client: { users: { fetch } },
+        deferred: false,
+        replied: false,
         reply: jest.fn().mockResolvedValue(undefined),
+        // The board defers before drawing its picture card, then fills the
+        // placeholder.
+        deferReply: jest.fn(async () => { interaction.deferred = true; }),
+        editReply: jest.fn().mockResolvedValue(undefined),
     };
+    return interaction;
 }
+
+/** The board's text embed: the last one in the reply, under the picture card. */
+const boardText = interaction => interaction.editReply.mock.calls[0][0].embeds.at(-1).data;
 
 beforeEach(() => {
     jest.clearAllMocks();
@@ -119,7 +129,7 @@ describe('leaderboard row rendering', () => {
 
         await leaderboard.execute(interaction);
 
-        const { description } = interaction.reply.mock.calls[0][0].embeds[0].data;
+        const { description } = boardText(interaction);
         expect(description).toContain('🥇 u0#0 — Level 10');
         expect(description).toContain('🥈 u1#0 — Level 9');
         expect(description).toContain('🥉 u2#0 — Level 8');
@@ -134,7 +144,7 @@ describe('leaderboard row rendering', () => {
 
         await leaderboard.execute(interaction);
 
-        const { description } = interaction.reply.mock.calls[0][0].embeds[0].data;
+        const { description } = boardText(interaction);
         expect(description).toContain('u0#0');
         expect(description).not.toContain('u1#0');
         // The medal still comes from the row's rank, not its printed position.

@@ -53,6 +53,13 @@ const THEMES = {
     pets:    { top: '#2b1d3a', bottom: '#0d0914', accent: '#ff9f6b', muted: '#d7c1e0', panel: 'rgba(255,255,255,0.06)' },
     // /casino slots' paytable (games/casino/slotsPaytableCard.js), drawn in this family's style.
     slots:   { top: '#271a4a', bottom: '#0c0818', accent: '#b08cff', muted: '#c4b7ea', panel: 'rgba(255,255,255,0.06)' },
+    // The leaderboard cards (utils/leaderboardCard.js): levels and economy in
+    // prize gold, and a palette for each board with a colour of its own.
+    board:        { top: '#2a2410', bottom: '#0d0b05', accent: '#f5c542', muted: '#d9cc9c', panel: 'rgba(255,255,255,0.06)' },
+    achievements: { top: '#2c1f3f', bottom: '#0d0915', accent: '#f1c40f', muted: '#cfc0e3', panel: 'rgba(255,255,255,0.06)' },
+    streak:       { top: '#3a1c0c', bottom: '#120804', accent: '#ff7a1a', muted: '#e8c2a4', panel: 'rgba(255,255,255,0.06)' },
+    duel:         { top: '#3a1216', bottom: '#120506', accent: '#e5534b', muted: '#e3b1ad', panel: 'rgba(255,255,255,0.06)' },
+    syndicate:    { top: '#14262a', bottom: '#050c0e', accent: '#3fc1b0', muted: '#a8d3cc', panel: 'rgba(255,255,255,0.06)' },
 };
 
 /** The avatar ring for each prestige rank; rank 0 uses the activity accent. */

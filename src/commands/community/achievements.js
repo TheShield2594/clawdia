@@ -8,6 +8,7 @@ const COLORS = require('../../utils/embedColors');
 const { getAchievementArt } = require('../../utils/achievementArt');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { attachGrind } = require('../../utils/grindProfile');
+const { sendBoard, avatarUrlOf, displayNameOf } = require('../../utils/leaderboardCard');
 
 const CATEGORY_ORDER = ['economy', 'leveling', 'hunt', 'fishing', 'exploration', 'community', 'moderation', 'custom'];
 
@@ -309,6 +310,37 @@ async function handleLeaderboard(interaction, _guildSettings) {
         return `${medal} <@${u.userId}> — **${u.achievementsCount}** achievements`;
     });
 
+    // Names and avatars for the picture card, fetched together; a member the
+    // API cannot resolve is still drawn, as a lettered disc.
+    const [members, self] = await Promise.all([
+        Promise.all(topUsers.map(u => interaction.client.users.fetch(u.userId).catch(() => null))),
+        User.findOne({ guildId: interaction.guild.id, userId: interaction.user.id }, 'achievementsCount').lean(),
+    ]);
+    const count = n => `${n.toLocaleString('en-US')} achievement${n !== 1 ? 's' : ''}`;
+    const entries = topUsers.map((u, i) => ({
+        rank: i + 1,
+        name: displayNameOf(members[i]) ?? 'Unknown member',
+        avatarUrl: avatarUrlOf(members[i]),
+        value: count(u.achievementsCount),
+        score: u.achievementsCount,
+        you: u.userId === interaction.user.id,
+    }));
+
+    // The caller's own standing, when they have earned any and are off the board.
+    let you = null;
+    const selfCount = self?.achievementsCount ?? 0;
+    if (selfCount > 0 && !entries.some(e => e.you)) {
+        const ahead = await User.countDocuments({ guildId: interaction.guild.id, achievementsCount: { $gt: selfCount } });
+        you = {
+            rank: ahead + 1,
+            name: interaction.member?.displayName ?? displayNameOf(interaction.user),
+            avatarUrl: avatarUrlOf(interaction.user),
+            value: count(selfCount),
+            score: selfCount,
+        };
+        lines.push('', `📍 You: **#${ahead + 1}** — ${count(selfCount)}`);
+    }
+
     const embed = new EmbedBuilder()
         .setColor(0xF1C40F)
         .setTitle('🏅 Achievement Leaderboard')
@@ -316,7 +348,14 @@ async function handleLeaderboard(interaction, _guildSettings) {
         .setFooter({ text: 'Most achievements earned in this server' })
         .setTimestamp();
 
-    return interaction.reply({ embeds: [embed] });
+    return sendBoard(interaction, embed, {
+        theme: 'achievements',
+        kicker: interaction.guild.name,
+        title: 'Achievements',
+        subtitle: 'Top 10 by total achievements earned',
+        entries,
+        you,
+    });
 }
 
 async function handlePin(interaction, guildSettings) {

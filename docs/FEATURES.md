@@ -503,6 +503,17 @@ Set a moderation log channel to track:
 /leaderboard         - Server leaderboard
 ```
 
+Every ranked board leads with a picture card: the top three on a podium with
+their avatars in gold, silver and bronze (a crown on first), the rest as rows
+whose bar measures them against first place, and your own standing under the
+board when you are off it. The same card draws `/leaderboard` (every type but
+the Hall of Champions), `/achievements leaderboard`, `/streak`,
+`/pet leaderboard` (each pet in its species' portrait), `/season leaderboard`,
+`/duel leaderboard`, `/syndicate leaderboard` (under the leader's avatar) and
+`/fish tournament status`, each in its own colours. The text board stays under
+the card with every name and number on it; if the card cannot be drawn the text
+goes out alone.
+
 **Customization:**
 - XP rate multiplier
 - Level-up message

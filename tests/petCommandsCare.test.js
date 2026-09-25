@@ -1072,7 +1072,7 @@ describe('/pet leaderboard', () => {
 
         const interaction = await run('leaderboard');
 
-        const embed = interaction.replies.at(-1).embeds[0].data;
+        const embed = interaction.replies.at(-1).embeds.at(-1).data;
         expect(embed.title).toBe('🐾 Pet Leaderboard — Most Bonded Pets');
         const lines = embed.description.split('\n');
         expect(lines[0]).toBe('🥇 🐶 **Rex** 🌟 — ❤️❤️❤️❤️❤️❤️❤️🖤 Soulbound 92 — <@u1>');
@@ -1082,6 +1082,11 @@ describe('/pet leaderboard', () => {
         expect(pipelineOf()[0]).toEqual({ $match: { guildId: GUILD, 'pets.0': { $exists: true } } });
         expect(pipelineOf()[2]).toEqual({ $addFields: { petBond: { $ifNull: ['$pets.bond', 0] } } });
         expect(pipelineOf()[3]).toEqual({ $sort: { petBond: -1, 'pets.adoptedAt': 1 } });
+        // The picture card leads, the text board under it.
+        const reply = interaction.replies.at(-1);
+        expect(reply.files.map(f => f.name)).toEqual(['leaderboard.png']);
+        expect(reply.embeds[0].data.image.url).toBe('attachment://leaderboard.png');
+        expect(reply.files[0].description).toContain('Pet Leaderboard for ');
     });
 
     // #1186: the stored bond lags a player who has not run a pet command while
@@ -1097,7 +1102,7 @@ describe('/pet leaderboard', () => {
 
         const interaction = await run('leaderboard');
 
-        const lines = interaction.replies.at(-1).embeds[0].data.description.split('\n');
+        const lines = interaction.replies.at(-1).embeds.at(-1).data.description.split('\n');
         expect(lines[0]).toMatch(/Kept.* Trusted 45 — <@u2>$/);
         expect(lines[1]).toMatch(/Starved.* Friendly 30 — <@u1>$/);
     });
@@ -1111,7 +1116,7 @@ describe('/pet leaderboard', () => {
 
         const interaction = await run('leaderboard', { type: 'level' });
 
-        const embed = interaction.replies.at(-1).embeds[0].data;
+        const embed = interaction.replies.at(-1).embeds.at(-1).data;
         expect(embed.title).toContain('Highest Level Pets');
         expect(embed.description.split('\n')).toEqual([
             '🥇 🌑 **Apex Alpha** ⭐⭐⭐ — Lv**25** — <@u1>',
@@ -1129,7 +1134,7 @@ describe('/pet leaderboard', () => {
 
         const interaction = await run('leaderboard', { type: 'wins' });
 
-        const embed = interaction.replies.at(-1).embeds[0].data;
+        const embed = interaction.replies.at(-1).embeds.at(-1).data;
         expect(embed.title).toContain('Most PvP Wins');
         expect(embed.description.split('\n')).toEqual([
             '🥇 🦊 **Red** — ⚔️ 9W / 2L vs members — <@u1>',
@@ -1141,7 +1146,7 @@ describe('/pet leaderboard', () => {
     test('an empty server says so', async () => {
         const interaction = await run('leaderboard');
 
-        expect(interaction.replies.at(-1).embeds[0].data.description).toBe('*No pets in this server yet!*');
+        expect(interaction.replies.at(-1).embeds.at(-1).data.description).toBe('*No pets in this server yet!*');
     });
 
     test('a failed query is answered by the dispatcher with a follow-up', async () => {
