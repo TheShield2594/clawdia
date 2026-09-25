@@ -37,6 +37,23 @@ describe('isPrivateIp', () => {
         ['64:ff9b::1', 'NAT64'],
         ['2001:db8::1', 'documentation'],
         ['100::1', 'discard prefix'],
+        ['192.0.0.8', 'IETF protocol assignments'],
+        ['192.0.2.1', 'TEST-NET-1'],
+        ['198.18.0.1', 'benchmarking lower'],
+        ['198.19.255.255', 'benchmarking upper'],
+        ['198.51.100.1', 'TEST-NET-2'],
+        ['203.0.113.1', 'TEST-NET-3'],
+        ['::127.0.0.1', 'IPv4-compatible loopback'],
+        ['::7f00:1', 'IPv4-compatible loopback, hex form'],
+        ['::a9fe:a9fe', 'IPv4-compatible metadata address'],
+        ['0:0:0:0:0:0:0:1', 'IPv6 loopback, long form'],
+        ['::ffff:0:7f00:1', 'IPv4-translated loopback'],
+        ['2002:7f00:1::1', '6to4 wrapping loopback'],
+        ['2002:a9fe:a9fe::1', '6to4 wrapping cloud metadata'],
+        ['2002:c0a8:101::', '6to4 wrapping RFC1918'],
+        ['2001:0:4136:e378::1', 'Teredo'],
+        ['fec0::1', 'IPv6 site-local'],
+        ['fe80::1%eth0', 'IPv6 link-local with a zone id'],
     ];
 
     it.each(blocked)('blocks %s (%s)', (ip) => {
@@ -54,7 +71,10 @@ describe('isPrivateIp', () => {
         '192.167.1.1',     // just below 192.168/16
         '192.169.1.1',     // just above it
         '223.255.255.255', // just below multicast
+        '198.17.255.255',  // just below benchmarking 198.18/15
+        '198.20.0.1',      // just above it
         '2606:4700:4700::1111',
+        '2002:808:808::1', // 6to4 wrapping a public IPv4
     ];
 
     it.each(allowed)('allows public address %s', (ip) => {

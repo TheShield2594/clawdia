@@ -33,36 +33,75 @@ const http = require('http');
 const https = require('https');
 
 
+// Returns true for an IPv4 address that must not be fetched: loopback, RFC1918,
+// link-local, CGNAT, multicast and every IANA special-purpose block that is not
+// globally routable (RFC 6890).
+function isPrivateIpv4(ip) {
+    const [a, b, c] = ip.split('.').map(Number);
+    return (
+        a === 0 ||                              // this-network 0.0.0.0/8
+        a === 127 ||                            // loopback
+        a === 10 ||                             // RFC1918 /8
+        (a === 100 && b >= 64 && b <= 127) ||   // RFC 6598 shared address space
+        (a === 172 && b >= 16 && b <= 31) ||    // RFC1918 /12
+        (a === 192 && b === 168) ||             // RFC1918 /16
+        (a === 169 && b === 254) ||             // link-local
+        (a === 192 && b === 0 && c === 0) ||    // IETF protocol assignments 192.0.0.0/24
+        (a === 192 && b === 0 && c === 2) ||    // documentation TEST-NET-1
+        (a === 192 && b === 88 && c === 99) ||  // 6to4 relay anycast (RFC 7526)
+        (a === 198 && (b === 18 || b === 19)) || // benchmarking 198.18.0.0/15
+        (a === 198 && b === 51 && c === 100) || // documentation TEST-NET-2
+        (a === 203 && b === 0 && c === 113) ||  // documentation TEST-NET-3
+        (a >= 224 && a <= 239) ||               // multicast 224.0.0.0/4
+        a >= 240                                // reserved/broadcast 240.0.0.0/4 + 255.255.255.255
+    );
+}
+
+// Expands a valid IPv6 string into its eight 16-bit groups, so prefix checks
+// compare numbers instead of text. String prefixes miss equivalent spellings:
+// `::127.0.0.1` normalises to `::7f00:1`, and `0:0::1` is `::1`.
+function ipv6Groups(ip) {
+    let s = ip.toLowerCase();
+    const zone = s.indexOf('%');
+    if (zone !== -1) s = s.slice(0, zone);
+    // A dotted IPv4 tail (`::ffff:1.2.3.4`) stands for the last two groups.
+    const tail = s.match(/(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (tail) {
+        const [, p, q, r, t] = tail.map(Number);
+        s = `${s.slice(0, tail.index)}${((p << 8) | q).toString(16)}:${((r << 8) | t).toString(16)}`;
+    }
+    const [head, rest] = s.split('::');
+    const left = head ? head.split(':') : [];
+    const right = rest === undefined ? [] : (rest ? rest.split(':') : []);
+    const fill = rest === undefined ? [] : Array(8 - left.length - right.length).fill('0');
+    return [...left, ...fill, ...right].map(h => parseInt(h, 16));
+}
+
+// The IPv4 address carried in two IPv6 groups.
+function groupsToIpv4(hi, lo) {
+    return `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+}
+
 // Returns true for any IP that must not be fetched (loopback, RFC1918, link-local, IPv6 ULA/LL, etc.).
 function isPrivateIp(ip) {
-    if (net.isIPv4(ip)) {
-        const [a, b] = ip.split('.').map(Number);
-        return (
-            a === 0 ||
-            a === 127 ||
-            a === 10 ||
-            (a === 100 && b >= 64 && b <= 127) || // RFC 6598 shared address space
-            (a === 172 && b >= 16 && b <= 31) ||
-            (a === 192 && b === 168) ||
-            (a === 169 && b === 254) ||            // link-local
-            (a >= 224 && a <= 239) ||              // multicast 224.0.0.0/4
-            a >= 240                               // reserved/broadcast 240.0.0.0/4 + 255.255.255.255
-        );
-    }
+    if (net.isIPv4(ip)) return isPrivateIpv4(ip);
     if (net.isIPv6(ip)) {
-        const n = ip.toLowerCase();
+        const g = ipv6Groups(ip);
+        if (g.length !== 8 || g.some(n => !Number.isInteger(n))) return true;
+        const zeroUpTo = n => g.slice(0, n).every(x => x === 0);
         return (
-            n === '::1' ||                         // loopback
-            n === '::' ||                          // unspecified
-            n.startsWith('fc') ||                  // ULA fc00::/7
-            n.startsWith('fd') ||                  // ULA fd00::/8
-            /^fe[89ab]/i.test(n) ||                // link-local fe80::/10
-            n.startsWith('ff') ||                  // multicast ff00::/8
-            n.startsWith('::ffff:') ||             // IPv4-mapped ::ffff:0:0/96
-            n.startsWith('::ffff:0:') ||           // IPv4-translated (RFC 2765)
-            n.startsWith('64:ff9b:') ||            // IPv4-IPv6 translation (RFC 6052)
-            n.startsWith('2001:db8:') ||           // documentation (RFC 3849)
-            n.startsWith('100::')                  // discard prefix (RFC 6666)
+            zeroUpTo(6) ||                                          // ::/96: ::, ::1 and IPv4-compatible ::a.b.c.d
+            (zeroUpTo(5) && g[5] === 0xffff) ||                     // IPv4-mapped ::ffff:0:0/96
+            (zeroUpTo(4) && g[4] === 0xffff && g[5] === 0) ||       // IPv4-translated ::ffff:0:0:0/96 (RFC 2765)
+            (g[0] === 0x64 && g[1] === 0xff9b) ||                   // NAT64 64:ff9b::/96 and 64:ff9b:1::/48
+            (g[0] === 0x100 && g[1] === 0 && g[2] === 0 && g[3] === 0) || // discard prefix 100::/64 (RFC 6666)
+            (g[0] === 0x2001 && g[1] === 0) ||                      // Teredo 2001::/32, which tunnels to an embedded IPv4
+            (g[0] === 0x2001 && g[1] === 0xdb8) ||                  // documentation 2001:db8::/32 (RFC 3849)
+            (g[0] === 0x2002 && isPrivateIpv4(groupsToIpv4(g[1], g[2]))) || // 6to4 2002::/16 wrapping a private IPv4
+            (g[0] & 0xfe00) === 0xfc00 ||                           // ULA fc00::/7
+            (g[0] & 0xffc0) === 0xfe80 ||                           // link-local fe80::/10
+            (g[0] & 0xffc0) === 0xfec0 ||                           // deprecated site-local fec0::/10
+            (g[0] & 0xff00) === 0xff00                              // multicast ff00::/8
         );
     }
     return true; // unknown format — block by default
