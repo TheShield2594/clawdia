@@ -14,7 +14,8 @@ const { decryptSecret, guildSecretBinding } = require('../../config/secretBox');
  * @param {object} spec
  * @param {string} spec.field  the settings field holding the guild key, e.g. `openaiKey`
  * @param {string} [spec.envKey] the operator's key from the environment, read by
- *   the caller as a literal `process.env.X` so the env-drift checks can see it
+ *   by the caller as a literal environment read, so the env-drift check in
+ *   tests/envExampleDrift.test.js can see which variable it is
  * @param {string} [spec.guildId] whose settings these are
  * @returns {{ apiKey: string|null }}
  */
