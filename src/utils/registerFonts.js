@@ -20,7 +20,7 @@ const path = require('path');
 const { registerFont } = require('canvas');
 
 // Faces the repo ships itself (SIL OFL, licences beside them), for the cards
-// that want a period look the system fonts cannot give — the Explorer's Map.
+// that want a look the system fonts cannot give — the Explorer's Map.
 // They live under src/ because the Docker build context ships src/ and drops
 // assets/ (see .dockerignore).
 const BUNDLED = path.join(__dirname, '..', 'fonts');
@@ -65,14 +65,9 @@ const FONTS = [
         candidates: [path.join(BUNDLED, 'IMFeENit28P.ttf')],
     },
     {
-        family: 'IM Fell English SC',
+        family: 'Cinzel',
         weight: 'normal',
-        candidates: [path.join(BUNDLED, 'IMFeENsc28P.ttf')],
-    },
-    {
-        family: 'Cinzel Decorative',
-        weight: 'bold',
-        candidates: [path.join(BUNDLED, 'CinzelDecorative-Bold.ttf')],
+        candidates: [path.join(BUNDLED, 'Cinzel.ttf')],
     },
     {
         family: 'Noto Color Emoji',

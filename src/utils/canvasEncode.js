@@ -18,14 +18,17 @@
 /**
  * @param {import('canvas').Canvas} canvas
  * @param {string} [mimeType] anything node-canvas encodes: PNG, or JPEG where the image is photographic enough that PNG runs large.
+ * @param {object} [config] the encoder's options, e.g. `{ quality: 0.9 }` for JPEG.
  * @returns {Promise<Buffer>}
  */
-function encodeCanvas(canvas, mimeType = 'image/png') {
+function encodeCanvas(canvas, mimeType = 'image/png', config) {
     return new Promise((resolve, reject) => {
-        canvas.toBuffer((err, buffer) => {
+        const done = (err, buffer) => {
             if (err) return reject(err);
             resolve(buffer);
-        }, mimeType);
+        };
+        if (config) canvas.toBuffer(done, mimeType, config);
+        else canvas.toBuffer(done, mimeType);
     });
 }
 

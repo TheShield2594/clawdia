@@ -6,11 +6,11 @@
 // same visibility rules as the text map (exploreService.mapRegionStates).
 
 const { loadImage } = require('canvas');
-const { createExploreMapCard, mapAltText, CARD_W, CARD_H, LAYOUT, __test__: { plain, placeRegions } } = require('../src/utils/exploreMapCard');
+const { createExploreMapCard, mapAltText, buildWorld, isWorldReady, CARD_W, CARD_H, LAYOUT, __test__: { plain, placeRegions } } = require('../src/utils/exploreMapCard');
 const { mapRegionStates, renderMap } = require('../src/services/exploreService');
 const { REGION_LIST } = require('../src/data/exploreData');
 
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff]);
 
 const region = id => REGION_LIST.find(r => r.id === id);
 const progress = (id, fraction = 1) => {
@@ -23,7 +23,7 @@ const explorer = (regions, unlockedRegions, activeRegion = 'whispering_forest') 
 });
 
 async function expectCard(buffer) {
-    expect(buffer.subarray(0, 4)).toEqual(PNG_MAGIC);
+    expect(buffer.subarray(0, 3)).toEqual(JPEG_MAGIC);
     const img = await loadImage(buffer);
     expect([img.width, img.height]).toEqual([CARD_W, CARD_H]);
 }
@@ -65,8 +65,8 @@ describe('mapRegionStates', () => {
 describe('the bundled map lettering', () => {
     test('ships in src/ (the Docker context drops assets/) and resolves on any host', () => {
         const { resolveFonts } = require('../src/utils/registerFonts');
-        const bundled = resolveFonts().filter(f => ['IM Fell English', 'IM Fell English SC', 'Cinzel Decorative'].includes(f.family));
-        expect(bundled).toHaveLength(4);
+        const bundled = resolveFonts().filter(f => ['IM Fell English', 'Cinzel'].includes(f.family));
+        expect(bundled).toHaveLength(3);
         for (const font of bundled) {
             expect([font.family, font.style, font.path]).toEqual([font.family, font.style, expect.stringContaining(`${require('path').sep}src${require('path').sep}fonts${require('path').sep}`)]);
         }
@@ -74,6 +74,14 @@ describe('the bundled map lettering', () => {
 });
 
 describe('createExploreMapCard', () => {
+    // The world is generated once per process; every case below shares it.
+    beforeAll(() => buildWorld(), 60000);
+
+    test('the world builds once and is then ready', async () => {
+        expect(isWorldReady()).toBe(true);
+        expect(await buildWorld()).toBe(await buildWorld());
+    });
+
     test('every region in the data has its own place on the map', () => {
         for (const r of REGION_LIST) expect([r.id, Boolean(LAYOUT[r.id])]).toEqual([r.id, true]);
     });
