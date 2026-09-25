@@ -12,7 +12,7 @@ const { debitUpTo, incExpr } = require('../../utils/balanceDebit');
 const { creditCoinsOrOwe } = require('../../utils/creditOrOwe');
 const { crimePayoutKey } = require('../../utils/payoutKey');
 const { getTotalBonus } = require('../../services/petService');
-const { getCrimeFlavorText } = require('../../utils/copyLines');
+const { getCrimeFlavorText, getCrimeBeats } = require('../../utils/copyLines');
 const { stackBar } = require('../../utils/rewardReveal');
 const { delay } = require('../../utils/delay');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
@@ -25,6 +25,8 @@ const { isDistrictActive } = require('../../services/districtService');
 const { secureRandom } = require('../../utils/secureRandom');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const Reminder = require('../../models/Reminder');
+const { MAX_OPEN_REMINDERS } = require('../../utils/reminderLimits');
 
 const COOLDOWN_MS    = 1.5 * 3_600_000; // 1.5 hours
 const DEATH_RATE     = 0.08;            // 8% of failures trigger critical death
@@ -138,6 +140,10 @@ const FINES = [
 
 const MAX_SUCCESS    = 0.95;
 const PICK_WINDOW_MS = 15_000;
+const BEAT_MS        = 900;             // each suspense beat before the result
+const REMIND_ID      = 'crime_remind';
+const REMIND_WINDOW_MS = 5 * 60_000;    // how long the result's Remind me button stays live
+const REMINDER_TEXT  = 'Your next `/crime` job is open. 🌆';
 const TOP_PAYOUT     = Math.max(...CRIMES.map(c => c.maxPayout));
 
 const pct = rate => `${Math.round(rate * 100)}%`;
@@ -193,6 +199,63 @@ async function awaitPick(message, userId) {
     }
 }
 
+const progressBar = (step, of) => `${'▰'.repeat(step)}${'▱'.repeat(of - step)}`;
+
+/**
+ * Sets, or moves, the member's "next job is open" reminder through the same
+ * Reminder rows /remind writes, so the scheduler that already delivers those
+ * delivers this. One per member per server: pressing it again after the next
+ * job moves the one they have instead of stacking another.
+ *
+ * @returns {Promise<boolean>} false when they are at the open-reminder cap
+ */
+async function setJobReminder({ userId, guildId, channelId }, remindAt) {
+    const existing = await Reminder.findOneAndUpdate(
+        { userId, guildId, message: REMINDER_TEXT, completed: false },
+        { $set: { remindAt, channelId } },
+    );
+    if (existing) return true;
+    const open = await Reminder.countDocuments({ userId, completed: false });
+    if (open >= MAX_OPEN_REMINDERS) return false;
+    await Reminder.create({ userId, guildId, channelId, message: REMINDER_TEXT, remindAt });
+    return true;
+}
+
+/**
+ * Arms the result's Remind me button. Not awaited: the command is done once
+ * the result is up, and the button outlives it for a few minutes. The button
+ * comes off when it is used or the window closes, so a stale one is never
+ * left on the message.
+ */
+function armReminderButton(interaction, message, remindAt) {
+    const collector = message.createMessageComponentCollector({
+        filter: ownedBy(interaction.user.id, i => i.customId === REMIND_ID, "That reminder button is for whoever ran the job."),
+        time: REMIND_WINDOW_MS,
+        max: 1,
+    });
+    collector.on('collect', async press => {
+        try {
+            const set = await setJobReminder({
+                userId: interaction.user.id,
+                guildId: interaction.guild.id,
+                channelId: interaction.channelId,
+            }, remindAt);
+            await press.reply({
+                content: set
+                    ? `🔔 I'll ping you here ${relTime(remindAt)} when your next job opens.`
+                    : `You already have ${MAX_OPEN_REMINDERS} open reminders — cancel one with \`/reminders cancel\` first.`,
+                flags: MessageFlags.Ephemeral,
+            });
+        } catch (err) {
+            console.error('[crime] reminder error:', err);
+            await press.reply({ content: "Couldn't set that reminder — try `/remind` instead.", flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+    });
+    collector.on('end', () => {
+        interaction.editReply({ components: [] }).catch(() => {});
+    });
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('crime')
@@ -215,6 +278,11 @@ module.exports = {
         }
 
         const currency = guildSettings?.economy?.currency || '💰';
+        // One way to write an amount everywhere in the command. It was
+        // "💵 80–200", "💰 Earned: 500 coins", "💰500" and "Balance: 500 coins"
+        // depending on which screen you were on.
+        const money = n => `${currency} ${Math.round(n).toLocaleString()}`;
+        const moneyRange = (a, b) => `${currency} ${Math.round(a).toLocaleString()}–${Math.round(b).toLocaleString()}`;
         const featured = getDailyFeatured(interaction.guild.id);
         const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
@@ -321,6 +389,9 @@ module.exports = {
                 : '';
 
             // ── Step 1: Choose the crime ────────────────────────────────────────
+            // A live countdown rather than "15 seconds" in a footer that was
+            // already stale by the time anyone read it.
+            const pickDeadline = () => relTime(new Date(Date.now() + PICK_WINDOW_MS));
             const timeBand = getTimeBand();
 
             const choices = shuffle(CRIMES).slice(0, 3);
@@ -344,7 +415,7 @@ module.exports = {
                 return (
                     `**${isFeatured ? '🌟 ' : ''}${c.emoji} ${c.displayName}** ${c.riskEmoji}\n` +
                     `${c.riskLabel}\n` +
-                    `🎯 ${pct(Math.min(MAX_SUCCESS, c.successRate + oddsBonus))} success · 💵 ${c.minPayout}–${c.maxPayout} · Fine: ${c.minFine}–${c.maxFine}` +
+                    `🎯 ${pct(Math.min(MAX_SUCCESS, c.successRate + oddsBonus))} success · 💰 ${moneyRange(c.minPayout, c.maxPayout)} · 💸 fine ${moneyRange(c.minFine, c.maxFine)}` +
                     featuredTag
                 );
             }).join('\n\n');
@@ -352,8 +423,8 @@ module.exports = {
             const selectionEmbed = new EmbedBuilder()
                 .setColor(COLORS.WARN)
                 .setTitle('🌆 Tonight\'s Jobs')
-                .setDescription(`Three options on the table. Pick your play — or let the clock decide.\n\n${crimeLines}${bonusLine}`)
-                .setFooter({ text: `${timeBand.emoji} ${timeBand.label} · 15 seconds. No choice and it gets chosen for you.` })
+                .setDescription(`Three options on the table. Pick your play — or let the clock decide.\n\n${crimeLines}${bonusLine}\n\n⏳ Decide ${pickDeadline()}`)
+                .setFooter({ text: `${timeBand.emoji} ${timeBand.label} · No pick and the clock chooses.` })
                 .setTimestamp();
 
             const response = await interaction.reply({ embeds: [selectionEmbed], components: [row], withResponse: true });
@@ -366,11 +437,16 @@ module.exports = {
 
             // ── Step 2: Choose the execution method ────────────────────────────
             const execData = EXECUTION_METHODS[crime.name];
+            // The clock picking for them used to be silent: the next screen
+            // simply named a job they had not chosen.
+            const hesitated = crimePress
+                ? ''
+                : `⏳ *You hesitated — the crew picked **${crime.displayName}** for you.*\n\n`;
 
             const execMethodLines = execData.methods.map(m => {
                 const rateStr = pct(methodOdds(m, oddsBonus));
                 const payoutStr = m.payoutRange || m.payoutMult !== 1.0 ? ` · ${payoutLabel(m)} payout` : '';
-                const fineStr = ` · fine ${Math.round(crime.minFine * m.fineMult)}–${Math.round(crime.maxFine * m.fineMult)}`;
+                const fineStr = ` · 💸 ${moneyRange(crime.minFine * m.fineMult, crime.maxFine * m.fineMult)}`;
                 const wantedStr = m.wantedMs > 0 ? ` · 🔥 ${hours(m.wantedMs)}h heat on fail` : '';
                 return `**${m.label}** — ${m.desc}\n🎯 ${rateStr} success${payoutStr}${fineStr}${wantedStr}`;
             }).join('\n\n');
@@ -378,8 +454,8 @@ module.exports = {
             const execEmbed = new EmbedBuilder()
                 .setColor('#e67e22')
                 .setTitle(`${crime.emoji} ${crime.displayName} — Choose Your Approach`)
-                .setDescription(`🎯 ${execData.situation}\n\n${execMethodLines}${bonusLine}`)
-                .setFooter({ text: '15 seconds to decide. No pick and you play it safe.' })
+                .setDescription(`${hesitated}🎯 ${execData.situation}\n\n${execMethodLines}${bonusLine}\n\n⏳ Decide ${pickDeadline()}`)
+                .setFooter({ text: 'No pick and you play it safe.' })
                 .setTimestamp();
 
             const execRow = new ActionRowBuilder().addComponents(
@@ -411,6 +487,35 @@ module.exports = {
             const crimeTime = new Date();
 
             const streakMult = clampMultiplier(getStreakMultiplier(user.streak?.current ?? 0));
+
+            // How cleanly a landed job went, 0–1 — the same measure the
+            // wildcard's cut rides on, shown as how much of the story sold.
+            const clean = success ? 1 - successRoll / successChance : 0;
+            const bluffStr = execMethod.wildcard
+                ? (success
+                    ? `\n> 🎲 *They bought ${Math.round(50 + 50 * clean)}% of your story.*`
+                    : '\n> 🎲 *They didn\'t buy a word of it.*')
+                : '';
+
+            // The career line every result carries. Every settled outcome counts
+            // an attempt, so this is the record after this job.
+            const attempts = (user.crimeRecord?.totalCrimes ?? 0) + 1;
+            const cleanJobs = (user.crimeRecord?.successfulCrimes ?? 0) + (success ? 1 : 0);
+            const MASTERY_CAP = 150;
+            const careerField = {
+                name: '📒 Record',
+                value: `${cleanJobs}–${attempts - cleanJobs} · ${pct(cleanJobs / attempts)} clean\n` +
+                    (attempts >= MASTERY_CAP
+                        ? '🏆 Mastery maxed · +15%'
+                        : `🏆 Mastery ${attempts}/${MASTERY_CAP} · +${pct(Math.min(0.15, attempts * 0.001))}`),
+                inline: true,
+            };
+
+            let nextJobAt = new Date(claimNow.getTime() + COOLDOWN_MS);
+            const nextJobLine = at => { nextJobAt = at; return `\n\n⏱️ Next job ${relTime(at)}`; };
+            // Named on the result as well as on the beat before it, so a
+            // player who looks away still learns who made the call.
+            const footerText = execPress ? execMethod.label : `${execMethod.label} · picked for you`;
 
             let embed;
             settled = true;
@@ -467,7 +572,7 @@ module.exports = {
                 if (petCrimeBonus > 0) desc += `\n> 🐾 *Your pet boosted your success chance!*`;
                 if (masteryBonus > 0) desc += `\n> 🏆 *Criminal mastery: +${pct(masteryBonus)} applied*`;
                 if (isFeaturedCrime) desc += `\n> 🌟 *Featured job — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout applied!*`;
-                if (execMethod.payoutRange) desc += `\n> 🎲 *The bluff sold — ×${payoutMult} cut (range ${payoutLabel(execMethod)})*`;
+                desc += bluffStr;
 
                 const crimeMultEntries = [];
                 if (streakMult > 1.0) crimeMultEntries.push({ emoji: '🔥', label: `${streakMult.toFixed(2)}x` });
@@ -478,17 +583,20 @@ module.exports = {
                 // or the bar breaks down a number it does not add up to.
                 const crimeBar = stackBar(crimeMultEntries, streakMult * payoutMult * merchantMult * (isFeaturedCrime ? 1 + FEATURED_PAYOUT_BONUS : 1), earned, currency);
 
-                desc += `\n\n────────────────────\n  ${currency} Earned: **${earned.toLocaleString()} coins**`;
-                if (crimeBar) desc += `\n  ${crimeBar}`;
-                desc += `\n────────────────────\n  Balance: ${newBalance.toLocaleString()} coins`;
+                if (crimeBar) desc += `\n\n${crimeBar}`;
                 desc += payoutNote;
-                desc += `\n\n⏱️ Next job ${relTime(new Date(claimNow.getTime() + COOLDOWN_MS))}`;
+                desc += nextJobLine(nextJobAt);
 
                 embed = new EmbedBuilder()
                     .setColor(isFeaturedCrime ? '#FFD700' : '#2ecc71')
                     .setTitle(`${isFeaturedCrime ? '🌟 ' : ''}${crime.emoji} ${crime.displayName} — Clean Getaway`)
                     .setDescription(desc)
-                    .setFooter({ text: execMethod.label })
+                    .addFields(
+                        { name: 'Earned',  value: `**${money(earned)}**`, inline: true },
+                        { name: 'Balance', value: money(newBalance), inline: true },
+                        careerField,
+                    )
+                    .setFooter({ text: footerText })
                     .setTimestamp();
             } else {
                 const flavorText = FINES[Math.floor(secureRandom() * FINES.length)];
@@ -505,9 +613,9 @@ module.exports = {
                 // claim, or the heat. A flat "Cooldown: 1.5h" misstated every
                 // loud failure, which locks the player out for 2–3h.
                 const cooldownEnds = claimNow.getTime() + COOLDOWN_MS;
-                const nextJobStr = (heldUntil = null) => `\n\n⏱️ Next job ${relTime(new Date(Math.max(
+                const nextJobStr = (heldUntil = null) => nextJobLine(new Date(Math.max(
                     cooldownEnds, wantedUntil?.getTime() ?? 0, heldUntil?.getTime() ?? 0,
-                )))}`;
+                )));
 
                 // What this failure would take, sized once, so the Lifesaver
                 // reports the figure it actually absorbed rather than a re-roll.
@@ -567,7 +675,7 @@ module.exports = {
                     await User.updateOne(userFilter, { $max: { wantedUntil: heldUntil } });
                     return {
                         heldUntil,
-                        holdingStr: `\n> ⛓️ *Couldn't cover ${currency}${unpaid.toLocaleString()} of it — ${Math.round(holdingMs / 60_000)} min in holding.*`,
+                        holdingStr: `\n> ⛓️ *Couldn't cover ${money(unpaid)} of it — ${Math.round(holdingMs / 60_000)} min in holding.*`,
                     };
                 };
 
@@ -581,12 +689,13 @@ module.exports = {
                     embed = new EmbedBuilder()
                         .setColor('#e67e22')
                         .setTitle(`${crime.emoji} Saved by the Lifesaver!`)
-                        .setDescription(`Your attempt at **${crime.displayName}** went sideways. ${flavorText}\n> 🛟 *Your Lifesaver activated and saved you! No coins lost! (consumed)*${wantedStr}${nextJobStr()}`)
+                        .setDescription(`Your attempt at **${crime.displayName}** went sideways. ${flavorText}${bluffStr}\n> 🛟 *Your Lifesaver activated and saved you! No coins lost! (consumed)*${wantedStr}${nextJobStr()}`)
                         .addFields(
-                            { name: isCriticalFailure ? 'Death Loss Absorbed' : 'Fine Absorbed', value: `${currency}${absorbable.toLocaleString()}`, inline: true },
-                            { name: 'Balance', value: `${currency}${balanceNow.toLocaleString()}`, inline: true }
+                            { name: isCriticalFailure ? 'Seizure Absorbed' : 'Fine Absorbed', value: money(absorbable), inline: true },
+                            { name: 'Balance', value: money(balanceNow), inline: true },
+                            careerField,
                         )
-                        .setFooter({ text: execMethod.label })
+                        .setFooter({ text: footerText })
                         .setTimestamp();
                 } else if (isCriticalFailure) {
                     const critSet = { 'crimeRecord.totalCrimes': incExpr('crimeRecord.totalCrimes', 1) };
@@ -604,22 +713,22 @@ module.exports = {
 
                     logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_critical_fail', amount: -lost, balance: critBalance, note: `${crime.name} (critical failure, ${walletShare}% seized, ${execMethod.id})` });
 
-                    const critNarrative = getCrimeFlavorText(crime.name, 'fail')
-                        .replace('{fine}', lost.toLocaleString())
-                        .replace('{amount}', lost.toLocaleString());
+                    // Its own lines: the ordinary bust pool is too light for this.
+                    const critNarrative = getCrimeFlavorText(crime.name, 'crit');
                     const critDesc =
-                        `${critNarrative}\n\n> *${flavorText}*\n\n` +
-                        `────────────────────\n` +
-                        `  💸 Seized: ${currency}${lost.toLocaleString()} coins  (${walletShare}% of wallet)\n` +
-                        `  💰 Remaining: ${critBalance.toLocaleString()} coins\n` +
-                        `────────────────────` +
+                        `${critNarrative}${bluffStr}` +
                         holdingStr + wantedStr + nextJobStr(heldUntil);
 
                     embed = new EmbedBuilder()
                         .setColor('#8B0000')
                         .setTitle(`💀 ${crime.displayName} — Everything Went Wrong`)
                         .setDescription(critDesc)
-                        .setFooter({ text: `${execMethod.label} · Purchase a Lifesaver from /shop to protect against critical failures` })
+                        .addFields(
+                            { name: 'Seized',  value: `**${money(lost)}**${walletShare > 0 ? ` · ${walletShare}% of wallet` : ''}`, inline: true },
+                            { name: 'Balance', value: money(critBalance), inline: true },
+                            careerField,
+                        )
+                        .setFooter({ text: `${footerText} · A 🛟 Lifesaver from /shop absorbs the next one` })
                         .setTimestamp();
                 } else {
                     const setFields = { 'crimeRecord.totalCrimes': incExpr('crimeRecord.totalCrimes', 1) };
@@ -634,20 +743,19 @@ module.exports = {
 
                     logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_fine', amount: -paid, balance: finedBalance, note: `${crime.name} (busted, ${execMethod.id})` });
 
-                    const bustNarrative = getCrimeFlavorText(crime.name, 'fail')
-                        .replace('{fine}', paid.toLocaleString())
-                        .replace('{amount}', paid.toLocaleString());
+                    const bustNarrative = getCrimeFlavorText(crime.name, 'fail');
                     const undergroundStr = undergroundActive ? '\n> 🌑 *Underground district active — fine reduced by 15%!*' : '';
 
                     embed = new EmbedBuilder()
                         .setColor(COLORS.ERROR)
                         .setTitle(`${crime.emoji} ${crime.displayName} — Busted`)
-                        .setDescription(`${bustNarrative}\n\n> *${flavorText}*${undergroundStr}${holdingStr}${wantedStr}${nextJobStr(heldUntil)}`)
+                        .setDescription(`${bustNarrative}\n\n> *${flavorText}*${bluffStr}${undergroundStr}${holdingStr}${wantedStr}${nextJobStr(heldUntil)}`)
                         .addFields(
-                            { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
-                            { name: 'Balance',   value: `${currency}${finedBalance.toLocaleString()}`, inline: true }
+                            { name: 'Fine Paid', value: money(paid), inline: true },
+                            { name: 'Balance',   value: money(finedBalance), inline: true },
+                            careerField,
                         )
-                        .setFooter({ text: execMethod.label })
+                        .setFooter({ text: footerText })
                         .setTimestamp();
                 }
             }
@@ -660,14 +768,25 @@ module.exports = {
             advanceMissions(User, userFilter, 'crime', 1, guildSettings)
                 .catch(err => console.error('[crime] season mission error:', err));
 
-            // Suspense delay between execution method selection and result reveal
-            const suspenseEmbed = new EmbedBuilder()
+            // The reveal: the setup, a complication, then the outcome. The
+            // result is already settled — this is pacing, not a second roll —
+            // and neither beat gives the ending away.
+            const beats = getCrimeBeats(crime.name);
+            const beat = (step, text) => new EmbedBuilder()
                 .setColor(COLORS.WARN)
-                .setTitle(`${crime.emoji} Running the Job…`)
-                .setDescription(`*${crime.displayName} in progress…*`);
-            await interaction.editReply({ embeds: [suspenseEmbed], components: [] });
-            await delay(900);
-            await interaction.editReply({ embeds: [embed], components: [] });
+                .setTitle(`${crime.emoji} ${crime.displayName} — ${execMethod.label}`)
+                .setDescription(`${text}\n\n${progressBar(step, 3)}`);
+            const autoNote = execPress ? '' : '⏳ *No call made — you play it safe.*\n\n';
+            await interaction.editReply({ embeds: [beat(1, `${autoNote}*${beats.setup}*`)], components: [] });
+            await delay(BEAT_MS);
+            await interaction.editReply({ embeds: [beat(2, `*${beats.tension}*`)], components: [] });
+            await delay(BEAT_MS);
+
+            const remindRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(REMIND_ID).setLabel('🔔 Remind me').setStyle(ButtonStyle.Secondary),
+            );
+            await interaction.editReply({ embeds: [embed], components: [remindRow] });
+            armReminderButton(interaction, message, nextJobAt);
         } catch (error) {
             console.error('Crime command error:', error);
             // Before `settled` nothing has moved, so the slot goes back and

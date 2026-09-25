@@ -25,6 +25,9 @@ const mockFailed = fakeCollection('FailedJob');
 jest.mock('../src/models/User', () => mockUsers.model);
 jest.mock('../src/models/Guild', () => mockGuilds.model);
 jest.mock('../src/models/FailedJob', () => mockFailed.model);
+// The result's Remind me button writes the same rows /remind does.
+const mockReminders = fakeCollection('Reminder', { completed: false });
+jest.mock('../src/models/Reminder', () => mockReminders.model);
 jest.mock('../src/utils/guildSettingsCache', () =>
     require('./helpers/guildSettingsCacheMock')());
 
@@ -118,6 +121,7 @@ beforeEach(() => {
     mockUsers.reset();
     mockGuilds.reset();
     mockFailed.reset();
+    mockReminders.reset();
     jest.clearAllMocks();
     // `clearAllMocks` clears calls, not implementations, so the
     // `mockReturnValue(true)` in the underground-district test below stayed true
@@ -551,8 +555,8 @@ describe('when the job never runs', () => {
         const interaction = makeInteraction({ components: [{ customId: PICKPOCKET }, { customId: FEATHER_TOUCH }] });
         const render = interaction.editReply;
         let edits = 0;
-        // The step-2 prompt and the suspense frame land; the result does not.
-        interaction.editReply = jest.fn(payload => (++edits === 3 ? Promise.reject(new Error('Unknown Message')) : render(payload)));
+        // The step-2 prompt and both suspense beats land; the result does not.
+        interaction.editReply = jest.fn(payload => (++edits === 4 ? Promise.reject(new Error('Unknown Message')) : render(payload)));
         await crime.execute(interaction);
 
         const stored = mockUsers.get(USER_ID);
@@ -621,7 +625,7 @@ describe('failure bookkeeping', () => {
 
         const interaction = await run();
 
-        expect(repliedText(interaction)).toContain('💰10,000');
+        expect(repliedText(interaction)).toContain('💰 10,000');
         expect(mockUsers.get(USER_ID).balance).toBe(10_000);
     });
 
@@ -674,14 +678,15 @@ describe('the balance', () => {
 
     it('swings the Bluff\'s cut with how cleanly it lands', async () => {
         // A roll of 0.01 against 27% is about as clean as it gets:
-        // 1 − 0.01/0.27 of the way from ×1.0 to ×2.6.
+        // 1 − 0.01/0.27 of the way from ×1.0 to ×2.6, and 98% of the story.
         rolls([], 0.01);
         seedUser({ balance: 1000 });
         seedGuild();
 
         const interaction = await run([{ customId: 'grand larceny' }, { customId: 'exec_bluff_in' }]);
 
-        expect(repliedText(interaction)).toContain('×2.54 cut');
+        expect(repliedText(interaction)).toContain('⚡ ×2.54');
+        expect(repliedText(interaction)).toContain('They bought 98% of your story');
     });
 
     it('plays it safe for a player who never picks an approach', async () => {
@@ -744,5 +749,139 @@ describe('a fine the wallet cannot cover', () => {
 
         expect(mockUsers.get(USER_ID).wantedUntil).toBeNull();
         expect(repliedText(interaction)).not.toContain('in holding');
+    });
+});
+
+describe('what the player sees', () => {
+    const lastEmbed = interaction => interaction.replies.at(-1).embeds[0].data;
+
+    it('counts both prompts down live instead of promising "15 seconds"', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        const prompts = interaction.replies.slice(0, 2).map(p => p.embeds[0].data.description);
+        for (const text of prompts) expect(text).toMatch(/⏳ Decide <t:\d+:R>/);
+    });
+
+    it('says so when the clock made either call', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run([]);
+
+        const text = repliedText(interaction);
+        expect(text).toContain('You hesitated — the crew picked');
+        expect(text).toContain('No call made — you play it safe');
+        expect(lastEmbed(interaction).footer.text).toContain('picked for you');
+    });
+
+    it('builds to the result in three beats', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        const beats = interaction.replies.map(p => p.embeds?.[0]?.data?.description ?? '');
+        expect(beats.some(d => d.endsWith('▰▱▱'))).toBe(true);
+        expect(beats.some(d => d.endsWith('▰▰▱'))).toBe(true);
+    });
+
+    it('writes every amount one way, with the server\'s currency', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild({ currency: '🪙' });
+
+        const interaction = await run();
+
+        const text = repliedText(interaction);
+        expect(text).not.toContain('💵');
+        expect(text).toMatch(/🪙 80–200/);
+        const { fields } = lastEmbed(interaction);
+        expect(fields.find(f => f.name === 'Balance').value).toMatch(/^🪙 [\d,]+$/);
+    });
+
+    it('carries the player\'s record and mastery progress', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000, crimeRecord: { totalCrimes: 39, successfulCrimes: 20 } });
+        seedGuild();
+
+        const interaction = await run();
+
+        const record = lastEmbed(interaction).fields.find(f => f.name === '📒 Record').value;
+        expect(record).toContain('21–19 · 53% clean');
+        expect(record).toContain('Mastery 40/150 · +4%');
+    });
+
+    it('gives a critical failure its own lines, not the ordinary bust\'s', async () => {
+        rollsUntil(7, 0.99, 0.01);
+        seedUser({ balance: 400 });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(lastEmbed(interaction).description).toContain('plainclothes detective');
+    });
+});
+
+describe('the Remind me button', () => {
+    const REMIND = { customId: 'crime_remind' };
+
+    it('sets a reminder for when the next job opens', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: FEATHER_TOUCH }, REMIND]);
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const claim = mockUsers.writes.find(w => w.update?.$set?.lastCrime).update.$set.lastCrime;
+        const [reminder] = mockReminders.all();
+        expect(reminder).toMatchObject({ userId: USER_ID, guildId: GUILD_ID, completed: false });
+        expect(reminder.remindAt.getTime()).toBe(claim.getTime() + COOLDOWN_MS);
+    });
+
+    it('times the reminder to the heat, not the cooldown, after a loud failure', async () => {
+        rolls([], 0.99);
+        seedUser({ balance: 10_000 });
+        seedGuild();
+
+        await run([{ customId: PICKPOCKET }, { customId: BOLD_GRAB }, REMIND]);
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const [reminder] = mockReminders.all();
+        expect(reminder.remindAt.getTime()).toBe(mockUsers.get(USER_ID).wantedUntil.getTime());
+    });
+
+    it('moves the one they already have rather than stacking another', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+        mockReminders.seed({
+            userId: USER_ID, guildId: GUILD_ID, channelId: 'channel-1', completed: false,
+            message: 'Your next `/crime` job is open. 🌆', remindAt: new Date(0),
+        });
+
+        await run([{ customId: PICKPOCKET }, { customId: FEATHER_TOUCH }, REMIND]);
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(mockReminders.all()).toHaveLength(1);
+        expect(mockReminders.all()[0].remindAt.getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it('comes off the message once its window closes', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(interaction.replies.at(-1)).toEqual({ components: [] });
+        expect(mockReminders.all()).toEqual([]);
     });
 });
