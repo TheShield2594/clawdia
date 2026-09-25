@@ -19,7 +19,7 @@ const {
     resolveActiveRegion, executeExplore, applyExploreXpBonus, resolveEncounter,
     getEncounterStakes, addJournalEntry, randInt, resolveRoute,
 } = require('../../../services/exploreService');
-const { getTotalBonus, tryGrantRarePet } = require('../../../services/petService');
+const { getTotalBonus, tryGrantRarePet, formatPetBonus } = require('../../../services/petService');
 const { checkAndAward, announceAchievements } = require('../../../services/achievementService');
 const { ensureQuests, onExplore, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../../services/questService');
 const { recordMissionProgress } = require('../../../services/seasonMissionService');
@@ -519,7 +519,7 @@ async function handleGo(interaction) {
             embed.addFields({
                 name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
                 value: `A **${rarePetDrop.name}** came down out of the canopy and followed you back. It joined your pets at full hunger.\n`
-                     + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
+                     + `Passive: **${formatPetBonus(rarePetDrop.bonusType, rarePetDrop.bonusPct)}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
                      + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
                 inline: false,
             });

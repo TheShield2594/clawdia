@@ -221,7 +221,7 @@ async function handleDig(interaction) {
         }
 
         // Crystal Fox pet: +15% mine yield (only if hunger >= 30)
-        const { getTotalBonus, petCompanionLine, tryGrantRarePet } = require('../../../services/petService');
+        const { getTotalBonus, petCompanionLine, tryGrantRarePet, formatPetBonus } = require('../../../services/petService');
         const petMineYieldPct = getTotalBonus(user.pets || [], 'mine_yield');
 
         const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
@@ -415,7 +415,7 @@ async function handleDig(interaction) {
             embed.addFields({
                 name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
                 value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
-                     + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
+                     + `Passive: **${formatPetBonus(rarePetDrop.bonusType, rarePetDrop.bonusPct)}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
                      + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
                 inline: false,
             });

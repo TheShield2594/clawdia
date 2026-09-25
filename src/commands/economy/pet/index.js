@@ -20,7 +20,7 @@ const {
 const { petAutocomplete } = require('./autocomplete');
 const { executeAdopt } = require('./adopt');
 const { executeStatus } = require('./status');
-const { executeFeed } = require('./feed');
+const { executeFeed, MAX_FEED_QUANTITY } = require('./feed');
 const { executeRelease } = require('./release');
 const { executeRename } = require('./rename');
 const { executeList, rareCompanionFooter } = require('./list');
@@ -61,6 +61,10 @@ module.exports = {
                 .addStringOption(opt =>
                     opt.setName('slot').setDescription('Which pet to feed (defaults to your first)').setRequired(false).setAutocomplete(true)
                 )
+                .addIntegerOption(opt =>
+                    opt.setName('quantity').setDescription('Feed up to this many — stops once your pet is full (default 1)')
+                        .setRequired(false).setMinValue(1).setMaxValue(MAX_FEED_QUANTITY)
+                )
         )
         .addSubcommand(sub =>
             sub.setName('release')
@@ -85,10 +89,10 @@ module.exports = {
                 .setDescription('View the top pets in this server.')
                 .addStringOption(opt =>
                     opt.setName('type')
-                        .setDescription('Sort order (default: bond days)')
+                        .setDescription('Sort order (default: bond)')
                         .setRequired(false)
                         .addChoices(
-                            { name: 'Bond Days (Most Loyal)', value: 'bonds' },
+                            { name: 'Bond (Most Loyal)',      value: 'bonds' },
                             { name: 'Level (Highest Level)', value: 'level' },
                             { name: 'PvP Wins (vs members)',  value: 'wins'  }
                         )

@@ -43,6 +43,12 @@ const petFields = () => ({
     pvpWins:            { type: Number,  default: 0 },
     pvpLosses:          { type: Number,  default: 0 },
     lastBattle:         { type: Date,    default: null },
+    // Bond (#1186): 0–100, raised by care and lowered by neglect — see the Bond
+    // section of services/petService.js. bondDay/bondToday are its daily cap,
+    // shaped like interactionDay/interactionsToday above.
+    bond:               { type: Number,  default: 0, min: 0, max: 100 },
+    bondDay:            { type: Number,  default: null },
+    bondToday:          { type: Number,  default: 0    },
 });
 
 const userSchema = new Schema({

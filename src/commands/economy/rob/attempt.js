@@ -12,7 +12,7 @@ const User  = require('../../../models/User');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { hasEffect, spendEffectCharge, timeRemaining } = require('../../../services/effectsService');
 const { checkAndAward, announceAchievements } = require('../../../services/achievementService');
-const { getTotalBonus } = require('../../../services/petService');
+const { petChanceBonus } = require('../../../services/petService');
 const { randomFrom, ROB_WIN_LINES, ROB_FAIL_LINES } = require('../../../utils/copyLines');
 const { delay } = require('../../../utils/delay');
 const { buildCooldownEmbed } = require('../../../utils/cooldownEmbed');
@@ -197,6 +197,18 @@ async function claimRobAbsorber(robber, robberSnapshot, type) {
     return null;
 }
 
+/**
+ * The robber's chance of success, 0–0.95. Everything here adds percentage
+ * points to the 40% base: a Knife is +15 pts and a Fox's passive is its
+ * effective bonus in points — a maxed Fox takes 40% to 60% (#1190).
+ */
+function robSuccessChance(robber, now = Date.now()) {
+    let chance = BASE_SUCCESS_CHANCE;
+    if (hasEffect(robber, 'knife')) chance += 0.15;
+    chance += petChanceBonus(robber.pets, 'rob_success', now);
+    return Math.max(0, Math.min(0.95, chance));
+}
+
 async function execute(interaction) {
     const guildSettings = await getGuildSettings(interaction.guild.id);
     if (guildSettings?.economy?.enabled === false) {
@@ -299,10 +311,7 @@ async function execute(interaction) {
         }
 
         // ── Build success chance ──────────────────────────────────────────
-        let successChance = BASE_SUCCESS_CHANCE;
-        if (hasEffect(robber, 'knife'))       successChance += 0.15;  // Knife: +15%
-        successChance += getTotalBonus(robber.pets || [], 'rob_success') / 100; // Fox pet: +8%
-        successChance = Math.max(0, Math.min(0.95, successChance));
+        const successChance = robSuccessChance(robber);
 
         // ── Suspense reveal ───────────────────────────────────────────────
         await interaction.reply({
@@ -533,4 +542,4 @@ async function execute(interaction) {
     }
 }
 
-module.exports = { execute, saveRobState };
+module.exports = { execute, saveRobState, robSuccessChance, BASE_SUCCESS_CHANCE };

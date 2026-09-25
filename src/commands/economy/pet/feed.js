@@ -7,7 +7,9 @@ const {
     STARVING_THRESHOLD,
     feedPet,
     isPetFull,
+    effectiveHunger,
     recordPetInteraction,
+    recordBondCare,
     getPetDisplay,
     applyPetXp,
     resolvePetRef,
@@ -25,9 +27,21 @@ const {
     creditPetCare, collectPetAchievements, announcePetAchievements,
 } = require('./shared');
 
+// How many items one /pet feed may use. A hungry pet on ordinary food takes up
+// to ten, which used to mean ten commands (#1188).
+const MAX_FEED_QUANTITY = 10;
+
+/** The `quantity` option, clamped to 1–MAX_FEED_QUANTITY. Absent means one. */
+function readQuantity(interaction) {
+    const raw = interaction.options.getInteger?.('quantity');
+    if (!Number.isFinite(raw)) return 1;
+    return Math.min(MAX_FEED_QUANTITY, Math.max(1, Math.floor(raw)));
+}
+
 async function executeFeed(interaction) {
     const materialId = interaction.options.getString('material');
     const petRef     = readSlotOption(interaction);
+    const quantity   = readQuantity(interaction);
 
     await interaction.deferReply();
 
@@ -66,19 +80,37 @@ async function executeFeed(interaction) {
         return interaction.editReply(`${getPetDisplay(pet).emoji} **${fullName}** is completely full — save that \`${materialId}\` for later.`);
     }
 
-    const result = feedPet(pet, materialId);
+    // Feed one item at a time until the pet is full or the quantity (or the
+    // pile) runs out. The fullness check runs before every item, so the last
+    // item used is the one that tops the pet up and nothing is spent after it.
+    const now       = Date.now();
+    const before    = effectiveHunger(pet, now);
+    const available = Math.min(quantity, total);
+    let used = 0, xpTotal = 0, result = null;
+    while (used < available && !isPetFull(pet, now)) {
+        const step = feedPet(pet, materialId, now);
+        if (!step) break;
+        decrementMaterial(user, materialId);
+        pet.hunger      = step.hunger;
+        // Decay was brought up to date by syncHungerAndRunaway above; re-anchor
+        // the cursor so the restored hunger isn't immediately docked again, and
+        // so the next item in this loop starts from the hunger just written.
+        pet.lastDecayAt = new Date(now);
+        xpTotal += step.isFavorite ? XP_FEED_FAVORITE : XP_FEED_OTHER;
+        result = step;
+        used++;
+    }
     if (!result) return interaction.editReply('Could not feed that pet.');
 
-    decrementMaterial(user, materialId);
-    user.pets[petIndex].hunger          = result.hunger;
-    user.pets[petIndex].lastFed         = new Date();
-    // Decay was brought up to date by syncHungerAndRunaway above; re-anchor the
-    // cursor so the restored hunger isn't immediately docked again.
-    user.pets[petIndex].lastDecayAt     = new Date();
-    user.pets[petIndex].starving        = result.hunger < STARVING_THRESHOLD;
-    recordPetInteraction(user.pets[petIndex]);
-    if (result.hunger > 0) user.pets[petIndex].starvingStartAt = null;
-    const feedXp = applyPetXp(user.pets[petIndex], result.isFavorite ? XP_FEED_FAVORITE : XP_FEED_OTHER);
+    pet.lastFed  = new Date(now);
+    pet.starving = result.hunger < STARVING_THRESHOLD;
+    // One command is one interaction, however many items it used — Pet of the
+    // Week credit is still capped per day by recordPetInteraction.
+    recordPetInteraction(pet);
+    const bondGained = recordBondCare(pet, 'feed', now);
+    if (result.hunger > 0) pet.starvingStartAt = null;
+    const feedXp = applyPetXp(pet, xpTotal);
+    const gained = Math.round(result.hunger - before);
     user.markModified('pets');
 
     // A completed pet-care quest pays coins. `save()` writes `balance` as an
@@ -105,10 +137,18 @@ async function executeFeed(interaction) {
     announcePetAchievements(interaction, user, guildSettings, earned);
 
     const displayName  = pet.name || def?.name || pet.petId;
-    // Say what actually landed: a favourite fed at 95% restores 5, not 25.
+    // Say what actually landed: a favourite pet at 95% restores 5, not 25.
     const favoriteNote = result.isFavorite
-        ? ` *(favorite food — +${result.gained} hunger!)*`
-        : ` *(not favorite — +${result.gained} hunger)*`;
+        ? ` *(favorite food — +${gained} hunger!)*`
+        : ` *(not favorite — +${gained} hunger)*`;
+    const leftover     = total - used;
+    // Only worth a line when the player asked for more than one.
+    const usedNote     = quantity > 1
+        ? `\n🍽️ Used **${used}** of ${quantity}` +
+          (used < quantity ? (isPetFull(pet, now) ? ' — full now' : ' — that was all you had') : '') +
+          ` · ${leftover} left`
+        : '';
+    const bondNote     = bondGained > 0 ? `\n❤️ **+${bondGained} bond**` : '';
     const progressNote = feedXp.evolved
         ? `\n🌟 **${displayName} evolved!** Say hello to **${getPetDisplay(user.pets[petIndex]).titledName}** (Stage ${feedXp.toStage})!`
         : feedXp.leveledUp
@@ -118,9 +158,9 @@ async function executeFeed(interaction) {
     const embed = new EmbedBuilder()
         .setColor(result.hunger >= STARVING_THRESHOLD ? '#4caf50' : '#ff5722')
         .setTitle(`${getPetDisplay(user.pets[petIndex]).emoji} ${displayName} fed!`)
-        .setDescription(`✨ **+${feedXp.gained} pet XP**${progressNote}`)
+        .setDescription(`✨ **+${feedXp.gained} pet XP**${bondNote}${usedNote}${progressNote}`)
         .addFields(
-            { name: 'Food',   value: `\`${materialId}\`${favoriteNote}`,   inline: true  },
+            { name: 'Food',   value: `\`${materialId}\`${used > 1 ? ` ×${used}` : ''}${favoriteNote}`, inline: true },
             { name: 'Hunger', value: hungerBar(result.hunger),              inline: false },
             { name: 'Bonus',  value: result.hunger >= STARVING_THRESHOLD ? '✅ Active' : `❌ Still inactive (need ≥ ${STARVING_THRESHOLD}%)`, inline: true },
         )
@@ -131,4 +171,4 @@ async function executeFeed(interaction) {
     return interaction.editReply({ embeds: [embed], files: art ? [art.attachment] : [] });
 }
 
-module.exports = { executeFeed };
+module.exports = { executeFeed, MAX_FEED_QUANTITY };

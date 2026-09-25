@@ -11,16 +11,17 @@ const {
     effectiveHunger,
     getMoodLine,
     getMoodColor,
-    heartBar,
     getPetDisplay,
     getEffectiveBonusPct,
+    formatPetBonus,
     applyPetXp,
     applyHungerDecay,
     recordPetInteraction,
+    recordBondCare,
     REST_DURATION_MS,
 } = require('../../../services/petService');
 const { generatePetSprite } = require('../../../utils/cardGenerator');
-const { hungerBar, buildNavComponents, renderPetStatus, renderPetCard } = require('../../../services/petStatusView');
+const { hungerBar, buildNavComponents, renderPetStatus, renderPetCard, bondText } = require('../../../services/petStatusView');
 const { applyXpGain, announceLevelUp } = require('../../../services/levelingService');
 const { isVersionError } = require('../../../utils/versionRetry');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
@@ -130,6 +131,7 @@ async function executeStatus(interaction) {
             const petXpResult = applyPetXp(freshUser.pets[idx], 10);
             freshUser.pets[idx].lastPlay = new Date();
             recordPetInteraction(freshUser.pets[idx]);
+            const bondGained = recordBondCare(freshUser.pets[idx], 'play');
             freshUser.markModified('pets');
             // A completed pet-care quest pays coins. `save()` writes `balance` as an
             // absolute `$set`, so the credit is folded out of the save and applied as
@@ -170,7 +172,8 @@ async function executeStatus(interaction) {
             const xpLine = xpGain > 0
                 ? `✨ **+${xpGain} XP** for you, **+${petXpResult.gained} XP** for ${name}!`
                 : `✨ **+${petXpResult.gained} XP** for ${name}! *(You've had your play XP for this hour.)*`;
-            await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n${xpLine}${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
+            const bondNote = bondGained > 0 ? ` ❤️ **+${bondGained} bond**` : '';
+            await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n${xpLine}${bondNote}${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
             await interaction.editReply(
                 await renderPetStatus(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL, guildId, interaction.user.id, ownerName)
             ).catch(() => {});
@@ -194,6 +197,7 @@ async function executeStatus(interaction) {
                 freshUser.pets[idx].lastDecayAt     = settled.lastDecayAt;
                 freshUser.pets[idx].starving        = settled.starving;
                 freshUser.pets[idx].starvingStartAt = settled.starvingStartAt ?? null;
+                freshUser.pets[idx].bond            = settled.bond;
             }
             freshUser.pets[idx].restUntil = new Date(Date.now() + REST_DURATION_MS);
             recordPetInteraction(freshUser.pets[idx]);
@@ -231,7 +235,6 @@ async function executeStatus(interaction) {
             const pet      = freshUser.pets[idx];
             const def      = PET_DEFINITIONS[pet.petId];
             const name     = pet.name || def?.name || pet.petId;
-            const bondDays = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
             const hunger   = effectiveHunger(pet);
 
             const showLeft = cooldownMinutesLeft(pet.lastShowcase, SHOWCASE_COOLDOWN_MS);
@@ -259,10 +262,10 @@ async function executeStatus(interaction) {
                 .setAuthor({ name: `Owned by ${interaction.user.username}`, iconURL: ownerAvatarURL })
                 .setDescription(`*${getMoodLine(pet)}*${pet.potw ? '\n🌟 **Pet of the Week**' : ''}`)
                 .addFields(
-                    { name: '❤️ Bond',    value: `${heartBar(bondDays)} ${bondDays}d`,               inline: true },
+                    { name: '❤️ Bond',    value: bondText(pet),                                      inline: true },
                     { name: '🍖 Hunger', value: hungerBar(hunger),                                    inline: true },
                     { name: `${hunger >= STARVING_THRESHOLD ? '✅' : '❌'} Bonus`,
-                      value: `+${getEffectiveBonusPct(pet)}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}`, inline: false },
+                      value: formatPetBonus(def?.bonusType, getEffectiveBonusPct(pet)), inline: false },
                 )
                 .setFooter({ text: `${def?.name ?? pet.petId} • Use /pet status to check on yours!` })
                 .setTimestamp();

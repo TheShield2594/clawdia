@@ -128,6 +128,7 @@ function createPet(petId, { name = null, now = new Date() } = {}) {
         evolutionStage: 1,
         battleWins: 0,
         battleLosses: 0,
+        bond: 0,
     };
 }
 
@@ -290,8 +291,9 @@ function getMoodColor(hunger) {
 }
 
 const HEART_BAR_LENGTH = 8;
-function heartBar(bondDays) {
-    const filled = Math.min(Math.floor(bondDays / 10), HEART_BAR_LENGTH);
+/** Eight hearts for a bond of 0–BOND_MAX. */
+function heartBar(bond) {
+    const filled = Math.max(0, Math.min(Math.floor(Number(bond) / (BOND_MAX / HEART_BAR_LENGTH)) || 0, HEART_BAR_LENGTH));
     return '❤️'.repeat(filled) + '🖤'.repeat(HEART_BAR_LENGTH - filled);
 }
 
@@ -452,6 +454,9 @@ function applyHungerDecay(pets, now = Date.now()) {
         return {
             ...(pet.toObject ? pet.toObject() : pet),
             hunger: newHunger,
+            // Drained over the same window, so it has to be settled before the
+            // cursor below moves past it.
+            bond: effectiveBond(pet, now),
             lastDecayAt: new Date(now),
             starving: newHunger < STARVING_THRESHOLD,
             starvingStartAt,
@@ -508,6 +513,111 @@ function isPetFull(pet, now = Date.now()) {
     return Math.round(effectiveHunger(pet, now)) >= 100;
 }
 
+// ── Bond ──────────────────────────────────────────────────────────────────────
+//
+// Bond used to be days since `adoptedAt` and nothing else (#1186): the "Most
+// Loyal" leaderboard ranked pets by age, bond did nothing in the game, and a
+// pet revived with a Revive Scroll kept counting the days it spent gone. It is
+// now a stored 0–BOND_MAX value that care raises and neglect lowers:
+//
+//  - Feeding, playing and battling (a pet's training) each add a little, and a
+//    pet takes at most BOND_DAILY_CAP a UTC day however much is clicked, the
+//    same shape as the daily cap on Pet of the Week credit.
+//  - It drains slowly while the pet sits below STARVING_THRESHOLD hunger, and
+//    running away costs BOND_RUNAWAY_PENALTY on top — the scroll brings the pet
+//    back, not the trust.
+//  - Tiers unlock small rewards: a few percent on the passive, a frame on the
+//    companion card, and a title shown with the pet.
+//
+// Migration 028 seeds existing pets from their age, capped below the top two
+// tiers, so long-time owners are not reset to zero but still have those to
+// earn. The seeding rule lives in the migration alone, so a later retune here
+// cannot change what it did.
+
+const BOND_MAX             = 100;
+const BOND_DAILY_CAP       = 4;
+const BOND_CARE = Object.freeze({ feed: 2, play: 2, battle: 1 });
+const BOND_HUNGRY_DECAY_PER_DAY = 2;
+const BOND_RUNAWAY_PENALTY = 25;
+
+// `boost` multiplies the pet's passive; `frame` colours the companion card's
+// border (null keeps the species colour).
+const BOND_TIERS = Object.freeze([
+    { tier: 0, min: 0,  title: 'Wary',      boost: 0,    frame: null      },
+    { tier: 1, min: 15, title: 'Friendly',  boost: 0.01, frame: null      },
+    { tier: 2, min: 35, title: 'Trusted',   boost: 0.02, frame: '#cd7f32' },
+    { tier: 3, min: 60, title: 'Devoted',   boost: 0.04, frame: '#c9d6e3' },
+    { tier: 4, min: 90, title: 'Soulbound', boost: 0.06, frame: '#ff6b8b' },
+]);
+
+function clampBond(value) {
+    const n = Number(value ?? 0);
+    if (!Number.isFinite(n)) return 0;
+    return Math.min(BOND_MAX, Math.max(0, n));
+}
+
+/**
+ * Milliseconds of the window since the decay cursor that the pet spent below
+ * STARVING_THRESHOLD. Uses the window's average decay rate, as the runaway
+ * clock does.
+ */
+function hungryMsSince(pet, now = Date.now()) {
+    const { hunger: end, decay, windowMs } = decaySince(pet, now);
+    if (windowMs <= 0) return 0;
+    const start = clampHunger(pet.hunger);
+    if (start < STARVING_THRESHOLD) return windowMs;
+    if (end >= STARVING_THRESHOLD || decay <= 0) return 0;
+    const crossedAfter = (start - STARVING_THRESHOLD) / (decay / windowMs);
+    return Math.max(0, windowMs - crossedAfter);
+}
+
+/** A pet's bond now, including hungry-time drain not yet written back. */
+function effectiveBond(pet, now = Date.now()) {
+    if (!pet) return 0;
+    const drain = (hungryMsSince(pet, now) / MS_PER_DAY) * BOND_HUNGRY_DECAY_PER_DAY;
+    return clampBond(clampBond(pet.bond) - drain);
+}
+
+/** The tier a bond value falls in. */
+function bondTierFor(bond) {
+    const b = clampBond(bond);
+    return [...BOND_TIERS].reverse().find(t => b >= t.min) ?? BOND_TIERS[0];
+}
+
+/** A pet's current bond tier (decay-aware). */
+function getBondTier(pet, now = Date.now()) {
+    return bondTierFor(effectiveBond(pet, now));
+}
+
+/**
+ * Raise a pet's bond for one act of care ('feed'|'play'|'battle'), subject to
+ * the daily cap. Mutates `pet`. Returns the points actually added.
+ *
+ * Call after the pet's decay has been brought up to date, so the drain owed so
+ * far is not charged against the new bond.
+ */
+function recordBondCare(pet, kind, now = Date.now()) {
+    const points = BOND_CARE[kind] ?? 0;
+    if (!pet || points <= 0) return 0;
+    const day = Math.floor(now / MS_PER_DAY);
+    if (pet.bondDay !== day) {
+        pet.bondDay   = day;
+        pet.bondToday = 0;
+    }
+    const room   = Math.max(0, BOND_DAILY_CAP - (pet.bondToday ?? 0));
+    const before = clampBond(pet.bond);
+    const gained = Math.min(points, room, BOND_MAX - before);
+    if (gained <= 0) return 0;
+    pet.bond      = before + gained;
+    pet.bondToday = (pet.bondToday ?? 0) + gained;
+    return gained;
+}
+
+/** The bond a pet keeps after running away. Pure. */
+function bondAfterRunaway(pet) {
+    return clampBond(clampBond(pet?.bond) - BOND_RUNAWAY_PENALTY);
+}
+
 // ── Pet of the Week credit ────────────────────────────────────────────────────
 //
 // Pet of the Week pays coins to the pet with the most weekly interactions, so
@@ -562,10 +672,45 @@ function getTotalBonus(pets, bonusType, now = Date.now()) {
     for (const pet of pets) {
         const bonus = getPetBonus(pet, now);
         if (bonus && bonus.bonusType === bonusType) {
-            total += getEffectiveBonusPct(pet);
+            total += getEffectiveBonusPct(pet, now);
         }
     }
     return Math.min(total, MAX_STACKED_BONUS_PCT);
+}
+
+// ── Passive units ──────────────────────────────────────────────────────────────
+//
+// Passives come in two units, and they used to be labelled alike (#1190). Rob
+// and crime add *percentage points* to a success chance — a maxed Fox's +20
+// takes a 40% rob to 60% — while every other passive *multiplies* a payout, so
+// a Wolf's +25% hunt yield is ×1.25. Printing both as "+20%" made the Fox look
+// four times weaker than it is. The balance stays; the label now says which it
+// is, and petChanceBonus() is the one place the additive rule lives.
+
+const CHANCE_BONUS_TYPES = new Set(['rob_success', 'crime_success']);
+
+/** Unit and wording for a bonus type: `{ unit: '%'|' pts', label }`. */
+function petBonusParts(bonusType) {
+    const words = String(bonusType ?? '').replace(/_/g, ' ');
+    return CHANCE_BONUS_TYPES.has(bonusType)
+        ? { unit: ' pts', label: `${words} chance` }
+        : { unit: '%',    label: words };
+}
+
+/** A passive as players read it: "+25% hunt yield", "+20 pts rob success chance". */
+function formatPetBonus(bonusType, pct) {
+    const { unit, label } = petBonusParts(bonusType);
+    return `+${pct}${unit} ${label}`;
+}
+
+/**
+ * Percentage points a player's fed pets add to a success chance, as a fraction
+ * to *add* (0.2 for +20 pts). Only for the chance passives; the payout ones go
+ * through getTotalBonus as a multiplier.
+ */
+function petChanceBonus(pets, bonusType, now = Date.now()) {
+    if (!CHANCE_BONUS_TYPES.has(bonusType)) return 0;
+    return getTotalBonus(pets ?? [], bonusType, now) / 100;
 }
 
 // ── Companion lines on grind results ──────────────────────────────────────────
@@ -675,9 +820,10 @@ function getPetDisplay(pet) {
 }
 
 /**
- * Effective passive bonus % for a pet (base × stage × per-level growth), capped.
+ * Effective passive bonus % for a pet (base × stage × per-level growth, capped,
+ * × the bond tier's boost).
  */
-function getEffectiveBonusPct(pet) {
+function getEffectiveBonusPct(pet, now = Date.now()) {
     const def = PET_DEFINITIONS[pet.petId];
     if (!def) return 0;
     const stage = pet.evolutionStage ?? 1;
@@ -686,7 +832,11 @@ function getEffectiveBonusPct(pet) {
         MAX_EFFECTIVE_BONUS_MULT,
         (STAGE_BONUS_MULT[stage] ?? 1.0) + (level - 1) * PER_LEVEL_BONUS_GROWTH
     );
-    return Math.round(def.bonusPct * mult * 10) / 10;
+    // The bond tier's reward sits on top of the level cap: a few percent of the
+    // passive, so a well-kept pet is a little better than a neglected one at
+    // the same level without outgrowing MAX_STACKED_BONUS_PCT on its own.
+    const bondBoost = 1 + getBondTier(pet, now).boost;
+    return Math.round(def.bonusPct * mult * bondBoost * 10) / 10;
 }
 
 /**
@@ -981,7 +1131,7 @@ async function selectPetOfTheWeek(client) {
 
             const def      = PET_DEFINITIONS[bestPet.petId];
             const name     = bestPet.name || def?.name || bestPet.petId;
-            const bondDays = Math.floor((Date.now() - new Date(bestPet.adoptedAt).getTime()) / 86400000);
+            const bond     = effectiveBond(bestPet);
 
             const embed = new EmbedBuilder()
                 .setColor(COLORS.PRIZE)
@@ -991,7 +1141,7 @@ async function selectPetOfTheWeek(client) {
                     `${def?.emoji ?? '🐾'} **${name}** — owned by <@${bestUser.userId}>\n\n` +
                     `_${bestCount} interaction${bestCount !== 1 ? 's' : ''} this week_`
                 )
-                .addFields({ name: '❤️ Bond', value: `${heartBar(bondDays)} ${bondDays} days`, inline: true })
+                .addFields({ name: '❤️ Bond', value: `${heartBar(bond)} ${bondTierFor(bond).title} (${Math.floor(bond)})`, inline: true })
                 .setFooter({ text: 'Earn the ribbon by feeding, playing with, or resting your pet!' })
                 .setTimestamp();
 
@@ -1057,6 +1207,10 @@ module.exports = {
     recordPetInteraction,
     getPetBonus,
     getTotalBonus,
+    CHANCE_BONUS_TYPES,
+    petBonusParts,
+    formatPetBonus,
+    petChanceBonus,
     getMoodLine,
     getMoodBand,
     getMoodAction,
@@ -1064,6 +1218,17 @@ module.exports = {
     SPECIES_ACTIONS,
     petCompanionLine,
     heartBar,
+    BOND_MAX,
+    BOND_DAILY_CAP,
+    BOND_CARE,
+    BOND_HUNGRY_DECAY_PER_DAY,
+    BOND_RUNAWAY_PENALTY,
+    BOND_TIERS,
+    effectiveBond,
+    bondTierFor,
+    getBondTier,
+    recordBondCare,
+    bondAfterRunaway,
     assignPersonality,
     // Progression & battles
     PET_MAX_LEVEL,

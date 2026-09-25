@@ -277,6 +277,7 @@ describe('/pet battle against a wild pet', () => {
         expect(stored.pvpWins).toBeUndefined(); // wild wins never count toward PvP
         expect(stored.xp).toBe(22);
         expect(stored.lastBattle).toBeInstanceOf(Date);
+        expect(stored.bond).toBe(1); // a fight is training, which counts as care
         expect(interaction.replies[1].embeds[0].data.title).toBe('⚔️ A wild challenger appears!');
         expect(interaction.replies[1].embeds[0].data.description).toContain('Wild Boar** (Lv.4)');
         const result = interaction.replies.at(-1).embeds[0].data;
@@ -423,6 +424,9 @@ describe('/pet battle against a member', () => {
         expect(petOf(RIVAL)).toEqual(expect.objectContaining({ battleWins: 0, battleLosses: 1, pvpLosses: 1, xp: 10 }));
         expect(petOf(USER).lastBattle).toBeInstanceOf(Date);
         expect(petOf(RIVAL).lastBattle).toBeInstanceOf(Date);
+        // Only the challenger chose to fight, so only its pet gains bond.
+        expect(petOf(USER).bond).toBe(1);
+        expect(petOf(RIVAL).bond ?? 0).toBe(0);
         expect(wallet(USER)).toBe(1000);
         expect(wallet(RIVAL)).toBe(1000);
         const result = interaction.replies.at(-1).embeds[0].data;

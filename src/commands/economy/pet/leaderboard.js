@@ -2,7 +2,7 @@
 
 const { EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
-const { heartBar, getPetDisplay } = require('../../../services/petService');
+const { heartBar, getPetDisplay, effectiveBond, bondTierFor } = require('../../../services/petService');
 const COLORS = require('../../../utils/embedColors');
 
 async function executeLeaderboard(interaction) {
@@ -11,6 +11,8 @@ async function executeLeaderboard(interaction) {
     const sortType = interaction.options.getString('type') ?? 'bonds';
 
     let sortStage, addFieldsStage, titleLabel, lineBuilder;
+    let rerank = rows => rows;
+    let poolSize = 10;
 
     if (sortType === 'level') {
         addFieldsStage = { $addFields: { petLevel: '$pets.level' } };
@@ -34,15 +36,25 @@ async function executeLeaderboard(interaction) {
             return `${rank} ${emoji} **${titledName}** — ⚔️ ${e.pet.pvpWins ?? 0}W / ${e.pet.pvpLosses ?? 0}L vs members — <@${e.userId}>`;
         };
     } else {
-        // Default: bond days
-        addFieldsStage = { $addFields: { bondDays: { $toInt: { $divide: [{ $subtract: [new Date(), '$pets.adoptedAt'] }, 86400000] } } } };
-        sortStage = { $sort: { bondDays: -1 } };
+        // Default: bond. It used to be days since adoption, which ranked pets
+        // by age (#1186); it is now the care-earned bond, oldest pet first on a
+        // tie so a long-kept pet still edges out a new one at the same bond.
+        addFieldsStage = { $addFields: { petBond: { $ifNull: ['$pets.bond', 0] } } };
+        sortStage = { $sort: { petBond: -1, 'pets.adoptedAt': 1 } };
         titleLabel = 'Most Bonded Pets';
         lineBuilder = (e, rank) => {
             const { emoji, titledName } = getPetDisplay(e.pet);
             const potw = e.pet.potw ? ' 🌟' : '';
-            return `${rank} ${emoji} **${titledName}**${potw} — ${heartBar(e.bondDays)} ${e.bondDays}d — <@${e.userId}>`;
+            return `${rank} ${emoji} **${titledName}**${potw} — ${heartBar(e.bond)} ${bondTierFor(e.bond).title} ${Math.floor(e.bond)} — <@${e.userId}>`;
         };
+        // The stored bond does not yet include the hungry-time drain owed by a
+        // player who has not run a pet command since; the embed shows the
+        // decay-aware value and re-sorts on it, from a slightly wider pool.
+        poolSize = 25;
+        rerank = rows => rows
+            .map(e => ({ ...e, bond: effectiveBond(e.pet) }))
+            .sort((a, b) => b.bond - a.bond)
+            .slice(0, 10);
     }
 
     const top = await User.aggregate([
@@ -50,9 +62,9 @@ async function executeLeaderboard(interaction) {
         { $unwind: '$pets' },
         addFieldsStage,
         sortStage,
-        { $limit: 10 },
-        { $project: { _id: 0, userId: 1, pet: '$pets', bondDays: 1, petLevel: 1, petWins: 1, petLosses: 1 } },
-    ]);
+        { $limit: poolSize },
+        { $project: { _id: 0, userId: 1, pet: '$pets', petBond: 1, petLevel: 1, petWins: 1, petLosses: 1 } },
+    ]).then(rerank);
 
     const medals = ['🥇', '🥈', '🥉'];
     const lines  = top.map((e, i) => lineBuilder(e, medals[i] ?? `${i + 1}.`));

@@ -16,7 +16,7 @@ function options(overrides = {}) {
         petId: 'wolf', iconId: 'pet:wolf', kicker: "TheShield's companion", titledName: 'Apex Ghost',
         species: 'Wolf', personality: 'Loyal', rare: false, potw: false, stage: 3, stageName: 'Stage 3 - Apex',
         level: 24, maxed: false, xpInLevel: 340, xpToNext: 520, hunger: 72, threshold: 30, moodColor: '#cddc39',
-        bondDays: 42, bonus: { pct: 22.5, label: 'hunt yield', active: true },
+        bond: 42, bondMax: 100, bondTitle: 'Trusted', bondFrame: '#cd7f32', bonus: { pct: 22.5, label: 'hunt yield', active: true },
         stats: { hp: 214, atk: 71, def: 38, spd: 29, crit: 0.1 }, boosted: ['hp', 'def'],
         record: { wins: 18, losses: 4, pvpWins: 5, pvpLosses: 2 },
         action: 'a low, contented rumble', quote: '"Life\'s pretty chill right now, honestly."',
@@ -42,14 +42,14 @@ describe('createPetStatusCard', () => {
     test('the awkward edges still draw: no art, no passive, max level, empty hunger, long name, POTW and rare', async () => {
         await expectCard(await createPetStatusCard(options({
             petId: 'nonesuch', iconId: null, species: 'Nonesuch', personality: null,
-            bonus: null, maxed: true, level: 30, xpInLevel: 0, xpToNext: 0, hunger: 0, bondDays: 0,
+            bonus: null, maxed: true, level: 30, xpInLevel: 0, xpToNext: 0, hunger: 0, bond: 0, bondTitle: null, bondFrame: null,
             titledName: 'Seasoned Sir Reginald Fluffington the Third of Somewhere', potw: true, rare: true,
             stats: {}, record: {}, action: null, footerLeft: null, footerRight: null,
         })));
     });
 
     test('out-of-range numbers are clamped rather than thrown on', async () => {
-        await expectCard(await createPetStatusCard(options({ hunger: 250, stage: 9, xpInLevel: 900, xpToNext: 100, bondDays: 5000 })));
+        await expectCard(await createPetStatusCard(options({ hunger: 250, stage: 9, xpInLevel: 900, xpToNext: 100, bond: 5000 })));
         await expectCard(await createPetStatusCard(options({ hunger: -5, stage: 0, xpInLevel: 0, xpToNext: 0 })));
     });
 });

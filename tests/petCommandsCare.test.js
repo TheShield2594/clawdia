@@ -509,6 +509,61 @@ describe('/pet feed', () => {
         expect(stored().pets[0].weeklyInteractions).toBe(4);
     });
 
+    // #1188: one command can use up to ten items, but never more than the pet
+    // can take.
+    test('quantity 5 on a pet at 60% uses only the four items it takes to fill it', async () => {
+        const now = Date.now();
+        jest.spyOn(Date, 'now').mockReturnValue(now);
+        seedUser({
+            pets: [makePet({ hunger: 60, name: 'Rex', lastDecayAt: new Date(now) })],
+            inventory: [{ itemId: 'pet_food', quantity: 7 }],
+        });
+
+        const interaction = await run('feed', { material: 'pet_food', quantity: 5 });
+
+        const fed = stored().pets[0];
+        expect(fed.hunger).toBe(100);
+        expect(fed.xp).toBe(4 * 4);
+        expect(fed.weeklyInteractions).toBe(1);
+        expect(stored().inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
+        const text = textOf(interaction);
+        expect(text).toContain('`pet_food` ×4');
+        expect(text).toContain('not favorite — +40 hunger');
+        expect(text).toContain('+16 pet XP');
+        expect(text).toContain('Used **4** of 5 — full now · 3 left');
+    });
+
+    test('quantity stops at the pile, and the last item may top the pet up past what it needed', async () => {
+        const now = Date.now();
+        jest.spyOn(Date, 'now').mockReturnValue(now);
+        seedUser({
+            pets: [makePet({ hunger: 10, lastDecayAt: new Date(now) })],
+            hunt: { materials: { rabbits_foot: 2 } },
+        });
+
+        const interaction = await run('feed', { material: 'rabbits_foot', quantity: 10 });
+
+        expect(stored().pets[0].hunger).toBe(60);
+        expect(stored().pets[0].xp).toBe(16);
+        expect(stored().hunt.materials.rabbits_foot).toBe(0);
+        expect(textOf(interaction)).toContain('favorite food — +50 hunger!');
+        expect(textOf(interaction)).toContain('Used **2** of 10 — that was all you had · 0 left');
+    });
+
+    test('a quantity that is all used says so without a reason', async () => {
+        const now = Date.now();
+        jest.spyOn(Date, 'now').mockReturnValue(now);
+        seedUser({
+            pets: [makePet({ hunger: 20, lastDecayAt: new Date(now) })],
+            inventory: [{ itemId: 'pet_food', quantity: 5 }],
+        });
+
+        const interaction = await run('feed', { material: 'pet_food', quantity: 3 });
+
+        expect(stored().pets[0].hunger).toBe(50);
+        expect(textOf(interaction)).toContain('Used **3** of 3 · 2 left');
+    });
+
     test('a pet type with no definition cannot be fed', async () => {
         seedUser({ pets: [makePet({ petId: 'unicorn', hunger: 20 })], inventory: [{ itemId: 'pet_food', quantity: 1 }] });
 
@@ -622,6 +677,40 @@ describe('/pet feed', () => {
         expect(stored().deceasedPets).toHaveLength(1);
     });
 
+    // #1186: running off costs bond — the days starving drain it, and the
+    // runaway itself takes a fixed cut the Revive Scroll does not give back.
+    test('a pet that runs away loses bond to the hunger and the runaway', async () => {
+        const now = Date.now();
+        jest.spyOn(Date, 'now').mockReturnValue(now);
+        const starvedSince = new Date(now - 5 * DAY);
+        seedUser({
+            pets: [makePet({ _id: 'p-gone', petId: 'cat', bond: 70, hunger: 0, starving: true, starvingStartAt: starvedSince, lastDecayAt: starvedSince })],
+        });
+
+        await run('feed', { material: 'pet_food' });
+
+        // 70 − 5 days × 2 − 25.
+        expect(stored().deceasedPets[0].bond).toBeCloseTo(35, 6);
+    });
+
+    test('feeding raises bond once per command, under the daily cap', async () => {
+        const now = Date.now();
+        jest.spyOn(Date, 'now').mockReturnValue(now);
+        seedUser({
+            pets: [makePet({ hunger: 10, bond: 12, lastDecayAt: new Date(now) })],
+            inventory: [{ itemId: 'pet_food', quantity: 10 }],
+        });
+
+        const first = await run('feed', { material: 'pet_food', quantity: 3 });
+        expect(stored().pets[0].bond).toBe(14);
+        expect(textOf(first)).toContain('❤️ **+2 bond**');
+
+        await run('feed', { material: 'pet_food' });
+        const third = await run('feed', { material: 'pet_food' });
+        expect(stored().pets[0].bond).toBe(16);
+        expect(textOf(third)).not.toContain('bond**');
+    });
+
     // A death whose save loses a version race is neither stored nor announced,
     // and the player gets feed's own edit-conflict reply rather than the
     // command-wide apology.
@@ -649,26 +738,26 @@ describe('/pet release', () => {
 
     test('asks first, and a confirmed release removes the pet', async () => {
         seedUser({
-            pets: [makePet({ _id: 'p-dog', name: 'Rex', level: 12, battleWins: 3, battleLosses: 1 }), makePet({ _id: 'p-cat', petId: 'cat' })],
+            pets: [makePet({ _id: 'p-dog', name: 'Rex', level: 12, battleWins: 3, battleLosses: 1, bond: 62.5 }), makePet({ _id: 'p-cat', petId: 'cat' })],
         });
 
         const interaction = await run('release', { slot: 'p-dog' }, { components: [confirm] });
 
         const prompt = interaction.replies[0];
         expect(prompt.embeds[0].data.title).toBe('Release Rex?');
-        expect(prompt.embeds[0].data.description).toMatch(/Lv\.12, 10 days of bond, 3W \/ 1L/);
+        expect(prompt.embeds[0].data.description).toMatch(/Lv\.12, Devoted bond \(62\), 3W \/ 1L/);
         expect(prompt.components[0].components.map(c => c.data.custom_id))
             .toEqual(['pet_release_yes:interaction-1', 'pet_release_no:interaction-1']);
         expect(interaction.replies.at(-1).content).toBe('🐶 **Rex** has been released. Goodbye, friend!');
         expect(stored().pets.map(p => p._id)).toEqual(['p-cat']);
     });
 
-    test('a bond of exactly one day is singular', async () => {
-        seedUser({ pets: [makePet({ adoptedAt: new Date(Date.now() - DAY - HOUR) })] });
+    test('bond is what care earned, not how long the pet was kept', async () => {
+        seedUser({ pets: [makePet({ adoptedAt: new Date(Date.now() - 400 * DAY) })] });
 
         const interaction = await run('release', { slot: '0' }, { components: [cancel] });
 
-        expect(interaction.replies[0].embeds[0].data.description).toContain('1 day of bond');
+        expect(interaction.replies[0].embeds[0].data.description).toContain('Wary bond (0)');
     });
 
     test('keeping the pet leaves the roster alone', async () => {
@@ -800,12 +889,13 @@ describe('/pet list', () => {
 describe('/pet leaderboard', () => {
     const pipelineOf = () => mockUsers.model.aggregate.mock.calls[0][0];
 
-    test('defaults to bond days, with medals, the POTW star and a numbered fourth place', async () => {
+    test('defaults to bond, with medals, the POTW star and a numbered fourth place', async () => {
+        const fed = { hunger: 100, lastDecayAt: new Date() };
         mockUsers.model.aggregate.mockResolvedValueOnce([
-            { userId: 'u1', bondDays: 40, pet: { petId: 'dog', name: 'Rex', potw: true } },
-            { userId: 'u2', bondDays: 20, pet: { petId: 'cat' } },
-            { userId: 'u3', bondDays: 10, pet: { petId: 'mystery' } },
-            { userId: 'u4', bondDays: 1, pet: { petId: 'fox' } },
+            { userId: 'u1', petBond: 92, pet: { petId: 'dog', name: 'Rex', potw: true, bond: 92, ...fed } },
+            { userId: 'u2', petBond: 40, pet: { petId: 'cat', bond: 40, ...fed } },
+            { userId: 'u3', petBond: 10, pet: { petId: 'mystery', bond: 10, ...fed } },
+            { userId: 'u4', petBond: 0,  pet: { petId: 'fox', ...fed } },
         ]);
 
         const interaction = await run('leaderboard');
@@ -813,12 +903,31 @@ describe('/pet leaderboard', () => {
         const embed = interaction.replies.at(-1).embeds[0].data;
         expect(embed.title).toBe('🐾 Pet Leaderboard — Most Bonded Pets');
         const lines = embed.description.split('\n');
-        expect(lines[0]).toMatch(/^🥇 🐶 \*\*Rex\*\* 🌟 — .* 40d — <@u1>$/);
-        expect(lines[1]).toMatch(/^🥈 🐱 \*\*Cat\*\* — /);
-        expect(lines[2]).toMatch(/^🥉 🐾 \*\*mystery\*\* — /);
-        expect(lines[3]).toMatch(/^4\. 🦊 \*\*Fox\*\* — /);
+        expect(lines[0]).toBe('🥇 🐶 **Rex** 🌟 — ❤️❤️❤️❤️❤️❤️❤️🖤 Soulbound 92 — <@u1>');
+        expect(lines[1]).toMatch(/^🥈 🐱 \*\*Cat\*\* — .* Trusted 40 — /);
+        expect(lines[2]).toMatch(/^🥉 🐾 \*\*mystery\*\* — .* Wary 10 — /);
+        expect(lines[3]).toMatch(/^4\. 🦊 \*\*Fox\*\* — .* Wary 0 — /);
         expect(pipelineOf()[0]).toEqual({ $match: { guildId: GUILD, 'pets.0': { $exists: true } } });
-        expect(pipelineOf()[3]).toEqual({ $sort: { bondDays: -1 } });
+        expect(pipelineOf()[2]).toEqual({ $addFields: { petBond: { $ifNull: ['$pets.bond', 0] } } });
+        expect(pipelineOf()[3]).toEqual({ $sort: { petBond: -1, 'pets.adoptedAt': 1 } });
+    });
+
+    // #1186: the stored bond lags a player who has not run a pet command while
+    // their pet went hungry, so the board re-ranks on the decay-aware value.
+    test('ranks on bond as it stands now, not as last written', async () => {
+        const now = Date.now();
+        jest.spyOn(Date, 'now').mockReturnValue(now);
+        mockUsers.model.aggregate.mockResolvedValueOnce([
+            // Stored higher, but ten days starving since: 50 − 20 = 30.
+            { userId: 'u1', petBond: 50, pet: { petId: 'dog', name: 'Starved', bond: 50, hunger: 0, lastDecayAt: new Date(now - 10 * DAY) } },
+            { userId: 'u2', petBond: 45, pet: { petId: 'cat', name: 'Kept', bond: 45, hunger: 100, lastDecayAt: new Date(now) } },
+        ]);
+
+        const interaction = await run('leaderboard');
+
+        const lines = interaction.replies.at(-1).embeds[0].data.description.split('\n');
+        expect(lines[0]).toMatch(/Kept.* Trusted 45 — <@u2>$/);
+        expect(lines[1]).toMatch(/Starved.* Friendly 30 — <@u1>$/);
     });
 
     test('by level marks evolved stages', async () => {

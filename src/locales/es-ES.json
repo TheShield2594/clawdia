@@ -1083,7 +1083,8 @@
         "description": "Alimenta a una mascota; su comida favorita restaura más y da XP extra.",
         "options": {
           "material": { "description": "Qué comida usar: empieza a escribir para ver lo que tienes" },
-          "slot": { "description": "A qué mascota alimentar (por defecto, la primera)" }
+          "slot": { "description": "A qué mascota alimentar (por defecto, la primera)" },
+          "quantity": { "description": "Da hasta esta cantidad; se detiene cuando tu mascota está llena (por defecto 1)" }
         }
       },
       "release": {
@@ -1103,7 +1104,7 @@
       "leaderboard": {
         "description": "Consulta las mejores mascotas de este servidor.",
         "options": {
-          "type": { "description": "Orden (por defecto: días de vínculo)" }
+          "type": { "description": "Orden (por defecto: vínculo)" }
         }
       },
       "battle": {

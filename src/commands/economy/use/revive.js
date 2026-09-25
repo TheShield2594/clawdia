@@ -7,7 +7,7 @@ const User = require('../../../models/User');
 const { PET_DEFINITIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../../services/petService');
 const { leftField } = require('./status');
 
-/** Revives `deceasedPets[0]` with its level, record and bond, or says why not. */
+/** Revives `deceasedPets[0]` with its level, record and remaining bond, or says why not. */
 async function useReviveScroll({ interaction, userFilter, preview, canonicalId, dropEmptyInventorySlots }) {
     const fallen = preview.deceasedPets?.[0];
     if (!fallen) {
@@ -38,8 +38,8 @@ async function useReviveScroll({ interaction, userFilter, preview, canonicalId, 
     const now = new Date();
     const revived = {
         ...(fallen.toObject ? fallen.toObject() : fallen),
-        // Comes back weak but alive: bond, level, XP and record are preserved,
-        // the starvation state is not.
+        // Comes back weak but alive: level, XP and record are preserved, and the
+        // bond it kept after the runaway penalty; the starvation state is not.
         hunger: 50,
         lastFed: now,
         lastDecayAt: now,
@@ -89,7 +89,7 @@ async function useReviveScroll({ interaction, userFilter, preview, canonicalId, 
         .setDescription(
             `${def?.emoji ?? '🐾'} **${name}** is back at your side, weak but whole.\n\n` +
             `They kept everything: **Level ${fallen.level ?? 1}**, ` +
-            `**${fallen.battleWins ?? 0}W / ${fallen.battleLosses ?? 0}L**, and every day of your bond.`
+            `**${fallen.battleWins ?? 0}W / ${fallen.battleLosses ?? 0}L** — though running off cost some of your bond.`
         )
         .addFields(
             { name: '🍖 Hunger', value: '50% — feed them soon', inline: true },

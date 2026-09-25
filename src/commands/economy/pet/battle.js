@@ -14,6 +14,7 @@ const {
     makeWildPet,
     levelMatched,
     applyPetXp,
+    recordBondCare,
     resolvePetRef,
     XP_BATTLE_WIN,
     XP_BATTLE_LOSS,
@@ -213,6 +214,8 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
 
     const xpRes = applyPetXp(myPet, won ? XP_WILD_WIN : XP_WILD_LOSS);
     myPet.lastBattle  = new Date();
+    // A fight is the pet's training, and counts as care toward its bond.
+    recordBondCare(myPet, 'battle');
     if (won) myPet.battleWins   = (myPet.battleWins ?? 0) + 1;
     else     myPet.battleLosses = (myPet.battleLosses ?? 0) + 1;
     user.markModified('pets');
@@ -366,6 +369,8 @@ async function pvpBattle(interaction, ctx) {
         losePet.battleLosses = (losePet.battleLosses ?? 0) + 1;
         losePet.pvpLosses    = (losePet.pvpLosses ?? 0) + 1;
         aPet.lastBattle = new Date(); bPet.lastBattle = new Date();
+        // Only the challenger chose to train; the defender's owner did nothing.
+        recordBondCare(aPet, 'battle');
         chUser.markModified('pets'); opUser.markModified('pets');
 
         // Payout — the pot moves on its own keyed write. It was a bare `$inc` that

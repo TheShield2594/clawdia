@@ -4,7 +4,7 @@ const { EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../../models/User');
 const {
     PET_DEFINITIONS, PERSONALITY_TRAITS, STARVING_THRESHOLD,
-    createPet, hasFreePetSlot, petCapacity, countSlotPets, sanitizePetName,
+    createPet, hasFreePetSlot, petCapacity, countSlotPets, sanitizePetName, formatPetBonus,
 } = require('../../../services/petService');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { isVersionError } = require('../../../utils/versionRetry');
@@ -104,7 +104,7 @@ async function executeAdopt(interaction) {
             `${personalityDef.emoji} **Personality: ${personalityDef.label}** — *${personalityDef.desc}*`
         )
         .addFields(
-            { name: 'Passive Bonus',  value: `+${def.bonusPct}% ${def.bonusType.replace(/_/g, ' ')} (active when hunger ≥ ${STARVING_THRESHOLD}%)`, inline: true },
+            { name: 'Passive Bonus',  value: `${formatPetBonus(def.bonusType, def.bonusPct)} (active when hunger ≥ ${STARVING_THRESHOLD}%)`, inline: true },
             { name: 'Favorite Food',  value: `\`${def.favoriteMaterial}\` (restores 25 hunger)`,                                  inline: true },
             { name: 'Cost',           value: `${def.cost.toLocaleString()} ${currency}`,                                           inline: true },
         )
