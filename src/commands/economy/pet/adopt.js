@@ -4,7 +4,7 @@ const { EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../../models/User');
 const {
     PET_DEFINITIONS, PERSONALITY_TRAITS, STARVING_THRESHOLD,
-    createPet, hasFreePetSlot, petCapacity, countSlotPets, sanitizePetName, formatPetBonus,
+    createPet, joinVacation, noteCodex, hasFreePetSlot, petCapacity, countSlotPets, sanitizePetName, formatPetBonus,
 } = require('../../../services/petService');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const { isVersionError } = require('../../../utils/versionRetry');
@@ -69,8 +69,10 @@ async function executeAdopt(interaction) {
     user.balance = charged.balance;
     user.unmarkModified('balance');
 
-    const newPet = createPet(petId, { name: petName });
+    // A pet adopted mid-vacation joins it, so the pause covers every pet (#1181).
+    const newPet = joinVacation(user, createPet(petId, { name: petName }));
     user.pets.push(newPet);
+    noteCodex(user, petId);
     user.markModified('pets');
     const personality = newPet.personality;
 

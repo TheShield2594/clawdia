@@ -144,6 +144,15 @@ const JOBS = [
         fn: client => require('../petService').selectPetOfTheWeek(client),
     },
     {
+        // One DM when a pet's passive switches off and one when it is about to
+        // run away (#1181). Hourly: hunger moves 10 points a day.
+        name: 'sendPetHungerWarnings',
+        scope: SCOPE.GUILD,
+        service: 'petWarningService',
+        schedule: '23 * * * *',
+        fn: client => require('../petWarningService').sendPetHungerWarnings(client),
+    },
+    {
         name: 'applyBankInterest',
         scope: SCOPE.GUILD,
         service: 'bankService',

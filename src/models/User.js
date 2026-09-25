@@ -56,6 +56,14 @@ const petFields = () => ({
     bond:               { type: Number,  default: 0, min: 0, max: 100 },
     bondDay:            { type: Number,  default: null },
     bondToday:          { type: Number,  default: 0    },
+    // Vacation (#1181): the window this pet's hunger is paused for — see the
+    // Vacation section of services/petService.js.
+    vacationFrom:       { type: Date,    default: null },
+    vacationUntil:      { type: Date,    default: null },
+    // Hunger warning DMs (#1181), one per crossing: below the passive
+    // threshold, and empty. Cleared when the pet is fed back above each.
+    hungerWarnedLow:    { type: Boolean, default: false },
+    hungerWarnedEmpty:  { type: Boolean, default: false },
 });
 
 const userSchema = new Schema({
@@ -277,6 +285,9 @@ const userSchema = new Schema({
         leaderboard: {
             overtaken: { type: Boolean, default: true },  // DM when someone passes you
             climbed:   { type: Boolean, default: false }  // DM when you hit a major rank threshold
+        },
+        pets: {
+            hunger: { type: Boolean, default: true }  // DM when a pet's passive switches off, and when it is about to run away
         }
     },
 
@@ -299,6 +310,8 @@ const userSchema = new Schema({
     // Extra pet slots bought with the Pet Slot Expansion item (capped in petService).
     petSlots: { type: Number, default: 0, min: 0 },
     pets: [petFields()],
+    // Every species this player has ever owned, for /pet codex (#1187).
+    petCodex: { type: [String], default: [] },
 
     // Pets lost to starvation, most recent first. Retained so a Revive Scroll
     // can restore one with its level, bond and battle record intact; capped at

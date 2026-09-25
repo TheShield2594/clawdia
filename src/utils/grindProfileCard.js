@@ -49,6 +49,8 @@ const THEMES = {
     mine:    { top: '#2e2622', bottom: '#0d0a08', accent: '#e07b39', muted: '#cdb4a0', panel: 'rgba(255,255,255,0.06)' },
     // /inventory's Items tab — not one grind but all of them, so Discord blurple.
     items:   { top: '#1f2244', bottom: '#0a0b18', accent: '#7c86f7', muted: '#b6bbe9', panel: 'rgba(255,255,255,0.06)' },
+    // /pet codex — every species, owned or not (#1187).
+    pets:    { top: '#2b1d3a', bottom: '#0d0914', accent: '#ff9f6b', muted: '#d7c1e0', panel: 'rgba(255,255,255,0.06)' },
     // /casino slots' paytable (games/casino/slotsPaytableCard.js), drawn in this family's style.
     slots:   { top: '#271a4a', bottom: '#0c0818', accent: '#b08cff', muted: '#c4b7ea', panel: 'rgba(255,255,255,0.06)' },
 };
@@ -231,7 +233,7 @@ const CARD_H = 430;
 
 /**
  * @param {object} opts
- * @param {'hunt'|'fish'|'explore'} opts.activity   picks the palette
+ * @param {'hunt'|'fish'|'explore'|'mine'|'pets'} opts.activity   picks the palette
  * @param {string}  opts.name          display name
  * @param {?string} opts.avatarUrl     PNG avatar URL; a failed fetch draws a disc
  * @param {string}  opts.rankTitle     e.g. "Marksman"

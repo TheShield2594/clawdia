@@ -1002,7 +1002,7 @@ describe('/pet dispatcher', () => {
     test('the definition carries every subcommand', () => {
         const json = pet.data.toJSON();
         expect(json.name).toBe('pet');
-        expect(json.options.map(o => o.name)).toEqual(['adopt', 'status', 'feed', 'release', 'rename', 'list', 'leaderboard', 'battle']);
+        expect(json.options.map(o => o.name)).toEqual(['adopt', 'status', 'feed', 'release', 'rename', 'list', 'codex', 'vacation', 'leaderboard', 'battle']);
     });
 });
 

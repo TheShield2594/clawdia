@@ -7,6 +7,7 @@ const User = require('../../../models/User');
 const { getGuildSettings } = require('../../../utils/guildSettingsCache');
 const {
     isPetActive,
+    isOnVacation,
     pickDefenderPet,
     getPetDisplay,
     getPetStats,
@@ -36,6 +37,7 @@ const {
     NO_SUCH_PET, resolveUser, syncHungerAndRunaway, readSlotOption,
     creditPetCare, collectPetAchievements, announcePetAchievements,
 } = require('./shared');
+const { revealEvolution } = require('./evolution');
 
 const BATTLE_COOLDOWN_MS  = 10 * 60 * 1000;    // per-pet battle cooldown
 const BATTLE_MIN_ACCOUNT_AGE_MS = 7 * 24 * 3_600_000; // wagered battles only
@@ -81,6 +83,7 @@ function battleLogLines(rounds, nameA, nameB) {
 
 function petUsable(pet) {
     if (!pet) return { ok: false, reason: 'no pet in that slot' };
+    if (isOnVacation(pet)) return { ok: false, reason: 'on vacation — end it with `/pet vacation off` to battle' };
     if (!isPetActive(pet)) return { ok: false, reason: 'too hungry to fight (feed it first)' };
     return { ok: true };
 }
@@ -279,7 +282,10 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
         xpLineA: petXpLine(da.titledName, xpRes),
     });
     if (wildArt) resultEmbed.setThumbnail(wildArt.url);
-    return interaction.editReply({ embeds: [resultEmbed], files: artFiles, attachments: [] });
+    await interaction.editReply({ embeds: [resultEmbed], files: artFiles, attachments: [] });
+    await revealEvolution(interaction, myPet, xpRes, {
+        ownerId: interaction.user.id, ownerName: interaction.member?.displayName ?? interaction.user.username,
+    });
 }
 
 async function pvpBattle(interaction, ctx) {
@@ -486,7 +492,7 @@ async function pvpBattle(interaction, ctx) {
 
         const da2 = getPetDisplay(aSnap), db2 = getPetDisplay(bSnap);
         const winnerDisp = aWon ? da2 : db2;
-        return interaction.editReply({
+        await interaction.editReply({
             content: null,
             embeds: [battleResultEmbed({
                 color: '#f1c40f',
@@ -498,6 +504,15 @@ async function pvpBattle(interaction, ctx) {
             })],
             components: [],
         }).catch(() => {});
+        // Each side's reveal only once its evolution is actually saved.
+        if (chSaved.status === 'fulfilled') {
+            await revealEvolution(interaction, aPet, aXp, {
+                ownerId: interaction.user.id, ownerName: interaction.member?.displayName ?? interaction.user.username,
+            });
+        }
+        if (opSaved.status === 'fulfilled') {
+            await revealEvolution(interaction, bPet, bXp, { ownerId: opponent.id, ownerName: opponent.globalName ?? opponent.username });
+        }
     });
 
     collector.on('end', (collected, reason) => {

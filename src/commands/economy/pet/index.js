@@ -26,6 +26,9 @@ const { executeRename } = require('./rename');
 const { executeList, rareCompanionFooter } = require('./list');
 const { executeLeaderboard } = require('./leaderboard');
 const { executeBattle } = require('./battle');
+const { executeCodex } = require('./codex');
+const { executeVacation } = require('./vacation');
+const { VACATION_MAX_DAYS } = require('../../../services/petService');
 
 module.exports = {
     cooldown: 5,
@@ -84,6 +87,16 @@ module.exports = {
                 )
         )
         .addSubcommand(sub => sub.setName('list').setDescription('View all available pets in the shop.'))
+        .addSubcommand(sub => sub.setName('codex').setDescription('Every pet species — the ones you have owned, and where the rare ones come from.'))
+        .addSubcommand(sub =>
+            sub.setName('vacation')
+                .setDescription(`Pause hunger for all your pets for up to ${VACATION_MAX_DAYS} days (passives and battles are off meanwhile).`)
+                .addStringOption(opt =>
+                    opt.setName('state').setDescription('Start or end the vacation').setRequired(true)
+                        .addChoices({ name: 'On', value: 'on' }, { name: 'Off', value: 'off' }))
+                .addIntegerOption(opt =>
+                    opt.setName('days').setDescription(`How many days (default ${VACATION_MAX_DAYS})`).setRequired(false)
+                        .setMinValue(1).setMaxValue(VACATION_MAX_DAYS)))
         .addSubcommand(sub =>
             sub.setName('leaderboard')
                 .setDescription('View the top pets in this server.')
@@ -123,6 +136,8 @@ module.exports = {
             if (sub === 'list')        return await executeList(interaction);
             if (sub === 'leaderboard') return await executeLeaderboard(interaction);
             if (sub === 'battle')      return await executeBattle(interaction);
+            if (sub === 'codex')       return await executeCodex(interaction);
+            if (sub === 'vacation')    return await executeVacation(interaction);
         } catch (err) {
             console.error('[pet] error:', err);
             const msg = { content: 'Something went wrong with the pet command.', flags: MessageFlags.Ephemeral };

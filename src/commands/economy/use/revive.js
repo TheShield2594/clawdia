@@ -45,6 +45,11 @@ async function useReviveScroll({ interaction, userFilter, preview, canonicalId, 
         lastDecayAt: now,
         starving: false,
         starvingStartAt: null,
+        // A fresh start for the hunger DMs and no leftover vacation (#1181).
+        hungerWarnedLow: false,
+        hungerWarnedEmpty: false,
+        vacationFrom: null,
+        vacationUntil: null,
     };
     delete revived._id;
     delete revived.diedAt;

@@ -33,6 +33,7 @@ const {
     trainingSessions,
     trainingPct,
     getSpeciesMove,
+    isOnVacation,
 } = require('./petService');
 const { MATERIAL_RARITY } = require('../data/materialRarity');
 const { getItemImageAttachment } = require('../utils/itemImageHelper');
@@ -90,7 +91,7 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
         ? `${lastFedH}h ago`
         : `${Math.floor(lastFedH / 24)}d ago`;
 
-    const potwLine   = pet.potw ? '\n🌟 **Pet of the Week**' : '';
+    const potwLine   = (pet.potw ? '\n🌟 **Pet of the Week**' : '') + (vacationLine(pet) ? `\n${vacationLine(pet)}` : '');
     const move       = getSpeciesMove(pet.petId);
 
     const personalityDef = pet.personality ? PERSONALITY_TRAITS[pet.personality] : null;
@@ -210,6 +211,13 @@ function trainingText(pet) {
 function bondText(pet, now = Date.now()) {
     const bond = effectiveBond(pet, now);
     return `${heartBar(bond)} **${bondTierFor(bond).title}** · ${Math.floor(bond)}/${BOND_MAX}`;
+}
+
+/** "🏖️ On vacation until …" while a pet's hunger is paused (#1181), else null. */
+function vacationLine(pet, now = Date.now()) {
+    if (!isOnVacation(pet, now)) return null;
+    const until = Math.floor(new Date(pet.vacationUntil).getTime() / 1000);
+    return `🏖️ **On vacation** until <t:${until}:f> — hunger paused, passive and battles off`;
 }
 
 function lastFedText(pet, now = Date.now()) {
@@ -344,6 +352,7 @@ function buildPetCardEmbed(pet, index, total, ownerAvatarURL, cardName, now = Da
         `${display.emoji} ${action ? `*${action}* — ` : ''}${getMoodLine(pet, now)}`,
         personalityDef ? `${personalityDef.emoji} **${personalityDef.label}** — ${personalityDef.desc}` : null,
         pet.potw ? '🌟 **Pet of the Week**' : null,
+        vacationLine(pet, now),
         '',
         `📈 Lv **${level}** (${xpNote}) · 🍖 **${Math.round(hunger)}%** · ❤️ **${getBondTier(pet, now).title}** ${Math.floor(effectiveBond(pet, now))}/${BOND_MAX} · `
             + `${bonusOn ? '✅' : '❌'} ${formatPetBonus(def?.bonusType, getEffectiveBonusPct(pet, now))}`

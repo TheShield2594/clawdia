@@ -1064,6 +1064,12 @@
           "type": { "description": "Qué notificación cambiar" },
           "value": { "description": "Activar o desactivar la notificación" }
         }
+      },
+      "pets": {
+        "description": "Activa o desactiva los DM cuando una mascota tiene hambre o va a escaparse.",
+        "options": {
+          "value": { "description": "Activar o desactivar la notificación" }
+        }
       }
     }
   },
@@ -1101,6 +1107,14 @@
         }
       },
       "list": { "description": "Consulta todas las mascotas disponibles en la tienda." },
+      "codex": { "description": "Todas las especies de mascota: las que has tenido y de dónde salen las raras." },
+      "vacation": {
+        "description": "Pausa el hambre de todas tus mascotas hasta 14 días (sin pasivas ni combates mientras tanto).",
+        "options": {
+          "state": { "description": "Empezar o terminar las vacaciones" },
+          "days": { "description": "Cuántos días (por defecto 14)" }
+        }
+      },
       "leaderboard": {
         "description": "Consulta las mejores mascotas de este servidor.",
         "options": {
