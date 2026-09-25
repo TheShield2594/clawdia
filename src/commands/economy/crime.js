@@ -408,7 +408,10 @@ module.exports = {
             const pickDeadline = () => relTime(new Date(Date.now() + PICK_WINDOW_MS));
             // Step 1 quotes each job at its standard approach.
             const standardOf = c => EXECUTION_METHODS[c.name].methods[1];
-            const timeBand = getTimeBand();
+            // The player's own hour when they have told /timezone what it is —
+            // the edge below is real odds now, and "Night" at noon their time
+            // would be a lie.
+            const timeBand = getTimeBand(user.timezone);
 
             const choices = shuffle(CRIMES).slice(0, 3);
             if (!choices.some(c => c.name === featured.crime.name)) {
@@ -441,7 +444,7 @@ module.exports = {
                 .setColor(COLORS.WARN)
                 .setTitle('🌆 Tonight\'s Jobs')
                 .setDescription(`Three options on the table. Pick your play — or let the clock decide.\n\n${crimeLines}${bonusLine}\n\n⏳ Decide ${pickDeadline()}`)
-                .setFooter({ text: `${timeBand.emoji} ${timeBand.label} · No pick and the clock chooses.` })
+                .setFooter({ text: `${timeBand.emoji} ${timeBand.label}${timeBand.local ? '' : ' (UTC — /timezone set for yours)'} · No pick and the clock chooses.` })
                 .setTimestamp();
 
             const response = await interaction.reply({ embeds: [selectionEmbed], components: [row], withResponse: true });

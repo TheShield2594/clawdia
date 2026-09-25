@@ -934,3 +934,25 @@ describe('the hour', () => {
         expect(interaction.replies[0].embeds[0].data.description).toContain('☀️ +5%');
     });
 });
+
+describe('the hour, on the player\'s clock', () => {
+    it('reads the band in the timezone the player set', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000, timezone: 'Asia/Tokyo' });
+        seedGuild();
+
+        await run();
+
+        expect(getTimeBand).toHaveBeenCalledWith('Asia/Tokyo');
+    });
+
+    it('says the band is UTC for a player who has not set one', async () => {
+        rolls([], 0.1);
+        seedUser({ balance: 1000 });
+        seedGuild();
+
+        const interaction = await run();
+
+        expect(interaction.replies[0].embeds[0].data.footer.text).toContain('(UTC — /timezone set for yours)');
+    });
+});
