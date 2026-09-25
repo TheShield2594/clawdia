@@ -110,16 +110,19 @@ describe('every game stays under 99% with both luck items', () => {
         expect(worstOld).toBeGreaterThan(1.3);
     });
 
-    test('roulette: a re-spin of a lost straight number is the worst case, and it is under 99%', () => {
+    test('roulette: a tenth of a lost straight number back is the worst case, and it is under 99%', () => {
         // Single-zero wheel: an even-money bet wins 18 of 37, a dozen or column
-        // 12, a straight number 1, at 1:1, 2:1 and 35:1.
+        // 12, a straight number 1, at 1:1, 2:1 and 35:1. The charm hands back
+        // ROULETTE_CHARM_REFUND of a lost stake rather than re-spinning.
+        const { ROULETTE_CHARM_REFUND } = require('../src/games/casino/settlement');
         const { charm } = CASINO_LUCK.roulette;
         expect(CASINO_LUCK.roulette.streak).toBe(0);
         for (const [wins, odds] of [[18, 1], [12, 2], [1, 35]]) {
             const p = wins / 37;
-            const withRespin = (odds + 1) * (p + (1 - p) * charm * p);
-            expect(withRespin).toBeLessThan(CEILING);
+            const withRefund = (odds + 1) * p + (1 - p) * charm * ROULETTE_CHARM_REFUND;
+            expect(withRefund).toBeLessThan(CEILING);
         }
+        // The re-spin it replaced, at the old 20%.
         expect(36 * (1 / 37 + (36 / 37) * 0.2 / 37)).toBeGreaterThan(1.16);
     });
 

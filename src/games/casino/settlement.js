@@ -119,6 +119,40 @@ function rouletteSettlement(bet, payoutOdds, won) {
     return { profit, credit: won ? bet + profit : 0 };
 }
 
+/**
+ * The Lucky Charm's save on a losing roulette spin: a tenth of the stake back.
+ *
+ * It used to re-spin the wheel. A second spin is a second chance at the full
+ * table odds, which on a 1-in-37 straight number is worth far more than the
+ * rest of the table's bets, and at 20% it paid 116% there. A refund is worth
+ * the same on every bet, and never more than the stake.
+ *
+ * How often the charm fires is CASINO_LUCK.roulette in effectsService, sized
+ * with this rate so the thinnest bet on the table, a straight number, stays
+ * under the casino's 99% ceiling (tests/casinoLuckAndBoosters).
+ */
+const ROULETTE_CHARM_REFUND = 0.10;
+
+/**
+ * Coins the charm hands back on a lost stake: 10%, rounded down, at least 1.
+ *
+ * @param {number} bet
+ */
+function rouletteCharmRefund(bet) {
+    return Math.max(1, Math.floor(bet * ROULETTE_CHARM_REFUND));
+}
+
+/**
+ * A lost spin the charm saved: the refund is the credit, and the profit is the
+ * stake less it.
+ *
+ * @param {number} bet
+ */
+function rouletteCharmSettlement(bet) {
+    const credit = rouletteCharmRefund(bet);
+    return { profit: credit - bet, credit };
+}
+
 // Poker settles through holdemRules.js, which is Casino Hold'em's paytable. The
 // old heads-up game's fold, pot and showdown helpers went with it (#873, pass 24).
 
@@ -133,4 +167,7 @@ module.exports = {
     insuranceProfit,
     insuranceCost,
     rouletteSettlement,
+    rouletteCharmRefund,
+    rouletteCharmSettlement,
+    ROULETTE_CHARM_REFUND,
 };

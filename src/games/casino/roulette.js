@@ -3,82 +3,60 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    StringSelectMenuBuilder,
+    AttachmentBuilder,
     MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
-const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
+const { placeWager } = require('../../utils/placeWager');
 const { confirmBet } = require('../../utils/confirmBet');
-const { casinoRefusal, replayRefusal, refuseReplay } = require('./betGuard');
+const { delay } = require('../../utils/delay');
+const { getGuildSettings } = require('../../utils/guildSettingsCache');
+const { getPolicyDecision } = require('../../utils/commandPolicy');
+const { casinoRefusal, replayRefusal } = require('./betGuard');
 const { casinoLuck } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 const { newHandId, payHand, payoutNote, settledBalance } = require('./payout');
-const { rouletteSettlement } = require('./settlement');
+const { rouletteSettlement, rouletteCharmSettlement } = require('./settlement');
+const {
+    WHEEL_ORDER, WHEEL_INDEX, POCKETS, BETS,
+    colorOf, pocketEmoji, describeBet, shortBet, betOdds, coveredNumbers, spin, nearMiss, spinFrames, pocketUnderBall,
+} = require('./rouletteWheel');
+const { renderRouletteTable } = require('./rouletteTable');
+const { shortAmount } = require('./tableArt');
 
-const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3a1.png';
-const MIN_BET = 10;
+const MIN_BET    = 10;
+const MAX_BET    = 1_000_000_000;
+const IMAGE_NAME = 'roulette.jpg';
+const HISTORY_KEPT  = 15;
+const REPLAY_WINDOW = 90_000;
+const FOOTER = 'European roulette  •  Single zero  •  2.7% house edge';
 
-const RED_NUMBERS = new Set([
-    1, 3, 5, 7, 9, 12, 14, 16, 18,
-    19, 21, 23, 25, 27, 30, 32, 34, 36,
-]);
-
-function colorOf(n) {
-    if (n === 0) return 'green';
-    return RED_NUMBERS.has(n) ? 'red' : 'black';
-}
-
-function pocketEmoji(n) {
-    const c = colorOf(n);
-    if (c === 'green') return '🟢';
-    if (c === 'red')   return '🔴';
-    return '⚫';
-}
-
-const BETS = {
-    red:    { label: 'Red',              payout: 1,  matches: n => colorOf(n) === 'red'              },
-    black:  { label: 'Black',            payout: 1,  matches: n => colorOf(n) === 'black'            },
-    odd:    { label: 'Odd',              payout: 1,  matches: n => n !== 0 && n % 2 === 1            },
-    even:   { label: 'Even',             payout: 1,  matches: n => n !== 0 && n % 2 === 0            },
-    low:    { label: 'Low (1–18)',        payout: 1,  matches: n => n >= 1 && n <= 18                 },
-    high:   { label: 'High (19–36)',      payout: 1,  matches: n => n >= 19 && n <= 36                },
-    dozen1: { label: '1st Dozen (1–12)',  payout: 2,  matches: n => n >= 1  && n <= 12               },
-    dozen2: { label: '2nd Dozen (13–24)', payout: 2,  matches: n => n >= 13 && n <= 24               },
-    dozen3: { label: '3rd Dozen (25–36)', payout: 2,  matches: n => n >= 25 && n <= 36               },
-    col1:   { label: 'Column 1',          payout: 2,  matches: n => n !== 0 && n % 3 === 1           },
-    col2:   { label: 'Column 2',          payout: 2,  matches: n => n !== 0 && n % 3 === 2           },
-    col3:   { label: 'Column 3',          payout: 2,  matches: n => n !== 0 && n % 3 === 0           },
-    number: { label: 'Straight Number',   payout: 35, matches: (n, target) => n === target           },
-};
-
-function spin() { return Math.floor(Math.random() * 37); }
+// ── Text ─────────────────────────────────────────────────────────────────────
 
 function pocketLabel(n) {
-    return `${pocketEmoji(n)} **${n}**`;
+    return `${pocketEmoji(n)} ${n}`;
 }
 
-// Shows 7 surrounding pockets with the current one highlighted
-function pocketStrip(currentIndex, highlight = true) {
-    const around = 3;
-    const parts  = [];
-    for (let offset = -around; offset <= around; offset++) {
-        const i   = ((currentIndex + offset) % 37 + 37) % 37;
-        const lbl = `${pocketEmoji(i)} ${i}`;
-        parts.push(offset === 0 && highlight ? `**▶ ${pocketEmoji(i)} ${i} ◀**` : lbl);
+/**
+ * The seven pockets around `number` in wheel order, the middle one marked —
+ * the wheel in words, for when the image cannot be drawn.
+ */
+function pocketStrip(number) {
+    const at = WHEEL_INDEX[number];
+    const parts = [];
+    for (let offset = -3; offset <= 3; offset++) {
+        const n = WHEEL_ORDER[((at + offset) % POCKETS + POCKETS) % POCKETS];
+        parts.push(offset === 0 ? `**▶ ${pocketLabel(n)} ◀**` : pocketLabel(n));
     }
     return parts.join('  ');
 }
 
-function describeBet(betKey, target) {
-    if (betKey === 'number') return `Straight #${target}`;
-    return BETS[betKey].label;
-}
-
-function betOdds(betKey) {
-    const payout = BETS[betKey]?.payout;
-    if (!payout) return '';
-    return payout === 35 ? '35:1' : `${payout}:1`;
+function historyText(history) {
+    if (!history?.length) return '';
+    return [...history].reverse().slice(0, 12).map(pocketLabel).join('  ');
 }
 
 function embedAuthor(interaction) {
@@ -88,63 +66,197 @@ function embedAuthor(interaction) {
     };
 }
 
-function spinningEmbed(currentIndex, betKey, target, bet, interaction) {
-    return new EmbedBuilder()
+const signed = n => `${n >= 0 ? '+' : '−'}${Math.abs(n).toLocaleString()}`;
+
+/**
+ * How a spin came out, in the three shapes it can take. Shared by the embed
+ * and the banner on the image so the two never disagree.
+ */
+function outcomeOf({ won, charmSaved, betKey }) {
+    if (won) return betKey === 'number' ? 'jackpot' : 'win';
+    return charmSaved ? 'charm' : 'loss';
+}
+
+function bannerFor(outcome, profit, credit) {
+    if (outcome === 'jackpot') return { text: `STRAIGHT UP!  ${signed(profit)}`, tone: 'gold' };
+    if (outcome === 'win')     return { text: `WIN  ${signed(profit)}`,         tone: 'win' };
+    if (outcome === 'charm')   return { text: `LUCKY CHARM  +${credit.toLocaleString()} BACK`, tone: 'gold' };
+    return { text: `LOSS  ${signed(profit)}`, tone: 'lose' };
+}
+
+function spinningEmbed({ interaction, betKey, target, bet, withImage, strip }) {
+    const embed = new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
-        .setThumbnail(THUMB)
-        .setColor(COLORS.ERROR)
-        .setTitle('🎡 Roulette — Spinning…')
+        .setColor(COLORS.PRIZE)
+        .setTitle('🎡 Roulette')
         .setDescription(
-            `${pocketStrip(currentIndex)}\n\n` +
-            `*The wheel is spinning — no more bets!*`,
+            (withImage ? '' : `${strip}\n\n`) +
+            `*The ball is in play — no more bets.*\n` +
+            `🎯 **${describeBet(betKey, target)}** (${betOdds(betKey)})  ·  💰 **${bet.toLocaleString()}**`,
         )
-        .addFields(
-            { name: '🎯 Your Bet',  value: `${describeBet(betKey, target)} (${betOdds(betKey)})`, inline: true },
-            { name: '💰 Wager',     value: `**${bet.toLocaleString()}** coins`,                    inline: true },
-        )
-        .setFooter({ text: 'European Roulette  •  Single zero  •  2.7% house edge' });
+        .setFooter({ text: FOOTER });
+    if (withImage) embed.setImage(`attachment://${IMAGE_NAME}`);
+    return embed;
 }
 
-function historyLine(history) {
-    if (!history || history.length === 0) return '';
-    return history.map(n => pocketEmoji(n)).join(' ') + '\n\n';
-}
+function resultEmbed({ interaction, spinState, balance, history, note, withImage }) {
+    const { result, betKey, target, bet, profit, credit, outcome } = spinState;
+    const betText = `**${describeBet(betKey, target)}**`;
+    const lines = [];
+    if (outcome === 'jackpot') lines.push(`💎 **Straight up!** ${betText} hits for **${signed(profit)}** coins.`);
+    else if (outcome === 'win') lines.push(`🏆 ${betText} wins — **${signed(profit)}** coins.`);
+    else if (outcome === 'charm') lines.push(`🍀 ${betText} loses, but your **Lucky Charm** hands back **${credit.toLocaleString()}** — net **${signed(profit)}**.`);
+    else lines.push(`💀 ${betText} loses — **${signed(profit)}** coins.`);
 
-function resultEmbed({ result, won, betKey, target, bet, profit, balance, interaction, history, note = '' }) {
-    const color    = won ? '#2ecc71' : '#e74c3c';
-    const netStr   = profit >= 0 ? `+${profit.toLocaleString()}` : `${profit.toLocaleString()}`;
-    const headline = won
-        ? `🏆 **Landed on ${pocketLabel(result)}** — your **${describeBet(betKey, target)}** bet wins!`
-        : `💀 **Landed on ${pocketLabel(result)}** — your **${describeBet(betKey, target)}** bet loses.`;
+    const close = nearMiss(result, betKey, target);
+    if (close !== null) lines.push(`😮 So close — **${close}** sits right next to **${result}** on the wheel.`);
+    if (result === 0 && outcome !== 'jackpot') lines.push('🟢 *Zero — every outside bet loses.*');
+    if (note) lines.push(note.trim());
+    if (!withImage) {
+        lines.unshift(pocketStrip(result), '');
+        const recent = historyText(history);
+        if (recent) lines.push('', `📊 Recent: ${recent}`);
+    }
 
-    const colorDesc = colorOf(result) === 'green'
-        ? '🟢 Zero — all even-money bets lose'
-        : colorOf(result) === 'red'
-        ? '🔴 Red number'
-        : '⚫ Black number';
+    const color = outcome === 'jackpot' ? COLORS.PRIZE
+        : outcome === 'win' ? COLORS.SUCCESS
+        : outcome === 'charm' ? COLORS.WARN
+        : COLORS.ERROR;
 
-    const historyStr = history?.length
-        ? `📊 Last ${history.length} result${history.length > 1 ? 's' : ''}: ${historyLine(history)}`
-        : '';
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
-        .setThumbnail(THUMB)
         .setColor(color)
-        .setTitle(`🎡 Roulette — ${won ? 'Winner!' : 'No Luck'}`)
-        .setDescription(
-            `${pocketStrip(result)}\n\n${headline}${note}\n*${colorDesc}*\n\n` +
-            (historyStr ? `${historyStr}\n` : '') +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `  📊 Net: **${netStr}**  ·  💰 Balance: **${balance.toLocaleString()}** coins\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━`
-        )
+        .setTitle(`🎡 Roulette — ${pocketLabel(result)}`)
+        .setDescription(lines.join('\n'))
         .addFields(
-            { name: '🎯 Bet',   value: `${describeBet(betKey, target)} (${betOdds(betKey)})`, inline: true },
-            { name: '💰 Wager', value: `${bet.toLocaleString()} coins`,                        inline: true },
+            { name: '🎯 Bet',     value: `${describeBet(betKey, target)} · ${betOdds(betKey)} · ${bet.toLocaleString()}`, inline: true },
+            { name: '💰 Balance', value: `${balance.toLocaleString()} coins`, inline: true },
         )
-        .setFooter({ text: 'European Roulette  •  Straight number pays 35:1' })
+        .setFooter({ text: FOOTER })
         .setTimestamp();
+    if (withImage) embed.setImage(`attachment://${IMAGE_NAME}`);
+    return embed;
 }
+
+/** The image described in words, for screen readers. */
+function altText({ result, betKey, target, outcome }) {
+    if (result === null) return `Roulette wheel spinning. Bet: ${describeBet(betKey, target)}.`;
+    return `Roulette wheel. The ball landed on ${result} ${colorOf(result)}. Bet: ${describeBet(betKey, target)} — ${outcome === 'loss' ? 'lost' : outcome === 'charm' ? 'lost, Lucky Charm refund' : 'won'}.`;
+}
+
+let renderFailureLogged = false;
+
+/**
+ * The table image as an attachment, or null when it can't be drawn. The image
+ * is a nicety: the embed says everything in words too, so a render failure is
+ * logged once and the game plays on without it.
+ */
+async function tableImage(view, alt) {
+    try {
+        const jpg = await renderRouletteTable(view);
+        return new AttachmentBuilder(jpg, { name: IMAGE_NAME, description: alt.slice(0, 1024) });
+    } catch (err) {
+        if (!renderFailureLogged) {
+            renderFailureLogged = true;
+            console.error('[roulette] table render failed; continuing without the image:', err);
+        }
+        return null;
+    }
+}
+
+// ── Where the spin is drawn ──────────────────────────────────────────────────
+
+/**
+ * The message a spin plays on.
+ *
+ * `ix` is the interaction that started this spin — the command, or the button
+ * press that asked for another. It has already been acknowledged: deferred
+ * (a command's reply, or the press's own message) or answered with the private
+ * "are you sure?" prompt for a large bet.
+ *
+ * In the second case the reply is that private prompt, and the game used to
+ * spin inside it — so the biggest bets at the table were the ones nobody else
+ * could see. Those now open a public follow-up, and every later edit names it.
+ *
+ * Every spin edits through its own interaction, not the original command's, so
+ * a long run of "Spin Again" never outlives the fifteen-minute token that edits
+ * a reply.
+ */
+function createSurface(ix, prompted) {
+    let message = null;
+    return {
+        async show(payload) {
+            if (prompted && !message) {
+                message = await ix.followUp(payload);
+                return message;
+            }
+            const shown = await ix.editReply(message ? { ...payload, message } : payload);
+            message ??= shown;
+            return shown;
+        },
+    };
+}
+
+// ── The next spin ────────────────────────────────────────────────────────────
+
+/** The bets offered in the "change bet" menu: everything the table takes. */
+function rebetMenu(customId, betKey, target) {
+    const options = Object.entries(BETS)
+        .filter(([key]) => key !== 'number' || target !== null)
+        .map(([key, def]) => ({
+            label: key === 'number' ? `Straight #${target} (35:1)` : `${def.label} (${def.payout}:1)`,
+            value: key,
+            default: key === betKey,
+        }));
+    return new StringSelectMenuBuilder()
+        .setCustomId(customId)
+        .setPlaceholder('🎯 Change bet and spin…')
+        .addOptions(options);
+}
+
+function replayRows(ids, { betKey, target, bet }) {
+    const buttons = [
+        new ButtonBuilder().setCustomId(ids.replay).setLabel(`Spin Again · ${shortAmount(bet)}`).setEmoji('🎡').setStyle(ButtonStyle.Primary),
+    ];
+    if (Math.floor(bet / 2) >= MIN_BET) {
+        buttons.push(new ButtonBuilder().setCustomId(ids.half).setLabel(`½ · ${shortAmount(Math.floor(bet / 2))}`).setStyle(ButtonStyle.Secondary));
+    }
+    if (bet * 2 <= MAX_BET) {
+        buttons.push(new ButtonBuilder().setCustomId(ids.double).setLabel(`2× · ${shortAmount(bet * 2)}`).setStyle(ButtonStyle.Secondary));
+    }
+    return [
+        new ActionRowBuilder().addComponents(buttons),
+        new ActionRowBuilder().addComponents(rebetMenu(ids.rebet, betKey, target)),
+    ];
+}
+
+/**
+ * The gates the dispatcher applies to a typed `/casino roulette`, applied to a
+ * replay press: the server's command policy, then the command's cooldown, so
+ * a button is never a way round a limit an admin set. Returns a refusal to
+ * show, or null to spin.
+ */
+async function replayGateRefusal(press, interaction, claimCooldown) {
+    let settings;
+    try {
+        settings = await getGuildSettings(interaction.guild.id);
+    } catch {
+        return 'Could not load server settings. Try again in a moment.';
+    }
+    const asCommand = {
+        user:      press.user,
+        member:    press.member ?? interaction.member,
+        guild:     interaction.guild,
+        channelId: press.channelId ?? interaction.channelId,
+        commandName: 'casino',
+        options: { getSubcommand: () => 'roulette', getSubcommandGroup: () => null },
+    };
+    const policy = getPolicyDecision(asCommand, settings, 'casino');
+    if (!policy.allowed) return policy.reason;
+    return claimCooldown ? claimCooldown(asCommand, settings) : null;
+}
+
+// ── The command ──────────────────────────────────────────────────────────────
 
 module.exports = {
     name: 'roulette',
@@ -174,7 +286,7 @@ module.exports = {
             opt.setName('amount')
                 .setDescription(`Coins to wager (min ${MIN_BET.toLocaleString()})`)
                 .setMinValue(MIN_BET)
-                .setMaxValue(1_000_000_000)
+                .setMaxValue(MAX_BET)
                 .setRequired(true))
         .addIntegerOption(opt =>
             opt.setName('number')
@@ -183,7 +295,7 @@ module.exports = {
                 .setMaxValue(36)
                 .setRequired(false)),
 
-    async execute(interaction, { releaseLock, onWager } = {}) {
+    async execute(interaction, { releaseLock, onWager, claimCooldown } = {}) {
         if (!interaction.guild) {
             releaseLock?.();
             return interaction.reply({ content: 'This command can only be used in a server.', flags: MessageFlags.Ephemeral });
@@ -200,6 +312,15 @@ module.exports = {
                 flags: MessageFlags.Ephemeral,
             });
         }
+        // A number on any other bet used to be dropped without a word, and the
+        // player who typed `bet:Red number:17` thought they were on 17.
+        if (betKey !== 'number' && target !== null) {
+            releaseLock?.();
+            return interaction.reply({
+                content: `\`number\` only applies to a **Straight Number** bet. Pick \`bet: Straight Number\` to play #${target}, or leave \`number\` out to play ${BETS[betKey].label}.`,
+                flags: MessageFlags.Ephemeral,
+            });
+        }
 
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const refusal = casinoRefusal(guildSettings, bet);
@@ -209,29 +330,43 @@ module.exports = {
         }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
-        const { shouldProceed: rProceed, alreadyReplied: rReplied } = await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings);
-        if (!rProceed) { releaseLock?.(); return; }
-        if (!rReplied) await interaction.deferReply();
-        await playRoulette(interaction, betKey, bet, target, releaseLock, onWager);
+        const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings);
+        if (!shouldProceed) { releaseLock?.(); return; }
+        if (!alreadyReplied) await interaction.deferReply();
+
+        await playRoulette({
+            interaction,
+            surface: createSurface(interaction, alreadyReplied),
+            betKey, bet, target, guildSettings,
+            releaseLock, onWager, claimCooldown,
+        });
     },
 };
 
-// releaseLock is called once the spin settles into a result — "Spin Again"
-// starts a brand-new hand with its own atomic debit, so it doesn't need the
-// lock re-held.
-async function playRoulette(interaction, betKey, bet, target, releaseLock, onWager) {
+// ── One spin ─────────────────────────────────────────────────────────────────
+
+/**
+ * Takes the stake, decides and pays the spin, then shows it.
+ *
+ * The coins settle *before* the wheel is drawn. The result is decided the
+ * moment the ball is thrown, so there is nothing for the animation to wait
+ * for — and paying afterwards meant a restart during the five seconds of
+ * spinning took the stake and paid nothing, winners included.
+ *
+ * `releaseLock` is the command's casino lock, released once the spin has been
+ * shown. A replay passes none: it is a new hand with its own atomic debit.
+ */
+async function playRoulette(ctx) {
+    const { interaction, surface, betKey, bet, target, releaseLock, onWager } = ctx;
     const handId = newHandId();
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
+    let spinState = null;
+    let balance = null;
+    let history = [];
 
     try {
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-        if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
-            releaseLock?.();
-            return interaction.editReply({ content: 'Economy games are disabled in this server.' });
-        }
-
         await User.findOneAndUpdate(
             userFilter,
             { $setOnInsert: { ...userFilter, balance: 0 } },
@@ -239,135 +374,202 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock, onWag
         );
 
         debited = await placeWager(userFilter, bet, { onWager });
-
         if (!debited) {
             releaseLock?.();
-            return interaction.editReply({
+            return surface.show({
                 content: `❌ Not enough coins to wager **${bet.toLocaleString()}**.`,
+                embeds: [], components: [], attachments: [],
             });
         }
 
-        let result   = spin();
-        const betDef   = BETS[betKey];
-        let won        = betDef.matches(result, target);
-        // Lucky Charm: a losing spin sometimes spins again (low-stakes bets
-        // only). It was 20%, which paid 116% on a straight number (#873, pass 26).
-        let charmTriggered = false;
+        // ── Decide and pay ──
+        const betDef = BETS[betKey];
+        const result = spin();
+        const won = betDef.matches(result, target);
+        // Lucky Charm: a slice of a lost stake back, sometimes. Never a second
+        // spin — see rouletteCharmSettlement for why. How often is CASINO_LUCK's.
         const { charm } = casinoLuck('roulette', debited, bet);
-        if (!won && charm > 0 && Math.random() < charm) {
-            result = spin();
-            won    = betDef.matches(result, target);
-            charmTriggered = true;
-        }
-        const { profit, credit } = rouletteSettlement(bet, betDef.payout, won);
-        const delay    = ms => new Promise(r => setTimeout(r, ms));
+        const charmSaved = !won && charm > 0 && Math.random() < charm;
+        const { profit, credit } = charmSaved
+            ? rouletteCharmSettlement(bet)
+            : rouletteSettlement(bet, betDef.payout, won);
 
-        // Spinning animation
-        const totalSteps = 37 + result;
-
-        await interaction.editReply({
-            embeds: [spinningEmbed(0, betKey, target, bet, interaction)],
-        }).catch(() => {});
-
-        for (let step = 1; step <= totalSteps; step++) {
-            const remaining = totalSteps - step;
-            const shouldDraw = remaining < 8 || step % 4 === 0;
-            if (!shouldDraw) continue;
-
-            const wait = 120 + Math.max(0, 12 - remaining) * 35;
-            await delay(wait);
-            await interaction.editReply({
-                embeds: [spinningEmbed(step % 37, betKey, target, bet, interaction)],
-            }).catch(() => {});
-        }
-
-        const paid = await payHand(userFilter, credit,
-            { game: 'roulette', handId, phase: 'settle' });
+        const paid = await payHand(userFilter, credit, { game: 'roulette', handId, phase: 'settle' });
         settled = true;
+        spinState = { result, won, charmSaved, betKey, target, bet, profit, credit, outcome: outcomeOf({ won, charmSaved, betKey }), note: payoutNote(paid) };
+        balance = await settledBalance(userFilter, paid.balance);
+
+        // The server's table history, this spin included. Read back in the same
+        // round trip that writes it.
+        const guildDoc = await Guild.findOneAndUpdate(
+            { guildId: interaction.guild.id },
+            { $push: { 'casinoStats.rouletteHistory': { $each: [result], $slice: -HISTORY_KEPT } } },
+            { new: true, projection: { casinoStats: 1 } },
+        ).catch(() => null);
+        history = guildDoc?.casinoStats?.rouletteHistory ?? [result];
+        const before = history.slice(0, -1);
+
+        // ── The spin ──
+        const frames = spinFrames(result);
+        const covered = coveredNumbers(betKey, target);
+        const view = (frame, final) => ({
+            frame,
+            result: final ? result : null,
+            betLabel: shortBet(betKey, target),
+            odds: betOdds(betKey),
+            bet,
+            covered,
+            history: final ? history : before,
+            banner: final ? bannerFor(spinState.outcome, profit, credit) : null,
+        });
+        const framePayload = async i => {
+            const final = i === frames.length - 1;
+            const image = await tableImage(view(frames[i], final), altText({ ...spinState, result: final ? result : null }));
+            if (final) return image;
+            // Without an image, the frames still turn: a strip of pockets
+            // around wherever the ball is passing.
+            return {
+                embeds: [spinningEmbed({ interaction, betKey, target, bet, withImage: !!image, strip: pocketStrip(pocketUnderBall(frames[i])) })],
+                files: image ? [image] : [],
+                attachments: [],
+                // Also clears the last spin's buttons off a replayed message, so
+                // nobody can press a button no collector is listening to.
+                components: [],
+                content: null,
+            };
+        };
+
+        let next = framePayload(0);
+        for (let i = 0; i < frames.length - 1; i++) {
+            const payload = await next;
+            await surface.show(payload).catch(() => {});
+            next = framePayload(i + 1);
+            await delay(frames[i].holdMs);
+        }
+        const finalImage = await next;
+
+        // ── The result ──
+        const nonce = `${interaction.id}_${Date.now()}`;
+        const ids = {
+            replay: `roulette_replay_${nonce}`,
+            half:   `roulette_half_${nonce}`,
+            double: `roulette_double_${nonce}`,
+            rebet:  `roulette_rebet_${nonce}`,
+        };
+        const msg = await surface.show({
+            content: null,
+            embeds: [resultEmbed({ interaction, spinState, balance, history, note: spinState.note, withImage: !!finalImage })],
+            files: finalImage ? [finalImage] : [],
+            attachments: [],
+            components: replayRows(ids, spinState),
+        });
         releaseLock?.();
 
-        // Save result to guild roulette history (last 15)
-        await Guild.updateOne(
-            { guildId: interaction.guild.id },
-            { $push: { 'casinoStats.rouletteHistory': { $each: [result], $slice: -15 } } }
-        ).catch(() => {});
-
-        // Fetch updated history to display
-        const updatedGuild = await Guild.findOne({ guildId: interaction.guild.id }, 'casinoStats').lean().catch(() => null);
-        const rouletteHistory = updatedGuild?.casinoStats?.rouletteHistory ?? [];
-
-        const replayId = `roulette_replay_${interaction.id}_${Date.now()}`;
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(replayId).setLabel('🎡 Spin Again').setStyle(ButtonStyle.Primary),
-        );
-
-        const rouletteResultEmbed = resultEmbed({
-            result, won, betKey, target, bet, profit, interaction, history: rouletteHistory,
-            balance: await settledBalance(userFilter, paid.balance),
-            note: payoutNote(paid),
-        });
-        if (charmTriggered) {
-            const desc = rouletteResultEmbed.data.description ?? '';
-            rouletteResultEmbed.setDescription(desc + (won ? '\n> 🍀 *Lucky Charm re-spun the wheel for you!*' : ''));
-        }
-        await interaction.editReply({
-            embeds: [rouletteResultEmbed],
-            components: [row],
-        });
-
-        const msg = await interaction.fetchReply();
-        const collector = msg.createMessageComponentCollector({
-            filter: ownedBy(interaction.user.id, i => i.customId === replayId, "This isn't your spin."),
-            max: 1,
-            time: 60_000,
-        });
-        collector.on('collect', async i => {
-            // A new spin is a new hand, so it answers to the settings as they
-            // are now, not as they were when the first one was typed.
-            const refused = await replayRefusal(interaction.guild.id, bet);
-            if (refused) return refuseReplay(i, interaction, refused);
-
-            const user   = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            const wallet = user?.balance ?? 0;
-
-            // Confirm against the button press, not the original command.
-            // confirmBet prompts with `interaction.reply`, and the original was
-            // deferred and edited several times before this collector was ever
-            // attached — so replaying a bet big enough to need confirming threw
-            // InteractionAlreadyReplied out of the collector callback and the
-            // replay silently did nothing. The button press is unacknowledged
-            // and can carry the prompt.
-            //
-            // It answers `{ shouldProceed, alreadyReplied }`, which is always
-            // truthy — so testing the object itself never caught a cancellation
-            // either, and a player who pressed Cancel had the replay spun and
-            // their coins taken anyway.
-            const { shouldProceed, alreadyReplied } = await confirmBet(i, bet, wallet, 'Roulette', guildSettings);
-            if (!shouldProceed) return;
-            // Prompting already acknowledged the press; without one it still
-            // needs acknowledging, or the button sits spinning.
-            if (!alreadyReplied) await i.deferUpdate();
-
-            // The spin still renders on the original command's reply, which is
-            // the message the wheel has been drawn on all along.
-            await playRoulette(interaction, betKey, bet, target, null, onWager);
-        });
-        collector.on('end', (_, reason) => {
-            if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
-        });
-
+        armReplay(ctx, msg, surface, ids);
     } catch (err) {
         console.error('[Roulette] error:', err);
         releaseLock?.();
-        const rolled = debited && !settled
+        if (settled) {
+            // The coins are right; only the showing failed. Say what happened
+            // in words rather than "something went wrong" over a paid spin.
+            await surface.show({
+                content: null,
+                embeds: [resultEmbed({ interaction, spinState, balance: balance ?? 0, history, note: spinState.note, withImage: false })],
+                files: [], attachments: [], components: [],
+            }).catch(() => {});
+            return;
+        }
+        const rolled = debited
             ? await payHand(userFilter, bet, { game: 'roulette', handId, phase: 'rollback' })
             : null;
         const outcome = !debited ? 'No wager was taken.'
-            : settled ? 'Your hand had already been settled.'
             : rolled.credited ? 'Your wager has been refunded — please try again.' : 'Your wager could not be refunded.';
-        await interaction.editReply({
+        await surface.show({
             content: `Something went wrong. ${outcome}${rolled ? payoutNote(rolled) : ''}`,
-            components: [],
+            embeds: [], files: [], attachments: [], components: [],
         }).catch(() => {});
     }
 }
+
+/**
+ * Listens on a result for the next spin: the same bet again, half or double
+ * it, or a different bet from the menu.
+ */
+function armReplay(ctx, msg, surface, ids) {
+    const { interaction, betKey, bet, onWager, claimCooldown } = ctx;
+    if (!msg?.createMessageComponentCollector) return;
+
+    const known = new Set(Object.values(ids));
+    const collector = msg.createMessageComponentCollector({
+        filter: ownedBy(interaction.user.id, i => known.has(i.customId), "This isn't your spin."),
+        time: REPLAY_WINDOW,
+    });
+    // One press at a time: a second press while the first is still asking
+    // "are you sure?" would stake twice.
+    let busy = false;
+
+    collector.on('collect', async i => {
+        if (busy) return i.deferUpdate().catch(() => {});
+        busy = true;
+        try {
+            const nextBet = i.customId === ids.half ? Math.floor(bet / 2)
+                : i.customId === ids.double ? bet * 2
+                : bet;
+            const nextKey = i.customId === ids.rebet ? (i.values?.[0] ?? betKey) : betKey;
+
+            // A new spin is a new hand, so it answers to the settings as they
+            // are now, not as they were when the first one was typed.
+            const refused = await replayRefusal(interaction.guild.id, nextBet);
+            if (refused) {
+                collector.stop('refused');
+                return i.reply({ content: refused, flags: MessageFlags.Ephemeral }).catch(() => {});
+            }
+            const gated = await replayGateRefusal(i, interaction, claimCooldown);
+            if (gated) {
+                busy = false;
+                return i.reply({ content: gated, flags: MessageFlags.Ephemeral }).catch(() => {});
+            }
+
+            const user   = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+            const wallet = user?.balance ?? 0;
+            // Said privately, and before anything is staked: overwriting the
+            // result with "not enough coins" lost the spin the player was
+            // looking at.
+            if (wallet < nextBet) {
+                busy = false;
+                return i.reply({ content: `❌ Not enough coins to wager **${nextBet.toLocaleString()}**.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+            }
+            const settings = await getGuildSettings(interaction.guild.id).catch(() => ctx.guildSettings);
+
+            // Confirm against the press, which is unacknowledged and can carry
+            // the prompt. Cancelling leaves the buttons live for another go.
+            const { shouldProceed, alreadyReplied } = await confirmBet(i, nextBet, wallet, 'Roulette', settings);
+            if (!shouldProceed) { busy = false; return; }
+            if (!alreadyReplied) await i.deferUpdate().catch(() => {});
+            collector.stop('replayed');
+
+            // A confirmed replay plays on a new public message, so the old one
+            // keeps its result but loses its buttons.
+            if (alreadyReplied) await surface.show({ components: [] }).catch(() => {});
+
+            await playRoulette({
+                ...ctx,
+                surface: createSurface(i, alreadyReplied),
+                betKey: nextKey,
+                bet: nextBet,
+                guildSettings: settings,
+                releaseLock: null,
+                onWager,
+            });
+        } catch (err) {
+            console.error('[Roulette] replay error:', err);
+            busy = false;
+        }
+    });
+    collector.on('end', (_, reason) => {
+        if (reason === 'replayed') return;
+        surface.show({ components: [] }).catch(() => {});
+    });
+}
+
+module.exports.__test = { pocketStrip, outcomeOf, bannerFor, resultEmbed, createSurface, MIN_BET, MAX_BET };
