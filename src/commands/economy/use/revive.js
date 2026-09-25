@@ -4,7 +4,7 @@
 
 const { EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../../models/User');
-const { PET_DEFINITIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../../services/petService');
+const { PET_DEFINITIONS, petCapacity, hasFreePetSlot, countSlotPets, joinVacation } = require('../../../services/petService');
 const { leftField } = require('./status');
 
 /** Revives `deceasedPets[0]` with its level, record and remaining bond, or says why not. */
@@ -45,9 +45,17 @@ async function useReviveScroll({ interaction, userFilter, preview, canonicalId, 
         lastDecayAt: now,
         starving: false,
         starvingStartAt: null,
+        // A fresh start for the hunger DMs and no leftover vacation (#1181).
+        hungerWarnedLow: false,
+        hungerWarnedEmpty: false,
+        vacationFrom: null,
+        vacationUntil: null,
     };
     delete revived._id;
     delete revived.diedAt;
+    // Coming home mid-vacation, it joins the others rather than being the one
+    // active pet while they are away.
+    joinVacation(preview, revived, now.getTime());
 
     // Consume the scroll, remove the record and bring the pet back in one
     // conditional write, so a double-click can't revive the same pet twice

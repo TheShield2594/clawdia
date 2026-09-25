@@ -420,6 +420,49 @@ describe('/pet feed', () => {
         expect(textOf(interaction)).toMatch(/Dog evolved!\*\* Say hello to \*\*Seasoned Dog\*\* \(Stage 2\)/);
     });
 
+    test('an evolution posts its own public reveal with the card and the passive before and after', async () => {
+        seedUser({
+            pets: [makePet({ hunger: 50, level: 9, xp: xpForLevel(10) - 1 })],
+            hunt: { materials: { rabbits_foot: 1 } },
+        });
+
+        const interaction = await run('feed', { material: 'rabbits_foot' });
+
+        expect(interaction.followUp).toHaveBeenCalledTimes(1);
+        const reveal = interaction.followUp.mock.calls[0][0];
+        expect(reveal.flags).toBeUndefined();
+        expect(reveal.allowedMentions).toEqual({ parse: [] });
+        const embed = reveal.embeds[0].toJSON();
+        expect(embed.title).toContain('Evolution!');
+        expect(embed.description).toContain('**Dog** evolved into **Seasoned Dog**');
+        expect(embed.fields.find(f => f.name.includes('Passive')).value).toMatch(/work earnings → \*\*\+.+work earnings\*\*/);
+    });
+
+    test('a level-up that is not an evolution posts no reveal', async () => {
+        seedUser({
+            pets: [makePet({ hunger: 50, xp: xpForLevel(2) - 1 })],
+            hunt: { materials: { rabbits_foot: 1 } },
+        });
+
+        const interaction = await run('feed', { material: 'rabbits_foot' });
+
+        expect(interaction.followUp).not.toHaveBeenCalled();
+    });
+
+    test('a reveal that cannot be posted does not fail the feed', async () => {
+        seedUser({
+            pets: [makePet({ hunger: 50, level: 9, xp: xpForLevel(10) - 1 })],
+            hunt: { materials: { rabbits_foot: 1 } },
+        });
+        const interaction = interactionFor('feed', { material: 'rabbits_foot' });
+        interaction.followUp = jest.fn(async () => { throw new Error('Missing Access'); });
+
+        await pet.execute(interaction);
+
+        expect(stored().pets[0].evolutionStage).toBe(2);
+        expect(textOf(interaction)).toContain('Seasoned Dog');
+    });
+
     test('with no pets it says so', async () => {
         seedUser({ hunt: { materials: { rabbits_foot: 1 } } });
 
@@ -870,6 +913,103 @@ describe('/pet rename', () => {
 
 // ─── /pet list ──────────────────────────────────────────────────────────────────
 
+// ─── /pet vacation ──────────────────────────────────────────────────────────────
+
+describe('/pet vacation', () => {
+    test('on pauses every pet until the end of the window and says when', async () => {
+        seedUser({ pets: [makePet({ _id: 'a' }), makePet({ _id: 'b', petId: 'cat' })] });
+
+        const interaction = await run('vacation', { state: 'on', days: 5 });
+
+        const pets = stored().pets;
+        const until = new Date(pets[0].vacationUntil).getTime();
+        expect(until - new Date(pets[0].vacationFrom).getTime()).toBe(5 * DAY);
+        expect(new Date(pets[1].vacationUntil).getTime()).toBe(until);
+        const text = textOf(interaction);
+        expect(text).toContain('Pets on vacation');
+        expect(text).toContain('**2 pets**');
+        expect(text).toContain(`<t:${Math.floor(until / 1000)}:R>`);
+    });
+
+    test('defaults to the longest vacation', async () => {
+        seedUser({ pets: [makePet()] });
+
+        await run('vacation', { state: 'on' });
+
+        const p = stored().pets[0];
+        expect(new Date(p.vacationUntil) - new Date(p.vacationFrom)).toBe(14 * DAY);
+    });
+
+    test('on while already away is refused rather than extended', async () => {
+        const until = new Date(Date.now() + 3 * DAY);
+        seedUser({ pets: [makePet({ vacationFrom: new Date(Date.now() - DAY), vacationUntil: until })] });
+
+        const interaction = await run('vacation', { state: 'on' });
+
+        expect(textOf(interaction)).toContain('already on vacation');
+        expect(new Date(stored().pets[0].vacationUntil).getTime()).toBe(until.getTime());
+    });
+
+    test('off ends it now', async () => {
+        seedUser({ pets: [makePet({ vacationFrom: new Date(Date.now() - DAY), vacationUntil: new Date(Date.now() + 3 * DAY) })] });
+
+        const interaction = await run('vacation', { state: 'off' });
+
+        expect(new Date(stored().pets[0].vacationUntil).getTime()).toBeLessThanOrEqual(Date.now());
+        expect(textOf(interaction)).toContain('Welcome back');
+    });
+
+    test('off with no vacation on says so', async () => {
+        seedUser({ pets: [makePet()] });
+
+        const interaction = await run('vacation', { state: 'off' });
+
+        expect(textOf(interaction)).toContain("aren't on vacation");
+    });
+
+    test('with no pets it says so', async () => {
+        seedUser({});
+
+        const interaction = await run('vacation', { state: 'on' });
+
+        expect(textOf(interaction)).toContain("don't have any pets");
+    });
+
+    test('a pet that ran away on the way in leaves nothing to send', async () => {
+        seedUser({ pets: [makePet({ hunger: 0, starvingStartAt: new Date(Date.now() - 4 * DAY) })] });
+
+        const interaction = await run('vacation', { state: 'on' });
+
+        expect(stored().pets).toHaveLength(0);
+        expect(textOf(interaction)).toContain("don't have any pets");
+    });
+
+    test('an edit conflict on the save is answered, not thrown', async () => {
+        seedUser({ pets: [makePet()] });
+        mockAfterLoad = (user) => { user.save = jest.fn(async () => { throw versionError(); }); };
+
+        const interaction = await run('vacation', { state: 'on' });
+
+        expect(textOf(interaction)).toContain('Edit conflict');
+    });
+});
+
+// ─── /pet codex ─────────────────────────────────────────────────────────────────
+
+describe('/pet codex', () => {
+    test('lists every species, owned or not, with where the rare ones come from', async () => {
+        seedUser({ pets: [makePet({ petId: 'wolf' })], petCodex: ['eagle'] });
+
+        const interaction = await run('codex');
+
+        const text = textOf(interaction);
+        expect(text).toContain('2 of 10');
+        expect(text).toContain('Lantern Owl');
+        expect(text).toContain('appears on a legendary expedition (/explore)');
+        expect(text).toContain('Eagle');
+    });
+});
+
 describe('/pet list', () => {
     test('lists every purchasable pet with its price, max-level bonus and favourite food', async () => {
         const interaction = await run('list');
@@ -1002,7 +1142,7 @@ describe('/pet dispatcher', () => {
     test('the definition carries every subcommand', () => {
         const json = pet.data.toJSON();
         expect(json.name).toBe('pet');
-        expect(json.options.map(o => o.name)).toEqual(['adopt', 'status', 'feed', 'release', 'rename', 'list', 'leaderboard', 'battle']);
+        expect(json.options.map(o => o.name)).toEqual(['adopt', 'status', 'feed', 'release', 'rename', 'list', 'codex', 'vacation', 'leaderboard', 'battle']);
     });
 });
 

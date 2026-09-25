@@ -16,7 +16,7 @@ function rareCompanionFooter() {
     const nameList = names.length > 1
         ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
         : names[0];
-    return `${nameList} aren't sold — each has a ${Math.round(RARE_PET_DROP_CHANCE * 100)}% chance to appear on a legendary ${sources.join(' / ')}`;
+    return `${nameList} aren't sold — each has a ${Math.round(RARE_PET_DROP_CHANCE * 100)}% chance to appear on a legendary ${sources.join(' / ')} · see every species in /pet codex`;
 }
 
 async function executeList(interaction) {

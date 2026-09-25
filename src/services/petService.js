@@ -153,8 +153,41 @@ function tryGrantRarePet(user, source, tier, rng = Math.random) {
     if (!user) return null;
     const def = rollRarePet(user.pets ?? [], source, tier, rng);
     if (!def) return null;
-    user.pets.push(createPet(def.petId));
+    user.pets.push(joinVacation(user, createPet(def.petId)));
+    noteCodex(user, def.petId);
     return def;
+}
+
+// ── Codex ─────────────────────────────────────────────────────────────────────
+//
+// /pet codex shows every species, in colour once the player has owned one
+// (#1187). A pet that is released leaves the roster, so what a player has
+// owned is kept in `petCodex`; the roster and the memorial count too, so a
+// species owned before the field existed is not shown as never seen.
+
+/** Record that `user` has owned `petId`. Mutates; the caller saves. */
+function noteCodex(user, petId) {
+    if (!user || !petId) return;
+    if (!Array.isArray(user.petCodex)) user.petCodex = [];
+    if (!user.petCodex.includes(petId)) {
+        user.petCodex.push(petId);
+        user.markModified?.('petCodex');
+    }
+}
+
+/** Every species id this player has ever owned. */
+function codexSpecies(user) {
+    return new Set([
+        ...(user?.petCodex ?? []),
+        ...(user?.pets ?? []).map(p => p.petId),
+        ...(user?.deceasedPets ?? []).map(p => p.petId),
+    ].filter(id => PET_DEFINITIONS[id]));
+}
+
+/** Where a rare companion comes from, in words: "appears on a legendary hunt". */
+function rarePetHint(def) {
+    const where = { hunt: 'hunt', fish: 'catch', mine: 'dig', explore: 'expedition' }[def?.materialSource] ?? def?.materialSource;
+    return `appears on a legendary ${where} (/${def?.materialSource})`;
 }
 
 // ── Pet slots ─────────────────────────────────────────────────────────────────
@@ -330,6 +363,103 @@ function resolvePetRef(pets, ref) {
     return byType !== -1 ? { index: byType, pet: pets[byType] } : null;
 }
 
+// ── Vacation ──────────────────────────────────────────────────────────────────
+//
+// `/pet vacation` pauses hunger decay for every pet a player owns, for up to
+// VACATION_MAX_DAYS (#1181), so a holiday no longer ends in a pet that ran
+// away. Each pet carries the window it is paused for (`vacationFrom` to
+// `vacationUntil`) rather than the player, so every read of hunger — the
+// passives in /hunt and /fish included — can account for it from the pet
+// alone. Ending a vacation early moves `vacationUntil` back to that moment.
+//
+// A pet on vacation is not active: no passive, no battles, no training and no
+// Pet of the Week credit, so a pause can never be used to farm. Only one window
+// is kept per pet; it is safe to overwrite because the command brings decay up
+// to date first, and a window before the decay cursor no longer matters.
+
+const VACATION_MAX_DAYS = 14;
+
+function vacationWindow(pet) {
+    const from  = pet?.vacationFrom  ? new Date(pet.vacationFrom).getTime()  : NaN;
+    const until = pet?.vacationUntil ? new Date(pet.vacationUntil).getTime() : NaN;
+    return Number.isFinite(from) && Number.isFinite(until) && until > from ? { from, until } : null;
+}
+
+/** Whether a pet's hunger is paused right now. */
+function isOnVacation(pet, now = Date.now()) {
+    const w = vacationWindow(pet);
+    return !!w && now >= w.from && now < w.until;
+}
+
+/** Milliseconds of [startMs, endMs] that fall inside the pet's vacation. */
+function pausedMsBetween(pet, startMs, endMs) {
+    const w = vacationWindow(pet);
+    if (!w || endMs <= startMs) return 0;
+    return Math.max(0, Math.min(endMs, w.until) - Math.max(startMs, w.from));
+}
+
+/**
+ * The wall-clock time `activeMs` of unpaused time after `startMs` — the
+ * moment decay that began at `startMs` has run for that long, skipping the
+ * pause.
+ */
+function wallClockAfter(pet, startMs, activeMs) {
+    const w = vacationWindow(pet);
+    const t = startMs + activeMs;
+    if (!w) return t;
+    const pauseStart = Math.max(w.from, startMs);
+    const pauseLen   = Math.max(0, w.until - pauseStart);
+    return t <= pauseStart ? t : t + pauseLen;
+}
+
+/** The vacation window a player's pets are on, as `{ from, until }` Dates, or null. */
+function activeVacation(user, now = Date.now()) {
+    const pet = (user?.pets ?? []).find(p => isOnVacation(p, now));
+    if (!pet) return null;
+    const w = vacationWindow(pet);
+    return { from: new Date(w.from), until: new Date(w.until) };
+}
+
+/** Put a newly added pet on its owner's current vacation, if they are on one. Returns the pet. */
+function joinVacation(user, pet, now = Date.now()) {
+    const v = activeVacation(user, now);
+    if (v && pet) {
+        pet.vacationFrom  = new Date(now);
+        pet.vacationUntil = v.until;
+    }
+    return pet;
+}
+
+/**
+ * Start a vacation for every pet `user` owns. Bring decay up to date first.
+ * Mutates; the caller saves. Returns the end Date.
+ */
+function startVacation(user, days = VACATION_MAX_DAYS, now = Date.now()) {
+    const span  = Math.min(VACATION_MAX_DAYS, Math.max(1, Math.floor(Number(days) || VACATION_MAX_DAYS)));
+    const until = new Date(now + span * MS_PER_DAY);
+    for (const pet of user?.pets ?? []) {
+        pet.vacationFrom  = new Date(now);
+        pet.vacationUntil = until;
+    }
+    user?.markModified?.('pets');
+    return until;
+}
+
+/**
+ * End a vacation now. Bring decay up to date first. Mutates; the caller saves.
+ * Returns how many pets were on vacation.
+ */
+function endVacation(user, now = Date.now()) {
+    let ended = 0;
+    for (const pet of user?.pets ?? []) {
+        if (!isOnVacation(pet, now)) continue;
+        pet.vacationUntil = new Date(now);
+        ended++;
+    }
+    if (ended) user?.markModified?.('pets');
+    return ended;
+}
+
 // ── Hunger decay ──────────────────────────────────────────────────────────────
 //
 // Hunger decays *continuously* from `lastDecayAt`, a cursor that tracks how far
@@ -358,20 +488,22 @@ function decayCursor(pet, now = Date.now()) {
 
 /**
  * Decay accrued since the pet's cursor, without persisting anything.
- * Returns { hunger, decay, windowMs }.
+ * Returns { hunger, decay, windowMs, activeMs }, where `activeMs` is the part
+ * of the window that was not paused by a vacation.
  *
  * Resting used to halve this for two hours (#1182). It saved about 0.4 hunger
  * a press and was only ever pressed for care credit, so Train replaced it and
- * decay runs at one speed.
+ * decay runs at one speed — or not at all, on vacation (#1181).
  */
 function decaySince(pet, now = Date.now()) {
     const from     = decayCursor(pet, now);
     const windowMs = Math.max(0, now - from);
     const hunger   = clampHunger(pet.hunger);
-    if (windowMs === 0) return { hunger, decay: 0, windowMs: 0 };
+    if (windowMs === 0) return { hunger, decay: 0, windowMs: 0, activeMs: 0 };
 
-    const decay = (windowMs * HUNGER_DECAY_PER_DAY) / MS_PER_DAY;
-    return { hunger: Math.max(0, hunger - decay), decay, windowMs };
+    const activeMs = Math.max(0, windowMs - pausedMsBetween(pet, from, now));
+    const decay    = (activeMs * HUNGER_DECAY_PER_DAY) / MS_PER_DAY;
+    return { hunger: Math.max(0, hunger - decay), decay, windowMs, activeMs };
 }
 
 /** A pet's current hunger, including decay not yet written to the database. */
@@ -380,9 +512,12 @@ function effectiveHunger(pet, now = Date.now()) {
     return decaySince(pet, now).hunger;
 }
 
-/** Whether a pet is fed enough for its passive bonus to apply (decay-aware). */
+/**
+ * Whether a pet's passive applies and it can battle or train: fed enough
+ * (decay-aware) and not on vacation.
+ */
 function isPetActive(pet, now = Date.now()) {
-    return !!pet && effectiveHunger(pet, now) >= STARVING_THRESHOLD;
+    return !!pet && !isOnVacation(pet, now) && effectiveHunger(pet, now) >= STARVING_THRESHOLD;
 }
 
 /**
@@ -415,7 +550,7 @@ function pickDefenderPet(pets, challengerLevel = 1, now = Date.now()) {
 function applyHungerDecay(pets, now = Date.now()) {
     return pets.map(pet => {
         const from = decayCursor(pet, now);
-        const { hunger: newHunger, decay, windowMs } = decaySince(pet, now);
+        const { hunger: newHunger, decay, activeMs, windowMs } = decaySince(pet, now);
         if (windowMs <= 0) return pet;
 
         const prevHunger = clampHunger(pet.hunger);
@@ -435,11 +570,18 @@ function applyHungerDecay(pets, now = Date.now()) {
             // On a fresh transition, back-date to when hunger actually ran out using
             // the window's average decay rate, so a pet left alone for a month is not
             // handed a fresh grace period from the moment it happens to be noticed.
-            const ratePerMs = decay / windowMs;
+            const ratePerMs = activeMs > 0 ? decay / activeMs : 0;
             const crossedAt = (!wasAtZero && ratePerMs > 0)
-                ? from + Math.min(windowMs, prevHunger / ratePerMs)
+                ? wallClockAfter(pet, from, Math.min(activeMs, prevHunger / ratePerMs))
                 : from;
-            starvingStartAt = new Date(Math.round(crossedAt));
+            starvingStartAt = new Date(Math.round(Math.min(now, crossedAt)));
+        }
+        // The runaway clock stands still on vacation too: push it forward by
+        // whatever part of this window after it started was paused.
+        if (starvingStartAt) {
+            const start  = new Date(starvingStartAt).getTime();
+            const paused = pausedMsBetween(pet, Math.max(start, from), now);
+            if (paused > 0) starvingStartAt = new Date(start + paused);
         }
 
         return {
@@ -553,13 +695,14 @@ function clampBond(value) {
  * clock does.
  */
 function hungryMsSince(pet, now = Date.now()) {
-    const { hunger: end, decay, windowMs } = decaySince(pet, now);
-    if (windowMs <= 0) return 0;
+    // Active time only: bond does not drain while the pet is on vacation.
+    const { hunger: end, decay, activeMs } = decaySince(pet, now);
+    if (activeMs <= 0) return 0;
     const start = clampHunger(pet.hunger);
-    if (start < STARVING_THRESHOLD) return windowMs;
+    if (start < STARVING_THRESHOLD) return activeMs;
     if (end >= STARVING_THRESHOLD || decay <= 0) return 0;
-    const crossedAfter = (start - STARVING_THRESHOLD) / (decay / windowMs);
-    return Math.max(0, windowMs - crossedAfter);
+    const crossedAfter = (start - STARVING_THRESHOLD) / (decay / activeMs);
+    return Math.max(0, activeMs - crossedAfter);
 }
 
 /** A pet's bond now, including hungry-time drain not yet written back. */
@@ -675,7 +818,7 @@ function trainCooldownMinutes(pet, now = Date.now()) {
 
 /**
  * Whether a pet can train `focus` now. Returns `{ ok: true }` or
- * `{ ok: false, reason: 'focus'|'maxed'|'cooldown'|'hungry', minutes? }`.
+ * `{ ok: false, reason: 'focus'|'maxed'|'cooldown'|'vacation'|'hungry', minutes? }`.
  * Decay-aware, like every other read of hunger.
  */
 function canTrain(pet, focus, now = Date.now()) {
@@ -683,6 +826,7 @@ function canTrain(pet, focus, now = Date.now()) {
     if (trainingSessions(pet, focus) >= TRAIN_MAX_SESSIONS) return { ok: false, reason: 'maxed' };
     const minutes = trainCooldownMinutes(pet, now);
     if (minutes > 0) return { ok: false, reason: 'cooldown', minutes };
+    if (isOnVacation(pet, now)) return { ok: false, reason: 'vacation' };
     if (!isPetActive(pet, now)) return { ok: false, reason: 'hungry' };
     return { ok: true };
 }
@@ -728,6 +872,7 @@ const POTW_DAILY_INTERACTION_CAP = 3;
  * Mutates `pet`. Returns true when the interaction counted.
  */
 function recordPetInteraction(pet, now = Date.now()) {
+    if (isOnVacation(pet, now)) return false;
     const day = Math.floor(now / MS_PER_DAY);
     if (pet.interactionDay !== day) {
         pet.interactionDay    = day;
@@ -954,6 +1099,31 @@ function applyPetXp(pet, amount) {
         fromLevel, toLevel: pet.level,
         evolved:   pet.evolutionStage > fromStage,
         fromStage, toStage: pet.evolutionStage,
+    };
+}
+
+/**
+ * What an evolution changed, for the reveal (#1187): the titled name and
+ * passive before and after. `res` is applyPetXp's result for `pet`, which it
+ * has already mutated. Returns null when `res` is not an evolution.
+ */
+function evolutionSummary(pet, res, now = Date.now()) {
+    if (!pet || !res?.evolved) return null;
+    const plain  = pet.toObject ? pet.toObject() : { ...pet };
+    const before = { ...plain, level: res.fromLevel, evolutionStage: res.fromStage };
+    const def    = PET_DEFINITIONS[pet.petId];
+    const was    = getPetDisplay(before);
+    const is     = getPetDisplay(pet);
+    return {
+        fromStage:  res.fromStage,
+        toStage:    res.toStage,
+        fromEmoji:  was.emoji,
+        toEmoji:    is.emoji,
+        fromTitle:  was.titledName,
+        toTitle:    is.titledName,
+        bonusType:  def?.bonusType ?? null,
+        fromPct:    def ? getEffectiveBonusPct(before, now) : 0,
+        toPct:      def ? getEffectiveBonusPct(pet, now) : 0,
     };
 }
 
@@ -1449,6 +1619,16 @@ module.exports = {
     countSlotPets,
     hasFreePetSlot,
     tryGrantRarePet,
+    noteCodex,
+    codexSpecies,
+    rarePetHint,
+    VACATION_MAX_DAYS,
+    isOnVacation,
+    pausedMsBetween,
+    activeVacation,
+    joinVacation,
+    startVacation,
+    endVacation,
     HUNGER_DECAY_PER_DAY,
     MS_PER_DAY,
     STARVING_THRESHOLD,
@@ -1514,6 +1694,7 @@ module.exports = {
     getPetDisplay,
     getEffectiveBonusPct,
     applyPetXp,
+    evolutionSummary,
     getPetStats,
     firstStrikeChance,
     PERSONALITY_COMBAT,

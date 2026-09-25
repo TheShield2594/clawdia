@@ -26,6 +26,7 @@ const {
     isEdible, getMaterialSource, decrementMaterial,
     creditPetCare, collectPetAchievements, announcePetAchievements,
 } = require('./shared');
+const { revealEvolution } = require('./evolution');
 
 // How many items one /pet feed may use. A hungry pet on ordinary food takes up
 // to ten, which used to mean ten commands (#1188).
@@ -109,6 +110,9 @@ async function executeFeed(interaction) {
     recordPetInteraction(pet);
     const bondGained = recordBondCare(pet, 'feed', now);
     if (result.hunger > 0) pet.starvingStartAt = null;
+    // Fed back above a warning line, the next crossing warns again (#1181).
+    if (result.hunger >= STARVING_THRESHOLD) pet.hungerWarnedLow = false;
+    if (result.hunger > 0) pet.hungerWarnedEmpty = false;
     const feedXp = applyPetXp(pet, xpTotal);
     const gained = Math.round(result.hunger - before);
     user.markModified('pets');
@@ -168,7 +172,10 @@ async function executeFeed(interaction) {
 
     const art = await petArt(pet.petId, interaction.guild.id, displayName);
     if (art) embed.setThumbnail(art.url);
-    return interaction.editReply({ embeds: [embed], files: art ? [art.attachment] : [] });
+    await interaction.editReply({ embeds: [embed], files: art ? [art.attachment] : [] });
+    await revealEvolution(interaction, user.pets[petIndex], feedXp, {
+        ownerId: interaction.user.id, ownerName: interaction.member?.displayName ?? interaction.user.username,
+    });
 }
 
 module.exports = { executeFeed, MAX_FEED_QUANTITY };

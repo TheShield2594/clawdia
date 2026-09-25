@@ -32,6 +32,7 @@ const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const { questRewardPayoutKey } = require('../../../utils/payoutKey');
 const { ownedBy } = require('../../../utils/collectorOwner');
 const { resolveUser, syncHungerAndRunaway, creditPetCare } = require('./shared');
+const { revealEvolution } = require('./evolution');
 
 const PLAY_COOLDOWN_MS     = 60 * 60 * 1000; // 1 hour
 // Showcase posts a public embed, so it is rate-limited per pet to keep a
@@ -186,6 +187,7 @@ async function executeStatus(interaction) {
                 : `✨ **+${petXpResult.gained} XP** for ${name}! *(You've had your play XP for this hour.)*`;
             const bondNote = bondGained > 0 ? ` ❤️ **+${bondGained} bond**` : '';
             await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n${xpLine}${bondNote}${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
+            await revealEvolution(btn, freshUser.pets[idx], petXpResult, { ownerId: interaction.user.id, ownerName });
             lastShown = freshUser.pets[idx];
             lastTotal = freshUser.pets.length;
             await interaction.editReply(
@@ -207,6 +209,7 @@ async function executeStatus(interaction) {
                     focus:    'That training focus no longer exists.',
                     maxed:    `${f?.emoji ?? '🏋️'} **${name}** has mastered ${f?.label ?? 'that'} training (${TRAIN_MAX_SESSIONS}/${TRAIN_MAX_SESSIONS}). Pick another focus.`,
                     cooldown: `🏋️ **${name}** is still sore from the last session! Train again in **${check.minutes >= 60 ? `${Math.floor(check.minutes / 60)}h ${check.minutes % 60}m` : `${check.minutes}m`}**.`,
+                    vacation: `🏖️ **${name}** is on vacation. End it with \`/pet vacation off\` to train.`,
                     hungry:   `🍖 **${name}** is too hungry to train. Feed it above **${STARVING_THRESHOLD}%** first.`,
                 }[check.reason];
                 return btn.reply({ content: why, flags: MessageFlags.Ephemeral });
