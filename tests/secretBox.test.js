@@ -249,20 +249,27 @@ describe('the AI providers read the sealed value back', () => {
         expect(provider.resolveAuth({ [field]: 'sk-legacy' }).apiKey).toBe('sk-legacy');
     }));
 
-    // Losing the key must degrade to the bot-wide credential, not to an auth
-    // failure against a provider that was handed a base64 blob.
-    test.each(CASES)('%s falls back to the environment when the guild key cannot be opened', (_name, provider, field, envVar) => {
+    // A key that will not open is reported, not replaced (#1147). Falling back
+    // to the bot-wide credential would move this guild's spend onto the
+    // operator's bill without anyone deciding it should — and would still
+    // beat an auth failure against a provider handed a base64 blob.
+    test.each(CASES)('%s reports a guild key it cannot open rather than falling back', (_name, provider, field, envVar) => {
         const sealed = withKey(KEY, () => encryptSecret('sk-unreadable'));
         const saved = process.env[envVar];
+        const savedGuilds = process.env.AI_ENV_KEY_GUILDS;
         process.env[envVar] = 'sk-bot-wide';
+        process.env.AI_ENV_KEY_GUILDS = '*';
 
         try {
             withKey(undefined, () => {
-                expect(provider.resolveAuth({ [field]: sealed }).apiKey).toBe('sk-bot-wide');
+                expect(provider.resolveAuth({ [field]: sealed }, { guildId: 'g1' }))
+                    .toEqual({ apiKey: null, keySource: null, keyError: 'undecryptable' });
             });
         } finally {
             if (saved === undefined) delete process.env[envVar];
             else process.env[envVar] = saved;
+            if (savedGuilds === undefined) delete process.env.AI_ENV_KEY_GUILDS;
+            else process.env.AI_ENV_KEY_GUILDS = savedGuilds;
         }
     });
 });

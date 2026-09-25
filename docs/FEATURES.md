@@ -363,7 +363,8 @@ The whole reply goes to one of two checkers, picked by what the server has
 connected:
 
 - **OpenAI's free `omni-moderation-latest` endpoint** whenever any OpenAI key is
-  present (the dashboard key or the bot-wide one). The policy here is OpenAI's own
+  present (the dashboard key, or the bot-wide one for a server in
+  `AI_ENV_KEY_GUILDS`). The policy here is OpenAI's own
   default set of flagged categories — hate, harassment, sexual, violence,
   self-harm and the rest — and the reply is flagged if any of them trips.
 - **Otherwise the guild's own provider**, asked one fixed *"does this violate the

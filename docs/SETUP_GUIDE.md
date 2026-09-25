@@ -64,6 +64,35 @@ Administrator: if a feature misbehaves, grant the specific missing permission
 
 ## AI Integration
 
+Each provider below can be set up two ways: a key per server, entered by that
+server's admins in the dashboard and billed to them, or a bot-wide key in
+`.env` billed to you.
+
+### Who can spend the bot-wide keys
+
+Only the servers you list. Since 5.0.0 a server with no key of its own uses the
+bot-wide one only if its guild ID is in `AI_ENV_KEY_GUILDS` (comma-separated, or
+`*` for every server). Empty means none — otherwise the admin of any server the
+bot is invited to could switch AI on without a key and spend yours. A boot with
+a bot-wide key set and this empty logs a warning saying so.
+
+```env
+AI_ENV_KEY_GUILDS=123456789012345678,234567890123456789
+```
+
+Spend through a bot-wide key is also held to your ceilings, whatever the
+server's own AI limits say (a server's limits can be tighter, never looser —
+and its `0`, which means unlimited, does not lift yours):
+
+| Variable | Default | What it bounds |
+|---|---:|---|
+| `AI_ENV_KEY_USER_LIMIT` | 20 | messages per user per 10 minutes |
+| `AI_ENV_KEY_MONTHLY_COST` | 10 | US dollars per server per month |
+| `AI_ENV_KEY_MONTHLY_TOKENS` | 5000000 | tokens per server per month, for models with no price on file |
+
+Set one to `0` to lift that ceiling. A server using its own key is bound only by
+its own limits.
+
 ### OpenAI
 
 1. Go to [OpenAI Platform](https://platform.openai.com/)
@@ -649,8 +678,11 @@ SECRET_ENCRYPTION_KEY=the_generated_value
 Keep it somewhere other than the backups it protects — a value stored next to
 the archive it encrypts protects nothing. It is also not recoverable: without
 it the stored per-guild keys cannot be read back. The bot does not break if it
-is lost or rotated (it falls back to the bot-wide `*_API_KEY` variables and logs
-a warning), but every affected server has to re-enter its key in the dashboard.
+is lost or rotated — it logs a warning, and each affected server is told its
+saved key could not be read — but every affected server has to re-enter its key
+in the dashboard. It does not fall back to the bot-wide `*_API_KEY` variables
+for those servers: that would move their spend onto your bill without anyone
+deciding it should.
 
 Keys already saved before the variable was set are rewritten on the next boot,
 by migration `018_encrypt_guild_ai_keys`. If you set it *later* than that — the
@@ -667,8 +699,10 @@ Each key is also sealed to its server and field: the guild ID and field name go
 in as authenticated data, so a sealed key copied into another server's settings
 (by anyone with write access to the database) will not open there. Keys sealed
 before 5.0.0 are rebound on the next boot by migration `029_bind_guild_ai_keys`,
-and `npm run secrets:encrypt` rebinds any it finds too. The bot-wide `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`
-/ `OPENROUTER_API_KEY` variables are unaffected either way — they are read from
+and `npm run secrets:encrypt` rebinds any it finds too.
+
+The bot-wide `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` /
+`OPENROUTER_API_KEY` variables are unaffected either way — they are read from
 the environment and never stored in the database.
 
 The same key covers the MCP OAuth tokens (`Connecting GitHub from the dashboard`
@@ -1720,7 +1754,8 @@ only when the set changes.
 
 ### AI Not Working
 
-1. Verify API key is correct
+1. Verify API key is correct. A server with no key of its own needs its guild ID
+   in `AI_ENV_KEY_GUILDS` to use the bot-wide one
 2. Check you have credits/quota remaining
 3. Try switching providers (OpenAI ↔ Gemini)
 4. Check logs for specific error messages

@@ -34,6 +34,7 @@ const {
     MAX_TASKS_PER_GUILD
 } = require('../../utils/scheduledTaskLimits');
 const { runDeepTask, refuseTask } = require('../../services/ai/deepTask');
+const { missingKeyMessage } = require('../../services/ai/apiKeys');
 
 const MEMORY_CAP = 10;
 
@@ -606,7 +607,7 @@ async function runMcpPrompt(interaction, ai) {
 
     const config = resolveProviderConfig(ai, { guildId: interaction.guild.id });
     if (config.provider !== 'ollama' && !config.apiKey) {
-        return editText(interaction, `${providers.get(config.provider)?.label || config.provider} is not configured. Add an API key in the dashboard.`);
+        return editText(interaction, missingKeyMessage(providers.get(config.provider)?.label || config.provider, config.keyError));
     }
 
     const rendered = await renderPrompt(forGuild(interaction.guild.id, ai.mcpServers), match.server, match.prompt.name, parsed.values);

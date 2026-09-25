@@ -164,6 +164,7 @@ function collectEnvProblems(env = process.env, { required = REQUIRED_ENV } = {})
     }
 
     warnings.push(...checkSecretEncryption(env));
+    warnings.push(...checkEnvAiKeys(env));
 
     if (env.DASHBOARD_PORT !== undefined && env.DASHBOARD_PORT !== '') {
         const port = Number(env.DASHBOARD_PORT);
@@ -229,6 +230,27 @@ function checkMongoAuth(env) {
         ],
         warnings: [],
     };
+}
+
+/**
+ * An operator AI key that no guild is allowed to use (#1147).
+ *
+ * Since 5.0.0 the environment keys are only spent for the guilds named in
+ * AI_ENV_KEY_GUILDS, and empty means none — so an install upgraded with an
+ * OPENAI_API_KEY and nothing else has, silently, an AI that answers "not
+ * configured" everywhere. Say so at boot instead. A warning, in every
+ * environment: nothing is exposed, it is just a setup that cannot work.
+ */
+function checkEnvAiKeys(env) {
+    const keys = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY']
+        .filter(name => (env[name] || '').trim());
+    if (!keys.length || (env.AI_ENV_KEY_GUILDS || '').trim()) return [];
+
+    return [
+        `${keys.join(', ')} ${keys.length === 1 ? 'is' : 'are'} set, but AI_ENV_KEY_GUILDS is empty, so no ` +
+        'server can use ' + (keys.length === 1 ? 'it' : 'them') + '. Set AI_ENV_KEY_GUILDS to the guild IDs ' +
+        'allowed to spend the bot-wide keys (or `*` for every server) — see .env.example.',
+    ];
 }
 
 /**
@@ -383,6 +405,7 @@ module.exports = {
     checkSessionSecret,
     checkSecretEncryption,
     checkMongoAuth,
+    checkEnvAiKeys,
     checkGatewaySplit,
     DASHBOARD_REQUIRED_ENV,
     resolveDashboardUrl,

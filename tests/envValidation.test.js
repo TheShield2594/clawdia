@@ -19,6 +19,7 @@ const {
     checkDashboardUrl,
     checkSessionSecret,
     checkSecretEncryption,
+    checkEnvAiKeys,
     resolveDashboardUrl,
     REQUIRED_ENV,
     SESSION_SECRET_MIN_LENGTH,
@@ -356,5 +357,24 @@ describe('the entry points validate before they connect', () => {
         expect(source).toMatch(/require\('\.\.\/config\/validateEnv'\)/);
         expect(source).not.toMatch(/must use HTTPS in production/);
         expect(source).not.toMatch(/SESSION_SECRET\.length < 32/);
+    });
+});
+
+// #1147: the bot-wide AI keys are only spent for the guilds the operator names.
+describe('checkEnvAiKeys', () => {
+    test('warns when a bot-wide key is set and no guild may use it', () => {
+        const [warning] = checkEnvAiKeys({ OPENAI_API_KEY: 'sk-x', GEMINI_API_KEY: 'AIza' });
+        expect(warning).toMatch(/OPENAI_API_KEY, GEMINI_API_KEY are set, but AI_ENV_KEY_GUILDS is empty/);
+    });
+
+    test('is quiet once the guilds are named, or with no bot-wide key', () => {
+        expect(checkEnvAiKeys({ OPENAI_API_KEY: 'sk-x', AI_ENV_KEY_GUILDS: '*' })).toEqual([]);
+        expect(checkEnvAiKeys({})).toEqual([]);
+    });
+
+    test('is a warning, not an error', () => {
+        const { errors, warnings } = collectEnvProblems(goodEnv({ OPENAI_API_KEY: 'sk-x' }));
+        expect(errors).toEqual([]);
+        expect(warnings.join('\n')).toMatch(/AI_ENV_KEY_GUILDS/);
     });
 });

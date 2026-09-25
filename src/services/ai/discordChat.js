@@ -4,6 +4,7 @@ const { providers, mcpMode, usesClientTools, supportsVision } = require('./provi
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
 const { retrieveKnowledge, knowledgeSection } = require('./knowledge');
 const { getEmbedder } = require('./embeddings');
+const { missingKeyMessage } = require('./apiKeys');
 const { retrieveCommands, commandSection } = require('./commandHelp');
 const { retrieveGameData, gameDataSection } = require('./gameData');
 const { collectImages, loadImages, visionNotice } = require('./vision');
@@ -166,12 +167,12 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
  * content, which is the right answer for the reply-to-bot trigger.
  */
 async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
-    const { provider, model, temperature, maxTokens, contextTokens, apiKey, baseUrl, mcpServers, mcpConfirm, mcpRoute, mcpApprover, rateLimit } = resolveProviderConfig(aiSettings, { guildId: message.guild?.id });
+    const { provider, model, temperature, maxTokens, contextTokens, apiKey, keyError, baseUrl, mcpServers, mcpConfirm, mcpRoute, mcpApprover, rateLimit } = resolveProviderConfig(aiSettings, { guildId: message.guild?.id });
     const providerDef = providers.get(provider);
     const providerLabel = providerDef?.label || provider;
 
     if (provider !== 'ollama' && !apiKey) {
-        return reply(message, `${providerLabel} is not configured. Add an API key in the dashboard.`);
+        return reply(message, missingKeyMessage(providerLabel, keyError));
     }
 
     const modelError = providerDef?.validateModel?.(model);

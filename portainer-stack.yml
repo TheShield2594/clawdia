@@ -342,6 +342,12 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # Which servers may spend the four keys above (#1147): guild IDs, or `*`.
+      # Empty means none. The ceilings bound that spend; see .env.example.
+      - AI_ENV_KEY_GUILDS=${AI_ENV_KEY_GUILDS:-}
+      - AI_ENV_KEY_USER_LIMIT=${AI_ENV_KEY_USER_LIMIT:-}
+      - AI_ENV_KEY_MONTHLY_COST=${AI_ENV_KEY_MONTHLY_COST:-}
+      - AI_ENV_KEY_MONTHLY_TOKENS=${AI_ENV_KEY_MONTHLY_TOKENS:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
       # Encrypts the per-server AI provider keys admins enter in the dashboard,
       # so the nightly dumps in the backups volume hold ciphertext rather than

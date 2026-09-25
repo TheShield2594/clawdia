@@ -72,9 +72,19 @@ describe('outputModerationEnabled', () => {
     it('is off for a non-ollama provider with no key and no OpenAI key', () => {
         expect(outputModerationEnabled(guild({ ai: { provider: 'gemini', openaiKey: null } }))).toBe(false);
     });
-    it('is on when only the bot-wide OpenAI key is set', () => {
+    it('is on when only the bot-wide OpenAI key is set, for a server allowed it', () => {
         process.env.OPENAI_API_KEY = 'sk-env';
-        expect(outputModerationEnabled(guild({ ai: { provider: 'gemini', openaiKey: null } }))).toBe(true);
+        process.env.AI_ENV_KEY_GUILDS = 'g1';
+        try {
+            expect(outputModerationEnabled(guild({ ai: { provider: 'gemini', openaiKey: null } }))).toBe(true);
+        } finally {
+            delete process.env.AI_ENV_KEY_GUILDS;
+        }
+    });
+    // #1147: the bot-wide key belongs to the operator, who names the servers.
+    it('is off on the bot-wide key alone for a server not in AI_ENV_KEY_GUILDS', () => {
+        process.env.OPENAI_API_KEY = 'sk-env';
+        expect(outputModerationEnabled(guild({ ai: { provider: 'gemini', openaiKey: null } }))).toBe(false);
     });
 });
 
