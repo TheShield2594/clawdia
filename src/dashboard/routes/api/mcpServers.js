@@ -11,7 +11,7 @@ const {
     guildServersAllowed,
     getMcpServers,
     resolveMcpServers,
-    requiresApproval,
+    effectiveMcpRoute,
     forGuild,
     CONFIRM_MODES,
     DEFAULT_CONFIRM_MODE,
@@ -306,12 +306,12 @@ function validateServerInput(body, name) {
  * `auto` is the default and reads as a question rather than an answer, so the
  * panel is told the answer as well as the setting.
  */
-function effectiveMcpRoute(guildSettings) {
-    const route = guildSettings?.ai?.mcpRoute || DEFAULT_MCP_ROUTE;
-    if (route !== 'auto') return route;
-    return requiresApproval(guildSettings?.ai?.mcpConfirm, forGuild(guildSettings?.guildId, guildSettings?.ai?.mcpServers))
-        ? 'client'
-        : 'connector';
+function guildEffectiveRoute(guildSettings) {
+    return effectiveMcpRoute(
+        guildSettings?.ai?.mcpRoute || DEFAULT_MCP_ROUTE,
+        guildSettings?.ai?.mcpConfirm,
+        forGuild(guildSettings?.guildId, guildSettings?.ai?.mcpServers)
+    );
 }
 
 // The guild's MCP servers, the operator's global ones, the presets, and whether editing is allowed at all.
@@ -347,7 +347,7 @@ router.get('/guild/:guildId/mcp-servers', checkAuth, checkGuildAccess, async (re
             // what "auto" means for their own configuration.
             mcpRoute: guildSettings?.ai?.mcpRoute || DEFAULT_MCP_ROUTE,
             mcpRoutes: MCP_ROUTES,
-            effectiveRoute: effectiveMcpRoute(guildSettings),
+            effectiveRoute: guildEffectiveRoute(guildSettings),
             // 'native' (the provider's own API takes the servers), 'client'
             // (the bot lists and calls the tools itself) or false. The panel
             // only has to warn when it is false.

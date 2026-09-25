@@ -1,7 +1,9 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { randomUUID } = require('crypto');
+const crypto = require('crypto');
+const { randomUUID } = crypto;
 const MigrationRecord = require('../models/MigrationRecord');
 
 // Wall-clock budget for a single migration. A migration that hangs holds the
@@ -202,7 +204,9 @@ function loadMigrations(dir) {
  * warn-and-continue default the only branch it could ever take (#872).
  *
  * The archive lands in MIGRATION_BACKUP_DIR (default ./backups, same place as
- * scripts/backup.sh) and is restored with scripts/restore.sh.
+ * scripts/backup.sh), mode 0600, and is restored with scripts/restore.sh. With
+ * BACKUP_ENCRYPTION_PASSPHRASE set it is sealed the way the nightly archives
+ * are and named pre-migration-<stamp>.gz.enc (#1150).
  */
 function preMigrationBackup(irreversibleNames) {
     const mode = String(process.env.MIGRATION_BACKUP || '').toLowerCase();
@@ -227,7 +231,12 @@ function preMigrationBackup(irreversibleNames) {
 
     const backupDir = process.env.MIGRATION_BACKUP_DIR || path.join(process.cwd(), 'backups');
     const stamp = new Date().toISOString().replace(/[:.]/g, '').replace(/-/g, '');
-    const archive = path.join(backupDir, `pre-migration-${stamp}.gz`);
+    // With BACKUP_ENCRYPTION_PASSPHRASE set, ./backups is meant to hold only
+    // ciphertext (#886) — and a full plaintext dump beside the sealed nightly
+    // archives would undo that on every irreversible migration (#1150). The
+    // dump is then staged outside backupDir and only the sealed file lands.
+    const passphrase = process.env.BACKUP_ENCRYPTION_PASSPHRASE || '';
+    const archive = path.join(backupDir, `pre-migration-${stamp}.gz${passphrase ? '.enc' : ''}`);
 
     try {
         fs.mkdirSync(backupDir, { recursive: true });
@@ -257,20 +266,104 @@ function preMigrationBackup(irreversibleNames) {
         );
     }
 
-    console.log(`[MIGRATIONS] Taking pre-migration backup → ${archive}`);
-    // Synchronous on purpose: this runs at boot before anything is served, and
-    // the destructive migration must not start until the dump has finished.
-    const result = spawnSync('mongodump', [`--uri=${uri}`, '--gzip', `--archive=${archive}`], {
-        stdio: ['ignore', 'inherit', 'inherit'],
-    });
-
-    if (result.error) {
-        return fail(`mongodump could not be run (${result.error.code === 'ENOENT' ? 'not on PATH' : result.error.message})`);
+    // Where mongodump writes. Unencrypted that is the archive itself; sealed,
+    // it is a private directory (mkdtemp is 0700) outside backupDir, removed
+    // however this ends, so the plaintext never appears where the ciphertext
+    // lives — the same staging scripts/backup.sh does.
+    let staging = null;
+    let work = archive;
+    if (passphrase) {
+        try {
+            staging = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdia-premigration-'));
+        } catch (err) {
+            return fail(`could not create a private staging directory for the encrypted backup: ${err.message}`);
+        }
+        work = path.join(staging, 'dump.gz');
     }
-    if (result.status !== 0) {
-        return fail(`mongodump exited with status ${result.status}`);
+
+    try {
+        // Created 0600 before mongodump opens it: mongodump truncates an
+        // existing file rather than recreating it, so the mode survives, and
+        // the dump is never world-readable for even the time it takes to write.
+        try {
+            fs.closeSync(fs.openSync(work, 'wx', 0o600));
+        } catch (err) {
+            return fail(`could not create ${work}: ${err.message}`);
+        }
+
+        console.log(`[MIGRATIONS] Taking pre-migration backup → ${archive}`);
+        // Synchronous on purpose: this runs at boot before anything is served, and
+        // the destructive migration must not start until the dump has finished.
+        const result = spawnSync('mongodump', [`--uri=${uri}`, '--gzip', `--archive=${work}`], {
+            stdio: ['ignore', 'inherit', 'inherit'],
+        });
+
+        if (result.error || result.status !== 0) {
+            // A dump that did not finish is not an archive, and one left under
+            // the name restore.sh and the offsite sync reach for reads as one.
+            fs.rmSync(work, { force: true });
+            return fail(result.error
+                ? `mongodump could not be run (${result.error.code === 'ENOENT' ? 'not on PATH' : result.error.message})`
+                : `mongodump exited with status ${result.status}`);
+        }
+
+        if (passphrase) {
+            try {
+                sealArchive(work, archive, passphrase);
+            } catch (err) {
+                // A half-written .enc is not an archive, and leaving it under
+                // the name restore.sh would reach for reads as a success.
+                fs.rmSync(archive, { force: true });
+                return fail(`encrypting the pre-migration backup failed: ${err.message}`);
+            }
+        }
+        // Belt and braces for the plaintext path: an operator's umask or an
+        // archive left over from an older version must not be group-readable.
+        try { fs.chmodSync(archive, 0o600); } catch { /* best effort */ }
+    } finally {
+        if (staging) fs.rmSync(staging, { recursive: true, force: true });
     }
     console.log('[MIGRATIONS] Pre-migration backup complete.');
+}
+
+// The sealed format is `openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt`,
+// byte for byte — the same invocation scripts/backup.sh and the nightly backup
+// service use — so scripts/restore.sh and verify-backup.sh open a sealed
+// pre-migration dump exactly as they open any other .gz.enc. It is done here in
+// Node rather than by shelling out because the bot image carries no openssl
+// binary, and a seal that could not run would leave only the plaintext choice.
+const SEAL_ITERATIONS = 200000;
+const SEAL_CHUNK = 1024 * 1024;
+
+/**
+ * Encrypts `src` into `dest` in OpenSSL's salted format: the magic
+ * `Salted__`, an 8-byte salt, then AES-256-CBC with key and IV derived by
+ * PBKDF2-HMAC-SHA256. Synchronous and chunked, so a large dump never has to fit
+ * in memory and the migration still cannot start before the seal is done.
+ *
+ * `dest` is created 0600 and must not already exist.
+ */
+function sealArchive(src, dest, passphrase) {
+    const salt = crypto.randomBytes(8);
+    const derived = crypto.pbkdf2Sync(passphrase, salt, SEAL_ITERATIONS, 48, 'sha256');
+    const cipher = crypto.createCipheriv('aes-256-cbc', derived.subarray(0, 32), derived.subarray(32, 48));
+
+    const inFd = fs.openSync(src, 'r');
+    let outFd;
+    try {
+        outFd = fs.openSync(dest, 'wx', 0o600);
+        fs.writeSync(outFd, Buffer.concat([Buffer.from('Salted__'), salt]));
+        const buf = Buffer.alloc(SEAL_CHUNK);
+        let n;
+        while ((n = fs.readSync(inFd, buf, 0, SEAL_CHUNK, null)) > 0) {
+            fs.writeSync(outFd, cipher.update(buf.subarray(0, n)));
+        }
+        fs.writeSync(outFd, cipher.final());
+        fs.fsyncSync(outFd);
+    } finally {
+        fs.closeSync(inFd);
+        if (outFd !== undefined) fs.closeSync(outFd);
+    }
 }
 
 /**
@@ -599,4 +692,5 @@ module.exports = {
     waitForMigrations,
     isRecordableMigration,
     preMigrationBackup,
+    sealArchive,
 };

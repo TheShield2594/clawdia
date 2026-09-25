@@ -278,11 +278,27 @@ async function runAction(action, message, options = {}) {
     return handler(action, message, options);
 }
 
+// What a trailing ACTION block may do. schedule_task is deliberately absent:
+// on the tool route it goes through an approval prompt, and this route has no
+// way to put one up — so a prompt-injected ACTION block (an MCP tool result, a
+// quoted message) could otherwise set a recurring, unattended, token-spending
+// task during an admin's conversation with nobody approving it (#1148). The
+// addendum already tells the model it is not on the list; this makes that true.
+const TEXT_PROTOCOL_ACTIONS = new Set(['create_poll', 'create_reminder', 'suggest_mod_action']);
+
 // The text protocol's executor. The model has already told the user it acted by
 // the time this runs, so a failure has to be said out loud in the channel —
 // there is no tool result for it to land in, which is the whole difference
 // between this route and the tool one.
 async function executeAction(action, message) {
+    if (!TEXT_PROTOCOL_ACTIONS.has(action?.type)) {
+        console.warn(`[AI Action] refused text-protocol action "${action?.type}" — not allowed on this route`);
+        await message.channel.send({
+            content: 'ℹ️ That action can\'t be taken from here — nothing was scheduled or changed.',
+            allowedMentions: { parse: [] }
+        }).catch(() => {});
+        return;
+    }
     try {
         await runAction(action, message);
     } catch (err) {
@@ -309,5 +325,6 @@ module.exports = {
     buildToolActionsAddendum,
     extractAction,
     executeAction,
-    runAction
+    runAction,
+    TEXT_PROTOCOL_ACTIONS
 };

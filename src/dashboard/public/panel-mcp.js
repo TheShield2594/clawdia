@@ -175,10 +175,16 @@ function renderMcpRoute(provider) {
 
     const base = hint.dataset.base || hint.textContent;
     hint.dataset.base = base;
-    hint.textContent = select.value === 'auto' && _mcpEffectiveRoute
-        ? base + ' Right now automatic resolves to ' +
-            (_mcpEffectiveRoute === 'client' ? "Clawdia's own client." : "Anthropic's connector.")
-        : base;
+    if (select.value === 'auto' && _mcpEffectiveRoute) {
+        hint.textContent = base + ' Right now automatic resolves to ' +
+            (_mcpEffectiveRoute === 'client' ? "Clawdia's own client." : "Anthropic's connector.");
+    } else if (select.value === 'connector' && _mcpEffectiveRoute === 'client') {
+        // Approvals (or an OAuth connection) override the connector (#1149):
+        // say so, rather than letting the admin believe the connector is in use.
+        hint.textContent = base + " Right now requests use Clawdia's own client anyway: an approval policy or an OAuth connection is set, and neither can work through Anthropic's connector.";
+    } else {
+        hint.textContent = base;
+    }
 }
 
 function renderMcpServers(provider) {

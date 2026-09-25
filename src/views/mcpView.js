@@ -56,11 +56,15 @@ function describeConfirm(mode) {
 /**
  * The route line, or null for a provider that only ever had one route.
  *
- * `auto` is a question rather than an answer, so it is shown resolved.
+ * `auto` is a question rather than an answer, so it is shown resolved — and so
+ * is `connector` when approvals or an OAuth connection override it (#1149).
  */
 function describeRoute(provider, route, effective) {
     if (provider !== 'anthropic') return null;
-    const resolved = route === 'auto' ? `auto → ${effective}` : route;
+    const resolved = route !== effective ? `${route} → ${effective}` : route;
+    if (route === 'connector' && effective === 'client') {
+        return `Route: ${resolved} — Clawdia makes the calls, because approvals (or an OAuth connection) cannot work through Anthropic's connector`;
+    }
     return effective === 'connector'
         ? `Route: ${resolved} — Anthropic opens the connections, so approvals and activity do not apply`
         : `Route: ${resolved} — Clawdia makes the calls`;

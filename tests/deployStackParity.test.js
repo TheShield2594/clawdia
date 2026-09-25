@@ -57,6 +57,15 @@ describe.each(stacks)('%s', (name, doc) => {
         expect([name, source]).toEqual([name, target]);
     });
 
+    it('hands the bot the passphrase that seals its pre-migration dump (#1150)', () => {
+        // docker-compose.yml gives the bot the whole .env; the Portainer stack
+        // names each variable, and a bot without it writes the dump in the clear.
+        const env = doc.services.bot.environment;
+        const named = Array.isArray(env) ? env.map(e => String(e).split('=')[0]) : Object.keys(env || {});
+        const viaEnvFile = (doc.services.bot.env_file || []).includes('.env');
+        expect([name, viaEnvFile || named.includes('BACKUP_ENCRYPTION_PASSPHRASE')]).toEqual([name, true]);
+    });
+
     it('declares any named volume it mounts', () => {
         const declared = Object.keys(doc.volumes || {});
         const named = Object.values(doc.services)

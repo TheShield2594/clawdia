@@ -75,9 +75,14 @@ const FIRST_SERVER_CONFIRM_MODE = 'writes';
  * `auto` is the default because the alternative is a guild turning on approvals
  * and losing them by changing a dropdown on a different tab.
  *
- * One case overrides even `connector`: a connection authorized with OAuth
+ * Two cases override even `connector`. A connection authorized with OAuth
  * (#796) always takes the client route, because an access token expires within
- * the hour and only the bot can refresh it. See `usesOAuth` below.
+ * the hour and only the bot can refresh it. See `usesOAuth` below. And a guild
+ * whose approval policy could stop a call — `mcpConfirm` other than `off`, or
+ * any server with `confirmTools` — takes the client route too (#1149): the
+ * connector runs calls on Anthropic's side where no approval prompt can exist,
+ * so honouring `connector` there would switch the approvals off silently. See
+ * `effectiveMcpRoute` below.
  */
 const MCP_ROUTES = ['auto', 'connector', 'client'];
 const DEFAULT_MCP_ROUTE = 'auto';
@@ -596,6 +601,20 @@ function requiresApproval(mode, guildServers = []) {
 }
 
 /**
+ * The route a Claude request actually takes: 'client' or 'connector'.
+ *
+ * `connector` is a preference, and it gives way to anything that only works on
+ * the client route — an OAuth connection (#796) or an approval policy (#1149).
+ * `auto` resolves the same way; the two settings differ only in the one
+ * request-time case `usesClientRoute` in providers/anthropic.js adds.
+ */
+function effectiveMcpRoute(route, mode, guildServers = []) {
+    if ((route || DEFAULT_MCP_ROUTE) === 'client') return 'client';
+    if (usesOAuth(guildServers)) return 'client';
+    return requiresApproval(mode, guildServers) ? 'client' : 'connector';
+}
+
+/**
  * Request fragment for the Anthropic Messages API, or null when no servers
  * apply. `tools` is merged with (not substituted for) any tools the caller
  * already has — every server in mcp_servers must be referenced by exactly one
@@ -636,6 +655,7 @@ module.exports = {
     ownerOf,
     guildServersAllowed,
     requiresApproval,
+    effectiveMcpRoute,
     isToolEnabled,
     isToolDeferred,
     toolAnnotations,

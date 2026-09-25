@@ -130,7 +130,7 @@ describe('loadFileSecrets', () => {
         // Everything the bot reads that carries a credential. The rest —
         // CLIENT_ID, DASHBOARD_URL, NODE_ENV, tuning knobs — is not sensitive.
         const SECRET_SHAPED = [...used].filter(name =>
-            /(_TOKEN|_SECRET|_KEY|_PASSWORD|_USERNAME)$/.test(name) || name === 'MONGODB_URI');
+            /(_TOKEN|_SECRET|_KEY|_PASSWORD|_PASSPHRASE|_USERNAME)$/.test(name) || name === 'MONGODB_URI');
 
         expect(SECRET_SHAPED.sort()).toEqual([...FILE_BACKED_SECRETS].sort());
     });
