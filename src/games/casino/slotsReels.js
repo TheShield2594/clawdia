@@ -1,4 +1,5 @@
 'use strict';
+const { secureRandom } = require('../../utils/secureRandom');
 
 // The reels, the paytable and the payout evaluation for `/casino slots`.
 //
@@ -140,14 +141,14 @@ function windowAt(stops) {
 const countScatters = window => window.flat().filter(s => s.type === 'scatter').length;
 
 /**
- * Spins the reels. `rng` returns a float in [0, 1) — Math.random by default.
+ * Spins the reels. `rng` returns a float in [0, 1) — secureRandom (crypto) by default.
  * `hot` stops reel 1 on a high-value symbol (the Heat meter's Hot Spin); `lock`
  * holds reel 1 at a stop already chosen, for a Lucky Charm re-spin of a Hot
  * Spin that must not lose the lock it was given.
  *
  * @returns {{stops: number[], window: object[][], line: object[], scatterCount: number}}
  */
-function spin({ rng = Math.random, hot = false, lock = null } = {}) {
+function spin({ rng = secureRandom, hot = false, lock = null } = {}) {
     const pick = () => Math.floor(rng() * STRIP_LENGTH);
     const first = lock ?? (hot ? HOT_STOPS[Math.floor(rng() * HOT_STOPS.length)] : pick());
     const stops = [first, pick(), pick()];
@@ -160,7 +161,7 @@ function spin({ rng = Math.random, hot = false, lock = null } = {}) {
 const FILLER = REELS[0].filter(s => s.type !== 'scatter');
 
 /** A filler emoji for a cell whose reel is still spinning. */
-function fillerEmoji(rng = Math.random) {
+function fillerEmoji(rng = secureRandom) {
     return FILLER[Math.floor(rng() * FILLER.length)].emoji;
 }
 

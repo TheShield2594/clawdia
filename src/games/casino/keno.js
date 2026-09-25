@@ -5,6 +5,7 @@ const {
     ButtonStyle,
     MessageFlags,
 } = require('discord.js');
+const { secureRandom } = require('../../utils/secureRandom');
 const User  = require('../../models/User');
 const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
@@ -196,13 +197,13 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
         let grossPayout = multiplier > 0 ? bet * multiplier : 0;
 
         let charmTriggered = false;
-        if (grossPayout === 0 && luck.charm > 0 && Math.random() < luck.charm) {
+        if (grossPayout === 0 && luck.charm > 0 && secureRandom() < luck.charm) {
             grossPayout = bet;
             charmTriggered = true;
         }
 
         let streakTriggered = false;
-        if (grossPayout === 0 && luck.streak > 0 && Math.random() < luck.streak) {
+        if (grossPayout === 0 && luck.streak > 0 && secureRandom() < luck.streak) {
             grossPayout = bet;
             streakTriggered = true;
         }

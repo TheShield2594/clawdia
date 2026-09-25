@@ -63,6 +63,7 @@ jest.mock('../src/games/casino/blackjackHands', () => {
     return { ...actual, buildDeck: (...args) => (mockDeck ? [...mockDeck] : actual.buildDeck(...args)) };
 });
 
+const { mockRandom, restoreRandom } = require('./helpers/secureRandom');
 const User  = require('../src/models/User');
 const Guild = require('../src/models/Guild');
 const crash = require('../src/games/casino/crash');
@@ -118,6 +119,7 @@ afterEach(() => {
     deleteLobby(CHANNEL_ID);
     jest.useRealTimers();
     jest.restoreAllMocks();
+    restoreRandom();
     errorSpy?.mockRestore();
 });
 
@@ -128,7 +130,7 @@ describe('crash auto cash-out', () => {
     const rollFor = point => 1 - 0.99 / (point + 0.005);
 
     async function playRound(point, autoCashout) {
-        jest.spyOn(Math, 'random').mockReturnValue(rollFor(point));
+        mockRandom(rollFor(point));
         jest.useFakeTimers();
         const spin = makeInteraction({
             options: { bet: BET, auto_cashout: autoCashout },
@@ -196,7 +198,7 @@ describe('higher-or-lower', () => {
      */
     async function play(rolls, presses) {
         const queue = [...rolls];
-        jest.spyOn(Math, 'random').mockImplementation(() => queue.shift() ?? 0);
+        mockRandom(() => queue.shift() ?? 0);
         jest.useFakeTimers();
         let hand = null;
         const shownId = prefix => hand?.replies
@@ -368,7 +370,7 @@ describe('no coin booster reaches a casino payout', () => {
     async function playGame(game, options, presses = [], rolls = null) {
         if (rolls) {
             const queue = [...rolls];
-            jest.spyOn(Math, 'random').mockImplementation(() => queue.shift() ?? 0);
+            mockRandom(() => queue.shift() ?? 0);
         }
         jest.useFakeTimers();
         let hand = null;

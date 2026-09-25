@@ -5,6 +5,7 @@ const {
     EmbedBuilder,
     MessageFlags,
 } = require('discord.js');
+const { secureRandom } = require('../../utils/secureRandom');
 const User  = require('../../models/User');
 const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
@@ -291,7 +292,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
             const won = pickedHigher ? next.value > current.value : next.value < current.value;
 
             // Lucky Charm on loss: return bet silently and end session (low-stakes bets only)
-            if (!won && luck.charm > 0 && Math.random() < luck.charm) {
+            if (!won && luck.charm > 0 && secureRandom() < luck.charm) {
                 const saved = await payHand(userFilter, bet,
                     { game: 'higherlower', handId, phase: 'lucky-save:charm' });
                 settledHere = true;
@@ -313,7 +314,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
             }
 
             // Lucky Streak on loss: return bet silently and end session (low-stakes bets only)
-            if (!won && luck.streak > 0 && Math.random() < luck.streak) {
+            if (!won && luck.streak > 0 && secureRandom() < luck.streak) {
                 const saved = await payHand(userFilter, bet,
                     { game: 'higherlower', handId, phase: 'lucky-save:streak' });
                 settledHere = true;

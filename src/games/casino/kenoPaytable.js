@@ -1,4 +1,5 @@
 'use strict';
+const { secureRandom } = require('../../utils/secureRandom');
 
 // The draw and the paytable for `/casino keno`, lifted out of keno.js (#785).
 //
@@ -18,8 +19,8 @@ const DRAW_COUNT = 10;
 const PAYOUTS = { 2: 1, 3: 5, 4: 20, 5: 150 };
 const PAYTABLE_FOOTER = `2 matches = ${PAYOUTS[2]}× · 3 = ${PAYOUTS[3]}× · 4 = ${PAYOUTS[4]}× · 5 = ${PAYOUTS[5]}×`;
 
-/** Ten of forty, ascending. `rng` returns a float in [0, 1) — Math.random by default. */
-function drawNumbers(rng = Math.random) {
+/** Ten of forty, ascending. `rng` returns a float in [0, 1) — secureRandom (crypto) by default. */
+function drawNumbers(rng = secureRandom) {
     const pool = Array.from({ length: POOL_SIZE }, (_, i) => i + 1);
     for (let i = pool.length - 1; i > 0; i--) {
         const j = Math.floor(rng() * (i + 1));

@@ -1,4 +1,5 @@
 'use strict';
+const { secureRandom } = require('../../utils/secureRandom');
 
 // Hand totals, the dealer loop and the settle for `/casino blackjack`, lifted
 // out of blackjack.js (#785).
@@ -11,8 +12,8 @@
 const SUITS  = ['♠', '♥', '♦', '♣'];
 const VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 
-/** The 52 cards, shuffled. `rng` returns a float in [0, 1) — Math.random by default. */
-function buildDeck(rng = Math.random) {
+/** The 52 cards, shuffled. `rng` returns a float in [0, 1) — secureRandom (crypto) by default. */
+function buildDeck(rng = secureRandom) {
     const deck = [];
     for (const suit of SUITS) {
         for (const value of VALUES) deck.push({ suit, value });

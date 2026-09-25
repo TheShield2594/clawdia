@@ -27,6 +27,7 @@ jest.mock('../src/games/casino/payout', () => ({
     payHand: jest.fn(),
 }));
 
+const { mockRandom, restoreRandom } = require('./helpers/secureRandom');
 const { MessageFlags } = require('discord.js');
 const User  = require('../src/models/User');
 const Guild = require('../src/models/Guild');
@@ -173,7 +174,6 @@ describe('the result embed', () => {
 // ─── The game ─────────────────────────────────────────────────────────────────
 
 describe('/casino roulette', () => {
-    let randomSpy;
     let errorSpy;
 
     beforeEach(() => {
@@ -188,17 +188,14 @@ describe('/casino roulette', () => {
     });
 
     afterEach(() => {
-        randomSpy?.mockRestore();
-        randomSpy = null;
+        restoreRandom();
         errorSpy.mockRestore();
     });
 
     /** Lands the first spin on `n`; every later draw is 0.5. */
     const landOn = (n, ...more) => {
-        randomSpy = jest.spyOn(Math, 'random');
-        randomSpy.mockReturnValueOnce((n + 0.5) / 37);
-        more.forEach(v => randomSpy.mockReturnValueOnce(v));
-        randomSpy.mockReturnValue(0.5);
+        const queue = [(n + 0.5) / 37, ...more];
+        mockRandom(() => (queue.length ? queue.shift() : 0.5));
     };
 
     const play = async (options, extra = {}) => {

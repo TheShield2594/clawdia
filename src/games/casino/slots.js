@@ -6,6 +6,7 @@ const {
     MessageFlags,
     AttachmentBuilder,
 } = require('discord.js');
+const { secureRandom } = require('../../utils/secureRandom');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { placeWager } = require('../../utils/placeWager');
@@ -723,13 +724,13 @@ async function playSlots(ctx) {
 
         // Lucky Charm: a losing spin sometimes gets a second one. A Hot Spin's
         // second spin keeps the reel it was locked to.
-        if (isNetLoss(result, bet) && luck.charm > 0 && Math.random() < luck.charm) {
+        if (isNetLoss(result, bet) && luck.charm > 0 && secureRandom() < luck.charm) {
             view   = spin({ lock: hot ? firstView.stops[0] : null });
             result = evaluate(view.line, bet, { scatterCount: view.scatterCount });
             charm  = true;
         }
         // Lucky Streak: a spin that is still a loss is sometimes refunded.
-        if (isNetLoss(result, bet) && luck.streak > 0 && Math.random() < luck.streak) {
+        if (isNetLoss(result, bet) && luck.streak > 0 && secureRandom() < luck.streak) {
             result = { ...result, outcome: 'push', payout: bet };
         }
 

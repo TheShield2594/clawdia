@@ -10,6 +10,7 @@
 // casual no-stakes flip and the PvP challenge did not fit a house game and were
 // dropped with the old command; `/duel` covers player-vs-player wagering.
 
+const { secureRandom } = require('../../utils/secureRandom');
 const { EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
@@ -26,7 +27,7 @@ const SPIN_FRAMES = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '�
 const SPIN_MS     = 300;
 const MIN_BET     = 10;
 
-const flip = () => (Math.random() < 0.5 ? HEADS : TAILS);
+const flip = () => (secureRandom() < 0.5 ? HEADS : TAILS);
 const pip  = side => (side === HEADS ? '👑' : '🔘');
 
 function embedAuthor(interaction) {
