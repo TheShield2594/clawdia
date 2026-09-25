@@ -2,7 +2,7 @@
 
 /**
  * #998 — /pet status, driven end to end: the status card, its prev/next
- * navigation, and the play / rest / showcase buttons, each of which re-reads the
+ * navigation, and the play / train / showcase buttons, each of which re-reads the
  * player and writes back through the shared fakeCollection store.
  */
 
@@ -41,7 +41,7 @@ const pet = require('../src/commands/economy/pet');
 const { generatePetSprite } = require('../src/utils/cardGenerator');
 const { createPetStatusCard } = require('../src/utils/petStatusCard');
 const { announceLevelUp } = require('../src/services/levelingService');
-const { xpForLevel, REST_DURATION_MS } = require('../src/services/petService');
+const { xpForLevel, TRAIN_COOLDOWN_MS, TRAIN_HUNGER_COST } = require('../src/services/petService');
 
 const GUILD = 'guild-1';
 const USER = 'user-1';
@@ -132,7 +132,10 @@ describe('/pet status card', () => {
         expect(card.embeds).toHaveLength(1);
         expect(repliedText({ replies: [card] })).toContain('Pet 1 of 1');
         expect(card.components.flatMap(r => r.components.map(c => c.data.custom_id)))
-            .toEqual([`pet_play:${USER}:0:pet-dog`, `pet_rest:${USER}:0:pet-dog`, `pet_showcase:${USER}:0:pet-dog`]);
+            .toEqual([
+                `pet_play:${USER}:0:pet-dog`, `pet_showcase:${USER}:0:pet-dog`,
+                `pet_train_power:${USER}:0:pet-dog`, `pet_train_guard:${USER}:0:pet-dog`, `pet_train_agility:${USER}:0:pet-dog`,
+            ]);
         // A day of decay at 10/day, written back by the status save.
         expect(stored().pets[0].hunger).toBeCloseTo(70, 3);
     });
@@ -160,7 +163,7 @@ describe('/pet status card', () => {
 
         const last = interaction.replies.at(-1);
         const buttons = last.components.flatMap(r => r.components);
-        expect(buttons).toHaveLength(5);
+        expect(buttons).toHaveLength(7);
         expect(buttons.every(b => b.data.disabled === true)).toBe(true);
     });
 
@@ -289,29 +292,88 @@ describe('/pet status — play', () => {
     });
 });
 
-describe('/pet status — rest', () => {
-    test('puts the pet to rest for two hours', async () => {
-        seedUser({ pets: [makePet({ name: 'Rex' })] });
+describe('/pet status — train (#1182, which replaced rest)', () => {
+    test('a session raises the focus, costs hunger, and counts as care', async () => {
+        seedUser({ pets: [makePet({ name: 'Rex', hunger: 80 })] });
         const interaction = await openStatus();
-        const before = Date.now();
 
-        const { i } = await press(interaction, 'rest', 0);
+        const { i } = await press(interaction, 'train_power', 0);
 
-        const until = stored().pets[0].restUntil.getTime();
-        expect(until).toBeGreaterThanOrEqual(before + REST_DURATION_MS);
-        expect(until).toBeLessThanOrEqual(Date.now() + REST_DURATION_MS);
-        expect(stored().pets[0].weeklyInteractions).toBe(1);
-        expect(i.reply.mock.calls[0][0].content).toBe('🛏️ **Rex** is now resting! Hunger will decay at half speed for **2 hours**.');
+        const trained = stored().pets[0];
+        expect(trained.training).toEqual({ power: 1 });
+        expect(trained.lastTrain).toBeInstanceOf(Date);
+        expect(trained.hunger).toBeCloseTo(80 - TRAIN_HUNGER_COST, 1);
+        expect(trained.weeklyInteractions).toBe(1);
+        expect(trained.bond).toBe(1);
+        expect(i.reply.mock.calls[0][0].content)
+            .toBe(`💪 **Rex** trained Power! Now **+0.4% ATK** (1/10). 🍖 −${TRAIN_HUNGER_COST} hunger → **72%**. ❤️ **+1 bond**`);
     });
 
-    test('a pet already resting is refused with the time left', async () => {
-        seedUser({ pets: [makePet({ restUntil: new Date(Date.now() + 30 * 60_000) })] });
+    test('Agility says what it adds to crit as well', async () => {
+        seedUser({ pets: [makePet({ name: 'Rex', training: { agility: 3 } })] });
         const interaction = await openStatus();
 
-        const { i } = await press(interaction, 'rest', 0);
+        const { i } = await press(interaction, 'train_agility', 0);
 
-        expect(i.reply.mock.calls[0][0].content).toBe('🛏️ **Dog** is already resting! 30m remaining.');
+        expect(stored().pets[0].training).toEqual({ agility: 4 });
+        expect(i.reply.mock.calls[0][0].content).toContain('Now **+12% SPD** and **+2 pts** crit (4/10)');
+    });
+
+    test('a session that takes the pet below the threshold warns that its passive is off', async () => {
+        seedUser({ pets: [makePet({ name: 'Rex', hunger: 33 })] });
+        const interaction = await openStatus();
+
+        const { i } = await press(interaction, 'train_guard', 0);
+
+        expect(stored().pets[0].hunger).toBeCloseTo(33 - TRAIN_HUNGER_COST, 1);
+        expect(i.reply.mock.calls[0][0].content).toContain('below 30% hunger, so its passive is off until you feed it.');
+    });
+
+    test('is refused on the cooldown, with the time left', async () => {
+        seedUser({ pets: [makePet({ lastTrain: new Date(Date.now() - (TRAIN_COOLDOWN_MS - 90 * 60_000)) })] });
+        const interaction = await openStatus();
+
+        const { i } = await press(interaction, 'train_power', 0);
+
+        expect(i.reply.mock.calls[0][0].content).toBe('🏋️ **Dog** is still sore from the last session! Train again in **1h 30m**.');
         expect(stored().pets[0].weeklyInteractions).toBeUndefined();
+    });
+
+    test('a maxed focus is refused, and its button is disabled', async () => {
+        seedUser({ pets: [makePet({ training: { guard: 10 } })] });
+        const interaction = await openStatus();
+
+        const card = interaction.replies.at(-1);
+        const guard = card.components.flatMap(r => r.components).find(b => b.data.custom_id.startsWith('pet_train_guard'));
+        expect(guard.data.label).toBe('🛡️ Train Guard 10/10');
+        expect(guard.data.disabled).toBe(true);
+
+        const { i } = await press(interaction, 'train_guard', 0);
+        expect(i.reply.mock.calls[0][0].content).toContain('has mastered Guard training (10/10)');
+        expect(stored().pets[0].training).toEqual({ guard: 10 });
+    });
+
+    test('a hungry pet cannot train', async () => {
+        seedUser({ pets: [makePet({ hunger: 10 })] });
+        const interaction = await openStatus();
+
+        const { i } = await press(interaction, 'train_power', 0);
+
+        expect(i.reply.mock.calls[0][0].content).toBe('🍖 **Dog** is too hungry to train. Feed it above **30%** first.');
+        expect(stored().pets[0].training).toBeUndefined();
+    });
+
+    test('settles pending decay first, so the session spends current hunger', async () => {
+        seedUser({ pets: [makePet({ hunger: 80 })] });
+        const interaction = await openStatus();
+
+        const now = Date.now();
+        stored().pets[0].hunger      = 80;
+        stored().pets[0].lastDecayAt = new Date(now - 12 * HOUR);
+        await press(interaction, 'train_power', 0);
+
+        expect(stored().pets[0].hunger).toBeCloseTo(80 - 5 - TRAIN_HUNGER_COST, 1);
+        expect(stored().pets[0].lastDecayAt.getTime()).toBeGreaterThanOrEqual(now);
     });
 
     test('a lost version race asks for a retry', async () => {
@@ -319,10 +381,10 @@ describe('/pet status — rest', () => {
         const interaction = await openStatus();
 
         failNextFreshSave(versionError());
-        const { i } = await press(interaction, 'rest', 0);
+        const { i } = await press(interaction, 'train_power', 0);
 
         expect(i.reply.mock.calls[0][0].content).toBe('⚠️ Action conflict — please try again.');
-        expect(stored().pets[0].restUntil).toBeUndefined();
+        expect(stored().pets[0].training).toBeUndefined();
     });
 
     test('any other save failure is reported', async () => {
@@ -330,7 +392,7 @@ describe('/pet status — rest', () => {
         const interaction = await openStatus();
 
         failNextFreshSave(new Error('disk full'));
-        const { i } = await press(interaction, 'rest', 0);
+        const { i } = await press(interaction, 'train_power', 0);
 
         expect(i.reply.mock.calls[0][0].content).toBe('❌ Failed to save. Please try again.');
     });
@@ -454,22 +516,5 @@ describe('/pet status — review fixes', () => {
         expect(stored().pets[0].lastPlay).toBeInstanceOf(Date);
         expect(stored().pets[0].xp).toBe(10);
         expect(stored().pets[0].weeklyInteractions).toBe(7);
-    });
-
-    test('resting settles pending decay first, so an earlier rest window keeps its half-speed credit', async () => {
-        seedUser({ pets: [makePet({ hunger: 80 })] });
-        const interaction = await openStatus();
-
-        // Three hours of decay still owed, two of them inside a rest that ended
-        // an hour ago: 2h at 5/day plus 1h at 10/day.
-        const now = Date.now();
-        stored().pets[0].hunger      = 80;
-        stored().pets[0].lastDecayAt = new Date(now - 3 * HOUR);
-        stored().pets[0].restUntil   = new Date(now - HOUR);
-        await press(interaction, 'rest', 0);
-
-        expect(stored().pets[0].hunger).toBeCloseTo(80 - 20 / 24, 2);
-        expect(stored().pets[0].lastDecayAt.getTime()).toBeGreaterThanOrEqual(now);
-        expect(stored().pets[0].restUntil.getTime()).toBeGreaterThan(now);
     });
 });

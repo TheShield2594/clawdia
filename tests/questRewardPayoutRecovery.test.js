@@ -178,12 +178,12 @@ describe('every quest-reward credit is keyed at its call site', () => {
     // its key. Assert each write independently (occurrence count, and the
     // distinct per-fighter interpolations) so a regression on any single credit
     // fails here.
-    test('pet status keys both the play and the rest care write', () => {
+    test('pet status keys both the play and the train care write', () => {
         const src = read('commands/economy/pet/status.js');
-        // Play and rest each key by the button interaction; the string is
+        // Play and train each key by the button interaction; the string is
         // identical, so the guard is that it appears once per write.
         expect(countOf(src, `questRewardPayoutKey('pet', btn.id)`)).toBe(2);
-        for (const job of ['playQuestReward', 'restQuestReward']) expect(src).toContain(job);
+        for (const job of ['playQuestReward', 'trainQuestReward']) expect(src).toContain(job);
     });
 
     test('pet battle keys the wild write and each PvP fighter apart', () => {
