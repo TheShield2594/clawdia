@@ -1122,11 +1122,12 @@
         }
       },
       "battle": {
-        "description": "Combate contra una mascota salvaje por XP, o reta a otro miembro (opcionalmente por monedas).",
+        "description": "Lucha contra una mascota salvaje por XP, o reta a un miembro (por monedas o clasificación).",
         "options": {
           "opponent": { "description": "Miembro a retar (déjalo vacío para luchar contra una mascota salvaje)" },
           "slot": { "description": "Cuál de tus mascotas combate (por defecto, la primera)" },
-          "bet": { "description": "Monedas a apostar (requiere un oponente)" }
+          "bet": { "description": "Monedas a apostar (requiere un oponente)" },
+          "rated": { "description": "Combate clasificatorio en la escalera (requiere oponente; niveles igualados)" }
         }
       }
     }
