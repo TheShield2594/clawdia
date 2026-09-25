@@ -14,6 +14,30 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.15.0] - 2026-09-25
+
+Migrations through `028_seed_pet_bond`.
+
+Pet follow-ups from the design review (#1180).
+
+- **Pet bond is earned by care, not by age (#1186).** Bond was the number of
+  days since adoption, so the Most Loyal board ranked pets by age and a revived
+  pet kept counting the days it was gone. It is now a stored 0–100 value:
+  feeding and playing add 2 and battling adds 1, at most 4 a pet a day. It
+  drains 2 a day while the pet is below 30% hunger, and running away costs 25.
+  Five tiers (Wary, Friendly, Trusted, Devoted, Soulbound) add 1–6% to the
+  passive, show as a title, and from Trusted up frame the companion card. The
+  leaderboard ranks by bond. Migration 028 seeds existing pets from their age,
+  one point per two days capped at 50; it is reversible, and the previous image
+  ignores the new fields.
+- **Rob and crime passives are labelled in points (#1190).** They add
+  percentage points to a success chance, while every other passive multiplies a
+  payout, and both were printed as "+X%". A maxed Fox now reads "+20 pts rob
+  success chance" (40% → 60%). The balance is unchanged.
+- **`/pet feed` takes a `quantity` (#1188),** 1–10. It feeds one item at a time
+  and stops once the pet is full, so no item is spent past that point, and the
+  reply says how many were used and how many are left.
+
 ## [4.14.0] - 2026-09-24
 
 Migrations through `027_encrypt_mcp_tokens`.

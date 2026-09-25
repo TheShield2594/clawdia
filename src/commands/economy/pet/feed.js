@@ -9,6 +9,7 @@ const {
     isPetFull,
     effectiveHunger,
     recordPetInteraction,
+    recordBondCare,
     getPetDisplay,
     applyPetXp,
     resolvePetRef,
@@ -106,6 +107,7 @@ async function executeFeed(interaction) {
     // One command is one interaction, however many items it used — Pet of the
     // Week credit is still capped per day by recordPetInteraction.
     recordPetInteraction(pet);
+    const bondGained = recordBondCare(pet, 'feed', now);
     if (result.hunger > 0) pet.starvingStartAt = null;
     const feedXp = applyPetXp(pet, xpTotal);
     const gained = Math.round(result.hunger - before);
@@ -146,6 +148,7 @@ async function executeFeed(interaction) {
           (used < quantity ? (isPetFull(pet, now) ? ' — full now' : ' — that was all you had') : '') +
           ` · ${leftover} left`
         : '';
+    const bondNote     = bondGained > 0 ? `\n❤️ **+${bondGained} bond**` : '';
     const progressNote = feedXp.evolved
         ? `\n🌟 **${displayName} evolved!** Say hello to **${getPetDisplay(user.pets[petIndex]).titledName}** (Stage ${feedXp.toStage})!`
         : feedXp.leveledUp
@@ -155,7 +158,7 @@ async function executeFeed(interaction) {
     const embed = new EmbedBuilder()
         .setColor(result.hunger >= STARVING_THRESHOLD ? '#4caf50' : '#ff5722')
         .setTitle(`${getPetDisplay(user.pets[petIndex]).emoji} ${displayName} fed!`)
-        .setDescription(`✨ **+${feedXp.gained} pet XP**${usedNote}${progressNote}`)
+        .setDescription(`✨ **+${feedXp.gained} pet XP**${bondNote}${usedNote}${progressNote}`)
         .addFields(
             { name: 'Food',   value: `\`${materialId}\`${used > 1 ? ` ×${used}` : ''}${favoriteNote}`, inline: true },
             { name: 'Hunger', value: hungerBar(result.hunger),              inline: false },

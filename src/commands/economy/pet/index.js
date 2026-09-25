@@ -89,10 +89,10 @@ module.exports = {
                 .setDescription('View the top pets in this server.')
                 .addStringOption(opt =>
                     opt.setName('type')
-                        .setDescription('Sort order (default: bond days)')
+                        .setDescription('Sort order (default: bond)')
                         .setRequired(false)
                         .addChoices(
-                            { name: 'Bond Days (Most Loyal)', value: 'bonds' },
+                            { name: 'Bond (Most Loyal)',      value: 'bonds' },
                             { name: 'Level (Highest Level)', value: 'level' },
                             { name: 'PvP Wins (vs members)',  value: 'wins'  }
                         )

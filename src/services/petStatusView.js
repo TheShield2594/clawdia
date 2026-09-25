@@ -17,6 +17,10 @@ const {
     getMoodColor,
     getPetStats,
     heartBar,
+    BOND_MAX,
+    effectiveBond,
+    bondTierFor,
+    getBondTier,
     PET_MAX_LEVEL,
     getMoodBand,
     xpForLevel,
@@ -65,7 +69,6 @@ function petArt(petId, guildId, label) {
  */
 function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
     const def         = PET_DEFINITIONS[pet.petId];
-    const bondDays    = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
     const hunger      = effectiveHunger(pet);
     const moodLine    = getMoodLine(pet);
     const moodColor   = getMoodColor(hunger);
@@ -112,7 +115,7 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL, thumbUrl = null) {
         .setDescription(`${dispEmoji} *${moodLine}*${personalityLine}${potwLine}${restLine}`)
         .addFields(
             { name: '📈 Level',             value: levelLine,                            inline: false },
-            { name: '❤️ Bond',              value: `${heartBar(bondDays)} ${bondDays}d`, inline: false },
+            { name: '❤️ Bond',              value: bondText(pet),                        inline: false },
             { name: '🍖 Hunger',            value: hungerBar(hunger),                    inline: false },
             { name: `${bonusEmoji} Bonus`,  value: bonusLabel,                           inline: true  },
             { name: '⚔️ Battle Record',     value: record,                               inline: true  },
@@ -167,8 +170,13 @@ function buildNavComponents(userId, index, total, petId = null) {
 
 // ─── The companion card ──────────────────────────────────────────────────────
 
-function bondDaysOf(pet, now = Date.now()) {
-    return Math.max(0, Math.floor((now - new Date(pet.adoptedAt).getTime()) / 86400000));
+/**
+ * A pet's bond as one line: hearts, the tier's title and the number, e.g.
+ * "❤️❤️❤️❤️❤️🖤🖤🖤 **Devoted** · 62/100". Bond is earned by care, not age (#1186).
+ */
+function bondText(pet, now = Date.now()) {
+    const bond = effectiveBond(pet, now);
+    return `${heartBar(bond)} **${bondTierFor(bond).title}** · ${Math.floor(bond)}/${BOND_MAX}`;
 }
 
 function lastFedText(pet, now = Date.now()) {
@@ -227,9 +235,12 @@ function petCardOptions(pet, { kicker, footerLeft = null, footerRight = null }, 
         hunger,
         threshold:   STARVING_THRESHOLD,
         moodColor:   getMoodColor(hunger),
-        bondDays:    bondDaysOf(pet, now),
+        bond:        Math.floor(effectiveBond(pet, now)),
+        bondMax:     BOND_MAX,
+        bondTitle:   getBondTier(pet, now).title,
+        bondFrame:   getBondTier(pet, now).frame,
         bonus:       def ? {
-            pct:    getEffectiveBonusPct(pet),
+            pct:    getEffectiveBonusPct(pet, now),
             ...petBonusParts(def.bonusType),
             active: hunger >= STARVING_THRESHOLD,
         } : null,
@@ -252,9 +263,9 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** The card's alt text: what it shows, in words, for anyone who cannot see it. */
 function cardAltText(o) {
-    const bonus = o.bonus ? `, passive +${o.bonus.pct}% ${o.bonus.label} ${o.bonus.active ? 'active' : 'inactive'}` : '';
+    const bonus = o.bonus ? `, passive +${o.bonus.pct}${o.bonus.unit ?? '%'} ${o.bonus.label} ${o.bonus.active ? 'active' : 'inactive'}` : '';
     return `Companion card for ${o.titledName}, a level ${o.level} ${o.personality ? `${o.personality.toLowerCase()} ` : ''}`
-        + `${o.species}${o.potw ? ', Pet of the Week' : ''}: hunger ${Math.round(o.hunger)}%, bond ${o.bondDays} days${bonus}, `
+        + `${o.species}${o.potw ? ', Pet of the Week' : ''}: hunger ${Math.round(o.hunger)}%, bond ${o.bondTitle ? `${o.bondTitle.toLowerCase()} ` : ''}${o.bond}/${o.bondMax ?? 100}${bonus}, `
         + `record ${plural(o.record.wins, 'win')} and ${plural(o.record.losses, 'loss', 'losses')}.`;
 }
 
@@ -299,8 +310,8 @@ function buildPetCardEmbed(pet, index, total, ownerAvatarURL, cardName, now = Da
         pet.potw ? '🌟 **Pet of the Week**' : null,
         rest ? `🛏️ Resting for ${formatMinutes(rest)} — hunger decays at half speed` : null,
         '',
-        `📈 Lv **${level}** (${xpNote}) · 🍖 **${Math.round(hunger)}%** · ❤️ **${bondDaysOf(pet, now)}d** · `
-            + `${bonusOn ? '✅' : '❌'} ${formatPetBonus(def?.bonusType, getEffectiveBonusPct(pet))}`
+        `📈 Lv **${level}** (${xpNote}) · 🍖 **${Math.round(hunger)}%** · ❤️ **${getBondTier(pet, now).title}** ${Math.floor(effectiveBond(pet, now))}/${BOND_MAX} · `
+            + `${bonusOn ? '✅' : '❌'} ${formatPetBonus(def?.bonusType, getEffectiveBonusPct(pet, now))}`
             + `${bonusOn ? '' : ` *(feed above ${STARVING_THRESHOLD}%)*`}`,
         `⚔️ ${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L · PvP ${pet.pvpWins ?? 0}-${pet.pvpLosses ?? 0}`,
     ];
@@ -356,5 +367,5 @@ async function renderPetStatus(pet, index, total, ownerAvatarURL, guildId, userI
 
 module.exports = {
     HUNGER_BAR_LENGTH, hungerBar, petArt, buildPetEmbed, buildNavComponents, renderPetStatus,
-    petCardOptions, renderPetCard, buildPetCardEmbed, cardAltText,
+    petCardOptions, renderPetCard, buildPetCardEmbed, cardAltText, bondText,
 };

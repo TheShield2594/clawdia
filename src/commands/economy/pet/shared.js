@@ -15,6 +15,7 @@ const {
     applyHungerDecay,
     effectiveHunger,
     checkRunaway,
+    bondAfterRunaway,
 } = require('../../../services/petService');
 const { MATERIAL_RARITY } = require('../../../data/materialRarity');
 const { onPetCare, notifyQuestComplete } = require('../../../services/questService');
@@ -149,14 +150,17 @@ async function syncHungerAndRunaway(user, interaction) {
         user.pets[i].lastDecayAt     = d.lastDecayAt;
         user.pets[i].starving        = d.starving;
         user.pets[i].starvingStartAt = d.starvingStartAt ?? null;
+        user.pets[i].bond            = d.bond;
     }
 
     const { ranAwayPets } = checkRunaway(user.pets);
     for (const gone of ranAwayPets) {
         // Keep a record so a Revive Scroll can bring the pet back with its
-        // level, bond and battle record intact.
+        // level and battle record intact.
         const snapshot = gone.toObject ? gone.toObject() : { ...gone };
         delete snapshot._id;
+        // Running off costs trust the scroll does not give back (#1186).
+        snapshot.bond = bondAfterRunaway(gone);
         user.deceasedPets.unshift({ ...snapshot, diedAt: new Date() });
         if (gone._id) user.pets.pull(gone._id);
     }
@@ -200,7 +204,7 @@ async function syncHungerAndRunaway(user, interaction) {
         // above is the only notice the owner gets — which is why it names them.
         if (interaction.replied || interaction.deferred) {
             await interaction.followUp({
-                content: `💔 After days without food, ${names.join(', ')} ran away.\n*A Revive Scroll from \`/shop\` calls ${ranAwayPets.length > 1 ? 'one of them' : 'them'} home with level, bond and record intact — or \`/pet adopt\` a new companion.*`,
+                content: `💔 After days without food, ${names.join(', ')} ran away.\n*A Revive Scroll from \`/shop\` calls ${ranAwayPets.length > 1 ? 'one of them' : 'them'} home with level and record intact — or \`/pet adopt\` a new companion.*`,
                 flags: MessageFlags.Ephemeral
             }).catch(() => {});
         }

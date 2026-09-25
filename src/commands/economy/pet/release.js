@@ -3,7 +3,7 @@
 const {
     EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags,
 } = require('discord.js');
-const { PET_DEFINITIONS, getPetDisplay, resolvePetRef } = require('../../../services/petService');
+const { PET_DEFINITIONS, getPetDisplay, resolvePetRef, effectiveBond, getBondTier } = require('../../../services/petService');
 const { isVersionError, withVersionRetry } = require('../../../utils/versionRetry');
 const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
@@ -19,7 +19,7 @@ async function executeRelease(interaction) {
     const name    = pet.name || def?.name || pet.petId;
     const petId   = String(pet._id);
     const level   = pet.level ?? 1;
-    const bondDays = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
+    const bond    = effectiveBond(pet);
 
     // Releasing is permanent and unrevivable — a Revive Scroll only brings back
     // pets lost to starvation — so a level 30 pet was one mistyped slot away
@@ -32,7 +32,7 @@ async function executeRelease(interaction) {
             .setTitle(`Release ${name}?`)
             .setDescription(
                 `${getPetDisplay(pet).emoji} **${getPetDisplay(pet).titledName}** — Lv.${level}, ` +
-                `${bondDays} day${bondDays === 1 ? '' : 's'} of bond, ${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L.\n\n` +
+                `${getBondTier(pet).title} bond (${Math.floor(bond)}), ${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L.\n\n` +
                 `**This cannot be undone.** A Revive Scroll only calls back pets that ran away hungry, not released ones.`
             )],
         components: [new ActionRowBuilder().addComponents(

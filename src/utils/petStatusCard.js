@@ -7,10 +7,10 @@
  *   ┌──────────────────────────────────────────────────────────────────────┐
  *   │ ╭────────────╮  THESHIELD'S COMPANION                     ╭─────╮    │
  *   │ │ PET OF THE │  Apex Ghost                               (  LV  )   │
- *   │ │    WEEK    │  Wolf · Loyal · Rare companion             ( 24  )    │
+ *   │ │    WEEK    │  Wolf · Loyal · Trusted                    ( 24  )    │
  *   │ │ (portrait) │                                           ╰─────╯     │
  *   │ │            │  HUNGER ▰▰▰▰▰▰▰▱▱▱▱ 72%       |BONUS                │
- *   │ │            │  BOND   ▰▰▰▰▱▱▱▱ 42 days                            │
+ *   │ │            │  BOND   ▰▰▰▰▱▱▱▱ 42                                 │
  *   │ │  ◆ ◆ ◇     │  [PASSIVE +22.5% HUNT YIELD]                         │
  *   │ │  STAGE 2   │  [HP 214][ATK 71][DEF 38][SPD 29][RECORD 18W 4L]      │
  *   │ ╰────────────╯                                                       │
@@ -160,7 +160,7 @@ function pawPrint(ctx, cx, cy, s) {
     }
 }
 
-function paintBackdrop(ctx, accent, moodColor) {
+function paintBackdrop(ctx, accent, moodColor, bondFrame = null) {
     const grad = ctx.createLinearGradient(0, 0, CARD_W, CARD_H);
     grad.addColorStop(0, shade(accent, -0.72));
     grad.addColorStop(0.55, '#0d0f16');
@@ -183,10 +183,12 @@ function paintBackdrop(ctx, accent, moodColor) {
     pawPrint(ctx, CARD_W - 250, CARD_H - 20, 52);
     ctx.restore();
 
-    // A thin frame in the species colour, so the card reads as one object.
+    // A thin frame in the species colour, so the card reads as one object —
+    // or, from the Trusted bond tier up, a heavier one in the tier's colour
+    // (#1186).
     roundRect(ctx, 6, 6, CARD_W - 12, CARD_H - 12, 22);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = hexToRgba(accent, 0.35);
+    ctx.lineWidth = bondFrame ? 5 : 2;
+    ctx.strokeStyle = bondFrame ? hexToRgba(bondFrame, 0.9) : hexToRgba(accent, 0.35);
     ctx.stroke();
 }
 
@@ -284,7 +286,7 @@ function drawHeader(ctx, o, accent) {
     const size = fitSize(ctx, name, maxW, 50, 26);
     text(ctx, name, PANEL_X, PAD + 32 + (50 - size) / 2, { font: `bold ${size}px ${FONT}`, max: maxW });
 
-    const sub = [plain(o.species), plain(o.personality)].filter(Boolean).join('  ·  ');
+    const sub = [plain(o.species), plain(o.personality), plain(o.bondTitle)].filter(Boolean).join('  ·  ');
     text(ctx, sub, PANEL_X, PAD + 94, { font: `bold 20px ${FONT}`, color: MUTED, max: maxW });
 }
 
@@ -351,13 +353,14 @@ function drawBondBar(ctx, o, y) {
     text(ctx, 'BOND', PANEL_X, y + h / 2 + 1, { font: `bold 16px ${FONT}`, color: MUTED, baseline: 'middle' });
     const SEGMENTS = 8, gap = 6;
     const sw = (w - gap * (SEGMENTS - 1)) / SEGMENTS;
-    const filled = Math.min(SEGMENTS, Math.floor(o.bondDays / 10));
+    const max = o.bondMax ?? 100;
+    const filled = Math.max(0, Math.min(SEGMENTS, Math.floor((o.bond ?? 0) / (max / SEGMENTS))));
     for (let i = 0; i < SEGMENTS; i++) {
         roundRect(ctx, x + i * (sw + gap), y, sw, h, 6);
         ctx.fillStyle = i < filled ? '#ff6b8b' : FAINT;
         ctx.fill();
     }
-    text(ctx, `${num(o.bondDays)}d`, x + w + 14, y + h / 2 + 1, { font: `bold 20px ${FONT}`, color: '#ff8fa6', baseline: 'middle' });
+    text(ctx, num(o.bond ?? 0), x + w + 14, y + h / 2 + 1, { font: `bold 20px ${FONT}`, color: '#ff8fa6', baseline: 'middle' });
 }
 
 function drawPassive(ctx, o, y) {
@@ -475,7 +478,10 @@ function drawFooter(ctx, o) {
  * @param {number}  o.hunger        0–100
  * @param {number}  o.threshold     where the passive switches off
  * @param {string}  o.moodColor
- * @param {number}  o.bondDays
+ * @param {number}  o.bond          0–bondMax, earned by care
+ * @param {number}  [o.bondMax]     100
+ * @param {?string} [o.bondTitle]   the bond tier's title, e.g. "Devoted"
+ * @param {?string} [o.bondFrame]   the tier's frame colour, or null for the species one
  * @param {?{pct: number, unit?: string, label: string, active: boolean}} o.bonus
  * @param {{hp: number, atk: number, def: number, spd: number, crit: number}} o.stats
  * @param {string[]} [o.boosted]    stat keys the personality raises
@@ -493,7 +499,7 @@ async function createPetStatusCard(o) {
     const stage = Math.min(3, Math.max(1, o.stage | 0 || 1));
     const opts = { ...o, stage };
 
-    paintBackdrop(ctx, accent, o.moodColor);
+    paintBackdrop(ctx, accent, o.moodColor, o.bondFrame);
     await drawPortraitWindow(ctx, opts, accent);
     drawHeader(ctx, opts, accent);
     drawLevelRing(ctx, opts, accent);

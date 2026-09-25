@@ -34,6 +34,8 @@ function makePet(overrides = {}) {
         name: 'Rex',
         personality: 'loyal',
         adoptedAt: new Date(Date.now() - 40 * DAY),
+        // Friendly: its 1% passive boost rounds away at this level.
+        bond: 20,
         lastFed: new Date(Date.now() - 2 * 3600000),
         lastDecayAt: new Date(),
         hunger: 80,
@@ -157,7 +159,7 @@ describe('petArt / renderPetStatus', () => {
         expect(payload.files).toHaveLength(1);
         expect(payload.files[0].name).toBe('pet-card.png');
         expect(payload.files[0].description)
-            .toBe('Companion card for Seasoned Rex, a level 12 loyal Dog, Pet of the Week: hunger 80%, bond 40 days, '
+            .toBe('Companion card for Seasoned Rex, a level 12 loyal Dog, Pet of the Week: hunger 80%, bond friendly 20/100, '
                 + 'passive +9.2% work earnings active, record 3 wins and 1 loss.');
         expect(payload.attachments).toEqual([]);
         const json = payload.embeds[0].toJSON();
@@ -225,6 +227,6 @@ describe('petCardOptions', () => {
 
     test('the alt text names the pet and its state', () => {
         const o = petCardOptions(makePet({ potw: false, hunger: 10, battleWins: 1, battleLosses: 0 }), { kicker: 'K' });
-        expect(cardAltText(o)).toMatch(/^Companion card for Seasoned Rex, a level 12 loyal Dog: hunger \d+%, bond 40 days, passive \+9\.2% work earnings inactive, record 1 win and 0 losses\.$/);
+        expect(cardAltText(o)).toMatch(/^Companion card for Seasoned Rex, a level 12 loyal Dog: hunger \d+%, bond friendly \d+\/100, passive \+9\.2% work earnings inactive, record 1 win and 0 losses\.$/);
     });
 });

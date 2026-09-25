@@ -214,7 +214,7 @@ describe('/pet status — play', () => {
         expect(stored().pets[0].xp).toBe(10);
         expect(stored().pets[0].weeklyInteractions).toBe(1);
         expect(stored().pets[0].lastPlay).toBeInstanceOf(Date);
-        expect(i.reply.mock.calls[0][0].content).toBe('🎾 You played with **Rex**! They loved it.\n✨ **+20 XP** for you, **+10 XP** for Rex!');
+        expect(i.reply.mock.calls[0][0].content).toBe('🎾 You played with **Rex**! They loved it.\n✨ **+20 XP** for you, **+10 XP** for Rex! ❤️ **+2 bond**');
         expect(announceLevelUp).not.toHaveBeenCalled();
     });
 
@@ -230,7 +230,7 @@ describe('/pet status — play', () => {
         expect(stored().xp).toBe(0);
         expect(stored().pets[1].xp).toBe(10);
         expect(i.reply.mock.calls[0][0].content)
-            .toBe("🎾 You played with **Tom**! They loved it.\n✨ **+10 XP** for Tom! *(You've had your play XP for this hour.)*");
+            .toBe("🎾 You played with **Tom**! They loved it.\n✨ **+10 XP** for Tom! *(You've had your play XP for this hour.)* ❤️ **+2 bond**");
     });
 
     test('a player level-up and a pet level-up are both announced', async () => {
@@ -338,7 +338,7 @@ describe('/pet status — rest', () => {
 
 describe('/pet status — showcase', () => {
     test('posts the companion card publicly and counts the interaction', async () => {
-        seedUser({ pets: [makePet({ name: 'Rex', potw: true })] });
+        seedUser({ pets: [makePet({ name: 'Rex', potw: true, bond: 40 })] });
         const interaction = await openStatus();
 
         const { i } = await press(interaction, 'showcase', 0);
@@ -349,7 +349,7 @@ describe('/pet status — showcase', () => {
         expect(embed.author.name).toBe('Owned by player');
         expect(embed.description).toContain('🌟 **Pet of the Week**');
         expect(embed.fields.map(f => f.name)).toEqual(['❤️ Bond', '🍖 Hunger', '✅ Bonus']);
-        expect(embed.fields[0].value).toMatch(/ 10d$/);
+        expect(embed.fields[0].value).toBe('❤️❤️❤️🖤🖤🖤🖤🖤 **Trusted** · 40/100');
         expect(embed.image.url).toBe('attachment://pet-showcase.png');
         expect(embed.thumbnail).toBeUndefined();
         expect(payload.files.map(f => f.name)).toEqual(['pet-showcase.png']);
