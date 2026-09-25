@@ -15,7 +15,10 @@ const {
     isEncrypted,
     encryptionEnabled,
     _resetSecretBox,
+    guildSecretBinding,
+    isBound,
     PREFIX,
+    PREFIX_BOUND,
 } = require('../src/config/secretBox');
 
 const KEY = 'a-test-encryption-key';
@@ -92,11 +95,54 @@ describe('with a key configured', () => {
         expect(withKey('a-completely-different-key', () => decryptSecret(sealed))).toBeNull();
     });
 
+    // #1152. Node accepts a GCM tag as short as four bytes unless told
+    // otherwise, and a truncated tag is a far cheaper forgery target.
+    test('refuses a value whose tag has been truncated', () => withKey(KEY, () => {
+        const sealed = encryptSecret('sk-abc');
+        const [iv, tag, ct] = sealed.slice(PREFIX.length).split('.');
+        const short = Buffer.from(tag, 'base64url').subarray(0, 4).toString('base64url');
+
+        expect(decryptSecret(`${PREFIX}${iv}.${short}.${ct}`)).toBeNull();
+    }));
+
     // Pre-#564 rows. They keep working until something rewrites them, which is
     // what makes the change deployable without a flag day.
     test('reads a plaintext key written before encryption was configured', () => withKey(KEY, () => {
         expect(decryptSecret('sk-legacy-plaintext')).toBe('sk-legacy-plaintext');
     }));
+});
+
+// #1152: a bound value carries its guild and field as GCM additional data, so
+// a sealed key copied into another guild's document, or another field, fails
+// to open instead of being spent by the wrong guild.
+describe('a value sealed to a binding', () => {
+    const G1 = guildSecretBinding('g1', 'ai.openaiKey');
+
+    test('round-trips under the same binding, in the v2 format', () => withKey(KEY, () => {
+        const sealed = encryptSecret('sk-abc', G1);
+
+        expect(sealed.startsWith(PREFIX_BOUND)).toBe(true);
+        expect(isBound(sealed)).toBe(true);
+        expect(isEncrypted(sealed)).toBe(true);
+        expect(decryptSecret(sealed, G1)).toBe('sk-abc');
+    }));
+
+    test.each([
+        ['another guild', guildSecretBinding('g2', 'ai.openaiKey')],
+        ['another field', guildSecretBinding('g1', 'ai.geminiKey')],
+        ['no binding at all', null],
+    ])('does not open under %s', (_label, binding) => withKey(KEY, () => {
+        expect(decryptSecret(encryptSecret('sk-abc', G1), binding)).toBeNull();
+    }));
+
+    test('an unbound value still opens, whatever binding it is read with', () => withKey(KEY, () => {
+        expect(decryptSecret(encryptSecret('sk-abc'), G1)).toBe('sk-abc');
+    }));
+
+    test('there is no binding without a guild', () => {
+        expect(guildSecretBinding(null, 'ai.openaiKey')).toBeNull();
+        expect(guildSecretBinding('', 'ai.openaiKey')).toBeNull();
+    });
 });
 
 describe('with no key configured', () => {
@@ -148,7 +194,9 @@ describe('the Guild schema stores provider keys sealed', () => {
 
         expect(guild.ai[field]).not.toBe('sk-plain-secret');
         expect(isEncrypted(guild.ai[field])).toBe(true);
-        expect(decryptSecret(guild.ai[field])).toBe('sk-plain-secret');
+        expect(decryptSecret(guild.ai[field], guildSecretBinding('1', `ai.${field}`))).toBe('sk-plain-secret');
+        // Sealed to this guild: it will not open as anyone else's.
+        expect(decryptSecret(guild.ai[field], guildSecretBinding('2', `ai.${field}`))).toBeNull();
     }));
 
     // The dashboard writes dotted paths through `guildSettings.set(key, value)`.
@@ -157,7 +205,7 @@ describe('the Guild schema stores provider keys sealed', () => {
         guild.set('ai.openaiKey', 'sk-from-dashboard');
 
         expect(isEncrypted(guild.ai.openaiKey)).toBe(true);
-        expect(decryptSecret(guild.ai.openaiKey)).toBe('sk-from-dashboard');
+        expect(decryptSecret(guild.ai.openaiKey, guildSecretBinding('1', 'ai.openaiKey'))).toBe('sk-from-dashboard');
     }));
 
     test('clearing a key still clears it', () => withKey(KEY, () => {
@@ -189,6 +237,12 @@ describe('the AI providers read the sealed value back', () => {
         const settings = { [field]: encryptSecret('sk-guild-key') };
 
         expect(provider.resolveAuth(settings).apiKey).toBe('sk-guild-key');
+    }));
+
+    test.each(CASES)('%s opens a key bound to its guild, given the guild', (_name, provider, field) => withKey(KEY, () => {
+        const settings = { [field]: encryptSecret('sk-guild-key', guildSecretBinding('g1', `ai.${field}`)) };
+
+        expect(provider.resolveAuth(settings, { guildId: 'g1' }).apiKey).toBe('sk-guild-key');
     }));
 
     test.each(CASES)('%s still takes a plaintext guild key', (_name, provider, field) => withKey(KEY, () => {

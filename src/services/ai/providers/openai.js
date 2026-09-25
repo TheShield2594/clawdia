@@ -1,5 +1,5 @@
 const OpenAI = require('openai');
-const { decryptSecret } = require('../../../config/secretBox');
+const { resolveApiKey } = require('../apiKeys');
 const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 const { dataUrl } = require('../vision');
 
@@ -410,7 +410,7 @@ module.exports = {
     // Which models can answer under a JSON schema natively (#1044). Asked by the
     // registry so a caller does not have to know what OpenAI's names mean.
     supportsStructured,
-    resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.openaiKey) || process.env.OPENAI_API_KEY }),
+    resolveAuth: (aiSettings, { guildId } = {}) => resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId }),
     stream,
     complete,
     structured

@@ -661,7 +661,13 @@ npm run secrets:encrypt
 ```
 
 That is idempotent, so running it again, or after a new server adds a key, does
-nothing. The bot-wide `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`
+nothing.
+
+Each key is also sealed to its server and field: the guild ID and field name go
+in as authenticated data, so a sealed key copied into another server's settings
+(by anyone with write access to the database) will not open there. Keys sealed
+before 5.0.0 are rebound on the next boot by migration `029_bind_guild_ai_keys`,
+and `npm run secrets:encrypt` rebinds any it finds too. The bot-wide `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`
 / `OPENROUTER_API_KEY` variables are unaffected either way — they are read from
 the environment and never stored in the database.
 

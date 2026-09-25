@@ -17,7 +17,7 @@ const { readPage, pageEnvelope } = require('../../lib/apiPage');
 async function embedEntry(guildId, entry) {
     try {
         const guild = await Guild.findOne({ guildId }, { ai: 1 }).lean();
-        return await embedForStorage(guild?.ai || {}, embeddingTextOfEntry(entry));
+        return await embedForStorage(guild?.ai || {}, embeddingTextOfEntry(entry), guildId);
     } catch (error) {
         console.warn(`[KB] could not embed entry for guild ${guildId}: ${error.message}`);
         return null;

@@ -1,5 +1,5 @@
 const { GoogleGenAI } = require('@google/genai');
-const { decryptSecret } = require('../../../config/secretBox');
+const { resolveApiKey } = require('../apiKeys');
 const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // Google's current SDK. It replaces `@google/generative-ai`, which Google
@@ -386,7 +386,7 @@ module.exports = {
     supportsVision,
     // Which models can answer under a JSON schema natively (#1044).
     supportsStructured,
-    resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.geminiKey) || process.env.GEMINI_API_KEY }),
+    resolveAuth: (aiSettings, { guildId } = {}) => resolveApiKey(aiSettings, { field: 'geminiKey', envKey: process.env.GEMINI_API_KEY, guildId }),
     stream,
     complete,
     structured,

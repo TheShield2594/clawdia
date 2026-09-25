@@ -36,8 +36,24 @@ const crypto = require('crypto');
 
 /** Marks a stored value as ciphertext, and says which format it is in. */
 const PREFIX = 'enc.v1.';
+/**
+ * The same layout, sealed to a binding (#1152): the value's owner and field go
+ * in as GCM additional authenticated data, so the ciphertext only opens for
+ * the guild and path it was written for. Without it, anyone who can write to
+ * the database could copy one guild's sealed provider key into another guild's
+ * document and have the bot spend it on the second guild's behalf. A v1 value
+ * carries no binding and still opens anywhere; migration 029 rewrites the
+ * stored provider keys as v2.
+ */
+const PREFIX_BOUND = 'enc.v2.';
 const ALGORITHM = 'aes-256-gcm';
 const IV_BYTES = 12;
+/**
+ * GCM's full tag. Node will otherwise accept a tag as short as 4 bytes on
+ * decrypt, and a truncated tag is a much cheaper forgery target (#1152) — so
+ * both the cipher and the length check below pin it.
+ */
+const TAG_BYTES = 16;
 
 /**
  * Domain separation for the KDF, not a secret. A per-value salt would have to
@@ -76,7 +92,26 @@ function encryptionEnabled() {
 
 /** Whether a stored value is one of ours, rather than a plaintext credential. */
 function isEncrypted(value) {
-    return typeof value === 'string' && value.startsWith(PREFIX);
+    return typeof value === 'string' && (value.startsWith(PREFIX) || value.startsWith(PREFIX_BOUND));
+}
+
+/** Whether a stored value is sealed to a binding (the v2 format). */
+function isBound(value) {
+    return typeof value === 'string' && value.startsWith(PREFIX_BOUND);
+}
+
+/**
+ * The binding for a guild's secret at `path`, or null when there is no guild to
+ * bind it to. Both sides of a round trip must build it the same way, which is
+ * why it is built here rather than at each call site.
+ *
+ * @param {string|null|undefined} guildId
+ * @param {string} path  the document path, e.g. `ai.openaiKey`
+ * @returns {string|null}
+ */
+function guildSecretBinding(guildId, path) {
+    if (typeof guildId !== 'string' || !guildId) return null;
+    return `guild:${guildId}|${path}`;
 }
 
 /**
@@ -86,21 +121,29 @@ function isEncrypted(value) {
  * (null, '', a value some caller has already encrypted), so it is safe as a
  * Mongoose setter on a nullable path and safe to apply twice.
  *
+ * With a `binding` (see guildSecretBinding) the value is sealed to it and
+ * only opens when the same binding is given to decryptSecret. Without one it
+ * is written in the unbound v1 format, which is what every non-guild secret
+ * and any write that cannot name its guild still uses.
+ *
  * @param {*} value
- * @returns {*} `enc.v1.<iv>.<tag>.<ciphertext>`, all base64url.
+ * @param {string|null} [binding]
+ * @returns {*} `enc.v1.<iv>.<tag>.<ciphertext>` (or `enc.v2.` when bound),
+ *          all base64url.
  */
-function encryptSecret(value) {
+function encryptSecret(value, binding = null) {
     if (typeof value !== 'string' || value === '' || isEncrypted(value)) return value;
 
     const key = encryptionKey();
     if (!key) return value;
 
     const iv = crypto.randomBytes(IV_BYTES);
-    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+    const cipher = crypto.createCipheriv(ALGORITHM, key, iv, { authTagLength: TAG_BYTES });
+    if (binding) cipher.setAAD(Buffer.from(binding, 'utf8'));
     const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
     const tag = cipher.getAuthTag();
 
-    return PREFIX + [iv, tag, ciphertext].map(b => b.toString('base64url')).join('.');
+    return (binding ? PREFIX_BOUND : PREFIX) + [iv, tag, ciphertext].map(b => b.toString('base64url')).join('.');
 }
 
 /**
@@ -112,25 +155,36 @@ function encryptSecret(value) {
  *
  * A value that *is* encrypted and cannot be opened returns null, having said so
  * once on the log. That happens when `SECRET_ENCRYPTION_KEY` is unset, rotated
- * without re-encrypting, or the stored bytes were altered — and null is the
- * useful answer for all three, because every caller falls back to the bot-wide
- * key from the environment. Returning the ciphertext instead would send it to
- * the provider as an API key and report the outcome as an auth failure.
+ * without re-encrypting, the stored bytes were altered, or a bound value was
+ * read under a different binding (copied from another guild or field) — and
+ * null is the answer for all of them. Returning the ciphertext instead would
+ * send it to the provider as an API key and report the outcome as an auth
+ * failure.
+ *
+ * `binding` is only consulted for a bound (v2) value, which will not open
+ * without the binding it was sealed to. An unbound value ignores it.
  *
  * @param {*} value
+ * @param {string|null} [binding]
  * @returns {string|null}
  */
-function decryptSecret(value) {
+function decryptSecret(value, binding = null) {
     if (typeof value !== 'string' || value === '') return value || null;
     if (!isEncrypted(value)) return value;
+    const bound = isBound(value);
 
     const key = encryptionKey();
     if (!key) {
-        warnOnce('no-key', '[SECRETS] A stored secret is encrypted but SECRET_ENCRYPTION_KEY is not set; falling back to the environment key.');
+        warnOnce('no-key', '[SECRETS] A stored secret is encrypted but SECRET_ENCRYPTION_KEY is not set, so it cannot be read.');
         return null;
     }
 
-    const parts = value.slice(PREFIX.length).split('.');
+    if (bound && !binding) {
+        warnOnce('unbound-read', '[SECRETS] A stored secret is bound to its guild and field, but was read without saying which.');
+        return null;
+    }
+
+    const parts = value.slice(bound ? PREFIX_BOUND.length : PREFIX.length).split('.');
     if (parts.length !== 3) {
         warnOnce('malformed', '[SECRETS] A stored secret is malformed and cannot be decrypted.');
         return null;
@@ -138,13 +192,20 @@ function decryptSecret(value) {
 
     try {
         const [iv, tag, ciphertext] = parts.map(p => Buffer.from(p, 'base64url'));
-        const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+        // Checked by hand as well as pinned on the decipher, so a short tag is
+        // refused here whatever a future Node does with the option.
+        if (tag.length !== TAG_BYTES) {
+            warnOnce('short-tag', '[SECRETS] A stored secret has a truncated authentication tag and was refused.');
+            return null;
+        }
+        const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, { authTagLength: TAG_BYTES });
+        if (bound) decipher.setAAD(Buffer.from(binding, 'utf8'));
         decipher.setAuthTag(tag);
         return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
     } catch {
         // Deliberately not `err.message`: it says nothing useful beyond
         // "unable to authenticate data", and the value itself must not be logged.
-        warnOnce('undecryptable', '[SECRETS] A stored secret could not be decrypted — wrong SECRET_ENCRYPTION_KEY, or the value was altered.');
+        warnOnce('undecryptable', '[SECRETS] A stored secret could not be decrypted — wrong SECRET_ENCRYPTION_KEY, the value was altered, or it was sealed for a different guild or field.');
         return null;
     }
 }
@@ -167,7 +228,10 @@ module.exports = {
     encryptSecret,
     decryptSecret,
     isEncrypted,
+    isBound,
+    guildSecretBinding,
     encryptionEnabled,
     _resetSecretBox,
     PREFIX,
+    PREFIX_BOUND,
 };

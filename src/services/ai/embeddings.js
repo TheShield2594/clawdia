@@ -153,9 +153,9 @@ async function localEmbedder(model) {
 }
 
 /** The OpenAI embedder for this guild, or null when no key resolves. */
-async function openaiEmbedder(aiSettings) {
-    const { decryptSecret } = require('../../config/secretBox');
-    const apiKey = decryptSecret(aiSettings.openaiKey) || process.env.OPENAI_API_KEY;
+async function openaiEmbedder(aiSettings, guildId) {
+    const { resolveApiKey } = require('./apiKeys');
+    const { apiKey } = resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId });
     if (!apiKey) return null;
 
     const OpenAI = require('openai');
@@ -167,9 +167,9 @@ async function openaiEmbedder(aiSettings) {
 }
 
 /** The Gemini embedder for this guild, or null when no key resolves. */
-async function geminiEmbedder(aiSettings) {
-    const { decryptSecret } = require('../../config/secretBox');
-    const apiKey = decryptSecret(aiSettings.geminiKey) || process.env.GEMINI_API_KEY;
+async function geminiEmbedder(aiSettings, guildId) {
+    const { resolveApiKey } = require('./apiKeys');
+    const { apiKey } = resolveApiKey(aiSettings, { field: 'geminiKey', envKey: process.env.GEMINI_API_KEY, guildId });
     if (!apiKey) return null;
 
     const { GoogleGenAI } = require('@google/genai');
@@ -185,20 +185,22 @@ async function geminiEmbedder(aiSettings) {
  * cannot be stood up.
  *
  * @param {object} aiSettings a guild's `ai` settings subdocument
+ * @param {string} [guildId] whose settings they are — a guild's provider key is
+ *   sealed to it and will not open without it
  * @returns {Promise<null|{id: string, embed: (texts: string[]) => Promise<number[][]>}>}
  *   `id` is the embedder's identity, stored beside each vector; `embed` turns a
  *   batch of strings into their vectors. Null on every failure — no key, package
  *   missing, model unavailable — so callers treat "no embedder" and "tier off"
  *   the same way and fall back to keyword scoring.
  */
-async function getEmbedder(aiSettings) {
+async function getEmbedder(aiSettings, guildId) {
     const config = semanticConfig(aiSettings);
     if (!config) return null;
 
     let embed;
     try {
-        if (config.provider === 'openai') embed = await openaiEmbedder(aiSettings);
-        else if (config.provider === 'gemini') embed = await geminiEmbedder(aiSettings);
+        if (config.provider === 'openai') embed = await openaiEmbedder(aiSettings, guildId);
+        else if (config.provider === 'gemini') embed = await geminiEmbedder(aiSettings, guildId);
         else embed = await localEmbedder(config.localModel);
     } catch (err) {
         console.warn(`[AI:embeddings] could not initialise the ${config.provider} embedder: ${err.message}`);
@@ -219,8 +221,8 @@ async function getEmbedder(aiSettings) {
  *
  * @returns {Promise<null|{embedding: number[], embeddingModel: string}>}
  */
-async function embedForStorage(aiSettings, text) {
-    const embedder = await getEmbedder(aiSettings);
+async function embedForStorage(aiSettings, text, guildId) {
+    const embedder = await getEmbedder(aiSettings, guildId);
     if (!embedder) return null;
 
     try {

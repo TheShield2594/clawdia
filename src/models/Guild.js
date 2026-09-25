@@ -1,5 +1,29 @@
 const { Schema, model } = require('mongoose');
-const { encryptSecret } = require('../config/secretBox');
+const { encryptSecret, guildSecretBinding } = require('../config/secretBox');
+
+/**
+ * The guild a setter is writing for. `this` is the Guild document on a save,
+ * and the Query on an update — where the guild is whatever the filter names.
+ */
+function guildIdOf(ctx) {
+    if (!ctx) return null;
+    const id = typeof ctx.getFilter === 'function'
+        ? ctx.getFilter()?.guildId
+        : (typeof ctx.get === 'function' ? ctx.get('guildId') : ctx.guildId);
+    return typeof id === 'string' && id ? id : null;
+}
+
+/**
+ * A setter that seals a provider key to this guild and path (#1152), so a
+ * sealed key copied into another guild's document will not open there. A write
+ * that cannot name its guild falls back to the unbound format rather than
+ * failing; migration 029 binds anything left that way.
+ */
+function sealedToGuild(path) {
+    return function seal(value) {
+        return encryptSecret(value, guildSecretBinding(guildIdOf(this), path));
+    };
+}
 
 function distinctProfileIds(profiles) {
     if (!Array.isArray(profiles)) return true;
@@ -455,15 +479,16 @@ const guildSchema = new Schema({
         },
         model: { type: String, default: null },
         // Live provider credentials, encrypted at rest when the operator has
-        // configured SECRET_ENCRYPTION_KEY (#564). The setter is on the schema
+        // configured SECRET_ENCRYPTION_KEY (#564), and sealed to this guild and
+        // field (#1152). The setter is on the schema
         // rather than at the dashboard route so it cannot be skipped by a write
         // site added later; the matching read is decryptSecret() in each
         // provider's resolveAuth, because these documents reach the AI path as
         // plain objects via toObject(), which does not run getters.
-        openaiKey: { type: String, default: null, set: encryptSecret },
-        geminiKey: { type: String, default: null, set: encryptSecret },
-        anthropicKey: { type: String, default: null, set: encryptSecret },
-        openrouterKey: { type: String, default: null, set: encryptSecret },
+        openaiKey: { type: String, default: null, set: sealedToGuild('ai.openaiKey') },
+        geminiKey: { type: String, default: null, set: sealedToGuild('ai.geminiKey') },
+        anthropicKey: { type: String, default: null, set: sealedToGuild('ai.anthropicKey') },
+        openrouterKey: { type: String, default: null, set: sealedToGuild('ai.openrouterKey') },
         ollamaBaseUrl: { type: String, default: 'http://localhost:11434' },
         channelId: { type: String, default: null },
         systemPrompt: { type: String, default: 'You are a helpful Discord bot assistant.' },

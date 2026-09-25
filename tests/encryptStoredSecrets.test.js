@@ -53,7 +53,8 @@ const {
     decryptStoredGuildKeys,
     countPlaintextGuildKeys,
 } = require('../src/migrations/018_encrypt_guild_ai_keys');
-const { encryptSecret, decryptSecret, isEncrypted, _resetSecretBox } = require('../src/config/secretBox');
+const { bindStoredGuildKeys, unbindStoredGuildKeys } = require('../src/migrations/029_bind_guild_ai_keys');
+const { encryptSecret, decryptSecret, isEncrypted, isBound, guildSecretBinding, _resetSecretBox } = require('../src/config/secretBox');
 
 const KEY = 'a-test-encryption-key';
 
@@ -65,6 +66,9 @@ function setKey(value) {
 
 const guild = (guildId, ai) => ({ _id: guildId, guildId, ai });
 const stored = (guildId, field) => collection.docs.find(d => d.guildId === guildId).ai[field];
+// Opens a stored key the way the providers do: under its guild and field
+// (#1152). An unbound value ignores the binding.
+const open = (guildId, field) => decryptSecret(stored(guildId, field), guildSecretBinding(guildId, `ai.${field}`));
 
 let savedKey;
 beforeAll(() => { savedKey = process.env.SECRET_ENCRYPTION_KEY; });
@@ -88,10 +92,10 @@ describe('encryptStoredGuildKeys', () => {
 
         await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 2, keys: 4, skipped: 0 });
 
-        expect(decryptSecret(stored('g1', 'openaiKey'))).toBe('sk-one');
-        expect(decryptSecret(stored('g1', 'anthropicKey'))).toBe('sk-ant-two');
-        expect(decryptSecret(stored('g2', 'geminiKey'))).toBe('AIza-three');
-        expect(decryptSecret(stored('g2', 'openrouterKey'))).toBe('sk-or-four');
+        expect(open('g1', 'openaiKey')).toBe('sk-one');
+        expect(open('g1', 'anthropicKey')).toBe('sk-ant-two');
+        expect(open('g2', 'geminiKey')).toBe('AIza-three');
+        expect(open('g2', 'openrouterKey')).toBe('sk-or-four');
     });
 
     test('is idempotent — a second pass rewrites nothing', async () => {
@@ -142,7 +146,7 @@ describe('encryptStoredGuildKeys', () => {
         await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 0, keys: 0, skipped: 1 });
 
         expect(stored('g1', 'openaiKey')).toBe(savedMeanwhile);
-        expect(decryptSecret(stored('g1', 'openaiKey'))).toBe('sk-new-from-dashboard');
+        expect(open('g1', 'openaiKey')).toBe('sk-new-from-dashboard');
     });
 
     // One field changing underneath the sweep must not cost the other three,
@@ -156,9 +160,9 @@ describe('encryptStoredGuildKeys', () => {
 
         await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 1, keys: 2, skipped: 1 });
 
-        expect(decryptSecret(stored('g1', 'openaiKey'))).toBe('sk-replaced');
-        expect(decryptSecret(stored('g1', 'geminiKey'))).toBe('AIza-two');
-        expect(decryptSecret(stored('g1', 'anthropicKey'))).toBe('sk-ant-three');
+        expect(open('g1', 'openaiKey')).toBe('sk-replaced');
+        expect(open('g1', 'geminiKey')).toBe('AIza-two');
+        expect(open('g1', 'anthropicKey')).toBe('sk-ant-three');
     });
 
     // Silently doing nothing would report as success and leave the operator
@@ -246,5 +250,56 @@ describe('countPlaintextGuildKeys', () => {
 
         expect(isEncrypted(stored('g1', 'openaiKey'))).toBe(true);
         await expect(countPlaintextGuildKeys()).resolves.toBe(0);
+    });
+});
+
+// #1152: a sealed key used to open for any guild, so one guild's key copied
+// into another's document would be spent on the second guild's behalf.
+describe('binding keys to their guild and field', () => {
+    test('the plaintext sweep seals straight to the bound format', async () => {
+        collection.docs = [guild('g1', { openaiKey: 'sk-one' })];
+        await encryptStoredGuildKeys();
+
+        expect(isBound(stored('g1', 'openaiKey'))).toBe(true);
+        expect(open('g1', 'openaiKey')).toBe('sk-one');
+    });
+
+    test('029 rebinds an unbound sealed key, and only those', async () => {
+        const alreadyBound = encryptSecret('sk-two', guildSecretBinding('g1', 'ai.geminiKey'));
+        collection.docs = [guild('g1', { openaiKey: encryptSecret('sk-one'), geminiKey: alreadyBound, anthropicKey: 'sk-plain' })];
+
+        await expect(bindStoredGuildKeys()).resolves.toEqual({ keys: 1, skipped: 0, unreadable: 0 });
+
+        expect(isBound(stored('g1', 'openaiKey'))).toBe(true);
+        expect(open('g1', 'openaiKey')).toBe('sk-one');
+        expect(stored('g1', 'geminiKey')).toBe(alreadyBound);
+        // Plaintext is 018's job, not this one's.
+        expect(stored('g1', 'anthropicKey')).toBe('sk-plain');
+    });
+
+    test('a bound key moved to another guild does not open there', async () => {
+        collection.docs = [guild('g1', { openaiKey: encryptSecret('sk-one') })];
+        await bindStoredGuildKeys();
+        const sealed = stored('g1', 'openaiKey');
+
+        expect(decryptSecret(sealed, guildSecretBinding('g2', 'ai.openaiKey'))).toBeNull();
+        expect(decryptSecret(sealed, guildSecretBinding('g1', 'ai.geminiKey'))).toBeNull();
+    });
+
+    test('leaves a key it cannot open alone rather than destroying it', async () => {
+        const foreign = (() => { setKey('some-other-key'); const v = encryptSecret('sk-x'); setKey(KEY); return v; })();
+        collection.docs = [guild('g1', { openaiKey: foreign })];
+
+        await expect(bindStoredGuildKeys()).resolves.toEqual({ keys: 0, skipped: 0, unreadable: 1 });
+        expect(stored('g1', 'openaiKey')).toBe(foreign);
+    });
+
+    test('029 down puts the keys back in the format older code reads', async () => {
+        collection.docs = [guild('g1', { openaiKey: encryptSecret('sk-one', guildSecretBinding('g1', 'ai.openaiKey')) })];
+
+        await expect(unbindStoredGuildKeys()).resolves.toEqual({ keys: 1, skipped: 0 });
+
+        expect(isBound(stored('g1', 'openaiKey'))).toBe(false);
+        expect(decryptSecret(stored('g1', 'openaiKey'))).toBe('sk-one');
     });
 });

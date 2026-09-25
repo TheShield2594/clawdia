@@ -52,7 +52,7 @@ function resolveProviderConfig(aiSettings, { guildId } = {}) {
         ? Number(aiSettings.contextTokens)
         : null;
 
-    const auth = providers.get(providerName)?.resolveAuth(aiSettings) || {};
+    const auth = providers.get(providerName)?.resolveAuth(aiSettings, { guildId }) || {};
 
     // Carried through so every caller that spreads this config keeps the
     // guild's MCP servers attached without having to know they exist.

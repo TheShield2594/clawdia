@@ -14,6 +14,22 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [5.0.0] - 2026-09-25
+
+Migrations through `029_bind_guild_ai_keys`.
+
+Security fixes from the whole-repo review. **Major** because migration 029
+writes guild AI keys in a format the 4.x images cannot read: roll back with
+`npm run migrate:rollback` before deploying an older image.
+
+- **Stored guild AI keys are bound to their guild and field (#1152).** Keys are
+  now sealed with the guild ID and field name as GCM additional authenticated
+  data (`enc.v2.`), so a sealed key copied into another guild's document, or
+  into another field, no longer opens. Migration 029 rewrites the existing
+  `enc.v1.` keys (reversible: `down` unbinds them). Decryption also pins the
+  GCM tag to 16 bytes and rejects shorter ones, which Node would otherwise
+  accept.
+
 ## [4.15.0] - 2026-09-25
 
 Migrations through `028_seed_pet_bond`.

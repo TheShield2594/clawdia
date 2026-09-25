@@ -1,5 +1,5 @@
 const Anthropic = require('@anthropic-ai/sdk');
-const { decryptSecret } = require('../../../config/secretBox');
+const { resolveApiKey } = require('../apiKeys');
 const {
     buildAnthropicMcpParams,
     requiresApproval,
@@ -507,7 +507,7 @@ module.exports = {
     // Which models can answer under a JSON schema natively — here, via a forced
     // tool call (#1044).
     supportsStructured,
-    resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.anthropicKey) || process.env.ANTHROPIC_API_KEY }),
+    resolveAuth: (aiSettings, { guildId } = {}) => resolveApiKey(aiSettings, { field: 'anthropicKey', envKey: process.env.ANTHROPIC_API_KEY, guildId }),
     stream,
     complete,
     structured

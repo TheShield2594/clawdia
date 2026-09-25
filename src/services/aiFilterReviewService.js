@@ -70,7 +70,7 @@ const SYSTEM_PROMPT =
 function aiReviewEnabled(guildDoc) {
     const ai = guildDoc?.ai;
     if (!ai?.enabled || !guildDoc?.moderation?.aiReviewEnabled) return false;
-    const { provider, apiKey } = resolveProviderConfig(ai);
+    const { provider, apiKey } = resolveProviderConfig(ai, { guildId: guildDoc.guildId });
     return provider === 'ollama' || Boolean(apiKey);
 }
 
@@ -97,7 +97,7 @@ function contextBlock(precedingMessages) {
 async function reviewFilterTrip(guildDoc, { rule, message, precedingMessages = [] } = {}) {
     if (!aiReviewEnabled(guildDoc)) return null;
 
-    const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(guildDoc.ai);
+    const { provider, model, apiKey, baseUrl, rateLimit } = resolveProviderConfig(guildDoc.ai, { guildId: guildDoc.guildId });
 
     const prompt =
         `Rule that tripped: "${rule}"\n\n`

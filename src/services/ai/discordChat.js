@@ -274,7 +274,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // retrieval is exactly the keyword scorer it has always been. Best-effort —
     // a first-message model load or a provider hiccup falls back to keyword
     // rather than failing the reply.
-    const embedder = await getEmbedder(aiSettings).catch(err => {
+    const embedder = await getEmbedder(aiSettings, message.guild?.id).catch(err => {
         console.warn(`[AI:knowledge] semantic embedder unavailable: ${err.message}`);
         return null;
     });
