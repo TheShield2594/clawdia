@@ -163,22 +163,33 @@ describe('the summary footer', () => {
         expect(activity.footer()).toBe('-# 🔧 6 tool calls, 1 failed');
     });
 
-    test('reports a server that could not be reached at all', () => {
-        // Nothing was called, so without this the reply is just a model that
-        // does not know — and the admin who could fix it never finds out.
+    test('keeps a server that could not be reached off the footer', () => {
         const activity = createToolActivity();
         activity.onEvent({ type: 'unavailable', server: 'github', error: 'HTTP 401' });
 
-        expect(activity.footer()).toBe('-# 🔧 ⚠️ github unreachable');
-        expect(activity.used).toBe(true);
+        // Every server is dialled on every turn, so a down one is not
+        // something this reply did — naming it on a reply about anything
+        // else reads as the bot having tried to call it.
+        expect(activity.footer()).toBe('');
+        expect(activity.used).toBe(false);
+        expect(activity.unreachableServers).toEqual(['github']);
     });
 
-    test('reports an unreachable server once, not once per attempt', () => {
+    test('leaves an unreachable server off a footer that has calls on it', () => {
+        const activity = createToolActivity();
+        activity.onEvent({ type: 'unavailable', server: 'github' });
+        activity.onEvent({ type: 'start', id: 1, server: 'calendar', tool: 'list_events' });
+        activity.onEvent({ type: 'end', id: 1, server: 'calendar', tool: 'list_events', durationMs: 500 });
+
+        expect(activity.footer()).toBe('-# 🔧 calendar·list_events 0.5s');
+    });
+
+    test('records an unreachable server once, not once per attempt', () => {
         const activity = createToolActivity();
         activity.onEvent({ type: 'unavailable', server: 'github' });
         activity.onEvent({ type: 'unavailable', server: 'github' });
 
-        expect(activity.footer()).toBe('-# 🔧 ⚠️ github unreachable');
+        expect(activity.unreachableServers).toEqual(['github']);
     });
 });
 

@@ -236,11 +236,9 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
 
     // The guild's activity ledger counts what its own connections did. The
     // bot's tools are not one of them, the same split the chat transport makes.
-    if (activity.used) {
-        const serverCalls = activity.calls.filter(call => call.server !== BOT_SERVER);
-        if (serverCalls.length || activity.unreachableServers.length) {
-            await recordToolCalls(guild.id, serverCalls, activity.unreachableServers).catch(() => {});
-        }
+    const serverCalls = activity.calls.filter(call => call.server !== BOT_SERVER);
+    if (serverCalls.length || activity.unreachableServers.length) {
+        await recordToolCalls(guild.id, serverCalls, activity.unreachableServers).catch(() => {});
     }
 
     const footer = activity.footer();

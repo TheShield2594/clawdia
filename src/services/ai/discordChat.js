@@ -771,11 +771,9 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         // panel, one row per server an admin configured, and the bot is not one
         // of them. They still show in the reply's activity footer, which is
         // where "what did it just do" belongs.
-        if (activity.used) {
-            const serverCalls = activity.calls.filter(call => call.server !== BOT_SERVER);
-            if (serverCalls.length || activity.unreachableServers.length) {
-                await recordToolCalls(message.guild.id, serverCalls, activity.unreachableServers);
-            }
+        const serverCalls = activity.calls.filter(call => call.server !== BOT_SERVER);
+        if (serverCalls.length || activity.unreachableServers.length) {
+            await recordToolCalls(message.guild.id, serverCalls, activity.unreachableServers);
         }
 
         // A withheld reply leaves no assistant turn in history: storing the

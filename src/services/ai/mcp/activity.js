@@ -8,8 +8,7 @@ const { toolLabel: label } = require('../../../utils/toolLabel');
 // waiting on somebody else's HTTP request, and the Discord message sits on "…"
 // for as long as that takes — which for a repository search or a calendar query
 // is seconds, not milliseconds. Nothing in the reply afterwards says a tool ran
-// at all, so a slow answer looks like a stuck bot and a wrong answer from an
-// unreachable server looks like a confidently wrong model.
+// at all, so a slow answer looks like a stuck bot.
 //
 // This turns the toolkit's events into two short pieces of text: a live line
 // naming the tools running right now, and a footer on the finished reply
@@ -91,9 +90,9 @@ function createToolActivity() {
     let files = [];
     let fileBytes = 0;
     let used = false;
-    // Separate from `used`, which a server merely being unreachable also sets.
-    // This one means a tool call was actually put in motion — which is what
-    // makes re-running the turn something with consequences.
+    // Separate from `used`, which an attachment also sets. This one means a
+    // tool call was actually put in motion — which is what makes re-running
+    // the turn something with consequences.
     let attempted = false;
 
     function onEvent(event) {
@@ -137,8 +136,12 @@ function createToolActivity() {
                 });
                 break;
             }
+            // Every configured server is dialled before the model sees the
+            // message, so a server being down says nothing about this turn: its
+            // tools were simply never offered. Kept for the usage ledger only —
+            // naming it on a reply about something else reads as the bot having
+            // tried to call it.
             case 'unavailable':
-                used = true;
                 if (!unreachable.includes(event.server)) unreachable.push(event.server);
                 break;
             // A chart, a screenshot, a rendered page: something the channel can
@@ -198,13 +201,11 @@ function createToolActivity() {
     /**
      * The summary left on the finished reply, or '' when no tool ran.
      *
-     * A server that could not be reached is named here even though it produced
-     * no calls: it is the difference between "the model does not know" and "the
-     * thing that knows was down", and the admin who can fix it is reading the
-     * same channel.
+     * An unreachable server is not named here: it was never called, and the
+     * dashboard's MCP panel is where an admin finds out it is down.
      */
     function footer() {
-        if (!done.length && !unreachable.length) return '';
+        if (!done.length) return '';
 
         const parts = [];
         if (done.length > MAX_FOOTER_ENTRIES) {
@@ -228,8 +229,6 @@ function createToolActivity() {
                 parts.push(`${call.ok ? '' : '⚠️ '}${label(call.server)}·${label(call.tool)}${time ? ` ${time}` : ''}`);
             }
         }
-        for (const server of unreachable) parts.push(`⚠️ ${label(server)} unreachable`);
-
         return clamp(`-# 🔧 ${parts.join(' · ')}`, STATUS_RESERVE);
     }
 

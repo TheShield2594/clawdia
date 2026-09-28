@@ -163,7 +163,7 @@ describe('the summary on the finished reply', () => {
         expect(message.channel.send).not.toHaveBeenCalled();
     });
 
-    test('reports a server that could not be reached, even with nothing called', async () => {
+    test('says nothing about a server that could not be reached when nothing was called', async () => {
         mockStream.mockImplementation(async function* (args) {
             args.onToolEvent({ type: 'unavailable', server: 'github', error: 'HTTP 401' });
             yield 'I could not check.';
@@ -172,7 +172,7 @@ describe('the summary on the finished reply', () => {
         const { message, sent } = fakeMessage();
         await handleAIChat(message, SETTINGS);
 
-        expect(sent[0].content).toContain('⚠️ github unreachable');
+        expect(sent[0].content).toBe('I could not check.');
     });
 
     test('never reaches the history the model is given next time', async () => {
