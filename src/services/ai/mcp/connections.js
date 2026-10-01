@@ -93,11 +93,10 @@ async function mapWithLimit(items, limit, fn) {
 function keyFor(connection) {
     // A process is the command that starts it: the same name pointed at a
     // different command, args or env after a config reload is a different
-    // server, and must not inherit the old one's process or tool list.
-    // Hashed, because the env it is built from holds the server's secrets.
-    if (connection.stdio) {
-        return `stdio ${require('crypto').createHash('sha256').update(JSON.stringify(connection.stdio)).digest('hex')}`;
-    }
+    // server, and must not inherit the old one's process or tool list. Like
+    // the token in the key below, the env is only ever an in-memory map key
+    // here — never logged, never sent — so it is used as it is.
+    if (connection.stdio) return `stdio ${JSON.stringify(connection.stdio)}`;
     // A connection allowed onto the private network is never pooled with one
     // that is not, or a dashboard entry pasting the same public URL and token
     // would be handed a client that skips the SSRF guard.
