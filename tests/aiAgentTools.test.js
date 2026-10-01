@@ -9,17 +9,22 @@ jest.mock('../src/models/KnowledgeBase', () => ({
     countDocuments: jest.fn(),
     updateOne: jest.fn(async () => ({}))
 }));
+jest.mock('../src/models/ConversationLog', () => ({ find: jest.fn() }));
 jest.mock('../src/services/ai/embeddings', () => ({
     embedForStorage: jest.fn(async () => null),
     cosineSimilarity: jest.fn()
 }));
 
 const KnowledgeBase = require('../src/models/KnowledgeBase');
+const ConversationLog = require('../src/models/ConversationLog');
 const { embedForStorage } = require('../src/services/ai/embeddings');
 const {
     buildAgentTools,
     buildAgentToolsAddendum,
     searchWeb,
+    readWebpage,
+    htmlToText,
+    searchConversations,
     searxngBaseUrl,
     saveNote,
     noteKey,
@@ -51,9 +56,10 @@ describe('which agent tools a turn gets', () => {
     });
 
     test('web search needs the guild switch and the operator\'s SEARXNG_URL', () => {
-        expect(names(buildAgentTools({ webSearchEnabled: true }, { guildId: 'g1' }))).toEqual(['web_search']);
+        expect(names(buildAgentTools({ webSearchEnabled: true }, { guildId: 'g1' }))).toEqual(['web_search', 'read_webpage']);
         delete process.env.SEARXNG_URL;
-        expect(buildAgentTools({ webSearchEnabled: true }, { guildId: 'g1' })).toEqual([]);
+        // Reading a page needs no search engine.
+        expect(names(buildAgentTools({ webSearchEnabled: true }, { guildId: 'g1' }))).toEqual(['read_webpage']);
     });
 
     test('learning is only for members who could edit the knowledge base by hand', () => {
@@ -64,7 +70,7 @@ describe('which agent tools a turn gets', () => {
 
     test('a scheduled run gets the search but never writes a note', () => {
         const ai = { webSearchEnabled: true, learningEnabled: true };
-        expect(names(buildAgentTools(ai, { guildId: 'g1', canManage: true, unattended: true }))).toEqual(['web_search']);
+        expect(names(buildAgentTools(ai, { guildId: 'g1', canManage: true, unattended: true }))).toEqual(['web_search', 'read_webpage']);
     });
 
     test('the search needs no approval and says it only reads', () => {
@@ -224,5 +230,90 @@ describe('approving tools in a scheduled run', () => {
         const [sent] = buildAnthropicMcpParams(servers).tools;
         expect(sent).not.toHaveProperty('unattended_tools');
         expect(sent).not.toHaveProperty('confirm_tools');
+    });
+});
+
+describe('read_webpage', () => {
+    const page = (body, { status = 200, type = 'text/html; charset=utf-8' } = {}) => jest.fn(async () => ({
+        ok: status >= 200 && status < 300,
+        status,
+        headers: { get: name => (name === 'content-type' ? type : null) },
+        body: require('stream').Readable.toWeb(require('stream').Readable.from([Buffer.from(body)])),
+    }));
+
+    test('reads the text of a page through the SSRF guard', async () => {
+        const { guardedDispatcher } = require('../src/utils/outboundGuard');
+        const requestImpl = page('<html><head><title>Release &amp; notes</title><script>evil()</script></head>'
+            + '<body><nav>menu</nav><h1>Version 2</h1><p>It is out&nbsp;now.</p><ul><li>Faster</li></ul></body></html>');
+        const text = await readWebpage({ url: 'https://example.com/notes' }, { requestImpl });
+
+        expect(requestImpl.mock.calls[0][1].dispatcher).toBe(guardedDispatcher());
+        expect(text).toMatch(/not instructions/);
+        expect(text).toMatch(/"Release & notes"/);
+        expect(text).toMatch(/Version 2/);
+        expect(text).toMatch(/It is out now\./);
+        expect(text).toMatch(/- Faster/);
+        expect(text).not.toMatch(/evil|menu/);
+    });
+
+    test('refuses a private address before any request goes out', async () => {
+        const requestImpl = page('secret');
+        for (const url of ['http://127.0.0.1:8080/admin', 'http://169.254.169.254/latest', 'file:///etc/passwd', 'not a url']) {
+            await expect(readWebpage({ url }, { requestImpl })).resolves.toMatch(/Nothing was read/);
+        }
+        expect(requestImpl).not.toHaveBeenCalled();
+    });
+
+    test('says what it got instead of reading something that is not text', async () => {
+        await expect(readWebpage({ url: 'https://example.com/a.png' }, { requestImpl: page('x', { type: 'image/png' }) }))
+            .resolves.toMatch(/image\/png, not a page of text/);
+        await expect(readWebpage({ url: 'https://example.com/x' }, { requestImpl: page('', { status: 404 }) }))
+            .resolves.toMatch(/status 404/);
+        const down = jest.fn(async () => { throw new Error('ENOTFOUND'); });
+        await expect(readWebpage({ url: 'https://nowhere.example' }, { requestImpl: down })).resolves.toMatch(/could not be fetched/);
+    });
+
+    test('a long page is cut, and says so', async () => {
+        const text = await readWebpage({ url: 'https://example.com/long' }, { requestImpl: page(`<p>${'word '.repeat(5000)}</p>`) });
+        expect(text).toMatch(/the page goes on/);
+    });
+
+    test('decodes numeric entities and keeps block breaks', () => {
+        expect(htmlToText('<p>caf&#233;</p><p>&#x2014;done</p>').text).toBe('café\n—done');
+    });
+});
+
+describe('search_conversations', () => {
+    const query = hits => {
+        const chain = { sort: jest.fn(() => chain), limit: jest.fn(() => chain), lean: jest.fn(async () => hits) };
+        ConversationLog.find.mockReturnValue(chain);
+        return chain;
+    };
+
+    test('is only offered with the guild switch on, for a known member, and never unattended', () => {
+        expect(buildAgentTools({ conversationSearch: true }, { guildId: 'g1' })).toEqual([]);
+        expect(names(buildAgentTools({ conversationSearch: true }, { guildId: 'g1', userId: 'u1' }))).toEqual(['search_conversations']);
+        expect(buildAgentTools({ conversationSearch: true }, { guildId: 'g1', userId: 'u1', unattended: true })).toEqual([]);
+    });
+
+    test('searches only the asker\'s own turns, and lists them oldest first', async () => {
+        query([
+            { role: 'assistant', content: 'Booked the Lisbon flight for the 12th.', createdAt: new Date('2026-08-02') },
+            { role: 'user', content: 'Can you look at flights to Lisbon?', createdAt: new Date('2026-08-01') }
+        ]);
+        const text = await searchConversations({ query: 'lisbon flight', userId: 'someone-else' }, { guildId: 'g1', userId: 'u1' });
+
+        expect(ConversationLog.find.mock.calls[0][0]).toEqual({ guildId: 'g1', userId: 'u1', $text: { $search: 'lisbon flight' } });
+        expect(text.indexOf('2026-08-01')).toBeLessThan(text.indexOf('2026-08-02'));
+        expect(text).toMatch(/They said: Can you look at flights/);
+        expect(text).toMatch(/You answered: Booked/);
+    });
+
+    test('says so when nothing matches, or the search fails', async () => {
+        query([]);
+        await expect(searchConversations({ query: 'zzz' }, { guildId: 'g1', userId: 'u1' })).resolves.toMatch(/Nothing in your past/);
+        ConversationLog.find.mockImplementation(() => { throw new Error('no text index'); });
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        await expect(searchConversations({ query: 'x' }, { guildId: 'g1', userId: 'u1' })).resolves.toMatch(/failed/);
     });
 });

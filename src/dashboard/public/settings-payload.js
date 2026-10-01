@@ -362,6 +362,7 @@ function buildSettingsPayload(section, ctx = {}) {
             'ai.memory.cap': Math.min(50, Math.max(1, parseInt(document.getElementById('ai-memory-cap').value, 10) || 10)),
             'ai.learningEnabled': document.getElementById('ai-learning').checked,
             'ai.webSearchEnabled': document.getElementById('ai-web-search').checked,
+            'ai.conversationSearch': document.getElementById('ai-conversation-search').checked,
             // These live on the Connections tab but belong to the same ai
             // document, so they save with everything else rather than needing
             // their own endpoint.

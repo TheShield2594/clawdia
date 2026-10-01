@@ -137,8 +137,12 @@
                             <span class="switch"><input type="checkbox" id="ai-learning" <%= settings.ai.learningEnabled ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
                         <label class="toggle">
-                            <span class="toggle-text"><strong>Enable web search</strong><span>Give the AI a <code>web_search</code> tool over the bot operator's SearXNG instance (<code>SEARXNG_URL</code>). Does nothing until that is set.</span></span>
+                            <span class="toggle-text"><strong>Enable web access</strong><span>Let the AI read public web pages, and search the web through the bot operator's SearXNG instance when <code>SEARXNG_URL</code> is set.</span></span>
                             <span class="switch"><input type="checkbox" id="ai-web-search" <%= settings.ai.webSearchEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Searchable conversation history</strong><span>Keep a year of each member's AI conversations so the AI can search them when asked about something from before. Each member can only ever search their own. Erased with <code>/mydata</code>.</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-conversation-search" <%= settings.ai.conversationSearch ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
                         <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
                         <div class="actions-row">

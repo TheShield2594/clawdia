@@ -299,14 +299,31 @@ another. The notes are guild-wide, so the tool is only offered to members with
 Manage Server, never in scheduled tasks, and capped at 200 notes a server. Read,
 edit or delete them in the dashboard's knowledge base like any other entry.
 
-**Web search**:
+**Web access**:
 
-With `SEARXNG_URL` set by the operator and **Enable web search** on, the model
-has a `web_search` tool over that SearXNG instance. It returns titles, URLs and
+With **Enable web access** on, the model has a `read_webpage` tool that fetches
+one public page and reads its text — a search result whose snippet is not
+enough, or a link somebody pasted. The URL is the model's choice, so it goes
+through the same SSRF guard as every dashboard URL: private and reserved
+addresses are refused, on every redirect. Pages that need a login or JavaScript
+come back empty.
+
+With `SEARXNG_URL` set by the operator as well, the model also has a
+`web_search` tool over that SearXNG instance. It returns titles, URLs and
 snippets, labelled as third-party text the model must not take instructions
 from, and the model is told to cite the URLs it uses. It is read-only, so it
 needs no approval and is offered to scheduled tasks too. Setup is in
 [SETUP_GUIDE.md](SETUP_GUIDE.md#web-search-searxng).
+
+**Searchable conversation history**:
+
+The chat keeps the last few turns per channel and a rolling summary, which is
+enough context for a reply but not for "what did we decide about the trip last
+month?". With **Searchable conversation history** on, every AI turn is also
+written to a log kept for a year, and the model gets a `search_conversations`
+tool over it — keyword search across every channel and DM. A member only ever
+searches their own conversations; the filter is the person asking, not anything
+the model passes. `/mydata` exports and erases the log with everything else.
 
 Older turns are not simply forgotten when they fall past the history window:
 what drops out is folded into a short rolling summary of the conversation, which

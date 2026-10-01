@@ -717,6 +717,11 @@ const guildSchema = new Schema({
         // Per guild as well as per operator, because each search is another
         // tool round on this guild's budget.
         webSearchEnabled: { type: Boolean, default: false },
+        // Keep a searchable log of every AI turn (models/ConversationLog.js)
+        // and give the model a search_conversations tool over the asker's own
+        // turns. Off by default: it is a year of members' conversations stored,
+        // which a community server should decide on rather than inherit.
+        conversationSearch: { type: Boolean, default: false },
         dailyDigest: {
             enabled:          { type: Boolean, default: false },
             channelId:        { type: String, default: null },

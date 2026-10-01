@@ -816,7 +816,8 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
                 createSummarizer(
                     { provider, model, apiKey, baseUrl, rateLimit },
                     { guildId: message.guild.id, userId: message.author.id, channelId: message.channel.id }
-                )
+                ),
+                { archive: aiSettings.conversationSearch === true }
             );
             // Only what the question matched is a source. The background tier
             // is in the prompt because it is recent, not because it answered
