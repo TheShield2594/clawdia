@@ -175,6 +175,10 @@ module.exports = {
                                     { name: 'In a channel', value: 'channel' },
                                     { name: 'To me by DM', value: 'dm' }
                                 ))
+                        .addBooleanOption(opt =>
+                            opt.setName('deep')
+                                .setDescription('Give each run deep task mode\'s room: more tool rounds, several minutes')
+                                .setRequired(false))
                         .addChannelOption(opt =>
                             opt.setName('channel')
                                 .setDescription('Where the result is posted. Defaults to this channel.')
@@ -376,6 +380,7 @@ async function addScheduledTask(interaction) {
     const every = interaction.options.getString('every');
     const cron = interaction.options.getString('cron');
     const deliverTo = interaction.options.getString('deliver') || 'channel';
+    const mode = interaction.options.getBoolean('deep') ? 'deep' : 'standard';
     const channelOption = interaction.options.getChannel('channel');
     const channel = channelOption || interaction.channel;
 
@@ -432,13 +437,14 @@ async function addScheduledTask(interaction) {
         repeat: every || null,
         cron,
         timezone,
-        deliverTo
+        deliverTo,
+        mode
     });
     if (error) return interaction.reply({ content: error, flags: MessageFlags.Ephemeral });
 
     const stamp = Math.floor(task.fireAt.getTime() / 1000);
     const cadence = taskCadence(task, ', repeating **', '**', ' (once)');
-    const where = deliverTo === 'dm' ? 'to your DMs' : `in ${channel}`;
+    const where = (deliverTo === 'dm' ? 'to your DMs' : `in ${channel}`) + (mode === 'deep' ? ' as a **deep** task' : '');
     const dmNote = deliverTo === 'dm'
         ? '\n-# Keep your DMs open to this bot, and keep Manage Server: the task stops if either goes.'
         : '';
@@ -461,7 +467,7 @@ async function listScheduledTasks(interaction) {
 
     const lines = tasks.map(task => {
         const stamp = Math.floor(task.fireAt.getTime() / 1000);
-        const cadence = taskCadence(task, ' · repeats ', '', ' · once');
+        const cadence = taskCadence(task, ' · repeats ', '', ' · once') + (task.mode === 'deep' ? ' · deep' : '');
         // A disabled task is one somebody switched off or one the runner gave
         // up on, and the reason it gave up is the useful half.
         const state = task.enabled ? '' : ` · **off**${task.lastError ? ` (${toolLabel(task.lastError, 60)})` : ''}`;

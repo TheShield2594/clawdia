@@ -36,6 +36,7 @@ function interaction({
     sub,
     strings = {},
     integers = {},
+    booleans = {},
     channelOption = undefined,
     manageGuild = true,
 } = {}) {
@@ -53,6 +54,7 @@ function interaction({
             getSubcommand: () => sub,
             getString: name => strings[name] ?? null,
             getInteger: name => integers[name] ?? null,
+            getBoolean: name => booleans[name] ?? null,
             getChannel: () => (channelOption === undefined ? null : channelOption),
         },
         reply: async payload => { replies.push(payload); return payload; },
@@ -171,6 +173,23 @@ describe('/ai schedule add', () => {
         expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ deliverTo: 'dm', createdBy: 'u1' }));
         expect(said(i)).toMatch(/to your DMs/);
         expect(said(i)).toMatch(/Keep your DMs open/);
+    });
+
+    it('passes deep through as the task\'s mode', async () => {
+        createTask.mockResolvedValue({ task: {
+            _id: 'aaaabbbbcccc123456', fireAt: new Date(Date.now() + 3_600_000), repeat: 'daily', mode: 'deep'
+        } });
+        const i = add({ booleans: { deep: true } });
+
+        await command.execute(i);
+
+        expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ mode: 'deep' }));
+        expect(said(i)).toMatch(/as a \*\*deep\*\* task/);
+    });
+
+    it('leaves a task standard when deep is not asked for', async () => {
+        await command.execute(add());
+        expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ mode: 'standard' }));
     });
 
     it('refuses a DM task pointed at a channel', async () => {

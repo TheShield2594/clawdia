@@ -34,6 +34,12 @@ module.exports = {
     // guild's monthly ceiling (#831) bounds what those runs can spend.
     MIN_CRON_INTERVAL_MINUTES: 15,
 
+    // The same floor for a deep task, which may make three times the tool
+    // rounds and run for eight minutes. Hourly at the most: the guild's
+    // unattributed tool-call budget is an hour wide, so a deep task any more
+    // frequent would only be spending runs that find the budget already gone.
+    MIN_DEEP_CRON_INTERVAL_MINUTES: 60,
+
     // Consecutive failures before the service switches a task off. Three days
     // of a daily task failing the same way is not a hiccup, and each attempt
     // costs tokens; the task is kept, disabled, with its last error on it.

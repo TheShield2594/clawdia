@@ -241,7 +241,8 @@ async function scheduleTask(action, message) {
         repeat,
         cron,
         timezone,
-        deliverTo: action.deliverTo === 'dm' ? 'dm' : 'channel'
+        deliverTo: action.deliverTo === 'dm' ? 'dm' : 'channel',
+        mode: action.deep === true ? 'deep' : 'standard'
     });
 
     if (error) return `Nothing was scheduled: ${error}`;
@@ -253,8 +254,9 @@ async function scheduleTask(action, message) {
     const where = task.deliverTo === 'dm'
         ? 'sent to them by DM (it stops if they close their DMs to the bot or lose Manage Server)'
         : 'posting in this channel';
-    return `Scheduled. The first run is <t:${stamp}:F> (<t:${stamp}:R>)${cadence}, ${where} — `
-        + 'include that timestamp when you confirm it, and mention that a server admin can list or remove it with /ai schedule.';
+    const depth = task.mode === 'deep' ? ' Each run is a deep task, with room for many tool rounds.' : '';
+    return `Scheduled. The first run is <t:${stamp}:F> (<t:${stamp}:R>)${cadence}, ${where}.${depth} `
+        + 'Include that timestamp when you confirm it, and mention that a server admin can list or remove it with /ai schedule.';
 }
 
 async function suggestModAction(action, message) {

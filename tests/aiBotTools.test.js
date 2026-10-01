@@ -208,6 +208,26 @@ describe('what each tool does', () => {
         expect(text).toMatch(/by DM/);
     });
 
+    test('deep makes a deep task, where the server allows them', async () => {
+        Guild.findOne.mockReturnValue({ lean: async () => ({ ai: { enabled: true, taskModeEnabled: true } }) });
+        const { text } = await run('schedule_task', {
+            instruction: 'Cross-check the three feeds', delayMinutes: 60, repeat: 'daily', deep: true
+        }, { manageGuild: true });
+
+        expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({ mode: 'deep' }));
+        expect(text).toMatch(/deep task/);
+    });
+
+    test('and is refused in words where the server does not', async () => {
+        Guild.findOne.mockReturnValue({ lean: async () => ({ ai: { enabled: true } }) });
+        const { text } = await run('schedule_task', {
+            instruction: 'Cross-check the three feeds', delayMinutes: 60, repeat: 'daily', deep: true
+        }, { manageGuild: true });
+
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
+        expect(text).toMatch(/Deep task mode is switched off/);
+    });
+
     test('anything but "dm" posts in the channel', async () => {
         await run('schedule_task', {
             instruction: 'Brief the channel', delayMinutes: 60, repeat: 'daily', deliverTo: 'everyone'

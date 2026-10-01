@@ -36,7 +36,7 @@ const { runJob } = require('../src/utils/jobRunner');
 const { runDueTasks, createTask, __test__ } = require('../src/services/scheduledTaskService');
 const {
     MAX_TASK_FAILURES, MAX_TASKS_PER_GUILD, MAX_TASKS_PER_USER,
-    MAX_TASK_PROMPT_LENGTH, MAX_TASK_DELAY_MINUTES, MIN_CRON_INTERVAL_MINUTES, TASK_RUN_TIMEOUT_MS
+    MAX_TASK_PROMPT_LENGTH, MAX_TASK_DELAY_MINUTES, MIN_CRON_INTERVAL_MINUTES, MIN_DEEP_CRON_INTERVAL_MINUTES, TASK_RUN_TIMEOUT_MS
 } = require('../src/utils/scheduledTaskLimits');
 
 const NOW = new Date('2026-07-14T09:00:00Z');
@@ -358,6 +358,60 @@ describe('running an ai_prompt task', () => {
     });
 });
 
+describe('running a deep task', () => {
+    const { TASK_MAX_TOOL_ROUNDS, TASK_TURN_BUDGET_MS } = require('../src/services/ai/mcp/toolkit');
+
+    beforeEach(() => {
+        Guild.findOne.mockReturnValue({ lean: async () => ({ ai: { enabled: true, taskModeEnabled: true } }) });
+    });
+
+    test('gets deep task mode\'s ceilings and framing, still unattributed', async () => {
+        due([makeTask({ mode: 'deep' })]);
+        await runDueTasks(makeClient(textChannel()));
+
+        const request = aiService.getCompletion.mock.calls[0][0];
+        expect(request).toMatchObject({ maxRounds: TASK_MAX_TOOL_ROUNDS, turnBudgetMs: TASK_TURN_BUDGET_MS });
+        expect(request.systemPrompt).toMatch(/running a \*\*task\*\*/);
+        expect(request.systemPrompt).toMatch(/standing instruction/);
+        // Unattributed, so the guild's scheduled tool budget is what bounds it.
+        expect(request.userId).toBeUndefined();
+    });
+
+    test('a standard task keeps the ordinary ceilings', async () => {
+        due([makeTask()]);
+        await runDueTasks(makeClient(textChannel()));
+
+        const request = aiService.getCompletion.mock.calls[0][0];
+        expect(request.maxRounds).toBeUndefined();
+        expect(request.turnBudgetMs).toBeUndefined();
+    });
+
+    test('fails without spending anything once deep task mode is switched off', async () => {
+        Guild.findOne.mockReturnValue({ lean: async () => ({ ai: { enabled: true, taskModeEnabled: false } }) });
+        due([makeTask({ mode: 'deep' })]);
+
+        await runDueTasks(makeClient(textChannel()));
+
+        expect(aiService.getCompletion).not.toHaveBeenCalled();
+        const [, update] = ScheduledTask.findOneAndUpdate.mock.calls[1];
+        expect(update.$set.lastError).toMatch(/deep task mode is switched off/);
+    });
+
+    test('splits a long report over several messages, none past the limit', async () => {
+        aiService.getCompletion.mockResolvedValue(Array.from({ length: 60 }, (_, i) => `Finding ${i}: ${'x'.repeat(90)}`).join('\n'));
+        const channel = textChannel();
+        due([makeTask({ mode: 'deep' })]);
+
+        await runDueTasks(makeClient(channel));
+
+        expect(channel.send.mock.calls.length).toBeGreaterThan(1);
+        for (const [payload] of channel.send.mock.calls) {
+            expect(payload.content.length).toBeLessThanOrEqual(2000);
+            expect(payload.allowedMentions).toEqual({ parse: [] });
+        }
+    });
+});
+
 describe('running a task that delivers by DM', () => {
     function dmClient({ member = undefined, fetchThrows = false } = {}) {
         const recipient = member === undefined
@@ -579,6 +633,33 @@ describe('createTask, the one gate both routes go through', () => {
     test('refuses a DM task with nobody to send it to', async () => {
         const { error } = await createTask({ ...BASE, createdBy: null, deliverTo: 'dm' });
         expect(error).toMatch(/needs a person/);
+    });
+
+    test('refuses a deep task while the server has deep task mode off', async () => {
+        Guild.findOne.mockReturnValue({ lean: async () => ({ ai: { enabled: true, taskModeEnabled: false } }) });
+        const { error } = await createTask({ ...BASE, mode: 'deep' });
+        expect(error).toMatch(/Deep task mode is switched off/);
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
+    });
+
+    test('records a deep task once the mode is on', async () => {
+        Guild.findOne.mockReturnValue({ lean: async () => ({ ai: { enabled: true, taskModeEnabled: true } }) });
+        await createTask({ ...BASE, mode: 'deep' });
+        expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({ mode: 'deep' }));
+    });
+
+    test('holds a deep cron task to the hourly floor', async () => {
+        Guild.findOne.mockReturnValue({ lean: async () => ({ ai: { enabled: true, taskModeEnabled: true } }) });
+        const { error } = await createTask({ ...BASE, mode: 'deep', cron: '*/30 * * * *' });
+        expect(error).toMatch(new RegExp(`every ${MIN_DEEP_CRON_INTERVAL_MINUTES} minutes`));
+
+        const { task } = await createTask({ ...BASE, fireAt: undefined, mode: 'deep', cron: '0 * * * *' });
+        expect(task.mode).toBe('deep');
+    });
+
+    test('refuses a mode that is not standard or deep', async () => {
+        const { error } = await createTask({ ...BASE, mode: 'turbo' });
+        expect(error).toMatch(/standard or deep/);
     });
 
     test('refuses a named cadence and a cron line together', async () => {

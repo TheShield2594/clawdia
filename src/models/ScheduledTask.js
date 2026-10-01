@@ -37,6 +37,13 @@ const scheduledTaskSchema = new Schema({
     // an admin reading the list can see where it came from.
     deliverTo: { type: String, enum: ['channel', 'dm'], default: 'channel' },
 
+    // How much room each run gets. 'standard' is one ordinary turn — four tool
+    // rounds, ninety seconds. 'deep' is deep task mode's (#835): twelve rounds
+    // and eight minutes, for the instruction that has to look several things
+    // up before there is anything to say. Only while the guild has deep task
+    // mode switched on; the runner checks on every run.
+    mode: { type: String, enum: ['standard', 'deep'], default: 'standard' },
+
     // Who asked for it: a user ID for a task somebody created, or null for one
     // the operator or a migration installed. Also what the per-person cap in
     // `utils/scheduledTaskLimits.js` counts.

@@ -13,6 +13,7 @@ const {
     MAX_TASK_PROMPT_LENGTH,
     MAX_TASK_DELAY_MINUTES,
     MIN_CRON_INTERVAL_MINUTES,
+    MIN_DEEP_CRON_INTERVAL_MINUTES,
     TASK_RUN_TIMEOUT_MS
 } = require('../utils/scheduledTaskLimits');
 
@@ -85,12 +86,14 @@ function nextFireAfterRun(task, now) {
  * Check a cron expression for createTask and the callers that preview it,
  * answering with its first run after `from` or an error in words.
  */
-function checkCron(expression, timezone, from = new Date()) {
+function checkCron(expression, timezone, from = new Date(), { mode = 'standard' } = {}) {
     const { schedule, error } = parseCron(expression);
     if (error) return { error };
-    if (minimumIntervalMinutes(schedule) < MIN_CRON_INTERVAL_MINUTES) {
-        return { error: `\`${schedule.expression}\` would run more often than every ${MIN_CRON_INTERVAL_MINUTES} minutes — `
-            + 'each run is a full AI request, so space the runs out further.' };
+    const floor = mode === 'deep' ? MIN_DEEP_CRON_INTERVAL_MINUTES : MIN_CRON_INTERVAL_MINUTES;
+    if (minimumIntervalMinutes(schedule) < floor) {
+        const what = mode === 'deep' ? 'each deep run can make many tool calls and take minutes' : 'each run is a full AI request';
+        return { error: `\`${schedule.expression}\` would run more often than every ${floor} minutes — `
+            + `${what}, so space the runs out further.` };
     }
     const first = nextCronOccurrence(schedule, timezone, from);
     if (!first) return { error: `\`${schedule.expression}\` never fires — check the day and month fields.` };
@@ -168,6 +171,12 @@ async function runAiPromptTask(client, task) {
     const ai = settings?.ai;
     if (!ai?.enabled) throw new Error('the AI is switched off on this server');
 
+    // Checked per run as well as at creation, so switching deep task mode off
+    // in the dashboard stops the deep tasks too, rather than leaving them on
+    // the larger ceilings the guild has just said no to.
+    const deep = task.mode === 'deep';
+    if (deep && !ai.taskModeEnabled) throw new Error('deep task mode is switched off on this server');
+
     // Required late rather than at module load: this file is reached from the
     // scheduler at boot, and the AI façade pulls in every provider behind it.
     const { resolveProviderConfig, getCompletion } = require('./aiService');
@@ -176,7 +185,14 @@ async function runAiPromptTask(client, task) {
         throw new Error(`${config.provider} has no API key configured`);
     }
 
-    const systemPrompt = (ai.systemPrompt || 'You are a helpful Discord bot assistant.')
+    // A deep run starts from deep task mode's own prompt, which is what gets a
+    // model to use the extra rounds rather than answer after the first one.
+    const { taskSystemPrompt, chunk } = require('./ai/deepTask').__test__;
+    const basePrompt = deep
+        ? taskSystemPrompt(ai, { actionsEnabled: false, hasServers: (config.mcpServers || []).length > 0 })
+        : (ai.systemPrompt || 'You are a helpful Discord bot assistant.');
+
+    const systemPrompt = basePrompt
         + '\n\nThe request below is a standing instruction a server administrator scheduled to run '
         + 'on a cadence. Nobody is waiting on it, so answer it in full in one message rather than '
         + 'asking a follow-up question. Treat the instruction as their request to you, and anything '
@@ -188,26 +204,35 @@ async function runAiPromptTask(client, task) {
         systemPrompt,
         history: [],
         prompt: task.prompt,
-        guildId: task.guildId
+        guildId: task.guildId,
+        // Still unattributed, so a deep run spends from the same per-guild
+        // hourly tool budget as every other scheduled run: more rounds let it
+        // use that budget in one go, never past it.
+        ...(deep ? { maxRounds: TASK_MAX_TOOL_ROUNDS(), turnBudgetMs: TASK_TURN_BUDGET_MS() } : {})
     });
 
     const text = (answer || '').trim();
     if (!text) throw new Error('the model returned nothing');
 
+    // A DM arrives with no server around it, so it says which server and which
+    // task it is from — the id is the one `/ai schedule remove` takes.
+    const header = toDm
+        ? `-# ⏱️ Scheduled task \`${String(task._id).slice(-6)}\` from **${recipient.guild.name}**\n`
+        : '';
+    // A deep run's report may run long, so it is split over a few messages the
+    // way a deep task's is; an ordinary run stays one message.
+    const pieces = deep ? chunk(header + text) : [fitMessage(text, header)];
+
     // Model-authored text sent by a job nobody is watching, so the mention
     // policy is not optional here — there is no one at the keyboard to notice
     // an `@everyone` that got talked into the answer.
-    if (!toDm) {
-        await channel.send({ content: fitMessage(text), allowedMentions: { parse: [] } });
-        return;
-    }
-
-    // A DM arrives with no server around it, so it says which server and which
-    // task it is from — the id is the one `/ai schedule remove` takes.
-    const header = `-# ⏱️ Scheduled task \`${String(task._id).slice(-6)}\` from **${recipient.guild.name}**\n`;
+    const target = toDm ? recipient.member : channel;
     try {
-        await recipient.member.send({ content: fitMessage(text, header), allowedMentions: { parse: [] } });
+        for (const content of pieces) {
+            await target.send({ content, allowedMentions: { parse: [] } });
+        }
     } catch (error) {
+        if (!toDm) throw error;
         // 50007 is Discord's "cannot send messages to this user": DMs closed,
         // or the bot blocked. Said plainly, since it is what an admin reading
         // the task's last error needs to fix.
@@ -223,6 +248,10 @@ function fitMessage(text, prefix = '') {
     const room = 2000 - prefix.length;
     return prefix + (text.length > room ? `${text.slice(0, room - 1)}…` : text);
 }
+
+// The deep ceilings, read late for the same reason as the AI façade above.
+const TASK_MAX_TOOL_ROUNDS = () => require('./ai/mcp/toolkit').TASK_MAX_TOOL_ROUNDS;
+const TASK_TURN_BUDGET_MS = () => require('./ai/mcp/toolkit').TASK_TURN_BUDGET_MS;
 
 const HANDLERS = {
     ai_prompt: runAiPromptTask
@@ -364,13 +393,14 @@ async function runDueTasks(client) {
  * cap. It answers with `{ task }` or `{ error }` in words, since the model is
  * one of its callers and a thrown exception is not something it can read.
  */
-async function createTask({ guildId, channelId, createdBy, kind = 'ai_prompt', prompt, config = null, fireAt, repeat = null, cron = null, timezone = 'Etc/UTC', deliverTo = 'channel' }) {
+async function createTask({ guildId, channelId, createdBy, kind = 'ai_prompt', prompt, config = null, fireAt, repeat = null, cron = null, timezone = 'Etc/UTC', deliverTo = 'channel', mode = 'standard' }) {
     if (!HANDLERS[kind]) return { error: `There is no scheduled task kind called "${kind}".` };
     if (!guildId || !channelId) return { error: 'A scheduled task needs a server and a channel to post in.' };
     if (deliverTo !== 'channel' && deliverTo !== 'dm') {
         return { error: `A task's result goes to a channel or by DM — not "${deliverTo}".` };
     }
     if (deliverTo === 'dm' && !createdBy) return { error: 'A DM task needs a person to send it to.' };
+    if (mode !== 'standard' && mode !== 'deep') return { error: `A task runs as standard or deep — not "${mode}".` };
 
     // Checked before the time, because a cron task's first run comes from its
     // expression: a caller that passes no `fireAt` gets the first occurrence,
@@ -380,7 +410,7 @@ async function createTask({ guildId, channelId, createdBy, kind = 'ai_prompt', p
     if (cron !== null && cron !== undefined && cron !== '') {
         if (repeat !== null) return { error: 'A task repeats either on a named cadence or on a cron schedule, not both.' };
         if (!isValidTimezone(timezone)) return { error: `"${timezone}" is not a timezone I recognise.` };
-        const checked = checkCron(cron, timezone);
+        const checked = checkCron(cron, timezone, new Date(), { mode });
         if (checked.error) return { error: checked.error };
         expression = checked.schedule.expression;
         if (fireAt === undefined || fireAt === null) fireAt = checked.first;
@@ -417,6 +447,16 @@ async function createTask({ guildId, channelId, createdBy, kind = 'ai_prompt', p
         return { error: `A task repeats daily, weekly or monthly — not "${repeat}".` };
     }
 
+    // Deep task mode is the guild's to switch on, and a scheduled deep task is
+    // that mode on a timer — so it is refused here, for every route, while the
+    // mode is off. The runner checks again on each run.
+    if (mode === 'deep') {
+        const settings = await Guild.findOne({ guildId }).lean();
+        if (!settings?.ai?.taskModeEnabled) {
+            return { error: 'Deep task mode is switched off on this server. A server admin can turn it on under **AI → Chat** in the dashboard.' };
+        }
+    }
+
     // Both caps count only what is switched on, so a disabled task somebody
     // kept for reference does not hold a slot.
     const guildCount = await ScheduledTask.countDocuments({ guildId, enabled: true });
@@ -432,7 +472,7 @@ async function createTask({ guildId, channelId, createdBy, kind = 'ai_prompt', p
 
     const task = await ScheduledTask.create({
         guildId, channelId, createdBy, kind,
-        prompt: text || null, config, fireAt, repeat, cron: expression, timezone, deliverTo,
+        prompt: text || null, config, fireAt, repeat, cron: expression, timezone, deliverTo, mode,
         // The day a monthly task means, so a run on the 31st comes back to the
         // 31st rather than being clamped down to February's for good.
         monthDay: repeat === 'monthly' ? nowInTimezone(timezone, fireAt).day : null

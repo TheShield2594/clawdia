@@ -156,6 +156,12 @@ function scheduleTaskTool(message) {
                 description: 'Where each result goes: "channel" posts it in this channel (the default), "dm" sends '
                     + 'it privately to the person you are replying to — only ever them. Use "dm" only when they ask '
                     + 'for it privately or by DM.'
+            },
+            deep: {
+                type: 'boolean',
+                description: 'Give each run deep task mode\'s room — many more tool rounds and several minutes — for '
+                    + 'instructions that must look several things up before answering. Only works where the server has '
+                    + 'deep task mode on, and repeats at most hourly. Leave it out for anything one look can answer.'
             }
         },
         required: ['instruction', 'repeat'],
