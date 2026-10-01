@@ -35,6 +35,27 @@
                             <input type="text" id="ai-model" value="<%= settings.ai.model || '' %>" placeholder="Leave empty for provider default">
                             <small id="ai-model-hint">Default: gpt-4o-mini</small>
                         </div>
+                        <div class="field field-pair">
+                            <div>
+                                <label class="field-label" for="ai-fallback-1-provider">Backup provider 1</label>
+                                <select id="ai-fallback-1-provider" data-change="ai-provider"><option value="" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === '' ? 'selected' : '' %>>None</option><option value="openai" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === 'openai' ? 'selected' : '' %>>OpenAI</option><option value="anthropic" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === 'anthropic' ? 'selected' : '' %>>Anthropic (Claude)</option><option value="gemini" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === 'gemini' ? 'selected' : '' %>>Google Gemini</option><option value="openrouter" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === 'openrouter' ? 'selected' : '' %>>OpenRouter</option><option value="ollama" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === 'ollama' ? 'selected' : '' %>>Ollama (self-hosted)</option></select>
+                            </div>
+                            <div>
+                                <label class="field-label" for="ai-fallback-1-model">Backup model 1</label>
+                                <input type="text" id="ai-fallback-1-model" value="<%= (settings.ai.fallbacks || [])[0]?.model || '' %>" placeholder="Leave empty for provider default">
+                            </div>
+                        </div>
+                        <div class="field field-pair">
+                            <div>
+                                <label class="field-label" for="ai-fallback-2-provider">Backup provider 2</label>
+                                <select id="ai-fallback-2-provider" data-change="ai-provider"><option value="" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === '' ? 'selected' : '' %>>None</option><option value="openai" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === 'openai' ? 'selected' : '' %>>OpenAI</option><option value="anthropic" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === 'anthropic' ? 'selected' : '' %>>Anthropic (Claude)</option><option value="gemini" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === 'gemini' ? 'selected' : '' %>>Google Gemini</option><option value="openrouter" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === 'openrouter' ? 'selected' : '' %>>OpenRouter</option><option value="ollama" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === 'ollama' ? 'selected' : '' %>>Ollama (self-hosted)</option></select>
+                            </div>
+                            <div>
+                                <label class="field-label" for="ai-fallback-2-model">Backup model 2</label>
+                                <input type="text" id="ai-fallback-2-model" value="<%= (settings.ai.fallbacks || [])[1]?.model || '' %>" placeholder="Leave empty for provider default">
+                            </div>
+                        </div>
+                        <div class="field"><small>Used in order when the provider above is down, overloaded, rate-limited or rejects its key — never once a reply has started. Each uses this server's key for that provider. Pick models whose context window is at least as large as the main one's.</small></div>
                         <form class="ai-keys-form" autocomplete="off" data-no-submit>
                         <div class="field ai-key-field" data-provider="openai">
                             <label class="field-label" for="ai-openai-key">OpenAI API key</label>

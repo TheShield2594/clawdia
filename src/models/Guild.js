@@ -727,6 +727,19 @@ const guildSchema = new Schema({
         // Off by default: each clip is a second paid call, to a service the
         // guild may not otherwise use.
         voiceTranscription: { type: Boolean, default: false },
+        // Providers to answer with when the primary cannot (services/ai/index.js):
+        // down, overloaded, rate-limited, or refusing the key. Tried in order,
+        // each with this guild's own key for it; a null model is that
+        // provider's default. At most two.
+        fallbacks: {
+            type: [{
+                _id: false,
+                provider: { type: String, enum: ['openai', 'gemini', 'anthropic', 'ollama', 'openrouter'], required: true },
+                model: { type: String, default: null }
+            }],
+            default: [],
+            validate: { validator: list => list.length <= 2, message: 'At most two backup providers.' }
+        },
         dailyDigest: {
             enabled:          { type: Boolean, default: false },
             channelId:        { type: String, default: null },

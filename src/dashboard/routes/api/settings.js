@@ -444,6 +444,33 @@ function validateAiUpdate(updates) {
             const error = validateContextTokens(context);
             if (error) return error;
         }
+
+        let fallbacks;
+        if (key === 'ai.fallbacks') fallbacks = value;
+        else if (key.startsWith('ai.fallbacks.')) return 'ai.fallbacks is saved as a whole list';
+        else if (isWholeAi) fallbacks = value.fallbacks;
+
+        if (fallbacks !== undefined) {
+            const error = validateFallbacks(fallbacks);
+            if (error) return error;
+        }
+    }
+    return null;
+}
+
+const FALLBACK_PROVIDERS = ['openai', 'gemini', 'anthropic', 'ollama', 'openrouter'];
+
+// The backup providers (`ai.fallbacks`): at most two, each a known provider and
+// an optional model name of a sane length.
+function validateFallbacks(value) {
+    if (!Array.isArray(value)) return 'ai.fallbacks must be a list';
+    if (value.length > 2) return 'ai.fallbacks can list at most two backup providers';
+    for (const entry of value) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return 'each backup must be { provider, model }';
+        if (!FALLBACK_PROVIDERS.includes(entry.provider)) return `"${entry.provider}" is not a provider`;
+        if (entry.model != null && (typeof entry.model !== 'string' || entry.model.length > 100)) {
+            return 'a backup model must be a name of at most 100 characters';
+        }
     }
     return null;
 }

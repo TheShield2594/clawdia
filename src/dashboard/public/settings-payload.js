@@ -364,6 +364,15 @@ function buildSettingsPayload(section, ctx = {}) {
             'ai.webSearchEnabled': document.getElementById('ai-web-search').checked,
             'ai.conversationSearch': document.getElementById('ai-conversation-search').checked,
             'ai.voiceTranscription': document.getElementById('ai-voice-transcription').checked,
+            // Empty provider rows are dropped, so "None" in the first row and a
+            // provider in the second still saves as a one-item list.
+            'ai.fallbacks': [1, 2]
+                .map(function(n) {
+                    var provider = document.getElementById('ai-fallback-' + n + '-provider').value;
+                    var model = document.getElementById('ai-fallback-' + n + '-model').value.trim();
+                    return provider ? { provider: provider, model: model || null } : null;
+                })
+                .filter(Boolean),
             // These live on the Connections tab but belong to the same ai
             // document, so they save with everything else rather than needing
             // their own endpoint.
