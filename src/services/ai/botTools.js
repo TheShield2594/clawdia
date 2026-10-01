@@ -5,7 +5,8 @@ const { MAX_REMINDER_MINUTES, MAX_REMINDER_MESSAGE_LENGTH } = require('../../uti
 const {
     MAX_TASK_PROMPT_LENGTH,
     MAX_TASK_DELAY_MINUTES,
-    MIN_TASK_DELAY_MINUTES
+    MIN_TASK_DELAY_MINUTES,
+    MIN_CRON_INTERVAL_MINUTES
 } = require('../../utils/scheduledTaskLimits');
 const { MEMORY_CAP, MAX_MEMORY_LENGTH } = require('../../utils/memoryLimits');
 const { runAction } = require('./actions');
@@ -118,7 +119,7 @@ function scheduleTaskTool(message) {
         name: 'schedule_task',
         description:
             'Schedule an instruction for you to carry out later, once or on a repeating cadence — '
-            + 'posting the result in this channel. Use it only when the answer has to be worked out at '
+            + 'posting the result in this channel, or sending it to the person by DM. Use it only when the answer has to be worked out at '
             + 'the time (checking feeds, recapping a channel, comparing something against last week). '
             + 'For "remind me to…", use create_reminder instead: each run of a scheduled task costs the '
             + 'server a full AI request. The user is asked to approve it before it is set.',
@@ -133,15 +134,37 @@ function scheduleTaskTool(message) {
                 type: 'integer',
                 minimum: MIN_TASK_DELAY_MINUTES,
                 maximum: MAX_TASK_DELAY_MINUTES,
-                description: 'How many minutes from now the first run should be.'
+                description: 'How many minutes from now the first run should be. Required unless repeat is "cron", '
+                    + 'where the schedule decides the first run and this is left out.'
             },
             repeat: {
                 type: 'string',
-                enum: ['none', 'daily', 'weekly', 'monthly'],
-                description: 'How often it repeats after the first run. "none" runs it once.'
+                enum: ['none', 'daily', 'weekly', 'monthly', 'cron'],
+                description: 'How often it repeats after the first run. "none" runs it once; "cron" follows the cron '
+                    + 'field, for cadences the others cannot say, like weekdays only or every few hours.'
+            },
+            cron: {
+                type: 'string',
+                maxLength: 100,
+                description: 'Only with repeat "cron": a five-field cron expression (minute hour day-of-month month '
+                    + `day-of-week), e.g. "0 9 * * 1-5" for weekdays at 09:00. Runs at least ${MIN_CRON_INTERVAL_MINUTES} `
+                    + 'minutes apart. Times are in the server\'s timezone, which the result tells you.'
+            },
+            deliverTo: {
+                type: 'string',
+                enum: ['channel', 'dm'],
+                description: 'Where each result goes: "channel" posts it in this channel (the default), "dm" sends '
+                    + 'it privately to the person you are replying to — only ever them. Use "dm" only when they ask '
+                    + 'for it privately or by DM.'
+            },
+            deep: {
+                type: 'boolean',
+                description: 'Give each run deep task mode\'s room — many more tool rounds and several minutes — for '
+                    + 'instructions that must look several things up before answering. Only works where the server has '
+                    + 'deep task mode on, and repeats at most hourly. Leave it out for anything one look can answer.'
             }
         },
-        required: ['instruction', 'delayMinutes', 'repeat'],
+        required: ['instruction', 'repeat'],
         confirm: true,
         run: args => runAction({ type: 'schedule_task', ...args }, message)
     });

@@ -28,6 +28,7 @@ const { toolLabel } = require('../../utils/toolLabel');
 const ScheduledTask = require('../../models/ScheduledTask');
 const { createTask } = require('../../services/scheduledTaskService');
 const { parseAtOption } = require('../../utils/timezones');
+const { parseCron, describeCron } = require('../../utils/cronSchedule');
 const {
     MAX_TASK_PROMPT_LENGTH,
     MAX_TASK_DELAY_MINUTES,
@@ -161,6 +162,23 @@ module.exports = {
                                     { name: 'Weekly', value: 'weekly' },
                                     { name: 'Monthly', value: 'monthly' }
                                 ))
+                        .addStringOption(opt =>
+                            opt.setName('cron')
+                                .setDescription('A cron schedule instead of `every`, e.g. "0 9 * * 1-5" for weekdays at 9')
+                                .setMaxLength(100)
+                                .setRequired(false))
+                        .addStringOption(opt =>
+                            opt.setName('deliver')
+                                .setDescription('Post the result in a channel (default), or send it to you by DM')
+                                .setRequired(false)
+                                .addChoices(
+                                    { name: 'In a channel', value: 'channel' },
+                                    { name: 'To me by DM', value: 'dm' }
+                                ))
+                        .addBooleanOption(opt =>
+                            opt.setName('deep')
+                                .setDescription('Give each run deep task mode\'s room: more tool rounds, several minutes')
+                                .setRequired(false))
                         .addChannelOption(opt =>
                             opt.setName('channel')
                                 .setDescription('Where the result is posted. Defaults to this channel.')
@@ -335,6 +353,19 @@ function shortTaskId(task) {
     return task._id.toString().slice(-6);
 }
 
+/**
+ * How often a task runs, wrapped for the sentence it goes in. A cron task is
+ * described in its own timezone, since that is what its hours are in.
+ */
+function taskCadence(task, before, after, once) {
+    if (task.cron) {
+        const { schedule } = parseCron(task.cron);
+        const label = schedule ? describeCron(schedule) : `cron \`${task.cron}\``;
+        return `${before}${label} (${task.timezone || 'Etc/UTC'})${after}`;
+    }
+    return task.repeat ? `${before}${task.repeat}${after}` : once;
+}
+
 async function handleSchedule(interaction) {
     const sub = interaction.options.getSubcommand();
     if (sub === 'add') return addScheduledTask(interaction);
@@ -347,13 +378,25 @@ async function addScheduledTask(interaction) {
     const at = interaction.options.getString('at');
     const inMinutes = interaction.options.getInteger('in_minutes');
     const every = interaction.options.getString('every');
-    const channel = interaction.options.getChannel('channel') || interaction.channel;
+    const cron = interaction.options.getString('cron');
+    const deliverTo = interaction.options.getString('deliver') || 'channel';
+    const mode = interaction.options.getBoolean('deep') ? 'deep' : 'standard';
+    const channelOption = interaction.options.getChannel('channel');
+    const channel = channelOption || interaction.channel;
 
     if (at && inMinutes) {
         return interaction.reply({ content: 'Use either `at` or `in_minutes`, not both.', flags: MessageFlags.Ephemeral });
     }
-    if (!at && !inMinutes) {
-        return interaction.reply({ content: 'Say when it should first run — either `at` or `in_minutes`.', flags: MessageFlags.Ephemeral });
+    if (deliverTo === 'dm' && channelOption) {
+        return interaction.reply({ content: 'A DM task comes to you, not a channel — leave `channel` out.', flags: MessageFlags.Ephemeral });
+    }
+    if (every && cron) {
+        return interaction.reply({ content: 'Use either `every` or `cron`, not both.', flags: MessageFlags.Ephemeral });
+    }
+    // A cron schedule says when it runs on its own; `at` or `in_minutes` with
+    // one only moves the first run.
+    if (!at && !inMinutes && !cron) {
+        return interaction.reply({ content: 'Say when it should first run — either `at` or `in_minutes` — or give it a `cron` schedule.', flags: MessageFlags.Ephemeral });
     }
     if (!channel?.isTextBased?.()) {
         return interaction.reply({ content: 'Pick a channel I can post text in.', flags: MessageFlags.Ephemeral });
@@ -364,7 +407,7 @@ async function addScheduledTask(interaction) {
     const settings = await getGuildSettings(interaction.guild.id);
     const timezone = settings?.ai?.dailyDigest?.timezone || 'Etc/UTC';
 
-    let fireAt;
+    let fireAt = null;
     if (at) {
         fireAt = parseAtOption(at, timezone);
         if (!fireAt) {
@@ -376,11 +419,11 @@ async function addScheduledTask(interaction) {
         if (fireAt.getTime() <= Date.now()) {
             return interaction.reply({ content: 'That time has already passed — pick a future one.', flags: MessageFlags.Ephemeral });
         }
-    } else {
+    } else if (inMinutes) {
         fireAt = new Date(Date.now() + inMinutes * 60_000);
     }
 
-    if (fireAt.getTime() - Date.now() > MAX_TASK_DELAY_MINUTES * 60_000) {
+    if (fireAt && fireAt.getTime() - Date.now() > MAX_TASK_DELAY_MINUTES * 60_000) {
         return interaction.reply({ content: 'A task can be scheduled at most a year out.', flags: MessageFlags.Ephemeral });
     }
 
@@ -392,15 +435,23 @@ async function addScheduledTask(interaction) {
         prompt: instruction,
         fireAt,
         repeat: every || null,
-        timezone
+        cron,
+        timezone,
+        deliverTo,
+        mode
     });
     if (error) return interaction.reply({ content: error, flags: MessageFlags.Ephemeral });
 
     const stamp = Math.floor(task.fireAt.getTime() / 1000);
-    const cadence = every ? `, repeating **${every}**` : ' (once)';
+    const cadence = taskCadence(task, ', repeating **', '**', ' (once)');
+    const where = (deliverTo === 'dm' ? 'to your DMs' : `in ${channel}`) + (mode === 'deep' ? ' as a **deep** task' : '');
+    const dmNote = deliverTo === 'dm'
+        ? '\n-# Keep your DMs open to this bot, and keep Manage Server: the task stops if either goes.'
+        : '';
     return interaction.reply({
-        content: `✅ Scheduled \`${shortTaskId(task)}\` in ${channel} — first run <t:${stamp}:F> (<t:${stamp}:R>)${cadence}.`
-            + '\n-# Each run is a full AI request billed to this server. It counts against the monthly budget on the dashboard.',
+        content: `✅ Scheduled \`${shortTaskId(task)}\` ${where} — first run <t:${stamp}:F> (<t:${stamp}:R>)${cadence}.`
+            + '\n-# Each run is a full AI request billed to this server. It counts against the monthly budget on the dashboard.'
+            + dmNote,
         allowedMentions: { parse: [] }
     });
 }
@@ -416,11 +467,12 @@ async function listScheduledTasks(interaction) {
 
     const lines = tasks.map(task => {
         const stamp = Math.floor(task.fireAt.getTime() / 1000);
-        const cadence = task.repeat ? ` · repeats ${task.repeat}` : ' · once';
+        const cadence = taskCadence(task, ' · repeats ', '', ' · once') + (task.mode === 'deep' ? ' · deep' : '');
         // A disabled task is one somebody switched off or one the runner gave
         // up on, and the reason it gave up is the useful half.
         const state = task.enabled ? '' : ` · **off**${task.lastError ? ` (${toolLabel(task.lastError, 60)})` : ''}`;
-        return `\`${shortTaskId(task)}\` <#${task.channelId}> — ${toolLabel(task.prompt || task.kind, 80)}\n`
+        const where = task.deliverTo === 'dm' ? `DM to <@${task.createdBy}>` : `<#${task.channelId}>`;
+        return `\`${shortTaskId(task)}\` ${where} — ${toolLabel(task.prompt || task.kind, 80)}\n`
             + `-# next <t:${stamp}:R>${cadence}${state}`;
     });
 

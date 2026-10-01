@@ -265,4 +265,12 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
     }
 }
 
-module.exports = { runDeepTask, refuseTask, __test__: { chunk, taskSystemPrompt, messageShim } };
+// `taskSystemPrompt` and `chunk` are public because a scheduled deep task
+// (scheduledTaskService) frames and splits its runs the same way.
+module.exports = {
+    runDeepTask,
+    refuseTask,
+    taskSystemPrompt,
+    chunk,
+    __test__: { chunk, taskSystemPrompt, messageShim }
+};

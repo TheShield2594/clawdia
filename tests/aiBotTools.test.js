@@ -181,6 +181,77 @@ describe('what each tool does', () => {
         expect(text).toMatch(new RegExp(`maximum of ${MAX_TASKS_PER_USER}`));
     });
 
+    test('a cron task is created in the server\'s timezone, with its first run left to the schedule', async () => {
+        const settingsCache = require('../src/utils/guildSettingsCache');
+        const spy = jest.spyOn(settingsCache, 'getGuildSettings')
+            .mockResolvedValue({ ai: { dailyDigest: { timezone: 'Europe/London' } } });
+        try {
+            const { text } = await run('schedule_task', {
+                instruction: 'Morning brief from the feeds', repeat: 'cron', cron: '0 9 * * 1-5'
+            }, { manageGuild: true });
+
+            expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({
+                cron: '0 9 * * 1-5', repeat: null, timezone: 'Europe/London',
+            }));
+            expect(text).toMatch(/Europe\/London/);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    test('a DM task goes to the person who asked, and the model is told so', async () => {
+        const { text } = await run('schedule_task', {
+            instruction: 'Brief me on the feeds', delayMinutes: 60, repeat: 'daily', deliverTo: 'dm'
+        }, { manageGuild: true });
+
+        expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({ deliverTo: 'dm', createdBy: 'u1' }));
+        expect(text).toMatch(/by DM/);
+    });
+
+    test('deep makes a deep task, where the server allows them', async () => {
+        Guild.findOne.mockReturnValue({ lean: async () => ({ ai: { enabled: true, taskModeEnabled: true } }) });
+        const { text } = await run('schedule_task', {
+            instruction: 'Cross-check the three feeds', delayMinutes: 60, repeat: 'daily', deep: true
+        }, { manageGuild: true });
+
+        expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({ mode: 'deep' }));
+        expect(text).toMatch(/deep task/);
+    });
+
+    test('and is refused in words where the server does not', async () => {
+        Guild.findOne.mockReturnValue({ lean: async () => ({ ai: { enabled: true } }) });
+        const { text } = await run('schedule_task', {
+            instruction: 'Cross-check the three feeds', delayMinutes: 60, repeat: 'daily', deep: true
+        }, { manageGuild: true });
+
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
+        expect(text).toMatch(/Deep task mode is switched off/);
+    });
+
+    test('anything but "dm" posts in the channel', async () => {
+        await run('schedule_task', {
+            instruction: 'Brief the channel', delayMinutes: 60, repeat: 'daily', deliverTo: 'everyone'
+        }, { manageGuild: true });
+
+        expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({ deliverTo: 'channel' }));
+    });
+
+    test('repeat "cron" without an expression is refused', async () => {
+        const { text } = await run('schedule_task', { instruction: 'when?', repeat: 'cron' }, { manageGuild: true });
+
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
+        expect(text).toMatch(/needs a cron expression/);
+    });
+
+    test('a cron line that runs too often is refused in words the model can fix', async () => {
+        const { text } = await run('schedule_task', {
+            instruction: 'watch the feed', repeat: 'cron', cron: '* * * * *'
+        }, { manageGuild: true });
+
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
+        expect(text).toMatch(/more often than every/);
+    });
+
     test('a task with no first-run time is refused rather than guessed at', async () => {
         const { text } = await run('schedule_task', { instruction: 'when?', repeat: 'daily' }, { manageGuild: true });
 
