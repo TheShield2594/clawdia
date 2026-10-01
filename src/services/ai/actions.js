@@ -202,13 +202,32 @@ async function scheduleTask(action, message) {
             + 'Tell them an admin can do it here, or with /ai schedule add.';
     }
 
+    const isCron = action.repeat === 'cron';
+    const cron = isCron && typeof action.cron === 'string' ? action.cron : null;
+    if (isCron && !cron) {
+        return 'Nothing was scheduled: repeat "cron" needs a cron expression in the cron field.';
+    }
+
+    // A cron task's first run comes from its expression, so the delay is only
+    // needed for the other kinds; given alongside a cron line, it moves the
+    // first run the way `at` does on the slash command.
     const rawMinutes = Number(action.delayMinutes);
-    if (!Number.isFinite(rawMinutes)) {
+    const hasDelay = action.delayMinutes !== undefined && action.delayMinutes !== null && Number.isFinite(rawMinutes);
+    if (!hasDelay && !isCron) {
         return 'Nothing was scheduled: say how many minutes from now the first run should be.';
     }
-    const minutes = Math.min(MAX_TASK_DELAY_MINUTES, Math.max(MIN_TASK_DELAY_MINUTES, Math.round(rawMinutes)));
+    const fireAt = hasDelay
+        ? new Date(Date.now() + Math.min(MAX_TASK_DELAY_MINUTES, Math.max(MIN_TASK_DELAY_MINUTES, Math.round(rawMinutes))) * 60 * 1000)
+        : null;
 
-    const repeat = action.repeat === 'none' ? null : (action.repeat ?? null);
+    const repeat = action.repeat === 'none' || isCron ? null : (action.repeat ?? null);
+
+    // The server's timezone, as `/ai schedule add` uses: a cron line's hours
+    // mean nothing without one, and the task belongs to the server rather than
+    // to whoever asked for it.
+    const { getGuildSettings } = require('../../utils/guildSettingsCache');
+    const settings = await getGuildSettings(message.guild.id);
+    const timezone = settings?.ai?.dailyDigest?.timezone || 'Etc/UTC';
 
     const { task, error } = await createTask({
         guildId: message.guild.id,
@@ -218,14 +237,18 @@ async function scheduleTask(action, message) {
         createdBy: message.author.id,
         kind: 'ai_prompt',
         prompt: typeof action.instruction === 'string' ? action.instruction : '',
-        fireAt: new Date(Date.now() + minutes * 60 * 1000),
-        repeat
+        fireAt,
+        repeat,
+        cron,
+        timezone
     });
 
     if (error) return `Nothing was scheduled: ${error}`;
 
     const stamp = Math.floor(task.fireAt.getTime() / 1000);
-    const cadence = task.repeat ? `, repeating ${task.repeat}` : ' (once)';
+    const cadence = task.cron
+        ? `, repeating on the cron schedule \`${task.cron}\` in the server's timezone, ${task.timezone}`
+        : task.repeat ? `, repeating ${task.repeat}` : ' (once)';
     return `Scheduled. The first run is <t:${stamp}:F> (<t:${stamp}:R>)${cadence}, posting in this channel — `
         + 'include that timestamp when you confirm it, and mention that a server admin can list or remove it with /ai schedule.';
 }

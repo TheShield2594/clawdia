@@ -27,6 +27,13 @@ module.exports = {
     // And the nearest a task may fire, which is one tick of the scheduler.
     MIN_TASK_DELAY_MINUTES: 1,
 
+    // The closest together two runs of a cron-scheduled task may be. The named
+    // cadences cannot repeat more than daily; a cron line can say every minute,
+    // which is 1,440 provider calls a day from one instruction. Fifteen minutes
+    // still allows "watch this feed" and caps one task at 96 runs a day, and the
+    // guild's monthly ceiling (#831) bounds what those runs can spend.
+    MIN_CRON_INTERVAL_MINUTES: 15,
+
     // Consecutive failures before the service switches a task off. Three days
     // of a daily task failing the same way is not a hiccup, and each attempt
     // costs tokens; the task is kept, disabled, with its last error on it.

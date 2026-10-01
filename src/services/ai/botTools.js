@@ -5,7 +5,8 @@ const { MAX_REMINDER_MINUTES, MAX_REMINDER_MESSAGE_LENGTH } = require('../../uti
 const {
     MAX_TASK_PROMPT_LENGTH,
     MAX_TASK_DELAY_MINUTES,
-    MIN_TASK_DELAY_MINUTES
+    MIN_TASK_DELAY_MINUTES,
+    MIN_CRON_INTERVAL_MINUTES
 } = require('../../utils/scheduledTaskLimits');
 const { MEMORY_CAP, MAX_MEMORY_LENGTH } = require('../../utils/memoryLimits');
 const { runAction } = require('./actions');
@@ -133,15 +134,24 @@ function scheduleTaskTool(message) {
                 type: 'integer',
                 minimum: MIN_TASK_DELAY_MINUTES,
                 maximum: MAX_TASK_DELAY_MINUTES,
-                description: 'How many minutes from now the first run should be.'
+                description: 'How many minutes from now the first run should be. Required unless repeat is "cron", '
+                    + 'where the schedule decides the first run and this is left out.'
             },
             repeat: {
                 type: 'string',
-                enum: ['none', 'daily', 'weekly', 'monthly'],
-                description: 'How often it repeats after the first run. "none" runs it once.'
+                enum: ['none', 'daily', 'weekly', 'monthly', 'cron'],
+                description: 'How often it repeats after the first run. "none" runs it once; "cron" follows the cron '
+                    + 'field, for cadences the others cannot say, like weekdays only or every few hours.'
+            },
+            cron: {
+                type: 'string',
+                maxLength: 100,
+                description: 'Only with repeat "cron": a five-field cron expression (minute hour day-of-month month '
+                    + `day-of-week), e.g. "0 9 * * 1-5" for weekdays at 09:00. Runs at least ${MIN_CRON_INTERVAL_MINUTES} `
+                    + 'minutes apart. Times are in the server\'s timezone, which the result tells you.'
             }
         },
-        required: ['instruction', 'delayMinutes', 'repeat'],
+        required: ['instruction', 'repeat'],
         confirm: true,
         run: args => runAction({ type: 'schedule_task', ...args }, message)
     });

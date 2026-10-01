@@ -145,6 +145,29 @@ describe('/ai schedule add', () => {
         expect(createTask).not.toHaveBeenCalled();
     });
 
+    it('takes a cron schedule with no first-run time, leaving the first run to it', async () => {
+        createTask.mockResolvedValue({ task: {
+            _id: 'aaaabbbbcccc123456', fireAt: new Date(Date.now() + 3_600_000),
+            repeat: null, cron: '0 9 * * 1-5', timezone: 'Etc/UTC'
+        } });
+        const i = interaction({ sub: 'add', strings: { instruction: 'morning brief', cron: '0 9 * * 1-5' }, integers: {} });
+
+        await command.execute(i);
+
+        const call = createTask.mock.calls[0][0];
+        expect(call).toMatchObject({ cron: '0 9 * * 1-5', repeat: null });
+        expect(call.fireAt).toBeNull();
+        expect(said(i)).toMatch(/weekdays at 09:00/);
+    });
+
+    it('refuses a named cadence and a cron schedule together', async () => {
+        const i = add({ strings: { instruction: 'recap', every: 'daily', cron: '0 9 * * *' } });
+        await command.execute(i);
+
+        expect(said(i)).toMatch(/`every` or `cron`/);
+        expect(createTask).not.toHaveBeenCalled();
+    });
+
     it('passes the service\'s refusal straight through', async () => {
         // The caps live in one place, so the command shows what they said
         // rather than re-deriving them.

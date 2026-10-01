@@ -57,6 +57,14 @@ const scheduledTaskSchema = new Schema({
     repeat: { type: String, enum: ['daily', 'weekly', 'monthly', null], default: null },
     timezone: { type: String, default: 'Etc/UTC' },
 
+    // A five-field cron expression, for the cadences the named repeats cannot
+    // say: weekdays at nine, every two hours. Mutually exclusive with `repeat`.
+    // `fireAt` stays the source of truth for when the task is next due — the
+    // expression only decides where it moves after each run, in `timezone`, so
+    // the scan, the claim and the catch-up after downtime are the same for
+    // both kinds of repeat.
+    cron: { type: String, default: null },
+
     // The day of the month a monthly task actually means, snapshotted at
     // creation from `fireAt` in the task's own timezone.
     //

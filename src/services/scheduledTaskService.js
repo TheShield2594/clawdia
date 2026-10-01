@@ -3,6 +3,7 @@ const Guild = require('../models/Guild');
 const { runJob } = require('../utils/jobRunner');
 const { addCalendarDays, addCalendarMonths, isValidTimezone, nowInTimezone } = require('../utils/timezones');
 const { handlesGuild } = require('../utils/sharding');
+const { parseCron, nextCronOccurrence, minimumIntervalMinutes } = require('../utils/cronSchedule');
 const {
     MAX_TASK_FAILURES,
     MAX_TASKS_PER_TICK,
@@ -10,6 +11,7 @@ const {
     MAX_TASKS_PER_USER,
     MAX_TASK_PROMPT_LENGTH,
     MAX_TASK_DELAY_MINUTES,
+    MIN_CRON_INTERVAL_MINUTES,
     TASK_RUN_TIMEOUT_MS
 } = require('../utils/scheduledTaskLimits');
 
@@ -56,6 +58,42 @@ function nextOccurrence(from, repeat, timezone, now, anchorDay = null) {
         next = after;
     }
     return next;
+}
+
+/**
+ * Where a task moves after the run claimed at `now`, or null for a one-shot.
+ *
+ * A cron task searches forward from `now` rather than from its own `fireAt`,
+ * which skips missed occurrences for free: the next one is the first one still
+ * in the future. An expression that no longer parses — it was valid when it was
+ * stored, so this is a task from a version that read cron differently — has no
+ * next run and is retired like a one-shot, rather than refiring every minute.
+ */
+function nextFireAfterRun(task, now) {
+    const timezone = task.timezone || 'Etc/UTC';
+    if (task.cron) {
+        const { schedule } = parseCron(task.cron);
+        return schedule ? nextCronOccurrence(schedule, timezone, now) : null;
+    }
+    return task.repeat
+        ? nextOccurrence(task.fireAt, task.repeat, timezone, now, task.monthDay)
+        : null;
+}
+
+/**
+ * Check a cron expression for createTask and the callers that preview it,
+ * answering with its first run after `from` or an error in words.
+ */
+function checkCron(expression, timezone, from = new Date()) {
+    const { schedule, error } = parseCron(expression);
+    if (error) return { error };
+    if (minimumIntervalMinutes(schedule) < MIN_CRON_INTERVAL_MINUTES) {
+        return { error: `\`${schedule.expression}\` would run more often than every ${MIN_CRON_INTERVAL_MINUTES} minutes — `
+            + 'each run is a full AI request, so space the runs out further.' };
+    }
+    const first = nextCronOccurrence(schedule, timezone, from);
+    if (!first) return { error: `\`${schedule.expression}\` never fires — check the day and month fields.` };
+    return { schedule, first };
 }
 
 async function getChannel(client, channelId) {
@@ -146,9 +184,7 @@ const HANDLERS = {
  * is dropped in that window instead, which is the cheaper mistake.
  */
 async function claim(task, now) {
-    const nextFireAt = task.repeat
-        ? nextOccurrence(task.fireAt, task.repeat, task.timezone || 'Etc/UTC', now, task.monthDay)
-        : null;
+    const nextFireAt = nextFireAfterRun(task, now);
 
     return ScheduledTask.findOneAndUpdate(
         { _id: task._id, fireAt: task.fireAt, enabled: true },
@@ -270,9 +306,23 @@ async function runDueTasks(client) {
  * cap. It answers with `{ task }` or `{ error }` in words, since the model is
  * one of its callers and a thrown exception is not something it can read.
  */
-async function createTask({ guildId, channelId, createdBy, kind = 'ai_prompt', prompt, config = null, fireAt, repeat = null, timezone = 'Etc/UTC' }) {
+async function createTask({ guildId, channelId, createdBy, kind = 'ai_prompt', prompt, config = null, fireAt, repeat = null, cron = null, timezone = 'Etc/UTC' }) {
     if (!HANDLERS[kind]) return { error: `There is no scheduled task kind called "${kind}".` };
     if (!guildId || !channelId) return { error: 'A scheduled task needs a server and a channel to post in.' };
+
+    // Checked before the time, because a cron task's first run comes from its
+    // expression: a caller that passes no `fireAt` gets the first occurrence,
+    // and one that does (the slash command's `at`) gets that as a first run
+    // with the expression taking over afterwards.
+    let expression = null;
+    if (cron !== null && cron !== undefined && cron !== '') {
+        if (repeat !== null) return { error: 'A task repeats either on a named cadence or on a cron schedule, not both.' };
+        if (!isValidTimezone(timezone)) return { error: `"${timezone}" is not a timezone I recognise.` };
+        const checked = checkCron(cron, timezone);
+        if (checked.error) return { error: checked.error };
+        expression = checked.schedule.expression;
+        if (fireAt === undefined || fireAt === null) fireAt = checked.first;
+    }
     if (!(fireAt instanceof Date) || Number.isNaN(fireAt.getTime())) {
         return { error: 'That is not a time I can schedule anything for.' };
     }
@@ -320,7 +370,7 @@ async function createTask({ guildId, channelId, createdBy, kind = 'ai_prompt', p
 
     const task = await ScheduledTask.create({
         guildId, channelId, createdBy, kind,
-        prompt: text || null, config, fireAt, repeat, timezone,
+        prompt: text || null, config, fireAt, repeat, cron: expression, timezone,
         // The day a monthly task means, so a run on the 31st comes back to the
         // 31st rather than being clamped down to February's for good.
         monthDay: repeat === 'monthly' ? nowInTimezone(timezone, fireAt).day : null
@@ -332,5 +382,6 @@ module.exports = {
     runDueTasks,
     createTask,
     HANDLERS,
-    __test__: { nextOccurrence, claim, runClaimed, withTimeout, REPEAT_STEP }
+    checkCron,
+    __test__: { nextOccurrence, nextFireAfterRun, claim, runClaimed, withTimeout, REPEAT_STEP }
 };

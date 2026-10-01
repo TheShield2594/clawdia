@@ -36,7 +36,7 @@ const { runJob } = require('../src/utils/jobRunner');
 const { runDueTasks, createTask, __test__ } = require('../src/services/scheduledTaskService');
 const {
     MAX_TASK_FAILURES, MAX_TASKS_PER_GUILD, MAX_TASKS_PER_USER,
-    MAX_TASK_PROMPT_LENGTH, MAX_TASK_DELAY_MINUTES, TASK_RUN_TIMEOUT_MS
+    MAX_TASK_PROMPT_LENGTH, MAX_TASK_DELAY_MINUTES, MIN_CRON_INTERVAL_MINUTES, TASK_RUN_TIMEOUT_MS
 } = require('../src/utils/scheduledTaskLimits');
 
 const NOW = new Date('2026-07-14T09:00:00Z');
@@ -202,6 +202,31 @@ describe('claiming a due task', () => {
         const [, update] = ScheduledTask.findOneAndUpdate.mock.calls[0];
         expect(update.$set.fireAt.getUTCDate()).toBe(31);
         expect(update.$set.fireAt.getTime()).toBeGreaterThan(NOW.getTime());
+    });
+
+    test('moves a cron task to its next occurrence after now, skipping the ones missed', async () => {
+        // Weekdays at nine, last due on a Monday a week ago; NOW is Tuesday
+        // 2026-07-14 09:00 UTC, so Tuesday's run is the one being claimed and
+        // the next is Wednesday's — not the six missed in between.
+        jest.useFakeTimers().setSystemTime(NOW);
+        try {
+            due([makeTask({ cron: '0 9 * * 1-5', fireAt: new Date('2026-07-06T09:00:00Z') })]);
+            await runDueTasks(makeClient(textChannel()));
+        } finally {
+            jest.useRealTimers();
+        }
+
+        const [, update] = ScheduledTask.findOneAndUpdate.mock.calls[0];
+        expect(update.$set.fireAt).toEqual(new Date('2026-07-15T09:00:00Z'));
+        expect(update.$set.enabled).toBeUndefined();
+    });
+
+    test('retires a cron task whose expression no longer parses rather than refiring it', async () => {
+        due([makeTask({ cron: 'not a cron line' })]);
+        await runDueTasks(makeClient(textChannel()));
+
+        const [, update] = ScheduledTask.findOneAndUpdate.mock.calls[0];
+        expect(update.$set.enabled).toBe(false);
     });
 
     test('runs each task inside its own job scope, so one guild cannot drop another', async () => {
@@ -428,6 +453,45 @@ describe('createTask, the one gate both routes go through', () => {
     test('records the day a monthly task means', async () => {
         await createTask({ ...BASE, repeat: 'monthly', timezone: 'Etc/UTC', fireAt: new Date('2027-01-31T09:00:00Z') });
         expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({ monthDay: 31 }));
+    });
+
+    test('a cron task with no first run gets the expression\'s first occurrence', async () => {
+        const { task, error } = await createTask({ ...BASE, fireAt: undefined, cron: '0 9 * * 1-5', timezone: 'America/New_York' });
+
+        expect(error).toBeUndefined();
+        expect(task.cron).toBe('0 9 * * 1-5');
+        expect(task.repeat).toBeNull();
+        expect(task.fireAt.getTime()).toBeGreaterThan(Date.now());
+        // 09:00 in New York is 13:00 or 14:00 UTC depending on the season.
+        expect([13, 14]).toContain(task.fireAt.getUTCHours());
+        expect([1, 2, 3, 4, 5]).toContain(task.fireAt.getUTCDay());
+    });
+
+    test('a cron task keeps a first run it was given', async () => {
+        const fireAt = new Date(Date.now() + 5 * 60_000);
+        const { task } = await createTask({ ...BASE, fireAt, cron: '0 9 * * *' });
+        expect(task.fireAt).toBe(fireAt);
+    });
+
+    test('refuses a cron line that would run more often than the floor', async () => {
+        const { error } = await createTask({ ...BASE, cron: '*/5 * * * *' });
+        expect(error).toMatch(new RegExp(`every ${MIN_CRON_INTERVAL_MINUTES} minutes`));
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
+    });
+
+    test('refuses a cron line it cannot read, saying why', async () => {
+        const { error } = await createTask({ ...BASE, cron: '0 25 * * *' });
+        expect(error).toMatch(/out of range for the hour field/);
+    });
+
+    test('refuses a cron line that never fires', async () => {
+        const { error } = await createTask({ ...BASE, cron: '0 0 31 2 *' });
+        expect(error).toMatch(/never fires/);
+    });
+
+    test('refuses a named cadence and a cron line together', async () => {
+        const { error } = await createTask({ ...BASE, repeat: 'daily', cron: '0 9 * * *' });
+        expect(error).toMatch(/not both/);
     });
 
     test('and leaves it unset for a cadence that has no day of the month', async () => {
