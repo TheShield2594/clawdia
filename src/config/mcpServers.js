@@ -235,14 +235,19 @@ function buildToolset(name, raw, label, warnings) {
     // stripped again before the Anthropic request is built.
     const confirm = toolNameList(raw.confirm_tools ?? raw.confirmTools);
     if (confirm.length) toolset.confirm_tools = confirm;
+    // The same kind of policy, read only by scheduled runs: the tools that may
+    // go ahead there although nobody is present to approve them. See
+    // createUnattendedConfirmer in src/services/ai/mcp/approval.js.
+    const unattended = toolNameList(raw.unattended_tools ?? raw.unattendedTools);
+    if (unattended.length) toolset.unattended_tools = unattended;
     return toolset;
 }
 
-// The toolset as the Messages API will accept it. `confirm_tools` is ours and
-// the API rejects a field it does not know, so it comes off here rather than
-// never going on — every other reader wants it.
+// The toolset as the Messages API will accept it. `confirm_tools` and
+// `unattended_tools` are ours and the API rejects a field it does not know, so
+// they come off here rather than never going on — every other reader wants them.
 function apiToolset(toolset) {
-    const { confirm_tools: _ours, ...rest } = toolset;
+    const { confirm_tools: _ours, unattended_tools: _alsoOurs, ...rest } = toolset;
     return rest;
 }
 

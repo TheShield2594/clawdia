@@ -3,6 +3,7 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
 const { rejectOtherUser } = require('../../../utils/collectorOwner');
 const { toolLabel } = require('../../../utils/toolLabel');
+const { resolveMcpServers } = require('../../../config/mcpServers');
 
 /**
  * Asking a person before a tool call that writes something.
@@ -206,4 +207,42 @@ function createToolConfirmer(message, { timeoutMs = CONFIRM_TIMEOUT_MS, approver
     };
 }
 
-module.exports = { createToolConfirmer, CONFIRM_TIMEOUT_MS, renderArgs, argsAttachment, MAX_ARGS_CHARS, ARGS_FILE_NAME };
+/**
+ * The answer a scheduled run gives when a tool asks for approval.
+ *
+ * A scheduled run has nobody to ask: it fires on a timer, and posting buttons
+ * in a channel at 07:00 for a call that then times out is a refusal with extra
+ * steps. So the guild says ahead of time, per connection, which tools may go
+ * ahead there (`unattendedTools`), and everything else is declined the way it
+ * always was. The list is the guild's own setting, never anything the server or
+ * the model says about a tool.
+ *
+ * Only MCP connections can be named. The bot's own tools are never approved
+ * here, even under a connection that happens to share their server's name.
+ *
+ * @param {object[]} mcpServers the request's server list (a resolved config's)
+ * @param {object} [options]
+ * @param {string} [options.botServer] the bot's own tools' server name
+ * @returns {(call: object) => Promise<{approved: boolean}>}
+ */
+function createUnattendedConfirmer(mcpServers, { botServer = 'clawdia' } = {}) {
+    const allowed = new Map();
+    for (const server of resolveMcpServers(mcpServers || [])) {
+        const names = server.toolset?.unattended_tools;
+        if (names?.length) allowed.set(server.name, new Set(names));
+    }
+
+    const refusal = {
+        approved: false,
+        message: 'This tool needs a person to approve it, and a scheduled task runs with nobody there to ask, so it '
+            + 'was not run. Carry on without it, and say in your answer that a server admin can allow it in scheduled '
+            + 'tasks under the connection\'s "Run without asking in scheduled tasks" setting.'
+    };
+
+    return async ({ server, tool }) => {
+        if (server === botServer) return refusal;
+        return allowed.get(server)?.has(tool) ? { approved: true } : refusal;
+    };
+}
+
+module.exports = { createToolConfirmer, createUnattendedConfirmer, CONFIRM_TIMEOUT_MS, renderArgs, argsAttachment, MAX_ARGS_CHARS, ARGS_FILE_NAME };

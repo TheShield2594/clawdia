@@ -358,6 +358,10 @@ function buildSettingsPayload(section, ctx = {}) {
             'ai.actionsEnabled': document.getElementById('ai-actions-enabled').checked,
             'ai.eventCommentary': document.getElementById('ai-event-commentary').checked,
             'ai.taskModeEnabled': document.getElementById('ai-task-mode').checked,
+            'ai.memory.autoSave': document.getElementById('ai-memory-autosave').checked,
+            'ai.memory.cap': Math.min(50, Math.max(1, parseInt(document.getElementById('ai-memory-cap').value, 10) || 10)),
+            'ai.learningEnabled': document.getElementById('ai-learning').checked,
+            'ai.webSearchEnabled': document.getElementById('ai-web-search').checked,
             // These live on the Connections tab but belong to the same ai
             // document, so they save with everything else rather than needing
             // their own endpoint.

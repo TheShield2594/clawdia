@@ -1,6 +1,7 @@
 const { PermissionFlagsBits } = require('discord.js');
 const ScheduledTask = require('../models/ScheduledTask');
 const Guild = require('../models/Guild');
+const User = require('../models/User');
 const { runJob } = require('../utils/jobRunner');
 const { addCalendarDays, addCalendarMonths, isValidTimezone, nowInTimezone } = require('../utils/timezones');
 const { handlesGuild } = require('../utils/sharding');
@@ -188,9 +189,14 @@ async function runAiPromptTask(client, task) {
     // A deep run starts from deep task mode's own prompt, which is what gets a
     // model to use the extra rounds rather than answer after the first one.
     const { taskSystemPrompt, chunk } = require('./ai/deepTask');
+    const { buildAgentTools, buildAgentToolsAddendum } = require('./ai/agentTools');
+    const { createUnattendedConfirmer } = require('./ai/mcp/approval');
+    // Read-only ones only: nobody is present to have asked this run for
+    // anything, so a scheduled run never writes a note.
+    const agentTools = buildAgentTools(ai, { guildId: task.guildId, unattended: true });
     const basePrompt = deep
-        ? taskSystemPrompt(ai, { actionsEnabled: false, hasServers: (config.mcpServers || []).length > 0 })
-        : (ai.systemPrompt || 'You are a helpful Discord bot assistant.');
+        ? taskSystemPrompt(ai, { actionsEnabled: false, hasServers: (config.mcpServers || []).length > 0, agentTools })
+        : (ai.systemPrompt || 'You are a helpful Discord bot assistant.') + buildAgentToolsAddendum(agentTools);
 
     const systemPrompt = basePrompt
         + '\n\nThe request below is a standing instruction a server administrator scheduled to run '
@@ -202,9 +208,14 @@ async function runAiPromptTask(client, task) {
     const answer = await getCompletion({
         ...config,
         systemPrompt,
-        history: [],
+        history: await ownerContext(task),
         prompt: task.prompt,
         guildId: task.guildId,
+        // Nobody can click "Run it" at 07:00, so a tool that needs approval is
+        // answered by the guild's per-connection list of the ones allowed to
+        // run unattended, and refused otherwise — as it always was.
+        confirmTool: createUnattendedConfirmer(config.mcpServers),
+        botTools: agentTools,
         // Still unattributed, so a deep run spends from the same per-guild
         // hourly tool budget as every other scheduled run: more rounds let it
         // use that budget in one go, never past it.
@@ -240,6 +251,32 @@ async function runAiPromptTask(client, task) {
             throw new Error(`could not DM <@${task.createdBy}> — their DMs are closed to this bot`, { cause: error });
         }
         throw error;
+    }
+}
+
+/**
+ * The saved memories of the person who set the task up, as the same leading
+ * context exchange a chat reply carries (discordChat.js).
+ *
+ * A task is somebody's standing request, and "plan my week" means nothing
+ * without knowing whose week. Only the creator's memories, never anyone
+ * else's: a channel task's answer is posted in front of the server, but it is
+ * that person's instruction and that person's context. Best-effort — a task
+ * that cannot read them runs as it always did, with none.
+ */
+async function ownerContext(task) {
+    if (!task.createdBy) return [];
+    try {
+        const owner = await User.findOne({ userId: task.createdBy, guildId: task.guildId }, { pinnedMemories: 1 }).lean();
+        const memories = (owner?.pinnedMemories || []).filter(m => typeof m?.content === 'string' && m.content.trim());
+        if (!memories.length) return [];
+        return [
+            { role: 'user', content: `[Saved context of <@${task.createdBy}>, who set up this task]\n${memories.map(m => `- ${m.content}`).join('\n')}` },
+            { role: 'assistant', content: 'Understood, I have noted their saved context.' }
+        ];
+    } catch (err) {
+        console.warn(`[ScheduledTask] could not load memories for task ${task._id}: ${err.message}`);
+        return [];
     }
 }
 

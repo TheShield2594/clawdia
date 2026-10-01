@@ -82,6 +82,7 @@ function serversEmbed(view) {
         if (server.allowedTools?.length) bits.push(`only ${server.allowedTools.length}`);
         if (server.blockedTools?.length) bits.push(`${server.blockedTools.length} blocked`);
         if (server.confirmTools?.length) bits.push(`${server.confirmTools.length} need approval`);
+        if (server.unattendedTools?.length) bits.push(`${server.unattendedTools.length} run in scheduled tasks`);
         return `**${toolLabel(server.name)}**${bits.length ? ` — ${bits.join(', ')}` : ''}`;
     });
 

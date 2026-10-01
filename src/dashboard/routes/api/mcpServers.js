@@ -225,6 +225,7 @@ function publicServer(server) {
         allowedTools: server.allowedTools || [],
         blockedTools: server.blockedTools || [],
         confirmTools: server.confirmTools || [],
+        unattendedTools: server.unattendedTools || [],
         resources: server.resources === true,
         addedBy: server.addedBy || null,
         createdAt: server.createdAt || null
@@ -279,6 +280,8 @@ function validateServerInput(body, name) {
     if (blocked.error) return { error: blocked.error };
     const confirm = validateToolNames(body.confirmTools, 'confirmTools');
     if (confirm.error) return { error: confirm.error };
+    const unattended = validateToolNames(body.unattendedTools, 'unattendedTools');
+    if (unattended.error) return { error: unattended.error };
 
     if (body.authorizationToken !== undefined && body.authorizationToken !== null) {
         if (typeof body.authorizationToken !== 'string') return { error: 'authorizationToken must be a string' };
@@ -293,6 +296,7 @@ function validateServerInput(body, name) {
             allowedTools: allowed.value,
             blockedTools: blocked.value,
             confirmTools: confirm.value,
+            unattendedTools: unattended.value,
             // Reading a server's documents into the system prompt is a separate
             // decision from calling its tools, so it is a separate switch.
             resources: body.resources === true
@@ -415,6 +419,7 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             existing.allowedTools = validated.value.allowedTools;
             existing.blockedTools = validated.value.blockedTools;
             existing.confirmTools = validated.value.confirmTools;
+            existing.unattendedTools = validated.value.unattendedTools;
             existing.resources = validated.value.resources;
             if (token !== undefined) existing.authorizationToken = token;
         } else {

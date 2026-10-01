@@ -587,6 +587,13 @@ const guildSchema = new Schema({
                 // nobody may call; this is for the ones that are fine with a
                 // moderator watching and not otherwise.
                 confirmTools:       [{ type: String }],
+                // Tools a scheduled task may run with nobody there to approve
+                // them. A scheduled run has no channel to post buttons in, so a
+                // tool that needs approval is otherwise refused there — which
+                // is right by default and wrong for "every morning, add my
+                // classes to the calendar". Only read by scheduled runs; a
+                // conversation still asks.
+                unattendedTools:    [{ type: String }],
                 // Whether this server's resources (resources/list, then
                 // resources/read) are searched for context when somebody talks
                 // to the AI, the way the knowledge base is. Off by default and
@@ -689,6 +696,27 @@ const guildSchema = new Schema({
         // person who asked has walked away. Guarded further by an allowance of
         // its own in services/ai/rateLimit.js.
         taskModeEnabled: { type: Boolean, default: false },
+        // Long-term memory about each member (#833), and how freely the model
+        // may write to it. `autoSave` off is the original posture: save_memory
+        // posts approval buttons and saves nothing until somebody clicks. On,
+        // the model saves and forgets on its own — which suits a server run by
+        // one person for themselves, and nobody else. `cap` is per member; every
+        // memory rides in the prompt of every reply, so it is a token budget as
+        // much as a storage one. See utils/memoryLimits.js.
+        memory: {
+            autoSave: { type: Boolean, default: false },
+            cap: { type: Number, default: 10, min: 1, max: 50 }
+        },
+        // Whether the model may write what it worked out to the knowledge base
+        // as a how-to note, so a later conversation retrieves it (the `learn`
+        // tool in services/ai/agentTools.js). Off by default: a note is
+        // guild-wide and read back into everybody's prompts, so it is offered
+        // only to members with Manage Server.
+        learningEnabled: { type: Boolean, default: false },
+        // A web_search tool over the operator's SearXNG instance (SEARXNG_URL).
+        // Per guild as well as per operator, because each search is another
+        // tool round on this guild's budget.
+        webSearchEnabled: { type: Boolean, default: false },
         dailyDigest: {
             enabled:          { type: Boolean, default: false },
             channelId:        { type: String, default: null },

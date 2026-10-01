@@ -19,6 +19,7 @@ describe('validateServerInput', () => {
             allowedTools: [],
             blockedTools: [],
             confirmTools: [],
+            unattendedTools: [],
             resources: false
         });
     });

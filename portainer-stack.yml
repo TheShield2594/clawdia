@@ -349,6 +349,8 @@ services:
       - AI_ENV_KEY_MONTHLY_COST=${AI_ENV_KEY_MONTHLY_COST:-}
       - AI_ENV_KEY_MONTHLY_TOKENS=${AI_ENV_KEY_MONTHLY_TOKENS:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      # SearXNG for the AI's web_search tool; see .env.example.
+      - SEARXNG_URL=${SEARXNG_URL:-}
       # Encrypts the per-server AI provider keys admins enter in the dashboard,
       # so the nightly dumps in the backups volume hold ciphertext rather than
       # live credentials (#564). Generate with `openssl rand -base64 32`, and

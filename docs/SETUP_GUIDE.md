@@ -162,6 +162,30 @@ Set **Model context window** in the dashboard too — see
 [FEATURES.md](FEATURES.md#configuration-options) for why a self-hosted model is
 the case where the bot cannot work it out for itself.
 
+### Web search (SearXNG)
+
+The AI's `web_search` tool queries a [SearXNG](https://docs.searxng.org/)
+instance you run. No API key, and nothing is sent anywhere but your own instance.
+
+1. Allow JSON output in SearXNG's `settings.yml` — without it every search is
+   refused with a 403:
+
+   ```yaml
+   search:
+     formats:
+       - html
+       - json
+   ```
+
+2. Set `SEARXNG_URL` to the instance, e.g. `http://searxng:8080`. Like
+   `OLLAMA_BASE_URL` it is your own endpoint, so a private or Docker address is
+   fine.
+3. Turn on **Enable web search** in the dashboard, under **AI → Chat**, in each
+   server that should have it.
+
+The tool is offered in chat replies, `/ai task` and scheduled tasks. Each search
+is one tool call against the server's usual per-user and per-guild tool budgets.
+
 ### Choosing between them
 
 [AI_COMPARISON.md](AI_COMPARISON.md) is the side-by-side: default model,

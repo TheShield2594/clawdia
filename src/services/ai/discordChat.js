@@ -22,6 +22,7 @@ const { createSummarizer, summaryContext } = require('./summarize');
 const { peekRateLimit, peekChannelRateLimit, userRateLimitKey } = require('./rateLimit');
 const { buildActionsAddendum, buildToolActionsAddendum, extractAction, executeAction } = require('./actions');
 const { buildBotTools, BOT_SERVER } = require('./botTools');
+const { buildAgentTools, buildAgentToolsAddendum } = require('./agentTools');
 const { buildMcpAddendum } = require('./mcp/prompt');
 const { retrieveMcpKnowledge } = require('./mcp/resources');
 const { createToolActivity, STATUS_RESERVE } = require('./mcp/activity');
@@ -333,9 +334,18 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // down to whether this request runs the bot's own tool loop: every provider
     // but Anthropic always does, and Anthropic does unless it is taking its own
     // MCP connector, where the bot never sees a call to attach a tool to.
-    const botTools = buildBotTools(message, { enabled: Boolean(aiSettings.actionsEnabled) });
-    const toolActions = botTools.length > 0
-        && usesClientTools(provider, { mcpRoute, mcpConfirm, mcpServers, botTools });
+    const botTools = buildBotTools(message, { enabled: Boolean(aiSettings.actionsEnabled), ai: aiSettings });
+    // Web search and learned notes ride the same loop but are not channel
+    // actions, so they have their own switches rather than `actionsEnabled`.
+    const agentTools = buildAgentTools(aiSettings, {
+        guildId: message.guild.id,
+        userId: message.author.id,
+        canManage: Boolean(message.member?.permissions?.has('ManageGuild'))
+    });
+    const clientTools = (botTools.length > 0 || agentTools.length > 0)
+        && usesClientTools(provider, { mcpRoute, mcpConfirm, mcpServers, botTools: [...botTools, ...agentTools] });
+    const toolActions = botTools.length > 0 && clientTools;
+    const offeredAgentTools = clientTools ? agentTools : [];
 
     if (mcpActive) {
         // The ACTION sentence only belongs in the MCP rule while there is an
@@ -351,9 +361,16 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         });
     }
     if (toolActions) {
-        sections.push({ id: 'actionRules', required: true, text: buildToolActionsAddendum(userDoc?.timezone) });
+        sections.push({
+            id: 'actionRules',
+            required: true,
+            text: buildToolActionsAddendum(userDoc?.timezone, { autoMemory: aiSettings.memory?.autoSave === true })
+        });
     } else if (aiSettings.actionsEnabled) {
         sections.push({ id: 'actionRules', required: true, text: buildActionsAddendum(userDoc?.timezone) });
+    }
+    if (offeredAgentTools.length) {
+        sections.push({ id: 'agentToolRules', required: true, stable: true, text: buildAgentToolsAddendum(offeredAgentTools) });
     }
 
     try {
@@ -499,7 +516,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
             }),
             // The bot's own tools ride the same loop as the servers' — same
             // approval prompt, same activity footer, same result budget.
-            botTools: toolActions ? botTools : [],
+            botTools: [...(toolActions ? botTools : []), ...offeredAgentTools],
             // Who the request is for, so the limit is enforced where the spend
             // happens rather than only in the peek above.
             rateLimit, userId: message.author.id, channelId: message.channel.id

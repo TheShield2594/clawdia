@@ -3,6 +3,7 @@
 const { resolveProviderConfig, getCompletion } = require('./index');
 const { providers } = require('./providers');
 const { buildBotTools, BOT_SERVER } = require('./botTools');
+const { buildAgentTools, buildAgentToolsAddendum } = require('./agentTools');
 const { buildToolActionsAddendum } = require('./actions');
 const { buildMcpAddendum } = require('./mcp/prompt');
 const { createToolActivity } = require('./mcp/activity');
@@ -111,7 +112,7 @@ function refuseTask({ ai, guildId, userId }) {
  * reply. Without that a model given twelve rounds still answers in one, because
  * everything else about the prompt says it is in a chat.
  */
-function taskSystemPrompt(ai, { actionsEnabled, hasServers }) {
+function taskSystemPrompt(ai, { actionsEnabled, hasServers, agentTools = [] }) {
     let systemPrompt = ai.systemPrompt || 'You are a helpful Discord bot assistant.';
 
     systemPrompt += '\n\nYou are running a **task**, not answering a chat message. Nobody is watching this arrive, '
@@ -123,7 +124,8 @@ function taskSystemPrompt(ai, { actionsEnabled, hasServers }) {
         + 'impossible with the tools you have, say so plainly and say what you would need.';
 
     if (hasServers) systemPrompt += buildMcpAddendum({ actionsEnabled: false });
-    if (actionsEnabled) systemPrompt += buildToolActionsAddendum(null);
+    if (actionsEnabled) systemPrompt += buildToolActionsAddendum(null, { autoMemory: ai.memory?.autoSave === true });
+    systemPrompt += buildAgentToolsAddendum(agentTools);
 
     return systemPrompt;
 }
@@ -195,6 +197,12 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
         }
     }
 
+    const agentTools = buildAgentTools(ai, {
+        guildId: guild.id,
+        userId: user.id,
+        canManage: Boolean(member?.permissions?.has?.('ManageGuild'))
+    });
+
     let answer = '';
     let failure = null;
     try {
@@ -202,7 +210,8 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
             ...config,
             systemPrompt: taskSystemPrompt(ai, {
                 actionsEnabled: Boolean(ai.actionsEnabled),
-                hasServers: (config.mcpServers || []).length > 0
+                hasServers: (config.mcpServers || []).length > 0,
+                agentTools
             }),
             history: [],
             prompt,
@@ -214,7 +223,7 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
             onToolEvent: activity.onEvent,
             mcpConfirm: config.mcpConfirm,
             confirmTool: createToolConfirmer(shim, { approver: config.mcpApprover }),
-            botTools: ai.actionsEnabled ? buildBotTools(shim) : [],
+            botTools: [...(ai.actionsEnabled ? buildBotTools(shim, { ai }) : []), ...agentTools],
             // Attributed, so the guild's ordinary windows bound this turn as
             // well as the deep-task allowance already spent above.
             userId: user.id,
