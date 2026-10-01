@@ -103,6 +103,16 @@ describe('what shares a pooled connection', () => {
     test('and a static one does not', () => {
         expect(clientFor(entryFor(SERVER), SERVER).options.getAccessToken).toBeNull();
     });
+
+    // A client allowed onto the operator's private network skips the SSRF
+    // guard, so it must never be the one a dashboard entry with the same URL
+    // and token is handed.
+    test('a private-network connection is never pooled with one that is not', () => {
+        const privateServer = { ...SERVER, connection: { ...SERVER.connection, allowPrivate: true } };
+        expect(entryFor(privateServer)).not.toBe(entryFor(SERVER));
+        expect(clientFor(entryFor(privateServer), privateServer).options.privateNetwork).toBe(true);
+        expect(clientFor(entryFor(SERVER), SERVER).options).not.toHaveProperty('privateNetwork');
+    });
 });
 
 describe('one failing list does not take the connection with it', () => {

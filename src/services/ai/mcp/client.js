@@ -89,6 +89,25 @@ const INTERNAL_ERROR = -32603;
 // later, not to hold a reply open.
 const MAX_RETRY_AFTER_MS = 5000;
 
+/**
+ * The URL of an operator's private-network server: http(s), no embedded
+ * credentials, and nothing else asked of it. The address checks are the part
+ * `allow_private` lifts; the shape checks are not.
+ */
+function operatorHttpUrl(raw, label) {
+    let url;
+    try {
+        url = new URL(String(raw || '').trim());
+    } catch {
+        throw new Error(`${label} is not a valid URL.`);
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        throw new Error(`${label} must use http:// or https:// (got "${url.protocol}//").`);
+    }
+    if (url.username || url.password) throw new Error(`${label} must not embed credentials.`);
+    return url;
+}
+
 class McpError extends Error {
     constructor(message, { status = null, code = null, sessionExpired = false } = {}) {
         super(message);
@@ -437,10 +456,18 @@ class McpHttpClient {
         elicitation = false,
         sampling = false,
         transport = 'auto',
+        privateNetwork = false,
     }) {
+        // An operator's own server on their own network (`allow_private` in the
+        // config file) skips the two network guards below: it may be a private
+        // address, and it may be plain http. Nothing a guild can write reaches
+        // this flag. Every other connection keeps both.
+        this.privateNetwork = privateNetwork === true;
         // Throws for anything that is not a plain http(s) URL, and for a literal
         // private address — the one destination that is knowable before DNS.
-        this.url = assertPublicHttpUrl(url, `${label} URL`).toString();
+        this.url = this.privateNetwork
+            ? operatorHttpUrl(url, `${label} URL`).toString()
+            : assertPublicHttpUrl(url, `${label} URL`).toString();
         this.label = label;
         this.token = typeof authorizationToken === 'string' && authorizationToken.trim()
             ? authorizationToken.trim()
@@ -466,6 +493,14 @@ class McpHttpClient {
         // than each starting their own.
         this.handshake = null;
         this.nextId = 0;
+    }
+
+    /**
+     * What every request is dialled through: the SSRF guard, or for an
+     * operator's private-network server, the default agent.
+     */
+    dispatcher() {
+        return this.privateNetwork ? undefined : guardedDispatcher();
     }
 
     headers() {
@@ -501,6 +536,8 @@ class McpHttpClient {
      * spelled like every other reason a connection failed.
      */
     assertTransportEncrypted(url, label) {
+        // The operator chose plain http for a server on their own network.
+        if (this.privateNetwork) return;
         try {
             assertHttpsUrl(url, label);
         } catch (err) {
@@ -589,7 +626,7 @@ class McpHttpClient {
                 headers: this.headers(),
                 body: JSON.stringify(payload),
                 timeout,
-                dispatcher: guardedDispatcher()
+                dispatcher: this.dispatcher()
             });
         } catch (err) {
             throw new McpError(err.message || 'request failed', { code: err.code || null });
@@ -666,6 +703,7 @@ class McpHttpClient {
             await this.authorize();
             const channel = new SseChannel({
                 url: this.url,
+                privateNetwork: this.privateNetwork,
                 headers: () => this.headers(),
                 label: this.label,
                 onMessage: message => this.dispatchSseMessage(message),
@@ -882,7 +920,7 @@ class McpHttpClient {
                 headers: this.headers(),
                 body: JSON.stringify(payload),
                 timeout,
-                dispatcher: guardedDispatcher()
+                dispatcher: this.dispatcher()
             });
         } catch (err) {
             throw new McpError(err.message || 'request failed', { code: err.code || null });
@@ -1315,7 +1353,7 @@ class McpHttpClient {
                 method: 'DELETE',
                 headers: this.headers(),
                 timeout: CONNECT_TIMEOUT_MS,
-                dispatcher: guardedDispatcher()
+                dispatcher: this.dispatcher()
             });
             // Whatever the server says here is discarded, but an unread body
             // holds its connection open until the pool times it out.

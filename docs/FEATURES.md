@@ -232,6 +232,9 @@ Config file:
 
 - `${VAR}` values resolve from the environment, so tokens stay out of the file
 - `enabled: false` parks a server without deleting the entry
+- `allow_private: true` lets an entry reach a server on your own network — a
+  LAN address or plain `http://` — which no dashboard connection can
+  ([details](SETUP_GUIDE.md#mcp-servers))
 - `guilds: ["<server id>", …]` limits an entry to the Discord servers named;
   without it, every server with AI on can use the file's credentials
 - `MCP_ALLOW_GUILD_SERVERS=false` makes the file the only way in

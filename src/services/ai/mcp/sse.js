@@ -135,7 +135,7 @@ async function pumpEvents(stream, onEvent) {
  * @param {string} label the server's name, for the error an admin reads
  * @returns {string}
  */
-function resolveEndpoint(raw, base, label) {
+function resolveEndpoint(raw, base, label, { privateNetwork = false } = {}) {
     let endpoint;
     try {
         endpoint = new URL(String(raw).trim(), base);
@@ -153,6 +153,9 @@ function resolveEndpoint(raw, base, label) {
     // The origin is the configured one, so this can only fail for a URL that was
     // never dialable, or never encrypted — but it is the same guard every other
     // address goes through, and it is cheap.
+    // A private-network server has already been held to its own origin above,
+    // which is the operator's; the address guard is what it was exempted from.
+    if (privateNetwork) return endpoint.toString();
     return assertHttpsUrl(endpoint.toString(), `${label} message endpoint`).toString();
 }
 
@@ -176,8 +179,10 @@ class SseChannel {
      * @param {Function} options.onMessage `(message) => void` per JSON-RPC message
      * @param {Function} options.onClosed `(error|null) => void`, once
      */
-    constructor({ url, headers, label, onMessage, onClosed }) {
+    constructor({ url, headers, label, onMessage, onClosed, privateNetwork = false }) {
         this.url = url;
+        // See McpHttpClient: an operator's own server on their own network.
+        this.privateNetwork = privateNetwork === true;
         this.headers = headers;
         this.label = label;
         this.onMessage = onMessage;
@@ -191,7 +196,7 @@ class SseChannel {
     async open() {
         // The standing GET carries the connection's credential like every other
         // request does, and it carries it for the life of the session.
-        assertHttpsUrl(this.url, `${this.label} URL`);
+        if (!this.privateNetwork) assertHttpsUrl(this.url, `${this.label} URL`);
 
         let response;
         try {
@@ -200,7 +205,7 @@ class SseChannel {
             response = await fetchHeaders(this.url, {
                 headers: { ...this.headers(), Accept: 'text/event-stream' },
                 timeout: ENDPOINT_TIMEOUT_MS,
-                dispatcher: guardedDispatcher(),
+                dispatcher: this.privateNetwork ? undefined : guardedDispatcher(),
             });
         } catch (err) {
             throw new Error(err.message || 'could not open the event stream', { cause: err });
@@ -242,7 +247,7 @@ class SseChannel {
                 if (!settled && event === 'endpoint') {
                     let endpoint;
                     try {
-                        endpoint = resolveEndpoint(data, this.url, this.label);
+                        endpoint = resolveEndpoint(data, this.url, this.label, { privateNetwork: this.privateNetwork });
                     } catch (err) {
                         this.close();
                         fail(err);

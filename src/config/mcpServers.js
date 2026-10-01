@@ -359,8 +359,26 @@ function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId
         warnings.push(`${label} ("${name}") url is not a valid URL — skipping it`);
         return null;
     }
-    if (parsed.protocol !== 'https:') {
-        warnings.push(`${label} ("${name}") url must start with https:// — skipping it`);
+    // A config-file entry may say the server is on the operator's own network
+    // (`allow_private: true`): a git or notes server on the LAN, a container on
+    // the compose network. The file is the operator's, like OLLAMA_BASE_URL and
+    // SEARXNG_URL, so it may dial the private address space and plain http that
+    // every dashboard URL is kept out of. A dashboard entry can never set this —
+    // a guild admin pointing the bot inside its host's network is the SSRF this
+    // whole guard exists for — and a dashboard entry of the same name replaces
+    // the file's, flag and all, so it cannot borrow it either.
+    const privateNetwork = source === 'file' && (raw.allow_private === true || raw.allowPrivate === true);
+    if (privateNetwork) {
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+            warnings.push(`${label} ("${name}") url must start with http:// or https:// — skipping it`);
+            return null;
+        }
+        if (parsed.username || parsed.password) {
+            warnings.push(`${label} ("${name}") url must not contain a username or password — put it in authorization_token — skipping it`);
+            return null;
+        }
+    } else if (parsed.protocol !== 'https:') {
+        warnings.push(`${label} ("${name}") url must start with https://${source === 'file' ? ' (or set "allow_private": true for a server on your own network)' : ''} — skipping it`);
         return null;
     }
 
@@ -455,11 +473,15 @@ function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId
         // token and cannot work on Anthropic's connector, so the routing below
         // reads this rather than whether a grant was handed over.
         oauth: Boolean(hasGrant),
+        // On the operator's network, so only the bot's own client can reach it:
+        // Anthropic's connector dials from Anthropic's side, where a LAN address
+        // means nothing. Routed like an OAuth connection for the same reason.
+        ...(privateNetwork ? { privateNetwork: true } : {}),
         ...(guilds ? { guilds } : {}),
         // What src/services/ai/mcp/ connects to when the guild is not on
         // Anthropic. Same url and same token — only the side that opens the
         // socket differs.
-        connection: { url, authorizationToken: token || null, oauth: grant },
+        connection: { url, authorizationToken: token || null, oauth: grant, ...(privateNetwork ? { allowPrivate: true } : {}) },
         toolset: buildToolset(name, raw, `${label} ("${name}")`, warnings)
     };
 }
@@ -591,6 +613,15 @@ function usesOAuth(guildServers = []) {
 }
 
 /**
+ * Whether any server can only be reached through the bot's own MCP client: an
+ * OAuth connection (only the bot can refresh its token) or one on the
+ * operator's private network (Anthropic's side cannot reach it).
+ */
+function needsClientRoute(guildServers = []) {
+    return resolveMcpServers(guildServers).some(server => server.oauth || server.privateNetwork);
+}
+
+/**
  * Whether this guild's policy would stop any tool call to ask a person.
  *
  * What `auto` turns on the client path for. A mode of anything but off could
@@ -615,7 +646,7 @@ function requiresApproval(mode, guildServers = []) {
  */
 function effectiveMcpRoute(route, mode, guildServers = []) {
     if ((route || DEFAULT_MCP_ROUTE) === 'client') return 'client';
-    if (usesOAuth(guildServers)) return 'client';
+    if (needsClientRoute(guildServers)) return 'client';
     return requiresApproval(mode, guildServers) ? 'client' : 'connector';
 }
 
@@ -634,7 +665,9 @@ function buildAnthropicMcpParams(guildServers = []) {
     // not be built (the server is down, the grant was revoked) and the caller
     // then falls through to this. Dropping them here is what makes that
     // fall-through safe wherever it happens.
-    const servers = resolveMcpServers(guildServers).filter(server => !server.oauth);
+    // A private-network server is dropped for the same reason: Anthropic would
+    // be handed an address only the bot's host can reach.
+    const servers = resolveMcpServers(guildServers).filter(server => !server.oauth && !server.privateNetwork);
     if (!servers.length) return null;
     return {
         mcp_servers: servers.map(s => s.server),
@@ -669,5 +702,6 @@ module.exports = {
     getMcpServers,
     resolveMcpServers,
     usesOAuth,
+    needsClientRoute,
     buildAnthropicMcpParams
 };

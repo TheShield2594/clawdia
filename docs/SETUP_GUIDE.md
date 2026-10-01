@@ -372,6 +372,38 @@ file lives outside the repo checkout.
 | `resources` | No | Set `true` to search this server's resources when somebody asks the AI something and put the relevant ones in the prompt. Off by default. |
 | `guilds` | No | Discord server IDs allowed to use this entry. Left out, every server with AI on gets it; `[]` means none. Set it on any entry whose token can write something, since members of every listed server can have the bot use it. |
 | `default_config` / `configs` | No | The API's raw toolset shape, if you need `defer_loading` or another setting the two lists above don't cover. |
+| `allow_private` | No | Set `true` for a server on your own network — a LAN address, a container on the compose network, or plain `http://`. Config file only; see below. |
+| `confirm_tools` / `unattended_tools` | No | The same two lists as a dashboard connection's **Always ask before these tools** and **Run without asking in scheduled tasks**. |
+
+**Servers on your own network.** Every MCP URL is normally held to a public
+`https://` address, because a dashboard field that could point the bot at a
+private one would let any server admin reach whatever the bot's container can —
+the database, the metadata service, the rest of your LAN. An entry in the config
+file is yours rather than a server admin's, so `"allow_private": true` lifts
+both checks for that entry alone: it may use a private address, and plain
+`http://`. A self-hosted notes or git MCP server is the case it is for:
+
+```json
+{
+  "servers": [
+    {
+      "name": "vault",
+      "url": "http://obsidian-mcp:3000/mcp",
+      "authorization_token": "${VAULT_MCP_TOKEN}",
+      "allow_private": true,
+      "guilds": ["<your server id>"]
+    }
+  ]
+}
+```
+
+What it does not change: a dashboard connection can never set it, and one with
+the same name replaces the file's entry, flag included. The URL still cannot
+carry a username or password. Over `http://` the token travels unencrypted, so
+keep that to a network you trust. Set `guilds` on it, since every server the
+entry reaches can have the bot read and write through it. These servers are
+always reached through the bot's own MCP client, even on Claude, because
+Anthropic's connector dials from Anthropic's side and cannot see your network.
 
 **The config file cannot hold a login.** Its secrets are `${ENV_VAR}`
 references, which the bot reads and never writes — and a refresh token rotates,
