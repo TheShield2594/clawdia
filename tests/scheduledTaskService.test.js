@@ -15,6 +15,7 @@ jest.mock('../src/models/ScheduledTask', () => ({
     create: jest.fn(async doc => ({ _id: 'new-task', ...doc })),
 }));
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
+jest.mock('../src/models/User', () => ({ findOne: jest.fn() }));
 jest.mock('../src/services/aiService', () => ({
     resolveProviderConfig: jest.fn(() => ({ provider: 'mock', apiKey: 'k', model: 'm' })),
     getCompletion: jest.fn(async () => 'the answer'),
@@ -31,6 +32,7 @@ jest.mock('../src/utils/jobRunner', () => ({
 
 const ScheduledTask = require('../src/models/ScheduledTask');
 const Guild = require('../src/models/Guild');
+const User = require('../src/models/User');
 const aiService = require('../src/services/aiService');
 const { runJob } = require('../src/utils/jobRunner');
 const { runDueTasks, createTask, __test__ } = require('../src/services/scheduledTaskService');
@@ -82,6 +84,7 @@ beforeEach(() => {
         ...makeTask(), ...(update.$set || {}), failureCount: 1
     }));
     Guild.findOne.mockReturnValue({ lean: async () => ({ ai: { enabled: true, systemPrompt: 'be helpful' } }) });
+    User.findOne.mockReturnValue({ lean: async () => null });
     aiService.getCompletion.mockResolvedValue('the answer');
 });
 
@@ -278,6 +281,46 @@ describe('running an ai_prompt task', () => {
         expect(req.systemPrompt).toMatch(/standing instruction/);
         expect(req.systemPrompt).toMatch(/as data/);
         expect(req.prompt).toBe('Recap #announcements');
+    });
+
+    test('carries the memories of the person who set it up, and nobody else\'s', async () => {
+        due([makeTask()]);
+        User.findOne.mockReturnValue({ lean: async () => ({ pinnedMemories: [{ content: 'Works nights on weekdays' }] }) });
+        await runDueTasks(makeClient(textChannel()));
+
+        expect(User.findOne).toHaveBeenCalledWith({ userId: 'u1', guildId: 'g1' }, expect.anything());
+        const [req] = aiService.getCompletion.mock.calls[0];
+        expect(req.history[0].content).toMatch(/Works nights on weekdays/);
+        expect(req.history[0].content).toMatch(/<@u1>/);
+    });
+
+    test('runs with no memories when there are none to read, or they cannot be read', async () => {
+        due([makeTask()]);
+        User.findOne.mockReturnValue({ lean: async () => { throw new Error('db down'); } });
+        await runDueTasks(makeClient(textChannel()));
+
+        const [req] = aiService.getCompletion.mock.calls[0];
+        expect(req.history).toEqual([]);
+    });
+
+    test('answers approvals from the connection\'s unattended list, not from a person', async () => {
+        due([makeTask()]);
+        aiService.resolveProviderConfig.mockReturnValueOnce({
+            provider: 'mock', apiKey: 'k', model: 'm',
+            mcpServers: [{
+                name: 'fastmail',
+                url: 'https://api.fastmail.com/mcp',
+                confirmTools: ['create_event', 'send_email'],
+                unattendedTools: ['create_event']
+            }]
+        });
+        await runDueTasks(makeClient(textChannel()));
+
+        const [req] = aiService.getCompletion.mock.calls[0];
+        await expect(req.confirmTool({ server: 'fastmail', tool: 'create_event' })).resolves.toEqual({ approved: true });
+        const refused = await req.confirmTool({ server: 'fastmail', tool: 'send_email' });
+        expect(refused.approved).toBe(false);
+        expect(refused.message).toMatch(/scheduled task/);
     });
 
     test('fails rather than posting when the guild has the AI switched off', async () => {

@@ -214,6 +214,7 @@ function renderMcpServers(provider) {
             if (srv.allowedTools.length) bits.push('only ' + srv.allowedTools.length + ' tool(s)');
             if (srv.blockedTools.length) bits.push(srv.blockedTools.length + ' blocked');
             if ((srv.confirmTools || []).length) bits.push(srv.confirmTools.length + ' need approval');
+            if ((srv.unattendedTools || []).length) bits.push(srv.unattendedTools.length + ' run in scheduled tasks');
             if (srv.resources) bits.push('📚 documents in context');
             const div = document.createElement('div');
             div.className = 'list-item';
@@ -277,7 +278,7 @@ function splitToolNames(value) {
 
 function resetMcpForm() {
     _mcpEditing = null;
-    ['mcp-name', 'mcp-url', 'mcp-token', 'mcp-allowed', 'mcp-blocked', 'mcp-confirm-tools'].forEach(function(id) {
+    ['mcp-name', 'mcp-url', 'mcp-token', 'mcp-allowed', 'mcp-blocked', 'mcp-confirm-tools', 'mcp-unattended-tools'].forEach(function(id) {
         if (mcpEl(id)) mcpEl(id).value = '';
     });
     mcpEl('mcp-preset').value = '';
@@ -304,6 +305,7 @@ function editMcpServer(name) {
     mcpEl('mcp-allowed').value = srv.allowedTools.join(', ');
     mcpEl('mcp-blocked').value = srv.blockedTools.join(', ');
     mcpEl('mcp-confirm-tools').value = (srv.confirmTools || []).join(', ');
+    if (mcpEl('mcp-unattended-tools')) mcpEl('mcp-unattended-tools').value = (srv.unattendedTools || []).join(', ');
     mcpEl('mcp-enabled').checked = srv.enabled;
     if (mcpEl('mcp-resources')) mcpEl('mcp-resources').checked = Boolean(srv.resources);
     mcpEl('mcp-form-title').textContent = 'Edit ' + srv.name;
@@ -325,6 +327,7 @@ async function saveMcpServer() {
         allowedTools: splitToolNames(mcpEl('mcp-allowed').value),
         blockedTools: splitToolNames(mcpEl('mcp-blocked').value),
         confirmTools: splitToolNames(mcpEl('mcp-confirm-tools').value),
+        unattendedTools: mcpEl('mcp-unattended-tools') ? splitToolNames(mcpEl('mcp-unattended-tools').value) : [],
         resources: Boolean(mcpEl('mcp-resources') && mcpEl('mcp-resources').checked)
     };
     // Only send the token when one was typed — an absent field means

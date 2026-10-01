@@ -13,7 +13,7 @@
 jest.mock('../src/models/Reminder', () => ({ countDocuments: jest.fn(async () => 0), create: jest.fn(async () => ({})) }));
 jest.mock('../src/models/Poll', () => ({ create: jest.fn(async () => ({})) }));
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn(async () => null) }));
-jest.mock('../src/models/User', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
+jest.mock('../src/models/User', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn(), updateOne: jest.fn() }));
 jest.mock('../src/models/ScheduledTask', () => ({
     countDocuments: jest.fn(async () => 0),
     create: jest.fn(async doc => ({ _id: 'abcdef123456', ...doc })),
@@ -59,6 +59,7 @@ beforeEach(() => {
     Guild.findOne.mockResolvedValue({ moderation: { logChannelId: 'log-channel' } });
     User.findOneAndUpdate.mockResolvedValue({ userId: 'u1' });
     User.findOne.mockReturnValue({ lean: async () => ({ pinnedMemories: [] }) });
+    User.updateOne.mockResolvedValue({ modifiedCount: 1 });
 });
 
 describe('which tools a turn is offered', () => {
@@ -66,9 +67,9 @@ describe('which tools a turn is offered', () => {
         expect(buildBotTools(fakeMessage(), { enabled: false })).toEqual([]);
     });
 
-    test('the three anyone can use', () => {
+    test('the four anyone can use', () => {
         const names = buildBotTools(fakeMessage()).map(tool => tool.name);
-        expect(names).toEqual(['create_poll', 'create_reminder', 'save_memory']);
+        expect(names).toEqual(['create_poll', 'create_reminder', 'save_memory', 'forget_memory']);
     });
 
     // `/ai schedule add` is behind Manage Server, so the tool that does the
@@ -111,7 +112,7 @@ describe('which tools a turn is offered', () => {
     test('only the ones that write durable state need approving', () => {
         const tools = buildBotTools(fakeMessage({ moderator: true, manageGuild: true }));
         expect(tools.filter(tool => tool.confirm).map(tool => tool.name))
-            .toEqual(['save_memory', 'schedule_task']);
+            .toEqual(['save_memory', 'forget_memory', 'schedule_task']);
     });
 });
 
@@ -406,7 +407,7 @@ describe('riding in the MCP toolkit', () => {
     test('a guild with no MCP servers still gets a toolkit for its actions', async () => {
         const toolkit = await toolkitWith(buildBotTools(fakeMessage()));
 
-        expect(toolkit.definitions.map(d => d.name)).toEqual(['create_poll', 'create_reminder', 'save_memory']);
+        expect(toolkit.definitions.map(d => d.name)).toEqual(['create_poll', 'create_reminder', 'save_memory', 'forget_memory']);
         // Bare names, like the load_tools meta-tool: these belong to the bot, and
         // every discovered tool's name carries a `server__tool` double underscore.
         expect(toolkit.definitions.every(d => !d.name.includes('__'))).toBe(true);
@@ -567,5 +568,88 @@ describe('riding in the MCP toolkit', () => {
     test('a name the model invented is answered, not thrown', async () => {
         const toolkit = await toolkitWith(buildBotTools(fakeMessage()));
         expect(await toolkit.call('delete_everything', {})).toMatch(/No tool named/);
+    });
+});
+
+// A server run by one person for themselves wants the opposite of the default:
+// a model that remembers as it goes, and forgets what has gone stale, without a
+// button in front of every fact.
+describe('the guild\'s memory settings', () => {
+    const autoSave = { memory: { autoSave: true, cap: 25 } };
+
+    test('memories ask first by default, and save without asking when the guild says so', () => {
+        const asking = buildBotTools(fakeMessage());
+        expect(toolNamed(asking, 'save_memory').confirm).toBe(true);
+        expect(toolNamed(asking, 'forget_memory').confirm).toBe(true);
+
+        const trusting = buildBotTools(fakeMessage(), { ai: autoSave });
+        expect(toolNamed(trusting, 'save_memory').confirm).toBe(false);
+        expect(toolNamed(trusting, 'forget_memory').confirm).toBe(false);
+        expect(toolNamed(trusting, 'save_memory').description).toMatch(/without\s+asking/);
+    });
+
+    test('the cap in the write is the guild\'s, not the default', async () => {
+        await toolNamed(buildBotTools(fakeMessage(), { ai: autoSave }), 'save_memory').run({ content: 'Likes tea' });
+        const [filter] = User.findOneAndUpdate.mock.calls[0];
+        expect(filter).toHaveProperty(['pinnedMemories.24']);
+        expect(filter).not.toHaveProperty([`pinnedMemories.${MEMORY_CAP - 1}`]);
+    });
+
+    test('a cap outside the range falls back or is clamped', () => {
+        const { memoryCapFor, MAX_MEMORY_CAP } = require('../src/utils/memoryLimits');
+        expect(memoryCapFor(undefined)).toBe(MEMORY_CAP);
+        expect(memoryCapFor({ memory: { cap: 0 } })).toBe(MEMORY_CAP);
+        expect(memoryCapFor({ memory: { cap: 500 } })).toBe(MAX_MEMORY_CAP);
+        expect(memoryCapFor({ memory: { cap: 30 } })).toBe(30);
+    });
+
+    test('a full store tells the model it can make room itself', async () => {
+        User.findOneAndUpdate.mockResolvedValue(null);
+        User.findOne.mockReturnValue({ lean: async () => ({ pinnedMemories: [{ content: 'other' }] }) });
+        const result = await toolNamed(buildBotTools(fakeMessage(), { ai: autoSave }), 'save_memory').run({ content: 'new' });
+        expect(result).toMatch(/maximum of 25/);
+        expect(result).toMatch(/forget_memory/);
+    });
+});
+
+describe('forget_memory', () => {
+    const memories = [
+        { _id: 'a', content: 'Works at the hospital on weekdays' },
+        { _id: 'b', content: 'Prefers tea over coffee' },
+        { _id: 'c', content: 'Prefers mornings for meetings' }
+    ];
+    const forget = content => toolNamed(buildBotTools(fakeMessage()), 'forget_memory').run({ content });
+
+    beforeEach(() => {
+        User.findOne.mockReturnValue({ lean: async () => ({ pinnedMemories: memories }) });
+    });
+
+    test('removes the one memory a quote picks out, by its id', async () => {
+        const result = await forget('works at the HOSPITAL');
+        expect(User.updateOne).toHaveBeenCalledWith(
+            { userId: 'u1', guildId: 'g1' },
+            { $pull: { pinnedMemories: { _id: 'a' } } }
+        );
+        expect(result).toMatch(/Forgotten/);
+    });
+
+    test('refuses a quote that matches more than one rather than guessing', async () => {
+        const result = await forget('Prefers');
+        expect(User.updateOne).not.toHaveBeenCalled();
+        expect(result).toMatch(/matches 2 memories/);
+    });
+
+    test('says so when nothing matches', async () => {
+        const result = await forget('lives in Paris');
+        expect(User.updateOne).not.toHaveBeenCalled();
+        expect(result).toMatch(/none of their saved memories/);
+    });
+
+    test('an exact match wins over the longer memories it is part of', async () => {
+        User.findOne.mockReturnValue({ lean: async () => ({
+            pinnedMemories: [{ _id: 'x', content: 'Has a cat' }, { _id: 'y', content: 'Has a cat named Miso' }]
+        }) });
+        await forget('has a cat');
+        expect(User.updateOne.mock.calls[0][1]).toEqual({ $pull: { pinnedMemories: { _id: 'x' } } });
     });
 });

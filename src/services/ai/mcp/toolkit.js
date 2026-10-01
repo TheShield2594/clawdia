@@ -796,9 +796,13 @@ async function prepareMcpToolkit(guildServers = [], {
         if (decision?.approved) return { approved: true };
         return {
             approved: false,
-            message: decision?.timedOut
-                ? 'Nobody approved this tool call in time, so it was not run. Say so, and offer to try again.'
-                : 'The user declined to run this tool. Do not try it again — carry on without it, or ask what they would like instead.'
+            // A confirmer that is a policy rather than a person (a scheduled
+            // run's) knows better than this does why it said no.
+            message: typeof decision?.message === 'string' && decision.message
+                ? decision.message
+                : decision?.timedOut
+                    ? 'Nobody approved this tool call in time, so it was not run. Say so, and offer to try again.'
+                    : 'The user declined to run this tool. Do not try it again — carry on without it, or ask what they would like instead.'
         };
     }
 

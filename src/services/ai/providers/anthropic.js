@@ -3,7 +3,7 @@ const { resolveApiKey } = require('../apiKeys');
 const {
     buildAnthropicMcpParams,
     requiresApproval,
-    usesOAuth,
+    needsClientRoute,
     MCP_BETA,
     DEFAULT_MCP_ROUTE
 } = require('../../../config/mcpServers');
@@ -177,7 +177,9 @@ function usesClientRoute({ useMcp = true, mcpRoute, mcpConfirm, mcpServers, botT
     // handed, and an OAuth access token expires in an hour with only the bot
     // able to refresh it. `connector` is a choice between two working routes,
     // and for this connection there is only one.
-    if (usesOAuth(mcpServers)) return true;
+    // The same holds for a server on the operator's private network, which
+    // Anthropic's side cannot reach at all.
+    if (needsClientRoute(mcpServers)) return true;
     if (route === 'client') return true;
     // A guild that named the connector gets the connector, and its actions stay
     // on the text protocol — unless its approval policy could stop a call. The

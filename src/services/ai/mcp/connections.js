@@ -91,10 +91,20 @@ async function mapWithLimit(items, limit, fn) {
 // connection, and therefore a session and a tool cache, with that guild's
 // actual grant.
 function keyFor(connection) {
+    // A process is the command that starts it: the same name pointed at a
+    // different command, args or env after a config reload is a different
+    // server, and must not inherit the old one's process or tool list. Like
+    // the token in the key below, the env is only ever an in-memory map key
+    // here — never logged, never sent — so it is used as it is.
+    if (connection.stdio) return `stdio ${JSON.stringify(connection.stdio)}`;
+    // A connection allowed onto the private network is never pooled with one
+    // that is not, or a dashboard entry pasting the same public URL and token
+    // would be handed a client that skips the SSRF guard.
+    const network = connection.allowPrivate ? ' private' : '';
     if (connection.oauth) {
-        return `${connection.url} oauth:${connection.oauth.guildId}/${connection.oauth.server}`;
+        return `${connection.url}${network} oauth:${connection.oauth.guildId}/${connection.oauth.server}`;
     }
-    return `${connection.url} token:${connection.authorizationToken || ''}`;
+    return `${connection.url}${network} token:${connection.authorizationToken || ''}`;
 }
 
 function closeQuietly(client) {
@@ -132,11 +142,20 @@ function entryFor(server) {
  * up as a connection that works in a channel and 401s in the panel.
  */
 function mcpClientFor(server, { onNotification = null, elicitation = false, sampling = false } = {}) {
+    // A local process from the operator's config file (`command`). Required
+    // lazily so a bot with no such server never loads child_process here.
+    if (server.connection.stdio) {
+        const { McpStdioClient } = require('./stdio');
+        return new McpStdioClient({ stdio: server.connection.stdio, label: server.name, onNotification, elicitation, sampling });
+    }
     const grant = server.connection.oauth;
     return new McpHttpClient({
         url: server.connection.url,
         authorizationToken: server.connection.authorizationToken,
         label: server.name,
+        // Only ever true for an operator config-file entry that asked for it
+        // (`allow_private` in src/config/mcpServers.js).
+        ...(server.connection.allowPrivate === true ? { privateNetwork: true } : {}),
         onNotification,
         elicitation,
         sampling,

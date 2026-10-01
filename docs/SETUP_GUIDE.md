@@ -162,6 +162,31 @@ Set **Model context window** in the dashboard too — see
 [FEATURES.md](FEATURES.md#configuration-options) for why a self-hosted model is
 the case where the bot cannot work it out for itself.
 
+### Web search (SearXNG)
+
+The AI's `web_search` tool queries a [SearXNG](https://docs.searxng.org/)
+instance you run. No API key, and nothing is sent anywhere but your own instance.
+
+1. Allow JSON output in SearXNG's `settings.yml` — without it every search is
+   refused with a 403:
+
+   ```yaml
+   search:
+     formats:
+       - html
+       - json
+   ```
+
+2. Set `SEARXNG_URL` to the instance, e.g. `http://searxng:8080`. Like
+   `OLLAMA_BASE_URL` it is your own endpoint, so a private or Docker address is
+   fine.
+3. Turn on **Enable web access** in the dashboard, under **AI → Chat**, in each
+   server that should have it. That switch also gives the AI `read_webpage`,
+   which needs no SearXNG at all.
+
+The tool is offered in chat replies, `/ai task` and scheduled tasks. Each search
+is one tool call against the server's usual per-user and per-guild tool budgets.
+
 ### Choosing between them
 
 [AI_COMPARISON.md](AI_COMPARISON.md) is the side-by-side: default model,
@@ -256,8 +281,11 @@ the server answers that POST with a 404 or a 405, which is what a server built
 against the 2024-11-05 revision does. Nothing has to be configured either way;
 paste the endpoint the service publishes.
 
-Local **stdio** servers are still out of reach: they are a subprocess on the
-machine running the server, not an address, and the bot connects over HTTP.
+Local **stdio** servers — a program speaking MCP over stdin/stdout rather than
+an address — cannot be added here, because a dashboard field that runs a
+command would let any server admin run programs on the host. The operator can
+add one in the config file with `command` (see *Servers that run as a command*
+below).
 
 **Tool gating.** *Only these tools* is an allowlist — leave it empty to allow
 everything the server offers. *Never these tools* is a denylist and wins over
@@ -340,7 +368,7 @@ file lives outside the repo checkout.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Unique identifier, letters/digits/`_`/`-`. Appears in Claude's tool calls. |
-| `url` | Yes | The server's HTTPS endpoint. Either HTTP transport works — Streamable HTTP is tried first and the older HTTP+SSE is used if the server refuses the POST. Local stdio servers cannot be reached this way. |
+| `url` | Yes, or `command` | The server's HTTPS endpoint. Either HTTP transport works — Streamable HTTP is tried first and the older HTTP+SSE is used if the server refuses the POST. For a server that runs as a local program, use `command` instead. |
 | `enabled` | No | Set `false` to keep an entry in the file without connecting to it. |
 | `authorization_token` | No | OAuth bearer token, if the server needs one. |
 | `allowed_tools` | No | Allowlist of tool names. Empty means every tool. |
@@ -348,6 +376,82 @@ file lives outside the repo checkout.
 | `resources` | No | Set `true` to search this server's resources when somebody asks the AI something and put the relevant ones in the prompt. Off by default. |
 | `guilds` | No | Discord server IDs allowed to use this entry. Left out, every server with AI on gets it; `[]` means none. Set it on any entry whose token can write something, since members of every listed server can have the bot use it. |
 | `default_config` / `configs` | No | The API's raw toolset shape, if you need `defer_loading` or another setting the two lists above don't cover. |
+| `command` / `args` / `env` / `cwd` | Instead of `url` | Run the server as a local process and speak MCP over its stdin/stdout. Config file only; see below. |
+| `allow_private` | No | Set `true` for a server on your own network — a LAN address, a container on the compose network, or plain `http://`. Config file only; see below. |
+| `confirm_tools` / `unattended_tools` | No | The same two lists as a dashboard connection's **Always ask before these tools** and **Run without asking in scheduled tasks**. |
+
+**Servers on your own network.** Every MCP URL is normally held to a public
+`https://` address, because a dashboard field that could point the bot at a
+private one would let any server admin reach whatever the bot's container can —
+the database, the metadata service, the rest of your LAN. An entry in the config
+file is yours rather than a server admin's, so `"allow_private": true` lifts
+both checks for that entry alone: it may use a private address, and plain
+`http://`. A self-hosted notes or git MCP server is the case it is for:
+
+```json
+{
+  "servers": [
+    {
+      "name": "vault",
+      "url": "http://obsidian-mcp:3000/mcp",
+      "authorization_token": "${VAULT_MCP_TOKEN}",
+      "allow_private": true,
+      "guilds": ["<your server id>"]
+    }
+  ]
+}
+```
+
+What it does not change: a dashboard connection can never set it, and one with
+the same name replaces the file's entry, flag included. The URL still cannot
+carry a username or password. Over `http://` the token travels unencrypted, so
+keep that to a network you trust. Set `guilds` on it, since every server the
+entry reaches can have the bot read and write through it. These servers are
+always reached through the bot's own MCP client, even on Claude, because
+Anthropic's connector dials from Anthropic's side and cannot see your network.
+
+**Servers that run as a command.** Most MCP servers ship as a program that
+speaks MCP over stdin and stdout, not as a web endpoint. Give the entry a
+`command` instead of a `url` and the bot starts that program itself when the
+AI first needs it, stops it after ten idle minutes, and restarts it if it
+crashes:
+
+```json
+{
+  "servers": [
+    {
+      "name": "vault",
+      "command": "node",
+      "args": ["/mcp/obsidian-mcp/dist/index.js", "/vault"],
+      "env": { "VAULT_API_KEY": "${VAULT_API_KEY}" },
+      "guilds": ["<your server id>"],
+      "unattended_tools": ["create_note"]
+    }
+  ]
+}
+```
+
+- **Config file only.** A command in a dashboard field would let any server
+  admin run programs on your host, so a dashboard connection with one is
+  ignored.
+- **It gets almost none of the bot's environment.** The process sees `PATH`,
+  `HOME`, the locale and timezone, and what you list in `env` — never the
+  Discord token, the database URI or the AI keys. `env` values and `args` can be
+  `${VAR}` references, read from the bot's environment when the file loads.
+- **It runs inside the bot's container, as the bot's user.** The published image
+  has Node but not `npm`, `npx`, Python or `uvx`, so install the server into a
+  folder you mount (for example `npm install --prefix ./mcp obsidian-mcp` on the
+  host, mounted at `/mcp`) and point `command` at `node`. Mount anything it works
+  on, such as the vault, as well. For a Python server, or anything heavy, run it
+  as its own container and connect to it by URL with `allow_private` instead.
+- **Keep it in sync yourself.** A notes server edits files on disk. If the vault
+  lives in git, a cron job that pulls and pushes it is what gets those edits
+  anywhere else.
+- **It is shared** by every Discord server its `guilds` list names: one process,
+  one set of tools. Set `guilds`.
+- **A server that cannot start** — a wrong path, a missing package — is reported
+  in the logs and left alone for thirty seconds rather than restarted by every
+  message.
 
 **The config file cannot hold a login.** Its secrets are `${ENV_VAR}`
 references, which the bot reads and never writes — and a refresh token rotates,

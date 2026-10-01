@@ -17,8 +17,15 @@ const AI_MODEL_DEFAULTS = {
 
 function updateAiProviderUI() {
     const provider = document.getElementById('ai-provider').value;
+    // The backups' keys too: a backup provider is only tried with a key of
+    // this server's own, and a hidden field is one nobody can fill in.
+    const inUse = new Set([provider]);
+    ['ai-fallback-1-provider', 'ai-fallback-2-provider'].forEach(id => {
+        const select = document.getElementById(id);
+        if (select && select.value) inUse.add(select.value);
+    });
     document.querySelectorAll('.ai-key-field').forEach(el => {
-        el.style.display = el.dataset.provider === provider ? '' : 'none';
+        el.style.display = inUse.has(el.dataset.provider) ? '' : 'none';
     });
     const hint = document.getElementById('ai-model-hint');
     if (hint) hint.textContent = 'Default: ' + (AI_MODEL_DEFAULTS[provider] || '');

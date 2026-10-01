@@ -49,6 +49,7 @@ const crypto = require('crypto');
 
 const User = require('../models/User');
 const Conversation = require('../models/Conversation');
+const ConversationLog = require('../models/ConversationLog');
 const Transaction = require('../models/Transaction');
 const Reminder = require('../models/Reminder');
 const GrindProfile = require('../models/GrindProfile');
@@ -163,6 +164,16 @@ const USER_DATA_ENTRIES = [
         collect: (userId, guildId) => lean(Conversation.find({ userId, guildId })),
         remove: async (userId, guildId) =>
             (await Conversation.deleteMany({ userId, guildId })).deletedCount || 0,
+    },
+    {
+        key: 'conversationLog',
+        label: 'Searchable log of AI conversations',
+        model: ConversationLog,
+        behavior: 'delete',
+        fields: ['userId'],
+        collect: (userId, guildId) => lean(ConversationLog.find({ userId, guildId })),
+        remove: async (userId, guildId) =>
+            (await ConversationLog.deleteMany({ userId, guildId })).deletedCount || 0,
     },
     {
         key: 'transactions',

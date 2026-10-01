@@ -37,7 +37,7 @@ const {
 const { runDeepTask, refuseTask } = require('../../services/ai/deepTask');
 const { missingKeyMessage } = require('../../services/ai/apiKeys');
 
-const MEMORY_CAP = 10;
+const { MAX_MEMORY_CAP, memoryCapFor } = require('../../utils/memoryLimits');
 
 // What a task request may say. Longer than a scheduled task's instruction —
 // somebody typing this is present and describing a job in one go — and far
@@ -73,7 +73,7 @@ module.exports = {
                     opt.setName('delete')
                         .setDescription('Delete a memory by its number (from the list)')
                         .setMinValue(1)
-                        .setMaxValue(MEMORY_CAP)
+                        .setMaxValue(MAX_MEMORY_CAP)
                 )
         )
         .addSubcommand(sub =>
@@ -283,16 +283,23 @@ module.exports = {
             });
         }
 
+        const settings = await getGuildSettings(interaction.guild.id).catch(() => null);
+        const cap = memoryCapFor(settings?.ai);
+
+        // A guild can raise the cap to fifty, and fifty spaced-out entries at
+        // the full preview length would pass an embed description's 4,096.
+        const dense = memories.length > 20;
+        const previewLength = dense ? 60 : 80;
         const lines = memories.map((m, i) => {
-            const preview = m.content.length > 80 ? m.content.slice(0, 80) + '…' : m.content;
+            const preview = m.content.length > previewLength ? m.content.slice(0, previewLength) + '…' : m.content;
             return `**${i + 1}.** ${preview}`;
         });
 
         const embed = new EmbedBuilder()
             .setTitle('📌 Your Pinned Memories')
             .setColor('#f1c40f')
-            .setDescription(lines.join('\n\n'))
-            .setFooter({ text: `${memories.length}/${MEMORY_CAP} slots used · Use /ai memories delete:<number> to remove one` });
+            .setDescription(lines.join(dense ? '\n' : '\n\n'))
+            .setFooter({ text: `${memories.length}/${cap} slots used · Use /ai memories delete:<number> to remove one` });
 
         return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }

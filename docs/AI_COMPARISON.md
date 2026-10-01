@@ -19,6 +19,32 @@ live in [SETUP_GUIDE.md](SETUP_GUIDE.md#ai-integration).
 | **Ollama** | `llama3.2` | `OLLAMA_BASE_URL` | Always $0 | Client | Runs on your own hardware; no key, no per-token cost |
 | **OpenRouter** | `openai/gpt-4o-mini` | `OPENROUTER_API_KEY` | No | Client | One key, many vendors' models; names must be `vendor/model` |
 
+## Backup providers
+
+A server can list up to two backups under **AI → Chat** (**Backup provider 1**
+and **2**). They are tried in order when the main provider cannot answer:
+unreachable, timed out, rate-limited or overloaded (429, 5xx, 529), refusing
+its key (401/403), or not knowing the model (404). They are not tried for a
+request that is wrong (a 400, like a prompt too long), so a backup never just
+repeats the same failure.
+
+Three rules keep a switch from doing harm:
+
+- **Never mid-reply.** A streamed reply only switches before its first word.
+  After that, the error is reported as before, because a second provider
+  starting over would splice two answers together.
+- **Never after a tool ran.** A turn that already ran a tool, such as moving a
+  calendar event, is not replayed on the backup, so the action can't happen
+  twice.
+- **Only with the server's own keys.** Each backup uses this server's key for
+  that provider, and is skipped if there is none. A server on its own key
+  cannot fall back onto the operator's environment key, which would put its
+  traffic on the operator's bill outside the operator's ceilings.
+
+The prompt is sized for the main model, so pick backups whose context window is
+at least as large. Usage is recorded under whichever provider answered.
+Structured calls (`/quiz`, `/forge` and similar) stay on the main provider.
+
 ## What actually differs
 
 **MCP works with every provider, by two different routes.** Whichever model is

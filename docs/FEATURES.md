@@ -37,6 +37,25 @@ cannot see it, so it says so instead of answering from the caption alone. The
 same happens to an image too large or too numerous to send. Nothing is
 downloaded for a model that cannot use it.
 
+**Voice messages**:
+
+With **Listen to voice messages** on, a voice message or audio clip sent to the
+AI is transcribed and answered like typed text. That means in a DM, or as a
+reply to one of the bot's messages in a server, since a voice message cannot
+carry a mention. The transcript is the turn: the model is told it was spoken,
+and the history, memory and conversation search all keep the words rather than
+the audio.
+
+Transcription uses the server's own keys, with no new setting: Gemini for a
+server on Gemini, otherwise OpenAI's `gpt-4o-mini-transcribe`, otherwise
+Gemini (`gemini-3.8-flash`). A clip only goes to a service that reads its
+format, so raw AAC goes to Gemini, and a transcription that fails on one
+service is tried once on the other. A server on Claude, OpenRouter or Ollama
+needs an OpenAI or Gemini key for it. Each clip is a separate charge from that provider, outside the monthly
+budget the AI usage ledger tracks. Clips over ten minutes or 19 MB are refused
+with a reason rather than transcribed, and the clip is downloaded through the
+same SSRF guard as images.
+
 **Knowing its own commands**:
 
 Ask the chat "how do I equip my rifle" and it answers `/hunt equip`, because
@@ -165,6 +184,13 @@ ask, and the question appears in the channel as a form to fill in — bounded to
 two questions a reply, and labelled with which server is asking, because a real
 one will not ask for a password or a key.
 
+A scheduled task has nobody to click those buttons, so a tool that needs
+approval is refused there. Each connection has a **Run without asking in
+scheduled tasks** list for the exceptions: name `create_event` on a calendar
+connection and "every morning, put today's classes on my calendar" can write
+without anyone awake, while the same call from a chat message still asks. The
+list is only read by scheduled runs, and never covers the bot's own tools.
+
 Approvals and the activity rollup below both need the bot to be the one making
 the call, which on Claude it is not by default — Anthropic's connector opens the
 connections on their side. Turning approvals on switches Claude to the bot's own
@@ -225,6 +251,12 @@ Config file:
 
 - `${VAR}` values resolve from the environment, so tokens stay out of the file
 - `enabled: false` parks a server without deleting the entry
+- `command` instead of `url` runs the server as a local process and speaks MCP
+  over its stdin/stdout — the transport most servers ship with. Config file
+  only ([details](SETUP_GUIDE.md#mcp-servers))
+- `allow_private: true` lets an entry reach a server on your own network — a
+  LAN address or plain `http://` — which no dashboard connection can
+  ([details](SETUP_GUIDE.md#mcp-servers))
 - `guilds: ["<server id>", …]` limits an entry to the Discord servers named;
   without it, every server with AI on can use the file's credentials
 - `MCP_ALLOW_GUILD_SERVERS=false` makes the file the only way in
@@ -238,6 +270,15 @@ Full field reference: [SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers)
 - Set an AI chat channel in dashboard
 - Users chat naturally, bot responds to every message and @-mentions/replies anywhere
 - Bot shows typing indicator while processing
+
+**Direct messages:**
+- Set `AI_DM_GUILD_ID` to your server's ID and its admins (Manage Server) can DM
+  the bot instead of mentioning it in a channel
+- A DM is answered as though it were sent in that server: its provider, system
+  prompt, memories, knowledge base, MCP connections and budget. Approvals,
+  reminders and scheduled tasks set from a DM come back to the DM
+- Every DM goes to the AI, so no mention is needed. Nobody else gets an answer,
+  and nothing besides the AI (leveling, automod, quests) runs in DMs
 
 **Customization:**
 
@@ -254,7 +295,57 @@ Clawdia pins facts she learns about a user across conversations. `/ai memories`
 lists them and `/ai memories delete <number>` removes one. React 📌 to one of her
 messages to pin it yourself; she can also ask to save one herself with the
 `save_memory` tool, which posts approval buttons and saves nothing until someone
-clicks. Ten per user, per server.
+clicks, and drop one that has gone stale with `forget_memory`. Ten per user, per
+server by default; **Memories per member** under **AI → Chat** raises it as far
+as fifty. Every memory rides in every reply's prompt, so more of them cost more
+per message.
+
+**Save memories without asking** turns the approval buttons off for those two
+tools. The model then remembers what you tell it about yourself as it goes, and
+replaces what has changed, the way a personal assistant would. It is meant for a
+server you run for yourself: it only ever saves what the person it is replying
+to said about themselves, but nobody reviews it. It needs AI actions on.
+
+A scheduled task carries the memories of the person who set it up, so "plan my
+week" knows whose week it is.
+
+**Learning**:
+
+With **Let the AI learn** on, the model gets a `learn` tool. After it finishes
+something that took several steps, or after you correct it, it writes down how
+to do it right next time as a note in the knowledge base, tagged `learned`. The
+notes come back through the same retrieval as every other entry (semantic tier
+included) when a later question is about the same thing. A note is keyed by its
+title, so learning the same thing again rewrites the note instead of adding
+another. The notes are guild-wide, so the tool is only offered to members with
+Manage Server, never in scheduled tasks, and capped at 200 notes a server. Read,
+edit or delete them in the dashboard's knowledge base like any other entry.
+
+**Web access**:
+
+With **Enable web access** on, the model has a `read_webpage` tool that fetches
+one public page and reads its text — a search result whose snippet is not
+enough, or a link somebody pasted. The URL is the model's choice, so it goes
+through the same SSRF guard as every dashboard URL: private and reserved
+addresses are refused, on every redirect. Pages that need a login or JavaScript
+come back empty.
+
+With `SEARXNG_URL` set by the operator as well, the model also has a
+`web_search` tool over that SearXNG instance. It returns titles, URLs and
+snippets, labelled as third-party text the model must not take instructions
+from, and the model is told to cite the URLs it uses. It is read-only, so it
+needs no approval and is offered to scheduled tasks too. Setup is in
+[SETUP_GUIDE.md](SETUP_GUIDE.md#web-search-searxng).
+
+**Searchable conversation history**:
+
+The chat keeps the last few turns per channel and a rolling summary, which is
+enough context for a reply but not for "what did we decide about the trip last
+month?". With **Searchable conversation history** on, every AI turn is also
+written to a log kept for a year, and the model gets a `search_conversations`
+tool over it — keyword search across every channel and DM. A member only ever
+searches their own conversations; the filter is the person asking, not anything
+the model passes. `/mydata` exports and erases the log with everything else.
 
 Older turns are not simply forgotten when they fall past the history window:
 what drops out is folded into a short rolling summary of the conversation, which

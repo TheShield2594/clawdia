@@ -186,9 +186,9 @@ describe('the summary on the finished reply', () => {
         await handleAIChat(message, SETTINGS);
 
         expect(mockAppendHistory).toHaveBeenCalledWith(
-            // The trailing argument is the summarizer for the turns this write
-            // may trim away (#833).
-            'g1', 'c1', 'u1', 'what changed in the repo?', 'Three open PRs.', 20, expect.anything()
+            // The summarizer for the turns this write may trim away (#833), and
+            // whether the turn also goes to the searchable log.
+            'g1', 'c1', 'u1', 'what changed in the repo?', 'Three open PRs.', 20, expect.anything(), { archive: false }
         );
     });
 

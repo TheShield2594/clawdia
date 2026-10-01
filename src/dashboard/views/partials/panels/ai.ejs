@@ -35,6 +35,27 @@
                             <input type="text" id="ai-model" value="<%= settings.ai.model || '' %>" placeholder="Leave empty for provider default">
                             <small id="ai-model-hint">Default: gpt-4o-mini</small>
                         </div>
+                        <div class="field field-pair">
+                            <div>
+                                <label class="field-label" for="ai-fallback-1-provider">Backup provider 1</label>
+                                <select id="ai-fallback-1-provider" data-change="ai-provider"><option value="" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === '' ? 'selected' : '' %>>None</option><option value="openai" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === 'openai' ? 'selected' : '' %>>OpenAI</option><option value="anthropic" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === 'anthropic' ? 'selected' : '' %>>Anthropic (Claude)</option><option value="gemini" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === 'gemini' ? 'selected' : '' %>>Google Gemini</option><option value="openrouter" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === 'openrouter' ? 'selected' : '' %>>OpenRouter</option><option value="ollama" <%= ((settings.ai.fallbacks || [])[0]?.provider || '') === 'ollama' ? 'selected' : '' %>>Ollama (self-hosted)</option></select>
+                            </div>
+                            <div>
+                                <label class="field-label" for="ai-fallback-1-model">Backup model 1</label>
+                                <input type="text" id="ai-fallback-1-model" value="<%= (settings.ai.fallbacks || [])[0]?.model || '' %>" placeholder="Leave empty for provider default">
+                            </div>
+                        </div>
+                        <div class="field field-pair">
+                            <div>
+                                <label class="field-label" for="ai-fallback-2-provider">Backup provider 2</label>
+                                <select id="ai-fallback-2-provider" data-change="ai-provider"><option value="" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === '' ? 'selected' : '' %>>None</option><option value="openai" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === 'openai' ? 'selected' : '' %>>OpenAI</option><option value="anthropic" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === 'anthropic' ? 'selected' : '' %>>Anthropic (Claude)</option><option value="gemini" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === 'gemini' ? 'selected' : '' %>>Google Gemini</option><option value="openrouter" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === 'openrouter' ? 'selected' : '' %>>OpenRouter</option><option value="ollama" <%= ((settings.ai.fallbacks || [])[1]?.provider || '') === 'ollama' ? 'selected' : '' %>>Ollama (self-hosted)</option></select>
+                            </div>
+                            <div>
+                                <label class="field-label" for="ai-fallback-2-model">Backup model 2</label>
+                                <input type="text" id="ai-fallback-2-model" value="<%= (settings.ai.fallbacks || [])[1]?.model || '' %>" placeholder="Leave empty for provider default">
+                            </div>
+                        </div>
+                        <div class="field"><small>Used in order when the provider above is down, overloaded, rate-limited or rejects its key — never once a reply has started. Each uses this server's key for that provider. Pick models whose context window is at least as large as the main one's.</small></div>
                         <form class="ai-keys-form" autocomplete="off" data-no-submit>
                         <div class="field ai-key-field" data-provider="openai">
                             <label class="field-label" for="ai-openai-key">OpenAI API key</label>
@@ -122,6 +143,31 @@
                         <label class="toggle">
                             <span class="toggle-text"><strong>Enable deep tasks</strong><span>Allow <code>/ai task</code> — multi-step work with a bigger tool budget, posted when it finishes. Costs much more per run than a chat message.</span></span>
                             <span class="switch"><input type="checkbox" id="ai-task-mode" <%= settings.ai.taskModeEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Save memories without asking</strong><span>The AI remembers and forgets facts about each member on its own instead of posting approval buttons. Suits a server you run for yourself. Needs AI actions on.</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-memory-autosave" <%= settings.ai.memory?.autoSave ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <div class="field">
+                            <label class="field-label" for="ai-memory-cap">Memories per member</label>
+                            <input type="number" id="ai-memory-cap" min="1" max="50" value="<%= settings.ai.memory?.cap ?? 10 %>">
+                            <small>1–50. Every saved memory goes into every reply's prompt, so more memories cost more per message.</small>
+                        </div>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Let the AI learn</strong><span>The AI writes down how it did things — and corrections you gave it — as notes in the knowledge base, and recalls them later. Only for members with Manage Server.</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-learning" <%= settings.ai.learningEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable web access</strong><span>Let the AI read public web pages, and search the web through the bot operator's SearXNG instance when <code>SEARXNG_URL</code> is set.</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-web-search" <%= settings.ai.webSearchEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Searchable conversation history</strong><span>Keep a year of each member's AI conversations so the AI can search them when asked about something from before. Each member can only ever search their own. Erased with <code>/mydata</code>.</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-conversation-search" <%= settings.ai.conversationSearch ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Listen to voice messages</strong><span>Transcribe voice messages and audio clips sent to the AI, then answer them. Uses this server's OpenAI key, or its Gemini key; each clip is billed by that provider.</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-voice-transcription" <%= settings.ai.voiceTranscription ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
                         <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
                         <div class="actions-row">
@@ -419,6 +465,11 @@
                             <label class="field-label" for="mcp-confirm-tools">Always ask before these tools <span class="mcp-section-note">(optional)</span></label>
                             <input type="text" id="mcp-confirm-tools" placeholder="create_issue, send_email">
                             <small>Comma-separated. These wait for someone to click <strong>Run it</strong> whatever the approval setting above says — the list to use when a tool has to be available but never unattended.</small>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="mcp-unattended-tools">Run without asking in scheduled tasks <span class="mcp-section-note">(optional)</span></label>
+                            <input type="text" id="mcp-unattended-tools" placeholder="create_event, update_event">
+                            <small>Comma-separated. A scheduled task has nobody to click <strong>Run it</strong>, so a tool that needs approval is refused there. Tools listed here go ahead in scheduled tasks only; a conversation still asks.</small>
                         </div>
                         <label class="toggle">
                             <span class="toggle-text"><strong>Enabled</strong><span>Offer this server's tools to the model</span></span>
