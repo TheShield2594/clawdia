@@ -78,6 +78,40 @@ test('a command that does not exist is an error, and is not retried on every mes
     await expect(client.initialize()).rejects.toThrow(/not retrying yet/);
 });
 
+test('a server that exits as it starts fails at once, not after the handshake timeout', async () => {
+    // A bad argument or a missing package: the process is gone before it has
+    // said anything, and the caller must hear so now, not in twenty seconds.
+    const client = makeClient({ stdio: { args: ['-e', 'process.stderr.write("bad flag\\n"); process.exit(2)'] } });
+    const started = Date.now();
+    const error = await client.initialize().catch(err => err);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toMatch(/exited with code 2|stopped/);
+    expect(Date.now() - started).toBeLessThan(3000);
+});
+
+test('a server that dies before the start settles is refused, not handed out dead', async () => {
+    // The race the real-process test above cannot force: the exit lands
+    // before the start has resolved, and the dead child's stdin still takes a
+    // write. Without the check, the request waits out the whole timeout.
+    const { EventEmitter } = require('events');
+    const { PassThrough } = require('stream');
+    const spawnImpl = () => {
+        const child = new EventEmitter();
+        child.stdout = new PassThrough();
+        child.stderr = new PassThrough();
+        child.stdin = { write: (_line, cb) => cb(), end: () => {}, on: () => {} };
+        child.kill = () => {};
+        process.nextTick(() => child.emit('exit', 1, null));
+        return child;
+    };
+    const client = new McpStdioClient({ stdio: stdio(), label: 'test-stdio', spawnImpl });
+    clients.push(client);
+
+    const started = Date.now();
+    await expect(client.initialize()).rejects.toThrow(/could not start test-stdio: exited with code 1/);
+    expect(Date.now() - started).toBeLessThan(3000);
+});
+
 test('close stops the process', async () => {
     const client = makeClient();
     await client.initialize();

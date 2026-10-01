@@ -102,11 +102,20 @@ describe('searxngBaseUrl', () => {
 });
 
 describe('web_search', () => {
+    // A real streamed body, so the size cap is exercised the way fetch delivers it.
     const respond = (status, body) => jest.fn(async () => ({
         ok: status >= 200 && status < 300,
         status,
-        text: async () => (typeof body === 'string' ? body : JSON.stringify(body))
+        body: require('stream').Readable.toWeb(require('stream').Readable.from([
+            Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))
+        ]))
     }));
+
+    test('stops reading a response past the size cap rather than buffering it', async () => {
+        const huge = JSON.stringify({ results: [{ url: 'https://x', title: 'x'.repeat(2 * 1024 * 1024) }] });
+        const text = await searchWeb({ query: 'x' }, { baseUrl: 'http://s', fetchImpl: respond(200, huge) });
+        expect(text).toMatch(/unreadable/);
+    });
 
     test('asks SearXNG for JSON and labels what comes back as third-party data', async () => {
         const fetchImpl = respond(200, {

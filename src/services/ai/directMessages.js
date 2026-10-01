@@ -47,7 +47,10 @@ async function resolveDmContext(message, client) {
         return null;
     }
 
-    const member = await guild.members.fetch(message.author.id).catch(() => null);
+    // Forced past the cache: this is an authorization check, and a member
+    // whose Manage Server was revoked a minute ago must not still pass it on
+    // a cached copy. One REST call per DM.
+    const member = await guild.members.fetch({ user: message.author.id, force: true }).catch(() => null);
     if (!member?.permissions?.has(PermissionFlagsBits.ManageGuild)) return null;
 
     const settings = await getGuildSettings(guildId);

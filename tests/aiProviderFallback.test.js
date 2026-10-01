@@ -163,6 +163,9 @@ test('the bot\'s own limits are never retried on another provider', () => {
     expect(shouldFallBack(Object.assign(new Error('limit'), { rateLimited: true }))).toBe(false);
     expect(shouldFallBack(httpError(404))).toBe(true);
     expect(shouldFallBack(httpError(422))).toBe(false);
+    // A request the caller cancelled is not one to send somewhere else.
+    expect(shouldFallBack(Object.assign(new Error('aborted'), { name: 'AbortError' }))).toBe(false);
+    expect(shouldFallBack(Object.assign(new Error('aborted'), { name: 'APIUserAbortError' }))).toBe(false);
 });
 
 describe('saving the list from the dashboard', () => {

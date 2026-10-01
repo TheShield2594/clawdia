@@ -75,7 +75,7 @@ describe('transcribeClip', () => {
         const requestImpl = download();
         const transcriber = { name: 'OpenAI', transcribe: jest.fn(async () => '  remind me to call mum at six  ') };
 
-        const result = await transcribeClip(clip, {}, 'g1', { transcriber, requestImpl });
+        const result = await transcribeClip(clip, {}, 'g1', { transcribers: [transcriber], requestImpl });
 
         expect(requestImpl.mock.calls[0][1].dispatcher).toBe(guardedDispatcher());
         expect(transcriber.transcribe).toHaveBeenCalledWith(Buffer.from('OggS...'), clip);
@@ -84,13 +84,61 @@ describe('transcribeClip', () => {
 
     test('every failure is a sentence for the user, never a throw', async () => {
         const ok = { name: 'OpenAI', transcribe: async () => 'hi' };
-        await expect(transcribeClip(clip, {}, 'g1', { transcriber: null })).resolves.toEqual({ error: expect.stringMatching(/no OpenAI or Gemini key/) });
-        await expect(transcribeClip(clip, {}, 'g1', { transcriber: ok, requestImpl: download(Buffer.from('x'), 404) })).resolves.toEqual({ error: expect.stringMatching(/could not download/) });
-        await expect(transcribeClip({ ...clip, url: 'http://127.0.0.1/a.ogg' }, {}, 'g1', { transcriber: ok, requestImpl: download() })).resolves.toEqual({ error: expect.stringMatching(/could not download/) });
+        await expect(transcribeClip(clip, {}, 'g1', { transcribers: [] })).resolves.toEqual({ error: expect.stringMatching(/no OpenAI or Gemini key/) });
+        await expect(transcribeClip(clip, {}, 'g1', { transcribers: [ok], requestImpl: download(Buffer.from('x'), 404) })).resolves.toEqual({ error: expect.stringMatching(/could not download/) });
+        await expect(transcribeClip({ ...clip, url: 'http://127.0.0.1/a.ogg' }, {}, 'g1', { transcribers: [ok], requestImpl: download() })).resolves.toEqual({ error: expect.stringMatching(/could not download/) });
         const broken = { name: 'OpenAI', transcribe: async () => { throw new Error('429'); } };
-        await expect(transcribeClip(clip, {}, 'g1', { transcriber: broken, requestImpl: download() })).resolves.toEqual({ error: expect.stringMatching(/could not transcribe/) });
+        await expect(transcribeClip(clip, {}, 'g1', { transcribers: [broken], requestImpl: download() })).resolves.toEqual({ error: expect.stringMatching(/could not transcribe/) });
         const silent = { name: 'OpenAI', transcribe: async () => '   ' };
-        await expect(transcribeClip(clip, {}, 'g1', { transcriber: silent, requestImpl: download() })).resolves.toEqual({ error: expect.stringMatching(/could not make out/) });
+        await expect(transcribeClip(clip, {}, 'g1', { transcribers: [silent], requestImpl: download() })).resolves.toEqual({ error: expect.stringMatching(/could not make out/) });
+    });
+});
+
+describe('choosing a service by format, and falling through', () => {
+    const download = () => jest.fn(async () => ({ ok: true, status: 200, body: Readable.toWeb(Readable.from([Buffer.from('audio')])) }));
+    const aac = { url: VOICE.url, name: 'memo.aac', mimeType: 'audio/aac' };
+    const service = (name, formats, transcribe = async () => `${name} heard it`) =>
+        ({ name, accepts: clip => formats.includes(clip.mimeType), transcribe: jest.fn(transcribe) });
+
+    test('a format only Gemini reads goes to Gemini even when OpenAI is first', async () => {
+        const openai = service('OpenAI', ['audio/ogg']);
+        const gemini = service('Gemini', ['audio/ogg', 'audio/aac']);
+        const result = await transcribeClip(aac, {}, 'g1', { transcribers: [openai, gemini], requestImpl: download() });
+        expect(openai.transcribe).not.toHaveBeenCalled();
+        expect(result).toEqual({ text: 'Gemini heard it', service: 'Gemini' });
+    });
+
+    test('a format no available service reads is refused before anything is downloaded', async () => {
+        const requestImpl = download();
+        const result = await transcribeClip(aac, {}, 'g1', { transcribers: [service('OpenAI', ['audio/ogg'])], requestImpl });
+        expect(result.error).toMatch(/audio\/aac is not a format/);
+        expect(requestImpl).not.toHaveBeenCalled();
+    });
+
+    test('a failure on the first service is tried once more on the next', async () => {
+        const openai = service('OpenAI', ['audio/ogg'], async () => { throw new Error('503'); });
+        const gemini = service('Gemini', ['audio/ogg']);
+        const clip = { url: VOICE.url, name: VOICE.name, mimeType: 'audio/ogg' };
+        await expect(transcribeClip(clip, {}, 'g1', { transcribers: [openai, gemini], requestImpl: download() }))
+            .resolves.toEqual({ text: 'Gemini heard it', service: 'Gemini' });
+    });
+
+    test('silence is an answer, not a failure to retry', async () => {
+        const openai = service('OpenAI', ['audio/ogg'], async () => '');
+        const gemini = service('Gemini', ['audio/ogg']);
+        const clip = { url: VOICE.url, name: VOICE.name, mimeType: 'audio/ogg' };
+        const result = await transcribeClip(clip, {}, 'g1', { transcribers: [openai, gemini], requestImpl: download() });
+        expect(result.error).toMatch(/could not make out/);
+        expect(gemini.transcribe).not.toHaveBeenCalled();
+    });
+
+    test('the real services declare what they read: OpenAI not raw AAC, Gemini yes', () => {
+        const { transcribersFor } = require('../src/services/ai/transcription');
+        const [openai, gemini] = transcribersFor({ openaiKey: 'sk-test', geminiKey: 'g-test' }, null);
+        expect(openai.accepts({ mimeType: 'audio/aac' })).toBe(false);
+        expect(openai.accepts({ mimeType: 'audio/ogg' })).toBe(true);
+        expect(gemini.accepts({ mimeType: 'audio/aac' })).toBe(true);
+        expect(gemini.accepts({ mimeType: 'audio/x-m4a' })).toBe(true);
     });
 });
 

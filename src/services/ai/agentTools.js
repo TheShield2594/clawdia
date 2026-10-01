@@ -131,9 +131,9 @@ async function searchWeb({ query, timeRange } = {}, { baseUrl = searxngBaseUrl()
 
     let body;
     try {
-        const text = await response.text();
-        if (text.length > SEARCH_MAX_BYTES) throw new Error('response too large');
-        body = JSON.parse(text);
+        // Capped while it is read, not after: a misconfigured or hostile
+        // endpoint must not be able to make the bot buffer an unbounded body.
+        body = JSON.parse(await readCappedText(response, SEARCH_MAX_BYTES));
     } catch (err) {
         console.warn(`[AI:web_search] unreadable response: ${err.message}`);
         return 'The web search returned something unreadable, so nothing was found.';

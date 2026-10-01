@@ -70,7 +70,8 @@ describe('which DMs are answered', () => {
         const context = await resolveDmContext(makeDm(), client);
         expect(context.guild).toBe(guild);
         expect(context.settings.ai.enabled).toBe(true);
-        expect(guild.members.fetch).toHaveBeenCalledWith('u1');
+        // Forced past the cache, since this decides who may use the bot.
+        expect(guild.members.fetch).toHaveBeenCalledWith({ user: 'u1', force: true });
     });
 
     test('a member without Manage Server is not', async () => {

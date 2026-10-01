@@ -160,6 +160,9 @@ function shouldFallBack(error) {
     if (!error || error.rateLimited || error.budgetExceeded || error.name === 'AiRateLimitError' || error.name === 'AiBudgetError') {
         return false;
     }
+    // A cancelled request was cancelled on purpose: asking the next provider
+    // would answer something nobody is waiting for any more.
+    if (error.name === 'AbortError' || error.name === 'APIUserAbortError') return false;
     const status = Number(error.status ?? error.statusCode ?? error.response?.status ?? error.code);
     if (Number.isInteger(status) && status >= 100 && status < 600) return FALLBACK_STATUSES.has(status);
     return true;

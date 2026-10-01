@@ -139,6 +139,12 @@ class McpStdioClient extends McpHttpClient {
             child.once('exit', (code, signal) => {
                 const why = signal ? `killed by ${signal}` : `exited with code ${code}`;
                 if (Date.now() - started < 5000 && code !== 0) this.noteFailure(why);
+                // Gone before the start settled: the start failed, and must
+                // not resolve with a dead child a request would then wait on.
+                if (!settled) {
+                    settled = true;
+                    reject(new McpError(`could not start ${this.label}: ${why}`));
+                }
                 this.processGone(child, new Error(`${why}${this.stderrTail ? ` — ${this.stderrTail.trim().split('\n').slice(-3).join(' | ')}` : ''}`));
             });
 
@@ -206,6 +212,11 @@ class McpStdioClient extends McpHttpClient {
 
     async postOverStdio(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, onNotification = null, onServerRequest = null } = {}) {
         const child = await this.openProcess();
+        // The process can die between starting and this request; a waiter
+        // registered against a child that is already gone is never answered.
+        if (this.child !== child) {
+            throw new McpError(`${this.label} stopped before the request was sent`, { sessionExpired: true });
+        }
 
         const deadline = { at: Date.now() + timeout, reschedule: null };
         let waiting = null;

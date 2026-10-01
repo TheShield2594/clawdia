@@ -43,7 +43,25 @@ const TRANSCRIBE_TIMEOUT_MS = 60_000;
 const MAX_TRANSCRIPT_CHARS = 8000;
 
 const OPENAI_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
-const GEMINI_TRANSCRIBE_MODEL = 'gemini-2.5-flash';
+// The model Google's own audio-understanding guide uses. The 2.5 models are
+// limited to projects that already used them, so a key made today could not
+// call one.
+const GEMINI_TRANSCRIBE_MODEL = 'gemini-3.8-flash';
+
+// What each service accepts, by the MIME type the clip arrives as. OpenAI's
+// transcription endpoint takes flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav and
+// webm — not raw AAC or a bare .opus file. Gemini takes those and more, but
+// names some of them differently, so a clip is relabelled for it.
+const OPENAI_FORMATS = new Set([
+    'audio/ogg', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/m4a', 'audio/x-m4a',
+    'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/webm', 'audio/flac'
+]);
+const GEMINI_MIME = {
+    'audio/ogg': 'audio/ogg', 'audio/opus': 'audio/opus', 'audio/mpeg': 'audio/mpeg', 'audio/mp3': 'audio/mp3',
+    'audio/mp4': 'audio/m4a', 'audio/m4a': 'audio/m4a', 'audio/x-m4a': 'audio/m4a',
+    'audio/wav': 'audio/wav', 'audio/x-wav': 'audio/wav', 'audio/wave': 'audio/wav',
+    'audio/webm': 'audio/webm', 'audio/flac': 'audio/flac', 'audio/aac': 'audio/aac'
+};
 
 function audioMimeType(attachment) {
     const declared = String(attachment?.contentType || '').split(';')[0].trim().toLowerCase();
@@ -91,6 +109,7 @@ function openaiTranscriber(aiSettings, guildId) {
     if (!apiKey) return null;
     return {
         name: 'OpenAI',
+        accepts: clip => OPENAI_FORMATS.has(clip.mimeType),
         async transcribe(buffer, clip) {
             const { OpenAI, toFile } = require('openai');
             const client = new OpenAI({ apiKey, timeout: TRANSCRIBE_TIMEOUT_MS });
@@ -106,6 +125,7 @@ function geminiTranscriber(aiSettings, guildId) {
     if (!apiKey) return null;
     return {
         name: 'Gemini',
+        accepts: clip => Boolean(GEMINI_MIME[clip.mimeType]),
         async transcribe(buffer, clip) {
             const { GoogleGenAI } = require('@google/genai');
             const client = new GoogleGenAI({ apiKey });
@@ -114,7 +134,7 @@ function geminiTranscriber(aiSettings, guildId) {
                 contents: [{
                     role: 'user',
                     parts: [
-                        { inlineData: { mimeType: clip.mimeType, data: buffer.toString('base64') } },
+                        { inlineData: { mimeType: GEMINI_MIME[clip.mimeType], data: buffer.toString('base64') } },
                         { text: 'Transcribe this voice message word for word, in the language it is spoken in. '
                             + 'Reply with the transcript only — no preamble, no notes. If nothing intelligible is said, reply with nothing.' }
                     ]
@@ -127,18 +147,19 @@ function geminiTranscriber(aiSettings, guildId) {
 }
 
 /**
- * The service that will transcribe for this guild, or null when it has no key
- * for either.
+ * Every service this guild has a key for, in the order to try them: Gemini
+ * first for a guild on Gemini, OpenAI first otherwise.
  */
-function transcriberFor(aiSettings, guildId) {
+function transcribersFor(aiSettings, guildId) {
     const order = aiSettings?.provider === 'gemini'
         ? [geminiTranscriber, openaiTranscriber]
         : [openaiTranscriber, geminiTranscriber];
-    for (const make of order) {
-        const transcriber = make(aiSettings || {}, guildId);
-        if (transcriber) return transcriber;
-    }
-    return null;
+    return order.map(make => make(aiSettings || {}, guildId)).filter(Boolean);
+}
+
+/** The first service that would be tried, or null with no key for either. */
+function transcriberFor(aiSettings, guildId) {
+    return transcribersFor(aiSettings, guildId)[0] || null;
 }
 
 async function downloadClip(clip, { requestImpl = request } = {}) {
@@ -161,9 +182,15 @@ async function downloadClip(clip, { requestImpl = request } = {}) {
  *
  * @returns {Promise<{text?: string, service?: string, error?: string}>}
  */
-async function transcribeClip(clip, aiSettings, guildId, { transcriber = transcriberFor(aiSettings, guildId), requestImpl } = {}) {
-    if (!transcriber) {
+async function transcribeClip(clip, aiSettings, guildId, { transcribers = transcribersFor(aiSettings, guildId), requestImpl } = {}) {
+    if (!transcribers.length) {
         return { error: 'I cannot listen to voice messages here: this server has no OpenAI or Gemini key for transcription.' };
+    }
+    // Only the services that can read this format — decided before anything
+    // is downloaded, so an unsupported clip costs nothing.
+    const able = transcribers.filter(transcriber => !transcriber.accepts || transcriber.accepts(clip));
+    if (!able.length) {
+        return { error: `I cannot listen to that recording: ${clip.mimeType} is not a format this server's transcription service reads.` };
     }
 
     let buffer;
@@ -175,20 +202,32 @@ async function transcribeClip(clip, aiSettings, guildId, { transcriber = transcr
     }
     if (!buffer?.length) return { error: 'That voice message was empty.' };
 
-    let text;
-    try {
-        text = await transcriber.transcribe(buffer, clip);
-    } catch (err) {
-        console.warn(`[AI:voice] ${transcriber.name} transcription failed: ${err.message}`);
-        return { error: 'I could not transcribe that voice message. Try again, or type it.' };
+    // Each able service in turn: a failure on one (an outage, a key without
+    // access to the model) is worth one more try on the other.
+    let heardNothing = false;
+    for (const transcriber of able) {
+        let text;
+        try {
+            text = await transcriber.transcribe(buffer, clip);
+        } catch (err) {
+            console.warn(`[AI:voice] ${transcriber.name} transcription failed: ${err.message}`);
+            continue;
+        }
+        const clean = typeof text === 'string' ? text.trim() : '';
+        if (!clean) {
+            // Silence is an answer, not a failure: another service would hear
+            // the same nothing.
+            heardNothing = true;
+            break;
+        }
+        return {
+            text: clean.length > MAX_TRANSCRIPT_CHARS ? `${clean.slice(0, MAX_TRANSCRIPT_CHARS)}…` : clean,
+            service: transcriber.name
+        };
     }
-
-    const clean = typeof text === 'string' ? text.trim() : '';
-    if (!clean) return { error: 'I could not make out anything in that voice message.' };
-    return {
-        text: clean.length > MAX_TRANSCRIPT_CHARS ? `${clean.slice(0, MAX_TRANSCRIPT_CHARS)}…` : clean,
-        service: transcriber.name
-    };
+    return heardNothing
+        ? { error: 'I could not make out anything in that voice message.' }
+        : { error: 'I could not transcribe that voice message. Try again, or type it.' };
 }
 
 /**
@@ -205,6 +244,7 @@ module.exports = {
     collectVoice,
     transcribeClip,
     transcriberFor,
+    transcribersFor,
     voiceTurn,
     audioMimeType,
     MAX_AUDIO_BYTES,

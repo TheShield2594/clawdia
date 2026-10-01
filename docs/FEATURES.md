@@ -48,8 +48,10 @@ the audio.
 
 Transcription uses the server's own keys, with no new setting: Gemini for a
 server on Gemini, otherwise OpenAI's `gpt-4o-mini-transcribe`, otherwise
-Gemini. A server on Claude, OpenRouter or Ollama needs an OpenAI or Gemini key
-for it. Each clip is a separate charge from that provider, outside the monthly
+Gemini (`gemini-3.8-flash`). A clip only goes to a service that reads its
+format, so raw AAC goes to Gemini, and a transcription that fails on one
+service is tried once on the other. A server on Claude, OpenRouter or Ollama
+needs an OpenAI or Gemini key for it. Each clip is a separate charge from that provider, outside the monthly
 budget the AI usage ledger tracks. Clips over ten minutes or 19 MB are refused
 with a reason rather than transcribed, and the clip is downloaded through the
 same SSRF guard as images.
