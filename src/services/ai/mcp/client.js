@@ -463,11 +463,16 @@ class McpHttpClient {
         // address, and it may be plain http. Nothing a guild can write reaches
         // this flag. Every other connection keeps both.
         this.privateNetwork = privateNetwork === true;
-        // Throws for anything that is not a plain http(s) URL, and for a literal
-        // private address — the one destination that is knowable before DNS.
-        this.url = this.privateNetwork
-            ? operatorHttpUrl(url, `${label} URL`).toString()
-            : assertPublicHttpUrl(url, `${label} URL`).toString();
+        // A local process has no URL to check (McpStdioClient in ./stdio.js).
+        // Otherwise this throws for anything that is not a plain http(s) URL,
+        // and for a literal private address — the one destination that is
+        // knowable before DNS.
+        if (transport === 'stdio') this.url = null;
+        else {
+            this.url = this.privateNetwork
+                ? operatorHttpUrl(url, `${label} URL`).toString()
+                : assertPublicHttpUrl(url, `${label} URL`).toString();
+        }
         this.label = label;
         this.token = typeof authorizationToken === 'string' && authorizationToken.trim()
             ? authorizationToken.trim()
@@ -476,7 +481,7 @@ class McpHttpClient {
         this.onNotification = typeof onNotification === 'function' ? onNotification : null;
         this.elicitation = Boolean(elicitation);
         this.sampling = Boolean(sampling);
-        this.transport = ['http', 'sse'].includes(transport) ? transport : 'auto';
+        this.transport = ['http', 'sse', 'stdio'].includes(transport) ? transport : 'auto';
         // The standing GET stream of the older transport, and what is still
         // waiting for an answer on it. Both stay empty on Streamable HTTP,
         // where a response arrives on the POST that asked for it.
@@ -1368,6 +1373,8 @@ class McpHttpClient {
 
 module.exports = {
     McpHttpClient,
+    readWithDeadline,
+    CONNECT_TIMEOUT_MS,
     SSE_PROTOCOL_VERSION,
     McpError,
     INTERNAL_ERROR,

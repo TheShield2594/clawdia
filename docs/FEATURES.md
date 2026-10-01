@@ -232,6 +232,9 @@ Config file:
 
 - `${VAR}` values resolve from the environment, so tokens stay out of the file
 - `enabled: false` parks a server without deleting the entry
+- `command` instead of `url` runs the server as a local process and speaks MCP
+  over its stdin/stdout — the transport most servers ship with. Config file
+  only ([details](SETUP_GUIDE.md#mcp-servers))
 - `allow_private: true` lets an entry reach a server on your own network — a
   LAN address or plain `http://` — which no dashboard connection can
   ([details](SETUP_GUIDE.md#mcp-servers))

@@ -91,6 +91,13 @@ async function mapWithLimit(items, limit, fn) {
 // connection, and therefore a session and a tool cache, with that guild's
 // actual grant.
 function keyFor(connection) {
+    // A process is the command that starts it: the same name pointed at a
+    // different command, args or env after a config reload is a different
+    // server, and must not inherit the old one's process or tool list.
+    // Hashed, because the env it is built from holds the server's secrets.
+    if (connection.stdio) {
+        return `stdio ${require('crypto').createHash('sha256').update(JSON.stringify(connection.stdio)).digest('hex')}`;
+    }
     // A connection allowed onto the private network is never pooled with one
     // that is not, or a dashboard entry pasting the same public URL and token
     // would be handed a client that skips the SSRF guard.
@@ -136,6 +143,12 @@ function entryFor(server) {
  * up as a connection that works in a channel and 401s in the panel.
  */
 function mcpClientFor(server, { onNotification = null, elicitation = false, sampling = false } = {}) {
+    // A local process from the operator's config file (`command`). Required
+    // lazily so a bot with no such server never loads child_process here.
+    if (server.connection.stdio) {
+        const { McpStdioClient } = require('./stdio');
+        return new McpStdioClient({ stdio: server.connection.stdio, label: server.name, onNotification, elicitation, sampling });
+    }
     const grant = server.connection.oauth;
     return new McpHttpClient({
         url: server.connection.url,

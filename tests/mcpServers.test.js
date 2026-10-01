@@ -659,3 +659,64 @@ describe('allow_private', () => {
         expect(effectiveMcpRoute('connector', 'off', forGuild('g1', []))).toBe('client');
     });
 });
+
+// A server the bot runs as a local process (`command`) — config file only.
+describe('stdio servers', () => {
+    const entry = (extra = {}) => ({ name: 'vault', command: 'npx', args: ['-y', 'obsidian-mcp', '/vault'], ...extra });
+
+    test('a config-file entry with a command becomes a local process', () => {
+        writeConfig({ servers: [entry({ env: { VAULT_TOKEN: 'abc' }, cwd: '/srv', guilds: ['g1'], unattended_tools: ['write_note'] })] });
+        const { servers, warnings } = load();
+        expect(warnings).toEqual([]);
+        expect(servers[0]).toMatchObject({
+            name: 'vault',
+            stdio: true,
+            guilds: ['g1'],
+            connection: { stdio: { command: 'npx', args: ['-y', 'obsidian-mcp', '/vault'], env: { VAULT_TOKEN: 'abc' }, cwd: '/srv' } }
+        });
+        expect(servers[0].toolset.unattended_tools).toEqual(['write_note']);
+    });
+
+    test('env values and args may be ${VAR} references, and a missing one skips the server', () => {
+        process.env.TEST_VAULT_TOKEN = 'from-env';
+        process.env.TEST_VAULT_DIR = '/data/vault';
+        try {
+            writeConfig({ servers: [entry({ args: ['${TEST_VAULT_DIR}'], env: { TOKEN: '${TEST_VAULT_TOKEN}' } })] });
+            expect(load().servers[0].connection.stdio).toMatchObject({ args: ['/data/vault'], env: { TOKEN: 'from-env' } });
+
+            writeConfig({ servers: [entry({ env: { TOKEN: '${TEST_NOT_SET_ANYWHERE}' } })] });
+            const { servers, warnings } = load();
+            expect(servers).toEqual([]);
+            expect(warnings.join(' ')).toMatch(/TEST_NOT_SET_ANYWHERE/);
+        } finally {
+            delete process.env.TEST_VAULT_TOKEN;
+            delete process.env.TEST_VAULT_DIR;
+        }
+    });
+
+    test.each([
+        ['an empty command', { command: '  ' }],
+        ['args that are not strings', { args: ['ok', 3] }],
+        ['env that is not an object', { env: ['A=1'] }],
+        ['an env name that is not a variable name', { env: { 'A B': '1' } }]
+    ])('skips %s with a warning', (_label, extra) => {
+        writeConfig({ servers: [entry(extra)] });
+        const { servers, warnings } = load();
+        expect(servers).toEqual([]);
+        expect(warnings).toHaveLength(1);
+    });
+
+    test('a dashboard entry can never name a command', () => {
+        writeConfig({ servers: [] });
+        load();
+        expect(resolveMcpServers(forGuild('g1', [entry()]))).toEqual([]);
+        expect(console.warn).toHaveBeenCalledWith(expect.stringMatching(/only the operator's config file/));
+    });
+
+    test('is never offered to Anthropic\'s connector, and forces the bot\'s own client', () => {
+        writeConfig({ servers: [entry(), { name: 'docs', url: 'https://mcp.example.com/docs' }] });
+        load();
+        expect(buildAnthropicMcpParams(forGuild('g1', [])).mcp_servers.map(server => server.name)).toEqual(['docs']);
+        expect(needsClientRoute(forGuild('g1', []))).toBe(true);
+    });
+});

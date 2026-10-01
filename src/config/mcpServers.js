@@ -333,6 +333,99 @@ function isToolDeferred(toolset, toolName) {
 // (the API rejects either half on its own, so they are always built together),
 // and the plain url/token pair the bot's own MCP client dials for every other
 // provider.
+// A config-file entry's `guilds` list (#1143): null when absent (every guild),
+// the trimmed ids when present, and false — skip the entry — when malformed.
+function fileGuilds(raw, label, warnings) {
+    if (raw.guilds === undefined) return null;
+    if (!Array.isArray(raw.guilds)) {
+        warnings.push(`${label} "guilds" must be an array of guild ids — skipping it`);
+        return false;
+    }
+    return raw.guilds.filter(id => typeof id === 'string' && id.trim()).map(id => id.trim());
+}
+
+// The most arguments and environment entries one command may carry. Generous
+// for any real server; a ceiling so a malformed file is a warning, not a hang.
+const MAX_STDIO_ARGS = 64;
+const MAX_STDIO_ENV = 64;
+const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * A config-file server the bot runs as a local process and speaks to over
+ * stdin/stdout (src/services/ai/mcp/stdio.js) — the transport most MCP servers
+ * ship with. Config file only: a command in a dashboard field would be remote
+ * code execution for every guild admin, so a guild entry with one is skipped.
+ *
+ * `env` values expand `${VAR}` like a token does, and only what is named there
+ * reaches the process — not the bot's own environment (see INHERITED_ENV).
+ */
+function normalizeStdioServer(raw, name, { label, source, expandEnv, warnings }) {
+    const where = `${label} ("${name}")`;
+    if (source !== 'file') {
+        warnings.push(`${where} names a command, which only the operator's config file may do — skipping it`);
+        return null;
+    }
+    const command = typeof raw.command === 'string' ? raw.command.trim() : '';
+    if (!command) {
+        warnings.push(`${where} "command" must be a non-empty string — skipping it`);
+        return null;
+    }
+    if (raw.url !== undefined) {
+        warnings.push(`${where} has both "command" and "url"; it is run as a command and the url is ignored`);
+    }
+
+    const rawArgs = raw.args === undefined ? [] : raw.args;
+    if (!Array.isArray(rawArgs) || rawArgs.length > MAX_STDIO_ARGS || rawArgs.some(arg => typeof arg !== 'string')) {
+        warnings.push(`${where} "args" must be an array of at most ${MAX_STDIO_ARGS} strings — skipping it`);
+        return null;
+    }
+    const args = [];
+    for (const arg of rawArgs) {
+        // An argument may be a ${VAR} reference too, for a path or a key.
+        const value = ENV_REF_PATTERN.test(arg.trim()) ? resolveSecret(arg, { expandEnv, label: `${where} args`, warnings }) : arg;
+        if (value === null) return null;
+        args.push(value ?? '');
+    }
+
+    const env = {};
+    if (raw.env !== undefined) {
+        if (!raw.env || typeof raw.env !== 'object' || Array.isArray(raw.env) || Object.keys(raw.env).length > MAX_STDIO_ENV) {
+            warnings.push(`${where} "env" must be an object of at most ${MAX_STDIO_ENV} string values — skipping it`);
+            return null;
+        }
+        for (const [key, value] of Object.entries(raw.env)) {
+            if (!ENV_NAME_PATTERN.test(key) || typeof value !== 'string') {
+                warnings.push(`${where} env "${key}" must be a variable name with a string value — skipping the server`);
+                return null;
+            }
+            const resolved = resolveSecret(value, { expandEnv, label: `${where} env ${key}`, warnings });
+            if (resolved === null) return null;
+            env[key] = resolved ?? '';
+        }
+    }
+
+    const cwd = typeof raw.cwd === 'string' && raw.cwd.trim() ? raw.cwd.trim() : null;
+    const guilds = fileGuilds(raw, where, warnings);
+    if (guilds === false) return null;
+
+    const stdio = { command, args, env, ...(cwd ? { cwd } : {}) };
+    // Not a URL anyone dials. It names the connection in logs, the pool and the
+    // dashboard, and never leaves the bot: a stdio server is never offered to
+    // Anthropic's connector (see `needsClientRoute`).
+    const url = `stdio:${name}`;
+    return {
+        name,
+        source,
+        server: { type: 'url', url, name },
+        resources: raw.resources === true || raw.use_resources === true,
+        oauth: false,
+        stdio: true,
+        ...(guilds ? { guilds } : {}),
+        connection: { url, authorizationToken: null, oauth: null, stdio },
+        toolset: buildToolset(name, raw, where, warnings)
+    };
+}
+
 function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId = null }) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         warnings.push(`${label} is not an object — skipping it`);
@@ -345,6 +438,9 @@ function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId
         warnings.push(`${label} needs a "name" of letters, digits, underscores or hyphens — skipping it`);
         return null;
     }
+
+    // A local process rather than a URL (`command`), config file only.
+    if (raw.command !== undefined) return normalizeStdioServer(raw, name, { label, source, expandEnv, warnings });
 
     const url = resolveSecret(raw.url, { expandEnv, label: `${label} ("${name}") url`, warnings });
     if (url === null) return null;
@@ -454,14 +550,8 @@ function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId
     // file's credentials are the operator's, and without a list they reach
     // every guild that turns AI on. Absent means every guild, which is what the
     // file has always meant; an empty list means none.
-    let guilds = null;
-    if (source === 'file' && raw.guilds !== undefined) {
-        if (!Array.isArray(raw.guilds)) {
-            warnings.push(`${label} ("${name}") "guilds" must be an array of guild ids — skipping it`);
-            return null;
-        }
-        guilds = raw.guilds.filter(id => typeof id === 'string' && id.trim()).map(id => id.trim());
-    }
+    const guilds = source === 'file' ? fileGuilds(raw, `${label} ("${name}")`, warnings) : null;
+    if (guilds === false) return null;
 
     return {
         name,
@@ -614,11 +704,11 @@ function usesOAuth(guildServers = []) {
 
 /**
  * Whether any server can only be reached through the bot's own MCP client: an
- * OAuth connection (only the bot can refresh its token) or one on the
- * operator's private network (Anthropic's side cannot reach it).
+ * OAuth connection (only the bot can refresh its token), one on the operator's
+ * private network, or a local process (Anthropic's side can reach neither).
  */
 function needsClientRoute(guildServers = []) {
-    return resolveMcpServers(guildServers).some(server => server.oauth || server.privateNetwork);
+    return resolveMcpServers(guildServers).some(server => server.oauth || server.privateNetwork || server.stdio);
 }
 
 /**
@@ -667,7 +757,7 @@ function buildAnthropicMcpParams(guildServers = []) {
     // fall-through safe wherever it happens.
     // A private-network server is dropped for the same reason: Anthropic would
     // be handed an address only the bot's host can reach.
-    const servers = resolveMcpServers(guildServers).filter(server => !server.oauth && !server.privateNetwork);
+    const servers = resolveMcpServers(guildServers).filter(server => !server.oauth && !server.privateNetwork && !server.stdio);
     if (!servers.length) return null;
     return {
         mcp_servers: servers.map(s => s.server),
