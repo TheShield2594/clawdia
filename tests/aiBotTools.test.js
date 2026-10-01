@@ -199,6 +199,23 @@ describe('what each tool does', () => {
         }
     });
 
+    test('a DM task goes to the person who asked, and the model is told so', async () => {
+        const { text } = await run('schedule_task', {
+            instruction: 'Brief me on the feeds', delayMinutes: 60, repeat: 'daily', deliverTo: 'dm'
+        }, { manageGuild: true });
+
+        expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({ deliverTo: 'dm', createdBy: 'u1' }));
+        expect(text).toMatch(/by DM/);
+    });
+
+    test('anything but "dm" posts in the channel', async () => {
+        await run('schedule_task', {
+            instruction: 'Brief the channel', delayMinutes: 60, repeat: 'daily', deliverTo: 'everyone'
+        }, { manageGuild: true });
+
+        expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({ deliverTo: 'channel' }));
+    });
+
     test('repeat "cron" without an expression is refused', async () => {
         const { text } = await run('schedule_task', { instruction: 'when?', repeat: 'cron' }, { manageGuild: true });
 

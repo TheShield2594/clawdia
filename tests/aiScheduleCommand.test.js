@@ -160,6 +160,30 @@ describe('/ai schedule add', () => {
         expect(said(i)).toMatch(/weekdays at 09:00/);
     });
 
+    it('sends a DM task to the person who set it up', async () => {
+        createTask.mockResolvedValue({ task: {
+            _id: 'aaaabbbbcccc123456', fireAt: new Date(Date.now() + 3_600_000), repeat: 'daily', deliverTo: 'dm'
+        } });
+        const i = add({ strings: { instruction: 'recap', every: 'daily', deliver: 'dm' } });
+
+        await command.execute(i);
+
+        expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ deliverTo: 'dm', createdBy: 'u1' }));
+        expect(said(i)).toMatch(/to your DMs/);
+        expect(said(i)).toMatch(/Keep your DMs open/);
+    });
+
+    it('refuses a DM task pointed at a channel', async () => {
+        const i = add({
+            strings: { instruction: 'recap', every: 'daily', deliver: 'dm' },
+            channelOption: { id: 'c2', isTextBased: () => true },
+        });
+        await command.execute(i);
+
+        expect(said(i)).toMatch(/leave `channel` out/);
+        expect(createTask).not.toHaveBeenCalled();
+    });
+
     it('refuses a named cadence and a cron schedule together', async () => {
         const i = add({ strings: { instruction: 'recap', every: 'daily', cron: '0 9 * * *' } });
         await command.execute(i);

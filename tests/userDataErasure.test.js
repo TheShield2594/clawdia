@@ -211,6 +211,9 @@ describe('records keyed by other fields or embedded in the guild (#1158)', () =>
             createdBy: 'member#0001', createdById: USER,
         });
         await ScheduledTask.create({ guildId: GUILD, channelId: 'c1', createdBy: USER, prompt: 'hi', fireAt: new Date() });
+        await ScheduledTask.create({
+            guildId: GUILD, channelId: 'c1', createdBy: USER, prompt: 'just for me', fireAt: new Date(), deliverTo: 'dm',
+        });
         await PendingDuel.create({ duelId: 'd1', guildId: GUILD, challengerId: USER, opponentId: OTHER_USER, amount: 10 });
         await Transaction.create({
             userId: OTHER_USER, guildId: GUILD, type: 'transfer', amount: 5, balance: 5, relatedUserId: USER,
@@ -242,6 +245,7 @@ describe('records keyed by other fields or embedded in the guild (#1158)', () =>
         const dump = await exportUserData(USER, GUILD);
         expect(dump.collections.polls.records[0]).toMatchObject({ isCreator: true, vote: 'b' });
         expect(dump.collections.scheduledTasks.records).toHaveLength(1);
+        expect(dump.collections.scheduledDmTasks.records).toHaveLength(1);
         expect(dump.collections.pendingDuels.records[0].opponentId).toBe('[redacted]');
         expect(dump.collections.transactionCounterparty.records).toHaveLength(1);
         expect(dump.collections.serverRecords.records[0].fishingWorldRecords).toHaveLength(1);
@@ -262,7 +266,11 @@ describe('records keyed by other fields or embedded in the guild (#1158)', () =>
         expect(poll.createdById).toBe(token);
         expect(poll.createdBy).toBe(DELETED_USER_NAME);
 
-        expect((await ScheduledTask.findOne({ guildId: GUILD }).lean()).createdBy).toBe(token);
+        // The channel task keeps running under a redacted creator; the DM one
+        // had nobody else to deliver to, so it is gone.
+        const tasks = await ScheduledTask.find({ guildId: GUILD }).lean();
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0]).toMatchObject({ createdBy: token, deliverTo: 'channel' });
         const duel = await PendingDuel.findOne({ duelId: 'd1' }).lean();
         expect(duel).toMatchObject({ challengerId: token, opponentId: OTHER_USER });
         expect((await Transaction.findOne({ userId: OTHER_USER, type: 'transfer' }).lean()).relatedUserId).toBe(token);

@@ -240,7 +240,8 @@ async function scheduleTask(action, message) {
         fireAt,
         repeat,
         cron,
-        timezone
+        timezone,
+        deliverTo: action.deliverTo === 'dm' ? 'dm' : 'channel'
     });
 
     if (error) return `Nothing was scheduled: ${error}`;
@@ -249,7 +250,10 @@ async function scheduleTask(action, message) {
     const cadence = task.cron
         ? `, repeating on the cron schedule \`${task.cron}\` in the server's timezone, ${task.timezone}`
         : task.repeat ? `, repeating ${task.repeat}` : ' (once)';
-    return `Scheduled. The first run is <t:${stamp}:F> (<t:${stamp}:R>)${cadence}, posting in this channel — `
+    const where = task.deliverTo === 'dm'
+        ? 'sent to them by DM (it stops if they close their DMs to the bot or lose Manage Server)'
+        : 'posting in this channel';
+    return `Scheduled. The first run is <t:${stamp}:F> (<t:${stamp}:R>)${cadence}, ${where} — `
         + 'include that timestamp when you confirm it, and mention that a server admin can list or remove it with /ai schedule.';
 }
 

@@ -492,12 +492,26 @@ const USER_DATA_ENTRIES = [
         reason: 'a scheduled task posts to a server channel and other members may '
             + 'rely on it; it keeps running under a redacted creator, and an admin '
             + 'can remove it from the dashboard.',
-        collect: (userId, guildId) => lean(ScheduledTask.find({ guildId, createdBy: userId })),
-        guilds: userId => ScheduledTask.distinct('guildId', { createdBy: userId }),
+        collect: (userId, guildId) => lean(ScheduledTask.find({ guildId, createdBy: userId, deliverTo: { $ne: 'dm' } })),
+        guilds: userId => ScheduledTask.distinct('guildId', { createdBy: userId, deliverTo: { $ne: 'dm' } }),
         remove: async (userId, guildId) => (await ScheduledTask.updateMany(
-            { guildId, createdBy: userId },
+            { guildId, createdBy: userId, deliverTo: { $ne: 'dm' } },
             { $set: { createdBy: pseudonymize(userId) } },
         )).modifiedCount || 0,
+    },
+    {
+        // The DM half of the same collection, deleted rather than kept: its
+        // only reader is the member, so under a redacted creator it would have
+        // nobody to deliver to and fail its way to switched-off anyway.
+        key: 'scheduledDmTasks',
+        label: 'Scheduled tasks the member set up to receive by DM',
+        model: ScheduledTask,
+        behavior: 'delete',
+        fields: ['createdBy'],
+        collect: (userId, guildId) => lean(ScheduledTask.find({ guildId, createdBy: userId, deliverTo: 'dm' })),
+        guilds: userId => ScheduledTask.distinct('guildId', { createdBy: userId, deliverTo: 'dm' }),
+        remove: async (userId, guildId) =>
+            (await ScheduledTask.deleteMany({ guildId, createdBy: userId, deliverTo: 'dm' })).deletedCount || 0,
     },
     {
         key: 'aiItems',

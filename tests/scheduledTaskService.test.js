@@ -358,6 +358,81 @@ describe('running an ai_prompt task', () => {
     });
 });
 
+describe('running a task that delivers by DM', () => {
+    function dmClient({ member = undefined, fetchThrows = false } = {}) {
+        const recipient = member === undefined
+            ? { permissions: { has: () => true }, send: jest.fn(async () => ({})) }
+            : member;
+        const guild = {
+            name: 'Test Server',
+            members: { fetch: jest.fn(async () => { if (fetchThrows) throw new Error('Unknown Member'); return recipient; }) }
+        };
+        return { client: { ...makeClient(null), guilds: { cache: { get: () => guild } } }, recipient, guild };
+    }
+
+    test('sends the answer to the person who set it up, saying where it came from', async () => {
+        const { client, recipient, guild } = dmClient();
+        due([makeTask({ _id: 'aaaaaa123456', deliverTo: 'dm' })]);
+
+        await runDueTasks(client);
+
+        expect(guild.members.fetch).toHaveBeenCalledWith('u1');
+        const sent = recipient.send.mock.calls[0][0];
+        expect(sent.content).toMatch(/`123456` from \*\*Test Server\*\*/);
+        expect(sent.content).toMatch(/the answer$/);
+        expect(sent.allowedMentions).toEqual({ parse: [] });
+        expect(sent.content.length).toBeLessThanOrEqual(2000);
+    });
+
+    test('tells the model the answer goes privately to an administrator', async () => {
+        due([makeTask({ deliverTo: 'dm' })]);
+        await runDueTasks(dmClient().client);
+
+        expect(aiService.getCompletion.mock.calls[0][0].systemPrompt).toMatch(/direct message/);
+    });
+
+    test('keeps a long answer inside Discord\'s limit, header included', async () => {
+        aiService.getCompletion.mockResolvedValue('x'.repeat(5000));
+        const { client, recipient } = dmClient();
+        due([makeTask({ deliverTo: 'dm' })]);
+
+        await runDueTasks(client);
+
+        expect(recipient.send.mock.calls[0][0].content).toHaveLength(2000);
+    });
+
+    test('fails without spending anything once the owner has left the server', async () => {
+        due([makeTask({ deliverTo: 'dm' })]);
+        await runDueTasks(dmClient({ fetchThrows: true }).client);
+
+        expect(aiService.getCompletion).not.toHaveBeenCalled();
+        const [, update] = ScheduledTask.findOneAndUpdate.mock.calls[1];
+        expect(update.$set.lastError).toMatch(/no longer in this server/);
+    });
+
+    test('fails without spending anything once the owner has lost Manage Server', async () => {
+        const member = { permissions: { has: () => false }, send: jest.fn() };
+        due([makeTask({ deliverTo: 'dm' })]);
+        await runDueTasks(dmClient({ member }).client);
+
+        expect(aiService.getCompletion).not.toHaveBeenCalled();
+        expect(member.send).not.toHaveBeenCalled();
+        const [, update] = ScheduledTask.findOneAndUpdate.mock.calls[1];
+        expect(update.$set.lastError).toMatch(/no longer has Manage Server/);
+    });
+
+    test('says plainly when the owner\'s DMs are closed', async () => {
+        const closed = Object.assign(new Error('Cannot send messages to this user'), { code: 50007 });
+        const member = { permissions: { has: () => true }, send: jest.fn(async () => { throw closed; }) };
+        due([makeTask({ deliverTo: 'dm' })]);
+
+        await runDueTasks(dmClient({ member }).client);
+
+        const [, update] = ScheduledTask.findOneAndUpdate.mock.calls[1];
+        expect(update.$set.lastError).toMatch(/DMs are closed/);
+    });
+});
+
 describe('createTask, the one gate both routes go through', () => {
     const BASE = {
         guildId: 'g1', channelId: 'c1', createdBy: 'u1',
@@ -487,6 +562,23 @@ describe('createTask, the one gate both routes go through', () => {
     test('refuses a cron line that never fires', async () => {
         const { error } = await createTask({ ...BASE, cron: '0 0 31 2 *' });
         expect(error).toMatch(/never fires/);
+    });
+
+    test('records where the result goes, defaulting to the channel', async () => {
+        await createTask(BASE);
+        expect(ScheduledTask.create).toHaveBeenLastCalledWith(expect.objectContaining({ deliverTo: 'channel' }));
+        await createTask({ ...BASE, deliverTo: 'dm' });
+        expect(ScheduledTask.create).toHaveBeenLastCalledWith(expect.objectContaining({ deliverTo: 'dm' }));
+    });
+
+    test('refuses a destination that is not a channel or a DM', async () => {
+        const { error } = await createTask({ ...BASE, deliverTo: 'email' });
+        expect(error).toMatch(/channel or by DM/);
+    });
+
+    test('refuses a DM task with nobody to send it to', async () => {
+        const { error } = await createTask({ ...BASE, createdBy: null, deliverTo: 'dm' });
+        expect(error).toMatch(/needs a person/);
     });
 
     test('refuses a named cadence and a cron line together', async () => {

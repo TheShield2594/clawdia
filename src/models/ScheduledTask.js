@@ -31,6 +31,12 @@ const scheduledTaskSchema = new Schema({
     // of them post something; a future kind that writes nowhere can leave it.
     channelId: { type: String, default: null },
 
+    // Where the result goes: posted in `channelId`, or sent by DM to
+    // `createdBy` — never to anyone else, so a task cannot be pointed at a
+    // stranger's inbox. A DM task still keeps the channel it was set up in, so
+    // an admin reading the list can see where it came from.
+    deliverTo: { type: String, enum: ['channel', 'dm'], default: 'channel' },
+
     // Who asked for it: a user ID for a task somebody created, or null for one
     // the operator or a migration installed. Also what the per-person cap in
     // `utils/scheduledTaskLimits.js` counts.

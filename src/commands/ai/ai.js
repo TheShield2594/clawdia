@@ -167,6 +167,14 @@ module.exports = {
                                 .setDescription('A cron schedule instead of `every`, e.g. "0 9 * * 1-5" for weekdays at 9')
                                 .setMaxLength(100)
                                 .setRequired(false))
+                        .addStringOption(opt =>
+                            opt.setName('deliver')
+                                .setDescription('Post the result in a channel (default), or send it to you by DM')
+                                .setRequired(false)
+                                .addChoices(
+                                    { name: 'In a channel', value: 'channel' },
+                                    { name: 'To me by DM', value: 'dm' }
+                                ))
                         .addChannelOption(opt =>
                             opt.setName('channel')
                                 .setDescription('Where the result is posted. Defaults to this channel.')
@@ -367,10 +375,15 @@ async function addScheduledTask(interaction) {
     const inMinutes = interaction.options.getInteger('in_minutes');
     const every = interaction.options.getString('every');
     const cron = interaction.options.getString('cron');
-    const channel = interaction.options.getChannel('channel') || interaction.channel;
+    const deliverTo = interaction.options.getString('deliver') || 'channel';
+    const channelOption = interaction.options.getChannel('channel');
+    const channel = channelOption || interaction.channel;
 
     if (at && inMinutes) {
         return interaction.reply({ content: 'Use either `at` or `in_minutes`, not both.', flags: MessageFlags.Ephemeral });
+    }
+    if (deliverTo === 'dm' && channelOption) {
+        return interaction.reply({ content: 'A DM task comes to you, not a channel — leave `channel` out.', flags: MessageFlags.Ephemeral });
     }
     if (every && cron) {
         return interaction.reply({ content: 'Use either `every` or `cron`, not both.', flags: MessageFlags.Ephemeral });
@@ -418,15 +431,21 @@ async function addScheduledTask(interaction) {
         fireAt,
         repeat: every || null,
         cron,
-        timezone
+        timezone,
+        deliverTo
     });
     if (error) return interaction.reply({ content: error, flags: MessageFlags.Ephemeral });
 
     const stamp = Math.floor(task.fireAt.getTime() / 1000);
     const cadence = taskCadence(task, ', repeating **', '**', ' (once)');
+    const where = deliverTo === 'dm' ? 'to your DMs' : `in ${channel}`;
+    const dmNote = deliverTo === 'dm'
+        ? '\n-# Keep your DMs open to this bot, and keep Manage Server: the task stops if either goes.'
+        : '';
     return interaction.reply({
-        content: `✅ Scheduled \`${shortTaskId(task)}\` in ${channel} — first run <t:${stamp}:F> (<t:${stamp}:R>)${cadence}.`
-            + '\n-# Each run is a full AI request billed to this server. It counts against the monthly budget on the dashboard.',
+        content: `✅ Scheduled \`${shortTaskId(task)}\` ${where} — first run <t:${stamp}:F> (<t:${stamp}:R>)${cadence}.`
+            + '\n-# Each run is a full AI request billed to this server. It counts against the monthly budget on the dashboard.'
+            + dmNote,
         allowedMentions: { parse: [] }
     });
 }
@@ -446,7 +465,8 @@ async function listScheduledTasks(interaction) {
         // A disabled task is one somebody switched off or one the runner gave
         // up on, and the reason it gave up is the useful half.
         const state = task.enabled ? '' : ` · **off**${task.lastError ? ` (${toolLabel(task.lastError, 60)})` : ''}`;
-        return `\`${shortTaskId(task)}\` <#${task.channelId}> — ${toolLabel(task.prompt || task.kind, 80)}\n`
+        const where = task.deliverTo === 'dm' ? `DM to <@${task.createdBy}>` : `<#${task.channelId}>`;
+        return `\`${shortTaskId(task)}\` ${where} — ${toolLabel(task.prompt || task.kind, 80)}\n`
             + `-# next <t:${stamp}:R>${cadence}${state}`;
     });
 
