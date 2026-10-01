@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Guild = require('../models/Guild');
 const Reminder = require('../models/Reminder');
 const { handleAIChat } = require('../services/aiService');
+const { resolveDmContext, asHomeMessage, isDirectMessage } = require('../services/ai/directMessages');
 const { ensureQuests, onMessage, onStreakUpdate, notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset } = require('../services/questService');
 const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMultiplier');
 const { hasEffect, consumeEffect, getXpMultiplier, getServerXpMultiplier } = require('../services/effectsService');
@@ -52,7 +53,8 @@ module.exports = {
     // thing using the memory.
     _spamLimiter: autoMod._spamLimiter,
     async execute(message, client) {
-        if (message.author.bot || !message.guild) return;
+        if (message.author.bot) return;
+        if (!message.guild) return handleDirectMessage(message, client);
 
         try {
             // Cached read: this fires on every message, and the handlers below
@@ -611,6 +613,30 @@ function sanitizeReminderText(text) {
         .trim()
         .slice(0, NL_REMINDER_MAX_TEXT);
     return sanitized;
+}
+
+/**
+ * A DM to the bot: answered by the AI as though it were sent in the operator's
+ * home server, when the sender is one of that server's admins
+ * (services/ai/directMessages.js). Nothing else the bot does runs in a DM — no
+ * leveling, no automod, no quests — because none of it has a server to count
+ * against. Every DM is addressed to the bot, so no mention is needed.
+ */
+async function handleDirectMessage(message, client) {
+    if (!isDirectMessage(message)) return;
+    try {
+        const context = await resolveDmContext(message, client);
+        if (!context) return;
+
+        const home = asHomeMessage(message, context.guild, context.member);
+        const content = (message.content || '').trim();
+        const reminderHandled = await handleNLReminder(home, content);
+        if (!reminderHandled) {
+            await handleAIChat(home, context.settings.ai, content, context.settings);
+        }
+    } catch (error) {
+        console.error('[AI:dm] error handling a direct message:', error);
+    }
 }
 
 async function handleNLReminder(message, contentOverride) {

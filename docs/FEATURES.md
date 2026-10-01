@@ -249,6 +249,15 @@ Full field reference: [SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers)
 - Users chat naturally, bot responds to every message and @-mentions/replies anywhere
 - Bot shows typing indicator while processing
 
+**Direct messages:**
+- Set `AI_DM_GUILD_ID` to your server's ID and its admins (Manage Server) can DM
+  the bot instead of mentioning it in a channel
+- A DM is answered as though it were sent in that server: its provider, system
+  prompt, memories, knowledge base, MCP connections and budget. Approvals,
+  reminders and scheduled tasks set from a DM come back to the DM
+- Every DM goes to the AI, so no mention is needed. Nobody else gets an answer,
+  and nothing besides the AI (leveling, automod, quests) runs in DMs
+
 **Customization:**
 
 ```text

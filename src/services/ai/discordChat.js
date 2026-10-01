@@ -484,7 +484,12 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         // before spending the guild's model budget on a server's behalf. Each
         // prompt is its own message with its own clock, so sharing the function
         // shares no state — it is one object rather than two doing the same job.
-        const confirmer = createToolConfirmer(message, { approver: mcpApprover });
+        // In a DM there is nobody else to approve, and the sender was already
+        // held to Manage Server before the message got here
+        // (services/ai/directMessages.js) — but a DM click carries no member
+        // permissions, so `managers` would leave nobody able to say yes.
+        const inDm = Boolean(message.channel?.isDMBased?.());
+        const confirmer = createToolConfirmer(message, { approver: inDm ? 'requester' : mcpApprover });
         const callArgs = {
             provider, model, apiKey, baseUrl,
             systemPrompt: fitted.systemPrompt, history: fitted.history, prompt: fitted.prompt,

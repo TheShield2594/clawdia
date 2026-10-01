@@ -351,6 +351,8 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
       # SearXNG for the AI's web_search tool; see .env.example.
       - SEARXNG_URL=${SEARXNG_URL:-}
+      # The server whose admins may talk to the AI by DM; see .env.example.
+      - AI_DM_GUILD_ID=${AI_DM_GUILD_ID:-}
       # Encrypts the per-server AI provider keys admins enter in the dashboard,
       # so the nightly dumps in the backups volume hold ciphertext rather than
       # live credentials (#564). Generate with `openssl rand -base64 32`, and
