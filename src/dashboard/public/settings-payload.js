@@ -363,6 +363,7 @@ function buildSettingsPayload(section, ctx = {}) {
             'ai.learningEnabled': document.getElementById('ai-learning').checked,
             'ai.webSearchEnabled': document.getElementById('ai-web-search').checked,
             'ai.conversationSearch': document.getElementById('ai-conversation-search').checked,
+            'ai.voiceTranscription': document.getElementById('ai-voice-transcription').checked,
             // These live on the Connections tab but belong to the same ai
             // document, so they save with everything else rather than needing
             // their own endpoint.

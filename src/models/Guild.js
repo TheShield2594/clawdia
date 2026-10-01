@@ -722,6 +722,11 @@ const guildSchema = new Schema({
         // turns. Off by default: it is a year of members' conversations stored,
         // which a community server should decide on rather than inherit.
         conversationSearch: { type: Boolean, default: false },
+        // Transcribe voice messages so the model can answer them
+        // (services/ai/transcription.js), with the guild's OpenAI or Gemini key.
+        // Off by default: each clip is a second paid call, to a service the
+        // guild may not otherwise use.
+        voiceTranscription: { type: Boolean, default: false },
         dailyDigest: {
             enabled:          { type: Boolean, default: false },
             channelId:        { type: String, default: null },

@@ -8,6 +8,7 @@ const { missingKeyMessage } = require('./apiKeys');
 const { retrieveCommands, commandSection } = require('./commandHelp');
 const { retrieveGameData, gameDataSection } = require('./gameData');
 const { collectImages, loadImages, visionNotice } = require('./vision');
+const { collectVoice, transcribeClip, voiceTurn } = require('./transcription');
 const {
     fitPrompt,
     inputBudget,
@@ -181,7 +182,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         return reply(message, modelError);
     }
 
-    const content = (promptContent ?? message.content).trim();
+    let content = (promptContent ?? message.content).trim();
     if (content.toLowerCase() === '!reset') {
         await clearHistory(message.guild.id, message.channel.id, message.author.id);
         return reply(message, 'Conversation history cleared.');
@@ -193,6 +194,10 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // downloading is decided later, once the model is known to be able to see.
     const attached = collectImages(message);
     const canSee = supportsVision(provider, model);
+    // And a voice message, which arrives as an audio clip with no text at all.
+    // Only collected when the guild switched transcription on: it is a second
+    // paid call, to a service the guild may not have chosen to use.
+    const voice = aiSettings.voiceTranscription === true ? collectVoice(message) : { clip: null, refused: null };
 
     // A bare `@Clawdia` is all mention and no question. Before the token was
     // stripped this reached the provider as the literal `<@id>`; now it would
@@ -200,15 +205,10 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     // message with no text but a screenshot on it is a question, though — it is
     // how most people ask "what is this?" — so only a message with neither has
     // nothing in it to answer.
-    if (!content && !attached.images.length) {
+    if (!content && !attached.images.length && !voice.clip) {
+        if (voice.refused) return reply(message, `I cannot listen to that voice message: ${voice.refused}.`);
         return reply(message, 'You mentioned me but did not ask anything — what can I help with?');
     }
-
-    // Something still has to arrive as the user's turn when the user typed
-    // nothing at all. This says what happened rather than inventing a question
-    // on their behalf, and it is what goes into the history too, so the next
-    // message's context reads the way this one did.
-    const promptText = content || '[The user sent this attachment with no message text.]';
 
     // A peek, not a consuming check: the slot is spent inside getCompletion /
     // streamCompletion, which is what actually bounds provider spend. This is
@@ -222,6 +222,26 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     if (!peekChannelRateLimit(message.channel.id, rateLimit.perChannel, rateLimit.windowMin)) {
         return reply(message, `This channel has reached the AI request limit. Please wait before sending more AI requests here.`);
     }
+
+    // Transcribed after the limits are peeked, so a member past theirs is not
+    // spending transcription on a reply that will be refused anyway.
+    if (voice.clip) {
+        await message.channel.sendTyping?.()?.catch(() => {});
+        const heard = await transcribeClip(voice.clip, aiSettings, message.guild.id);
+        if (heard.error) {
+            // Typed text alongside a clip that could not be heard is still a
+            // question; a clip alone is not.
+            if (!content && !attached.images.length) return reply(message, heard.error);
+        } else {
+            content = voiceTurn(heard.text, content);
+        }
+    }
+
+    // Something still has to arrive as the user's turn when the user typed
+    // nothing at all. This says what happened rather than inventing a question
+    // on their behalf, and it is what goes into the history too, so the next
+    // message's context reads the way this one did.
+    const promptText = content || '[The user sent this attachment with no message text.]';
 
     const maxHistory = aiSettings.maxHistory ?? 20;
 

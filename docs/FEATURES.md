@@ -37,6 +37,23 @@ cannot see it, so it says so instead of answering from the caption alone. The
 same happens to an image too large or too numerous to send. Nothing is
 downloaded for a model that cannot use it.
 
+**Voice messages**:
+
+With **Listen to voice messages** on, a voice message or audio clip sent to the
+AI is transcribed and answered like typed text. That means in a DM, or as a
+reply to one of the bot's messages in a server, since a voice message cannot
+carry a mention. The transcript is the turn: the model is told it was spoken,
+and the history, memory and conversation search all keep the words rather than
+the audio.
+
+Transcription uses the server's own keys, with no new setting: Gemini for a
+server on Gemini, otherwise OpenAI's `gpt-4o-mini-transcribe`, otherwise
+Gemini. A server on Claude, OpenRouter or Ollama needs an OpenAI or Gemini key
+for it. Each clip is a separate charge from that provider, outside the monthly
+budget the AI usage ledger tracks. Clips over ten minutes or 19 MB are refused
+with a reason rather than transcribed, and the clip is downloaded through the
+same SSRF guard as images.
+
 **Knowing its own commands**:
 
 Ask the chat "how do I equip my rifle" and it answers `/hunt equip`, because
