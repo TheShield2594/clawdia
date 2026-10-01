@@ -187,7 +187,7 @@ async function runAiPromptTask(client, task) {
 
     // A deep run starts from deep task mode's own prompt, which is what gets a
     // model to use the extra rounds rather than answer after the first one.
-    const { taskSystemPrompt, chunk } = require('./ai/deepTask').__test__;
+    const { taskSystemPrompt, chunk } = require('./ai/deepTask');
     const basePrompt = deep
         ? taskSystemPrompt(ai, { actionsEnabled: false, hasServers: (config.mcpServers || []).length > 0 })
         : (ai.systemPrompt || 'You are a helpful Discord bot assistant.');
