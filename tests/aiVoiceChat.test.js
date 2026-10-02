@@ -21,6 +21,16 @@ jest.mock('../src/services/ai/providers', () => ({
     usesClientTools: () => false,
     supportsVision: () => false,
 }));
+jest.mock('../src/services/ai/speech', () => ({
+    ...jest.requireActual('../src/services/ai/speech'),
+    sendSpokenReply: jest.fn(async () => true),
+}));
+const mockModeration = { enabled: false, flagged: false };
+jest.mock('../src/services/aiOutputModerationService', () => ({
+    outputModerationEnabled: () => mockModeration.enabled,
+    moderateOutput: async () => ({ flagged: mockModeration.flagged }),
+    WITHHELD_MESSAGE: 'withheld',
+}));
 jest.mock('../src/services/ai/transcription', () => ({
     ...jest.requireActual('../src/services/ai/transcription'),
     transcribeClip: jest.fn(),
@@ -39,6 +49,7 @@ jest.mock('../src/services/ai', () => ({
 }));
 
 const { transcribeClip } = require('../src/services/ai/transcription');
+const { sendSpokenReply } = require('../src/services/ai/speech');
 const { appendHistory } = require('../src/services/ai/history');
 const { handleAIChat } = require('../src/services/ai/discordChat');
 
@@ -62,6 +73,8 @@ const replyText = message => {
 
 beforeEach(() => {
     jest.clearAllMocks();
+    mockModeration.enabled = false;
+    mockModeration.flagged = false;
     mockComplete.mockResolvedValue('Done — reminder set for six.');
 });
 
@@ -71,7 +84,11 @@ test('a voice-only message is answered from its transcript, which is also what h
 
     await handleAIChat(message, SETTINGS, '');
 
-    expect(transcribeClip).toHaveBeenCalledWith(expect.objectContaining({ url: CLIP.url, mimeType: 'audio/ogg' }), SETTINGS, 'g1');
+    expect(transcribeClip).toHaveBeenCalledWith(
+        expect.objectContaining({ url: CLIP.url, mimeType: 'audio/ogg' }), SETTINGS, 'g1',
+        // The guild's limits, so the monthly budget is checked before a clip is paid for (#1230).
+        { rateLimit: expect.objectContaining({ windowMin: 10 }) }
+    );
     const prompt = mockComplete.mock.calls[0][0].prompt;
     expect(prompt).toBe('[Voice message, transcribed]\nremind me to call mum at six');
     expect(appendHistory.mock.calls[0][3]).toBe(prompt);
@@ -110,4 +127,47 @@ test('a clip that is too long is refused before anything is downloaded', async (
 
     expect(transcribeClip).not.toHaveBeenCalled();
     expect(replyText(message)).toMatch(/longer than 10 minutes/);
+});
+
+describe('spoken replies (#1231)', () => {
+    const heard = () => transcribeClip.mockResolvedValue({ text: 'remind me to call mum at six', service: 'OpenAI' });
+
+    test('a voice message is answered with text and then audio when the switch is on', async () => {
+        heard();
+        const message = voiceDm();
+        await handleAIChat(message, { ...SETTINGS, voiceReplies: 'when-spoken-to' }, '');
+
+        expect(replyText(message)).toBe('Done — reminder set for six.');
+        expect(sendSpokenReply).toHaveBeenCalledWith('Done — reminder set for six.', expect.any(Object), 'g1', expect.objectContaining({ deliver: expect.any(Function) }));
+        // What it delivers goes to the same channel, with no mentions allowed.
+        await sendSpokenReply.mock.calls[0][3].deliver({ files: ['x'] });
+        expect(message.channel.send).toHaveBeenCalledWith({ allowedMentions: { parse: [] }, files: ['x'] });
+    });
+
+    test('off, or a typed message under when-spoken-to, is text only', async () => {
+        heard();
+        await handleAIChat(voiceDm(), SETTINGS, '');
+        const typed = voiceDm('hello');
+        typed.attachments = new Map();
+        await handleAIChat(typed, { ...SETTINGS, voiceReplies: 'when-spoken-to' }, 'hello');
+        expect(sendSpokenReply).not.toHaveBeenCalled();
+    });
+
+    test('always-in-dms speaks a typed DM too', async () => {
+        const typed = voiceDm('hello');
+        typed.attachments = new Map();
+        typed.channel.isDMBased = () => true;
+        await handleAIChat(typed, { ...SETTINGS, voiceReplies: 'always-in-dms' }, 'hello');
+        expect(sendSpokenReply).toHaveBeenCalledTimes(1);
+    });
+
+    test('a reply the outbound check withheld is never spoken', async () => {
+        heard();
+        mockModeration.enabled = true;
+        mockModeration.flagged = true;
+        const message = voiceDm();
+        await handleAIChat(message, { ...SETTINGS, voiceReplies: 'when-spoken-to' }, '', {});
+        expect(replyText(message)).toBe('withheld');
+        expect(sendSpokenReply).not.toHaveBeenCalled();
+    });
 });

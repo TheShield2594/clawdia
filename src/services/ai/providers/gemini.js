@@ -22,6 +22,13 @@ const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require
 // (Gemini 2.0 Flash-Lite) supports no context caching at all, so it reports no
 // cached tokens and carries no `cachedIn`: the fallback to `in` is never reached.
 const PRICING = [
+    // Speech (#1230, #1231). A transcription is recorded as `<model> (audio)`
+    // because Gemini bills audio input at several times the text rate of the
+    // same model; the TTS models bill their audio output the same way. First,
+    // so the `flash` and `pro` rows below do not price them as text.
+    { match: /\(audio\)$/i, in: 1.00,  out: 2.50 },
+    { match: /pro.*-tts/i,  in: 1.00,  out: 20.00 },
+    { match: /-tts/i,       in: 0.50,  out: 10.00 },
     { match: /flash-lite/i, in: 0.075, out: 0.30 },
     { match: /2\.0-flash/i, in: 0.10,  out: 0.40, cachedIn: 0.025 },
     { match: /1\.5-flash/i, in: 0.075, out: 0.30, cachedIn: 0.01875 },

@@ -169,6 +169,15 @@
                             <span class="toggle-text"><strong>Listen to voice messages</strong><span>Transcribe voice messages and audio clips sent to the AI, then answer them. Uses this server's OpenAI key, or its Gemini key; each clip is billed by that provider.</span></span>
                             <span class="switch"><input type="checkbox" id="ai-voice-transcription" <%= settings.ai.voiceTranscription ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
+                        <div class="field">
+                            <label class="field-label" for="ai-voice-replies">Spoken replies</label>
+                            <select id="ai-voice-replies">
+                                <option value="off" <%= (settings.ai.voiceReplies || 'off') === 'off' ? 'selected' : '' %>>Off — text only</option>
+                                <option value="when-spoken-to" <%= settings.ai.voiceReplies === 'when-spoken-to' ? 'selected' : '' %>>When spoken to — answer a voice message with audio too</option>
+                                <option value="always-in-dms" <%= settings.ai.voiceReplies === 'always-in-dms' ? 'selected' : '' %>>Always in DMs — and for voice messages anywhere</option>
+                            </select>
+                            <small>Reads the reply aloud and posts the audio after the text, which is always posted as well. The first 1,500 characters or so are spoken. Uses this server's OpenAI key, or its Gemini key; each spoken reply is billed by that provider and counts toward the monthly budget.</small>
+                        </div>
                         <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
                         <div class="actions-row">
                             <button class="btn btn-primary" data-action="save" data-section="ai">Save changes</button>
