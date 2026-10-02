@@ -265,19 +265,33 @@ function speakersFor(aiSettings, guildId) {
  * The payloads to try posting, best first: a native voice message for Opus
  * (which Discord requires to carry nothing but the clip), then the same clip
  * as a plain attachment in case the voice-message form is refused.
+ *
+ * Each carries the words it speaks as its description, the attachment's alt
+ * text: the reply above already says them, but the clip should not be
+ * announced to a screen reader as a filename.
  */
-function audioPayloads(spoken) {
+function audioPayloads(spoken, words) {
+    const description = clipDescription(words);
     if (spoken.format === 'ogg') {
-        const plain = { files: [{ attachment: spoken.audio, name: 'reply.ogg' }] };
+        const plain = { files: [{ attachment: spoken.audio, name: 'reply.ogg', description }] };
         if (!spoken.seconds || !spoken.waveform) return [plain];
         const voice = new AttachmentBuilder(spoken.audio, {
             name: 'voice-message.ogg',
+            description,
             duration: spoken.seconds,
             waveform: spoken.waveform
         });
         return [{ files: [voice], flags: MessageFlags.IsVoiceMessage }, plain];
     }
-    return [{ files: [{ attachment: spoken.audio, name: 'reply.wav' }] }];
+    return [{ files: [{ attachment: spoken.audio, name: 'reply.wav', description }] }];
+}
+
+// Discord caps an attachment description at 1,024 characters.
+const MAX_DESCRIPTION_CHARS = 1024;
+
+function clipDescription(words) {
+    const text = `Spoken reply: ${words}`;
+    return text.length > MAX_DESCRIPTION_CHARS ? `${text.slice(0, MAX_DESCRIPTION_CHARS - 1)}…` : text;
 }
 
 /**
@@ -321,7 +335,7 @@ async function sendSpokenReply(text, aiSettings, guildId, {
             }
             if (!spoken?.audio?.length) continue;
 
-            for (const payload of audioPayloads(spoken)) {
+            for (const payload of audioPayloads(spoken, input)) {
                 try {
                     await deliver(payload);
                     return true;

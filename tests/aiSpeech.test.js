@@ -139,7 +139,7 @@ describe('sending a spoken reply', () => {
         const payload = deliver.mock.calls[0][0];
         expect(payload.flags).toBe(MessageFlags.IsVoiceMessage);
         expect(payload.content).toBeUndefined();
-        expect(payload.files[0]).toMatchObject({ name: 'voice-message.ogg', duration: 3, waveform: 'AAEC' });
+        expect(payload.files[0]).toMatchObject({ name: 'voice-message.ogg', duration: 3, waveform: 'AAEC', description: 'Spoken reply: Hello there' });
         expect(record).toHaveBeenCalledWith('g1', 'openai', OPENAI_TTS_MODEL, { inputTokens: 5, outputTokens: 63 });
     });
 
@@ -148,7 +148,7 @@ describe('sending a spoken reply', () => {
             .mockRejectedValueOnce(new Error('Cannot send voice messages'))
             .mockResolvedValueOnce({});
         await expect(sendSpokenReply('hi', {}, 'g1', { speakers: [ogg()], deliver, record: async () => {} })).resolves.toBe(true);
-        expect(deliver.mock.calls[1][0]).toEqual({ files: [{ attachment: expect.any(Buffer), name: 'reply.ogg' }] });
+        expect(deliver.mock.calls[1][0]).toEqual({ files: [{ attachment: expect.any(Buffer), name: 'reply.ogg', description: 'Spoken reply: hi' }] });
     });
 
     test('tries the next service when one fails', async () => {
@@ -156,7 +156,7 @@ describe('sending a spoken reply', () => {
         const wav = { name: 'Gemini', speak: async () => ({ audio: Buffer.from('RIFF'), format: 'wav', ledger: null }) };
         const deliver = jest.fn(async () => ({}));
         await expect(sendSpokenReply('hi', {}, 'g1', { speakers: [broken, wav], deliver })).resolves.toBe(true);
-        expect(deliver).toHaveBeenCalledWith({ files: [{ attachment: Buffer.from('RIFF'), name: 'reply.wav' }] });
+        expect(deliver).toHaveBeenCalledWith({ files: [{ attachment: Buffer.from('RIFF'), name: 'reply.wav', description: 'Spoken reply: hi' }] });
     });
 
     test('every failure is silent: no throw, and nothing posted', async () => {
