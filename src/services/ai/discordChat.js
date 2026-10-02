@@ -816,15 +816,17 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         // the text and only once it is final — a streamed reply is synthesized
         // once the stream has finished — and never for a reply the outbound
         // check withheld. In addition to the text, never instead of it, and
-        // silent on failure: the text is the reply.
+        // silent on failure: the text is the reply. Not awaited: synthesis can
+        // take seconds, and the history write below should not wait on it, or
+        // a quick follow-up would be answered without this turn in context.
         if (!withheld && fullResponse.trim() && shouldSpeak(aiSettings.voiceReplies, {
             spokenTo,
             inDm: message.channel?.isDMBased?.() === true
         })) {
-            await sendSpokenReply(fullResponse, aiSettings, message.guild.id, {
+            sendSpokenReply(fullResponse, aiSettings, message.guild.id, {
                 rateLimit,
                 deliver: payload => send(message.channel, payload)
-            });
+            }).catch(err => console.warn('[AI:voice] spoken reply failed:', err?.message || err));
         }
 
         // After the reply, never before it: the ledger is for the dashboard, and
