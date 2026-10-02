@@ -3,6 +3,8 @@
 const { guardedDispatcher, assertPublicHttpUrl } = require('../../utils/outboundGuard');
 const { request, discardBody, readCapped } = require('../../utils/httpFetch');
 const { resolveApiKey } = require('./apiKeys');
+const { recordUsage } = require('./usage');
+const { enforceMonthlyBudget } = require('./rateLimit');
 
 /**
  * Voice messages, turned into words before the model sees them.
@@ -47,6 +49,11 @@ const OPENAI_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
 // limited to projects that already used them, so a key made today could not
 // call one.
 const GEMINI_TRANSCRIBE_MODEL = 'gemini-3.8-flash';
+// The name a Gemini transcription goes into the usage ledger under. Gemini
+// bills audio input well above the text rate of the same model, so it gets a
+// pricing row of its own (providers/gemini.js) rather than being priced as if
+// the clip had been typed.
+const GEMINI_TRANSCRIBE_LEDGER_MODEL = `${GEMINI_TRANSCRIBE_MODEL} (audio)`;
 
 // What each service accepts, by the MIME type the clip arrives as. OpenAI's
 // transcription endpoint takes flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav and
@@ -104,6 +111,25 @@ function collectVoice(message) {
     };
 }
 
+/**
+ * What an OpenAI transcription cost, in the ledger's shape. The `gpt-4o-*-
+ * transcribe` models report tokens (`{ type: 'tokens', input_tokens, ... }`);
+ * whisper reports seconds instead, which this module never calls, so anything
+ * other than tokens is nothing to record.
+ */
+function openaiTranscriptionUsage(result) {
+    const usage = result && typeof result === 'object' ? result.usage : null;
+    if (!usage || (usage.type && usage.type !== 'tokens')) return null;
+    return { inputTokens: usage.input_tokens || 0, outputTokens: usage.output_tokens || 0 };
+}
+
+/** What a Gemini `generateContent` call cost, from its `usageMetadata`. */
+function geminiUsage(response) {
+    const meta = response?.usageMetadata;
+    if (!meta) return null;
+    return { inputTokens: meta.promptTokenCount || 0, outputTokens: meta.candidatesTokenCount || 0 };
+}
+
 function openaiTranscriber(aiSettings, guildId) {
     const { apiKey } = resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId });
     if (!apiKey) return null;
@@ -115,7 +141,10 @@ function openaiTranscriber(aiSettings, guildId) {
             const client = new OpenAI({ apiKey, timeout: TRANSCRIBE_TIMEOUT_MS });
             const file = await toFile(buffer, clip.name, { type: clip.mimeType });
             const result = await client.audio.transcriptions.create({ file, model: OPENAI_TRANSCRIBE_MODEL });
-            return typeof result === 'string' ? result : result?.text;
+            return {
+                text: typeof result === 'string' ? result : result?.text,
+                ledger: { provider: 'openai', model: OPENAI_TRANSCRIBE_MODEL, usage: openaiTranscriptionUsage(result) }
+            };
         }
     };
 }
@@ -141,7 +170,10 @@ function geminiTranscriber(aiSettings, guildId) {
                 }],
                 config: { temperature: 0, abortSignal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS) }
             });
-            return response?.text;
+            return {
+                text: response?.text,
+                ledger: { provider: 'gemini', model: GEMINI_TRANSCRIBE_LEDGER_MODEL, usage: geminiUsage(response) }
+            };
         }
     };
 }
@@ -182,9 +214,22 @@ async function downloadClip(clip, { requestImpl = request } = {}) {
  *
  * @returns {Promise<{text?: string, service?: string, error?: string}>}
  */
-async function transcribeClip(clip, aiSettings, guildId, { transcribers = transcribersFor(aiSettings, guildId), requestImpl } = {}) {
+async function transcribeClip(clip, aiSettings, guildId, {
+    transcribers = transcribersFor(aiSettings, guildId),
+    requestImpl,
+    rateLimit = null,
+    record = recordUsage
+} = {}) {
     if (!transcribers.length) {
         return { error: 'I cannot listen to voice messages here: this server has no OpenAI or Gemini key for transcription.' };
+    }
+    // A guild that is out of budget cannot have the reply, so it should not
+    // pay for the transcript of the question either (#1230).
+    try {
+        if (rateLimit) enforceMonthlyBudget(guildId, rateLimit);
+    } catch (err) {
+        if (err?.name === 'AiBudgetError') return { error: err.message };
+        throw err;
     }
     // Only the services that can read this format — decided before anything
     // is downloaded, so an unsupported clip costs nothing.
@@ -206,12 +251,22 @@ async function transcribeClip(clip, aiSettings, guildId, { transcribers = transc
     // access to the model) is worth one more try on the other.
     let heardNothing = false;
     for (const transcriber of able) {
-        let text;
+        let result;
         try {
-            text = await transcriber.transcribe(buffer, clip);
+            result = await transcriber.transcribe(buffer, clip);
         } catch (err) {
             console.warn(`[AI:voice] ${transcriber.name} transcription failed: ${err.message}`);
             continue;
+        }
+        // A transcriber answers `{ text, ledger }`, or a bare string when it has
+        // no cost to report. Recorded whether or not anything was heard: the
+        // call was billed either way.
+        const text = typeof result === 'string' ? result : result?.text;
+        const ledger = typeof result === 'object' ? result?.ledger : null;
+        if (ledger?.usage) {
+            Promise.resolve()
+                .then(() => record(guildId, ledger.provider, ledger.model, ledger.usage))
+                .catch(err => console.warn(`[AI:voice] could not record transcription usage: ${err.message}`));
         }
         const clean = typeof text === 'string' ? text.trim() : '';
         if (!clean) {
@@ -249,6 +304,9 @@ module.exports = {
     audioMimeType,
     MAX_AUDIO_BYTES,
     MAX_AUDIO_SECONDS,
+    openaiTranscriptionUsage,
+    geminiUsage,
     OPENAI_TRANSCRIBE_MODEL,
-    GEMINI_TRANSCRIBE_MODEL
+    GEMINI_TRANSCRIBE_MODEL,
+    GEMINI_TRANSCRIBE_LEDGER_MODEL
 };

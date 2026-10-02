@@ -9,6 +9,7 @@ const { retrieveCommands, commandSection } = require('./commandHelp');
 const { retrieveGameData, gameDataSection } = require('./gameData');
 const { collectImages, loadImages, visionNotice } = require('./vision');
 const { collectVoice, transcribeClip, voiceTurn } = require('./transcription');
+const { shouldSpeak, sendSpokenReply } = require('./speech');
 const {
     fitPrompt,
     inputBudget,
@@ -223,17 +224,22 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         return reply(message, `This channel has reached the AI request limit. Please wait before sending more AI requests here.`);
     }
 
+    // Whether this turn arrived as speech, which is what `when-spoken-to`
+    // answers aloud (#1231).
+    let spokenTo = false;
+
     // Transcribed after the limits are peeked, so a member past theirs is not
     // spending transcription on a reply that will be refused anyway.
     if (voice.clip) {
         await message.channel.sendTyping?.()?.catch(() => {});
-        const heard = await transcribeClip(voice.clip, aiSettings, message.guild.id);
+        const heard = await transcribeClip(voice.clip, aiSettings, message.guild.id, { rateLimit });
         if (heard.error) {
             // Typed text alongside a clip that could not be heard is still a
             // question; a clip alone is not.
             if (!content && !attached.images.length) return reply(message, heard.error);
         } else {
             content = voiceTurn(heard.text, content);
+            spokenTo = true;
         }
     }
 
@@ -804,6 +810,21 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
             await send(message.channel, { files: activity.attachments }).catch(err =>
                 console.error('[MCP] tool attachments send failed:', err?.message || err)
             );
+        }
+
+        // The reply read aloud, when the guild asked for that (#1231). After
+        // the text and only once it is final — a streamed reply is synthesized
+        // once the stream has finished — and never for a reply the outbound
+        // check withheld. In addition to the text, never instead of it, and
+        // silent on failure: the text is the reply.
+        if (!withheld && fullResponse.trim() && shouldSpeak(aiSettings.voiceReplies, {
+            spokenTo,
+            inDm: message.channel?.isDMBased?.() === true
+        })) {
+            await sendSpokenReply(fullResponse, aiSettings, message.guild.id, {
+                rateLimit,
+                deliver: payload => send(message.channel, payload)
+            });
         }
 
         // After the reply, never before it: the ledger is for the dashboard, and

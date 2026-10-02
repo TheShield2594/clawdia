@@ -7,6 +7,7 @@ const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/
 const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { validateBaseUrl: validateOllamaBaseUrl } = require('../../../services/ai/providers/ollama');
 const { CONFIRM_MODES, MCP_ROUTES, MCP_APPROVERS } = require('../../../config/mcpServers');
+const { VOICE_REPLY_MODES } = require('../../../config/aiVoice');
 const { isValidSlug } = require('../../lib/publicData');
 const { describeSensitivePermissions } = require('../../../utils/sensitiveRolePermissions');
 
@@ -369,6 +370,16 @@ function validateMcpApprover(value) {
     return null;
 }
 
+// Same reasoning for when replies are spoken (#1231): an unknown mode would be
+// refused by the enum on save, and this turns that into a message for the form.
+function validateVoiceReplies(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string' || !VOICE_REPLY_MODES.includes(value)) {
+        return `ai.voiceReplies must be one of: ${VOICE_REPLY_MODES.join(', ')}`;
+    }
+    return null;
+}
+
 // MCP connections are managed through api/mcpServers.js and the OAuth routes,
 // never through here (#1139). Those routes validate the URL, cap the list,
 // encrypt the token and — the part that matters — never take an `oauth`
@@ -434,6 +445,15 @@ function validateAiUpdate(updates) {
                 const error = validateMonthlyLimit(limit, `ai.${field}`);
                 if (error) return error;
             }
+        }
+
+        let voiceReplies;
+        if (key === 'ai.voiceReplies') voiceReplies = value;
+        else if (isWholeAi) voiceReplies = value.voiceReplies;
+
+        if (voiceReplies !== undefined) {
+            const error = validateVoiceReplies(voiceReplies);
+            if (error) return error;
         }
 
         let context;

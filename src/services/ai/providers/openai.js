@@ -14,6 +14,13 @@ const { dataUrl } = require('../vision');
 // (0.25x) — so each row carries its own published cached price rather than a
 // derived one.
 const PRICING = [
+    // Speech, priced at its audio rate (#1230, #1231): a transcription's input
+    // and a speech reply's output are mostly audio tokens, and the ledger does
+    // not split them from the text ones, so the whole call is priced as audio.
+    // Listed first — `^gpt-4o-mini` below would otherwise claim them.
+    { match: /^gpt-4o-mini-transcribe/i, in: 3.00,  out: 5.00 },
+    { match: /^gpt-4o-transcribe/i,      in: 6.00,  out: 10.00 },
+    { match: /^gpt-4o-mini-tts/i,        in: 0.60,  out: 12.00 },
     { match: /^gpt-4o-mini/i,   in: 0.15,  out: 0.60,  cachedIn: 0.075 },
     { match: /^gpt-4o/i,        in: 2.50,  out: 10.00, cachedIn: 1.25 },
     { match: /^gpt-4\.1-mini/i, in: 0.40,  out: 1.60,  cachedIn: 0.10 },

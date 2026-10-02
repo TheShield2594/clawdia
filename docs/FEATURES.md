@@ -51,10 +51,29 @@ server on Gemini, otherwise OpenAI's `gpt-4o-mini-transcribe`, otherwise
 Gemini (`gemini-3.8-flash`). A clip only goes to a service that reads its
 format, so raw AAC goes to Gemini, and a transcription that fails on one
 service is tried once on the other. A server on Claude, OpenRouter or Ollama
-needs an OpenAI or Gemini key for it. Each clip is a separate charge from that provider, outside the monthly
-budget the AI usage ledger tracks. Clips over ten minutes or 19 MB are refused
-with a reason rather than transcribed, and the clip is downloaded through the
-same SSRF guard as images.
+needs an OpenAI or Gemini key for it. Each clip is a separate charge from that
+provider, recorded in the AI usage ledger and counted toward the monthly budget
+like any other call: a server that is out of budget is told so before anything
+is transcribed. Clips over ten minutes or 19 MB are refused with a reason rather
+than transcribed, and the clip is downloaded through the same SSRF guard as
+images.
+
+**Spoken replies**:
+
+**Spoken replies** reads the AI's answer aloud and posts the audio after the
+text. *When spoken to* does it for a reply to a voice message; *Always in DMs*
+also does it for every reply in a DM. The text is always posted too, so the
+answer stays readable and searchable, and the audio only follows once the reply
+is final: a streamed reply is read once it has finished, and a reply the
+outbound moderation check withheld is never read.
+
+Speech uses the same keys as transcription, in the same order: OpenAI's
+`gpt-4o-mini-tts`, posted as a Discord voice message, or Gemini's speech model
+(`GEMINI_TTS_MODEL`), posted as a WAV attachment. Markdown, links, mentions and
+code are left out of what is read, and only about the first 1,500 characters
+are spoken, ending with "the rest is in the text". Each spoken reply is recorded
+in the usage ledger and counts toward the monthly budget. If speech fails, or
+the server is out of budget, the reply is the text alone, with no error.
 
 **Knowing its own commands**:
 

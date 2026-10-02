@@ -1,5 +1,6 @@
 const { Schema, model } = require('mongoose');
 const { encryptSecret, guildSecretBinding } = require('../config/secretBox');
+const { VOICE_REPLY_MODES } = require('../config/aiVoice');
 
 /**
  * The guild a setter is writing for. `this` is the Guild document on a save,
@@ -727,6 +728,10 @@ const guildSchema = new Schema({
         // Off by default: each clip is a second paid call, to a service the
         // guild may not otherwise use.
         voiceTranscription: { type: Boolean, default: false },
+        // Read the reply aloud as well (services/ai/speech.js; modes in
+        // config/aiVoice.js). The audio is in addition to the text, never
+        // instead of it. Off by default: each spoken reply is another paid call.
+        voiceReplies: { type: String, enum: VOICE_REPLY_MODES, default: 'off' },
         // Providers to answer with when the primary cannot (services/ai/index.js):
         // down, overloaded, rate-limited, or refusing the key. Tried in order,
         // each with this guild's own key for it; a null model is that

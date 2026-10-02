@@ -353,6 +353,8 @@ services:
       - SEARXNG_URL=${SEARXNG_URL:-}
       # The server whose admins may talk to the AI by DM; see .env.example.
       - AI_DM_GUILD_ID=${AI_DM_GUILD_ID:-}
+      # The Gemini model for spoken replies; see .env.example.
+      - GEMINI_TTS_MODEL=${GEMINI_TTS_MODEL:-}
       # Encrypts the per-server AI provider keys admins enter in the dashboard,
       # so the nightly dumps in the backups volume hold ciphertext rather than
       # live credentials (#564). Generate with `openssl rand -base64 32`, and

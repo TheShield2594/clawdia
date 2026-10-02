@@ -483,6 +483,14 @@ describe('validateAiUpdate', () => {
         })).toBeNull();
     });
 
+    it('accepts each spoken-reply mode and refuses any other (#1231)', () => {
+        const { VOICE_REPLY_MODES } = require('../src/config/aiVoice');
+        for (const mode of VOICE_REPLY_MODES) expect(validateAiUpdate({ 'ai.voiceReplies': mode })).toBeNull();
+        expect(validateAiUpdate({ 'ai.voiceReplies': 'shout' }))
+            .toBe(`ai.voiceReplies must be one of: ${VOICE_REPLY_MODES.join(', ')}`);
+        expect(validateAiUpdate({ ai: { voiceReplies: 3 } })).toMatch(/ai\.voiceReplies must be one of/);
+    });
+
     it('rejects a confirm mode and a route the enum does not know', () => {
         expect(validateAiUpdate({ 'ai.mcpConfirm': 'sometimes' }))
             .toBe(`ai.mcpConfirm must be one of: ${CONFIRM_MODES.join(', ')}`);
