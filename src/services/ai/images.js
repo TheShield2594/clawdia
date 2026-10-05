@@ -2,7 +2,7 @@
 
 const { resolveApiKey } = require('./apiKeys');
 const { recordUsage } = require('./usage');
-const { enforceMonthlyBudget, peekImageLimit, checkImageLimit, IMAGES_PER_WINDOW } = require('./rateLimit');
+const { enforceMonthlyBudget, reserveImageLimit, refundImageLimit, IMAGES_PER_WINDOW } = require('./rateLimit');
 const { BOT_SERVER } = require('./botTools');
 
 /**
@@ -168,7 +168,8 @@ function altText(prompt) {
  * @param {?string} context.userId whose hourly allowance; null for a scheduled run
  * @param {?object} context.rateLimit the guild's limits, for the monthly ceiling
  * @param {object[]} context.generators from imageGeneratorsFor
- * @param {{count: number}} context.turn images drawn so far this turn
+ * @param {{count: number, pending: number}} context.turn images drawn so far
+ *   this turn, and those being drawn right now
  * @param {object} runContext what the toolkit hands a bot tool
  * @param {Function} runContext.attach offers a file; true when it will be posted
  * @param {number} [runContext.deadline] when the turn stops waiting, in ms
@@ -179,7 +180,9 @@ async function generateImage(args, { guildId, userId = null, rateLimit = null, g
     const size = SIZES.includes(args?.size) ? args.size : 'square';
 
     if (typeof attach !== 'function') return 'No image was made: this conversation cannot take a file.';
-    if (turn.count >= MAX_IMAGES_PER_TURN) {
+    // Counting the ones still being drawn: a model that asks for three in one
+    // round runs all three at once, before any of them has finished.
+    if (turn.count + (turn.pending || 0) >= MAX_IMAGES_PER_TURN) {
         return `No image was made: one reply can carry at most ${MAX_IMAGES_PER_TURN} generated images. Tell the user to ask again for more.`;
     }
     try {
@@ -188,16 +191,25 @@ async function generateImage(args, { guildId, userId = null, rateLimit = null, g
         if (err?.name === 'AiBudgetError') return `No image was made: ${err.message}`;
         throw err;
     }
-    if (!peekImageLimit(guildId, userId)) {
-        return userId
-            ? `No image was made: this person has used their ${IMAGES_PER_WINDOW} images for this hour. Tell them to try again later.`
-            : `No image was made: this server's scheduled tasks have used their ${IMAGES_PER_WINDOW} images for this hour.`;
-    }
-
     const timeLeft = Number.isFinite(deadline) ? deadline - Date.now() : IMAGE_TIMEOUT_MS;
     if (timeLeft < MIN_TIME_LEFT_MS) {
         return 'No image was made: this reply does not have enough time left to draw one. Tell the user to ask for it on its own.';
     }
+
+    // Held now, before the slow call, for the same reason as the turn count
+    // above: calls in one round are concurrent, and a check made after the
+    // service answered would let all of them through.
+    const reservation = reserveImageLimit(guildId, userId);
+    if (!reservation) {
+        return userId
+            ? `No image was made: this person has used their ${IMAGES_PER_WINDOW} images for this hour. Tell them to try again later.`
+            : `No image was made: this server's scheduled tasks have used their ${IMAGES_PER_WINDOW} images for this hour.`;
+    }
+    turn.pending = (turn.pending || 0) + 1;
+    // Whether any service answered, refusal or picture. Either can be billed,
+    // so the hour's slot is kept; it is given back only when every service
+    // failed before answering.
+    let answered = false;
 
     const recordLedger = ledger => {
         if (!ledger?.usage) return;
@@ -206,42 +218,45 @@ async function generateImage(args, { guildId, userId = null, rateLimit = null, g
             .catch(err => console.warn(`[AI:image] could not record image usage: ${err.message}`));
     };
 
-    for (const generator of generators) {
-        let made;
-        try {
-            made = await generator.generate(prompt, size, { signal: AbortSignal.timeout(Math.min(IMAGE_TIMEOUT_MS, timeLeft - 1000)) });
-        } catch (err) {
-            // A call that reached the service and failed after may still be billed.
-            recordLedger(err?.ledger);
-            console.warn(`[AI:image] ${generator.name} image generation failed: ${err.message}`);
-            continue;
-        }
-        recordLedger(made?.ledger);
-        // Counted once the service has answered, refusal or picture: either can
-        // be billed, and a refused prompt retried a dozen times is still a dozen.
-        checkImageLimit(guildId, userId);
+    try {
+        for (const generator of generators) {
+            let made;
+            try {
+                made = await generator.generate(prompt, size, { signal: AbortSignal.timeout(Math.min(IMAGE_TIMEOUT_MS, timeLeft - 1000)) });
+            } catch (err) {
+                // A call that reached the service and failed after may still be billed.
+                recordLedger(err?.ledger);
+                console.warn(`[AI:image] ${generator.name} image generation failed: ${err.message}`);
+                continue;
+            }
+            recordLedger(made?.ledger);
+            answered = true;
 
-        if (made?.refused) {
-            // Not tried on the other service: a refusal is about the prompt, and
-            // shopping it around is exactly what moderation is there to stop.
-            return `The image service refused that prompt as against its content rules, so no image was made. `
-                + 'Tell the user plainly, without quoting the rules, and offer to try a different idea.';
-        }
+            if (made?.refused) {
+                // Not tried on the other service: a refusal is about the prompt, and
+                // shopping it around is exactly what moderation is there to stop.
+                return `The image service refused that prompt as against its content rules, so no image was made. `
+                    + 'Tell the user plainly, without quoting the rules, and offer to try a different idea.';
+            }
 
-        turn.count += 1;
-        const name = `generated-image-${turn.count}.${EXTENSIONS[made.mimeType] || 'png'}`;
-        const posted = attach({ buffer: made.image, name, mimeType: made.mimeType, description: altText(prompt) }) === true;
-        if (!posted) {
-            return 'The image was made, but this reply cannot carry any more files, so it was not posted. Tell the user.';
+            turn.count += 1;
+            const name = `generated-image-${turn.count}.${EXTENSIONS[made.mimeType] || 'png'}`;
+            const posted = attach({ buffer: made.image, name, mimeType: made.mimeType, description: altText(prompt) }) === true;
+            if (!posted) {
+                return 'The image was made, but this reply cannot carry any more files, so it was not posted. Tell the user.';
+            }
+            return `The image was made and will be posted in the conversation, after your reply, as ${name}. `
+                + 'Do not describe it as a link or paste anything for it; refer to it as the image below, briefly.';
         }
-        return `The image was made and will be posted in the conversation, after your reply, as ${name}. `
-            + 'Do not describe it as a link or paste anything for it; refer to it as the image below, briefly.';
+        return 'The image could not be made: the image service failed. Tell the user it did not work and they can try again later.';
+    } finally {
+        turn.pending -= 1;
+        if (!answered) refundImageLimit(reservation);
     }
-    return 'The image could not be made: the image service failed. Tell the user it did not work and they can try again later.';
 }
 
 function generateImageTool(context) {
-    const turn = { count: 0 };
+    const turn = { count: 0, pending: 0 };
     return {
         name: 'generate_image',
         serverName: BOT_SERVER,

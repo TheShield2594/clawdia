@@ -287,14 +287,19 @@ function imageLimitKey(guildId, userId) {
     return userId ? userRateLimitKey(guildId, userId) : `scheduled:${guildId}`;
 }
 
-/** Whether this person (or, with no person, this guild's scheduled runs) has an image left this hour. */
-function peekImageLimit(guildId, userId) {
-    return imageLimits.peek(imageLimitKey(guildId, userId), IMAGE_WINDOW_MS, IMAGES_PER_WINDOW);
+/**
+ * Hold one of this person's images (or, with no person, one of this guild's
+ * scheduled-run images) for the hour, before the slow call that makes it — so
+ * two images asked for in the same round cannot both slip under the limit.
+ * Returns a token for refundImageLimit, or null when there is none left.
+ */
+function reserveImageLimit(guildId, userId) {
+    return imageLimits.reserve(imageLimitKey(guildId, userId), IMAGE_WINDOW_MS, IMAGES_PER_WINDOW);
 }
 
-/** Spend one of those images, and say whether there was one. */
-function checkImageLimit(guildId, userId) {
-    return imageLimits.check(imageLimitKey(guildId, userId), IMAGE_WINDOW_MS, IMAGES_PER_WINDOW);
+/** Give back a held image that was never made. */
+function refundImageLimit(token) {
+    imageLimits.release(token);
 }
 
 /** A budget function over one key, in the shape the MCP toolkit spends. */
@@ -310,8 +315,8 @@ module.exports = {
     checkDeepTaskLimit,
     DEEP_TASKS_PER_WINDOW,
     DEEP_TASK_WINDOW_MS,
-    peekImageLimit,
-    checkImageLimit,
+    reserveImageLimit,
+    refundImageLimit,
     IMAGES_PER_WINDOW,
     enforceMonthlyBudget,
     AiBudgetError,

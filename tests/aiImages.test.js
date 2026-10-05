@@ -228,6 +228,49 @@ describe('cost', () => {
             .toMatch(/scheduled tasks have used/);
     });
 
+    test('images asked for in one round are counted before any of them finishes', async () => {
+        // A model calls tools in parallel; each call must hold its place before
+        // the slow provider call, or all of them pass the checks at once.
+        const userId = freshUser();
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const slow = { name: 'OpenAI', generate: jest.fn(async () => { await gate; return { image: PNG, mimeType: 'image/png', ledger }; }) };
+        const ctx = context({ userId, generators: [slow] });
+
+        const calls = Array.from({ length: MAX_IMAGES_PER_TURN + 2 }, (_, n) => generateImage({ prompt: `p${n}` }, ctx, runContext()));
+        release();
+        const results = await Promise.all(calls);
+
+        expect(slow.generate).toHaveBeenCalledTimes(MAX_IMAGES_PER_TURN);
+        expect(results.filter(text => /will be posted/.test(text))).toHaveLength(MAX_IMAGES_PER_TURN);
+        expect(results.filter(text => /at most 2/.test(text))).toHaveLength(2);
+        expect(ctx.turn).toEqual({ count: MAX_IMAGES_PER_TURN, pending: 0 });
+    });
+
+    test('concurrent turns cannot go past the hourly allowance either', async () => {
+        const userId = freshUser();
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const slow = { name: 'OpenAI', generate: jest.fn(async () => { await gate; return { image: PNG, mimeType: 'image/png', ledger }; }) };
+
+        const calls = Array.from({ length: IMAGES_PER_WINDOW + 3 }, () =>
+            generateImage({ prompt: 'x' }, context({ userId, generators: [slow] }), runContext()));
+        release();
+        const results = await Promise.all(calls);
+
+        expect(slow.generate).toHaveBeenCalledTimes(IMAGES_PER_WINDOW);
+        expect(results.filter(text => /used their 5 images/.test(text))).toHaveLength(3);
+    });
+
+    test('a refusal keeps the hour\'s slot, since it can be billed', async () => {
+        const userId = freshUser();
+        const refusing = drawing({ refused: true, image: undefined });
+        for (let n = 0; n < IMAGES_PER_WINDOW; n++) {
+            await generateImage({ prompt: 'x' }, context({ userId, generators: [refusing] }), runContext());
+        }
+        expect(await generateImage({ prompt: 'x' }, context({ userId }), runContext())).toMatch(/used their 5 images/);
+    });
+
     test('a failed call spends no allowance', async () => {
         const userId = freshUser();
         const broken = { name: 'OpenAI', generate: jest.fn(async () => { throw new Error('down'); }) };
