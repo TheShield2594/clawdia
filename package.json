@@ -7,7 +7,7 @@
     "start": "node src/index.js",
     "start:sharded": "node src/shard.js",
     "start:dashboard": "node src/dashboard/index.js",
-    "dev": "nodemon src/index.js",
+    "dev": "node --watch src/index.js",
     "deploy": "node src/deploy-commands.js",
     "migrate:rollback": "node scripts/rollback-migration.js",
     "payouts:replay": "node scripts/replay-owed-payouts.js",
@@ -71,7 +71,6 @@
     "jest-environment-jsdom": "^30.5.2",
     "js-yaml": "^5.4.2",
     "mongodb-memory-server": "^11.3.0",
-    "nodemon": "^3.0.2",
     "prettier": "^3.9.8",
     "supertest": "^7.3.0"
   },

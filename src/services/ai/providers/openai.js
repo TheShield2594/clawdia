@@ -21,6 +21,10 @@ const PRICING = [
     { match: /^gpt-4o-mini-transcribe/i, in: 3.00,  out: 5.00 },
     { match: /^gpt-4o-transcribe/i,      in: 6.00,  out: 10.00 },
     { match: /^gpt-4o-mini-tts/i,        in: 0.60,  out: 12.00 },
+    // Images (#1229): text in, image tokens out. The prompt is all that goes
+    // in, so the image-input rate never applies.
+    { match: /^gpt-image-1-mini/i,       in: 2.00,  out: 8.00 },
+    { match: /^gpt-image-1/i,            in: 5.00,  out: 40.00 },
     { match: /^gpt-4o-mini/i,   in: 0.15,  out: 0.60,  cachedIn: 0.075 },
     { match: /^gpt-4o/i,        in: 2.50,  out: 10.00, cachedIn: 1.25 },
     { match: /^gpt-4\.1-mini/i, in: 0.40,  out: 1.60,  cachedIn: 0.10 },

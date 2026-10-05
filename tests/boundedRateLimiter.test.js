@@ -182,3 +182,30 @@ describe('reset', () => {
         expect(limiter.check('a', 60_000, 1)).toBe(true);
     });
 });
+
+describe('reserve and release', () => {
+    test('a reservation takes a slot, and releasing it gives that slot back', () => {
+        const rl = new BoundedRateLimiter();
+        const first = rl.reserve('k', 60_000, 2);
+        const second = rl.reserve('k', 60_000, 2);
+        expect(first).not.toBeNull();
+        expect(second).not.toBeNull();
+        expect(rl.reserve('k', 60_000, 2)).toBeNull();
+
+        rl.release(first);
+        expect(rl.peek('k', 60_000, 2)).toBe(true);
+    });
+
+    test('a token releases once, and only its own slot', () => {
+        const rl = new BoundedRateLimiter();
+        const token = rl.reserve('k', 60_000, 3);
+        rl.reserve('k', 60_000, 3);
+        rl.release(token);
+        rl.release(token);
+        // One slot was given back, not two: one held, so two more fit.
+        expect(rl.reserve('k', 60_000, 3)).not.toBeNull();
+        expect(rl.reserve('k', 60_000, 3)).not.toBeNull();
+        expect(rl.reserve('k', 60_000, 3)).toBeNull();
+        expect(() => rl.release(null)).not.toThrow();
+    });
+});

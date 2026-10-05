@@ -75,6 +75,39 @@ are spoken, ending with "the rest is in the text". Each spoken reply is recorded
 in the usage ledger and counts toward the monthly budget. If speech fails, or
 the server is out of budget, the reply is the text alone, with no error.
 
+**Images**:
+
+With **Let the AI make images** on, the model has a `generate_image` tool:
+"draw a logo for the guild" or "make a banner for Friday's event" gets a picture
+posted after the reply, with the prompt as its alt text. It takes a prompt and a
+shape (square, landscape or portrait) and makes one image per call.
+
+It uses the same keys as voice, in the same order: Gemini's image model
+(`GEMINI_IMAGE_MODEL`, default `gemini-2.5-flash-image`) for a server on Gemini,
+otherwise OpenAI's `gpt-image-1` at medium quality (`OPENAI_IMAGE_MODEL`),
+otherwise Gemini. With neither key the tool is not offered. A prompt the service
+refuses is not retried on the other one; the model is told it was refused and
+says so. An image costs far more than a reply, so each is recorded in the usage
+ledger and counted toward the monthly budget, a server that is out of budget
+gets no image, each member gets five an hour, and one reply carries at most two.
+It needs no approval, since it changes nothing but the conversation, and it is
+offered to `/ai task` and scheduled tasks too, where the guild's five an hour and
+the hourly tool budget bound it.
+
+**Sub-agents in deep tasks**:
+
+A deep task (`/ai task`, or a scheduled task in deep mode) can hand independent
+pieces of its work to sub-agents with a `delegate` tool — "compare these four
+products" becomes four lookups running at once, each with a fresh context, and
+the task writes its report from their answers. Up to four sub-agents at a time
+and eight per task, each with six tool rounds and at most four minutes, inside
+the task's own clock. Sub-agents only look things up: they get the read-only
+tools (web access, and a connection's tools only where they would run in a
+scheduled task without asking), never in-channel actions, images, notes or
+`delegate` itself. Their tool calls come out of the task's own allowance, they
+take no message or deep-task slot of their own, and their tokens count toward
+the monthly budget. Their calls show on the task's progress line and footer.
+
 **Knowing its own commands**:
 
 Ask the chat "how do I equip my rifle" and it answers `/hunt equip`, because

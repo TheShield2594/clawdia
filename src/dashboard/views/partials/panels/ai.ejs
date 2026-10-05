@@ -178,6 +178,10 @@
                             </select>
                             <small>Reads the reply aloud and posts the audio after the text, which is always posted as well. The first 1,500 characters or so are spoken. Uses this server's OpenAI key, or its Gemini key; each spoken reply is billed by that provider and counts toward the monthly budget.</small>
                         </div>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Let the AI make images</strong><span>Draw a picture when someone asks for one and post it in the conversation, scheduled tasks included. Uses this server's OpenAI key, or its Gemini key. An image costs far more than a reply: each counts toward the monthly budget, and each member gets 5 an hour.</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-image-generation" <%= settings.ai.imageGeneration ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
                         <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
                         <div class="actions-row">
                             <button class="btn btn-primary" data-action="save" data-section="ai">Save changes</button>

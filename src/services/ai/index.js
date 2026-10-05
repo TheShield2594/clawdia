@@ -291,12 +291,18 @@ async function* streamProvider({ provider, guildId, mcp = true, usageOut, ...req
  * @param {string} [req.userId]
  * @param {string} [req.channelId]
  * @param {object} [req.rateLimit]
+ * @param {Function} [req.toolBudget] spend tool calls from this budget instead
+ *   of the one `userId` would get
  * @returns {Promise<string>} the reply text — not the provider's result object
  * @throws {AiRateLimitError|AiBudgetError} before the provider is touched
  */
-async function getCompletion({ provider, guildId, mcp = true, userId, channelId, rateLimit, keySource, keyError, ...req }) {
+async function getCompletion({ provider, guildId, mcp = true, userId, channelId, rateLimit, keySource, keyError, toolBudget: sharedBudget, ...req }) {
     enforceRateLimit({ guildId, userId, channelId, rateLimit });
-    const toolBudget = toolCallBudget({ guildId, userId, rateLimit });
+    // A delegated child turn (delegate.js) passes its parent's budget and no
+    // user: it spends the parent's tool calls, not a message slot of its own.
+    // Null is a budget too (the parent's is unbounded), so only a missing one
+    // is worked out here — or a child would land on the scheduled-run budget.
+    const toolBudget = sharedBudget !== undefined ? sharedBudget : toolCallBudget({ guildId, userId, rateLimit });
     const attempts = attemptsFor({ provider, ...req });
 
     for (let i = 0; i < attempts.length; i++) {

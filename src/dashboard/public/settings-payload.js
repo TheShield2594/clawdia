@@ -365,6 +365,7 @@ function buildSettingsPayload(section, ctx = {}) {
             'ai.conversationSearch': document.getElementById('ai-conversation-search').checked,
             'ai.voiceTranscription': document.getElementById('ai-voice-transcription').checked,
             'ai.voiceReplies': document.getElementById('ai-voice-replies').value,
+            'ai.imageGeneration': document.getElementById('ai-image-generation').checked,
             // Empty provider rows are dropped, so "None" in the first row and a
             // provider in the second still saves as a one-item list.
             'ai.fallbacks': [1, 2]
