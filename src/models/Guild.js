@@ -732,6 +732,10 @@ const guildSchema = new Schema({
         // config/aiVoice.js). The audio is in addition to the text, never
         // instead of it. Off by default: each spoken reply is another paid call.
         voiceReplies: { type: String, enum: VOICE_REPLY_MODES, default: 'off' },
+        // A generate_image tool (services/ai/images.js), with the guild's
+        // OpenAI or Gemini key. Off by default: one image costs about what a
+        // few dozen chat replies do.
+        imageGeneration: { type: Boolean, default: false },
         // Providers to answer with when the primary cannot (services/ai/index.js):
         // down, overloaded, rate-limited, or refusing the key. Tried in order,
         // each with this guild's own key for it; a null model is that

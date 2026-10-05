@@ -366,7 +366,8 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     const agentTools = buildAgentTools(aiSettings, {
         guildId: message.guild.id,
         userId: message.author.id,
-        canManage: Boolean(message.member?.permissions?.has('ManageGuild'))
+        canManage: Boolean(message.member?.permissions?.has('ManageGuild')),
+        rateLimit
     });
     const clientTools = (botTools.length > 0 || agentTools.length > 0)
         && usesClientTools(provider, { mcpRoute, mcpConfirm, mcpServers, botTools: [...botTools, ...agentTools] });

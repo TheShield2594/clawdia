@@ -11,6 +11,7 @@ const { createToolConfirmer } = require('./mcp/approval');
 const { recordToolCalls } = require('./mcp/usage');
 const { TASK_MAX_TOOL_ROUNDS, TASK_TURN_BUDGET_MS } = require('./mcp/toolkit');
 const { checkDeepTaskLimit } = require('./rateLimit');
+const { delegateTool, buildDelegateAddendum } = require('./delegate');
 
 /**
  * Deep task mode: one turn with room to actually do something (#835).
@@ -112,7 +113,7 @@ function refuseTask({ ai, guildId, userId }) {
  * reply. Without that a model given twelve rounds still answers in one, because
  * everything else about the prompt says it is in a chat.
  */
-function taskSystemPrompt(ai, { actionsEnabled, hasServers, agentTools = [] }) {
+function taskSystemPrompt(ai, { actionsEnabled, hasServers, agentTools = [], delegation = false }) {
     let systemPrompt = ai.systemPrompt || 'You are a helpful Discord bot assistant.';
 
     systemPrompt += '\n\nYou are running a **task**, not answering a chat message. Nobody is watching this arrive, '
@@ -126,6 +127,7 @@ function taskSystemPrompt(ai, { actionsEnabled, hasServers, agentTools = [] }) {
     if (hasServers) systemPrompt += buildMcpAddendum({ actionsEnabled: false });
     if (actionsEnabled) systemPrompt += buildToolActionsAddendum(null, { autoMemory: ai.memory?.autoSave === true });
     systemPrompt += buildAgentToolsAddendum(agentTools);
+    if (delegation) systemPrompt += buildDelegateAddendum();
 
     return systemPrompt;
 }
@@ -200,8 +202,13 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
     const agentTools = buildAgentTools(ai, {
         guildId: guild.id,
         userId: user.id,
-        canManage: Boolean(member?.permissions?.has?.('ManageGuild'))
+        canManage: Boolean(member?.permissions?.has?.('ManageGuild')),
+        rateLimit: config.rateLimit
     });
+    // Sub-agents for the parts of the task that split cleanly (#1232). Their
+    // tool calls come out of this person's allowance and show on this task's
+    // progress line.
+    const delegate = delegateTool({ ai, config, guildId: guild.id, userId: user.id, onToolEvent: activity.onEvent });
 
     let answer = '';
     let failure = null;
@@ -211,7 +218,8 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
             systemPrompt: taskSystemPrompt(ai, {
                 actionsEnabled: Boolean(ai.actionsEnabled),
                 hasServers: (config.mcpServers || []).length > 0,
-                agentTools
+                agentTools,
+                delegation: true
             }),
             history: [],
             prompt,
@@ -223,7 +231,7 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
             onToolEvent: activity.onEvent,
             mcpConfirm: config.mcpConfirm,
             confirmTool: createToolConfirmer(shim, { approver: config.mcpApprover }),
-            botTools: [...(ai.actionsEnabled ? buildBotTools(shim, { ai }) : []), ...agentTools],
+            botTools: [...(ai.actionsEnabled ? buildBotTools(shim, { ai }) : []), ...agentTools, delegate],
             // Attributed, so the guild's ordinary windows bound this turn as
             // well as the deep-task allowance already spent above.
             userId: user.id,
@@ -271,6 +279,13 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
     }
     for (const rest of pieces.slice(1)) {
         await channel.send({ content: rest, allowedMentions: { parse: [] } }).catch(() => {});
+    }
+
+    // Anything a tool made for the channel — a generated image, a chart — in a
+    // message of its own after the report, the way the chat reply posts them.
+    if (activity.attachments.length) {
+        await channel.send({ files: activity.attachments, allowedMentions: { parse: [] } }).catch(err =>
+            console.error('[Deep task] tool attachments send failed:', err?.message || err));
     }
 }
 

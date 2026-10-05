@@ -941,8 +941,16 @@ async function prepareMcpToolkit(guildServers = [], {
         // turn stopped waiting.
         if (target.run) {
             let settled = false;
+            // A bot tool that makes a file (generate_image, #1229) offers it the
+            // way a server's result does. Only an explicit yes counts here: a
+            // turn with no listener has nowhere to post it, and a tool told
+            // otherwise would say a picture was posted that never was.
+            const runContext = {
+                attach: file => emit({ ...describe, type: 'attachment', ...file }) === true,
+                deadline
+            };
             const running = Promise.resolve()
-                .then(() => target.run(args ?? {}))
+                .then(() => target.run(args ?? {}, runContext))
                 .then(value => { settled = true; return String(value ?? ''); });
             // A run that fails after the turn stopped waiting for it has nobody
             // left to tell, and an unhandled rejection would take the process

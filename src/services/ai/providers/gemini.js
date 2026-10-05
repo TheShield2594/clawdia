@@ -29,6 +29,9 @@ const PRICING = [
     { match: /\(audio\)$/i, in: 1.00,  out: 2.50 },
     { match: /pro.*-tts/i,  in: 1.00,  out: 20.00 },
     { match: /-tts/i,       in: 0.50,  out: 10.00 },
+    // Image output (#1229) is billed far above text output, and the image
+    // models are named `…-flash-image`, so this goes before `flash`.
+    { match: /-image/i,     in: 0.30,  out: 30.00 },
     { match: /flash-lite/i, in: 0.075, out: 0.30 },
     { match: /2\.0-flash/i, in: 0.10,  out: 0.40, cachedIn: 0.025 },
     { match: /1\.5-flash/i, in: 0.075, out: 0.30, cachedIn: 0.01875 },

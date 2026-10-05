@@ -16,7 +16,10 @@ jest.mock('../src/services/ai/index', () => ({
     getCompletion: jest.fn(async () => 'the report'),
 }));
 jest.mock('../src/services/ai/mcp/usage', () => ({ recordToolCalls: jest.fn(async () => {}) }));
-jest.mock('../src/services/ai/mcp/approval', () => ({ createToolConfirmer: jest.fn(() => 'confirmer') }));
+jest.mock('../src/services/ai/mcp/approval', () => ({
+    createToolConfirmer: jest.fn(() => 'confirmer'),
+    createUnattendedConfirmer: jest.requireActual('../src/services/ai/mcp/approval').createUnattendedConfirmer,
+}));
 jest.mock('../src/models/Reminder', () => ({ countDocuments: jest.fn(async () => 0), create: jest.fn(async () => ({})) }));
 jest.mock('../src/models/Poll', () => ({ create: jest.fn(async () => ({})) }));
 jest.mock('../src/models/User', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
@@ -143,7 +146,8 @@ describe('what a task turn asks the provider for', () => {
 
     it('offers the bot\'s own tools only where the guild allows actions', async () => {
         await run(scene());
-        expect(getCompletion.mock.calls[0][0].botTools).toEqual([]);
+        // Only delegation (#1232), which writes nothing.
+        expect(getCompletion.mock.calls[0][0].botTools.map(tool => tool.name)).toEqual(['delegate']);
 
         await run(scene({ ai: { ...AI, actionsEnabled: true } }));
         expect(getCompletion.mock.calls[1][0].botTools.map(tool => tool.name))
@@ -218,6 +222,57 @@ describe('what lands in the channel', () => {
         await run(s);
 
         expect(s.channel.send.mock.calls.length).toBeGreaterThan(1);
+    });
+
+    it('posts what the tools made, a generated image say, after the report (#1229)', async () => {
+        const s = scene();
+        const png = Buffer.from('png');
+        getCompletion.mockImplementation(async ({ onToolEvent }) => {
+            onToolEvent({ type: 'attachment', id: 1, server: 'clawdia', tool: 'generate_image', buffer: png, name: 'generated-image-1.png', description: 'Generated image: a fox' });
+            return 'drew it';
+        });
+
+        await run(s);
+
+        const last = s.channel.send.mock.calls.at(-1)[0];
+        expect(last.files).toEqual([{ attachment: png, name: 'generated-image-1.png', description: 'Generated image: a fox' }]);
+        expect(last.allowedMentions).toEqual({ parse: [] });
+    });
+});
+
+describe('sub-agents (#1232)', () => {
+    it('offers delegate and tells the model when to use it', async () => {
+        await run(scene());
+        const [req] = getCompletion.mock.calls[0];
+        expect(req.botTools.map(tool => tool.name)).toContain('delegate');
+        expect(req.systemPrompt).toMatch(/sub-agents with delegate/);
+    });
+
+    it('runs the children unattributed, on the person\'s tool allowance, and shows them on the task', async () => {
+        const s = scene();
+        getCompletion.mockImplementationOnce(async ({ botTools, onToolEvent }) => {
+            const delegate = botTools.find(tool => tool.name === 'delegate');
+            const report = await delegate.run({ tasks: [{ instruction: 'price of A' }] }, { deadline: Date.now() + 5 * 60 * 1000 });
+            onToolEvent({ type: 'end', id: 9, server: 'clawdia', tool: 'delegate', ok: true, durationMs: 10 });
+            return report;
+        }).mockImplementationOnce(async ({ onToolEvent }) => {
+            onToolEvent({ type: 'end', id: 1, server: 'web', tool: 'search', ok: true, durationMs: 5 });
+            return 'A costs 3';
+        });
+
+        await run(s);
+
+        const child = getCompletion.mock.calls[1][0];
+        expect(child.userId).toBeUndefined();
+        expect(child.botTools.map(tool => tool.name)).not.toContain('delegate');
+        // The guild sets no per-user limit, so the person's tool window is
+        // unbounded — and the child's is the same, not the scheduled budget.
+        expect(child.toolBudget).toBeNull();
+        expect('toolBudget' in child).toBe(true);
+        const final = s.__progress.edit.mock.calls.at(-1)[0].content;
+        expect(final).toContain('A costs 3');
+        // The child's call is in the task's footer, beside the delegation.
+        expect(final).toMatch(/web·search/);
     });
 });
 

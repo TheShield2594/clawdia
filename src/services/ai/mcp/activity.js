@@ -155,7 +155,12 @@ function createToolActivity() {
                 if (fileBytes + event.buffer.length > MAX_ATTACHMENT_BYTES) return false;
                 used = true;
                 fileBytes += event.buffer.length;
-                files.push({ attachment: event.buffer, name: event.name });
+                files.push({
+                    attachment: event.buffer,
+                    name: event.name,
+                    // Alt text, when the tool wrote some (a generated image's prompt).
+                    ...(typeof event.description === 'string' && event.description ? { description: event.description } : {})
+                });
                 return true;
             }
         }

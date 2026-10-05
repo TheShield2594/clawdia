@@ -60,11 +60,20 @@ const deepTaskLimits = new BoundedRateLimiter(AI_RL_MAX_KEYS);
 const DEEP_TASKS_PER_WINDOW = 3;
 const DEEP_TASK_WINDOW_MS = 60 * 60 * 1000;
 
+// And one for generated images (#1229). A single image costs about what a few
+// dozen chat replies do, so it is not left to the tool-call window, which
+// counts every lookup the same. Per person and guild like the deep-task one;
+// a scheduled run, with nobody to charge, spends from a per-guild key.
+const imageLimits = new BoundedRateLimiter(AI_RL_MAX_KEYS);
+const IMAGES_PER_WINDOW = 5;
+const IMAGE_WINDOW_MS = 60 * 60 * 1000;
+
 setInterval(() => {
     rateLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
     channelRateLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
     toolCallLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
     deepTaskLimits.cleanup(DEEP_TASK_WINDOW_MS);
+    imageLimits.cleanup(IMAGE_WINDOW_MS);
 }, 15 * 60 * 1000).unref();
 
 /**
@@ -274,6 +283,20 @@ function checkDeepTaskLimit(guildId, userId) {
     return deepTaskLimits.check(userRateLimitKey(guildId, userId), DEEP_TASK_WINDOW_MS, DEEP_TASKS_PER_WINDOW);
 }
 
+function imageLimitKey(guildId, userId) {
+    return userId ? userRateLimitKey(guildId, userId) : `scheduled:${guildId}`;
+}
+
+/** Whether this person (or, with no person, this guild's scheduled runs) has an image left this hour. */
+function peekImageLimit(guildId, userId) {
+    return imageLimits.peek(imageLimitKey(guildId, userId), IMAGE_WINDOW_MS, IMAGES_PER_WINDOW);
+}
+
+/** Spend one of those images, and say whether there was one. */
+function checkImageLimit(guildId, userId) {
+    return imageLimits.check(imageLimitKey(guildId, userId), IMAGE_WINDOW_MS, IMAGES_PER_WINDOW);
+}
+
 /** A budget function over one key, in the shape the MCP toolkit spends. */
 function spender(key, windowMs, limit) {
     const budget = () => toolCallLimits.check(key, windowMs, limit);
@@ -287,6 +310,9 @@ module.exports = {
     checkDeepTaskLimit,
     DEEP_TASKS_PER_WINDOW,
     DEEP_TASK_WINDOW_MS,
+    peekImageLimit,
+    checkImageLimit,
+    IMAGES_PER_WINDOW,
     enforceMonthlyBudget,
     AiBudgetError,
     SCHEDULED_TOOL_CALLS_PER_HOUR,

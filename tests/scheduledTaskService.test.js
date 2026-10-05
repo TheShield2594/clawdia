@@ -401,6 +401,33 @@ describe('running an ai_prompt task', () => {
     });
 });
 
+describe('what a run\'s tools make (#1229)', () => {
+    test('a generated image is posted after the answer', async () => {
+        const png = Buffer.from('png');
+        aiService.getCompletion.mockImplementation(async ({ onToolEvent }) => {
+            onToolEvent({ type: 'attachment', id: 1, server: 'clawdia', tool: 'generate_image', buffer: png, name: 'generated-image-1.png' });
+            return 'Today\'s image';
+        });
+        const channel = textChannel();
+        due([makeTask()]);
+
+        await runDueTasks(makeClient(channel));
+
+        expect(channel.send).toHaveBeenLastCalledWith({
+            files: [{ attachment: png, name: 'generated-image-1.png' }],
+            allowedMentions: { parse: [] }
+        });
+    });
+
+    test('the image tool is offered to a scheduled run with the switch on and a key', async () => {
+        Guild.findOne.mockReturnValue({ lean: async () => ({ ai: { enabled: true, imageGeneration: true, openaiKey: 'sk-test' } }) });
+        due([makeTask()]);
+        await runDueTasks(makeClient(textChannel()));
+
+        expect(aiService.getCompletion.mock.calls[0][0].botTools.map(tool => tool.name)).toContain('generate_image');
+    });
+});
+
 describe('running a deep task', () => {
     const { TASK_MAX_TOOL_ROUNDS, TASK_TURN_BUDGET_MS } = require('../src/services/ai/mcp/toolkit');
 
@@ -418,6 +445,15 @@ describe('running a deep task', () => {
         expect(request.systemPrompt).toMatch(/standing instruction/);
         // Unattributed, so the guild's scheduled tool budget is what bounds it.
         expect(request.userId).toBeUndefined();
+    });
+
+    test('may delegate to sub-agents; a standard task may not (#1232)', async () => {
+        due([makeTask({ mode: 'deep' }), makeTask({ _id: 'task-2' })]);
+        await runDueTasks(makeClient(textChannel()));
+
+        const [deep, standard] = aiService.getCompletion.mock.calls.map(([request]) => request);
+        expect(deep.botTools.map(tool => tool.name)).toContain('delegate');
+        expect(standard.botTools.map(tool => tool.name)).not.toContain('delegate');
     });
 
     test('a standard task keeps the ordinary ceilings', async () => {

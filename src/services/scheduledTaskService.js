@@ -191,11 +191,22 @@ async function runAiPromptTask(client, task) {
     const { taskSystemPrompt, chunk } = require('./ai/deepTask');
     const { buildAgentTools, buildAgentToolsAddendum } = require('./ai/agentTools');
     const { createUnattendedConfirmer } = require('./ai/mcp/approval');
-    // Read-only ones only: nobody is present to have asked this run for
-    // anything, so a scheduled run never writes a note.
-    const agentTools = buildAgentTools(ai, { guildId: task.guildId, unattended: true });
+    const { createToolActivity } = require('./ai/mcp/activity');
+    const { delegateTool } = require('./ai/delegate');
+    // Collects what the tools made for the channel (a generated image), which
+    // is posted after the answer. Nobody watches a progress line here.
+    const activity = createToolActivity();
+    // Nothing that writes: nobody is present to have asked this run for
+    // anything, so a scheduled run never writes a note. A generated image is
+    // offered, since posting it is the run's whole output.
+    const agentTools = buildAgentTools(ai, { guildId: task.guildId, unattended: true, rateLimit: config.rateLimit });
+    // A deep run may hand parts of the work to sub-agents (#1232). Unattributed
+    // like the run, so their tool calls spend the same per-guild hourly budget.
+    const extraTools = deep
+        ? [delegateTool({ ai, config, guildId: task.guildId, userId: null, onToolEvent: activity.onEvent })]
+        : [];
     const basePrompt = deep
-        ? taskSystemPrompt(ai, { actionsEnabled: false, hasServers: (config.mcpServers || []).length > 0, agentTools })
+        ? taskSystemPrompt(ai, { actionsEnabled: false, hasServers: (config.mcpServers || []).length > 0, agentTools, delegation: true })
         : (ai.systemPrompt || 'You are a helpful Discord bot assistant.') + buildAgentToolsAddendum(agentTools);
 
     const systemPrompt = basePrompt
@@ -215,7 +226,8 @@ async function runAiPromptTask(client, task) {
         // answered by the guild's per-connection list of the ones allowed to
         // run unattended, and refused otherwise — as it always was.
         confirmTool: createUnattendedConfirmer(config.mcpServers),
-        botTools: agentTools,
+        onToolEvent: activity.onEvent,
+        botTools: [...agentTools, ...extraTools],
         // Still unattributed, so a deep run spends from the same per-guild
         // hourly tool budget as every other scheduled run: more rounds let it
         // use that budget in one go, never past it.
@@ -241,6 +253,11 @@ async function runAiPromptTask(client, task) {
     try {
         for (const content of pieces) {
             await target.send({ content, allowedMentions: { parse: [] } });
+        }
+        // A failed send costs the pictures, not the run: the answer is out.
+        if (activity.attachments.length) {
+            await target.send({ files: activity.attachments, allowedMentions: { parse: [] } }).catch(err =>
+                console.warn(`[ScheduledTask] task ${task._id} could not post its attachments: ${err.message}`));
         }
     } catch (error) {
         if (!toDm) throw error;
