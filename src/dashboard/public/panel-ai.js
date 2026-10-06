@@ -749,6 +749,11 @@ registerPanelActions({
     },
     change: {
         'ai-provider': () => updateAiProviderUI(),
+        // The service and model fields only matter with images on.
+        'ai-image-generation': el => {
+            const options = document.getElementById('ai-image-options');
+            if (options) options.style.display = el.checked ? '' : 'none';
+        },
     },
 });
 

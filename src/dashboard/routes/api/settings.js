@@ -8,6 +8,7 @@ const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { validateBaseUrl: validateOllamaBaseUrl } = require('../../../services/ai/providers/ollama');
 const { CONFIRM_MODES, MCP_ROUTES, MCP_APPROVERS } = require('../../../config/mcpServers');
 const { VOICE_REPLY_MODES } = require('../../../config/aiVoice');
+const { IMAGE_SERVICES, imageModelError } = require('../../../config/aiImages');
 const { isValidSlug } = require('../../lib/publicData');
 const { describeSensitivePermissions } = require('../../../utils/sensitiveRolePermissions');
 
@@ -380,6 +381,28 @@ function validateVoiceReplies(value) {
     return null;
 }
 
+// Same again for which service draws images first, and the model each draws
+// with: a name that cannot work through the endpoint images.js calls is caught
+// here, against the field, rather than at the first image somebody asks for.
+function validateImageService(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string' || !IMAGE_SERVICES.includes(value)) {
+        return `ai.imageService must be one of: ${IMAGE_SERVICES.join(', ')}`;
+    }
+    return null;
+}
+
+function validateImageModels(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'object' || Array.isArray(value)) return 'ai.imageModels must be { openai, gemini }';
+    for (const [service, model] of Object.entries(value)) {
+        if (service !== 'openai' && service !== 'gemini') return `ai.imageModels has no "${service}" service`;
+        const error = imageModelError(service, model);
+        if (error) return error;
+    }
+    return null;
+}
+
 // MCP connections are managed through api/mcpServers.js and the OAuth routes,
 // never through here (#1139). Those routes validate the URL, cap the list,
 // encrypt the token and — the part that matters — never take an `oauth`
@@ -453,6 +476,25 @@ function validateAiUpdate(updates) {
 
         if (voiceReplies !== undefined) {
             const error = validateVoiceReplies(voiceReplies);
+            if (error) return error;
+        }
+
+        let imageService;
+        if (key === 'ai.imageService') imageService = value;
+        else if (isWholeAi) imageService = value.imageService;
+
+        if (imageService !== undefined) {
+            const error = validateImageService(imageService);
+            if (error) return error;
+        }
+
+        let imageModels;
+        if (key === 'ai.imageModels') imageModels = value;
+        else if (key.startsWith('ai.imageModels.')) imageModels = { [key.slice('ai.imageModels.'.length)]: value };
+        else if (isWholeAi) imageModels = value.imageModels;
+
+        if (imageModels !== undefined) {
+            const error = validateImageModels(imageModels);
             if (error) return error;
         }
 

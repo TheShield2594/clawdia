@@ -82,10 +82,17 @@ With **Let the AI make images** on, the model has a `generate_image` tool:
 posted after the reply, with the prompt as its alt text. It takes a prompt and a
 shape (square, landscape or portrait) and makes one image per call.
 
-It uses the same keys as voice, in the same order: Gemini's image model
-(`GEMINI_IMAGE_MODEL`, default `gemini-2.5-flash-image`) for a server on Gemini,
-otherwise OpenAI's `gpt-image-1` at medium quality (`OPENAI_IMAGE_MODEL`),
-otherwise Gemini. With neither key the tool is not offered. A prompt the service
+**Image service** picks which service draws first. On **Automatic** it uses the
+same keys as voice, in the same order: Gemini for a server on Gemini, otherwise
+OpenAI at medium quality, otherwise Gemini. Picking OpenAI or Gemini puts that
+one first; the other still draws when it fails or the server has no key for it.
+The **OpenAI image model** and **Gemini image model** fields set the model each
+draws with (a gpt-image model such as `gpt-image-1-mini`, a Gemini image model
+such as `gemini-2.5-flash-image`; DALL·E and Imagen are refused). Left empty,
+they use the operator's `OPENAI_IMAGE_MODEL` / `GEMINI_IMAGE_MODEL`, else
+`gpt-image-1` and `gemini-2.5-flash-image`. Only those models and
+`gpt-image-1-mini` have a known price, so another is counted in tokens but not
+toward the monthly cost limit. With neither key the tool is not offered. A prompt the service
 refuses is not retried on the other one; the model is told it was refused and
 says so. An image costs far more than a reply, so each is recorded in the usage
 ledger and counted toward the monthly budget, a server that is out of budget

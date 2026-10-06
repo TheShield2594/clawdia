@@ -1,6 +1,7 @@
 const { Schema, model } = require('mongoose');
 const { encryptSecret, guildSecretBinding } = require('../config/secretBox');
 const { VOICE_REPLY_MODES } = require('../config/aiVoice');
+const { IMAGE_SERVICES } = require('../config/aiImages');
 
 /**
  * The guild a setter is writing for. `this` is the Guild document on a save,
@@ -736,6 +737,14 @@ const guildSchema = new Schema({
         // OpenAI or Gemini key. Off by default: one image costs about what a
         // few dozen chat replies do.
         imageGeneration: { type: Boolean, default: false },
+        // Which service draws first and with which model (config/aiImages.js).
+        // Set on the dashboard; an empty model is the operator's default for
+        // that service.
+        imageService: { type: String, enum: IMAGE_SERVICES, default: 'auto' },
+        imageModels: {
+            openai: { type: String, default: null, maxlength: 100 },
+            gemini: { type: String, default: null, maxlength: 100 }
+        },
         // Providers to answer with when the primary cannot (services/ai/index.js):
         // down, overloaded, rate-limited, or refusing the key. Tried in order,
         // each with this guild's own key for it; a null model is that

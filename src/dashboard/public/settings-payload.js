@@ -366,6 +366,10 @@ function buildSettingsPayload(section, ctx = {}) {
             'ai.voiceTranscription': document.getElementById('ai-voice-transcription').checked,
             'ai.voiceReplies': document.getElementById('ai-voice-replies').value,
             'ai.imageGeneration': document.getElementById('ai-image-generation').checked,
+            'ai.imageService': document.getElementById('ai-image-service').value,
+            // Empty is "use the default", saved as null rather than ''.
+            'ai.imageModels.openai': document.getElementById('ai-image-model-openai').value.trim() || null,
+            'ai.imageModels.gemini': document.getElementById('ai-image-model-gemini').value.trim() || null,
             // Empty provider rows are dropped, so "None" in the first row and a
             // provider in the second still saves as a one-item list.
             'ai.fallbacks': [1, 2]

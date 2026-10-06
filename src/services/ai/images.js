@@ -4,16 +4,20 @@ const { resolveApiKey } = require('./apiKeys');
 const { recordUsage } = require('./usage');
 const { enforceMonthlyBudget, reserveImageLimit, refundImageLimit, IMAGES_PER_WINDOW } = require('./rateLimit');
 const { BOT_SERVER } = require('./botTools');
+const { operatorImageModel } = require('../../config/aiImages');
 
 /**
  * A `generate_image` tool (#1229): "draw a logo for the guild", "make a banner
  * for Friday's event", and the picture is posted in the conversation.
  *
- * Who draws follows the rule transcription.js and speech.js use, with the keys
+ * Who draws is the guild's `ai.imageService` (config/aiImages.js). Left on
+ * auto it follows the rule transcription.js and speech.js use, with the keys
  * the guild already has: Gemini for a guild on Gemini, otherwise OpenAI's image
  * model, otherwise Gemini. Claude, OpenRouter and Ollama make no images, so a
  * guild on one of those draws with whichever of the two keys it has, and is not
- * offered the tool with neither.
+ * offered the tool with neither. Picking a service only puts it first: the
+ * other still answers when it fails. The model is the guild's own
+ * `ai.imageModels.<service>` when set.
  *
  * One image costs far more than a chat reply, so three things bound it on top
  * of the turn's ordinary tool budget: the monthly ceiling (the call is recorded
@@ -37,10 +41,18 @@ const IMAGE_TIMEOUT_MS = 120_000;
 
 const SIZES = ['square', 'landscape', 'portrait'];
 
+// The default for a guild that has not picked a model on the dashboard.
 // Overridable because both lines get new models and renames faster than
 // releases; an operator should be able to follow one without waiting.
-const OPENAI_IMAGE_MODEL = (process.env.OPENAI_IMAGE_MODEL || '').trim() || 'gpt-image-1';
-const GEMINI_IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || '').trim() || 'gemini-2.5-flash-image';
+const OPENAI_IMAGE_MODEL = operatorImageModel('openai');
+const GEMINI_IMAGE_MODEL = operatorImageModel('gemini');
+
+/** The model this guild draws with on `service`: its own pick, else the default. */
+function imageModelFor(aiSettings, service) {
+    const own = aiSettings?.imageModels?.[service];
+    if (typeof own === 'string' && own.trim()) return own.trim();
+    return service === 'openai' ? OPENAI_IMAGE_MODEL : GEMINI_IMAGE_MODEL;
+}
 // Medium is about four US cents a square image on gpt-image-1; high is four
 // times that, for a picture posted in a chat.
 const OPENAI_IMAGE_QUALITY = 'medium';
@@ -78,6 +90,7 @@ function openaiUsage(result) {
 function openaiGenerator(aiSettings, guildId) {
     const { apiKey } = resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId });
     if (!apiKey) return null;
+    const model = imageModelFor(aiSettings, 'openai');
     return {
         name: 'OpenAI',
         async generate(prompt, size, { signal } = {}) {
@@ -86,7 +99,7 @@ function openaiGenerator(aiSettings, guildId) {
             let result;
             try {
                 result = await client.images.generate({
-                    model: OPENAI_IMAGE_MODEL,
+                    model,
                     prompt,
                     n: 1,
                     size: OPENAI_SIZE[size] || OPENAI_SIZE.square,
@@ -98,7 +111,7 @@ function openaiGenerator(aiSettings, guildId) {
                 if (isOpenaiRefusal(err)) return { refused: true, ledger: null };
                 throw err;
             }
-            const ledger = { provider: 'openai', model: OPENAI_IMAGE_MODEL, usage: openaiUsage(result) };
+            const ledger = { provider: 'openai', model, usage: openaiUsage(result) };
             const data = result?.data?.[0]?.b64_json;
             if (!data) throw Object.assign(new Error('no image in the response'), { ledger });
             return { image: Buffer.from(data, 'base64'), mimeType: 'image/png', ledger };
@@ -109,13 +122,14 @@ function openaiGenerator(aiSettings, guildId) {
 function geminiGenerator(aiSettings, guildId) {
     const { apiKey } = resolveApiKey(aiSettings, { field: 'geminiKey', envKey: process.env.GEMINI_API_KEY, guildId });
     if (!apiKey) return null;
+    const model = imageModelFor(aiSettings, 'gemini');
     return {
         name: 'Gemini',
         async generate(prompt, size, { signal } = {}) {
             const { GoogleGenAI } = require('@google/genai');
             const client = new GoogleGenAI({ apiKey });
             const response = await client.models.generateContent({
-                model: GEMINI_IMAGE_MODEL,
+                model,
                 contents: [{ role: 'user', parts: [{ text: prompt }] }],
                 config: {
                     responseModalities: ['IMAGE'],
@@ -127,7 +141,7 @@ function geminiGenerator(aiSettings, guildId) {
             // Billed whether or not a picture came back: the prompt was read.
             const ledger = {
                 provider: 'gemini',
-                model: GEMINI_IMAGE_MODEL,
+                model,
                 usage: meta ? { inputTokens: meta.promptTokenCount || 0, outputTokens: meta.candidatesTokenCount || 0 } : null
             };
             if (response?.promptFeedback?.blockReason) return { refused: true, ledger };
@@ -144,7 +158,9 @@ function geminiGenerator(aiSettings, guildId) {
 
 /** Every service this guild has a key for, in the order to try them. */
 function imageGeneratorsFor(aiSettings, guildId) {
-    const order = aiSettings?.provider === 'gemini'
+    const service = aiSettings?.imageService;
+    const geminiFirst = service === 'gemini' || (service !== 'openai' && aiSettings?.provider === 'gemini');
+    const order = geminiFirst
         ? [geminiGenerator, openaiGenerator]
         : [openaiGenerator, geminiGenerator];
     return order.map(make => make(aiSettings || {}, guildId)).filter(Boolean);
@@ -284,6 +300,7 @@ module.exports = {
     generateImageTool,
     generateImage,
     imageGeneratorsFor,
+    imageModelFor,
     isOpenaiRefusal,
     MAX_IMAGES_PER_TURN,
     OPENAI_IMAGE_MODEL,

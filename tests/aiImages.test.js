@@ -22,6 +22,7 @@ const {
     generateImageTool,
     generateImage,
     imageGeneratorsFor,
+    imageModelFor,
     isOpenaiRefusal,
     MAX_IMAGES_PER_TURN,
     OPENAI_IMAGE_MODEL,
@@ -91,6 +92,21 @@ describe('when the tool is offered', () => {
         expect(imageGeneratorsFor({ ...both, provider: 'gemini' }, null).map(g => g.name)).toEqual(['Gemini', 'OpenAI']);
         expect(imageGeneratorsFor({ ...both, provider: 'anthropic' }, null).map(g => g.name)).toEqual(['OpenAI', 'Gemini']);
         expect(imageGeneratorsFor({ provider: 'ollama' }, null)).toEqual([]);
+    });
+
+    test('the picked service goes first, and the other is still there behind it', () => {
+        const both = { openaiKey: 'sk-test', geminiKey: 'g-test' };
+        expect(imageGeneratorsFor({ ...both, provider: 'gemini', imageService: 'openai' }, null).map(g => g.name)).toEqual(['OpenAI', 'Gemini']);
+        expect(imageGeneratorsFor({ ...both, provider: 'openai', imageService: 'gemini' }, null).map(g => g.name)).toEqual(['Gemini', 'OpenAI']);
+        expect(imageGeneratorsFor({ ...both, provider: 'gemini', imageService: 'auto' }, null).map(g => g.name)).toEqual(['Gemini', 'OpenAI']);
+        // Picking a service the guild has no key for draws with the one it has.
+        expect(imageGeneratorsFor({ openaiKey: 'sk-test', imageService: 'gemini' }, null).map(g => g.name)).toEqual(['OpenAI']);
+    });
+
+    test("the guild's own model, else the default", () => {
+        expect(imageModelFor({ imageModels: { openai: ' gpt-image-1-mini ' } }, 'openai')).toBe('gpt-image-1-mini');
+        expect(imageModelFor({ imageModels: { openai: '', gemini: null } }, 'openai')).toBe(OPENAI_IMAGE_MODEL);
+        expect(imageModelFor({}, 'gemini')).toBe(GEMINI_IMAGE_MODEL);
     });
 });
 
@@ -297,6 +313,23 @@ describe('the real services', () => {
         );
         expect(made.image.equals(PNG)).toBe(true);
         expect(made.ledger).toEqual({ provider: 'openai', model: OPENAI_IMAGE_MODEL, usage: { inputTokens: 12, outputTokens: 1584 } });
+    });
+
+    test("each service draws with the guild's picked model, and records it as that", async () => {
+        mockImagesGenerate.mockResolvedValue({ data: [{ b64_json: PNG.toString('base64') }], usage: { input_tokens: 1, output_tokens: 2 } });
+        mockGenerateContent.mockResolvedValue({
+            candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: PNG.toString('base64') } }] } }]
+        });
+        const ai = { openaiKey: 'sk-test', geminiKey: 'g-test', imageModels: { openai: 'gpt-image-1-mini', gemini: 'gemini-3-pro-image-preview' } };
+        const [openai, gemini] = imageGeneratorsFor(ai, null);
+
+        const drawn = await openai.generate('a fox', 'square');
+        expect(mockImagesGenerate.mock.calls[0][0].model).toBe('gpt-image-1-mini');
+        expect(drawn.ledger.model).toBe('gpt-image-1-mini');
+
+        const painted = await gemini.generate('a fox', 'square');
+        expect(mockGenerateContent.mock.calls[0][0].model).toBe('gemini-3-pro-image-preview');
+        expect(painted.ledger.model).toBe('gemini-3-pro-image-preview');
     });
 
     test('OpenAI: a moderation block is a refusal, not an error', async () => {

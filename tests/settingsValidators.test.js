@@ -473,6 +473,27 @@ describe('validateHeistUpdate', () => {
 });
 
 describe('validateAiUpdate', () => {
+    test('ai.imageService is one of the known services', () => {
+        const { IMAGE_SERVICES } = require('../src/config/aiImages');
+        for (const service of IMAGE_SERVICES) expect(validateAiUpdate({ 'ai.imageService': service })).toBeNull();
+        expect(validateAiUpdate({ 'ai.imageService': 'midjourney' }))
+            .toBe(`ai.imageService must be one of: ${IMAGE_SERVICES.join(', ')}`);
+        expect(validateAiUpdate({ ai: { imageService: 1 } })).toMatch(/ai\.imageService must be one of/);
+    });
+
+    test('ai.imageModels takes image models for the service, or empty for the default', () => {
+        expect(validateAiUpdate({ 'ai.imageModels.openai': 'gpt-image-1-mini', 'ai.imageModels.gemini': 'gemini-2.5-flash-image' })).toBeNull();
+        expect(validateAiUpdate({ 'ai.imageModels.openai': null, 'ai.imageModels.gemini': '' })).toBeNull();
+        expect(validateAiUpdate({ ai: { imageModels: { openai: 'gpt-image-2' } } })).toBeNull();
+        expect(validateAiUpdate({ 'ai.imageModels.openai': 'gpt-4o' })).toMatch(/not an OpenAI image model/);
+        expect(validateAiUpdate({ 'ai.imageModels.openai': 'dall-e-3' })).toMatch(/DALL·E is not supported/);
+        expect(validateAiUpdate({ 'ai.imageModels.gemini': 'imagen-4.0-generate-001' })).toMatch(/Imagen is not supported/);
+        expect(validateAiUpdate({ 'ai.imageModels.gemini': 'gemini-2.0-flash' })).toMatch(/not a Gemini image model/);
+        expect(validateAiUpdate({ 'ai.imageModels.gemini': 'gemini image; drop' })).toMatch(/must be a model name/);
+        expect(validateAiUpdate({ 'ai.imageModels.midjourney': 'v7' })).toMatch(/no "midjourney" service/);
+        expect(validateAiUpdate({ 'ai.imageModels': ['gpt-image-1'] })).toMatch(/must be \{ openai, gemini \}/);
+    });
+
     it('accepts a well-formed update', () => {
         expect(validateAiUpdate({
             'ai.mcpConfirm': CONFIRM_MODES[0],

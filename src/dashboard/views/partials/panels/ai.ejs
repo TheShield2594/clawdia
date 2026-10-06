@@ -180,8 +180,31 @@
                         </div>
                         <label class="toggle">
                             <span class="toggle-text"><strong>Let the AI make images</strong><span>Draw a picture when someone asks for one and post it in the conversation, scheduled tasks included. Uses this server's OpenAI key, or its Gemini key. An image costs far more than a reply: each counts toward the monthly budget, and each member gets 5 an hour.</span></span>
-                            <span class="switch"><input type="checkbox" id="ai-image-generation" <%= settings.ai.imageGeneration ? 'checked' : '' %>><span class="slider"></span></span>
+                            <span class="switch"><input type="checkbox" id="ai-image-generation" data-change="ai-image-generation" <%= settings.ai.imageGeneration ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
+                        <% const imageService = settings.ai.imageService || 'auto'; const imageModels = settings.ai.imageModels || {}; const imageDefaults = (typeof defaultImageModels !== 'undefined' && defaultImageModels) || {}; %>
+                        <div id="ai-image-options" <%- settings.ai.imageGeneration ? '' : 'style="display:none"' %>>
+                            <div class="field">
+                                <label class="field-label" for="ai-image-service">Image service</label>
+                                <select id="ai-image-service">
+                                    <option value="auto" <%= imageService === 'auto' ? 'selected' : '' %>>Automatic — Gemini when chat runs on Gemini, otherwise OpenAI</option>
+                                    <option value="openai" <%= imageService === 'openai' ? 'selected' : '' %>>OpenAI</option>
+                                    <option value="gemini" <%= imageService === 'gemini' ? 'selected' : '' %>>Google Gemini</option>
+                                </select>
+                                <small>Which service draws first. If it fails, or this server has no key for it, the other one is used when there is a key for it.</small>
+                            </div>
+                            <div class="field field-pair">
+                                <div>
+                                    <label class="field-label" for="ai-image-model-openai">OpenAI image model</label>
+                                    <input type="text" id="ai-image-model-openai" maxlength="100" value="<%= imageModels.openai || '' %>" placeholder="<%= imageDefaults.openai ? 'Default: ' + imageDefaults.openai : 'Leave empty for the default' %>">
+                                </div>
+                                <div>
+                                    <label class="field-label" for="ai-image-model-gemini">Gemini image model</label>
+                                    <input type="text" id="ai-image-model-gemini" maxlength="100" value="<%= imageModels.gemini || '' %>" placeholder="<%= imageDefaults.gemini ? 'Default: ' + imageDefaults.gemini : 'Leave empty for the default' %>">
+                                </div>
+                            </div>
+                            <div class="field"><small>Leave a model empty for the default. OpenAI takes gpt-image models (e.g. <code>gpt-image-1-mini</code>, cheaper than <code>gpt-image-1</code>); Gemini takes its image models (e.g. <code>gemini-2.5-flash-image</code>). DALL·E and Imagen are not supported. Usage costs are estimated for gpt-image-1, gpt-image-1-mini and Gemini image models only; another model is still counted in tokens but at no cost, so the monthly cost limit will not see it.</small></div>
+                        </div>
                         <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
                         <div class="actions-row">
                             <button class="btn btn-primary" data-action="save" data-section="ai">Save changes</button>
