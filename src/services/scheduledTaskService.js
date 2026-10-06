@@ -507,7 +507,7 @@ async function createTask({ guildId, channelId, createdBy, kind = 'ai_prompt', p
     if (mode === 'deep') {
         const settings = await Guild.findOne({ guildId }).lean();
         if (!settings?.ai?.taskModeEnabled) {
-            return { error: 'Deep task mode is switched off on this server. A server admin can turn it on under **AI → Chat** in the dashboard.' };
+            return { error: 'Deep task mode is switched off on this server. A server admin can turn it on under **AI → Abilities** in the dashboard.' };
         }
     }
 

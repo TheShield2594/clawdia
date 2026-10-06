@@ -199,7 +199,7 @@ unless someone hand-added the word, and the model then answers blind even though
 the fact was on file.
 
 So the knowledge base has an optional second tier: **semantic retrieval**, off
-by default under **AI → Chat**. With it on, each entry is turned into a vector
+by default under **AI → Knowledge Base**. With it on, each entry is turned into a vector
 when it is written and the question into one when it is asked, and the nearest
 few by meaning are unioned with the keyword hits before the prompt is assembled
 — so the paraphrase reaches the entry, and nothing about the keyword tier or the
@@ -367,7 +367,7 @@ lists them and `/ai memories delete <number>` removes one. React 📌 to one of 
 messages to pin it yourself; she can also ask to save one herself with the
 `save_memory` tool, which posts approval buttons and saves nothing until someone
 clicks, and drop one that has gone stale with `forget_memory`. Ten per user, per
-server by default; **Memories per member** under **AI → Chat** raises it as far
+server by default; **Memories per member** under **AI → Knowledge Base** raises it as far
 as fifty. Every memory rides in every reply's prompt, so more of them cost more
 per message.
 
@@ -476,7 +476,7 @@ reachable from inside a story.
 
 ### Event Commentary
 
-With **Enable event commentary** switched on under **AI → Chat**, the bot adds
+With **Enable event commentary** switched on under **AI → Abilities**, the bot adds
 two or three sentences of colour commentary — in the server's own configured
 persona — to the announcements it already posts when a war, an economy season,
 or the weekly champion competition resolves.
