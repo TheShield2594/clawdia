@@ -22,6 +22,9 @@ const {
     generateImageTool,
     generateImage,
     imageGeneratorsFor,
+    imageModelFor,
+    higgsfieldGenerator,
+    sniffImageType,
     isOpenaiRefusal,
     MAX_IMAGES_PER_TURN,
     OPENAI_IMAGE_MODEL,
@@ -30,10 +33,10 @@ const {
 const { buildAgentTools, buildAgentToolsAddendum } = require('../src/services/ai/agentTools');
 const { prepareMcpToolkit } = require('../src/services/ai/mcp/toolkit');
 const { createToolActivity } = require('../src/services/ai/mcp/activity');
-const { bumpMonthlyUsage, resetMonthlyUsageCache, peekMonthlyUsage, estimateCost } = require('../src/services/ai/usage');
+const { bumpMonthlyUsage, resetMonthlyUsageCache, peekMonthlyUsage, estimateCost, rowCost, recordUsage } = require('../src/services/ai/usage');
 const { IMAGES_PER_WINDOW } = require('../src/services/ai/rateLimit');
 
-const KEYS = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'AI_ENV_KEY_GUILDS'];
+const KEYS = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY', 'AI_ENV_KEY_GUILDS'];
 const saved = {};
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const PNG = Buffer.from('89504e470d0a1a0a', 'hex');
@@ -91,6 +94,36 @@ describe('when the tool is offered', () => {
         expect(imageGeneratorsFor({ ...both, provider: 'gemini' }, null).map(g => g.name)).toEqual(['Gemini', 'OpenAI']);
         expect(imageGeneratorsFor({ ...both, provider: 'anthropic' }, null).map(g => g.name)).toEqual(['OpenAI', 'Gemini']);
         expect(imageGeneratorsFor({ provider: 'ollama' }, null)).toEqual([]);
+    });
+
+    test('the picked service goes first, and the other is still there behind it', () => {
+        const both = { openaiKey: 'sk-test', geminiKey: 'g-test' };
+        expect(imageGeneratorsFor({ ...both, provider: 'gemini', imageService: 'openai' }, null).map(g => g.name)).toEqual(['OpenAI', 'Gemini']);
+        expect(imageGeneratorsFor({ ...both, provider: 'openai', imageService: 'gemini' }, null).map(g => g.name)).toEqual(['Gemini', 'OpenAI']);
+        expect(imageGeneratorsFor({ ...both, provider: 'gemini', imageService: 'auto' }, null).map(g => g.name)).toEqual(['Gemini', 'OpenAI']);
+        // Picking a service the guild has no key for draws with the one it has.
+        expect(imageGeneratorsFor({ openaiKey: 'sk-test', imageService: 'gemini' }, null).map(g => g.name)).toEqual(['OpenAI']);
+    });
+
+    test('OpenRouter and Higgsfield draw with their own keys, behind the others unless picked', () => {
+        const all = { openaiKey: 'sk-test', geminiKey: 'g-test', openrouterKey: 'sk-or-test', higgsfieldKey: 'id:secret' };
+        expect(imageGeneratorsFor(all, null).map(g => g.name)).toEqual(['OpenAI', 'Gemini', 'OpenRouter', 'Higgsfield']);
+        expect(imageGeneratorsFor({ ...all, imageService: 'higgsfield' }, null).map(g => g.name))
+            .toEqual(['Higgsfield', 'OpenAI', 'Gemini', 'OpenRouter']);
+        expect(imageGeneratorsFor({ ...all, imageService: 'openrouter' }, null).map(g => g.name))
+            .toEqual(['OpenRouter', 'OpenAI', 'Gemini', 'Higgsfield']);
+        // On auto, a guild chatting through OpenRouter draws through it first.
+        expect(imageGeneratorsFor({ ...all, provider: 'openrouter' }, null).map(g => g.name))
+            .toEqual(['OpenRouter', 'OpenAI', 'Gemini', 'Higgsfield']);
+        // An OpenRouter key alone is now enough to be offered the tool.
+        expect(buildAgentTools({ imageGeneration: true, provider: 'openrouter', openrouterKey: 'sk-or-test' }, { guildId: 'g1' }).map(t => t.name))
+            .toEqual(['generate_image']);
+    });
+
+    test("the guild's own model, else the default", () => {
+        expect(imageModelFor({ imageModels: { openai: ' gpt-image-1-mini ' } }, 'openai')).toBe('gpt-image-1-mini');
+        expect(imageModelFor({ imageModels: { openai: '', gemini: null } }, 'openai')).toBe(OPENAI_IMAGE_MODEL);
+        expect(imageModelFor({}, 'gemini')).toBe(GEMINI_IMAGE_MODEL);
     });
 });
 
@@ -299,6 +332,23 @@ describe('the real services', () => {
         expect(made.ledger).toEqual({ provider: 'openai', model: OPENAI_IMAGE_MODEL, usage: { inputTokens: 12, outputTokens: 1584 } });
     });
 
+    test("each service draws with the guild's picked model, and records it as that", async () => {
+        mockImagesGenerate.mockResolvedValue({ data: [{ b64_json: PNG.toString('base64') }], usage: { input_tokens: 1, output_tokens: 2 } });
+        mockGenerateContent.mockResolvedValue({
+            candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: PNG.toString('base64') } }] } }]
+        });
+        const ai = { openaiKey: 'sk-test', geminiKey: 'g-test', imageModels: { openai: 'gpt-image-1-mini', gemini: 'gemini-3-pro-image-preview' } };
+        const [openai, gemini] = imageGeneratorsFor(ai, null);
+
+        const drawn = await openai.generate('a fox', 'square');
+        expect(mockImagesGenerate.mock.calls[0][0].model).toBe('gpt-image-1-mini');
+        expect(drawn.ledger.model).toBe('gpt-image-1-mini');
+
+        const painted = await gemini.generate('a fox', 'square');
+        expect(mockGenerateContent.mock.calls[0][0].model).toBe('gemini-3-pro-image-preview');
+        expect(painted.ledger.model).toBe('gemini-3-pro-image-preview');
+    });
+
     test('OpenAI: a moderation block is a refusal, not an error', async () => {
         mockImagesGenerate.mockRejectedValue(Object.assign(new Error('blocked'), { status: 400, code: 'moderation_blocked' }));
         const [openai] = imageGeneratorsFor({ openaiKey: 'sk-test' }, null);
@@ -340,4 +390,196 @@ describe('the real services', () => {
             expect.anything()
         );
     });
+});
+
+const jsonResponse = (status, body, headers = {}) => new Response(JSON.stringify(body), {
+    status, headers: { 'content-type': 'application/json', ...headers }
+});
+
+describe('OpenRouter', () => {
+    let fetchMock;
+    beforeEach(() => { fetchMock = jest.spyOn(global, 'fetch'); });
+
+    test('posts to its image endpoint and records the cost it reports', async () => {
+        fetchMock.mockResolvedValue(jsonResponse(200, {
+            data: [{ b64_json: PNG.toString('base64'), media_type: 'image/png' }],
+            usage: { prompt_tokens: 0, completion_tokens: 4175, cost: 0.04 }
+        }));
+        const [openrouter] = imageGeneratorsFor({ openrouterKey: 'sk-or-test', imageModels: { openrouter: 'black-forest-labs/flux.2-pro' } }, null);
+
+        const made = await openrouter.generate('a fox', 'landscape');
+
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(url).toBe('https://openrouter.ai/api/v1/images');
+        expect(init.headers.Authorization).toBe('Bearer sk-or-test');
+        expect(JSON.parse(init.body)).toMatchObject({ model: 'black-forest-labs/flux.2-pro', prompt: 'a fox', n: 1, aspect_ratio: '16:9' });
+        expect(made.image.equals(PNG)).toBe(true);
+        expect(made.mimeType).toBe('image/png');
+        expect(made.ledger).toEqual({
+            provider: 'openrouter', model: 'black-forest-labs/flux.2-pro',
+            usage: { inputTokens: 0, outputTokens: 4175, cost: 0.04 }
+        });
+    });
+
+    test('defaults to a model, and reads the type from the bytes when it is not given', async () => {
+        fetchMock.mockResolvedValue(jsonResponse(200, { data: [{ b64_json: PNG.toString('base64') }] }));
+        const [openrouter] = imageGeneratorsFor({ openrouterKey: 'sk-or-test' }, null);
+        const made = await openrouter.generate('x', 'square');
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe('google/gemini-2.5-flash-image');
+        expect(made.mimeType).toBe('image/png');
+    });
+
+    test('a moderation answer is a refusal; anything else is an error', async () => {
+        const [openrouter] = imageGeneratorsFor({ openrouterKey: 'sk-or-test' }, null);
+        fetchMock.mockResolvedValueOnce(jsonResponse(403, { error: { message: 'Input was flagged by moderation', code: 403 } }));
+        await expect(openrouter.generate('x', 'square')).resolves.toEqual({ refused: true, ledger: null });
+
+        fetchMock.mockResolvedValueOnce(jsonResponse(502, { error: { message: 'Generation failed' } }));
+        await expect(openrouter.generate('x', 'square')).rejects.toThrow('OpenRouter answered 502: Generation failed');
+    });
+
+    test('a vector image it cannot post is an error, still on the ledger', async () => {
+        fetchMock.mockResolvedValue(jsonResponse(200, {
+            data: [{ b64_json: Buffer.from('<svg/>').toString('base64'), media_type: 'image/svg+xml' }],
+            usage: { completion_tokens: 10, cost: 0.01 }
+        }));
+        const [openrouter] = imageGeneratorsFor({ openrouterKey: 'sk-or-test' }, null);
+        await expect(openrouter.generate('x', 'square')).rejects.toMatchObject({ ledger: { provider: 'openrouter' } });
+    });
+});
+
+describe('Higgsfield', () => {
+    let fetchMock;
+    beforeEach(() => { fetchMock = jest.spyOn(global, 'fetch'); });
+
+    const ID = 'd7e6c0f3-6699-4f6c-bb45-2ad7fd9158ff';
+    const generator = (ai = {}) => higgsfieldGenerator({ higgsfieldKey: 'kid:ksecret', ...ai }, null, { pollMs: 1 });
+    // Answers by URL, in order for the ones asked more than once; the last
+    // answer repeats. A Response body reads once, so each answer is a factory.
+    const route = routes => fetchMock.mockImplementation(async url => {
+        for (const [match, answers] of routes) {
+            if (String(url).includes(match)) return (answers.length > 1 ? answers.shift() : answers[0])();
+        }
+        throw new Error(`unexpected fetch ${url}`);
+    });
+
+    test('estimates, submits, polls until done, fetches the picture and records the estimate', async () => {
+        route([
+            ['/estimate/', [() => jsonResponse(200, { credits: '1.500', usd: '0.094' })]],
+            ['/status', [() => jsonResponse(200, { status: 'in_progress', request_id: ID }), () => jsonResponse(200, {
+                status: 'completed', request_id: ID, images: [{ url: 'https://cdn.example.com/out.png' }]
+            })]],
+            ['cdn.example.com', [() => new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } })]],
+            ['/higgsfield-ai/soul/v2/standard', [() => jsonResponse(200, { status: 'queued', request_id: ID })]]
+        ]);
+
+        const made = await generator().generate('a fox', 'portrait');
+
+        const submit = fetchMock.mock.calls.find(([url]) => url === 'https://api.higgsfield.ai/higgsfield-ai/soul/v2/standard');
+        expect(submit[1].headers.Authorization).toBe('Key kid:ksecret');
+        expect(submit[1].headers['Idempotency-Key']).toEqual(expect.any(String));
+        expect(JSON.parse(submit[1].body)).toEqual({ prompt: 'a fox', aspect_ratio: '9:16' });
+        expect(fetchMock.mock.calls.filter(([url]) => url === `https://api.higgsfield.ai/requests/${ID}/status`)).toHaveLength(2);
+        expect(made.image.equals(PNG)).toBe(true);
+        expect(made.mimeType).toBe('image/png');
+        expect(made.ledger).toEqual({
+            provider: 'higgsfield', model: 'higgsfield-ai/soul/v2/standard', usage: { inputTokens: 0, outputTokens: 0, cost: 0.094 }
+        });
+    });
+
+    test('nsfw is a refusal and is not charged; failed is an error', async () => {
+        route([
+            ['/estimate/', [() => jsonResponse(500, {})]],
+            ['/status', [() => jsonResponse(200, { status: 'nsfw', request_id: ID })]],
+            ['/higgsfield-ai/', [() => jsonResponse(200, { status: 'queued', request_id: ID })]]
+        ]);
+        await expect(generator().generate('x', 'square')).resolves.toEqual({ refused: true, ledger: null });
+
+        route([
+            ['/estimate/', [() => jsonResponse(500, {})]],
+            ['/status', [() => jsonResponse(200, { status: 'failed', request_id: ID, error: 'Generation failed' })]],
+            ['/higgsfield-ai/', [() => jsonResponse(200, { status: 'queued', request_id: ID })]]
+        ]);
+        await expect(generator().generate('x', 'square')).rejects.toThrow('Higgsfield request failed: Generation failed');
+    });
+
+    test('a rejected submission is an error with what Higgsfield said', async () => {
+        route([
+            ['/estimate/', [() => jsonResponse(500, {})]],
+            ['/higgsfield-ai/', [() => jsonResponse(403, { detail: 'Insufficient credits' })]]
+        ]);
+        await expect(generator().generate('x', 'square')).rejects.toThrow('Higgsfield answered 403: Insufficient credits');
+    });
+
+    test('a picture link that is not https is not fetched', async () => {
+        route([
+            ['/estimate/', [() => jsonResponse(200, { usd: '0.1' })]],
+            ['/status', [() => jsonResponse(200, { status: 'completed', request_id: ID, images: [{ url: 'http://169.254.169.254/latest' }] })]],
+            ['/higgsfield-ai/', [() => jsonResponse(200, { status: 'queued', request_id: ID })]]
+        ]);
+        await expect(generator().generate('x', 'square')).rejects.toMatchObject({ ledger: { provider: 'higgsfield' } });
+        expect(fetchMock.mock.calls.some(([url]) => String(url).includes('169.254'))).toBe(false);
+    });
+
+    test('out of time, a queued request is cancelled', async () => {
+        route([
+            ['/estimate/', [() => jsonResponse(200, { usd: '0.1' })]],
+            ['/cancel', [() => new Response(null, { status: 202 })]],
+            ['/status', [() => jsonResponse(200, { status: 'queued', request_id: ID })]],
+            ['/higgsfield-ai/', [() => jsonResponse(200, { status: 'queued', request_id: ID })]]
+        ]);
+        const controller = new AbortController();
+        const drawing = generator().generate('x', 'square', { signal: controller.signal });
+        setTimeout(() => controller.abort(new Error('out of time')), 20);
+        await expect(drawing).rejects.toThrow();
+        await flush();
+        expect(fetchMock.mock.calls.some(([url]) => url === `https://api.higgsfield.ai/requests/${ID}/cancel`)).toBe(true);
+    });
+
+    test('an endpoint ID that is not a plain path never reaches the URL', async () => {
+        await expect(generator({ imageModels: { higgsfield: '../requests/x' } }).generate('x', 'square')).rejects.toThrow(/not a Higgsfield endpoint ID/);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    test('no key, no generator', () => {
+        expect(higgsfieldGenerator({}, null)).toBeNull();
+    });
+});
+
+describe('reported costs on the ledger', () => {
+    test('a row with no price table costs what every call in it reported', () => {
+        expect(rowCost({ provider: 'higgsfield', model: 'm', requestCount: 2, reportedCost: 0.2, reportedCostRequests: 2 })).toBeCloseTo(0.2);
+        // One call did not say: the sum is not the whole, so the row is unpriced.
+        expect(rowCost({ provider: 'higgsfield', model: 'm', requestCount: 3, reportedCost: 0.2, reportedCostRequests: 2 })).toBeNull();
+        expect(rowCost({ provider: 'openrouter', model: 'x/y', requestCount: 1 })).toBeNull();
+        // A price table still wins.
+        expect(rowCost({ provider: 'openai', model: 'gpt-image-1', inputTokens: 0, outputTokens: 1_000_000, requestCount: 1 })).toBe(40);
+    });
+
+    test('a call that reports a cost is recorded even with no tokens', async () => {
+        await recordUsage('g-cost', 'higgsfield', 'higgsfield-ai/soul/v2/standard', { inputTokens: 0, outputTokens: 0, cost: 0.094 });
+        expect(AIUsage.updateOne).toHaveBeenCalledWith(
+            expect.objectContaining({ guildId: 'g-cost', provider: 'higgsfield' }),
+            expect.objectContaining({ $inc: expect.objectContaining({ requestCount: 1, reportedCost: 0.094, reportedCostRequests: 1 }) }),
+            expect.anything()
+        );
+
+        AIUsage.updateOne.mockClear();
+        await recordUsage('g-cost', 'higgsfield', 'm', { inputTokens: 0, outputTokens: 0, cost: null });
+        const [, update] = AIUsage.updateOne.mock.calls[0];
+        expect(update.$inc).toMatchObject({ requestCount: 1 });
+        expect(update.$inc).not.toHaveProperty('reportedCost');
+
+        // A call with neither tokens nor a cost field is still nothing to record.
+        AIUsage.updateOne.mockClear();
+        await recordUsage('g-cost', 'openai', 'gpt-image-1', { inputTokens: 0, outputTokens: 0 });
+        expect(AIUsage.updateOne).not.toHaveBeenCalled();
+    });
+});
+
+test('sniffImageType knows PNG, JPEG and WebP', () => {
+    expect(sniffImageType(PNG)).toBe('image/png');
+    expect(sniffImageType(Buffer.from([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg');
+    expect(sniffImageType(Buffer.from('RIFF0000WEBPVP8 ', 'ascii'))).toBe('image/webp');
+    expect(sniffImageType(Buffer.from('<svg/>'))).toBeNull();
 });

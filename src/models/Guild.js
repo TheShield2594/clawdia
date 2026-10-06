@@ -1,6 +1,7 @@
 const { Schema, model } = require('mongoose');
 const { encryptSecret, guildSecretBinding } = require('../config/secretBox');
 const { VOICE_REPLY_MODES } = require('../config/aiVoice');
+const { IMAGE_SERVICES } = require('../config/aiImages');
 
 /**
  * The guild a setter is writing for. `this` is the Guild document on a save,
@@ -490,6 +491,9 @@ const guildSchema = new Schema({
         geminiKey: { type: String, default: null, set: sealedToGuild('ai.geminiKey') },
         anthropicKey: { type: String, default: null, set: sealedToGuild('ai.anthropicKey') },
         openrouterKey: { type: String, default: null, set: sealedToGuild('ai.openrouterKey') },
+        // Higgsfield's key ID and secret as `ID:SECRET`, for images only
+        // (services/ai/images.js). Sealed like the provider keys above.
+        higgsfieldKey: { type: String, default: null, set: sealedToGuild('ai.higgsfieldKey') },
         ollamaBaseUrl: { type: String, default: 'http://localhost:11434' },
         channelId: { type: String, default: null },
         systemPrompt: { type: String, default: 'You are a helpful Discord bot assistant.' },
@@ -736,6 +740,16 @@ const guildSchema = new Schema({
         // OpenAI or Gemini key. Off by default: one image costs about what a
         // few dozen chat replies do.
         imageGeneration: { type: Boolean, default: false },
+        // Which service draws first and with which model (config/aiImages.js).
+        // Set on the dashboard; an empty model is the operator's default for
+        // that service.
+        imageService: { type: String, enum: IMAGE_SERVICES, default: 'auto' },
+        imageModels: {
+            openai: { type: String, default: null, maxlength: 100 },
+            gemini: { type: String, default: null, maxlength: 100 },
+            openrouter: { type: String, default: null, maxlength: 100 },
+            higgsfield: { type: String, default: null, maxlength: 100 }
+        },
         // Providers to answer with when the primary cannot (services/ai/index.js):
         // down, overloaded, rate-limited, or refusing the key. Tried in order,
         // each with this guild's own key for it; a null model is that
