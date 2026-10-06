@@ -1,6 +1,6 @@
 const { guardedDispatcher, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
 const { request, fetchHeaders, discardBody, bodyStream } = require('../../../utils/httpFetch');
-const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, offersTools, withUsage, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // The endpoint the *operator* runs, from the environment or the shipped default.
 // A guild's `ai.ollamaBaseUrl` is a dashboard setting, so it is attacker input
@@ -184,7 +184,7 @@ function requestBody({ model, messages, temperature, maxTokens, stream, tools })
  * `yield*`, and an out-parameter reads better here than nesting one generator
  * inside another to get at its return value.
  */
-async function* streamRound({ url, dispatcher, body, out }) {
+async function* streamRound({ url, dispatcher, body, out, signal }) {
     // The 120s bounds the wait for headers, as it did under axios: a model
     // generating a long answer holds the body open for as long as it takes,
     // and a clock on the whole response would cut off the slow ones.
@@ -194,6 +194,7 @@ async function* streamRound({ url, dispatcher, body, out }) {
         body: JSON.stringify(body),
         timeout: 120000,
         dispatcher,
+        signal,
     });
     if (!response.ok) {
         await discardBody(response);
@@ -240,9 +241,8 @@ async function* separated(pieces) {
     }
 }
 
-async function* stream({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs }) {
+async function* stream({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs, signal }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs });
-    const rounds = roundsFor(toolkit);
     const { url, dispatcher } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt, images, model });
 
@@ -252,36 +252,42 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, images, 
     // arrives in the round after it — two pieces of prose, not one sentence.
     let wroteText = false;
 
-    for (let round = 0; ; round++) {
-        // Withholding the tools on the final round leaves the model nothing to
-        // do but answer, so a turn can never end on an unanswered tool call.
-        const offerTools = Boolean(toolkit) && round < rounds;
-        const body = requestBody({
-            model, messages, temperature, maxTokens,
-            stream: true,
-            tools: offerTools ? toolParams(toolkit) : null
-        });
+    try {
+        for (let round = 0; ; round++) {
+            // A turn given up on starts no new request (#1238).
+            signal?.throwIfAborted();
+            // Withholding the tools on the final round, or once the turn's time is
+            // up, leaves the model nothing to do but answer, so a turn can never
+            // end on an unanswered tool call.
+            const offerTools = offersTools(toolkit, round);
+            const body = requestBody({
+                model, messages, temperature, maxTokens,
+                stream: true,
+                tools: offerTools ? toolParams(toolkit) : null
+            });
 
-        const out = { content: '', calls: [], usage: null };
-        if (wroteText) yield* separated(streamRound({ url, dispatcher, body, out }));
-        else yield* streamRound({ url, dispatcher, body, out });
-        if (out.content) wroteText = true;
+            const out = { content: '', calls: [], usage: null };
+            if (wroteText) yield* separated(streamRound({ url, dispatcher, body, out, signal }));
+            else yield* streamRound({ url, dispatcher, body, out, signal });
+            if (out.content) wroteText = true;
 
-        if (out.usage) {
-            sawUsage = true;
-            addUsage(totals, out.usage);
+            if (out.usage) {
+                sawUsage = true;
+                addUsage(totals, out.usage);
+            }
+            // No tools offered means no more rounds, whatever the model sent back.
+            if (!out.calls.length || !offerTools) break;
+            await runToolCalls({ toolkit, messages, calls: out.calls, content: out.content });
         }
-        // No tools offered means no more rounds, whatever the model sent back.
-        if (!out.calls.length || !offerTools) break;
-        await runToolCalls({ toolkit, messages, calls: out.calls, content: out.content });
+    } catch (err) {
+        throw withUsage(err, sawUsage ? totals : null);
     }
 
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs }) {
+async function complete({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs, signal }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs });
-    const rounds = roundsFor(toolkit);
     const { url, dispatcher } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt, images, model });
 
@@ -289,44 +295,52 @@ async function complete({ baseUrl, model, systemPrompt, history, prompt, images,
     let sawUsage = false;
     const parts = [];
 
-    for (let round = 0; ; round++) {
-        const offerTools = Boolean(toolkit) && round < rounds;
-        // Not streamed, so unlike `streamRound` the clock covers the whole
-        // response: the body here is one JSON object the model has finished.
-        const response = await request(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody({
-                model, messages, temperature, maxTokens,
-                stream: false,
-                tools: offerTools ? toolParams(toolkit) : null
-            })),
-            timeout: 120000,
-            dispatcher,
-        });
-        if (!response.ok) {
-            await discardBody(response);
-            throw new Error(`Ollama returned HTTP ${response.status}`);
+    try {
+        for (let round = 0; ; round++) {
+            signal?.throwIfAborted();
+            const offerTools = offersTools(toolkit, round);
+            // Not streamed, so unlike `streamRound` the clock covers the whole
+            // response: the body here is one JSON object the model has finished.
+            // The caller's signal rides beside it, since `request` takes one or
+            // the other.
+            const timeout = AbortSignal.timeout(120000);
+            const response = await request(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody({
+                    model, messages, temperature, maxTokens,
+                    stream: false,
+                    tools: offerTools ? toolParams(toolkit) : null
+                })),
+                signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+                dispatcher,
+            });
+            if (!response.ok) {
+                await discardBody(response);
+                throw new Error(`Ollama returned HTTP ${response.status}`);
+            }
+            const payload = await response.json();
+
+            const usage = usageOf(payload);
+            if (usage) {
+                sawUsage = true;
+                addUsage(totals, usage);
+            }
+
+            const message = payload?.message;
+            const content = message?.content || '';
+            if (content) parts.push(content);
+            const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+
+            // The round that stops calling tools is the answer — or the last round,
+            // where there were none to call. Text alongside a call is a preamble,
+            // and it is kept rather than dropped so a guild with streaming off
+            // reads the same reply a guild with it on watched arrive.
+            if (!calls.length || !offerTools) return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
+            await runToolCalls({ toolkit, messages, calls, content });
         }
-        const payload = await response.json();
-
-        const usage = usageOf(payload);
-        if (usage) {
-            sawUsage = true;
-            addUsage(totals, usage);
-        }
-
-        const message = payload?.message;
-        const content = message?.content || '';
-        if (content) parts.push(content);
-        const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
-
-        // The round that stops calling tools is the answer — or the last round,
-        // where there were none to call. Text alongside a call is a preamble,
-        // and it is kept rather than dropped so a guild with streaming off
-        // reads the same reply a guild with it on watched arrive.
-        if (!calls.length || !offerTools) return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
-        await runToolCalls({ toolkit, messages, calls, content });
+    } catch (err) {
+        throw withUsage(err, sawUsage ? totals : null);
     }
 }
 

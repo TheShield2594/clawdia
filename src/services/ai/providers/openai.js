@@ -1,6 +1,6 @@
 const OpenAI = require('openai');
 const { resolveApiKey } = require('../apiKeys');
-const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, offersTools, withUsage, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 const { dataUrl } = require('../vision');
 
 // USD per 1M tokens (input, output). Prefix-matched; unknown models report
@@ -206,20 +206,30 @@ function rejectsStreamOptions(err) {
  * The retry is safe to make because nothing has been consumed: a request that
  * fails at 400 produced no tokens, ran no tool, and cost nothing to repeat.
  */
-async function openStream(client, params, endpoint) {
-    if (noStreamOptions.has(endpoint)) return client.chat.completions.create(params);
+async function openStream(client, params, endpoint, signal) {
+    if (noStreamOptions.has(endpoint)) return client.chat.completions.create(params, ...requestOptions(signal));
 
     try {
         return await client.chat.completions.create({
             ...params,
             stream_options: { include_usage: true }
-        });
+        }, ...requestOptions(signal));
     } catch (err) {
         if (!rejectsStreamOptions(err)) throw err;
         console.warn(`[AI:openai] ${endpoint} rejects stream_options; usage will go unreported for it`);
         noStreamOptions.add(endpoint);
-        return client.chat.completions.create(params);
+        return client.chat.completions.create(params, ...requestOptions(signal));
     }
+}
+
+/**
+ * The SDK's per-request options, as arguments to spread: the caller's abort
+ * signal when it has one (#1238), so a request in flight when the turn is
+ * given up on is cancelled rather than left to run and bill. Nothing at all
+ * otherwise, so a call without one is exactly the call it always was.
+ */
+function requestOptions(signal) {
+    return signal ? [{ signal }] : [];
 }
 
 function toolCallsOf(message) {
@@ -269,9 +279,8 @@ async function runToolCalls({ toolkit, messages, calls, content }) {
     });
 }
 
-async function* stream({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs }) {
+async function* stream({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs, signal }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs });
-    const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     // What `noStreamOptions` is keyed on. `baseURL` is undefined for OpenAI
     // itself, which is a key like any other — and the one endpoint guaranteed
@@ -287,53 +296,59 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, images, t
     // into the first.
     let wroteText = false;
 
-    for (let round = 0; ; round++) {
-        // On the last permitted round the tools are withheld, which leaves the
-        // model nothing to do but answer. Without that a turn could end on a
-        // tool call, and the user would get an empty message.
-        const offerTools = Boolean(toolkit) && round < rounds;
+    try {
+        for (let round = 0; ; round++) {
+            // A turn given up on starts no new request (#1238).
+            signal?.throwIfAborted();
+            // On the last permitted round, or once the turn's time is up, the tools
+            // are withheld, which leaves the model nothing to do but answer.
+            // Without that a turn could end on a tool call, and the user would get
+            // an empty message.
+            const offerTools = offersTools(toolkit, round);
 
-        const response = await openStream(client, {
-            model,
-            messages,
-            ...tuningParams(model, temperature, maxTokens),
-            stream: true,
-            ...(offerTools ? { tools: toolParams(toolkit) } : {})
-        }, endpoint);
+            const response = await openStream(client, {
+                model,
+                messages,
+                ...tuningParams(model, temperature, maxTokens),
+                stream: true,
+                ...(offerTools ? { tools: toolParams(toolkit) } : {})
+            }, endpoint, signal);
 
-        let content = '';
-        let roundUsage = null;
-        const pending = new Map();
+            let content = '';
+            let roundUsage = null;
+            const pending = new Map();
 
-        for await (const chunk of response) {
-            const delta = chunk.choices?.[0]?.delta;
-            if (delta?.content) {
-                if (!content && wroteText) yield '\n\n';
-                content += delta.content;
-                wroteText = true;
-                yield delta.content;
+            for await (const chunk of response) {
+                const delta = chunk.choices?.[0]?.delta;
+                if (delta?.content) {
+                    if (!content && wroteText) yield '\n\n';
+                    content += delta.content;
+                    wroteText = true;
+                    yield delta.content;
+                }
+                if (delta?.tool_calls) accumulateToolCalls(pending, delta.tool_calls);
+                if (chunk.usage) {
+                    sawUsage = true;
+                    roundUsage = usageOf(chunk.usage);
+                }
             }
-            if (delta?.tool_calls) accumulateToolCalls(pending, delta.tool_calls);
-            if (chunk.usage) {
-                sawUsage = true;
-                roundUsage = usageOf(chunk.usage);
-            }
+            addUsage(totals, roundUsage);
+
+            const calls = [...pending.values()].filter(call => call.name);
+            // No tools offered means no more rounds: whatever this one produced is
+            // the answer, even if the model tried to call something anyway.
+            if (!calls.length || !offerTools) break;
+            await runToolCalls({ toolkit, messages, calls, content });
         }
-        addUsage(totals, roundUsage);
-
-        const calls = [...pending.values()].filter(call => call.name);
-        // No tools offered means no more rounds: whatever this one produced is
-        // the answer, even if the model tried to call something anyway.
-        if (!calls.length || !offerTools) break;
-        await runToolCalls({ toolkit, messages, calls, content });
+    } catch (err) {
+        throw withUsage(err, sawUsage ? totals : null);
     }
 
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs }) {
+async function complete({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs, signal }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, elicit, sample, toolBudget, botTools, botToolsOnly, maxRounds, turnBudgetMs });
-    const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = buildMessages({ systemPrompt, history, prompt, images, model, visionCapable });
 
@@ -341,35 +356,40 @@ async function complete({ apiKey, model, systemPrompt, history, prompt, images, 
     let sawUsage = false;
     const parts = [];
 
-    for (let round = 0; ; round++) {
-        const offerTools = Boolean(toolkit) && round < rounds;
+    try {
+        for (let round = 0; ; round++) {
+            signal?.throwIfAborted();
+            const offerTools = offersTools(toolkit, round);
 
-        const completion = await client.chat.completions.create({
-            model,
-            messages,
-            ...tuningParams(model, temperature, maxTokens),
-            ...(offerTools ? { tools: toolParams(toolkit) } : {})
-        });
+            const completion = await client.chat.completions.create({
+                model,
+                messages,
+                ...tuningParams(model, temperature, maxTokens),
+                ...(offerTools ? { tools: toolParams(toolkit) } : {})
+            }, ...requestOptions(signal));
 
-        if (completion.usage) {
-            sawUsage = true;
-            addUsage(totals, usageOf(completion.usage));
+            if (completion.usage) {
+                sawUsage = true;
+                addUsage(totals, usageOf(completion.usage));
+            }
+
+            const message = completion.choices?.[0]?.message;
+            const content = message?.content || '';
+            if (content) parts.push(content);
+            const calls = toolCallsOf(message).filter(call => call.name);
+
+            // Text emitted alongside a tool call is a preamble ("let me look that
+            // up"); the answer is the round that stops calling tools — or the last
+            // round, where none were offered to call. The preamble is kept rather
+            // than dropped, so a guild with streaming off reads the same reply a
+            // guild with it on watched arrive.
+            if (!calls.length || !offerTools) {
+                return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
+            }
+            await runToolCalls({ toolkit, messages, calls, content });
         }
-
-        const message = completion.choices?.[0]?.message;
-        const content = message?.content || '';
-        if (content) parts.push(content);
-        const calls = toolCallsOf(message).filter(call => call.name);
-
-        // Text emitted alongside a tool call is a preamble ("let me look that
-        // up"); the answer is the round that stops calling tools — or the last
-        // round, where none were offered to call. The preamble is kept rather
-        // than dropped, so a guild with streaming off reads the same reply a
-        // guild with it on watched arrive.
-        if (!calls.length || !offerTools) {
-            return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
-        }
-        await runToolCalls({ toolkit, messages, calls, content });
+    } catch (err) {
+        throw withUsage(err, sawUsage ? totals : null);
     }
 }
 

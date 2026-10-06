@@ -121,6 +121,33 @@ describe('fanning out', () => {
             jest.useRealTimers();
         }
     });
+
+    test('a child given up on has its signal aborted, so it starts no more paid rounds (#1238)', async () => {
+        jest.useFakeTimers();
+        try {
+            const signals = [];
+            getCompletion.mockImplementation(({ signal, prompt }) => {
+                signals.push(signal);
+                if (prompt === 'fast') return Promise.resolve('quick');
+                // Rejects the way a provider does once its signal fires.
+                return new Promise((_, reject) => signal.addEventListener('abort', () =>
+                    reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+            });
+
+            const pending = runDelegation(tasks('slow', 'fast'), context(), { deadline: Date.now() + 90_000 });
+            await jest.advanceTimersByTimeAsync(80_000);
+            const text = await pending;
+
+            expect(signals[0].aborted).toBe(true);
+            expect(signals[1].aborted).toBe(false);
+            // The message is the timeout's, unchanged, and not logged as a failure.
+            expect(text).toMatch(/Sub-task 1: slow\]\n\(The sub-agent ran out of time before answering\.\)/);
+            await Promise.resolve();
+            expect(console.warn).not.toHaveBeenCalled();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
 });
 
 describe('bounds', () => {

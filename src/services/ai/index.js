@@ -270,13 +270,28 @@ function ownedServers(mcpServers, guildId) {
     return forGuild(guildId, mcpServers);
 }
 
+/**
+ * Charge a request's tokens to the guild's ledger, off the caller's path.
+ *
+ * Also called with the usage a failed or cancelled request carries on its error
+ * (#1238): every round that came back before it was billed, and a turn given up
+ * on half way is still a turn the guild paid for.
+ */
+function chargeUsage(guildId, provider, model, usage) {
+    if (!guildId || !usage) return;
+    recordUsage(guildId, provider, model, usage).catch(err =>
+        console.error('[AI usage] record error:', err.message));
+}
+
 async function* streamProvider({ provider, guildId, mcp = true, usageOut, ...req }) {
     req.mcpServers = ownedServers(req.mcpServers, guildId);
-    yield* getProvider(provider).stream({ ...req, usageOut, useMcp: mcp });
-    if (guildId && usageOut?.usage) {
-        recordUsage(guildId, provider, req.model, usageOut.usage).catch(err =>
-            console.error('[AI usage] record error:', err.message));
+    try {
+        yield* getProvider(provider).stream({ ...req, usageOut, useMcp: mcp });
+    } catch (error) {
+        chargeUsage(guildId, provider, req.model, error?.usage);
+        throw error;
     }
+    chargeUsage(guildId, provider, req.model, usageOut?.usage);
 }
 
 /**
@@ -293,6 +308,8 @@ async function* streamProvider({ provider, guildId, mcp = true, usageOut, ...req
  * @param {object} [req.rateLimit]
  * @param {Function} [req.toolBudget] spend tool calls from this budget instead
  *   of the one `userId` would get
+ * @param {AbortSignal} [req.signal] cancels the turn (#1238): no new provider
+ *   request starts once it has fired, and the one in flight is aborted
  * @returns {Promise<string>} the reply text — not the provider's result object
  * @throws {AiRateLimitError|AiBudgetError} before the provider is touched
  */
@@ -318,15 +335,13 @@ async function getCompletion({ provider, guildId, mcp = true, userId, channelId,
                 toolBudget
             });
         } catch (error) {
+            chargeUsage(guildId, name, attempt.model, error?.usage);
             const next = attempts[i + 1];
             if (!next || state.ran || !shouldFallBack(error)) throw error;
             console.warn(`[AI] ${name}/${attempt.model} failed (${describeFailure(error)}); answering with ${next.provider}/${next.model}`);
             continue;
         }
-        if (guildId && result.usage) {
-            recordUsage(guildId, name, attempt.model, result.usage).catch(err =>
-                console.error('[AI usage] record error:', err.message));
-        }
+        chargeUsage(guildId, name, attempt.model, result.usage);
         return result.text;
     }
     // Unreachable: the last attempt either returns or throws.

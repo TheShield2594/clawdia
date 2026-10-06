@@ -1,6 +1,6 @@
 const { GoogleGenAI } = require('@google/genai');
 const { resolveApiKey } = require('../apiKeys');
-const { toolkitFor, mapWithLimit, roundsFor, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, roundsFor, offersTools, withUsage, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // Google's current SDK. It replaces `@google/generative-ai`, which Google
 // retired in favour of this one — that package still installs but no longer
@@ -160,7 +160,7 @@ function userMessage({ prompt, images, model }) {
     ];
 }
 
-function startChat({ apiKey, model, systemPrompt, history, temperature, maxTokens }, { toolkit = null, priorHistory = null } = {}) {
+function startChat({ apiKey, model, systemPrompt, history, temperature, maxTokens, signal }, { toolkit = null, priorHistory = null } = {}) {
     const client = new GoogleGenAI({ apiKey });
     return client.chats.create({
         model,
@@ -168,6 +168,11 @@ function startChat({ apiKey, model, systemPrompt, history, temperature, maxToken
             systemInstruction: systemPrompt,
             temperature,
             maxOutputTokens: maxTokens,
+            // On the chat rather than on each message: a per-message config
+            // replaces the chat's instead of adding to it, and would drop the
+            // system prompt and the tools with it. A request in flight when the
+            // turn is given up on is cancelled (#1238).
+            ...(signal ? { abortSignal: signal } : {}),
             ...(toolkit ? { tools: [{ functionDeclarations: functionDeclarations(toolkit) }] } : {})
         },
         history: priorHistory || history.map(h => ({
@@ -256,7 +261,7 @@ function callsOf(source) {
 
 async function* stream(req) {
     const toolkit = await toolkitFor(req);
-    const rounds = roundsFor(toolkit);
+    let rounds = roundsFor(toolkit);
     let chat = startChat(req, { toolkit });
     let declared = declaredCount(toolkit);
     let message = userMessage(req);
@@ -267,45 +272,55 @@ async function* stream(req) {
     // arrives in the round after it — two pieces of prose, not one sentence.
     let wroteText = false;
 
-    for (let round = 0; round <= rounds; round++) {
-        const result = await chat.sendMessageStream({ message });
-        let roundText = false;
+    try {
+        for (let round = 0; round <= rounds; round++) {
+            // A turn given up on starts no new request (#1238).
+            req.signal?.throwIfAborted();
+            const result = await chat.sendMessageStream({ message });
+            let roundText = false;
 
-        // Usage now rides on the chunks rather than on a separate response
-        // object awaited after the stream. Each chunk that carries it carries
-        // the running total, so the last one seen is the total for the round.
-        let lastUsage = null;
-        const calls = [];
-        for await (const chunk of result) {
-            if (chunk.usageMetadata) lastUsage = chunk.usageMetadata;
-            calls.push(...callsOf(chunk));
-            const text = chunk.text;
-            if (!text) continue;
-            if (!roundText && wroteText) yield '\n\n';
-            roundText = true;
-            wroteText = true;
-            yield text;
-        }
-        if (lastUsage) {
-            sawUsage = true;
-            addUsage(totals, usageOf(lastUsage));
-        }
+            // Usage now rides on the chunks rather than on a separate response
+            // object awaited after the stream. Each chunk that carries it carries
+            // the running total, so the last one seen is the total for the round.
+            let lastUsage = null;
+            const calls = [];
+            for await (const chunk of result) {
+                if (chunk.usageMetadata) lastUsage = chunk.usageMetadata;
+                calls.push(...callsOf(chunk));
+                const text = chunk.text;
+                if (!text) continue;
+                if (!roundText && wroteText) yield '\n\n';
+                roundText = true;
+                wroteText = true;
+                yield text;
+            }
+            if (lastUsage) {
+                sawUsage = true;
+                addUsage(totals, usageOf(lastUsage));
+            }
 
-        if (!calls.length) break;
-        message = await runToolCalls(toolkit, calls);
-        // The next request is the last one allowed, so it goes out with no
-        // tools declared: the model's only remaining move is to answer. The
-        // conversation so far comes from the chat itself, since it holds the
-        // function-call turn these responses answer.
-        if (round + 1 === rounds) {
-            chat = withoutTools(req, chat);
-        } else if (declaredCount(toolkit) !== declared) {
-            // The round loaded a deferred tool, so the chat is rebuilt to
-            // declare it. Checked after the calls have run, because loading is
-            // itself one of the calls.
-            declared = declaredCount(toolkit);
-            chat = rebuild(req, chat, toolkit);
+            if (!calls.length) break;
+            message = await runToolCalls(toolkit, calls);
+            // The next request is the last one allowed, or the turn's time is up
+            // (#1238), so it goes out with no tools declared: the model's only
+            // remaining move is to answer. The conversation so far comes from the
+            // chat itself, since it holds the function-call turn these responses
+            // answer.
+            if (!offersTools(toolkit, round + 1)) {
+                chat = withoutTools(req, chat);
+                // A chat with no tools cannot call one, so the next round is the
+                // last whatever the counter says.
+                rounds = round + 1;
+            } else if (declaredCount(toolkit) !== declared) {
+                // The round loaded a deferred tool, so the chat is rebuilt to
+                // declare it. Checked after the calls have run, because loading is
+                // itself one of the calls.
+                declared = declaredCount(toolkit);
+                chat = rebuild(req, chat, toolkit);
+            }
         }
+    } catch (err) {
+        throw withUsage(err, sawUsage ? totals : null);
     }
 
     if (req.usageOut && sawUsage) req.usageOut.usage = totals;
@@ -313,7 +328,7 @@ async function* stream(req) {
 
 async function complete(req) {
     const toolkit = await toolkitFor(req);
-    const rounds = roundsFor(toolkit);
+    let rounds = roundsFor(toolkit);
     let chat = startChat(req, { toolkit });
     let declared = declaredCount(toolkit);
     let message = userMessage(req);
@@ -322,28 +337,34 @@ async function complete(req) {
     let sawUsage = false;
     const parts = [];
 
-    for (let round = 0; round <= rounds; round++) {
-        const response = await chat.sendMessage({ message });
-        if (response.usageMetadata) {
-            sawUsage = true;
-            addUsage(totals, usageOf(response.usageMetadata));
-        }
+    try {
+        for (let round = 0; round <= rounds; round++) {
+            req.signal?.throwIfAborted();
+            const response = await chat.sendMessage({ message });
+            if (response.usageMetadata) {
+                sawUsage = true;
+                addUsage(totals, usageOf(response.usageMetadata));
+            }
 
-        // `.text` is undefined when the model returned no text part at all — a
-        // safety block, or a response that was only tool calls. A preamble is
-        // kept rather than replaced, so a guild with streaming off reads the
-        // same reply a guild with it on watched arrive.
-        if (response.text) parts.push(response.text);
+            // `.text` is undefined when the model returned no text part at all — a
+            // safety block, or a response that was only tool calls. A preamble is
+            // kept rather than replaced, so a guild with streaming off reads the
+            // same reply a guild with it on watched arrive.
+            if (response.text) parts.push(response.text);
 
-        const calls = callsOf(response);
-        if (!calls.length) break;
-        message = await runToolCalls(toolkit, calls);
-        if (round + 1 === rounds) {
-            chat = withoutTools(req, chat);
-        } else if (declaredCount(toolkit) !== declared) {
-            declared = declaredCount(toolkit);
-            chat = rebuild(req, chat, toolkit);
+            const calls = callsOf(response);
+            if (!calls.length) break;
+            message = await runToolCalls(toolkit, calls);
+            if (!offersTools(toolkit, round + 1)) {
+                chat = withoutTools(req, chat);
+                rounds = round + 1;
+            } else if (declaredCount(toolkit) !== declared) {
+                declared = declaredCount(toolkit);
+                chat = rebuild(req, chat, toolkit);
+            }
         }
+    } catch (err) {
+        throw withUsage(err, sawUsage ? totals : null);
     }
 
     return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
