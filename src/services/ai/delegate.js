@@ -82,10 +82,18 @@ function forwardEvents(onToolEvent, childIndex) {
     };
 }
 
-/** `promise`, or `fallback` once `ms` has passed. */
-function within(promise, ms, fallback) {
+/**
+ * `promise`, or `fallback` once `ms` has passed — calling `onTimeout` first,
+ * so whatever is still running for an answer nobody will read can be stopped.
+ */
+function within(promise, ms, fallback, onTimeout) {
     let timer;
-    const timeout = new Promise(resolve => { timer = setTimeout(() => resolve(fallback), ms); });
+    const timeout = new Promise(resolve => {
+        timer = setTimeout(() => {
+            onTimeout?.();
+            resolve(fallback);
+        }, ms);
+    });
     timer.unref?.();
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
@@ -132,6 +140,9 @@ async function runDelegation(args, context, { deadline } = {}) {
 
     const answers = await Promise.all(instructions.map((instruction, i) => {
         const index = state.spawned - instructions.length + i + 1;
+        // Aborted when the task stops waiting (#1238): without it the child
+        // would go on starting paid rounds whose answer nobody reads.
+        const controller = new AbortController();
         const run = complete({
             ...config,
             systemPrompt,
@@ -145,18 +156,22 @@ async function runDelegation(args, context, { deadline } = {}) {
             turnBudgetMs: budgetMs,
             onToolEvent: forwardEvents(onToolEvent, index),
             confirmTool: createUnattendedConfirmer(config.mcpServers),
-            botTools: tools
+            botTools: tools,
+            signal: controller.signal
         }).then(
             text => (typeof text === 'string' && text.trim() ? text.trim() : '(The sub-agent finished without an answer.)'),
             err => {
                 if (err?.rateLimited) return `(Not run: ${err.message})`;
+                // Cancelled because the task already gave up on it: the
+                // timeout line below is the answer, and this one is unread.
+                if (controller.signal.aborted) return '(The sub-agent ran out of time before answering.)';
                 console.warn(`[Deep task] sub-task failed: ${err?.message || err}`);
                 return '(The sub-agent failed with a provider error.)';
             }
         );
         // A few seconds of grace past the child's own budget for its last
         // provider call to come back, then the task stops waiting for it.
-        return within(run, budgetMs + 10_000, '(The sub-agent ran out of time before answering.)');
+        return within(run, budgetMs + 10_000, '(The sub-agent ran out of time before answering.)', () => controller.abort());
     }));
 
     const sections = instructions.map((instruction, i) => {

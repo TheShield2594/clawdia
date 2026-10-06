@@ -355,6 +355,7 @@ services:
     networks:
       - db-network      # reaches MongoDB
       - clawdia-network # reaches the internet (Discord API, AI APIs, etc.)
+      - browser-network # reaches the optional `playwright` sidecar, nothing else
     logging:
       driver: "json-file"
       options:
@@ -914,6 +915,56 @@ services:
           memory: 64m
     stop_grace_period: 15s
 
+  # Optional headless browser for the AI, off by default (#1234):
+  #
+  #   docker compose --profile browser up -d
+  #
+  # Playwright's own MCP server, for pages read_webpage cannot read: ones that
+  # render with JavaScript, or sit behind a login. It is a sidecar rather than
+  # part of the bot because the bot's image has no browser and no npm. Nothing
+  # uses it until config/mcp-servers.json has an entry pointing at
+  # http://playwright:8931/mcp with "allow_private": true. The tested entry, the
+  # tool lists and the security notes are in docs/SETUP_GUIDE.md, under
+  # "A browser for the AI".
+  #
+  # Its network is its own. The browser goes wherever a page or the model sends
+  # it, so it is kept off db-network (it must never reach MongoDB) and off
+  # clawdia-network (nor the dashboard or RSSHub). The bot joins browser-network
+  # to reach it; that is the only other container on it.
+  playwright:
+    profiles: [browser]
+    # Digest-pinned like every other third-party image (#644). The tag is the
+    # @playwright/mcp release; bump both together.
+    image: mcr.microsoft.com/playwright/mcp:v0.0.82@sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734
+    container_name: clawdia-playwright
+    restart: unless-stopped
+    init: true
+    # Appended to the image entrypoint, which already runs headless Chromium.
+    #   --isolated       a fresh in-memory profile per session: no cookies or
+    #                    logins outlive the session, or leak between guilds
+    #   --host 0.0.0.0   listen on the network, not only inside the container
+    #   --allowed-hosts  the server refuses any Host header but the ones listed
+    #                    (DNS-rebinding protection), and the bot sends this one.
+    #                    The port is part of it.
+    command: ["--isolated", "--host", "0.0.0.0", "--port", "8931", "--allowed-hosts", "playwright:8931"]
+    # No published port: the bot is the only client. Docker Desktop users who
+    # want to poke at it from the host can add "127.0.0.1:8931:8931".
+    networks:
+      - browser-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1g
+        reservations:
+          memory: 256m
+    stop_grace_period: 15s
+
 # Host files mounted read-only at /run/secrets/<name> inside the container.
 # Keep ./secrets/ out of git (it already is, via .gitignore) and chmod 0400 the
 # files. Uncomment alongside the service block above.
@@ -951,3 +1002,7 @@ networks:
   db-network:
     driver: bridge
     internal: true  # no external gateway — MongoDB cannot initiate outbound connections
+  # The bot and the optional `playwright` browser, and nobody else. Not internal:
+  # the browser needs the internet. Empty unless the browser profile is up.
+  browser-network:
+    driver: bridge

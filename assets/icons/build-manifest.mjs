@@ -7,7 +7,8 @@
  * One entry per catalogue key: 83 shop-browse activity ids + 35 guild shop
  * items + 144 catch/kill/mine results (caught fish, hunted animals, mined ores)
  * + 14 pet species (issue #1082) + 10 explore regions + 25 explore relics
- * + achievement badges (`achievement:<id>`, filled in incrementally). Each
+ * + achievement badges (`achievement:<id>`, filled in incrementally)
+ * + crafting materials (`fish:<id>` etc., one game at a time, #1168). Each
  * entry carries the storage key, the on-disk filename, the item's rarity, the
  * rim colour that rarity maps to, and the finished Higgsfield prompt.
  *
@@ -539,16 +540,47 @@ Object.entries(ACHIEVEMENT_SUBJECT).forEach(([id, subject]) => {
     });
 });
 
+// --- crafting materials ------------------------------------------------------
+// The drops left in a player's inventory (#1168), keyed `<activity>:<id>` the
+// way the inventory cards ask for them (src/data/activityItems.js). Single
+// objects like the gear and relic icons, rarity from the material's own tier in
+// src/data/materialRarity.js. Filled in one game at a time; fishing first
+// (#1169).
+const { MATERIAL_RARITY } = require('../../src/data/materialRarity.js');
+const MATERIAL_TIER_RARITY = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
+
+// The three scales are a ladder (§4): one teardrop scale, same angle, and only
+// the material escalates — plain silver, then iridescent, then cosmic.
+const SCALE = (detail) => `a single large teardrop-shaped fish scale standing upright, shown flat-on with fine curved growth ridges, ${detail}`;
+const FISH_MATERIAL_SUBJECT = {
+    fish_scale:     SCALE('plain pearly silver-blue with a soft sheen.'),
+    rare_scale:     SCALE('shimmering iridescent teal and violet, a few tiny sparkles at its edge.'),
+    mythic_scale:   SCALE('deep cosmic indigo flecked with tiny stars, a faint golden glow along its rim.'),
+    seaweed_bundle: 'a small bundle of glossy green kelp ribbons tied around the middle with a twist of twine.',
+    driftwood:      'a short gnarled piece of sun-bleached driftwood, smooth pale grey wood with a knot hole.',
+    old_coin:       'a single worn antique gold coin, tarnished green at the edges, stamped with a faded ship.',
+    pearl:          'a single lustrous round white pearl resting in a small open oyster shell.',
+    coral_fragment: 'a branching fragment of bright coral-pink coral with a few rounded tips.',
+    shark_tooth:    'a single large serrated triangular shark tooth, ivory white with a darker root.',
+    tentacle_ink:   'a small corked glass vial of swirling inky black-purple liquid with a curled purple tentacle wrapped around it.',
+};
+Object.entries(FISH_MATERIAL_SUBJECT).forEach(([id, subject]) => {
+    const def = MATERIAL_RARITY[id];
+    if (!def || def.source !== 'fish') throw new Error(`no fishing material ${id}`);
+    add(`fish:${id}`, MATERIAL_TIER_RARITY[def.tier - 1], subject);
+});
+
 // --- validate against the game registries -----------------------------------
 // Every namespaced key must be a known game key: a shop-browse gear id or a
 // catch/kill/mine result id (both uploadable), or a pet species / explore region
-// / explore relic id (all bundle-only, see src/data/activityItems.js) —
+// / explore relic / crafting material id (all bundle-only, see
+// src/data/activityItems.js) —
 // otherwise it is a typo the app will never ask for. The bundle-only keys are
 // included here but not in `isUploadableItemId`: their art ships only as a baked
 // default, never a per-guild upload.
-const { ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS, PET_ITEM_IDS, EXPLORE_ITEM_IDS } = require('../../src/data/activityItems.js');
+const { ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS, PET_ITEM_IDS, EXPLORE_ITEM_IDS, MATERIAL_ITEM_IDS } = require('../../src/data/activityItems.js');
 const knownKeys = new Set([
-    ...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS, ...PET_ITEM_IDS, ...EXPLORE_ITEM_IDS,
+    ...ACTIVITY_ITEM_IDS, ...RESULT_ITEM_IDS, ...PET_ITEM_IDS, ...EXPLORE_ITEM_IDS, ...MATERIAL_ITEM_IDS,
     ...[...ACHIEVEMENT_IDS].map((id) => `achievement:${id}`),
 ]);
 // Every prompt ends with the shared B3 style block; "rarity rim," is the phrase

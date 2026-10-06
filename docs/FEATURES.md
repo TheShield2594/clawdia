@@ -399,7 +399,9 @@ one public page and reads its text — a search result whose snippet is not
 enough, or a link somebody pasted. The URL is the model's choice, so it goes
 through the same SSRF guard as every dashboard URL: private and reserved
 addresses are refused, on every redirect. Pages that need a login or JavaScript
-come back empty.
+come back empty; for those, an operator can run Playwright's MCP server as an
+optional browser sidecar
+([setup](SETUP_GUIDE.md#a-browser-for-the-ai)).
 
 With `SEARXNG_URL` set by the operator as well, the model also has a
 `web_search` tool over that SearXNG instance. It returns titles, URLs and
