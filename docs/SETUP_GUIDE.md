@@ -180,7 +180,7 @@ instance you run. No API key, and nothing is sent anywhere but your own instance
 2. Set `SEARXNG_URL` to the instance, e.g. `http://searxng:8080`. Like
    `OLLAMA_BASE_URL` it is your own endpoint, so a private or Docker address is
    fine.
-3. Turn on **Enable web access** in the dashboard, under **AI → Chat**, in each
+3. Turn on **Enable web access** in the dashboard, under **AI → Abilities**, in each
    server that should have it. That switch also gives the AI `read_webpage`,
    which needs no SearXNG at all.
 

@@ -92,7 +92,7 @@ function chunk(text, size = DISCORD_MAX_LEN, limit = MAX_RESULT_MESSAGES) {
 function refuseTask({ ai, guildId, userId }) {
     if (!ai?.enabled) return 'The AI is switched off on this server.';
     if (!ai.taskModeEnabled) {
-        return 'Deep task mode is switched off on this server. A server admin can turn it on under **AI → Chat** in the dashboard.';
+        return 'Deep task mode is switched off on this server. A server admin can turn it on under **AI → Abilities** in the dashboard.';
     }
 
     const config = resolveProviderConfig(ai, { guildId });

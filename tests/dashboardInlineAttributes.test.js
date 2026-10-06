@@ -59,7 +59,7 @@ const BASELINE = {
     'index.ejs': 11,
     'partials/game-item-card.ejs': 1,
     'partials/panels/achievements.ejs': 12,
-    'partials/panels/ai.ejs': 45,
+    'partials/panels/ai.ejs': 38,
     'partials/panels/analytics.ejs': 10,
     'partials/panels/antinuke.ejs': 10,
     'partials/panels/bibleverses.ejs': 3,
@@ -96,7 +96,7 @@ const SCRIPT_BASELINE = {
     // move the rule into a class in styles.css.
     'guild-settings.js': 3,
     'panel-achievements.js': 15,
-    'panel-ai.js': 23,
+    'panel-ai.js': 19,
     'panel-analytics.js': 4,
     'panel-economy.js': 7,
     'panel-leveling.js': 4,

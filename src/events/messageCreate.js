@@ -71,9 +71,8 @@ module.exports = {
                 const ai = guildSettings.ai;
                 const hasChannelRestriction = !!ai.channelId;
                 const isDefaultChannel = hasChannelRestriction && message.channel.id === ai.channelId;
-                const persona = ai.channelPersonas?.find(p => p.channelId === message.channel.id);
 
-                if (!hasChannelRestriction || isDefaultChannel || persona) {
+                if (!hasChannelRestriction || isDefaultChannel) {
                     const isBotMentioned = message.mentions.has(client.user.id, { ignoreEveryone: true, ignoreRoles: true });
                     let isReplyToBot = false;
                     if (message.reference?.messageId) {
@@ -86,9 +85,6 @@ module.exports = {
                     if (!isBotMentioned && !isReplyToBot) {
                         // Fall through to non-AI handlers (leveling, moderation, etc.)
                     } else {
-                        const effectiveSettings = persona
-                            ? Object.assign({}, ai.toObject ? ai.toObject() : ai, { systemPrompt: persona.systemPrompt })
-                            : ai;
                         if (guildSettings.moderation?.enabled) {
                             const blocked = await handleAutoModeration(message, guildSettings);
                             if (blocked) return;
@@ -104,7 +100,7 @@ module.exports = {
                             .trim();
                         const reminderHandled = await handleNLReminder(message, strippedContent);
                         if (!reminderHandled) {
-                            await handleAIChat(message, effectiveSettings, strippedContent, guildSettings);
+                            await handleAIChat(message, ai, strippedContent, guildSettings);
                         }
                         return;
                     }
