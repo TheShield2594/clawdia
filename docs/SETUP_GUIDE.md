@@ -497,6 +497,95 @@ Dashboard tokens are encrypted at rest when `SECRET_ENCRYPTION_KEY` is set, the
 same as provider keys. Migration 027 encrypts the ones already stored, and
 `npm run secrets:encrypt` does the same on demand.
 
+#### A browser for the AI
+
+`read_webpage` reads static HTML, so a page that renders with JavaScript comes
+back empty and one behind a login is out of reach. Playwright publishes an MCP
+server that drives a real headless Chromium: navigate, read the rendered page,
+click, type, take a screenshot. It runs as an optional sidecar, since the bot's
+image has no browser and no npm.
+
+1. Start it. `docker-compose.yml` defines it under the `browser` profile:
+
+   ```bash
+   docker compose --profile browser up -d
+   ```
+
+   It joins `browser-network`, which only it and the bot are on.
+
+2. Add an entry to `config/mcp-servers.json` and restart the bot:
+
+   ```json
+   {
+     "servers": [
+       {
+         "name": "browser",
+         "url": "http://playwright:8931/mcp",
+         "allow_private": true,
+         "guilds": ["<your server id>"],
+         "allowed_tools": [
+           "browser_navigate", "browser_navigate_back", "browser_snapshot",
+           "browser_find", "browser_take_screenshot", "browser_tabs", "browser_close",
+           "browser_click", "browser_type", "browser_fill_form",
+           "browser_select_option", "browser_press_key", "browser_hover",
+           "browser_handle_dialog"
+         ],
+         "confirm_tools": [
+           "browser_click", "browser_type", "browser_fill_form",
+           "browser_select_option", "browser_press_key", "browser_hover",
+           "browser_handle_dialog"
+         ]
+       }
+     ]
+   }
+   ```
+
+   The log should then show `[MCP] 1 server(s) from …: browser`, and asking the
+   AI to read a JavaScript-heavy page should show `browser_navigate` and
+   `browser_snapshot` in the reply's tool line.
+
+What the entry does:
+
+- **`allow_private`** is required. The sidecar is a container on your own
+  network, reached over plain `http://`, which a URL is otherwise never allowed
+  to be.
+- **`guilds`** limits it to one Discord server. The bot keeps one connection
+  per server URL, so every guild the entry reaches shares the same browser
+  session, with the same open tabs and cookies.
+- **`allowed_tools`** is an allowlist, so a tool a newer image adds stays off
+  until you add it. Left out on purpose: `browser_evaluate` and
+  `browser_run_code_unsafe` (they run arbitrary script in the page),
+  `browser_file_upload` (it reads files from the sidecar), and the network,
+  console, drag and emulation tools, which a reading assistant has no use for.
+- **`confirm_tools`** puts everything beyond reading behind the **Run it**
+  button. Navigating, reading and screenshots run freely; a click, a keystroke
+  or a form fill waits for a person. A scheduled task has nobody to ask, so it
+  can only read. Don't list these under `unattended_tools`.
+- The model reads a page with `browser_snapshot`, which returns the rendered
+  text. `browser_navigate` on its own reports only where it landed.
+
+**Security.**
+
+- **A logged-in browser is a credential.** The service runs with `--isolated`,
+  so its profile lives in memory and every login is gone when the session or
+  the container ends. If you do want it signed in somewhere, save a Playwright
+  storage state file for an account made for the purpose, mount it read-only,
+  and add `--storage-state /state/state.json` to the service's `command`. Then
+  treat the entry like a token for that account: one guild, everything past
+  navigation behind approval, and no `unattended_tools`.
+- **The browser goes wherever a page tells it.** Page text is untrusted input,
+  and the model reads it, so a page can steer the model to another URL. That is
+  why the sidecar is kept off `db-network` (it can never reach MongoDB) and off
+  `clawdia-network`. It can still reach the bot on `browser-network` and
+  anything your host routes to, such as your LAN or a cloud metadata address,
+  and Playwright's `--blocked-origins` is documented as not being a security
+  boundary. On a host with private services, block the network's subnet at the
+  firewall: `docker network ls` lists it as `<project>_browser-network`,
+  `docker network inspect` on that name gives its subnet, and `DOCKER-USER`
+  rules dropping traffic from it to private ranges close the gap.
+- **The tools are third-party.** Everything the browser reads is sent to your AI
+  provider as a tool result, as for any other MCP server.
+
 #### Checking it works
 
 ```text
@@ -605,8 +694,9 @@ malformed config disables the connector, it never stops the bot from starting.
   one a call still runs — the model may want the side effect — but what comes
   back says the output did not fit rather than carrying it. Past the clock no
   further call is dialled at all, and no approval prompt is put in front of
-  anyone for a call that will not happen either way. Both are refusals worded so
-  the model can answer around them rather than leaving a reply open.
+  anyone for a call that will not happen either way; the model is asked once
+  more with no tools, so it answers from what it has. Both are refusals worded
+  so the model can answer around them rather than leaving a reply open.
 - A 429 carrying a short `Retry-After` is waited out once. A 429 without one, or
   asking for longer than a reply can wait, is reported as a failure.
 - On the client route the bot opens the connection, so the URL must be a public
