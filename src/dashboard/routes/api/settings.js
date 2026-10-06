@@ -8,7 +8,7 @@ const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { validateBaseUrl: validateOllamaBaseUrl } = require('../../../services/ai/providers/ollama');
 const { CONFIRM_MODES, MCP_ROUTES, MCP_APPROVERS } = require('../../../config/mcpServers');
 const { VOICE_REPLY_MODES } = require('../../../config/aiVoice');
-const { IMAGE_SERVICES, imageModelError } = require('../../../config/aiImages');
+const { IMAGE_SERVICES, IMAGE_SERVICE_ORDER, imageModelError, higgsfieldKeyError } = require('../../../config/aiImages');
 const { isValidSlug } = require('../../lib/publicData');
 const { describeSensitivePermissions } = require('../../../utils/sensitiveRolePermissions');
 
@@ -394,9 +394,9 @@ function validateImageService(value) {
 
 function validateImageModels(value) {
     if (value === undefined || value === null) return null;
-    if (typeof value !== 'object' || Array.isArray(value)) return 'ai.imageModels must be { openai, gemini }';
+    if (typeof value !== 'object' || Array.isArray(value)) return `ai.imageModels must be { ${IMAGE_SERVICE_ORDER.join(', ')} }`;
     for (const [service, model] of Object.entries(value)) {
-        if (service !== 'openai' && service !== 'gemini') return `ai.imageModels has no "${service}" service`;
+        if (!IMAGE_SERVICE_ORDER.includes(service)) return `ai.imageModels has no "${service}" service`;
         const error = imageModelError(service, model);
         if (error) return error;
     }
@@ -495,6 +495,15 @@ function validateAiUpdate(updates) {
 
         if (imageModels !== undefined) {
             const error = validateImageModels(imageModels);
+            if (error) return error;
+        }
+
+        let higgsfieldKey;
+        if (key === 'ai.higgsfieldKey') higgsfieldKey = value;
+        else if (isWholeAi) higgsfieldKey = value.higgsfieldKey;
+
+        if (higgsfieldKey !== undefined) {
+            const error = higgsfieldKeyError(higgsfieldKey);
             if (error) return error;
         }
 

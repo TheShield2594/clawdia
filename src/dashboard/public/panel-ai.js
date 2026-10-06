@@ -24,6 +24,11 @@ function updateAiProviderUI() {
         const select = document.getElementById(id);
         if (select && select.value) inUse.add(select.value);
     });
+    // And the image service's, with images on: a server that draws with
+    // OpenRouter needs somewhere to put that key even if it chats elsewhere.
+    const images = document.getElementById('ai-image-generation');
+    const imageService = document.getElementById('ai-image-service');
+    if (images && images.checked && imageService && imageService.value !== 'auto') inUse.add(imageService.value);
     document.querySelectorAll('.ai-key-field').forEach(el => {
         el.style.display = inUse.has(el.dataset.provider) ? '' : 'none';
     });
@@ -753,6 +758,7 @@ registerPanelActions({
         'ai-image-generation': el => {
             const options = document.getElementById('ai-image-options');
             if (options) options.style.display = el.checked ? '' : 'none';
+            updateAiProviderUI();
         },
     },
 });

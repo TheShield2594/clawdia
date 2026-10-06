@@ -491,7 +491,22 @@ describe('validateAiUpdate', () => {
         expect(validateAiUpdate({ 'ai.imageModels.gemini': 'gemini-2.0-flash' })).toMatch(/not a Gemini image model/);
         expect(validateAiUpdate({ 'ai.imageModels.gemini': 'gemini image; drop' })).toMatch(/must be a model name/);
         expect(validateAiUpdate({ 'ai.imageModels.midjourney': 'v7' })).toMatch(/no "midjourney" service/);
-        expect(validateAiUpdate({ 'ai.imageModels': ['gpt-image-1'] })).toMatch(/must be \{ openai, gemini \}/);
+        expect(validateAiUpdate({ 'ai.imageModels': ['gpt-image-1'] })).toMatch(/must be \{ openai, gemini, openrouter, higgsfield \}/);
+    });
+
+    test('OpenRouter takes an author/model slug, Higgsfield a plain endpoint path', () => {
+        expect(validateAiUpdate({ 'ai.imageModels.openrouter': 'black-forest-labs/flux.2-pro' })).toBeNull();
+        expect(validateAiUpdate({ 'ai.imageModels.openrouter': 'flux' })).toMatch(/not an OpenRouter model ID/);
+        expect(validateAiUpdate({ 'ai.imageModels.higgsfield': 'higgsfield-ai/soul/v2/standard' })).toBeNull();
+        for (const bad of ['soul', '../requests/x', 'a//b', 'a/./b', '/abs/path', 'a/b?x=1']) {
+            expect(validateAiUpdate({ 'ai.imageModels.higgsfield': bad })).not.toBeNull();
+        }
+    });
+
+    test('ai.higgsfieldKey is a key ID and secret joined by a colon', () => {
+        expect(validateAiUpdate({ 'ai.higgsfieldKey': 'abc123:s3cr3t' })).toBeNull();
+        expect(validateAiUpdate({ 'ai.higgsfieldKey': 'just-one-part' })).toMatch(/KEY_ID:KEY_SECRET/);
+        expect(validateAiUpdate({ 'ai.higgsfieldKey': 'a:b:c' })).toMatch(/KEY_ID:KEY_SECRET/);
     });
 
     it('accepts a well-formed update', () => {

@@ -370,6 +370,10 @@ function buildSettingsPayload(section, ctx = {}) {
             // Empty is "use the default", saved as null rather than ''.
             'ai.imageModels.openai': document.getElementById('ai-image-model-openai').value.trim() || null,
             'ai.imageModels.gemini': document.getElementById('ai-image-model-gemini').value.trim() || null,
+            'ai.imageModels.openrouter': document.getElementById('ai-image-model-openrouter').value.trim() || null,
+            'ai.imageModels.higgsfield': document.getElementById('ai-image-model-higgsfield').value.trim() || null,
+            // Write-only, like the provider keys: sent only when something was typed.
+            ...(document.getElementById('ai-higgsfield-key').value.trim() ? {'ai.higgsfieldKey': document.getElementById('ai-higgsfield-key').value.trim()} : {}),
             // Empty provider rows are dropped, so "None" in the first row and a
             // provider in the second still saves as a one-item list.
             'ai.fallbacks': [1, 2]

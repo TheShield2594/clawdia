@@ -491,6 +491,9 @@ const guildSchema = new Schema({
         geminiKey: { type: String, default: null, set: sealedToGuild('ai.geminiKey') },
         anthropicKey: { type: String, default: null, set: sealedToGuild('ai.anthropicKey') },
         openrouterKey: { type: String, default: null, set: sealedToGuild('ai.openrouterKey') },
+        // Higgsfield's key ID and secret as `ID:SECRET`, for images only
+        // (services/ai/images.js). Sealed like the provider keys above.
+        higgsfieldKey: { type: String, default: null, set: sealedToGuild('ai.higgsfieldKey') },
         ollamaBaseUrl: { type: String, default: 'http://localhost:11434' },
         channelId: { type: String, default: null },
         systemPrompt: { type: String, default: 'You are a helpful Discord bot assistant.' },
@@ -743,7 +746,9 @@ const guildSchema = new Schema({
         imageService: { type: String, enum: IMAGE_SERVICES, default: 'auto' },
         imageModels: {
             openai: { type: String, default: null, maxlength: 100 },
-            gemini: { type: String, default: null, maxlength: 100 }
+            gemini: { type: String, default: null, maxlength: 100 },
+            openrouter: { type: String, default: null, maxlength: 100 },
+            higgsfield: { type: String, default: null, maxlength: 100 }
         },
         // Providers to answer with when the primary cannot (services/ai/index.js):
         // down, overloaded, rate-limited, or refusing the key. Tried in order,

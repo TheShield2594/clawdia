@@ -82,18 +82,30 @@ With **Let the AI make images** on, the model has a `generate_image` tool:
 posted after the reply, with the prompt as its alt text. It takes a prompt and a
 shape (square, landscape or portrait) and makes one image per call.
 
-**Image service** picks which service draws first. On **Automatic** it uses the
-same keys as voice, in the same order: Gemini for a server on Gemini, otherwise
-OpenAI at medium quality, otherwise Gemini. Picking OpenAI or Gemini puts that
-one first; the other still draws when it fails or the server has no key for it.
-The **OpenAI image model** and **Gemini image model** fields set the model each
-draws with (a gpt-image model such as `gpt-image-1-mini`, a Gemini image model
-such as `gemini-2.5-flash-image`; DALL·E and Imagen are refused). Left empty,
-they use the operator's `OPENAI_IMAGE_MODEL` / `GEMINI_IMAGE_MODEL`, else
-`gpt-image-1` and `gemini-2.5-flash-image`. Only those models and
-`gpt-image-1-mini` have a known price, so another is counted in tokens but not
-toward the monthly cost limit. With neither key the tool is not offered. A prompt the service
-refuses is not retried on the other one; the model is told it was refused and
+**Image service** picks which service draws first: OpenAI, Gemini, OpenRouter
+or Higgsfield, each with the server's own key for it (OpenRouter's is the chat
+key field; Higgsfield's is under the image settings, as `KEY_ID:KEY_SECRET`). On
+**Automatic** it follows the chat provider the way voice does: Gemini for a
+server on Gemini, OpenRouter for one on OpenRouter, otherwise OpenAI. Whichever
+goes first, every other service the server has a key for is tried after it when
+it fails.
+
+Each service has a model field. OpenAI takes a gpt-image model (default
+`gpt-image-1`, at medium quality, or `OPENAI_IMAGE_MODEL`); Gemini an image model
+(default `gemini-2.5-flash-image`, or `GEMINI_IMAGE_MODEL`); DALL·E and Imagen are
+refused. OpenRouter takes any image model's `author/model` ID (default
+`google/gemini-2.5-flash-image`) and draws through its `/api/v1/images`
+endpoint. Higgsfield takes a text-to-image endpoint ID (default
+`higgsfield-ai/soul/v2/standard`); its requests are queued, so the bot submits,
+polls until the picture is ready, and cancels a request still queued when the
+reply runs out of time.
+
+Cost: OpenRouter reports what each image cost, and Higgsfield's estimate
+endpoint is asked before each one, so both count toward the monthly cost limit
+at that price. OpenAI and Gemini are priced from the table for gpt-image-1,
+gpt-image-1-mini and Gemini image models; another model there is counted in
+tokens but not in cost. With no key for any of them the tool is not offered. A prompt the service
+refuses is not retried on another one; the model is told it was refused and
 says so. An image costs far more than a reply, so each is recorded in the usage
 ledger and counted toward the monthly budget, a server that is out of budget
 gets no image, each member gets five an hour, and one reply carries at most two.
