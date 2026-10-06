@@ -35,6 +35,7 @@ const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES
 const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES, LOCATION_LIST, FISH } = require('./fishData');
 const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES, DEPTH_LIST, ORES } = require('./mineData');
 const { REGION_LIST, RELIC_LIST } = require('./exploreData');
+const { MATERIAL_RARITY } = require('./materialRarity');
 
 // Tiered gear is keyed by `slug`; everything else by `id`. That difference is
 // in the game data, so it is honoured here rather than normalised away — the
@@ -207,6 +208,44 @@ function isExploreItemId(itemId) {
     return typeof itemId === 'string' && EXPLORE_ITEM_IDS.has(itemId);
 }
 
+// ─── CRAFTING MATERIALS (inventory card art) ───────────────────────────────────
+//
+// The drops /fish, /hunt, /mine and /explore leave in a player's inventory
+// (#1168). The inventory cards already ask for their art under
+// `<activity>:<id>` — `fish:pearl`, `hunt:feather` — so that is the key each is
+// filed under here, the same namespace as the activity's gear. No material id
+// collides with a gear id in its namespace; a test holds that.
+//
+// Bundle-only, like pets and explore: no dashboard panel lists materials, so
+// they are kept out of isUploadableItemId and the only source of their art is
+// the baked default set. Read from materialRarity.js, which a test keeps in step
+// with every game's MATERIAL_NAMES, so a new material gets a slot here without
+// anyone remembering to add one.
+const MATERIAL_SOURCES = ['fish', 'hunt', 'mine', 'explore'];
+
+/** The storage key a material's icon is filed under (`fish:pearl`). */
+function materialItemId(source, materialId) {
+    return `${source}:${materialId}`;
+}
+
+const MATERIAL_ITEMS = Object.fromEntries(MATERIAL_SOURCES.map(source => [
+    source,
+    Object.entries(MATERIAL_RARITY)
+        .filter(([, def]) => def.source === source)
+        .map(([id, def]) => ({ id: materialItemId(source, id), label: def.label, emoji: def.emoji, tier: def.tier })),
+]));
+
+const MATERIAL_ITEM_IDS = new Set(
+    Object.values(MATERIAL_ITEMS)
+        .flat()
+        .map(item => item.id)
+);
+
+/** Whether `itemId` names a crafting material the bundled art set covers. */
+function isMaterialItemId(itemId) {
+    return typeof itemId === 'string' && MATERIAL_ITEM_IDS.has(itemId);
+}
+
 module.exports = {
     ACTIVITY_ITEMS, ACTIVITY_ITEM_IDS, isActivityItemId,
     RESULT_ITEMS, RESULT_ITEM_IDS, RESULT_NAMESPACES, resultItemId,
@@ -214,4 +253,5 @@ module.exports = {
     PET_NAMESPACE, PET_SPECIES_IDS, PET_ITEM_IDS, petItemId, isPetItemId,
     EXPLORE_NAMESPACE, RELIC_NAMESPACE, EXPLORE_ITEMS, EXPLORE_ITEM_IDS,
     exploreRegionItemId, relicItemId, isExploreItemId,
+    MATERIAL_SOURCES, MATERIAL_ITEMS, MATERIAL_ITEM_IDS, materialItemId, isMaterialItemId,
 };

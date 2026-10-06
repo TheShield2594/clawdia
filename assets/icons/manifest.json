@@ -3445,5 +3445,95 @@
     "rim": "emerald-green",
     "rimHex": "#2ECC71",
     "prompt": "Achievement badge icon: a crossed pair of playing cards behind a large silver poker chip. Style: bold cartoon achievement badge, round medal emblem with a single symbolic subject inside, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single badge centered with generous padding, no text, no numbers, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 383,
+    "key": "fish:fish_scale",
+    "file": "fish__fish_scale.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single large teardrop-shaped fish scale standing upright, shown flat-on with fine curved growth ridges, plain pearly silver-blue with a soft sheen. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 384,
+    "key": "fish:rare_scale",
+    "file": "fish__rare_scale.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single large teardrop-shaped fish scale standing upright, shown flat-on with fine curved growth ridges, shimmering iridescent teal and violet, a few tiny sparkles at its edge. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 385,
+    "key": "fish:mythic_scale",
+    "file": "fish__mythic_scale.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single large teardrop-shaped fish scale standing upright, shown flat-on with fine curved growth ridges, deep cosmic indigo flecked with tiny stars, a faint golden glow along its rim. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 386,
+    "key": "fish:seaweed_bundle",
+    "file": "fish__seaweed_bundle.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a small bundle of glossy green kelp ribbons tied around the middle with a twist of twine. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 387,
+    "key": "fish:driftwood",
+    "file": "fish__driftwood.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a short gnarled piece of sun-bleached driftwood, smooth pale grey wood with a knot hole. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 388,
+    "key": "fish:old_coin",
+    "file": "fish__old_coin.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single worn antique gold coin, tarnished green at the edges, stamped with a faded ship. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 389,
+    "key": "fish:pearl",
+    "file": "fish__pearl.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single lustrous round white pearl resting in a small open oyster shell. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 390,
+    "key": "fish:coral_fragment",
+    "file": "fish__coral_fragment.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a branching fragment of bright coral-pink coral with a few rounded tips. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 391,
+    "key": "fish:shark_tooth",
+    "file": "fish__shark_tooth.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single large serrated triangular shark tooth, ivory white with a darker root. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 392,
+    "key": "fish:tentacle_ink",
+    "file": "fish__tentacle_ink.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a small corked glass vial of swirling inky black-purple liquid with a curled purple tentacle wrapped around it. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   }
 ]

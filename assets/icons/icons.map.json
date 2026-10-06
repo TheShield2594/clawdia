@@ -4,7 +4,7 @@
     "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
     "style": "B3 (rarity rim, flat 2-tone, no gloss)",
     "date": "2026-09-21",
-    "count": 383,
+    "count": 393,
     "resultsAdded": {
       "date": "2026-09-21",
       "count": 144,
@@ -34,6 +34,12 @@
       "count": 37,
       "quality": "high",
       "note": "remaining achievement badges: all Common (13) and Uncommon (24) (issue #1108)"
+    },
+    "fishMaterialsAdded": {
+      "date": "2026-10-06",
+      "count": 10,
+      "quality": "high",
+      "note": "fishing materials for the /fish inv card (issue #1169)"
     }
   },
   "items": {
@@ -4249,6 +4255,116 @@
       "model": "gpt_image_2_5",
       "date": "2026-09-24",
       "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20260924_034809_d1d6a114-578c-457f-964d-4980e40f6b28.png"
+    },
+    "fish:fish_scale": {
+      "file": "fish__fish_scale.png",
+      "jobId": "13c2d909-721e-494b-a37e-f0f89330efa7",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-06",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261006_163034_13c2d909-721e-494b-a37e-f0f89330efa7.png"
+    },
+    "fish:rare_scale": {
+      "file": "fish__rare_scale.png",
+      "jobId": "e5d774c8-4730-4c21-8497-ceab0be615c8",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-06",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261006_163033_e5d774c8-4730-4c21-8497-ceab0be615c8.png"
+    },
+    "fish:mythic_scale": {
+      "file": "fish__mythic_scale.png",
+      "jobId": "4600b0d9-d96f-42fb-bf21-cc003a529f06",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-06",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261006_163114_4600b0d9-d96f-42fb-bf21-cc003a529f06.png"
+    },
+    "fish:seaweed_bundle": {
+      "file": "fish__seaweed_bundle.png",
+      "jobId": "6b94a0c3-698c-481f-970d-b4c260ca01ad",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-06",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261006_163033_6b94a0c3-698c-481f-970d-b4c260ca01ad.png"
+    },
+    "fish:driftwood": {
+      "file": "fish__driftwood.png",
+      "jobId": "3875b0ac-2f99-4f3d-898b-5cf9c6ec6343",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-06",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261006_163034_3875b0ac-2f99-4f3d-898b-5cf9c6ec6343.png"
+    },
+    "fish:old_coin": {
+      "file": "fish__old_coin.png",
+      "jobId": "e7b5e2ff-d884-4a83-a0d5-e3006619afe7",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-06",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261006_163114_e7b5e2ff-d884-4a83-a0d5-e3006619afe7.png"
+    },
+    "fish:pearl": {
+      "file": "fish__pearl.png",
+      "jobId": "0594516d-92c6-404c-8edf-3a26b11fffbb",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-06",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261006_163115_0594516d-92c6-404c-8edf-3a26b11fffbb.png"
+    },
+    "fish:coral_fragment": {
+      "file": "fish__coral_fragment.png",
+      "jobId": "c2181223-a3f1-4ab4-abf3-84562f5674d9",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-06",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261006_163133_c2181223-a3f1-4ab4-abf3-84562f5674d9.png"
+    },
+    "fish:shark_tooth": {
+      "file": "fish__shark_tooth.png",
+      "jobId": "b618bdc1-dcfd-4bcc-ab9a-4d26338ef8c5",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-06",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261006_163253_b618bdc1-dcfd-4bcc-ab9a-4d26338ef8c5.png"
+    },
+    "fish:tentacle_ink": {
+      "file": "fish__tentacle_ink.png",
+      "jobId": "dcc8a7f3-be65-4c51-b8a0-a5e1f461c480",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-06",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261006_163253_dcc8a7f3-be65-4c51-b8a0-a5e1f461c480.png"
     }
   }
 }

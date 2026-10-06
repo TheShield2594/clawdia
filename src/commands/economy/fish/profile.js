@@ -443,18 +443,11 @@ const OVERVIEW_ROD_PREVIEW = 5;
 // Chum and Shrimp Bait were both 🦐). One emoji per heading, plus the rod
 // status mark, which is information rather than decoration.
 
-/** Medallion colours for the materials, which have no baked art yet (#1168). */
+/**
+ * Medallion colours for the hunt drops this card lists, which have no baked art
+ * yet (#1171). The fishing materials have theirs (#1169), so they need none.
+ */
 const MATERIAL_COLORS = {
-    fish_scale:     '#5dade2',
-    rare_scale:     '#3498db',
-    mythic_scale:   '#9b59b6',
-    pearl:          '#ecf0f1',
-    seaweed_bundle: '#27ae60',
-    driftwood:      '#a0785a',
-    old_coin:       '#f1c40f',
-    shark_tooth:    '#bdc3c7',
-    tentacle_ink:   '#34495e',
-    coral_fragment: '#ff7f7f',
     rabbits_foot:   '#d7bde2',
     feather:        '#f5f5f5',
 };
