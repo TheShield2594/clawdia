@@ -1,16 +1,19 @@
                 <section id="ai" class="panel">
                     <div class="panel-head">
                         <h2>Ask Clawdia</h2>
-                        <p>Configure Clawdia's chat, knowledge base, summaries, and per-channel personas for your server.</p>
+                        <p>Configure Clawdia's chat, what it can do, its knowledge base, and its summaries for your server.</p>
                     </div>
 
                     <!-- Inner AI tabs -->
                     <div class="ai-inner-tabs" role="tablist" aria-label="AI sections">
                         <button class="ai-inner-tab active" type="button" role="tab" id="tab-ai-chat" aria-controls="ai-chat" aria-selected="true" tabindex="0" data-ai-tab="ai-chat">🧠 Chat</button>
+                        <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-abilities" aria-controls="ai-abilities" aria-selected="false" tabindex="-1" data-ai-tab="ai-abilities">🛠️ Abilities</button>
+                        <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-images" aria-controls="ai-images" aria-selected="false" tabindex="-1" data-ai-tab="ai-images">🎨 Images</button>
+                        <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-voice" aria-controls="ai-voice" aria-selected="false" tabindex="-1" data-ai-tab="ai-voice">🎙️ Voice</button>
                         <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-knowledgebase" aria-controls="ai-knowledgebase" aria-selected="false" tabindex="-1" data-ai-tab="ai-knowledgebase">📚 Knowledge Base</button>
                         <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-summaries" aria-controls="ai-summaries" aria-selected="false" tabindex="-1" data-ai-tab="ai-summaries">📝 Summaries</button>
-                        <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-personas" aria-controls="ai-personas" aria-selected="false" tabindex="-1" data-ai-tab="ai-personas">👤 Personas</button>
                         <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-mcp" aria-controls="ai-mcp" aria-selected="false" tabindex="-1" data-ai-tab="ai-mcp">🔌 Connections</button>
+                        <button class="ai-inner-tab" type="button" role="tab" id="tab-ai-usage" aria-controls="ai-usage" aria-selected="false" tabindex="-1" data-ai-tab="ai-usage">📊 Usage</button>
                     </div>
 
                     <!-- Chat -->
@@ -110,28 +113,15 @@
                             <span class="toggle-text"><strong>Stream responses</strong><span>Edit messages in real-time as the model generates</span></span>
                             <span class="switch"><input type="checkbox" id="ai-streaming" <%= settings.ai.streaming !== false ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
-                        <label class="toggle">
-                            <span class="toggle-text"><strong>Semantic knowledge search</strong><span>Also find knowledge-base entries by meaning, so a question that shares no words with an entry still reaches it. The local option downloads an on-device model on first use; OpenAI or Gemini uses that provider's embeddings and key.</span></span>
-                            <span class="switch"><input type="checkbox" id="ai-semantic-enabled" <%= settings.ai.semanticRetrieval?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
-                        </label>
-                        <div class="field">
-                            <label class="field-label" for="ai-semantic-provider">Embedding provider</label>
-                            <select id="ai-semantic-provider">
-                                <option value="local" <%= (settings.ai.semanticRetrieval?.provider || 'local') === 'local' ? 'selected' : '' %>>Local (on-device, no key)</option>
-                                <option value="openai" <%= settings.ai.semanticRetrieval?.provider === 'openai' ? 'selected' : '' %>>OpenAI</option>
-                                <option value="gemini" <%= settings.ai.semanticRetrieval?.provider === 'gemini' ? 'selected' : '' %>>Gemini</option>
-                            </select>
-                            <small>Only used when semantic knowledge search is on</small>
+                        <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" data-action="save" data-section="ai">Save changes</button>
                         </div>
-                        <div class="field field-trio">
-                            <div><label class="field-label" for="ai-rate-limit">Rate limit (requests / user)</label><input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>"><small>0 disables. MCP tool calls share a per-window budget of 8 &times; this limit</small></div>
-                            <div><label class="field-label" for="ai-rate-channel">Rate limit (requests / channel)</label><input type="number" id="ai-rate-channel" min="0" value="<%= settings.ai.rateLimitPerChannel ?? 0 %>"><small>0 disables</small></div>
-                            <div><label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label><input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>"></div>
-                        </div>
-                        <div class="field field-pair">
-                            <div><label class="field-label" for="ai-monthly-tokens">Monthly token budget</label><input type="number" id="ai-monthly-tokens" min="0" step="1000" value="<%= settings.ai.monthlyTokenLimit ?? 0 %>"><small>0 disables. Counts every AI call this server makes, scheduled ones included</small></div>
-                            <div><label class="field-label" for="ai-monthly-cost">Monthly cost budget (USD)</label><input type="number" id="ai-monthly-cost" min="0" step="0.5" value="<%= settings.ai.monthlyCostLimit ?? 0 %>"><small>0 disables. Estimated from provider pricing; resets on the 1st (UTC)</small></div>
-                        </div>
+                    </div>
+
+                    <!-- Abilities -->
+                    <div id="ai-abilities" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-ai-abilities">
+                        <p class="ai-inner-desc">What the AI is allowed to do beyond answering — act on the server, browse the web, and run longer tasks.</p>
                         <label class="toggle">
                             <span class="toggle-text"><strong>Enable AI actions</strong><span>Let the AI create polls, set reminders, schedule tasks, and suggest mod actions</span></span>
                             <span class="switch"><input type="checkbox" id="ai-actions-enabled" <%= settings.ai.actionsEnabled ? 'checked' : '' %>><span class="slider"></span></span>
@@ -145,39 +135,17 @@
                             <span class="switch"><input type="checkbox" id="ai-task-mode" <%= settings.ai.taskModeEnabled ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
                         <label class="toggle">
-                            <span class="toggle-text"><strong>Save memories without asking</strong><span>The AI remembers and forgets facts about each member on its own instead of posting approval buttons. Suits a server you run for yourself. Needs AI actions on.</span></span>
-                            <span class="switch"><input type="checkbox" id="ai-memory-autosave" <%= settings.ai.memory?.autoSave ? 'checked' : '' %>><span class="slider"></span></span>
-                        </label>
-                        <div class="field">
-                            <label class="field-label" for="ai-memory-cap">Memories per member</label>
-                            <input type="number" id="ai-memory-cap" min="1" max="50" value="<%= settings.ai.memory?.cap ?? 10 %>">
-                            <small>1–50. Every saved memory goes into every reply's prompt, so more memories cost more per message.</small>
-                        </div>
-                        <label class="toggle">
-                            <span class="toggle-text"><strong>Let the AI learn</strong><span>The AI writes down how it did things — and corrections you gave it — as notes in the knowledge base, and recalls them later. Only for members with Manage Server.</span></span>
-                            <span class="switch"><input type="checkbox" id="ai-learning" <%= settings.ai.learningEnabled ? 'checked' : '' %>><span class="slider"></span></span>
-                        </label>
-                        <label class="toggle">
                             <span class="toggle-text"><strong>Enable web access</strong><span>Let the AI read public web pages, and search the web through the bot operator's SearXNG instance when <code>SEARXNG_URL</code> is set.</span></span>
                             <span class="switch"><input type="checkbox" id="ai-web-search" <%= settings.ai.webSearchEnabled ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
-                        <label class="toggle">
-                            <span class="toggle-text"><strong>Searchable conversation history</strong><span>Keep a year of each member's AI conversations so the AI can search them when asked about something from before. Each member can only ever search their own. Erased with <code>/mydata</code>.</span></span>
-                            <span class="switch"><input type="checkbox" id="ai-conversation-search" <%= settings.ai.conversationSearch ? 'checked' : '' %>><span class="slider"></span></span>
-                        </label>
-                        <label class="toggle">
-                            <span class="toggle-text"><strong>Listen to voice messages</strong><span>Transcribe voice messages and audio clips sent to the AI, then answer them. Uses this server's OpenAI key, or its Gemini key; each clip is billed by that provider.</span></span>
-                            <span class="switch"><input type="checkbox" id="ai-voice-transcription" <%= settings.ai.voiceTranscription ? 'checked' : '' %>><span class="slider"></span></span>
-                        </label>
-                        <div class="field">
-                            <label class="field-label" for="ai-voice-replies">Spoken replies</label>
-                            <select id="ai-voice-replies">
-                                <option value="off" <%= (settings.ai.voiceReplies || 'off') === 'off' ? 'selected' : '' %>>Off — text only</option>
-                                <option value="when-spoken-to" <%= settings.ai.voiceReplies === 'when-spoken-to' ? 'selected' : '' %>>When spoken to — answer a voice message with audio too</option>
-                                <option value="always-in-dms" <%= settings.ai.voiceReplies === 'always-in-dms' ? 'selected' : '' %>>Always in DMs — and for voice messages anywhere</option>
-                            </select>
-                            <small>Reads the reply aloud and posts the audio after the text, which is always posted as well. The first 1,500 characters or so are spoken. Uses this server's OpenAI key, or its Gemini key; each spoken reply is billed by that provider and counts toward the monthly budget.</small>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" data-action="save" data-section="ai">Save changes</button>
                         </div>
+                    </div>
+
+                    <!-- Images -->
+                    <div id="ai-images" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-ai-images">
+                        <p class="ai-inner-desc">Let the AI draw pictures, and choose which service and model it draws with.</p>
                         <label class="toggle">
                             <span class="toggle-text"><strong>Let the AI make images</strong><span>Draw a picture when someone asks for one and post it in the conversation, scheduled tasks included. Uses this server's OpenAI, Gemini, OpenRouter or Higgsfield key. An image costs far more than a reply: each counts toward the monthly budget, and each member gets 5 an hour.</span></span>
                             <span class="switch"><input type="checkbox" id="ai-image-generation" data-change="ai-image-generation" <%= settings.ai.imageGeneration ? 'checked' : '' %>><span class="slider"></span></span>
@@ -193,7 +161,7 @@
                                     <option value="openrouter" <%= imageService === 'openrouter' ? 'selected' : '' %>>OpenRouter</option>
                                     <option value="higgsfield" <%= imageService === 'higgsfield' ? 'selected' : '' %>>Higgsfield</option>
                                 </select>
-                                <small>Which service draws first, with this server's key for it (the key fields above). If it fails, or there is no key for it, every other service this server has a key for is tried in turn.</small>
+                                <small>Which service draws first, with this server's key for it (the key fields on the <strong>Chat</strong> tab, or the Higgsfield key below). If it fails, or there is no key for it, every other service this server has a key for is tried in turn.</small>
                             </div>
                             <div class="field">
                                 <label class="field-label" for="ai-higgsfield-key">Higgsfield key</label>
@@ -222,7 +190,44 @@
                             </div>
                             <div class="field"><small>Leave a model empty for the default. OpenAI takes gpt-image models (e.g. <code>gpt-image-1-mini</code>, cheaper than <code>gpt-image-1</code>); Gemini takes its image models (e.g. <code>gemini-2.5-flash-image</code>); DALL·E and Imagen are not supported. OpenRouter takes any image model's ID from <a href="https://openrouter.ai/models?output_modalities=image" target="_blank" rel="noopener">its image models</a> (e.g. <code>black-forest-labs/flux.2-pro</code>). Higgsfield takes a text-to-image endpoint ID from <a href="https://docs.higgsfield.ai/docs/models/image-generation" target="_blank" rel="noopener">its model list</a> (e.g. <code>higgsfield-ai/soul/v2/standard</code>). OpenRouter and Higgsfield images count toward the monthly cost limit at the price each service reports; OpenAI and Gemini are estimated for gpt-image-1, gpt-image-1-mini and Gemini image models only, and another model is counted in tokens but not in cost.</small></div>
                         </div>
-                        <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" data-action="save" data-section="ai">Save changes</button>
+                        </div>
+                    </div>
+
+                    <!-- Voice -->
+                    <div id="ai-voice" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-ai-voice">
+                        <p class="ai-inner-desc">Let the AI hear voice messages and answer out loud.</p>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Listen to voice messages</strong><span>Transcribe voice messages and audio clips sent to the AI, then answer them. Uses this server's OpenAI key, or its Gemini key; each clip is billed by that provider.</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-voice-transcription" <%= settings.ai.voiceTranscription ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <div class="field">
+                            <label class="field-label" for="ai-voice-replies">Spoken replies</label>
+                            <select id="ai-voice-replies">
+                                <option value="off" <%= (settings.ai.voiceReplies || 'off') === 'off' ? 'selected' : '' %>>Off — text only</option>
+                                <option value="when-spoken-to" <%= settings.ai.voiceReplies === 'when-spoken-to' ? 'selected' : '' %>>When spoken to — answer a voice message with audio too</option>
+                                <option value="always-in-dms" <%= settings.ai.voiceReplies === 'always-in-dms' ? 'selected' : '' %>>Always in DMs — and for voice messages anywhere</option>
+                            </select>
+                            <small>Reads the reply aloud and posts the audio after the text, which is always posted as well. The first 1,500 characters or so are spoken. Uses this server's OpenAI key, or its Gemini key; each spoken reply is billed by that provider and counts toward the monthly budget.</small>
+                        </div>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" data-action="save" data-section="ai">Save changes</button>
+                        </div>
+                    </div>
+
+                    <!-- Usage & limits -->
+                    <div id="ai-usage" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-ai-usage">
+                        <p class="ai-inner-desc">Cap how much the AI can be used and what it can spend, and see what it has used so far.</p>
+                        <div class="field field-trio">
+                            <div><label class="field-label" for="ai-rate-limit">Rate limit (requests / user)</label><input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>"><small>0 disables. MCP tool calls share a per-window budget of 8 &times; this limit</small></div>
+                            <div><label class="field-label" for="ai-rate-channel">Rate limit (requests / channel)</label><input type="number" id="ai-rate-channel" min="0" value="<%= settings.ai.rateLimitPerChannel ?? 0 %>"><small>0 disables</small></div>
+                            <div><label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label><input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>"></div>
+                        </div>
+                        <div class="field field-pair">
+                            <div><label class="field-label" for="ai-monthly-tokens">Monthly token budget</label><input type="number" id="ai-monthly-tokens" min="0" step="1000" value="<%= settings.ai.monthlyTokenLimit ?? 0 %>"><small>0 disables. Counts every AI call this server makes, scheduled ones included</small></div>
+                            <div><label class="field-label" for="ai-monthly-cost">Monthly cost budget (USD)</label><input type="number" id="ai-monthly-cost" min="0" step="0.5" value="<%= settings.ai.monthlyCostLimit ?? 0 %>"><small>0 disables. Estimated from provider pricing; resets on the 1st (UTC)</small></div>
+                        </div>
                         <div class="actions-row">
                             <button class="btn btn-primary" data-action="save" data-section="ai">Save changes</button>
                         </div>
@@ -295,6 +300,43 @@
                         </div>
                         <div class="actions-row">
                             <button class="btn btn-primary" id="kb-add-btn">Add entry</button>
+                        </div>
+
+                        <div class="ai-kb-settings" data-save-scope="ai">
+                            <div class="panel-head"><h3>Memory &amp; recall</h3></div>
+                            <label class="toggle">
+                                <span class="toggle-text"><strong>Semantic knowledge search</strong><span>Also find knowledge-base entries by meaning, so a question that shares no words with an entry still reaches it. The local option downloads an on-device model on first use; OpenAI or Gemini uses that provider's embeddings and key.</span></span>
+                                <span class="switch"><input type="checkbox" id="ai-semantic-enabled" <%= settings.ai.semanticRetrieval?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                            </label>
+                            <div class="field">
+                                <label class="field-label" for="ai-semantic-provider">Embedding provider</label>
+                                <select id="ai-semantic-provider">
+                                    <option value="local" <%= (settings.ai.semanticRetrieval?.provider || 'local') === 'local' ? 'selected' : '' %>>Local (on-device, no key)</option>
+                                    <option value="openai" <%= settings.ai.semanticRetrieval?.provider === 'openai' ? 'selected' : '' %>>OpenAI</option>
+                                    <option value="gemini" <%= settings.ai.semanticRetrieval?.provider === 'gemini' ? 'selected' : '' %>>Gemini</option>
+                                </select>
+                                <small>Only used when semantic knowledge search is on</small>
+                            </div>
+                            <label class="toggle">
+                                <span class="toggle-text"><strong>Save memories without asking</strong><span>The AI remembers and forgets facts about each member on its own instead of posting approval buttons. Suits a server you run for yourself. Needs AI actions on, in the <strong>Abilities</strong> tab.</span></span>
+                                <span class="switch"><input type="checkbox" id="ai-memory-autosave" <%= settings.ai.memory?.autoSave ? 'checked' : '' %>><span class="slider"></span></span>
+                            </label>
+                            <div class="field">
+                                <label class="field-label" for="ai-memory-cap">Memories per member</label>
+                                <input type="number" id="ai-memory-cap" min="1" max="50" value="<%= settings.ai.memory?.cap ?? 10 %>">
+                                <small>1–50. Every saved memory goes into every reply's prompt, so more memories cost more per message.</small>
+                            </div>
+                            <label class="toggle">
+                                <span class="toggle-text"><strong>Let the AI learn</strong><span>The AI writes down how it did things — and corrections you gave it — as notes in the knowledge base, and recalls them later. Only for members with Manage Server.</span></span>
+                                <span class="switch"><input type="checkbox" id="ai-learning" <%= settings.ai.learningEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                            </label>
+                            <label class="toggle">
+                                <span class="toggle-text"><strong>Searchable conversation history</strong><span>Keep a year of each member's AI conversations so the AI can search them when asked about something from before. Each member can only ever search their own. Erased with <code>/mydata</code>.</span></span>
+                                <span class="switch"><input type="checkbox" id="ai-conversation-search" <%= settings.ai.conversationSearch ? 'checked' : '' %>><span class="slider"></span></span>
+                            </label>
+                            <div class="actions-row">
+                                <button class="btn btn-primary" data-action="save" data-section="ai">Save changes</button>
+                            </div>
                         </div>
                     </div>
 
@@ -376,46 +418,6 @@
                         </div>
                         <div class="actions-row">
                             <button class="btn btn-primary" data-action="add-summary-job">Add summary job</button>
-                        </div>
-                    </div>
-
-                    <!-- Personas -->
-                    <div id="ai-personas" class="ai-inner-panel" role="tabpanel" aria-labelledby="tab-ai-personas">
-                        <p class="ai-inner-desc">Assign a custom AI persona to specific channels. When the bot is active in a channel with a persona, it uses that persona's system prompt instead of the server-wide default.</p>
-                        <%# v5 de-emoji (#1074): the ⚠️ opening this caution is a KEEP — it leads a
-                            prose sentence in a warning banner (content), not a status chip, and rides
-                            the shared --warn-* surface rather than standing in as chrome. %>
-                        <div id="persona-channel-warning" style="display:none;margin-bottom:1rem;padding:.75rem 1rem;background:var(--warn-bg);border:1px solid var(--warn-border);border-radius:6px;color:var(--warn-text);font-size:.9rem;">
-                            ⚠️ The bot is currently restricted to a single channel in the <strong>Chat</strong> tab. Personas configured for other channels won't be active until you clear that restriction or select "All channels."
-                        </div>
-                        <div id="personas-list" style="margin-bottom:1.5rem;">
-                            <div id="personas-skeleton">
-                                <div class="skel-bar" style="width:70%"></div>
-                                <div class="skel-bar" style="width:55%"></div>
-                                <div class="skel-bar" style="width:65%"></div>
-                            </div>
-                        </div>
-                        <div class="panel-head" style="margin-top:1rem"><h3>Add / update persona</h3></div>
-                        <div class="field">
-                            <label class="field-label" for="persona-channel">Channel</label>
-                            <%- include('../channel-select', { id: 'persona-channel', placeholder: 'Select a channel' }) %>
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="persona-name">Persona name</label>
-                            <input type="text" id="persona-name" placeholder="e.g. Support Bot">
-                        </div>
-                        <div class="field">
-                            <div class="prompt-field-head">
-                                <label class="field-label" for="persona-prompt" style="margin:0;">System prompt</label>
-                                <div class="prompt-field-meta">
-                                    <span class="prompt-char-count" id="persona-prompt-count">0 / 4000</span>
-                                    <button type="button" class="prompt-expand-btn" data-action="prompt-edit" data-prompt-target="persona-prompt" data-prompt-title="Persona system prompt">⛶ Full-screen</button>
-                                </div>
-                            </div>
-                            <textarea id="persona-prompt" class="auto-resize" rows="8" maxlength="4000" placeholder="You are a helpful support assistant…" data-input="prompt-count" data-prompt-target="persona-prompt"></textarea>
-                        </div>
-                        <div class="actions-row">
-                            <button class="btn btn-primary" data-action="add-persona">Save persona</button>
                         </div>
                     </div>
 
@@ -538,7 +540,7 @@
                         </div>
                     </div>
 
-                    <!-- Full-screen prompt editor (shared by ai-prompt and persona-prompt) -->
+                    <!-- Full-screen prompt editor for the system prompt -->
                     <div id="prompt-editor-modal" class="modal-overlay prompt-editor-modal" style="display:none;" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="prompt-editor-title">
                         <div class="modal-box modal-box-wide">
                             <div class="modal-head">

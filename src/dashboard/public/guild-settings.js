@@ -109,8 +109,12 @@ let requestedTab = INITIAL_TAB;
 // The hashes that name an inner tab rather than a panel, and the panel each one
 // lives in. '#knowledgebase' is a place in the AI panel, so arriving at it — or
 // coming back to it — has to open 'ai' and then the tab inside it.
-const INNER_TO_PARENT = { knowledgebase: 'ai', aisummaries: 'ai', aipersonas: 'ai', dailynews: 'rss' };
-const AI_INNER_TABS = { knowledgebase: 'ai-knowledgebase', aisummaries: 'ai-summaries', aipersonas: 'ai-personas' };
+const AI_INNER_TABS = {
+    aiabilities: 'ai-abilities', aiimages: 'ai-images', aivoice: 'ai-voice',
+    knowledgebase: 'ai-knowledgebase', aisummaries: 'ai-summaries', aiusage: 'ai-usage'
+};
+const INNER_TO_PARENT = { dailynews: 'rss' };
+for (const hash of Object.keys(AI_INNER_TABS)) INNER_TO_PARENT[hash] = 'ai';
 const RSS_INNER_TABS = { dailynews: 'rss-tab-dailynews' };
 
 /**

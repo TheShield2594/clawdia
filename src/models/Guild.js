@@ -53,19 +53,6 @@ function distinctMcpServerNames(servers) {
     return true;
 }
 
-function distinctChannelPersonaIds(personas) {
-    if (!Array.isArray(personas)) return true;
-
-    const seen = new Set();
-    for (const persona of personas) {
-        if (!persona || !persona.channelId) continue;
-        if (seen.has(persona.channelId)) return false;
-        seen.add(persona.channelId);
-    }
-
-    return true;
-}
-
 function distinctLadderThresholds(ladder) {
     if (!Array.isArray(ladder)) return true;
 
@@ -554,18 +541,6 @@ const guildSchema = new Schema({
         // nobody typed. A server that wants its war announcements narrated says
         // so; the announcements are unchanged for everyone else.
         eventCommentary: { type: Boolean, default: false },
-        // Per-channel personas: each entry overrides systemPrompt for that channel
-        channelPersonas: {
-            type: [{
-                channelId:    { type: String, required: true },
-                personaName:  { type: String, default: 'Assistant' },
-                systemPrompt: { type: String, required: true }
-            }],
-            validate: {
-                validator: distinctChannelPersonaIds,
-                message: 'channelPersonas contains duplicate channelId values.'
-            }
-        },
         // Remote MCP servers this guild has connected in the dashboard. Merged
         // with the operator-wide config file at request time; a name defined in
         // both places resolves to the guild's entry. Whichever provider the

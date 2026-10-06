@@ -96,7 +96,7 @@ describe('the event handler', () => {
 
     beforeEach(() => {
         getGuildSettings.mockResolvedValue({
-            ai: { enabled: true, channelPersonas: [] },
+            ai: { enabled: true },
             leveling: { enabled: false },
             moderation: { enabled: false },
             suggestions: { enabled: false },

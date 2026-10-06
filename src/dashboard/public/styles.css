@@ -597,6 +597,7 @@ body {
 .ai-inner-panel { display: none; }
 .ai-inner-panel.active { display: block; animation: panel-in 0.2s ease; }
 .ai-inner-desc { color: var(--text-dim); font-size: 0.92rem; margin-bottom: 1.5rem; }
+.ai-kb-settings { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
 
 /* MCP connections panel */
 .mcp-note {
