@@ -331,6 +331,7 @@ function materialCardTiers(source, mats) {
     return [...byTier.entries()].sort(([a], [b]) => b - a).map(([tier, entries]) => ({ tier, entries }));
 }
 
+/** The card for one material tab, or null when that tab has nothing to draw. */
 function buildMaterialsCard(source, mats, target) {
     const tiers = materialCardTiers(source, mats);
     if (!tiers.length) return Promise.resolve(null);
@@ -466,12 +467,19 @@ module.exports = {
         });
 
         collector.on('collect', async btn => {
-            activeTab = btn.customId.split('_')[1];
+            const tab = btn.customId.split('_')[1];
+            activeTab = tab;
+            const page = await pageFor(tab);
+            // A card drawn for the first time can still be rendering when a
+            // second tab is clicked. If one was, this click is stale: let the
+            // later one paint, or the message shows one tab's page while its
+            // buttons say another is selected.
+            if (tab !== activeTab) return btn.deferUpdate().catch(() => {});
             // `attachments: []` drops the previous tab's card; `files` adds this one's.
             await btn.update({
-                ...(await pageFor(activeTab)),
+                ...page,
                 attachments: [],
-                components: [buildTabRow(activeTab, interaction.id)]
+                components: [buildTabRow(tab, interaction.id)]
             });
         });
 
