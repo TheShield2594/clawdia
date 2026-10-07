@@ -10,7 +10,7 @@ jest.mock('../src/models/GrindProfile', () => ({ find: jest.fn(), findOneAndUpda
 jest.mock('../src/models/AiItem', () => ({ find: jest.fn() }));
 
 const { __test__ } = require('../src/commands/economy/inventory');
-const { buildItemsCard, itemsCardSections } = __test__;
+const { buildItemsCard, itemsCardSections, buildMaterialsCard, materialCardTiers } = __test__;
 const { DEFAULT_SHOP_ITEMS } = require('../src/data/defaultShopItems');
 const { EFFECT_CONFIGS } = require('../src/data/effectConfigs');
 const { timeRemaining } = require('../src/services/effectsService');
@@ -66,6 +66,32 @@ describe('buildItemsCard', () => {
 
     test('sends no card when there is nothing to draw', async () => {
         expect(await buildItemsCard([], shopItems, [], {}, target)).toBeNull();
+    });
+});
+
+describe('material cards', () => {
+    const mats = { fish_scale: 3, pearl: 2, mythic_scale: 1, driftwood: 0 };
+
+    test('group owned materials by tier, rarest first, keyed to the source art', () => {
+        const tiers = materialCardTiers('fish', mats);
+        expect(tiers.map(t => t.tier)).toEqual([5, 3, 1]);
+        expect(tiers[0].entries).toEqual([expect.objectContaining({ iconId: 'fish:mythic_scale', name: 'Mythic Scale', count: 1 })]);
+        expect(tiers.flatMap(t => t.entries).some(e => e.iconId === 'fish:driftwood')).toBe(false);
+    });
+
+    test('only count materials of their own source', () => {
+        expect(materialCardTiers('mine', mats)).toEqual([]);
+    });
+
+    test('renders a PNG per tab whose alt text names every material', async () => {
+        const card = await buildMaterialsCard('fish', mats, target);
+        expect(card.attachment.subarray(0, 4)).toEqual(PNG_MAGIC);
+        expect(card.name).toBe('inventory-fish.png');
+        for (const s of ['Mythic Scale 1', 'Pearl 2', 'Fish Scale 3']) expect(card.description).toContain(s);
+    });
+
+    test('sends no card for a tab with no materials', async () => {
+        expect(await buildMaterialsCard('explore', {}, target)).toBeNull();
     });
 });
 

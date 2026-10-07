@@ -222,8 +222,7 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
 
 // The picture half of the Items tab: shop items, forged items and relics as
 // tiles with their counts, active effects as pills. The embed keeps every
-// number (#672) and the lore the card has no room for. The material tabs stay
-// text until their art exists (#1168).
+// number (#672) and the lore the card has no room for.
 
 const ITEMS_CARD_TILES = 16; // two rows per section; the embed has the rest
 
@@ -309,6 +308,55 @@ function buildItemsCard(inventory, shopItems, activeEffects, aiItemMap, target) 
     }), 'inventory-items.png', alt);
 }
 
+// ─── The material cards ───────────────────────────────────────────────────────
+
+// The Hunt, Fish, Mine and Explore tabs: one section per rarity tier, rarest
+// first, each material a tile with its count. Art is keyed `<source>:<key>`;
+// materials without baked art yet (#1168) draw as a medallion in their tier's
+// colour, the same stand-in the activity inventories use.
+
+const MATERIAL_CARD_TILES = 16;
+const SOURCE_TITLES = { hunt: 'Hunting Materials', fish: 'Fishing Materials', mine: 'Mining Materials', explore: 'Exploration Finds' };
+
+/** The owned materials of one source, grouped by tier, rarest tier first. */
+function materialCardTiers(source, mats) {
+    const byTier = new Map();
+    for (const [key, data] of Object.entries(MATERIAL_RARITY)) {
+        if (data.source !== source) continue;
+        const count = mats?.[key] ?? 0;
+        if (!(count > 0)) continue;
+        if (!byTier.has(data.tier)) byTier.set(data.tier, []);
+        byTier.get(data.tier).push({ iconId: `${source}:${key}`, name: data.label, count, color: TIER_COLORS[data.tier] });
+    }
+    return [...byTier.entries()].sort(([a], [b]) => b - a).map(([tier, entries]) => ({ tier, entries }));
+}
+
+function buildMaterialsCard(source, mats, target) {
+    const tiers = materialCardTiers(source, mats);
+    if (!tiers.length) return Promise.resolve(null);
+
+    const all = tiers.flatMap(t => t.entries);
+    const total = all.reduce((n, e) => n + e.count, 0);
+    const kinds = Object.values(MATERIAL_RARITY).filter(d => d.source === source).length;
+    const subtitle = `${total.toLocaleString('en-US')} material${total === 1 ? '' : 's'} · ${all.length} / ${kinds} kinds found`;
+
+    const sections = tiers.map(({ tier, entries }) => {
+        const tiles = entries.slice(0, MATERIAL_CARD_TILES);
+        return { label: TIER_LABELS[tier] ?? `Tier ${tier}`, entries: tiles, count: entries.length, more: entries.length - tiles.length };
+    });
+
+    const alt = `${SOURCE_TITLES[source]} for ${target.username}. `
+        + tiers.map(({ tier, entries }) => `${TIER_LABELS[tier] ?? `Tier ${tier}`}: ${entries.map(e => `${e.name} ${e.count}`).join(', ')}.`).join(' ');
+
+    return renderAttachment(() => createGrindInventoryCard({
+        activity: source,
+        title:    `${target.username}'s ${SOURCE_TITLES[source]}`,
+        subtitle,
+        buffs:    [],
+        sections,
+    }), `inventory-${source}.png`, alt);
+}
+
 function buildTabRow(active, interactionId, disabled = false) {
     return new ActionRowBuilder().addComponents(
         TAB_KEYS.map(key =>
@@ -391,15 +439,18 @@ module.exports = {
             explore: buildMaterialsEmbed('explore', mats.explore, color, footer, target, avatarURL),
         };
 
-        // The Items tab carries its card as the embed image; the material tabs
-        // are text until their art exists (#1168).
-        const itemsCard = await buildItemsCard(inventory, shopItems, activeEffects, aiItemMap, target);
-        const itemsPage = pagePayload(embeds.items, itemsCard);
-        const pageFor = tab => (tab === 'items' ? itemsPage : { embeds: [embeds[tab]], files: [] });
+        // Every tab carries its card as the embed image. Cards are drawn the
+        // first time their tab is opened and kept, so the reply only waits on
+        // the one it shows.
+        const cards = {};
+        const cardFor = tab => (cards[tab] ??= tab === 'items'
+            ? buildItemsCard(inventory, shopItems, activeEffects, aiItemMap, target)
+            : buildMaterialsCard(tab, mats[tab], target));
+        const pageFor = async tab => pagePayload(embeds[tab], await cardFor(tab));
 
         let activeTab = 'items';
         const message = await interaction.reply({
-            ...pageFor(activeTab),
+            ...(await pageFor(activeTab)),
             components: [buildTabRow(activeTab, interaction.id)],
             fetchReply: true
         });
@@ -418,7 +469,7 @@ module.exports = {
             activeTab = btn.customId.split('_')[1];
             // `attachments: []` drops the previous tab's card; `files` adds this one's.
             await btn.update({
-                ...pageFor(activeTab),
+                ...(await pageFor(activeTab)),
                 attachments: [],
                 components: [buildTabRow(activeTab, interaction.id)]
             });
@@ -431,5 +482,5 @@ module.exports = {
         });
     },
 
-    __test__: { buildItemsEmbed, buildItemsCard, itemsCardSections },
+    __test__: { buildItemsEmbed, buildItemsCard, itemsCardSections, buildMaterialsCard, materialCardTiers },
 };
