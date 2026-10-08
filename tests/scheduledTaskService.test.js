@@ -508,6 +508,27 @@ describe('running a deep task', () => {
         expect(standard.botTools.map(tool => tool.name)).not.toContain('delegate');
     });
 
+    // A deep report is several sends; a timeout during one of them must not
+    // let the rest follow a run already recorded as failed.
+    test('stops posting a long report once the run times out mid-send', async () => {
+        jest.useFakeTimers();
+        const channel = textChannel();
+        try {
+            due([makeTask({ mode: 'deep' })]);
+            aiService.getCompletion.mockResolvedValue('word '.repeat(2000));
+            // The first piece takes longer than the run has left.
+            channel.send.mockImplementationOnce(() => new Promise(resolve => setTimeout(() => resolve({}), TASK_RUN_TIMEOUT_MS + 5000)));
+
+            const tick = runDueTasks(makeClient(channel));
+            await Promise.resolve();
+            await jest.advanceTimersByTimeAsync(TASK_RUN_TIMEOUT_MS + 10_000);
+            await tick;
+        } finally {
+            jest.useRealTimers();
+        }
+        expect(channel.send).toHaveBeenCalledTimes(1);
+    });
+
     test('a standard task keeps the ordinary ceilings', async () => {
         due([makeTask()]);
         await runDueTasks(makeClient(textChannel()));

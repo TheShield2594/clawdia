@@ -210,6 +210,21 @@ const SKIPPED_ELEMENTS = ['script', 'style', 'noscript', 'svg', 'template', 'ifr
  * times. An element with no closer runs to the end of the page, which is what
  * a browser makes of it too.
  */
+/**
+ * Where `</name` next closes an element, from `from`, or -1. Only a closer the
+ * name ends at: `</navigate>` is not the end of a `<nav>`, and taking it for
+ * one would return the rest of the skipped element as page text.
+ */
+function closerOf(lower, name, from) {
+    let at = lower.indexOf(`</${name}`, from);
+    while (at !== -1) {
+        const next = lower.charAt(at + 2 + name.length);
+        if (next === '' || next === '>' || next === '/' || /\s/.test(next)) return at;
+        at = lower.indexOf(`</${name}`, at + 2 + name.length);
+    }
+    return -1;
+}
+
 function stripElements(html) {
     const lower = asciiLower(html);
     const opener = new RegExp(`<!--|<(${SKIPPED_ELEMENTS.join('|')})\\b`, 'g');
@@ -230,7 +245,7 @@ function stripElements(html) {
             const name = match[1];
             let close = nextCloser.get(name);
             if (close === undefined || (close !== -1 && close < opener.lastIndex)) {
-                close = lower.indexOf(`</${name}`, opener.lastIndex);
+                close = closerOf(lower, name, opener.lastIndex);
                 nextCloser.set(name, close);
             }
             if (close === -1) {

@@ -215,10 +215,11 @@ async function geminiEmbedder(aiSettings, guildId) {
         const response = await client.models.embedContent({ model: GEMINI_EMBED_MODEL, contents: texts });
         return {
             vectors: (response.embeddings || []).map(item => item.values),
-            // Gemini reports no token count for an embedding; a billable
-            // character count is what it charges by, so this is an estimate
-            // at the usual four characters a token.
-            inputTokens: Math.ceil(texts.reduce((sum, text) => sum + String(text || '').length, 0) / 4)
+            // The reported count when the response carries one; otherwise an
+            // estimate at the usual four characters a token, since the SDK's
+            // embedding response has no token count of its own.
+            inputTokens: response.usageMetadata?.promptTokenCount
+                || Math.ceil(texts.reduce((sum, text) => sum + String(text || '').length, 0) / 4)
         };
     });
 }

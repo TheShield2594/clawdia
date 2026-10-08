@@ -266,11 +266,15 @@ async function runAiPromptTask(client, task, { signal } = {}) {
     // an `@everyone` that got talked into the answer.
     const target = toDm ? recipient.member : channel;
     try {
+        // Checked before each piece as well: a deep report is several sends,
+        // and a timeout that lands during one of them must not let the rest
+        // follow a run already recorded as failed.
         for (const content of pieces) {
+            if (signal?.aborted) return;
             await target.send({ content, allowedMentions: { parse: [] } });
         }
         // A failed send costs the pictures, not the run: the answer is out.
-        if (activity.attachments.length) {
+        if (activity.attachments.length && !signal?.aborted) {
             await target.send({ files: activity.attachments, allowedMentions: { parse: [] } }).catch(err =>
                 console.warn(`[ScheduledTask] task ${task._id} could not post its attachments: ${err.message}`));
         }

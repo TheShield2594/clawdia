@@ -426,7 +426,10 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             existing.confirmTools = validated.value.confirmTools;
             existing.unattendedTools = validated.value.unattendedTools;
             existing.resources = validated.value.resources;
-            existing.managersOnly = validated.value.managersOnly;
+            // Kept as stored when the request does not say: an older panel, or
+            // any client that predates the switch, must not lift a restriction
+            // by leaving out a field it has never heard of.
+            if (typeof req.body?.managersOnly === 'boolean') existing.managersOnly = validated.value.managersOnly;
             if (token !== undefined) existing.authorizationToken = token;
         } else {
             servers.push({

@@ -155,7 +155,15 @@ function usageOf(raw) {
 // billed for are the sum. Within a round the last usage report wins, because
 // some OpenAI-compatible endpoints send a running total rather than a final one.
 function addUsage(totals, round) {
-    if (!round) return;
+    const rounds = totals.rounds || 0;
+    Object.defineProperty(totals, 'rounds', { value: rounds + 1, writable: true, configurable: true, enumerable: false });
+    // A round that reported no usage at all still happened, and was billed:
+    // its cost is unknown, so the turn's is too — a later round's reported
+    // cost must not be taken for the whole of it.
+    if (!round) {
+        if ('cost' in totals) totals.cost = null;
+        return;
+    }
     totals.inputTokens += round.inputTokens;
     totals.outputTokens += round.outputTokens;
     totals.cachedInputTokens += round.cachedInputTokens || 0;
@@ -164,13 +172,11 @@ function addUsage(totals, round) {
     // that did not makes the total unknown (null), never a partial sum, which
     // a spend limit would read as the whole of it. The round count is kept off
     // the enumerable fields, which are what the ledger receives.
-    const rounds = totals.rounds || 0;
     if ('cost' in round) {
         totals.cost = rounds === 0 ? round.cost : (Number.isFinite(totals.cost) ? totals.cost + round.cost : null);
     } else if (rounds > 0 && 'cost' in totals) {
         totals.cost = null;
     }
-    Object.defineProperty(totals, 'rounds', { value: rounds + 1, writable: true, configurable: true, enumerable: false });
 }
 
 // Streamed tool calls arrive as fragments keyed by index: the name in one
@@ -386,10 +392,8 @@ async function complete({ apiKey, model, systemPrompt, history, prompt, images, 
                 ...(offerTools ? { tools: toolParams(toolkit) } : {})
             }, ...requestOptions(signal));
 
-            if (completion.usage) {
-                sawUsage = true;
-                addUsage(totals, usageOf(completion.usage));
-            }
+            if (completion.usage) sawUsage = true;
+            addUsage(totals, completion.usage ? usageOf(completion.usage) : null);
 
             const message = completion.choices?.[0]?.message;
             const content = message?.content || '';

@@ -287,6 +287,14 @@ describe('openrouter', () => {
         expect(usage.cost).toBeNull();
     });
 
+    test('a round with no usage at all leaves the turn\'s cost unknown', async () => {
+        const silent = toolRound(undefined);
+        delete silent.usage;
+        mockCreate.mockResolvedValueOnce(silent).mockResolvedValueOnce(answerRound(0.003));
+        const { usage } = await openrouter.complete({ ...REQ, model: 'openai/gpt-4o-mini' });
+        expect(usage.cost).toBeNull();
+    });
+
     test('reaches the same tools through the OpenAI request path', async () => {
         mockCreate.mockResolvedValueOnce(ANSWER_STREAM());
         await collect(openrouter.stream({ ...REQ, model: 'openai/gpt-4o-mini' }));

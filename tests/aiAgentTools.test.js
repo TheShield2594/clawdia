@@ -297,6 +297,11 @@ describe('read_webpage', () => {
         expect(htmlToText(page)).toEqual({ title: 'Hi & bye', text: 'One\nTwo\n\n- a\ntail' });
     });
 
+    test('a longer tag that starts with the name does not close a skipped element', () => {
+        expect(htmlToText('<nav>hidden</navigate>still hidden</nav>shown').text).toBe('shown');
+        expect(htmlToText('<script>a</scripts>b</script >c').text).toBe('c');
+    });
+
     test('a text that changes length when lower-cased does not shift the cuts', () => {
         expect(htmlToText('İİİİ<script>bad</script>keep').text).toBe('İİİİ keep');
     });

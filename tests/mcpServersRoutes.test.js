@@ -541,13 +541,23 @@ describe('the managers-only switch', () => {
         expect(body.servers[0].managersOnly).toBe(true);
     });
 
-    test('is off when the panel does not send it', async () => {
+    // A client that predates the switch must not lift a restriction by
+    // leaving out a field it has never heard of.
+    test('is kept as stored when the request does not say', async () => {
         doc = makeDoc([{ ...stored, managersOnly: true }]);
         Guild.findOne.mockResolvedValue(doc);
 
         const { body } = await api('PUT', '/guild/g1/mcp-servers/github', { url: stored.url });
+        expect(doc.ai.mcpServers[0].managersOnly).toBe(true);
+        expect(body.servers[0].managersOnly).toBe(true);
+    });
+
+    test('is lifted only by an explicit false', async () => {
+        doc = makeDoc([{ ...stored, managersOnly: true }]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        await api('PUT', '/guild/g1/mcp-servers/github', { url: stored.url, managersOnly: false });
         expect(doc.ai.mcpServers[0].managersOnly).toBe(false);
-        expect(body.servers[0].managersOnly).toBe(false);
     });
 
     test('keeps a saved connection away from members', async () => {
