@@ -90,17 +90,21 @@ const DEFAULT_MCP_ROUTE = 'auto';
 /**
  * Who may click "Run it" on a tool call that is waiting for approval (#1143).
  *
- *   requester  the member who asked, or anyone with Manage Server (the
- *              default, and what the bot has always done)
- *   managers   only members with Manage Server
+ *   requester  the member who asked, or anyone with Manage Server
+ *   managers   only members with Manage Server (the default)
  *
  * `requester` makes approval a "did you mean it" check: it stops a model that
  * was talked into a call, not a member who wants the call made. A connection
  * holding an admin's credentials — a GitHub token, a mailbox — is one where
  * that difference matters, and `managers` is the setting for it.
+ *
+ * The default was `requester` until the AI-layer audit, which found that it
+ * let any member who could reach the AI approve their own write on the guild's
+ * credentials. A guild that saved `requester` keeps it; silence now reads as
+ * `managers`.
  */
 const MCP_APPROVERS = ['requester', 'managers'];
-const DEFAULT_MCP_APPROVER = 'requester';
+const DEFAULT_MCP_APPROVER = 'managers';
 
 /**
  * Which guild a list of stored servers belongs to (#1139).
@@ -127,6 +131,38 @@ function forGuild(guildId, servers) {
 
 function ownerOf(servers) {
     return (servers && typeof servers === 'object' && owners.get(servers)) || null;
+}
+
+/**
+ * Lists read on behalf of a member without Manage Server.
+ *
+ * Every connection a guild adds used to be every member's: anyone who could
+ * reach the AI could have it search a mailbox or file an issue on the
+ * credentials an admin connected — a personal-assistant setup's mail and
+ * calendar included. A connection that signs in with OAuth is somebody's own
+ * account, so it is the managers' alone; any other connection is too once its
+ * entry says `managers_only: true`. `resolveMcpServers` leaves those out of a
+ * list marked here, which is the one place every route to a server — the tool
+ * loop, Anthropic's connector, resources, prompts — reads its list from.
+ *
+ * The mark rides on the list like the owner does, and for the same reason.
+ * It is a mark for *restriction*, so it must be set at each place a member's
+ * request starts (`forMember`): the chat transport, `/ai task`, and the two
+ * `/ai mcp` subcommands members may run.
+ */
+const memberLists = new WeakSet();
+
+function forMember(servers, canManage) {
+    if (canManage) return servers;
+    const list = Array.isArray(servers) ? [...servers] : [];
+    const owner = ownerOf(servers);
+    if (owner) owners.set(list, owner);
+    memberLists.add(list);
+    return list;
+}
+
+function isMemberList(servers) {
+    return Boolean(servers && typeof servers === 'object' && memberLists.has(servers));
 }
 
 let cache = null;
@@ -436,6 +472,7 @@ function normalizeStdioServer(raw, name, { label, source, expandEnv, warnings })
         resources: raw.resources === true || raw.use_resources === true,
         oauth: false,
         stdio: true,
+        managersOnly: raw.managers_only === true || raw.managersOnly === true,
         ...(guilds ? { guilds } : {}),
         connection: { url, authorizationToken: null, oauth: null, stdio },
         toolset: buildToolset(name, raw, where, warnings)
@@ -579,6 +616,10 @@ function normalizeServer(raw, { label, source, expandEnv, warnings, ownerGuildId
         // token and cannot work on Anthropic's connector, so the routing below
         // reads this rather than whether a grant was handed over.
         oauth: Boolean(hasGrant),
+        // Who may use it: an OAuth connection is somebody's own account, so
+        // it is always managers-only; anything else is when its entry says so
+        // (see forMember).
+        managersOnly: Boolean(hasGrant) || raw.managers_only === true || raw.managersOnly === true,
         // On the operator's network, so only the bot's own client can reach it:
         // Anthropic's connector dials from Anthropic's side, where a LAN address
         // means nothing. Routed like an OAuth connection for the same reason.
@@ -700,7 +741,8 @@ function resolveMcpServers(guildServers = [], { guildId = ownerOf(guildServers) 
         for (const warning of warnings) console.warn(`[MCP] ${warning}`);
     }
 
-    return [...byName.values()];
+    const resolved = [...byName.values()];
+    return isMemberList(guildServers) ? resolved.filter(server => !server.managersOnly) : resolved;
 }
 
 /**
@@ -797,6 +839,8 @@ module.exports = {
     DEFAULT_MCP_APPROVER,
     forGuild,
     ownerOf,
+    forMember,
+    isMemberList,
     guildServersAllowed,
     requiresApproval,
     effectiveMcpRoute,

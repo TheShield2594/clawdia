@@ -107,6 +107,32 @@ beforeEach(() => {
     mockRetrieveMcpKnowledge.mockResolvedValue(null);
 });
 
+// A member without Manage Server reaches only the connections that are not
+// somebody's own account; the list every route reads is marked for that.
+describe('which connections the turn can reach', () => {
+    const { isMemberList } = require('../src/config/mcpServers');
+    const asker = canManage => {
+        const { message } = fakeMessage();
+        message.member = { permissions: { has: perm => canManage && perm === 'ManageGuild' } };
+        return message;
+    };
+
+    beforeEach(() => {
+        mockStream.mockImplementation(async function* () { yield 'ok'; });
+    });
+
+    test('a member\'s turn, and its resource lookup, get the member\'s list', async () => {
+        await handleAIChat(asker(false), SETTINGS);
+        expect(isMemberList(mockStream.mock.calls[0][0].mcpServers)).toBe(true);
+        expect(isMemberList(mockRetrieveMcpKnowledge.mock.calls[0][0])).toBe(true);
+    });
+
+    test('a manager\'s turn gets every connection', async () => {
+        await handleAIChat(asker(true), SETTINGS);
+        expect(isMemberList(mockStream.mock.calls[0][0].mcpServers)).toBe(false);
+    });
+});
+
 describe('while a tool is running', () => {
     test('the reply says which tool it is waiting on', async () => {
         mockStream.mockImplementation(async function* (args) {

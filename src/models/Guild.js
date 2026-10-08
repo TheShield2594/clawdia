@@ -660,12 +660,13 @@ const guildSchema = new Schema({
             default: 'auto'
         },
         // Who may click "Run it" on a tool call waiting for approval (#1143):
-        // the member who asked (or a moderator), or moderators only. See
-        // MCP_APPROVERS in src/config/mcpServers.js.
+        // the member who asked (or a moderator), or moderators only — the
+        // default since the AI-layer audit. See MCP_APPROVERS in
+        // src/config/mcpServers.js.
         mcpApprover: {
             type: String,
             enum: ['requester', 'managers'],
-            default: 'requester'
+            default: 'managers'
         },
         // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)
         actionsEnabled: { type: Boolean, default: false },

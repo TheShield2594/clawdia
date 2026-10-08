@@ -1,5 +1,5 @@
 const User = require('../../models/User');
-const { resolveMcpServers } = require('../../config/mcpServers');
+const { resolveMcpServers, forMember } = require('../../config/mcpServers');
 const { providers, mcpMode, usesClientTools, supportsVision } = require('./providers');
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
 const { retrieveKnowledge, knowledgeSection } = require('./knowledge');
@@ -170,7 +170,12 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
  * content, which is the right answer for the reply-to-bot trigger.
  */
 async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
-    const { provider, model, temperature, maxTokens, contextTokens, apiKey, keyError, baseUrl, mcpServers, mcpConfirm, mcpRoute, mcpApprover, rateLimit } = resolveProviderConfig(aiSettings, { guildId: message.guild?.id });
+    const { provider, model, temperature, maxTokens, contextTokens, apiKey, keyError, baseUrl, mcpServers: guildMcpServers, mcpConfirm, mcpRoute, mcpApprover, rateLimit } = resolveProviderConfig(aiSettings, { guildId: message.guild?.id });
+    // Whether the asker has Manage Server: it decides which of the guild's MCP
+    // connections this turn can reach (an OAuth one is somebody's own account,
+    // and a manager's alone — see forMember) and whether it may write notes.
+    const canManage = Boolean(message.member?.permissions?.has('ManageGuild'));
+    const mcpServers = forMember(guildMcpServers, canManage);
     const providerDef = providers.get(provider);
     const providerLabel = providerDef?.label || provider;
 
@@ -366,7 +371,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     const agentTools = buildAgentTools(aiSettings, {
         guildId: message.guild.id,
         userId: message.author.id,
-        canManage: Boolean(message.member?.permissions?.has('ManageGuild')),
+        canManage,
         rateLimit
     });
     const clientTools = (botTools.length > 0 || agentTools.length > 0)

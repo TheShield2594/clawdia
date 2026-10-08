@@ -70,18 +70,14 @@ before the slow work ([#995](https://github.com/TheShield2594/clawdia/issues/995
 and ratcheting the gathering loops' coverage floors
 ([#998](https://github.com/TheShield2594/clawdia/issues/998)) — are done.
 
-1. **Decide who may use a guild's MCP connections.** Open finding A of the
-   [AI-layer audit](AUDIT_LOG.md#ai-layer-unattended-runs-tools-mcp-and-spend):
-   every member who can reach the AI can use every connection the guild has,
-   including a mail or calendar account connected as a personal assistant, and
-   with `mcpApprover` at its default can approve their own write. **Settle the
-   policy first** — a per-connection role gate, managers-only for OAuth
-   connections, or a different default for `mcpApprover` — because each option
-   changes behaviour existing guilds rely on.
-2. **The AI-layer audit's remaining open findings**, in the order that section
+1. **The AI-layer audit's remaining open findings**, in the order
+   [that section](AUDIT_LOG.md#ai-layer-unattended-runs-tools-mcp-and-spend)
    lists them: page reads as an exfiltration path in unattended runs (B), and a
    monthly ceiling that is checked but not reserved (C). The rest are low and
-   wait for a reason to touch the code they are in.
+   wait for a reason to touch the code they are in. Who may use a guild's MCP
+   connections, which stood first here, is decided: OAuth and `managers_only`
+   connections are for members with Manage Server, and approval defaults to
+   them too.
 
 ## The audit queue
 

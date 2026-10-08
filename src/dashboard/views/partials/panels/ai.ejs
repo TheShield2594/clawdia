@@ -465,10 +465,10 @@
                         <div class="field">
                             <label class="field-label" for="mcp-approver">Who can click Run it</label>
                             <select id="mcp-approver">
-                                <option value="requester">The member who asked, or anyone who can manage this server</option>
                                 <option value="managers">Only members who can manage this server</option>
+                                <option value="requester">The member who asked, or anyone who can manage this server</option>
                             </select>
-                            <small>Tools run on the credentials you gave each connection. If the member who asked can approve their own call, approval only catches a model that was talked into something — pick the second option when a connection holds a token or login that ordinary members should not be able to use on their own say-so.</small>
+                            <small>Tools run on the credentials you gave each connection. If the member who asked can approve their own call, approval only catches a model that was talked into something — leave this on managers when a connection holds a token or login that ordinary members should not be able to use on their own say-so. A connection signed in with OAuth is only offered to members who can manage this server at all.</small>
                         </div>
                         <div class="actions-row mcp-section-actions">
                             <button class="btn btn-primary" data-action="mcp-save-confirm">Save approval setting</button>

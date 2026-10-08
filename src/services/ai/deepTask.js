@@ -6,6 +6,7 @@ const { buildBotTools, BOT_SERVER } = require('./botTools');
 const { buildAgentTools, buildAgentToolsAddendum } = require('./agentTools');
 const { buildToolActionsAddendum } = require('./actions');
 const { buildMcpAddendum } = require('./mcp/prompt');
+const { forMember } = require('../../config/mcpServers');
 const { createToolActivity } = require('./mcp/activity');
 const { createToolConfirmer } = require('./mcp/approval');
 const { recordToolCalls } = require('./mcp/usage');
@@ -199,10 +200,13 @@ async function runDeepTask({ ai, guild, channel, user, member, prompt }) {
         }
     }
 
+    const canManage = Boolean(member?.permissions?.has?.('ManageGuild'));
+    // The connections this person may use; their sub-agents inherit the list.
+    config.mcpServers = forMember(config.mcpServers, canManage);
     const agentTools = buildAgentTools(ai, {
         guildId: guild.id,
         userId: user.id,
-        canManage: Boolean(member?.permissions?.has?.('ManageGuild')),
+        canManage,
         rateLimit: config.rateLimit
     });
     // Sub-agents for the parts of the task that split cleanly (#1232). Their

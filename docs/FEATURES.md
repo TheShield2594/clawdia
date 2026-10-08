@@ -244,10 +244,12 @@ model is told the call was refused and answers from what it has.
 
 Tools that write something wait for a person. The **Approval** setting posts
 **Run it** / **Cancel** in the channel for a tool call and does not run it until
-the person who asked, or anyone who can manage the server, says so. A guild
-can limit that to members who can manage the server. That matters when a
-connection runs on an admin's token, because otherwise any member can ask for a
-call and approve it. Adding a first connection turns approval on for writes,
+someone who can manage the server says so. A guild can let the person who asked
+approve their own call instead, which catches a model that was talked into
+something but not a member who wants the call made. A connection signed in with
+OAuth — somebody's own mailbox or calendar — is offered only to members who can
+manage the server, and an operator can mark any config-file connection the same
+way with `managers_only`. Adding a first connection turns approval on for writes,
 since connecting a server is not by itself consent to unattended ones.
 
 It runs the other way too. A tool that gets halfway and needs one more fact can

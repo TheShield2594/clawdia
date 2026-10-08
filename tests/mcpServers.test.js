@@ -18,7 +18,10 @@ const {
     effectiveMcpRoute,
     buildAnthropicMcpParams,
     forGuild,
-    ownerOf
+    ownerOf,
+    forMember,
+    isMemberList,
+    DEFAULT_MCP_APPROVER
 } = require('../src/config/mcpServers');
 const { encryptSecret, _resetSecretBox } = require('../src/config/secretBox');
 
@@ -554,6 +557,52 @@ describe('a config-file server scoped to named guilds', () => {
         const result = load();
         expect(result.servers).toEqual([]);
         expect(result.warnings.join('\n')).toContain('"guilds" must be an array');
+    });
+});
+
+// The AI-layer audit: every connection used to be every member's, a personal
+// mailbox connected with OAuth included, and a member could approve their own
+// write on it.
+describe('who may use a connection', () => {
+    const grant = { guildId: 'g1', issuer: 'https://auth.example.com', clientId: 'cid', accessToken: 'enc:at' };
+    const stored = () => [
+        { name: 'mail', url: 'https://mail.example.com/mcp', oauth: grant },
+        { name: 'docs', url: 'https://docs.example.com/mcp' }
+    ];
+
+    beforeEach(() => {
+        writeConfig({ servers: [
+            { name: 'calendar', url: 'https://cal.example.com/mcp', managers_only: true },
+            { name: 'wiki', url: 'https://wiki.example.com/mcp' },
+            { name: 'notes', command: 'node', args: ['notes.js'], managers_only: true }
+        ] });
+        load();
+    });
+
+    const names = list => resolveMcpServers(list).map(s => s.name).sort();
+
+    test('a manager reaches every connection', () => {
+        expect(names(forMember(forGuild('g1', stored()), true))).toEqual(['calendar', 'docs', 'mail', 'notes', 'wiki']);
+    });
+
+    test('a member does not reach an OAuth connection, nor one marked managers_only', () => {
+        expect(names(forMember(forGuild('g1', stored()), false))).toEqual(['docs', 'wiki']);
+    });
+
+    test('marking a list keeps whose it is', () => {
+        const list = forMember(forGuild('g1', stored()), false);
+        expect(ownerOf(list)).toBe('g1');
+        expect(isMemberList(list)).toBe(true);
+        expect(isMemberList(forGuild('g1', stored()))).toBe(false);
+    });
+
+    test('the connector route sees the same narrower list', () => {
+        const params = buildAnthropicMcpParams(forMember(forGuild('g1', stored()), false));
+        expect(params.mcp_servers.map(s => s.name).sort()).toEqual(['docs', 'wiki']);
+    });
+
+    test('approval is for managers unless a guild says otherwise', () => {
+        expect(DEFAULT_MCP_APPROVER).toBe('managers');
     });
 });
 

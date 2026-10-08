@@ -2640,6 +2640,9 @@ Coinflip and dice read neither boosters nor luck items.
 
 **Status: Audited — findings resolved, some left open with reasons** ◐
 
+Open findings are lettered (B–G); A, who may use a guild's MCP connections, was
+decided after the pass and is fixed as #17.
+
 The first pass over the AI layer, which by October 2026 was about 19,000 lines
 and the fastest-growing part of the codebase outside the economy: chat and DMs,
 the bot's own tools and the agent tools (web search, page reading, conversation
@@ -2697,6 +2700,12 @@ it was not load-bearing until this pass.
 | 15 | A timed-out scheduled run was abandoned but not cancelled: it kept starting paid rounds and could post after being marked failed | Aborted on timeout; posts nothing once given up on | `scheduledTaskService.js` |
 | 16 | A monthly-budget refusal in chat read "Rate limit reached (undefined per undefinedm)" | Shows the budget message | `discordChat.js` |
 
+#### Decided and resolved after the pass
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 17 | **Every member who could reach the AI could use every MCP connection the guild had** — a mailbox or calendar connected as a personal assistant included — and with `mcpApprover` at its default (`requester`) could approve their own write on it. `/ai mcp prompt` was open to everyone too | A connection signed in with OAuth is offered only to members with Manage Server, and any config-file entry can say the same with `managers_only: true`; `resolveMcpServers` drops them from a list marked for a member (`forMember`), which chat, `/ai task` (and its sub-agents) and the two open `/ai mcp` subcommands mark. `mcpApprover` defaults to `managers`; a guild that saved `requester` keeps it | `mcpServers.js`, `discordChat.js`, `deepTask.js`, `ai.js`, `Guild.js`, `ai.ejs` |
+
 ---
 
 ### Open — found, not fixed in this pass
@@ -2706,7 +2715,6 @@ the risk it removes. They are listed so they are not rediscovered as new.
 
 | # | Finding | Severity | Why it is open |
 |---|---------|----------|----------------|
-| A | **Every member who can reach the AI can use the guild's MCP connections** — a mail, calendar or GitHub connection the operator set up as a personal assistant — and with `mcpApprover` at its default (`requester`) can approve their own write. `/ai mcp prompt` is open to everyone too | High | Needs a decision on who may use a connection (a per-connection role gate, or managers-only for OAuth connections) and on changing a default existing guilds run on |
 | B | `read_webpage` and `web_search` take any URL or query the model chooses, unconfirmed, so a run that has read private MCP results can be steered to send them out in a query string | Medium | Structural: the fixes (URLs only from the instruction or earlier results; no reads in a turn that has private data) change what the tools are for |
 | C | The monthly ceiling is checked, not reserved: N concurrent turns (sub-agents run in parallel; each shard bumps only its own cache) can all pass at $9.99 of $10 | Medium | Needs an in-flight estimate held per guild and settled per call; overshoot is bounded by a turn's maximum cost × concurrency |
 | D | Memories saved in a DM, and `search_conversations` over DMs and staff-only channels, can be quoted into a public channel of the home server | Low | The data is the asker's own; scoping memories by channel is a schema change |
