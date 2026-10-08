@@ -223,11 +223,14 @@ function createToolConfirmer(message, { timeoutMs = CONFIRM_TIMEOUT_MS, approver
  * @param {object[]} mcpServers the request's server list (a resolved config's)
  * @param {object} [options]
  * @param {string} [options.botServer] the bot's own tools' server name
+ * @param {boolean} [options.useAllowList] false refuses every call, list or
+ *        not: the list is the guild's consent for scheduled runs only, and a
+ *        sub-agent of a task somebody is watching is not one
  * @returns {(call: object) => Promise<{approved: boolean}>}
  */
-function createUnattendedConfirmer(mcpServers, { botServer = 'clawdia' } = {}) {
+function createUnattendedConfirmer(mcpServers, { botServer = 'clawdia', useAllowList = true } = {}) {
     const allowed = new Map();
-    for (const server of resolveMcpServers(mcpServers || [])) {
+    for (const server of useAllowList ? resolveMcpServers(mcpServers || []) : []) {
         const names = server.toolset?.unattended_tools;
         if (names?.length) allowed.set(server.name, new Set(names));
     }

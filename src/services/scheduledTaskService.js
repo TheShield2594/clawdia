@@ -191,6 +191,7 @@ async function runAiPromptTask(client, task) {
     const { taskSystemPrompt, chunk } = require('./ai/deepTask');
     const { buildAgentTools, buildAgentToolsAddendum } = require('./ai/agentTools');
     const { createUnattendedConfirmer } = require('./ai/mcp/approval');
+    const { unattendedConfirmMode } = require('../config/mcpServers');
     const { createToolActivity } = require('./ai/mcp/activity');
     const { delegateTool } = require('./ai/delegate');
     // Collects what the tools made for the channel (a generated image), which
@@ -225,6 +226,9 @@ async function runAiPromptTask(client, task) {
         // Nobody can click "Run it" at 07:00, so a tool that needs approval is
         // answered by the guild's per-connection list of the ones allowed to
         // run unattended, and refused otherwise — as it always was.
+        // And the guild's confirm mode is raised to at least `writes` for it,
+        // or a guild on `off` would have its write tools run with no list read.
+        mcpConfirm: unattendedConfirmMode(config.mcpConfirm),
         confirmTool: createUnattendedConfirmer(config.mcpServers),
         onToolEvent: activity.onEvent,
         botTools: [...agentTools, ...extraTools],

@@ -323,6 +323,18 @@ describe('running an ai_prompt task', () => {
         expect(refused.message).toMatch(/scheduled task/);
     });
 
+    // `off` is a chat answer: unattended, it would let every write run with no
+    // list read, since the list only answers a call that needs confirming.
+    test.each([
+        ['off', 'writes'], [undefined, 'writes'], ['destructive', 'writes'], ['always', 'always']
+    ])('runs a guild on %s confirm mode under %s', async (mode, expected) => {
+        due([makeTask()]);
+        aiService.resolveProviderConfig.mockReturnValueOnce({ provider: 'mock', apiKey: 'k', model: 'm', mcpConfirm: mode });
+        await runDueTasks(makeClient(textChannel()));
+
+        expect(aiService.getCompletion.mock.calls[0][0].mcpConfirm).toBe(expected);
+    });
+
     test('fails rather than posting when the guild has the AI switched off', async () => {
         const channel = textChannel();
         due([makeTask()]);

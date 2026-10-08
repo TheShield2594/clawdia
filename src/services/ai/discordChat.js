@@ -899,6 +899,12 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         };
 
         // The peek above passed but somebody else took the last slot in between.
+        // The monthly budget is a refusal too (rateLimited), but it carries no
+        // per-window limit to quote, and its own message says when it resets.
+        if (error?.name === 'AiBudgetError') {
+            await report(error.message);
+            return;
+        }
         if (error?.rateLimited) {
             await report(error.scope === 'channel'
                 ? 'This channel has reached the AI request limit. Please wait before sending more AI requests here.'

@@ -294,6 +294,22 @@ function needsConfirmation(mode, toolset, tool) {
 }
 
 /**
+ * The confirm mode a turn with nobody present runs under: a scheduled run, or a
+ * sub-agent of any task.
+ *
+ * `off` and `destructive` are a guild's answer for a conversation, where the
+ * person who asked is there to see what happened. Unattended, they would let a
+ * write tool run on a timer — steered, possibly, by a page or a tool result the
+ * run read on the way — with no one asked and the per-connection
+ * `unattended_tools` list never consulted, because that list is only read for a
+ * call that needs confirming. So nothing below `writes` applies: a read the
+ * server marked read-only still runs, and anything else goes to the list.
+ */
+function unattendedConfirmMode(mode) {
+    return mode === 'always' ? 'always' : 'writes';
+}
+
+/**
  * Whether one tool is on, according to a toolset built above.
  *
  * The toolset is the single description of a server's tool policy: Anthropic's
@@ -788,6 +804,7 @@ module.exports = {
     isToolDeferred,
     toolAnnotations,
     needsConfirmation,
+    unattendedConfirmMode,
     loadMcpServers,
     getMcpServers,
     resolveMcpServers,
