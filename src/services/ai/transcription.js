@@ -4,7 +4,7 @@ const { guardedDispatcher, assertPublicHttpUrl } = require('../../utils/outbound
 const { request, discardBody, readCapped } = require('../../utils/httpFetch');
 const { resolveApiKey } = require('./apiKeys');
 const { recordUsage } = require('./usage');
-const { enforceMonthlyBudget } = require('./rateLimit');
+const { enforceMonthlyBudget, budgetRefusal } = require('./rateLimit');
 
 /**
  * Voice messages, turned into words before the model sees them.
@@ -127,14 +127,16 @@ function openaiTranscriptionUsage(result) {
 function geminiUsage(response) {
     const meta = response?.usageMetadata;
     if (!meta) return null;
-    return { inputTokens: meta.promptTokenCount || 0, outputTokens: meta.candidatesTokenCount || 0 };
+    // Thinking tokens are billed as output, and reported apart from the answer.
+    return { inputTokens: meta.promptTokenCount || 0, outputTokens: (meta.candidatesTokenCount || 0) + (meta.thoughtsTokenCount || 0) };
 }
 
 function openaiTranscriber(aiSettings, guildId) {
-    const { apiKey } = resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId });
+    const { apiKey, keySource } = resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId });
     if (!apiKey) return null;
     return {
         name: 'OpenAI',
+        keySource,
         accepts: clip => OPENAI_FORMATS.has(clip.mimeType),
         async transcribe(buffer, clip) {
             const { OpenAI, toFile } = require('openai');
@@ -150,10 +152,11 @@ function openaiTranscriber(aiSettings, guildId) {
 }
 
 function geminiTranscriber(aiSettings, guildId) {
-    const { apiKey } = resolveApiKey(aiSettings, { field: 'geminiKey', envKey: process.env.GEMINI_API_KEY, guildId });
+    const { apiKey, keySource } = resolveApiKey(aiSettings, { field: 'geminiKey', envKey: process.env.GEMINI_API_KEY, guildId });
     if (!apiKey) return null;
     return {
         name: 'Gemini',
+        keySource,
         accepts: clip => Boolean(GEMINI_MIME[clip.mimeType]),
         async transcribe(buffer, clip) {
             const { GoogleGenAI } = require('@google/genai');
@@ -233,10 +236,19 @@ async function transcribeClip(clip, aiSettings, guildId, {
     }
     // Only the services that can read this format — decided before anything
     // is downloaded, so an unsupported clip costs nothing.
-    const able = transcribers.filter(transcriber => !transcriber.accepts || transcriber.accepts(clip));
-    if (!able.length) {
+    const readers = transcribers.filter(transcriber => !transcriber.accepts || transcriber.accepts(clip));
+    if (!readers.length) {
         return { error: `I cannot listen to that recording: ${clip.mimeType} is not a format this server's transcription service reads.` };
     }
+    // And of those, the ones whose key may still spend: one on the operator's
+    // key answers to the operator's ceilings (budgetRefusal).
+    let refusedFor = null;
+    const able = readers.filter(transcriber => {
+        const refusal = budgetRefusal(guildId, rateLimit, transcriber.keySource);
+        if (refusal) refusedFor = refusal;
+        return !refusal;
+    });
+    if (!able.length) return { error: refusedFor };
 
     let buffer;
     try {

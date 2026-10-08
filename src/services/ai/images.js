@@ -2,7 +2,7 @@
 
 const { resolveApiKey } = require('./apiKeys');
 const { recordUsage } = require('./usage');
-const { enforceMonthlyBudget, reserveImageLimit, refundImageLimit, IMAGES_PER_WINDOW } = require('./rateLimit');
+const { enforceMonthlyBudget, budgetRefusal, reserveImageLimit, refundImageLimit, IMAGES_PER_WINDOW } = require('./rateLimit');
 const { randomUUID } = require('crypto');
 const { setTimeout: sleep } = require('timers/promises');
 const { BOT_SERVER } = require('./botTools');
@@ -138,11 +138,12 @@ function openaiUsage(result) {
 // not draw, and throws for anything else (an outage, a bad key).
 
 function openaiGenerator(aiSettings, guildId) {
-    const { apiKey } = resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId });
+    const { apiKey, keySource } = resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId });
     if (!apiKey) return null;
     const model = imageModelFor(aiSettings, 'openai');
     return {
         name: 'OpenAI',
+        keySource,
         async generate(prompt, size, { signal } = {}) {
             const { OpenAI } = require('openai');
             const client = new OpenAI({ apiKey, timeout: IMAGE_TIMEOUT_MS, maxRetries: 0 });
@@ -170,11 +171,12 @@ function openaiGenerator(aiSettings, guildId) {
 }
 
 function geminiGenerator(aiSettings, guildId) {
-    const { apiKey } = resolveApiKey(aiSettings, { field: 'geminiKey', envKey: process.env.GEMINI_API_KEY, guildId });
+    const { apiKey, keySource } = resolveApiKey(aiSettings, { field: 'geminiKey', envKey: process.env.GEMINI_API_KEY, guildId });
     if (!apiKey) return null;
     const model = imageModelFor(aiSettings, 'gemini');
     return {
         name: 'Gemini',
+        keySource,
         async generate(prompt, size, { signal } = {}) {
             const { GoogleGenAI } = require('@google/genai');
             const client = new GoogleGenAI({ apiKey });
@@ -223,11 +225,12 @@ function openrouterUsage(body) {
 // answer as base64. A generation that does not finish comes back as an error
 // and is not billed.
 function openrouterGenerator(aiSettings, guildId) {
-    const { apiKey } = resolveApiKey(aiSettings, { field: 'openrouterKey', envKey: process.env.OPENROUTER_API_KEY, guildId });
+    const { apiKey, keySource } = resolveApiKey(aiSettings, { field: 'openrouterKey', envKey: process.env.OPENROUTER_API_KEY, guildId });
     if (!apiKey) return null;
     const model = imageModelFor(aiSettings, 'openrouter');
     return {
         name: 'OpenRouter',
+        keySource,
         async generate(prompt, size, { signal } = {}) {
             const response = await request(OPENROUTER_IMAGES_URL, {
                 method: 'POST',
@@ -454,8 +457,17 @@ async function generateImage(args, { guildId, userId = null, rateLimit = null, g
             .catch(err => console.warn(`[AI:image] could not record image usage: ${err.message}`));
     };
 
+    // The operator's ceiling, when the only services that could draw this are
+    // on the operator's key and it has been reached.
+    let refusedFor = null;
+
     try {
         for (const generator of generators) {
+            const refusal = budgetRefusal(guildId, rateLimit, generator.keySource);
+            if (refusal) {
+                refusedFor = refusal;
+                continue;
+            }
             let made;
             try {
                 made = await generator.generate(prompt, size, { signal: AbortSignal.timeout(Math.min(IMAGE_TIMEOUT_MS, timeLeft - 1000)) });
@@ -484,6 +496,7 @@ async function generateImage(args, { guildId, userId = null, rateLimit = null, g
             return `The image was made and will be posted in the conversation, after your reply, as ${name}. `
                 + 'Do not describe it as a link or paste anything for it; refer to it as the image below, briefly.';
         }
+        if (refusedFor && !answered) return `No image was made: ${refusedFor}`;
         return 'The image could not be made: the image service failed. Tell the user it did not work and they can try again later.';
     } finally {
         turn.pending -= 1;

@@ -264,6 +264,29 @@ describe('openai', () => {
 });
 
 describe('openrouter', () => {
+    const toolRound = cost => ({
+        choices: [{ message: { content: '', tool_calls: [{ id: 'c1', function: { name: 'github__search_repositories', arguments: '{"q":"clawdia"}' } }] } }],
+        usage: { prompt_tokens: 100, completion_tokens: 20, ...(cost === undefined ? {} : { cost }) }
+    });
+    const answerRound = cost => ({
+        choices: [{ message: { content: 'Three open PRs.' } }],
+        usage: { prompt_tokens: 300, completion_tokens: 10, ...(cost === undefined ? {} : { cost }) }
+    });
+
+    // It has no price table here, so the cost it reports is the only way its
+    // spend reaches a guild's dollar ceiling.
+    test('carries the cost it reports, summed over the turn\'s rounds', async () => {
+        mockCreate.mockResolvedValueOnce(toolRound(0.002)).mockResolvedValueOnce(answerRound(0.003));
+        const { usage } = await openrouter.complete({ ...REQ, model: 'openai/gpt-4o-mini' });
+        expect(usage.cost).toBeCloseTo(0.005);
+    });
+
+    test('a turn where a round reported no cost has an unknown one, not a partial sum', async () => {
+        mockCreate.mockResolvedValueOnce(toolRound(0.002)).mockResolvedValueOnce(answerRound(undefined));
+        const { usage } = await openrouter.complete({ ...REQ, model: 'openai/gpt-4o-mini' });
+        expect(usage.cost).toBeNull();
+    });
+
     test('reaches the same tools through the OpenAI request path', async () => {
         mockCreate.mockResolvedValueOnce(ANSWER_STREAM());
         await collect(openrouter.stream({ ...REQ, model: 'openai/gpt-4o-mini' }));

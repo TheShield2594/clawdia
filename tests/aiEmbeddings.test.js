@@ -29,6 +29,12 @@ describe('semanticConfig', () => {
         expect(semanticConfig({ semanticRetrieval: { enabled: true } }))
             .toEqual({ provider: 'local', localModel: 'Xenova/all-MiniLM-L6-v2' });
     });
+
+    // Whatever it names is downloaded and held for the life of the process.
+    test('ignores a model name written into the guild\'s settings', () => {
+        expect(semanticConfig({ semanticRetrieval: { enabled: true, localModel: 'someone/huge-model' } }).localModel)
+            .toBe('Xenova/all-MiniLM-L6-v2');
+    });
 });
 
 describe('embedderId', () => {

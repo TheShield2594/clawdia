@@ -186,7 +186,10 @@ function usageOf(meta) {
     if (!meta) return null;
     return {
         inputTokens: meta.promptTokenCount || 0,
-        outputTokens: meta.candidatesTokenCount || 0,
+        // A thinking model's reasoning is billed as output but reported apart
+        // from the answer (`thoughtsTokenCount`); left out, every 2.5+ reply
+        // was recorded, and held to the ceiling, at a fraction of its cost.
+        outputTokens: (meta.candidatesTokenCount || 0) + (meta.thoughtsTokenCount || 0),
         // The part of the prompt Gemini served from cached content — a subset
         // of promptTokenCount, reported when explicit context caching is in
         // play. Recorded for the cache-hit-rate view (#1046).
