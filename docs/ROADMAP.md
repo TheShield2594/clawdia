@@ -62,39 +62,26 @@ behind the audit except new game systems.
 
 ## Next
 
-Each item links to the issue that holds the detail. Nothing is restated here,
-so that there is only ever one copy to correct.
+Each item links to the issue or the audit-log entry that holds the detail.
+Nothing is restated here, so that there is only ever one copy to correct.
 
-1. **Acknowledge moderation interactions before the slow work.**
-   ([#995](https://github.com/TheShield2594/clawdia/issues/995)) The dispatcher
-   awaits settings, the frozen-economy read and the cooldown claim before
-   `execute`, and `/ban`, `/softban`, `/kick` and `/mute` can then await a member
-   fetch on a cache miss — which is normal, at 200 cached members swept hourly.
-   The three-second acknowledgement window is not guaranteed to survive that.
-   Deferred out of #994 deliberately, because the fix is in the shared dispatcher
-   and the response-visibility policy has to be decided before the code changes:
-   a public deferral makes refusals public, an ephemeral one hides successful
-   moderation embeds from the channel. **Settle that first** — it is the whole
-   of the work that cannot be started without a decision.
-2. **Ratchet the coverage floors — the three shop folders are what is left.**
-   ([#998](https://github.com/TheShield2594/clawdia/issues/998)) All three
-   gathering loops are done. `fish` and `mine` were at a branch floor of 0,
-   which every possible state satisfies, and carry 18% and 23% now; `hunt`, the
-   largest of them, went 18% → **32%** branches and 37% → **43%** statements.
-   Nothing under the loops is in `coverage-floors.json`'s `unguarded` list any
-   more. The method was the same each time and is worth reusing: take the file
-   in each folder that is a pure function of its arguments — `embeds.js`, which
-   reads no database and touches no interaction — and the smallest handler
-   beside it, driven through `tests/helpers/fakeInteraction.js`. Between them
-   they hold about a third of each directory's branches and need no new
-   scaffolding.
+The two items that stood here before — acknowledging moderation interactions
+before the slow work ([#995](https://github.com/TheShield2594/clawdia/issues/995))
+and ratcheting the gathering loops' coverage floors
+([#998](https://github.com/TheShield2594/clawdia/issues/998)) — are done.
 
-   `fish/shop` has since earned a floor of 92% branches from a suite of its
-   own. `hunt/shop` (7% branches) and `mine/shop` (6%) are what is left, and
-   they have the same shape as `fish/shop`: seven near-identical handlers each —
-   buy, list, repair, unlock, upgrade, use, and the one that sells the tool
-   itself (`weapon`, `pickaxe`) — so the `fish/shop` suite is the harness to
-   copy.
+1. **Decide who may use a guild's MCP connections.** Open finding A of the
+   [AI-layer audit](AUDIT_LOG.md#ai-layer-unattended-runs-tools-mcp-and-spend):
+   every member who can reach the AI can use every connection the guild has,
+   including a mail or calendar account connected as a personal assistant, and
+   with `mcpApprover` at its default can approve their own write. **Settle the
+   policy first** — a per-connection role gate, managers-only for OAuth
+   connections, or a different default for `mcpApprover` — because each option
+   changes behaviour existing guilds rely on.
+2. **The AI-layer audit's remaining open findings**, in the order that section
+   lists them: page reads as an exfiltration path in unattended runs (B), and a
+   monthly ceiling that is checked but not reserved (C). The rest are low and
+   wait for a reason to touch the code they are in.
 
 ## The audit queue
 
@@ -179,26 +166,21 @@ editing this file.
   alternative considered was a growing array on the guild document, which is the
   shape [#888](https://github.com/TheShield2594/clawdia/issues/888) had just
   finished removing. Worth its own issue if that trade should be reopened.
-- **Recurring or condition-triggered agent runs
-  ([#1045](https://github.com/TheShield2594/clawdia/issues/1045)).** Not planned.
-  The one-shot pieces already exist — `deepTask.js` runs a detached, budgeted
-  turn (#835), `schedule_task` fires one on a cadence behind ManageGuild (#834),
-  and both are bounded by the scheduled tool budget (#831) and the monthly
-  ceilings — but a task that *stands up on its own* to diff feeds weekly, digest
-  mod activity nightly, or watch an MCP result for a change is a net-new system,
-  and it is the one the issue itself names as most in tension with this file and
-  with the bot's safety posture. The tension is standing, not incidental: a
-  recurring task is durable state that fires with nobody watching, so the
-  write-approval flow (**Run it** / **Cancel**, which an interactive turn can
-  wait on because a human is there) and the DM's per-task tool firewall stop
-  being conveniences and become the load-bearing safety boundary — and getting
-  that boundary right is the work, not the scheduler. So the decision is to
-  *not* build it yet, and to record that here rather than relitigate it one pull
-  request at a time, which is what #1045 asked for. The exit is cheap when it is
-  reopened: the runner, the budget and the attribution are already in place, so
-  what a green light buys is a persisted recurrence and the firewall decisions —
-  reopen by editing this entry, not by stacking a scheduler onto a turn nobody
-  approved.
+- **Recurring agent runs
+  ([#1045](https://github.com/TheShield2594/clawdia/issues/1045)).** This entry
+  used to say "not planned"; recurring runs shipped anyway — cron-scheduled AI
+  tasks, scheduled tasks that run as deep tasks with sub-agents, and delivery by
+  DM — without this file being edited, which is the drift this file exists to
+  prevent. What the entry warned about held: with nobody watching, the approval
+  flow is the safety boundary, and until the AI-layer audit it was not one — a
+  guild on the default confirm mode had its MCP write tools run on a timer with
+  no list read. That is fixed (unattended turns confirm under at least `writes`,
+  and only the per-connection "run without asking in scheduled tasks" list can
+  pass a write). The "per-task tool firewall" for DM tasks this entry once
+  named was never built: a DM task has the same tools as a channel task, and is
+  instead held to its creator still having Manage Server on every run.
+  Condition-triggered runs (watch a feed, fire on a change) remain not planned,
+  for the reason above.
 
 ## Keeping this honest
 

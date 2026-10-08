@@ -23,7 +23,9 @@ gathering commands' profiles, inventories and prestige, the rest of
 `/market` and `/gift` with `/trade`, and the heist, syndicate and duel
 lobbies, the seasonal-event definition surface, and the casino's odds (#873),
 followed by a re-check of the economy changes that landed after the last pass.
-Every area of the economy has now had a pass. The majority of the codebase
+Every area of the economy has now had a pass. The AI layer — chat, tools,
+deep and scheduled tasks, MCP, and its spend controls — has had one too, with
+the findings it left open listed in its section. The majority of the codebase
 outside it has never been audited; see [Not yet reviewed](#not-yet-reviewed)
 for the full list.
 
@@ -2634,6 +2636,86 @@ Coinflip and dice read neither boosters nor luck items.
 
 ---
 
+## AI Layer: Unattended Runs, Tools, MCP and Spend
+
+**Status: Audited — findings resolved, some left open with reasons** ◐
+
+The first pass over the AI layer, which by October 2026 was about 19,000 lines
+and the fastest-growing part of the codebase outside the economy: chat and DMs,
+the bot's own tools and the agent tools (web search, page reading, conversation
+search, `learn`, image generation), deep tasks and sub-agents, scheduled tasks,
+the MCP client (HTTP, SSE, stdio, OAuth), and the spend controls around all of
+it. Ordered by what can act with nobody watching: scheduled and delegated runs
+first, then what any member can reach, then money.
+
+The finding that set the order: a scheduled run on a guild that had never
+chosen a confirm mode (`off`, the default) called any MCP write tool with no
+one asked, because the per-connection "run without asking in scheduled tasks"
+list is only read for a call that needs confirming. The roadmap's #1045 entry
+called that approval flow the load-bearing safety boundary for unattended runs;
+it was not load-bearing until this pass.
+
+**Files reviewed/fixed:**
+- `src/services/scheduledTaskService.js`, `src/services/ai/{deepTask,delegate,agentTools,botTools,actions,discordChat,directMessages,history,index,rateLimit,apiKeys,usage,images,transcription,speech,embeddings,knowledge}.js`
+- `src/services/ai/mcp/{approval,toolkit,client,connections,oauth,oauthStore,stdio,sse,elicitation,sampling}.js`, `src/config/mcpServers.js`
+- `src/services/ai/providers/{openai,gemini,openrouter,anthropic}.js`
+- `src/commands/ai/ai.js`, `src/dashboard/routes/api/mcpOAuth.js`, `src/models/McpOAuthState.js`
+- `tests/aiEnvKeyMediaCeilings.test.js` (added); `tests/{aiDelegate,scheduledTaskService,aiAgentTools,aiHistoryRetention,aiScheduleCommand,aiEmbeddings,geminiProvider,mcpProviderLoops,mcpConnections,mcpOAuthRoutes,mcpOAuthStore}.test.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 1 | **A scheduled run, or a deep task's sub-agent, called any MCP write tool unasked.** Under the default `off` mode (and `destructive`, for a tool publishing no annotations) nothing needed confirming, so the unattended allowlist was never read. On Claude, `off` also took Anthropic's connector route, where the scheduled tool budget and the round cap do not apply | Unattended turns confirm under at least `writes` (`unattendedConfirmMode`), which also forces the client route. A read the server marks read-only still runs; anything else goes to the list | `mcpServers.js`, `scheduledTaskService.js`, `delegate.js` |
+| 2 | **`read_webpage` could block the event loop for minutes.** Lazy matches against closers that never came (`<nav ` × n, `<!--` × n, `<br` × n) cost time in the square of the page — 5 s at 200 KB, and the cap is 2 MB. Any member could ask for such a page, or be steered to one | Linear scans for the skipped elements and comments; every tag pattern is `<[^<>]*>`. An ASCII-only lower-case keeps indices aligned for text that changes length when lower-cased | `agentTools.js` |
+| 3 | **Media spend reached the operator's key with no operator ceiling.** Images, transcription, speech and embeddings resolve their own keys, but the #1147 ceilings applied only when the *chat* key was the operator's — so a guild chatting on its own key with limits at 0 spent the operator's OpenAI or Gemini key on all four, unbounded | Each call on an environment key is held to the operator's ceilings (`budgetRefusal`), whatever the chat key | `rateLimit.js`, `images.js`, `transcription.js`, `speech.js`, `embeddings.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 4 | `learn` writes a note into every member's later prompts and ran unconfirmed, in a turn that may have just read a page telling it to | Confirmed every time | `agentTools.js` |
+| 5 | A sub-agent of an interactive `/ai task` answered approvals from the *scheduled-task* allowlist, which the dashboard promises applies to scheduled tasks only | Children of a task somebody ran refuse every write; only a scheduled run's children read the list | `delegate.js`, `approval.js` |
+| 6 | An OAuth grant was saved onto whatever URL the entry pointed at when the callback landed: a co-admin repointing it mid-consent got the token sent to the new address on every call | The flow records its URL; the grant is saved only onto an entry still at it | `mcpOAuth.js`, `oauthStore.js`, `McpOAuthState.js` |
+| 7 | A history write that failed after the reply was posted fell into the provider-error handler, which in streaming mode edits the placeholder — the first message of a good answer became "Sorry, I hit an error". Two quick mentions made it likely (VersionError on the trimmed array, E11000 on a first turn) | The write is caught and logged; a lost race is written once more against the fresh document | `discordChat.js`, `history.js` |
+| 8 | A channel task kept putting its creator's saved memories in front of the channel after they left or lost Manage Server | It still runs, without them | `scheduledTaskService.js` |
+| 9 | `/ai schedule list` sorted by `fireAt` alone; one-shots are switched off when they run and never pruned, so they pushed live tasks out of the window and out of reach of `/ai schedule remove` | Active tasks first | `ai.js` |
+| 10 | Embeddings ran on every message with no budget check and no ledger row | Checked before, recorded after; a refusal reads as no vector, as any embedding failure did | `embeddings.js` |
+| 11 | OpenRouter's reported per-call cost was dropped, and it has no price table here, so a dollar ceiling never counted OpenRouter chat | Carried through, summed over a turn's rounds only while every round reported one | `providers/openai.js` |
+| 12 | Gemini's thinking tokens are billed as output and were not counted | Added to output | `providers/gemini.js`, `transcription.js` |
+| 13 | `ai.semanticRetrieval.localModel` was read from guild settings — writable through the generic `ai.*` route though no panel shows it — and whatever it named was downloaded from Hugging Face and held for the life of the process | Always the default model | `embeddings.js` |
+
+#### Informational (all resolved)
+
+| # | Issue | Fix | File(s) |
+|---|-------|-----|---------|
+| 14 | OAuth connect and disconnect called `resetMcpCache`, closing every guild's connections and stdio processes with calls in flight | Only that guild's grant entry and the unauthenticated entry it replaced are dropped | `connections.js`, `mcpOAuth.js` |
+| 15 | A timed-out scheduled run was abandoned but not cancelled: it kept starting paid rounds and could post after being marked failed | Aborted on timeout; posts nothing once given up on | `scheduledTaskService.js` |
+| 16 | A monthly-budget refusal in chat read "Rate limit reached (undefined per undefinedm)" | Shows the budget message | `discordChat.js` |
+
+---
+
+### Open — found, not fixed in this pass
+
+Each of these is either a decision rather than a defect, or a fix larger than
+the risk it removes. They are listed so they are not rediscovered as new.
+
+| # | Finding | Severity | Why it is open |
+|---|---------|----------|----------------|
+| A | **Every member who can reach the AI can use the guild's MCP connections** — a mail, calendar or GitHub connection the operator set up as a personal assistant — and with `mcpApprover` at its default (`requester`) can approve their own write. `/ai mcp prompt` is open to everyone too | High | Needs a decision on who may use a connection (a per-connection role gate, or managers-only for OAuth connections) and on changing a default existing guilds run on |
+| B | `read_webpage` and `web_search` take any URL or query the model chooses, unconfirmed, so a run that has read private MCP results can be steered to send them out in a query string | Medium | Structural: the fixes (URLs only from the instruction or earlier results; no reads in a turn that has private data) change what the tools are for |
+| C | The monthly ceiling is checked, not reserved: N concurrent turns (sub-agents run in parallel; each shard bumps only its own cache) can all pass at $9.99 of $10 | Medium | Needs an in-flight estimate held per guild and settled per call; overshoot is bounded by a turn's maximum cost × concurrency |
+| D | Memories saved in a DM, and `search_conversations` over DMs and staff-only channels, can be quoted into a public channel of the home server | Low | The data is the asker's own; scoping memories by channel is a schema change |
+| E | The scheduler's due-task scan is not filtered by shard, so one shard's backlog can hold another's tasks for the length of the window | Low | Correctness under sharding only; the claim itself is sound |
+| F | MCP requests follow redirects (each hop SSRF-checked) without checking that a hop stays on https | Low | `redirect: 'error'` would break servers that redirect `/mcp` → `/mcp/`, a common framework default |
+| G | Smaller items: per-guild/per-user task caps race on concurrent creates; an elicitation enum with hundreds of options overflows the 2,000-character prompt; every DM forces a member fetch before any throttle; an image slot is refunded after a billed failure; a burst of voice messages is transcribed before the per-user window is consumed; Ollama has no key gate; the OAuth callback deletes the state before checking who completed it; stdio processes respawn without backoff on a clean exit; tokenless and stdio MCP sessions are shared across guilds; newer Gemini models price at the catch-all `flash`/`pro` rows | Low | Each is small and none moves money or data across a boundary |
+
+---
+
 ## Not yet reviewed
 
 The economy list below maps which pass of #873 audited each area; the
@@ -2663,7 +2745,7 @@ rather than a settled result:
 
 **Everything else uncovered:**
 
-- AI chat, personas, and summaries (`aiService.js`, `summaryService.js`, `ai.js`, `dm.js`)
+- AI summaries and the Dungeon Master (`summaryService.js`, `dm.js`, `services/dm/`) — the rest of the AI layer is audited above, with its open findings listed there
 - RSS feeds and the daily newspaper (`rssService.js`, `newspaperService.js`, `newspaper.js`, `feed.js`)
 - quests and achievements (`questService.js`, `achievementService.js`, `quests.js`, `questgen.js`, `achievements.js`)
 - giveaways (`giveawayService.js`, `giveaway.js`)
@@ -2692,6 +2774,6 @@ progress on 2026-09-23; the gathering commands' remaining surface on
 2026-09-23; the player market, gifts and trades on 2026-09-23; the heist,
 syndicate and duel lobbies on 2026-09-23; the seasonal-event definition
 surface on 2026-09-23; the casino's odds on 2026-09-23; and the post-audit
-economy changes were re-checked on 2026-09-24. The "Everything
+economy changes were re-checked on 2026-09-24; and the AI layer on 2026-10-08. The "Everything
 else uncovered" list carries no review date, because nothing in it has been
 reviewed.*
