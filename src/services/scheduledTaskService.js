@@ -155,7 +155,7 @@ async function getDmRecipient(client, task) {
     return { member, guild };
 }
 
-async function runAiPromptTask(client, task) {
+async function runAiPromptTask(client, task, { signal } = {}) {
     const toDm = task.deliverTo === 'dm';
     let channel = null;
     let recipient = null;
@@ -171,6 +171,13 @@ async function runAiPromptTask(client, task) {
     const settings = await Guild.findOne({ guildId: task.guildId }).lean();
     const ai = settings?.ai;
     if (!ai?.enabled) throw new Error('the AI is switched off on this server');
+
+    // A channel task is the server's and keeps running whoever set it up, but
+    // the creator's saved memories ride along only while that person is still
+    // someone who could have: a member with Manage Server. Otherwise a task
+    // whose owner left, or was demoted, would go on putting their private
+    // context in front of the channel. A DM task was held to this above.
+    const withOwnerContext = toDm || await getDmRecipient(client, task).then(() => true, () => false);
 
     // Checked per run as well as at creation, so switching deep task mode off
     // in the dashboard stops the deep tasks too, rather than leaving them on
@@ -220,7 +227,7 @@ async function runAiPromptTask(client, task) {
     const answer = await getCompletion({
         ...config,
         systemPrompt,
-        history: await ownerContext(task),
+        history: withOwnerContext ? await ownerContext(task) : [],
         prompt: task.prompt,
         guildId: task.guildId,
         // Nobody can click "Run it" at 07:00, so a tool that needs approval is
@@ -232,12 +239,16 @@ async function runAiPromptTask(client, task) {
         confirmTool: createUnattendedConfirmer(config.mcpServers),
         onToolEvent: activity.onEvent,
         botTools: [...agentTools, ...extraTools],
+        signal,
         // Still unattributed, so a deep run spends from the same per-guild
         // hourly tool budget as every other scheduled run: more rounds let it
         // use that budget in one go, never past it.
         ...(deep ? { maxRounds: TASK_MAX_TOOL_ROUNDS(), turnBudgetMs: TASK_TURN_BUDGET_MS() } : {})
     });
 
+    // Given up on while the last round was coming back: the run is already
+    // recorded as failed, so it posts nothing.
+    if (signal?.aborted) throw new Error('the run was cancelled after it timed out');
     const text = (answer || '').trim();
     if (!text) throw new Error('the model returned nothing');
 
@@ -355,10 +366,13 @@ async function claim(task, now) {
  * one after another, so a call that never returns would hold the tick open and
  * every later tick would be dropped by jobRunner as an overlap.
  */
-function withTimeout(work, ms, message) {
+function withTimeout(work, ms, message, onExpire) {
     let timer;
     const expiry = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), ms);
+        timer = setTimeout(() => {
+            onExpire?.();
+            reject(new Error(message));
+        }, ms);
     });
     return Promise.race([work, expiry]).finally(() => clearTimeout(timer));
 }
@@ -378,9 +392,14 @@ async function runClaimed(client, task) {
         return;
     }
 
+    // Aborted when the wait gives up (#1238): without it the abandoned run
+    // would go on starting paid rounds, and could still post its answer after
+    // the task had been marked failed.
+    const controller = new AbortController();
     try {
-        await withTimeout(handler(client, task), TASK_RUN_TIMEOUT_MS,
-            `the run did not finish within ${Math.round(TASK_RUN_TIMEOUT_MS / 60000)} minutes`);
+        await withTimeout(handler(client, task, { signal: controller.signal }), TASK_RUN_TIMEOUT_MS,
+            `the run did not finish within ${Math.round(TASK_RUN_TIMEOUT_MS / 60000)} minutes`,
+            () => controller.abort());
         await ScheduledTask.updateOne({ _id: task._id }, { $set: { failureCount: 0, lastError: null } });
     } catch (error) {
         // Counted rather than retried. Every attempt at an `ai_prompt` task is a

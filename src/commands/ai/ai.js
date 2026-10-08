@@ -464,7 +464,11 @@ async function addScheduledTask(interaction) {
 }
 
 async function listScheduledTasks(interaction) {
-    const tasks = await ScheduledTask.find({ guildId: interaction.guild.id }).sort({ fireAt: 1 }).limit(MAX_TASKS_PER_GUILD * 2);
+    // Active tasks first. A one-shot is switched off when it runs and never
+    // pruned, so by `fireAt` alone a server's old one-shots fill the window and
+    // push a live recurring task out of the list — and out of reach of
+    // `/ai schedule remove`, which takes the id this listing shows.
+    const tasks = await ScheduledTask.find({ guildId: interaction.guild.id }).sort({ enabled: -1, fireAt: 1 }).limit(MAX_TASKS_PER_GUILD * 2);
     if (!tasks.length) {
         return interaction.reply({
             content: 'No scheduled AI tasks on this server yet — add one with `/ai schedule add`.',

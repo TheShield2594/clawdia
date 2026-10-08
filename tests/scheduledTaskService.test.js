@@ -283,15 +283,35 @@ describe('running an ai_prompt task', () => {
         expect(req.prompt).toBe('Recap #announcements');
     });
 
+    // The guild the creator is looked up in when a channel task reads their
+    // memories: a member with Manage Server unless told otherwise.
+    const withOwner = (client, owner = { permissions: { has: () => true } }) => ({
+        ...client,
+        guilds: { cache: { get: () => ({ members: { fetch: jest.fn(async () => { if (!owner) throw new Error('Unknown Member'); return owner; }) } }) } }
+    });
+
     test('carries the memories of the person who set it up, and nobody else\'s', async () => {
         due([makeTask()]);
         User.findOne.mockReturnValue({ lean: async () => ({ pinnedMemories: [{ content: 'Works nights on weekdays' }] }) });
-        await runDueTasks(makeClient(textChannel()));
+        await runDueTasks(withOwner(makeClient(textChannel())));
 
         expect(User.findOne).toHaveBeenCalledWith({ userId: 'u1', guildId: 'g1' }, expect.anything());
         const [req] = aiService.getCompletion.mock.calls[0];
         expect(req.history[0].content).toMatch(/Works nights on weekdays/);
         expect(req.history[0].content).toMatch(/<@u1>/);
+    });
+
+    test.each([
+        ['left the server', null],
+        ['lost Manage Server', { permissions: { has: () => false } }]
+    ])('still runs, without their memories, once the person who set it up has %s', async (_, owner) => {
+        due([makeTask()]);
+        User.findOne.mockReturnValue({ lean: async () => ({ pinnedMemories: [{ content: 'Works nights on weekdays' }] }) });
+        await runDueTasks(withOwner(makeClient(textChannel()), owner));
+
+        const [req] = aiService.getCompletion.mock.calls[0];
+        expect(req.history).toEqual([]);
+        expect(User.findOne).not.toHaveBeenCalled();
     });
 
     test('runs with no memories when there are none to read, or they cannot be read', async () => {
@@ -397,6 +417,26 @@ describe('running an ai_prompt task', () => {
             expect.objectContaining({ $inc: { failureCount: 1 } }),
             expect.anything()
         );
+        // And the turn itself is cancelled, so it starts no more paid rounds.
+        expect(aiService.getCompletion.mock.calls[0][0].signal.aborted).toBe(true);
+    });
+
+    test('posts nothing when the answer arrives after the run was given up on', async () => {
+        jest.useFakeTimers();
+        const channel = textChannel();
+        try {
+            due([makeTask()]);
+            // A provider that ignores the abort and answers late anyway.
+            aiService.getCompletion.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve('late'), TASK_RUN_TIMEOUT_MS + 5000)));
+
+            const tick = runDueTasks(makeClient(channel));
+            await Promise.resolve();
+            await jest.advanceTimersByTimeAsync(TASK_RUN_TIMEOUT_MS + 10_000);
+            await tick;
+        } finally {
+            jest.useRealTimers();
+        }
+        expect(channel.send).not.toHaveBeenCalled();
     });
 
     test('disables a task whose kind this version does not know', async () => {

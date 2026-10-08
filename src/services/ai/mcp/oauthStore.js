@@ -187,11 +187,22 @@ async function readGrant(guildId, server) {
     return openGrant(doc?.ai?.mcpServers?.[0]?.oauth);
 }
 
-/** Writes a grant, replacing whatever was there. Used by the dashboard callback. */
-async function saveGrant(guildId, server, grant) {
+/**
+ * Writes a grant, replacing whatever was there. Used by the dashboard callback.
+ *
+ * `url` is the address the flow was started for. The consent screen can take
+ * minutes, and an entry repointed in that time — edited, or deleted and added
+ * again under the same name — must not receive a token issued for the old
+ * address: every later call would carry it to the new one. So when given, the
+ * entry has to still be at that url, or nothing is written.
+ */
+async function saveGrant(guildId, server, grant, { url } = {}) {
     invalidate(keyOf(guildId, server));
+    const match = typeof url === 'string'
+        ? { 'ai.mcpServers': { $elemMatch: { name: server, url } } }
+        : { 'ai.mcpServers.name': server };
     const result = await Guild.updateOne(
-        { guildId, 'ai.mcpServers.name': server },
+        { guildId, ...match },
         {
             $set: {
                 'ai.mcpServers.$.oauth': sealGrant({ ...grant, guildId }),

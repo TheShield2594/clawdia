@@ -437,6 +437,25 @@ async function cachedList(entry, server, kind, fn) {
     return inFlight;
 }
 
+/**
+ * Drop the pooled connections one guild's OAuth login can have affected: its
+ * own grant's, and the unauthenticated one the same url used before it had a
+ * grant, whose cached tool list is whatever the server answered with no login.
+ *
+ * Not `resetMcpCache`: that closes every guild's connections, stdio processes
+ * included, with calls in flight on them — and connect and disconnect are
+ * routes any guild's admin can call as often as the write limit allows.
+ */
+function resetOAuthConnection(url, guildId, server) {
+    if (typeof url !== 'string' || !url) return;
+    for (const key of [`${url} token:`, `${url} oauth:${guildId}/${server}`]) {
+        const entry = entries.get(key);
+        if (!entry) continue;
+        closeQuietly(entry.client);
+        entries.delete(key);
+    }
+}
+
 // Only for tests, which must not inherit a session or a cached list from the
 // case before them.
 function resetMcpCache() {
@@ -458,6 +477,7 @@ module.exports = {
     closeQuietly,
     sweepIdleSessions,
     resetMcpCache,
+    resetOAuthConnection,
     mapWithLimit,
     LIST_TTL_MS,
     STALE_TTL_MS,
