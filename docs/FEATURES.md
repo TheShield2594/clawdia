@@ -248,8 +248,9 @@ someone who can manage the server says so. A guild can let the person who asked
 approve their own call instead, which catches a model that was talked into
 something but not a member who wants the call made. A connection signed in with
 OAuth — somebody's own mailbox or calendar — is offered only to members who can
-manage the server, and an operator can mark any config-file connection the same
-way with `managers_only`. Adding a first connection turns approval on for writes,
+manage the server, and any other connection can be limited the same way with
+its **Only members who can manage this server** switch (`managers_only` in the
+config file). Adding a first connection turns approval on for writes,
 since connecting a server is not by itself consent to unattended ones.
 
 It runs the other way too. A tool that gets halfway and needs one more fact can

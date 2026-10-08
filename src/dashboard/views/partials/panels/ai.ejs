@@ -534,6 +534,10 @@
                             <span class="toggle-text"><strong>Use its documents as knowledge</strong><span>Search this server's resources when someone asks the AI something, and put the relevant ones in the prompt — a knowledge base kept by whoever owns the documents. Off unless you want its content in every conversation.</span></span>
                             <span class="switch"><input type="checkbox" id="mcp-resources"><span class="slider"></span></span>
                         </label>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Only members who can manage this server</strong><span>Everyone else's AI requests do not see this connection at all — for a token that is somebody's own mailbox, calendar or account. A connection signed in with OAuth is always limited this way. Scheduled tasks, which only managers can set up, still use it.</span></span>
+                            <span class="switch"><input type="checkbox" id="mcp-managers-only"><span class="slider"></span></span>
+                        </label>
                         <div class="actions-row">
                             <button class="btn btn-primary" id="mcp-save-btn" data-action="save-mcp-server">Add connection</button>
                             <button class="btn" id="mcp-cancel-btn" data-action="reset-mcp-form" style="display:none;">Cancel</button>

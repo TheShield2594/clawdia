@@ -581,6 +581,12 @@ const guildSchema = new Schema({
                 // resource is read before the model has said anything and lands
                 // in the system prompt of every message.
                 resources:          { type: Boolean, default: false },
+                // Offered only to members with Manage Server: for anyone else
+                // the AI does not see this connection at all (see forMember in
+                // src/config/mcpServers.js). For a token that is somebody's
+                // own account. An OAuth connection is managers-only whatever
+                // this says.
+                managersOnly:       { type: Boolean, default: false },
                 // An OAuth grant, for the servers that accept nothing else
                 // (#796). Present instead of `authorizationToken`, not
                 // alongside it: a connection authorizes one way or the other,

@@ -629,7 +629,8 @@ malformed config disables the connector, it never stops the bot from starting.
   somebody's own account, so only members with Manage Server can use it: for
   anyone else the AI does not see it, in chat, `/ai task` or `/ai mcp prompt`.
   Any other connection is open to every member who can reach the AI, unless its
-  config-file entry sets `managers_only`. Scheduled tasks are set up by managers
+  **Only members who can manage this server** switch is on (or, for a
+  config-file entry, `managers_only`). Scheduled tasks are set up by managers
   and reach every connection. A prompt expires unanswered after a minute, and the tool then
   does not run.
 - **Questions from a server** are the same idea in reverse. A tool that gets

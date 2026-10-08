@@ -2704,7 +2704,7 @@ it was not load-bearing until this pass.
 
 | # | Issue | Fix | File(s) |
 |---|-------|-----|---------|
-| 17 | **Every member who could reach the AI could use every MCP connection the guild had** — a mailbox or calendar connected as a personal assistant included — and with `mcpApprover` at its default (`requester`) could approve their own write on it. `/ai mcp prompt` was open to everyone too | A connection signed in with OAuth is offered only to members with Manage Server, and any config-file entry can say the same with `managers_only: true`; `resolveMcpServers` drops them from a list marked for a member (`forMember`), which chat, `/ai task` (and its sub-agents) and the two open `/ai mcp` subcommands mark. `mcpApprover` defaults to `managers`; a guild that saved `requester` keeps it | `mcpServers.js`, `discordChat.js`, `deepTask.js`, `ai.js`, `Guild.js`, `ai.ejs` |
+| 17 | **Every member who could reach the AI could use every MCP connection the guild had** — a mailbox or calendar connected as a personal assistant included — and with `mcpApprover` at its default (`requester`) could approve their own write on it. `/ai mcp prompt` was open to everyone too | A connection signed in with OAuth is offered only to members with Manage Server, and any other connection can be marked the same way — a dashboard switch, or `managers_only: true` in the config file; `resolveMcpServers` drops them from a list marked for a member (`forMember`), which chat, `/ai task` (and its sub-agents) and the two open `/ai mcp` subcommands mark. `mcpApprover` defaults to `managers`; a guild that saved `requester` keeps it | `mcpServers.js`, `discordChat.js`, `deepTask.js`, `ai.js`, `Guild.js`, `routes/api/mcpServers.js`, `panel-mcp.js`, `ai.ejs` |
 
 ---
 

@@ -517,6 +517,47 @@ describe('using a connection\'s documents as knowledge', () => {
     });
 });
 
+// Who may use a connection at all: off, every member who can reach the AI;
+// on, only members with Manage Server (forMember in config/mcpServers.js).
+describe('the managers-only switch', () => {
+    const stored = {
+        name: 'github',
+        url: 'https://api.githubcopilot.com/mcp/',
+        enabled: true,
+        authorizationToken: 'ghp_good',
+        allowedTools: [],
+        blockedTools: [],
+        confirmTools: []
+    };
+
+    test('round-trips through a save', async () => {
+        doc = makeDoc([{ ...stored }]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        const { status, body } = await api('PUT', '/guild/g1/mcp-servers/github', { url: stored.url, managersOnly: true });
+
+        expect(status).toBe(200);
+        expect(doc.ai.mcpServers[0].managersOnly).toBe(true);
+        expect(body.servers[0].managersOnly).toBe(true);
+    });
+
+    test('is off when the panel does not send it', async () => {
+        doc = makeDoc([{ ...stored, managersOnly: true }]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        const { body } = await api('PUT', '/guild/g1/mcp-servers/github', { url: stored.url });
+        expect(doc.ai.mcpServers[0].managersOnly).toBe(false);
+        expect(body.servers[0].managersOnly).toBe(false);
+    });
+
+    test('keeps a saved connection away from members', async () => {
+        const { resolveMcpServers, forGuild, forMember } = require('../src/config/mcpServers');
+        const servers = forGuild('g1', [{ ...stored, managersOnly: true }]);
+        expect(resolveMcpServers(forMember(servers, false)).map(s => s.name)).not.toContain('github');
+        expect(resolveMcpServers(forMember(servers, true)).map(s => s.name)).toContain('github');
+    });
+});
+
 describe('the approval policy', () => {
     const stored = {
         name: 'github',

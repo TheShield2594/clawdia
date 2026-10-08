@@ -227,6 +227,7 @@ function publicServer(server) {
         confirmTools: server.confirmTools || [],
         unattendedTools: server.unattendedTools || [],
         resources: server.resources === true,
+        managersOnly: server.managersOnly === true,
         addedBy: server.addedBy || null,
         createdAt: server.createdAt || null
     };
@@ -299,7 +300,11 @@ function validateServerInput(body, name) {
             unattendedTools: unattended.value,
             // Reading a server's documents into the system prompt is a separate
             // decision from calling its tools, so it is a separate switch.
-            resources: body.resources === true
+            resources: body.resources === true,
+            // Who may use the connection at all, apart from who may approve
+            // a call on it (`mcpApprover`): off, every member who can reach
+            // the AI can have it called; on, only members with Manage Server.
+            managersOnly: body.managersOnly === true
         }
     };
 }
@@ -421,6 +426,7 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             existing.confirmTools = validated.value.confirmTools;
             existing.unattendedTools = validated.value.unattendedTools;
             existing.resources = validated.value.resources;
+            existing.managersOnly = validated.value.managersOnly;
             if (token !== undefined) existing.authorizationToken = token;
         } else {
             servers.push({
@@ -462,6 +468,7 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             url: validated.value.url,
             enabled: validated.value.enabled,
             resources: validated.value.resources,
+            managersOnly: validated.value.managersOnly,
             tokenChanged: token !== undefined,
             oauthCleared,
             confirmModeDefaulted
