@@ -1,5 +1,5 @@
 const User = require('../../models/User');
-const { resolveMcpServers } = require('../../config/mcpServers');
+const { resolveMcpServers, forMember } = require('../../config/mcpServers');
 const { providers, mcpMode, usesClientTools, supportsVision } = require('./providers');
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
 const { retrieveKnowledge, knowledgeSection } = require('./knowledge');
@@ -170,7 +170,12 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
  * content, which is the right answer for the reply-to-bot trigger.
  */
 async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
-    const { provider, model, temperature, maxTokens, contextTokens, apiKey, keyError, baseUrl, mcpServers, mcpConfirm, mcpRoute, mcpApprover, rateLimit } = resolveProviderConfig(aiSettings, { guildId: message.guild?.id });
+    const { provider, model, temperature, maxTokens, contextTokens, apiKey, keyError, baseUrl, mcpServers: guildMcpServers, mcpConfirm, mcpRoute, mcpApprover, rateLimit } = resolveProviderConfig(aiSettings, { guildId: message.guild?.id });
+    // Whether the asker has Manage Server: it decides which of the guild's MCP
+    // connections this turn can reach (an OAuth one is somebody's own account,
+    // and a manager's alone — see forMember) and whether it may write notes.
+    const canManage = Boolean(message.member?.permissions?.has('ManageGuild'));
+    const mcpServers = forMember(guildMcpServers, canManage);
     const providerDef = providers.get(provider);
     const providerLabel = providerDef?.label || provider;
 
@@ -366,7 +371,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
     const agentTools = buildAgentTools(aiSettings, {
         guildId: message.guild.id,
         userId: message.author.id,
-        canManage: Boolean(message.member?.permissions?.has('ManageGuild')),
+        canManage,
         rateLimit
     });
     const clientTools = (botTools.length > 0 || agentTools.length > 0)
@@ -854,6 +859,10 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
             // bounded by the guild's own limits, and best-effort: the reply is
             // already on screen, and a conversation without a summary is what
             // this guild had yesterday.
+            //
+            // Caught here rather than by the handler below: that one reports a
+            // provider error, and in streaming mode it does so by editing the
+            // placeholder — which is by now the first message of the answer.
             await appendHistory(
                 message.guild.id, message.channel.id, message.author.id,
                 promptText, fullResponse, maxHistory,
@@ -862,7 +871,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
                     { guildId: message.guild.id, userId: message.author.id, channelId: message.channel.id }
                 ),
                 { archive: aiSettings.conversationSearch === true }
-            );
+            ).catch(err => console.error('[AI] history write failed:', err?.message || err));
             // Only what the question matched is a source. The background tier
             // is in the prompt because it is recent, not because it answered
             // anything, so citing it would credit an entry nobody retrieved.
@@ -895,6 +904,12 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
         };
 
         // The peek above passed but somebody else took the last slot in between.
+        // The monthly budget is a refusal too (rateLimited), but it carries no
+        // per-window limit to quote, and its own message says when it resets.
+        if (error?.name === 'AiBudgetError') {
+            await report(error.message);
+            return;
+        }
         if (error?.rateLimited) {
             await report(error.scope === 'channel'
                 ? 'This channel has reached the AI request limit. Please wait before sending more AI requests here.'

@@ -249,6 +249,17 @@ describe('/ai schedule list and remove', () => {
         expect(description).toMatch(/channel is gone/);
     });
 
+    // One-shots are switched off when they run and never pruned; sorted by
+    // fireAt alone they would push a live task out of the listing's window.
+    it('lists active tasks ahead of switched-off ones', async () => {
+        const sort = jest.fn(() => ({ limit: async () => [task()] }));
+        ScheduledTask.find.mockReturnValue({ sort });
+
+        await command.execute(interaction({ sub: 'list' }));
+
+        expect(sort).toHaveBeenCalledWith({ enabled: -1, fireAt: 1 });
+    });
+
     it('removes the task the short id names', async () => {
         ScheduledTask.find.mockResolvedValue([task()]);
         const i = interaction({ sub: 'remove', strings: { id: '123456' } });

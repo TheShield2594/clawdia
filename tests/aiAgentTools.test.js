@@ -290,6 +290,35 @@ describe('read_webpage', () => {
     test('decodes numeric entities and keeps block breaks', () => {
         expect(htmlToText('<p>caf&#233;</p><p>&#x2014;done</p>').text).toBe('café\n—done');
     });
+
+    test('cuts skipped elements and comments, whatever their case, and an unclosed one to the end', () => {
+        const page = '<html><head><title>Hi &amp; bye</title></head><body><NAV>menu</NAV><!-- c -->'
+            + '<p>One<br>Two</p><Script>x()</script  ><ul><li>a</li></ul><footer>f</footer>tail<nav>never closed';
+        expect(htmlToText(page)).toEqual({ title: 'Hi & bye', text: 'One\nTwo\n\n- a\ntail' });
+    });
+
+    test('a longer tag that starts with the name does not close a skipped element', () => {
+        expect(htmlToText('<nav>hidden</navigate>still hidden</nav>shown').text).toBe('shown');
+        expect(htmlToText('<script>a</scripts>b</script >c').text).toBe('c');
+    });
+
+    test('a text that changes length when lower-cased does not shift the cuts', () => {
+        expect(htmlToText('İİİİ<script>bad</script>keep').text).toBe('İİİİ keep');
+    });
+
+    // Each of these took seconds at this size when the patterns were lazy
+    // matches against a closer that never came, and the page cap is 2 MB.
+    test.each([
+        ['unclosed openers', '<'],
+        ['unclosed skipped elements', '<nav '],
+        ['unclosed comments', '<!--'],
+        ['unclosed titles', '<title>'],
+        ['unclosed line breaks', '<br']
+    ])('a page of %s is read in linear time', (_, unit) => {
+        const started = Date.now();
+        htmlToText(unit.repeat(400_000));
+        expect(Date.now() - started).toBeLessThan(2000);
+    });
 });
 
 describe('search_conversations', () => {

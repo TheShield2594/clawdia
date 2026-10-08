@@ -387,6 +387,24 @@ describe('prompts', () => {
         expect(i.replies[0].content).toContain('Looks fine to me.');
     });
 
+    // Members may run these two, so they see only the connections a member
+    // may use: not an OAuth one, nor one marked managers-only.
+    test('a member\'s run reaches only the connections a member may use', async () => {
+        const { isMemberList } = require('../src/config/mcpServers');
+        const i = interaction({ sub: 'prompt', manageGuild: false, strings: { name: 'github/review', arguments: 'pr=42' } });
+        await command.execute(i);
+
+        expect(isMemberList(mockListGuildPrompts.mock.calls[0][0])).toBe(true);
+        expect(isMemberList(mockRenderPrompt.mock.calls[0][0])).toBe(true);
+        expect(isMemberList(mockGetCompletion.mock.calls[0][0].mcpServers)).toBe(true);
+    });
+
+    test('a member\'s list of prompts comes from the same narrower list', async () => {
+        const { isMemberList } = require('../src/config/mcpServers');
+        await command.execute(interaction({ sub: 'prompts', manageGuild: false }));
+        expect(isMemberList(mockListGuildPrompts.mock.calls[0][0])).toBe(true);
+    });
+
     test('tells the model the wording came from somewhere else', async () => {
         const i = interaction({ sub: 'prompt', strings: { name: 'github/review', arguments: 'pr=42' } });
         await command.execute(i);

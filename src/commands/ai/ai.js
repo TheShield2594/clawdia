@@ -4,6 +4,7 @@ const { getGuildSettings } = require('../../utils/guildSettingsCache');
 const {
     resolveMcpServers,
     forGuild,
+    forMember,
     getMcpServers,
     effectiveMcpRoute,
     DEFAULT_CONFIRM_MODE,
@@ -464,7 +465,11 @@ async function addScheduledTask(interaction) {
 }
 
 async function listScheduledTasks(interaction) {
-    const tasks = await ScheduledTask.find({ guildId: interaction.guild.id }).sort({ fireAt: 1 }).limit(MAX_TASKS_PER_GUILD * 2);
+    // Active tasks first. A one-shot is switched off when it runs and never
+    // pruned, so by `fireAt` alone a server's old one-shots fill the window and
+    // push a live recurring task out of the list — and out of reach of
+    // `/ai schedule remove`, which takes the id this listing shows.
+    const tasks = await ScheduledTask.find({ guildId: interaction.guild.id }).sort({ enabled: -1, fireAt: 1 }).limit(MAX_TASKS_PER_GUILD * 2);
     if (!tasks.length) {
         return interaction.reply({
             content: 'No scheduled AI tasks on this server yet — add one with `/ai schedule add`.',
@@ -517,6 +522,16 @@ async function removeScheduledTask(interaction) {
     return interaction.reply({ content: `🗑️ Removed scheduled task \`${wanted}\`.`, flags: MessageFlags.Ephemeral });
 }
 
+/**
+ * The guild's connections as this member may use them: an OAuth connection,
+ * or one marked managers-only, is left out for anyone without Manage Server
+ * (see forMember). For the subcommands members may run.
+ */
+function memberServers(interaction, servers) {
+    const canManage = Boolean(interaction.memberPermissions?.has?.(PermissionFlagsBits.ManageGuild));
+    return forMember(forGuild(interaction.guild.id, servers), canManage);
+}
+
 /** The guild's stored connections, merged with the operator's config file. */
 async function guildMcpServers(guildId) {
     const settings = await getGuildSettings(guildId);
@@ -537,7 +552,7 @@ async function respondWithPrompts(interaction, typed) {
     const settings = await getGuildSettings(interaction.guild.id);
 
     const listings = await Promise.race([
-        listGuildPrompts(forGuild(interaction.guild.id, settings?.ai?.mcpServers)),
+        listGuildPrompts(memberServers(interaction, settings?.ai?.mcpServers)),
         new Promise(resolve => setTimeout(() => resolve([]), AUTOCOMPLETE_BUDGET_MS).unref?.())
     ]).catch(() => []);
 
@@ -563,7 +578,7 @@ async function handleMcp(interaction) {
 
     if (sub === 'prompts') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const listings = await listGuildPrompts(forGuild(interaction.guild.id, ai.mcpServers));
+        const listings = await listGuildPrompts(memberServers(interaction, ai.mcpServers));
         return interaction.editReply({ embeds: [promptsEmbed(listings)] });
     }
 
@@ -643,7 +658,8 @@ async function runMcpPrompt(interaction, ai) {
     await interaction.deferReply();
 
     const requested = interaction.options.getString('name');
-    const listings = await listGuildPrompts(forGuild(interaction.guild.id, ai.mcpServers));
+    const servers = memberServers(interaction, ai.mcpServers);
+    const listings = await listGuildPrompts(servers);
     const match = findPrompt(listings, requested);
     if (match.error) return editText(interaction, match.error);
 
@@ -668,8 +684,10 @@ async function runMcpPrompt(interaction, ai) {
     if (config.provider !== 'ollama' && !config.apiKey) {
         return editText(interaction, missingKeyMessage(providers.get(config.provider)?.label || config.provider, config.keyError));
     }
+    // And the turn the template runs as reaches only those connections too.
+    config.mcpServers = servers;
 
-    const rendered = await renderPrompt(forGuild(interaction.guild.id, ai.mcpServers), match.server, match.prompt.name, parsed.values);
+    const rendered = await renderPrompt(servers, match.server, match.prompt.name, parsed.values);
     if (rendered.error) return editText(interaction, `❌ ${rendered.error}`);
 
     const systemPrompt = (ai.systemPrompt || 'You are a helpful Discord bot assistant.')

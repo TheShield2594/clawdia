@@ -3,7 +3,7 @@
 const { AttachmentBuilder, MessageFlags } = require('discord.js');
 const { resolveApiKey } = require('./apiKeys');
 const { recordUsage } = require('./usage');
-const { enforceMonthlyBudget } = require('./rateLimit');
+const { enforceMonthlyBudget, budgetRefusal } = require('./rateLimit');
 const { VOICE_REPLY_MODES } = require('../../config/aiVoice');
 
 /**
@@ -180,10 +180,11 @@ function pcmToWav(pcm, { sampleRate = 24_000, channels = 1 } = {}) {
 // ledger for the call.
 
 function openaiSpeaker(aiSettings, guildId) {
-    const { apiKey } = resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId });
+    const { apiKey, keySource } = resolveApiKey(aiSettings, { field: 'openaiKey', envKey: process.env.OPENAI_API_KEY, guildId });
     if (!apiKey) return null;
     return {
         name: 'OpenAI',
+        keySource,
         async speak(text) {
             const { OpenAI } = require('openai');
             const client = new OpenAI({ apiKey, timeout: SPEAK_TIMEOUT_MS });
@@ -217,10 +218,11 @@ function openaiSpeaker(aiSettings, guildId) {
 }
 
 function geminiSpeaker(aiSettings, guildId) {
-    const { apiKey } = resolveApiKey(aiSettings, { field: 'geminiKey', envKey: process.env.GEMINI_API_KEY, guildId });
+    const { apiKey, keySource } = resolveApiKey(aiSettings, { field: 'geminiKey', envKey: process.env.GEMINI_API_KEY, guildId });
     if (!apiKey) return null;
     return {
         name: 'Gemini',
+        keySource,
         async speak(text) {
             const { GoogleGenAI } = require('@google/genai');
             const client = new GoogleGenAI({ apiKey });
@@ -321,6 +323,8 @@ async function sendSpokenReply(text, aiSettings, guildId, {
         if (rateLimit) enforceMonthlyBudget(guildId, rateLimit);
 
         for (const speaker of speakers) {
+            // One on the operator's key answers to the operator's ceilings.
+            if (budgetRefusal(guildId, rateLimit, speaker.keySource)) continue;
             let spoken;
             try {
                 spoken = await speaker.speak(input);

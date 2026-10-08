@@ -106,6 +106,17 @@ describe('who may start a task', () => {
 });
 
 describe('what a task turn asks the provider for', () => {
+    // Its sub-agents read the same config, so they inherit the narrower list.
+    it('reaches only the connections the person who ran it may use', async () => {
+        const { isMemberList } = require('../src/config/mcpServers');
+        await run(scene());
+        expect(isMemberList(getCompletion.mock.calls[0][0].mcpServers)).toBe(true);
+
+        getCompletion.mockClear();
+        await run({ ...scene(), member: { permissions: { has: perm => perm === 'ManageGuild' } } });
+        expect(isMemberList(getCompletion.mock.calls[0][0].mcpServers)).toBe(false);
+    });
+
     it('asks for the larger ceilings, which is the whole point', async () => {
         await run(scene());
 

@@ -20,8 +20,14 @@ describe('validateServerInput', () => {
             blockedTools: [],
             confirmTools: [],
             unattendedTools: [],
-            resources: false
+            resources: false,
+            managersOnly: false
         });
+    });
+
+    test('takes managers-only only as an explicit true', () => {
+        expect(validateServerInput({ ...ok, managersOnly: true }, 'github').value.managersOnly).toBe(true);
+        expect(validateServerInput({ ...ok, managersOnly: 'yes' }, 'github').value.managersOnly).toBe(false);
     });
 
     test.each([

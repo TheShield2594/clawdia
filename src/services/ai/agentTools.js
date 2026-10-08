@@ -189,19 +189,100 @@ function decodeEntities(text) {
     });
 }
 
+// Lower-cases A-Z only. The scans below index `html` by positions found in
+// this copy, and `toLowerCase` can change a string's length (`İ` becomes two
+// code units), which would cut the page in the wrong places after it.
+function asciiLower(text) {
+    return text.replace(/[A-Z]+/g, run => run.toLowerCase());
+}
+
+// Elements whose content is never page text, and are cut whole.
+const SKIPPED_ELEMENTS = ['script', 'style', 'noscript', 'svg', 'template', 'iframe', 'head', 'nav', 'footer'];
+
+/**
+ * Cut every `<name ...>...</name>` (and every `<!-- ... -->`) out of a page.
+ *
+ * A scan rather than `/<(script|...)\b[\s\S]*?<\/\1>/`: a lazy match against a
+ * closer that never comes reads to the end of the page from every opener, so
+ * a page of unclosed `<nav ` tags cost time in the square of its size — about
+ * five seconds for 200 KB, and the page may be ten times that, all of it with
+ * the event loop blocked. Each position here is looked at a bounded number of
+ * times. An element with no closer runs to the end of the page, which is what
+ * a browser makes of it too.
+ */
+/**
+ * Where `</name` next closes an element, from `from`, or -1. Only a closer the
+ * name ends at: `</navigate>` is not the end of a `<nav>`, and taking it for
+ * one would return the rest of the skipped element as page text.
+ */
+function closerOf(lower, name, from) {
+    let at = lower.indexOf(`</${name}`, from);
+    while (at !== -1) {
+        const next = lower.charAt(at + 2 + name.length);
+        if (next === '' || next === '>' || next === '/' || /\s/.test(next)) return at;
+        at = lower.indexOf(`</${name}`, at + 2 + name.length);
+    }
+    return -1;
+}
+
+function stripElements(html) {
+    const lower = asciiLower(html);
+    const opener = new RegExp(`<!--|<(${SKIPPED_ELEMENTS.join('|')})\\b`, 'g');
+    // Where the next closer for each name is, once looked for. A closer found
+    // before the current position is stale and looked for again from here, so
+    // each name's search only ever moves forward.
+    const nextCloser = new Map();
+    let out = '';
+    let from = 0;
+    let match;
+    while ((match = opener.exec(lower)) !== null) {
+        out += html.slice(from, match.index) + ' ';
+        let end;
+        if (match[0] === '<!--') {
+            const close = lower.indexOf('-->', match.index + 4);
+            end = close === -1 ? html.length : close + 3;
+        } else {
+            const name = match[1];
+            let close = nextCloser.get(name);
+            if (close === undefined || (close !== -1 && close < opener.lastIndex)) {
+                close = closerOf(lower, name, opener.lastIndex);
+                nextCloser.set(name, close);
+            }
+            if (close === -1) {
+                end = html.length;
+            } else {
+                const gt = lower.indexOf('>', close);
+                end = gt === -1 ? html.length : gt + 1;
+            }
+        }
+        from = end;
+        opener.lastIndex = end;
+    }
+    return out + html.slice(from);
+}
+
 /**
  * The readable text of an HTML page: no scripts, styles or markup, block
  * elements turned into line breaks, entities decoded. Deliberately crude —
  * the model reads it, not a person — and with no parser dependency.
+ *
+ * Every pattern here is linear in the page: a tag is `<` up to the next `<` or
+ * `>`, never `[^>]*`, which from each of a run of unclosed `<` reads on to the
+ * end of the page (see stripElements).
  */
 function htmlToText(html) {
-    const title = decodeEntities((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/\s+/g, ' ').trim());
-    let body = html
-        .replace(/<!--[\s\S]*?-->/g, ' ')
-        .replace(/<(script|style|noscript|svg|template|iframe|head|nav|footer)\b[\s\S]*?<\/\1\s*>/gi, ' ')
-        .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr|\/section|\/article|\/blockquote|\/pre)\b[^>]*>/gi, '\n')
-        .replace(/<li\b[^>]*>/gi, '\n- ')
-        .replace(/<[^>]+>/g, ' ');
+    const lower = asciiLower(html);
+    const titleOpen = lower.indexOf('<title');
+    let title = '';
+    if (titleOpen !== -1) {
+        const start = lower.indexOf('>', titleOpen);
+        const close = start === -1 ? -1 : lower.indexOf('</title', start);
+        if (close !== -1) title = decodeEntities(html.slice(start + 1, close).replace(/\s+/g, ' ').trim());
+    }
+    let body = stripElements(html)
+        .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr|\/section|\/article|\/blockquote|\/pre)\b[^<>]*>/gi, '\n')
+        .replace(/<li\b[^<>]*>/gi, '\n- ')
+        .replace(/<[^<>]*>/g, ' ');
     body = decodeEntities(body)
         .replace(/[ \t\f\v\r]+/g, ' ')
         .replace(/ *\n */g, '\n')
@@ -429,7 +510,11 @@ function learnTool(context) {
             required: ['title', 'content']
         },
         annotations: { readOnlyHint: false, destructiveHint: false },
-        confirm: false,
+        // Asked every time. A note is read back into every member's prompt,
+        // and the turn that writes one may have just read a web page or a
+        // tool result that told it to: unconfirmed, one hostile page an admin
+        // asked about would steer the guild's answers from then on.
+        confirm: true,
         run: args => saveNote(args, context)
     };
 }

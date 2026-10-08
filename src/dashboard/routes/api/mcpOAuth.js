@@ -60,7 +60,7 @@ const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/
 const { logAuditEvent } = require('../../lib/apiHelpers');
 const { resolveMcpServers, guildServersAllowed } = require('../../../config/mcpServers');
 const { inspectServer } = require('../../../services/ai/mcp/inspect');
-const { resetMcpCache } = require('../../../services/ai/mcp/connections');
+const { resetOAuthConnection } = require('../../../services/ai/mcp/connections');
 const {
     discover, registerClient, createPkce, createState, authorizationUrl,
     exchangeCode, resourceMetadataUrl, FLOW_TTL_MS, OAuthError,
@@ -200,6 +200,7 @@ async function startFlow(req, res) {
             _id: state,
             guildId,
             server: name,
+            url: stored.url,
             verifier: pkce.verifier,
             redirectUri,
             discovery,
@@ -322,13 +323,14 @@ async function handleCallback(req, res) {
             scope:                 tokens.scope,
             connectedBy:           flow.startedBy,
             connectedAt:           new Date(),
-        });
+        }, { url: typeof flow.url === 'string' ? flow.url : '' });
 
         if (!saved) {
             return closingPage(res, {
                 ok: false,
-                title: 'That connection is gone',
-                detail: 'It was removed while you were authorizing, so the login was not stored.',
+                title: 'That connection is gone or has moved',
+                detail: 'It was removed or pointed at a different address while you were authorizing, so the '
+                    + 'login was not stored. Start the connection again from the dashboard.',
             });
         }
 
@@ -336,7 +338,8 @@ async function handleCallback(req, res) {
         // grant, so it is holding no token and its cached tool list is whatever
         // an unauthenticated server answered. Dropping the cache is what makes
         // the connection work on the next message rather than the next hour.
-        resetMcpCache();
+        // This guild's entries only: every other guild's sessions are left be.
+        resetOAuthConnection(flow.url, flow.guildId, flow.server);
 
         // The admin who *started* the flow, not whoever holds the session on
         // return — those are the same person in every ordinary case, and the
@@ -379,9 +382,10 @@ async function disconnect(req, res) {
         const grant = await readGrant(guildId, name);
         if (!grant) return res.status(404).json({ error: 'That server has no OAuth login stored' });
 
+        const stored = await storedServer(guildId, name);
         await clearGrant(guildId, name);
         await McpOAuthState.deleteMany({ guildId, server: name });
-        resetMcpCache();
+        resetOAuthConnection(stored?.url, guildId, name);
 
         await logAuditEvent(req, guildId, 'mcp_oauth_disconnect', { name, issuer: grant.issuer });
         res.json({ success: true });

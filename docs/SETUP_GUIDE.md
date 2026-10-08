@@ -375,6 +375,7 @@ file lives outside the repo checkout.
 | `blocked_tools` | No | Denylist of tool names. Wins over `allowed_tools`. |
 | `resources` | No | Set `true` to search this server's resources when somebody asks the AI something and put the relevant ones in the prompt. Off by default. |
 | `guilds` | No | Discord server IDs allowed to use this entry. Left out, every server with AI on gets it; `[]` means none. Set it on any entry whose token can write something, since members of every listed server can have the bot use it. |
+| `managers_only` | No | Set `true` to offer this connection only to members with Manage Server: anyone else's AI requests do not see it at all. Use it for a token that is somebody's own account — a mailbox, a calendar. A connection signed in with OAuth is always managers-only. |
 | `default_config` / `configs` | No | The API's raw toolset shape, if you need `defer_loading` or another setting the two lists above don't cover. |
 | `command` / `args` / `env` / `cwd` | Instead of `url` | Run the server as a local process and speak MCP over its stdin/stdout. Config file only; see below. |
 | `allow_private` | No | Set `true` for a server on your own network — a LAN address, a container on the compose network, or plain `http://`. Config file only; see below. |
@@ -620,11 +621,17 @@ malformed config disables the connector, it never stops the bot from starting.
   straight away. `destructive` and `writes` both read the annotations a server
   publishes about its own tools; they differ over a tool that publishes none,
   which `destructive` lets through and `writes` asks about. `always` asks about
-  every call, reads included. By default a prompt can be answered by whoever
-  asked or by anyone with Manage Server; set **Who can click Run it** to
-  *Only members who can manage this server* when a connection holds credentials
-  ordinary members should not use on their own say-so. The person who asked can
-  still cancel. A prompt expires unanswered after a minute, and the tool then
+  every call, reads included. By default a prompt can be answered only by
+  someone with Manage Server; set **Who can click Run it** to *The member who
+  asked* to let members approve their own calls, which is only a check that the
+  model was not talked into something. The person who asked can still cancel.
+- **Who can use a connection.** A connection signed in with OAuth is
+  somebody's own account, so only members with Manage Server can use it: for
+  anyone else the AI does not see it, in chat, `/ai task` or `/ai mcp prompt`.
+  Any other connection is open to every member who can reach the AI, unless its
+  **Only members who can manage this server** switch is on (or, for a
+  config-file entry, `managers_only`). Scheduled tasks are set up by managers
+  and reach every connection. A prompt expires unanswered after a minute, and the tool then
   does not run.
 - **Questions from a server** are the same idea in reverse. A tool that gets
   halfway and needs one more fact — which environment, which of your three

@@ -204,6 +204,29 @@ describe('children cannot recurse or write', () => {
         await expect(confirmTool({ server: 'github', tool: 'create_issue' })).resolves.toMatchObject({ approved: false });
         await expect(confirmTool({ server: 'clawdia', tool: 'save_memory' })).resolves.toMatchObject({ approved: false });
     });
+
+    // A guild's chat confirm mode is for a conversation somebody is watching;
+    // `off` there must not mean a child's writes run with no list read.
+    test.each([
+        ['off', 'writes'], [undefined, 'writes'], ['destructive', 'writes'], ['writes', 'writes'], ['always', 'always']
+    ])('a guild on %s has its children confirm under %s', async (mode, expected) => {
+        await runDelegation(tasks('a'), context({ config: { ...CONFIG, mcpConfirm: mode } }), { deadline: later() });
+        expect(getCompletion.mock.calls[0][0].mcpConfirm).toBe(expected);
+    });
+
+    const allowed = [{ name: 'github', url: 'https://api.github.example/mcp', confirmTools: ['create_issue'], unattendedTools: ['create_issue'] }];
+
+    test('a scheduled run\'s children use the guild\'s unattended list', async () => {
+        await runDelegation(tasks('a'), context({ userId: null, config: { ...CONFIG, mcpServers: allowed } }), { deadline: later() });
+        const { confirmTool } = getCompletion.mock.calls[0][0];
+        await expect(confirmTool({ server: 'github', tool: 'create_issue' })).resolves.toEqual({ approved: true });
+    });
+
+    test('the children of a task somebody ran refuse every write, unattended list or not', async () => {
+        await runDelegation(tasks('a'), context({ config: { ...CONFIG, mcpServers: allowed } }), { deadline: later() });
+        const { confirmTool } = getCompletion.mock.calls[0][0];
+        await expect(confirmTool({ server: 'github', tool: 'create_issue' })).resolves.toMatchObject({ approved: false });
+    });
 });
 
 describe('spend stays inside the task\'s limits', () => {

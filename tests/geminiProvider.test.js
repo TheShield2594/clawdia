@@ -143,6 +143,16 @@ describe('stream', () => {
         expect(usageOut.usage).toEqual({ inputTokens: 40, outputTokens: 3, cachedInputTokens: 25 });
     });
 
+    it('bills a thinking model\'s reasoning as the output it is charged as', async () => {
+        const usageOut = {};
+        mockSendMessageStream.mockResolvedValue(chunks(
+            { text: 'hi', usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 3, thoughtsTokenCount: 500 } },
+        ));
+
+        await collect(gemini.stream({ ...REQ, usageOut }));
+        expect(usageOut.usage).toEqual({ inputTokens: 40, outputTokens: 503, cachedInputTokens: 0 });
+    });
+
     it('keeps the last running total when several chunks carry usage', async () => {
         const usageOut = {};
         mockSendMessageStream.mockResolvedValue(chunks(

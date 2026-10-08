@@ -35,6 +35,7 @@ const {
     cachedList,
     primeList,
     resetMcpCache,
+    resetOAuthConnection,
     LIST_TTL_MS,
     STALE_TTL_MS,
     MAX_PARALLEL_PER_SERVER,
@@ -94,6 +95,21 @@ describe('what shares a pooled connection', () => {
         };
 
         expect(entryFor(impostor)).not.toBe(entryFor(oauthServer('g1')));
+    });
+
+    // Connect and disconnect are any guild admin's to call; neither may close
+    // another guild's sessions, or the stdio processes shared by every guild.
+    test('a login change drops that guild\'s grant and the unauthenticated entry, nothing else', () => {
+        const unauthenticated = { name: 'linear', connection: { url: 'https://mcp.example.com/mcp', authorizationToken: null } };
+        const mine = entryFor(oauthServer('g1'));
+        const before = entryFor(unauthenticated);
+        const theirs = entryFor(oauthServer('g2'));
+
+        resetOAuthConnection('https://mcp.example.com/mcp', 'g1', 'linear');
+
+        expect(entryFor(oauthServer('g1'))).not.toBe(mine);
+        expect(entryFor(unauthenticated)).not.toBe(before);
+        expect(entryFor(oauthServer('g2'))).toBe(theirs);
     });
 
     test('an OAuth connection gets a client that can fetch a token', () => {

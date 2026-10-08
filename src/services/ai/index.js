@@ -1,7 +1,7 @@
 const { DEFAULT_CONFIRM_MODE, DEFAULT_MCP_ROUTE, DEFAULT_MCP_APPROVER, forGuild, ownerOf } = require('../../config/mcpServers');
 const { providers, getProvider, DEFAULT_MODELS, supportsStructured } = require('./providers');
 const { recordUsage } = require('./usage');
-const { enforceRateLimit, toolCallBudget } = require('./rateLimit');
+const { enforceRateLimit, toolCallBudget, guildLimitsOf } = require('./rateLimit');
 const { applyEnvKeyCeilings } = require('./apiKeys');
 const { requestModelJson, DEFAULT_TOKEN_BUDGETS } = require('../../utils/modelJson');
 
@@ -77,13 +77,7 @@ function resolveProviderConfig(aiSettings, { guildId } = {}) {
     // The monthly ceilings ride in the same block for the same reason, and are
     // the one limit here that also binds a call nobody sent: the scheduled
     // digests and newspapers spend this guild's money too (#831).
-    const guildLimits = {
-        perUser: aiSettings.rateLimitPerUser ?? 0,
-        perChannel: aiSettings.rateLimitPerChannel ?? 0,
-        windowMin: aiSettings.rateLimitWindowMin ?? 10,
-        monthlyTokens: aiSettings.monthlyTokenLimit ?? 0,
-        monthlyCost: aiSettings.monthlyCostLimit ?? 0
-    };
+    const guildLimits = guildLimitsOf(aiSettings);
     // Spend on the operator's environment key is the operator's money, so
     // their ceilings bind it whatever the guild set (#1147). A guild can only
     // tighten them — its own limits are 0-for-unlimited, and those zeroes are

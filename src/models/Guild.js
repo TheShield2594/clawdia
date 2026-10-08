@@ -581,6 +581,12 @@ const guildSchema = new Schema({
                 // resource is read before the model has said anything and lands
                 // in the system prompt of every message.
                 resources:          { type: Boolean, default: false },
+                // Offered only to members with Manage Server: for anyone else
+                // the AI does not see this connection at all (see forMember in
+                // src/config/mcpServers.js). For a token that is somebody's
+                // own account. An OAuth connection is managers-only whatever
+                // this says.
+                managersOnly:       { type: Boolean, default: false },
                 // An OAuth grant, for the servers that accept nothing else
                 // (#796). Present instead of `authorizationToken`, not
                 // alongside it: a connection authorizes one way or the other,
@@ -660,12 +666,13 @@ const guildSchema = new Schema({
             default: 'auto'
         },
         // Who may click "Run it" on a tool call waiting for approval (#1143):
-        // the member who asked (or a moderator), or moderators only. See
-        // MCP_APPROVERS in src/config/mcpServers.js.
+        // the member who asked (or a moderator), or moderators only — the
+        // default since the AI-layer audit. See MCP_APPROVERS in
+        // src/config/mcpServers.js.
         mcpApprover: {
             type: String,
             enum: ['requester', 'managers'],
-            default: 'requester'
+            default: 'managers'
         },
         // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)
         actionsEnabled: { type: Boolean, default: false },

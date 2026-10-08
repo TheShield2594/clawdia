@@ -465,10 +465,10 @@
                         <div class="field">
                             <label class="field-label" for="mcp-approver">Who can click Run it</label>
                             <select id="mcp-approver">
-                                <option value="requester">The member who asked, or anyone who can manage this server</option>
                                 <option value="managers">Only members who can manage this server</option>
+                                <option value="requester">The member who asked, or anyone who can manage this server</option>
                             </select>
-                            <small>Tools run on the credentials you gave each connection. If the member who asked can approve their own call, approval only catches a model that was talked into something — pick the second option when a connection holds a token or login that ordinary members should not be able to use on their own say-so.</small>
+                            <small>Tools run on the credentials you gave each connection. If the member who asked can approve their own call, approval only catches a model that was talked into something — leave this on managers when a connection holds a token or login that ordinary members should not be able to use on their own say-so. A connection signed in with OAuth is only offered to members who can manage this server at all.</small>
                         </div>
                         <div class="actions-row mcp-section-actions">
                             <button class="btn btn-primary" data-action="mcp-save-confirm">Save approval setting</button>
@@ -533,6 +533,10 @@
                         <label class="toggle">
                             <span class="toggle-text"><strong>Use its documents as knowledge</strong><span>Search this server's resources when someone asks the AI something, and put the relevant ones in the prompt — a knowledge base kept by whoever owns the documents. Off unless you want its content in every conversation.</span></span>
                             <span class="switch"><input type="checkbox" id="mcp-resources"><span class="slider"></span></span>
+                        </label>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Only members who can manage this server</strong><span>Everyone else's AI requests do not see this connection at all — for a token that is somebody's own mailbox, calendar or account. A connection signed in with OAuth is always limited this way. Scheduled tasks, which only managers can set up, still use it.</span></span>
+                            <span class="switch"><input type="checkbox" id="mcp-managers-only"><span class="slider"></span></span>
                         </label>
                         <div class="actions-row">
                             <button class="btn btn-primary" id="mcp-save-btn" data-action="save-mcp-server">Add connection</button>

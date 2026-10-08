@@ -1,5 +1,6 @@
 const { BoundedRateLimiter } = require('../../utils/boundedRateLimiter');
 const { peekMonthlyUsage, monthlyBudget } = require('./usage');
+const { applyEnvKeyCeilings } = require('./apiKeys');
 
 // Sliding-window AI rate limiting, per user and per channel.
 //
@@ -164,6 +165,47 @@ function enforceMonthlyBudget(guildId, rateLimit) {
     }
 }
 
+/**
+ * The monthly-ceiling refusal for one call, in words, or null when it may go.
+ *
+ * For the calls that pick their own key apart from the chat provider's —
+ * images, transcription, speech, embeddings. `rateLimit` is the guild's, and
+ * carries the operator's ceilings only when the *chat* key is the operator's
+ * (#1147); a guild chatting on its own key with its limits at 0 would
+ * otherwise spend the operator's OpenAI or Gemini key on these with no
+ * ceiling at all. So a call whose own key is the environment's is held to
+ * those ceilings here, whatever the chat key was.
+ *
+ * @param {string} guildId
+ * @param {?object} rateLimit the guild's limits, as resolveProviderConfig gives them
+ * @param {?string} keySource which key this call runs on ('guild', 'env', null)
+ */
+function budgetRefusal(guildId, rateLimit, keySource) {
+    const limits = keySource === 'env' ? applyEnvKeyCeilings(rateLimit || {}) : rateLimit;
+    if (!limits) return null;
+    try {
+        enforceMonthlyBudget(guildId, limits);
+        return null;
+    } catch (err) {
+        if (err?.name === 'AiBudgetError') return err.message;
+        throw err;
+    }
+}
+
+/**
+ * A guild's own limits from its `ai` settings, before any operator ceiling:
+ * what resolveProviderConfig carries as `rateLimit` for a guild-key provider.
+ */
+function guildLimitsOf(aiSettings = {}) {
+    return {
+        perUser: aiSettings.rateLimitPerUser ?? 0,
+        perChannel: aiSettings.rateLimitPerChannel ?? 0,
+        windowMin: aiSettings.rateLimitWindowMin ?? 10,
+        monthlyTokens: aiSettings.monthlyTokenLimit ?? 0,
+        monthlyCost: aiSettings.monthlyCostLimit ?? 0
+    };
+}
+
 function checkRateLimit(userId, limit, windowMin) {
     if (!limit || limit <= 0) return true;
     return rateLimits.check(userId, (windowMin || 10) * 60 * 1000, limit);
@@ -319,6 +361,8 @@ module.exports = {
     refundImageLimit,
     IMAGES_PER_WINDOW,
     enforceMonthlyBudget,
+    budgetRefusal,
+    guildLimitsOf,
     AiBudgetError,
     SCHEDULED_TOOL_CALLS_PER_HOUR,
     checkChannelRateLimit,

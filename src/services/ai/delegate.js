@@ -5,6 +5,7 @@ const { BOT_SERVER } = require('./botTools');
 const { buildAgentTools, buildAgentToolsAddendum } = require('./agentTools');
 const { buildMcpAddendum } = require('./mcp/prompt');
 const { createUnattendedConfirmer } = require('./mcp/approval');
+const { unattendedConfirmMode } = require('../../config/mcpServers');
 const { toolCallBudget } = require('./rateLimit');
 
 /**
@@ -23,8 +24,10 @@ const { toolCallBudget } = require('./rateLimit');
  *   - children never get `delegate` themselves, so there is no recursion;
  *   - children write nothing. Nobody is there to approve a write mid-task, so
  *     they get the scheduled-run rules: read-only agent tools, no in-channel
- *     actions, no images, and a server's tool only where the guild allowed it
- *     to run unattended (`createUnattendedConfirmer`);
+ *     actions, no images, the confirm mode raised to at least `writes`, and a
+ *     server's write tool only where the guild allowed it to run unattended
+ *     (`createUnattendedConfirmer`) — and only under a scheduled run, since
+ *     that list is consent for scheduled tasks and nothing else;
  *   - their tool calls come out of the task's own allowance — the person's
  *     tool window, or the guild's hourly scheduled budget for a scheduled run —
  *     and they spend no message slot or deep-task slot of their own. Their
@@ -155,7 +158,13 @@ async function runDelegation(args, context, { deadline } = {}) {
             maxRounds: CHILD_MAX_TOOL_ROUNDS,
             turnBudgetMs: budgetMs,
             onToolEvent: forwardEvents(onToolEvent, index),
-            confirmTool: createUnattendedConfirmer(config.mcpServers),
+            // Nobody watches a child, so writes are confirmed whatever the
+            // guild's chat mode says. The unattended list answers for a
+            // scheduled run's children only: the dashboard promises that list
+            // applies in scheduled tasks, and a person running `/ai task` was
+            // never asked about a write their sub-agent would make.
+            mcpConfirm: unattendedConfirmMode(config.mcpConfirm),
+            confirmTool: createUnattendedConfirmer(config.mcpServers, { useAllowList: userId === null }),
             botTools: tools,
             signal: controller.signal
         }).then(
