@@ -854,6 +854,10 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
             // bounded by the guild's own limits, and best-effort: the reply is
             // already on screen, and a conversation without a summary is what
             // this guild had yesterday.
+            //
+            // Caught here rather than by the handler below: that one reports a
+            // provider error, and in streaming mode it does so by editing the
+            // placeholder — which is by now the first message of the answer.
             await appendHistory(
                 message.guild.id, message.channel.id, message.author.id,
                 promptText, fullResponse, maxHistory,
@@ -862,7 +866,7 @@ async function handleAIChat(message, aiSettings, promptContent, guildSettings) {
                     { guildId: message.guild.id, userId: message.author.id, channelId: message.channel.id }
                 ),
                 { archive: aiSettings.conversationSearch === true }
-            );
+            ).catch(err => console.error('[AI] history write failed:', err?.message || err));
             // Only what the question matched is a source. The background tier
             // is in the prompt because it is recent, not because it answered
             // anything, so citing it would credit an entry nobody retrieved.

@@ -54,6 +54,21 @@ async function appendHistory(guildId, channelId, userId, userText, assistantText
         });
     }
     if (!max || max <= 0) return;
+    // Two turns in the same conversation can finish together — two quick
+    // mentions — and both read the document before either saves. The trim
+    // reassigns `messages`, which Mongoose versions, so the second save throws
+    // a VersionError; on a conversation's first turn the second insert hits the
+    // unique index instead. Either way that turn would be lost, so it is
+    // written once more against the document as the first one left it.
+    try {
+        await writeTurn(guildId, channelId, userId, userText, assistantText, max, summarize);
+    } catch (err) {
+        if (err?.name !== 'VersionError' && err?.code !== 11000) throw err;
+        await writeTurn(guildId, channelId, userId, userText, assistantText, max, summarize);
+    }
+}
+
+async function writeTurn(guildId, channelId, userId, userText, assistantText, max, summarize) {
     let doc = await Conversation.findOne({ guildId, channelId, userId });
     if (!doc) {
         doc = new Conversation({ guildId, channelId, userId, messages: [] });

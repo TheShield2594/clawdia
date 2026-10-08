@@ -83,3 +83,29 @@ test('a log write that fails does not fail the turn', async () => {
     await expect(appendHistory('g', 'c', 'u', 'q', 'a', 4, null, { archive: true })).resolves.toBeUndefined();
     expect(Conversation.__store.doc.messages).toHaveLength(2);
 });
+
+test('a turn that loses a save race is written again rather than dropped', async () => {
+    await appendExchanges(1, 20);
+    const stored = Conversation.__store.doc;
+    const realSave = stored.save;
+    // The first save of the next turn loses to a concurrent writer, as two
+    // quick mentions in one conversation do.
+    stored.save = jest.fn()
+        .mockImplementationOnce(async () => { throw Object.assign(new Error('No matching document'), { name: 'VersionError' }); })
+        .mockImplementation(realSave);
+
+    await appendHistory('g', 'c', 'u', 'question 2', 'answer 2', 20);
+
+    expect(stored.save).toHaveBeenCalledTimes(2);
+    const { messages } = await loadHistory('g', 'c', 'u', 20);
+    expect(messages.map(m => m.content)).toContain('answer 2');
+});
+
+test('any other save failure is not retried', async () => {
+    await appendExchanges(1, 20);
+    const stored = Conversation.__store.doc;
+    stored.save = jest.fn(async () => { throw new Error('connection reset'); });
+
+    await expect(appendHistory('g', 'c', 'u', 'question 2', 'answer 2', 20)).rejects.toThrow('connection reset');
+    expect(stored.save).toHaveBeenCalledTimes(1);
+});
