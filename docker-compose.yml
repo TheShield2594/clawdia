@@ -4,7 +4,7 @@ services:
     # `mongo:7` alone is re-published on every 7.x patch. Bumped by Dependabot,
     # held by tests/imagePinning.test.js. The tag stays for readability — Docker
     # resolves the digest.
-    image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
+    image: mongo:9@sha256:bac22ea7710d774103dcad3ec8ac13cba1eb378f488e3ce8a6b3a1adf2ba9dcc
     container_name: clawdia-mongodb
     restart: unless-stopped
     # Authentication (#648). The internal-only network keeps the outside world
@@ -161,7 +161,7 @@ services:
   # stays red and nothing that depends on it starts — the reason is in this
   # container's log rather than buried in a restart loop.
   mongo-replset-init:
-    image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
+    image: mongo:9@sha256:bac22ea7710d774103dcad3ec8ac13cba1eb378f488e3ce8a6b3a1adf2ba9dcc
     container_name: clawdia-mongo-replset-init
     restart: "no"
     depends_on:
@@ -518,7 +518,7 @@ services:
   # a history. Set BACKUP_RETENTION_DAYS to tune retention; to opt out entirely,
   # `docker compose up -d --scale backup=0`.
   backup:
-    image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
+    image: mongo:9@sha256:bac22ea7710d774103dcad3ec8ac13cba1eb378f488e3ce8a6b3a1adf2ba9dcc
     container_name: clawdia-backup
     restart: unless-stopped
     # Three variables, named one at a time — no `env_file: .env` here (#901). This
