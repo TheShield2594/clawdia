@@ -7,12 +7,12 @@ This file and its scripts (`build-manifest.mjs`, `rename-icons.mjs`,
 `cutout.mjs`, `prep-icons.mjs`, `manifest.json`, `icons.map.json`) live in
 `assets/icons/`.
 
-**The catalogue is 473 icons on `gpt_image_2_5`**, look **B3** (see §0),
+**The catalogue is 484 icons on `gpt_image_2_5`**, look **B3** (see §0),
 anchored to `hunt:steel_rifle`: the original 118 shop-browse gear/guild icons,
 the 144 catch/kill/mine results (issue #1081), the 14 pet portraits (issue
 #1082), 10 explore regions + 25 explore relics, 72 achievement badges, the 10 fishing
-materials (issue #1169), the 22 mining materials (issue #1170) and the 58 hunting
-materials (issue #1171). Every job id is in
+materials (issue #1169), the 22 mining materials (issue #1170), the 58 hunting
+materials (issue #1171) and the 11 exploration materials (issue #1172). Every job id is in
 `icons.map.json`; every prompt is in `manifest.json`, built by
 `build-manifest.mjs` from the game data. To reproduce or extend the set, that
 is the source of truth — start there, not from memory.
@@ -346,6 +346,16 @@ Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
 
+- **2026-10-22** — **Exploration materials: 11 of 11** (issue #1172). Keyed
+  `explore:<id>` through the shared `MATERIAL_ITEMS` registry, beside the region
+  and relic art (no id collides); rarity is the material's `tier`. They are a
+  surveyor's field kit in the parchment, brass and ink of the region and relic
+  art. The seal has no ribbon and the inkwell no cork, so neither reads as the
+  `the_final_decree` relic or a fishing/mining vial. Same settings as the rest,
+  in batches of 4, 4 and 3 with no 429s. `wayfarers_seal` was regenerated
+  after review (a wax drip ran past the rim, now a scalloped edge kept inside
+  it). Job ids + urls in `icons.map.json`
+  (now 484 items), and the PNGs are baked into `src/assets/item-icons/`.
 - **2026-10-22** — **Hunting materials: 58 of 58** (issue #1171). Keyed
   `hunt:<id>` through the shared `MATERIAL_ITEMS` registry; rarity is the
   material's `tier`, which for the 32 zone materials is the tier of the animal

@@ -4,7 +4,7 @@
     "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
     "style": "B3 (rarity rim, flat 2-tone, no gloss)",
     "date": "2026-09-21",
-    "count": 473,
+    "count": 484,
     "resultsAdded": {
       "date": "2026-09-21",
       "count": 144,
@@ -52,6 +52,12 @@
       "count": 58,
       "quality": "high",
       "note": "hunting materials for the /hunt inv card (issue #1171)"
+    },
+    "exploreMaterialsAdded": {
+      "date": "2026-10-22",
+      "count": 11,
+      "quality": "high",
+      "note": "exploration materials for the /inventory Explore tab (issue #1172)"
     }
   },
   "items": {
@@ -5257,6 +5263,127 @@
       "model": "gpt_image_2_5",
       "date": "2026-10-22",
       "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_030614_1467bbb9-2d07-4154-8ca3-57b0a2174ae2.png"
+    },
+    "explore:survey_chalk": {
+      "file": "explore__survey_chalk.png",
+      "jobId": "30d12968-9cb2-4993-afe1-0d0864d2c548",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_173545_30d12968-9cb2-4993-afe1-0d0864d2c548.png"
+    },
+    "explore:pressed_fern": {
+      "file": "explore__pressed_fern.png",
+      "jobId": "2f2ee16c-2916-4a45-827c-773fdfbdd58e",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_173545_2f2ee16c-2916-4a45-827c-773fdfbdd58e.png"
+    },
+    "explore:frayed_map_corner": {
+      "file": "explore__frayed_map_corner.png",
+      "jobId": "5f097e98-fccb-4237-b451-baac1bc42be9",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_173545_5f097e98-fccb-4237-b451-baac1bc42be9.png"
+    },
+    "explore:waypoint_flint": {
+      "file": "explore__waypoint_flint.png",
+      "jobId": "4d27ae62-0ce1-4ed9-9778-62cbc05c76b6",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_173545_4d27ae62-0ce1-4ed9-9778-62cbc05c76b6.png"
+    },
+    "explore:compass_shard": {
+      "file": "explore__compass_shard.png",
+      "jobId": "7e6afe70-5ecd-4202-9549-be2efda0dc0e",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_173626_7e6afe70-5ecd-4202-9549-be2efda0dc0e.png"
+    },
+    "explore:charted_vellum": {
+      "file": "explore__charted_vellum.png",
+      "jobId": "ffbe42eb-8393-4ad6-a90a-75ce413483fb",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_173626_ffbe42eb-8393-4ad6-a90a-75ce413483fb.png"
+    },
+    "explore:surveyors_lens": {
+      "file": "explore__surveyors_lens.png",
+      "jobId": "a56148cf-8f9d-41d9-828a-bc4d413733b8",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_173625_a56148cf-8f9d-41d9-828a-bc4d413733b8.png"
+    },
+    "explore:lantern_glass": {
+      "file": "explore__lantern_glass.png",
+      "jobId": "560acbcc-ba9d-4750-89bb-c404f16f0c00",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_173624_560acbcc-ba9d-4750-89bb-c404f16f0c00.png"
+    },
+    "explore:trailwardens_knot": {
+      "file": "explore__trailwardens_knot.png",
+      "jobId": "a33c60d7-8db7-4bf4-97e3-e670d4b7998e",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_173655_a33c60d7-8db7-4bf4-97e3-e670d4b7998e.png"
+    },
+    "explore:wayfarers_seal": {
+      "file": "explore__wayfarers_seal.png",
+      "jobId": "b3bd3466-8f46-48f6-a85c-433819f880ad",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_174041_b3bd3466-8f46-48f6-a85c-433819f880ad.png"
+    },
+    "explore:cartographers_ink": {
+      "file": "explore__cartographers_ink.png",
+      "jobId": "73b690d9-bb98-471d-955f-388e18d021ca",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-22",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_173655_73b690d9-bb98-471d-955f-388e18d021ca.png"
     }
   }
 }

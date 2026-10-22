@@ -16,7 +16,7 @@
 
 const {
     EXPLORE_ITEMS, EXPLORE_ITEM_IDS, exploreRegionItemId, relicItemId, isExploreItemId,
-    isUploadableItemId, ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS, PET_ITEM_IDS,
+    isUploadableItemId, ACTIVITY_ITEM_IDS, RESULT_ITEM_IDS, PET_ITEM_IDS, MATERIAL_ITEM_IDS,
 } = require('../src/data/activityItems');
 const { REGION_LIST, RELIC_LIST, relicSlug } = require('../src/data/exploreData');
 const manifest = require('../assets/icons/manifest.json');
@@ -87,7 +87,11 @@ describe('explore art is bundle-only, not uploadable', () => {
 });
 
 describe('the icon manifest covers every explore key', () => {
-    const exploreEntries = manifest.filter(m => m.key.startsWith('explore:') || m.key.startsWith('relic:'));
+    // Exploration's materials share the `explore:` namespace (#1172) and are
+    // covered by materialArtCatalog.test.js.
+    const exploreEntries = manifest
+        .filter(m => m.key.startsWith('explore:') || m.key.startsWith('relic:'))
+        .filter(m => !MATERIAL_ITEM_IDS.has(m.key));
 
     test('exactly one manifest entry per region and relic, and none stray', () => {
         expect(exploreEntries.map(m => m.key).sort()).toEqual([...EXPLORE_ITEM_IDS].sort());
