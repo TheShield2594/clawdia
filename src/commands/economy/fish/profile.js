@@ -443,15 +443,6 @@ const OVERVIEW_ROD_PREVIEW = 5;
 // Chum and Shrimp Bait were both 🦐). One emoji per heading, plus the rod
 // status mark, which is information rather than decoration.
 
-/**
- * Medallion colours for the hunt drops this card lists, which have no baked art
- * yet (#1171). The fishing materials have theirs (#1169), so they need none.
- */
-const MATERIAL_COLORS = {
-    rabbits_foot:   '#d7bde2',
-    feather:        '#f5f5f5',
-};
-
 // Hunt drops that fishing recipes also take.
 const HUNT_MATERIAL_NAMES = { rabbits_foot: "Rabbit's Foot", feather: 'Feather' };
 
@@ -474,11 +465,11 @@ function inventoryStock(user) {
         .map(([id, qty]) => ({ iconId: CONSUMABLES[id] ? `fish:${id}` : null, name: CONSUMABLES[id]?.name ?? titleCase(id), count: qty }));
     const materials = Object.entries(f.materials ?? {})
         .filter(([, qty]) => qty > 0)
-        .map(([id, qty]) => ({ iconId: `fish:${id}`, name: MATERIAL_NAMES[id] ?? titleCase(id), count: qty, color: MATERIAL_COLORS[id] }));
+        .map(([id, qty]) => ({ iconId: `fish:${id}`, name: MATERIAL_NAMES[id] ?? titleCase(id), count: qty }));
     const huntMats = user.hunt?.materials ?? {};
     for (const id of Object.keys(HUNT_MATERIAL_NAMES)) {
         const qty = huntMats[id] ?? 0;
-        if (qty) materials.push({ iconId: `hunt:${id}`, name: HUNT_MATERIAL_NAMES[id], source: 'hunt', count: qty, color: MATERIAL_COLORS[id] });
+        if (qty) materials.push({ iconId: `hunt:${id}`, name: HUNT_MATERIAL_NAMES[id], source: 'hunt', count: qty });
     }
     return { bait, consumables, materials };
 }
