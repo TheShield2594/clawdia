@@ -116,3 +116,43 @@ describe('the icon manifest covers the mining materials (#1170)', () => {
         }
     });
 });
+
+describe('the icon manifest covers the hunting materials (#1171)', () => {
+    const huntMaterialKeys = MATERIAL_ITEMS.hunt.map(item => item.id);
+    const entries = manifest.filter(m => huntMaterialKeys.includes(m.key));
+
+    test('exactly one entry per hunting material', () => {
+        expect(huntMaterialKeys).toHaveLength(58);
+        expect(entries.map(m => m.key).sort()).toEqual([...huntMaterialKeys].sort());
+    });
+
+    test('each takes its rim from the material\'s tier', () => {
+        for (const m of entries) {
+            const id = m.key.slice('hunt:'.length);
+            expect([m.key, m.rarity]).toEqual([m.key, TIER_RARITY[MATERIAL_RARITY[id].tier - 1]]);
+            expect(m.prompt).toMatch(/^Game item icon: /);
+            expect(m.prompt).toContain('rarity rim,');
+            expect(m.file).toBe(`${m.key.replace(/:/g, '__')}.png`);
+        }
+    });
+
+    test('like kinds share one silhouette (STYLE.md §4)', () => {
+        const prompt = key => entries.find(m => m.key === key).prompt;
+        const shared = {
+            'a single soft animal pelt laid out flat': ['badger_pelt', 'beaver_pelt', 'wolf_pelt', 'spirit_pelt',
+                'striped_pelt', 'opossum_pelt', 'sand_pelt', 'arctic_fox_pelt', 'shadow_pelt'],
+            'a single long feather angled diagonally': ['feather', 'crow_feather', 'scavenger_feather',
+                'snowy_feather', 'marsh_feather', 'storm_feather', 'thunderfeather'],
+            'a single long curved pointed fang': ['coyote_fang', 'lynx_fang', 'hyena_fang', 'saber_fang',
+                'dire_wolf_fang', 'ember_fang'],
+            'a single large hooked claw': ['bear_claw', 'ancient_claw', 'polar_claw', 'primal_claw'],
+            'a single branching antler': ['elk_antler', 'caribou_antler', 'obsidian_antler'],
+            'a single thick ridged horn': ['mountain_horn', 'ram_horn'],
+            'a single smooth curved tusk': ['hog_tusk', 'mammoth_tusk'],
+            'a single furry lucky animal foot charm': ['rabbits_foot', 'jackrabbit_foot'],
+        };
+        for (const [base, ids] of Object.entries(shared)) {
+            for (const id of ids) expect(prompt(`hunt:${id}`)).toContain(base);
+        }
+    });
+});

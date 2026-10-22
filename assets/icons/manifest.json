@@ -3733,5 +3733,527 @@
     "rim": "radiant-gold",
     "rimHex": "#FFD700",
     "prompt": "Game item icon: a small floating orb of swirling void energy, inky black at the core with a violet rim and tiny drifting specks. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 415,
+    "key": "hunt:badger_pelt",
+    "file": "hunt__badger_pelt.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, coarse grey fur with a bold black-and-white striped head flap. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 416,
+    "key": "hunt:beaver_pelt",
+    "file": "hunt__beaver_pelt.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, glossy dense chestnut-brown fur. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 417,
+    "key": "hunt:wolf_pelt",
+    "file": "hunt__wolf_pelt.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, thick shaggy grey wolf fur with a paler cream belly. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 418,
+    "key": "hunt:spirit_pelt",
+    "file": "hunt__spirit_pelt.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, ghostly pale blue-white snow leopard fur with dark rosette spots, a faint spectral glow and wisps of frost drifting off it. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 419,
+    "key": "hunt:striped_pelt",
+    "file": "hunt__striped_pelt.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, tiny tawny-orange chipmunk fur with dark and cream stripes down its length. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 420,
+    "key": "hunt:opossum_pelt",
+    "file": "hunt__opossum_pelt.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, scruffy pale grey-white opossum fur with a bare pink tail flap. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 421,
+    "key": "hunt:sand_pelt",
+    "file": "hunt__sand_pelt.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, soft sandy-cream fennec fox fur with a white belly. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 422,
+    "key": "hunt:arctic_fox_pelt",
+    "file": "hunt__arctic_fox_pelt.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, pristine fluffy snow-white arctic fox fur. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 423,
+    "key": "hunt:shadow_pelt",
+    "file": "hunt__shadow_pelt.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, sleek jet-black panther fur with a faint purple sheen. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 424,
+    "key": "hunt:thick_hide",
+    "file": "hunt__thick_hide.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single heavy folded slab of thick shaggy dark-brown musk ox hide with long coarse fur hanging from its edge. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 425,
+    "key": "hunt:gator_hide",
+    "file": "hunt__gator_hide.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single folded slab of tough olive-green alligator hide covered in raised bumpy armored scutes. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 426,
+    "key": "hunt:slick_skin",
+    "file": "hunt__slick_skin.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single small glossy limp strip of bright green frog skin with darker spots and a wet shine. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 427,
+    "key": "hunt:wolverine_fur",
+    "file": "hunt__wolverine_fur.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single thick tuft of dark brown wolverine fur with a tan stripe, tied at the base with a twist of cord. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 428,
+    "key": "hunt:golden_fur",
+    "file": "hunt__golden_fur.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single thick tuft of shimmering golden fox fur tied at the base with a twist of cord, glowing softly with tiny sparkles. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 429,
+    "key": "hunt:swamp_scale",
+    "file": "hunt__swamp_scale.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single large rounded scale, dark murky green with olive spots and a wet gleam. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 430,
+    "key": "hunt:feather",
+    "file": "hunt__feather.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, plain clean white dove feather. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 431,
+    "key": "hunt:down_feather",
+    "file": "hunt__down_feather.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single small fluffy soft down feather, pale grey-brown and wispy. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 432,
+    "key": "hunt:crow_feather",
+    "file": "hunt__crow_feather.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, glossy jet-black crow feather with a blue-purple sheen. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 433,
+    "key": "hunt:scavenger_feather",
+    "file": "hunt__scavenger_feather.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, dusty dark brown vulture feather with a ragged tip. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 434,
+    "key": "hunt:snowy_feather",
+    "file": "hunt__snowy_feather.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, soft white snowy owl feather with small black flecks. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 435,
+    "key": "hunt:marsh_feather",
+    "file": "hunt__marsh_feather.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, pale blue-grey crane feather with a darker grey tip. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 436,
+    "key": "hunt:storm_feather",
+    "file": "hunt__storm_feather.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, slate-grey storm hawk feather crackling with small blue lightning sparks along its edge. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 437,
+    "key": "hunt:thunderfeather",
+    "file": "hunt__thunderfeather.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single long feather angled diagonally with a curved quill at the base, huge golden thunderbird feather with electric blue edges and a bolt of lightning running down its spine, glowing brightly. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 438,
+    "key": "hunt:coyote_fang",
+    "file": "hunt__coyote_fang.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, plain ivory white. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 439,
+    "key": "hunt:lynx_fang",
+    "file": "hunt__lynx_fang.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, slender and sharp, cream white. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 440,
+    "key": "hunt:hyena_fang",
+    "file": "hunt__hyena_fang.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, thick and chipped, yellowed bone colour. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 441,
+    "key": "hunt:saber_fang",
+    "file": "hunt__saber_fang.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, huge and saber-long, ancient ivory with frost crusted at the root. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 442,
+    "key": "hunt:dire_wolf_fang",
+    "file": "hunt__dire_wolf_fang.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, large and jagged, bone white with a faint red glow at the root. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 443,
+    "key": "hunt:ember_fang",
+    "file": "hunt__ember_fang.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single long curved pointed fang standing upright with a thick root, ashen grey with glowing molten-orange cracks and a small flame flickering at the tip. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 444,
+    "key": "hunt:lion_tooth",
+    "file": "hunt__lion_tooth.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single large pointed lion canine tooth, warm ivory with a tawny root wrapped in a band of brown leather. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 445,
+    "key": "hunt:bear_claw",
+    "file": "hunt__bear_claw.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single large hooked claw curving to a sharp point, dark charcoal-grey black bear claw with a lighter slate-grey edge. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 446,
+    "key": "hunt:ancient_claw",
+    "file": "hunt__ancient_claw.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single large hooked claw curving to a sharp point, enormous fossilised prehistoric claw in dark brown stone, cracked and glowing with faint violet runes. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 447,
+    "key": "hunt:polar_claw",
+    "file": "hunt__polar_claw.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single large hooked claw curving to a sharp point, creamy white polar bear claw tipped with frost. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 448,
+    "key": "hunt:primal_claw",
+    "file": "hunt__primal_claw.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single large hooked claw curving to a sharp point, battle-scarred dark grey claw with deep notches and a blood-red tip. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 449,
+    "key": "hunt:scorpion_claw",
+    "file": "hunt__scorpion_claw.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single large scorpion pincer claw, glossy amber-orange armored shell with a dark tip. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 450,
+    "key": "hunt:eagle_talon",
+    "file": "hunt__eagle_talon.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single curved golden-yellow eagle foot talon gripping inward, with sharp black claw tips. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 451,
+    "key": "hunt:spectral_bone",
+    "file": "hunt__spectral_bone.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single translucent glowing pale-blue ghostly bone with silver moonlight wisps drifting off it. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 452,
+    "key": "hunt:antler_fragment",
+    "file": "hunt__antler_fragment.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single short broken piece of tan deer antler with one pointed tine and a jagged snapped end. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 453,
+    "key": "hunt:elk_antler",
+    "file": "hunt__elk_antler.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single branching antler with several pointed tines, large tan-brown elk antler. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 454,
+    "key": "hunt:caribou_antler",
+    "file": "hunt__caribou_antler.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single branching antler with several pointed tines, pale tan caribou antler caked in white frost. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 455,
+    "key": "hunt:obsidian_antler",
+    "file": "hunt__obsidian_antler.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single branching antler with several pointed tines, jet-black volcanic obsidian glass antler with sharp glossy facets and a faint molten-red glow in the cracks. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 456,
+    "key": "hunt:moose_rack",
+    "file": "hunt__moose_rack.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single wide flat palmate moose antler with a broad paddle and pointed tines along its edge, warm tan-brown. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 457,
+    "key": "hunt:megaloceros_crown",
+    "file": "hunt__megaloceros_crown.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a huge sweeping pair of giant elk antlers forming a crown, ancient bone-white with gold tips and crackling lightning glow. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 458,
+    "key": "hunt:mountain_horn",
+    "file": "hunt__mountain_horn.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single thick ridged horn sweeping back into a curl, pale cream-grey mountain goat horn. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 459,
+    "key": "hunt:ram_horn",
+    "file": "hunt__ram_horn.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single thick ridged horn sweeping back into a curl, massive battle-scarred dark brown ram horn with deep chips. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 460,
+    "key": "hunt:tusk_shard",
+    "file": "hunt__tusk_shard.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single small broken shard of ivory boar tusk with a jagged snapped end. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 461,
+    "key": "hunt:hog_tusk",
+    "file": "hunt__hog_tusk.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single smooth curved tusk arcing upward to a blunt point, short mud-stained yellowed hog tusk. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 462,
+    "key": "hunt:mammoth_tusk",
+    "file": "hunt__mammoth_tusk.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single smooth curved tusk arcing upward to a blunt point, huge long ivory mammoth tusk with a crust of blue ice along its curve. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 463,
+    "key": "hunt:rabbits_foot",
+    "file": "hunt__rabbits_foot.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single furry lucky animal foot charm hanging from a small gold ring, soft white cottontail rabbit fur. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 464,
+    "key": "hunt:jackrabbit_foot",
+    "file": "hunt__jackrabbit_foot.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single furry lucky animal foot charm hanging from a small gold ring, long sandy-brown jackrabbit fur. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 465,
+    "key": "hunt:venom_sac",
+    "file": "hunt__venom_sac.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single small plump translucent sac of glowing yellow-green venom with a fang-shaped tip. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 466,
+    "key": "hunt:swamp_gland",
+    "file": "hunt__swamp_gland.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single small slimy bulbous gland, murky green and toxic purple, oozing a few bubbles. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 467,
+    "key": "hunt:cottonmouth_venom",
+    "file": "hunt__cottonmouth_venom.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a small corked glass vial of glowing liquid, milky white venom with a dark olive snake coiled around it. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 468,
+    "key": "hunt:acorn_cache",
+    "file": "hunt__acorn_cache.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a small pile of plump brown acorns with their little caps, a few loose leaves tucked in. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 469,
+    "key": "hunt:hardwood_chip",
+    "file": "hunt__hardwood_chip.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single chunky splintered chip of dark oak hardwood with visible grain and a small peck hole. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 470,
+    "key": "hunt:bandit_mask",
+    "file": "hunt__bandit_mask.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a small black raccoon bandit eye mask made of grey-and-black striped fur. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 471,
+    "key": "hunt:spirit_essence",
+    "file": "hunt__spirit_essence.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a small floating orb of glowing spectral wolf spirit energy, pale white-blue with aurora-green swirls. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 472,
+    "key": "hunt:ancient_relic",
+    "file": "hunt__ancient_relic.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a small weathered stone idol carved with worn glowing rune marks, mossy grey stone. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   }
 ]
