@@ -545,7 +545,7 @@ Object.entries(ACHIEVEMENT_SUBJECT).forEach(([id, subject]) => {
 // way the inventory cards ask for them (src/data/activityItems.js). Single
 // objects like the gear and relic icons, rarity from the material's own tier in
 // src/data/materialRarity.js. Filled in one game at a time; fishing first
-// (#1169).
+// (#1169), then mining (#1170).
 const { MATERIAL_RARITY } = require('../../src/data/materialRarity.js');
 const MATERIAL_TIER_RARITY = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
 
@@ -568,6 +568,41 @@ Object.entries(FISH_MATERIAL_SUBJECT).forEach(([id, subject]) => {
     const def = MATERIAL_RARITY[id];
     if (!def || def.source !== 'fish') throw new Error(`no fishing material ${id}`);
     add(`fish:${id}`, MATERIAL_TIER_RARITY[def.tier - 1], subject);
+});
+
+// Mining (#1170). Each material is a small piece of the ore it drops from, so
+// it takes that ore icon's colours (`ore:<id>` above). Like kinds share a shape:
+// every dust is the same small heap, every raw gem the same rough uncut stone.
+const DUST = (detail) => `a small conical heap of fine glittering powder, ${detail}`;
+const RAW_GEM = (detail) => `a single rough uncut gemstone with jagged natural facets, ${detail}`;
+const MINE_MATERIAL_SUBJECT = {
+    rock_fragment:  'a single small broken fragment of plain grey stone with sharp chipped edges and a few speckles.',
+    coal_dust:      DUST('matte charcoal-black coal dust with a few tiny dark lumps on top.'),
+    copper_flake:   'a single thin curled flake of shiny orange copper metal, its edges tinged with green verdigris.',
+    iron_filing:    'a little cluster of thin dark grey iron filings and slivers, bristling outward like a tiny hedgehog.',
+    silver_dust:    DUST('lustrous bright silver dust catching the light.'),
+    lead_slug:      'a single small heavy rounded slug of dull blue-grey lead metal, slightly flattened.',
+    quartz_shard:   'a single clear pointed six-sided quartz crystal shard, pale icy white with a cloudy base.',
+    gold_nugget:    'a single lumpy rounded raw gold nugget, bright warm yellow gold with pitted bumps.',
+    raw_sapphire:   RAW_GEM('deep rich blue sapphire.'),
+    amethyst_chip:  'a single small chipped wedge of purple amethyst crystal with a few tiny pointed crystal tips.',
+    topaz_shard:    'a single long pointed shard of warm amber-orange topaz with clean straight facets.',
+    raw_emerald:    RAW_GEM('deep forest-green emerald.'),
+    raw_ruby:       RAW_GEM('blazing ember-red ruby with a faint inner glow.'),
+    obsidian_chip:  'a single razor-sharp chip of glossy black volcanic obsidian glass with curved conchoidal fracture ridges.',
+    platinum_dust:  DUST('pale white-silver platinum dust with a cool dull gleam.'),
+    raw_diamond:    RAW_GEM('icy clear-white diamond scattering tiny sparkles.'),
+    crystal_sliver: 'a single thin jagged sliver of near-black dark crystal with a deep violet edge glow, seeming to swallow the light around it.',
+    mythril_dust:   DUST('shimmering pale mint-silver mythril dust with a soft magical glow.'),
+    zenith_essence: 'a small corked glass vial of glowing liquid starlight, pale gold and white, with a tiny star sparkle inside.',
+    primordial_ash: 'a small smouldering heap of dark grey volcanic ash with glowing molten-orange embers and a wisp of heat shimmer.',
+    stardust:       'a small swirl of glittering cosmic stardust in deep blue and gold, sprinkled with tiny four-pointed stars.',
+    void_essence:   'a small floating orb of swirling void energy, inky black at the core with a violet rim and tiny drifting specks.',
+};
+Object.entries(MINE_MATERIAL_SUBJECT).forEach(([id, subject]) => {
+    const def = MATERIAL_RARITY[id];
+    if (!def || def.source !== 'mine') throw new Error(`no mining material ${id}`);
+    add(`mine:${id}`, MATERIAL_TIER_RARITY[def.tier - 1], subject);
 });
 
 // --- validate against the game registries -----------------------------------

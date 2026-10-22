@@ -4,7 +4,7 @@
     "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
     "style": "B3 (rarity rim, flat 2-tone, no gloss)",
     "date": "2026-09-21",
-    "count": 393,
+    "count": 415,
     "resultsAdded": {
       "date": "2026-09-21",
       "count": 144,
@@ -40,6 +40,12 @@
       "count": 10,
       "quality": "high",
       "note": "fishing materials for the /fish inv card (issue #1169)"
+    },
+    "mineMaterialsAdded": {
+      "date": "2026-10-21",
+      "count": 22,
+      "quality": "high",
+      "note": "mining materials for the /mine inv card (issue #1170)"
     }
   },
   "items": {
@@ -4365,6 +4371,248 @@
       "model": "gpt_image_2_5",
       "date": "2026-10-06",
       "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261006_163253_dcc8a7f3-be65-4c51-b8a0-a5e1f461c480.png"
+    },
+    "mine:rock_fragment": {
+      "file": "mine__rock_fragment.png",
+      "jobId": "e2b01fe1-0aa0-41cd-85a9-65ec973cf0f6",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235603_e2b01fe1-0aa0-41cd-85a9-65ec973cf0f6.png"
+    },
+    "mine:coal_dust": {
+      "file": "mine__coal_dust.png",
+      "jobId": "7b00f250-0e0c-4956-9f85-7ceca4533a06",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235603_7b00f250-0e0c-4956-9f85-7ceca4533a06.png"
+    },
+    "mine:copper_flake": {
+      "file": "mine__copper_flake.png",
+      "jobId": "e07dafc3-b93d-476d-9ee1-ff38ff90a02e",
+      "rarity": "Common",
+      "rim": "silver-grey",
+      "rimHex": "#AAAAAA",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235604_e07dafc3-b93d-476d-9ee1-ff38ff90a02e.png"
+    },
+    "mine:iron_filing": {
+      "file": "mine__iron_filing.png",
+      "jobId": "c467a711-8f25-4ff3-9584-1772babd0613",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235643_c467a711-8f25-4ff3-9584-1772babd0613.png"
+    },
+    "mine:silver_dust": {
+      "file": "mine__silver_dust.png",
+      "jobId": "7d17e07d-9fef-4dc0-8af9-b8b59af3c304",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235604_7d17e07d-9fef-4dc0-8af9-b8b59af3c304.png"
+    },
+    "mine:lead_slug": {
+      "file": "mine__lead_slug.png",
+      "jobId": "c1892693-a75c-451a-a476-16e39a09f2dd",
+      "rarity": "Uncommon",
+      "rim": "emerald-green",
+      "rimHex": "#2ECC71",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235643_c1892693-a75c-451a-a476-16e39a09f2dd.png"
+    },
+    "mine:quartz_shard": {
+      "file": "mine__quartz_shard.png",
+      "jobId": "ccc37a10-b3cf-4ca0-a812-a030bc41c4da",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235644_ccc37a10-b3cf-4ca0-a812-a030bc41c4da.png"
+    },
+    "mine:gold_nugget": {
+      "file": "mine__gold_nugget.png",
+      "jobId": "d3c5e3b8-120a-40c4-951a-a625e130edc3",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235644_d3c5e3b8-120a-40c4-951a-a625e130edc3.png"
+    },
+    "mine:raw_sapphire": {
+      "file": "mine__raw_sapphire.png",
+      "jobId": "35a7c40b-8cd9-4398-8724-8ceac0168a7e",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235721_35a7c40b-8cd9-4398-8724-8ceac0168a7e.png"
+    },
+    "mine:amethyst_chip": {
+      "file": "mine__amethyst_chip.png",
+      "jobId": "d0358f35-6e92-4c60-9a36-33bdeb9cca74",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235721_d0358f35-6e92-4c60-9a36-33bdeb9cca74.png"
+    },
+    "mine:topaz_shard": {
+      "file": "mine__topaz_shard.png",
+      "jobId": "877af1f5-1d76-4fb6-8448-ac13e5c5c86c",
+      "rarity": "Rare",
+      "rim": "sapphire-blue",
+      "rimHex": "#3498DB",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235721_877af1f5-1d76-4fb6-8448-ac13e5c5c86c.png"
+    },
+    "mine:raw_emerald": {
+      "file": "mine__raw_emerald.png",
+      "jobId": "651a5011-895d-425f-bc2d-ab14282135ca",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235722_651a5011-895d-425f-bc2d-ab14282135ca.png"
+    },
+    "mine:raw_ruby": {
+      "file": "mine__raw_ruby.png",
+      "jobId": "2e1f6bf6-c950-4c9e-8223-010d49194feb",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235759_2e1f6bf6-c950-4c9e-8223-010d49194feb.png"
+    },
+    "mine:obsidian_chip": {
+      "file": "mine__obsidian_chip.png",
+      "jobId": "a090e3b7-516f-43af-84db-df300195caa4",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235800_a090e3b7-516f-43af-84db-df300195caa4.png"
+    },
+    "mine:platinum_dust": {
+      "file": "mine__platinum_dust.png",
+      "jobId": "c5644951-20af-4287-8f8b-55bccc765d8c",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235800_c5644951-20af-4287-8f8b-55bccc765d8c.png"
+    },
+    "mine:raw_diamond": {
+      "file": "mine__raw_diamond.png",
+      "jobId": "3771eb43-d6c6-4a64-be15-b8d6481785e0",
+      "rarity": "Epic",
+      "rim": "amethyst-purple",
+      "rimHex": "#9B59B6",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235800_3771eb43-d6c6-4a64-be15-b8d6481785e0.png"
+    },
+    "mine:crystal_sliver": {
+      "file": "mine__crystal_sliver.png",
+      "jobId": "4154f61b-584f-4662-8602-9c6c73765d80",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261022_000156_4154f61b-584f-4662-8602-9c6c73765d80.png"
+    },
+    "mine:mythril_dust": {
+      "file": "mine__mythril_dust.png",
+      "jobId": "11e60f4d-ca63-40cd-bc0d-4742b99e63de",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235838_11e60f4d-ca63-40cd-bc0d-4742b99e63de.png"
+    },
+    "mine:zenith_essence": {
+      "file": "mine__zenith_essence.png",
+      "jobId": "e102ebf3-1b24-4384-b1d5-859eaf19f2c4",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235839_e102ebf3-1b24-4384-b1d5-859eaf19f2c4.png"
+    },
+    "mine:primordial_ash": {
+      "file": "mine__primordial_ash.png",
+      "jobId": "bccc6847-c591-4aef-914d-47a6af301a8f",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235839_bccc6847-c591-4aef-914d-47a6af301a8f.png"
+    },
+    "mine:stardust": {
+      "file": "mine__stardust.png",
+      "jobId": "1c23f6d6-856b-4be3-8947-1566b26f2d4e",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235917_1c23f6d6-856b-4be3-8947-1566b26f2d4e.png"
+    },
+    "mine:void_essence": {
+      "file": "mine__void_essence.png",
+      "jobId": "4d3951c6-a5a8-41f9-a638-0131017de080",
+      "rarity": "Legendary",
+      "rim": "radiant-gold",
+      "rimHex": "#FFD700",
+      "anchor": "07f39988-6583-48b4-82ac-ad752b513f3f",
+      "model": "gpt_image_2_5",
+      "date": "2026-10-21",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261021_235918_4d3951c6-a5a8-41f9-a638-0131017de080.png"
     }
   }
 }

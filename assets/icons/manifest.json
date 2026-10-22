@@ -3535,5 +3535,203 @@
     "rim": "amethyst-purple",
     "rimHex": "#9B59B6",
     "prompt": "Game item icon: a small corked glass vial of swirling inky black-purple liquid with a curled purple tentacle wrapped around it. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 393,
+    "key": "mine:rock_fragment",
+    "file": "mine__rock_fragment.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single small broken fragment of plain grey stone with sharp chipped edges and a few speckles. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 394,
+    "key": "mine:coal_dust",
+    "file": "mine__coal_dust.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a small conical heap of fine glittering powder, matte charcoal-black coal dust with a few tiny dark lumps on top. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 395,
+    "key": "mine:copper_flake",
+    "file": "mine__copper_flake.png",
+    "rarity": "Common",
+    "rim": "silver-grey",
+    "rimHex": "#AAAAAA",
+    "prompt": "Game item icon: a single thin curled flake of shiny orange copper metal, its edges tinged with green verdigris. Style: bold cartoon game icon, thick silver-grey rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 396,
+    "key": "mine:iron_filing",
+    "file": "mine__iron_filing.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a little cluster of thin dark grey iron filings and slivers, bristling outward like a tiny hedgehog. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 397,
+    "key": "mine:silver_dust",
+    "file": "mine__silver_dust.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a small conical heap of fine glittering powder, lustrous bright silver dust catching the light. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 398,
+    "key": "mine:lead_slug",
+    "file": "mine__lead_slug.png",
+    "rarity": "Uncommon",
+    "rim": "emerald-green",
+    "rimHex": "#2ECC71",
+    "prompt": "Game item icon: a single small heavy rounded slug of dull blue-grey lead metal, slightly flattened. Style: bold cartoon game icon, thick emerald-green rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 399,
+    "key": "mine:quartz_shard",
+    "file": "mine__quartz_shard.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single clear pointed six-sided quartz crystal shard, pale icy white with a cloudy base. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 400,
+    "key": "mine:gold_nugget",
+    "file": "mine__gold_nugget.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single lumpy rounded raw gold nugget, bright warm yellow gold with pitted bumps. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 401,
+    "key": "mine:raw_sapphire",
+    "file": "mine__raw_sapphire.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single rough uncut gemstone with jagged natural facets, deep rich blue sapphire. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 402,
+    "key": "mine:amethyst_chip",
+    "file": "mine__amethyst_chip.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single small chipped wedge of purple amethyst crystal with a few tiny pointed crystal tips. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 403,
+    "key": "mine:topaz_shard",
+    "file": "mine__topaz_shard.png",
+    "rarity": "Rare",
+    "rim": "sapphire-blue",
+    "rimHex": "#3498DB",
+    "prompt": "Game item icon: a single long pointed shard of warm amber-orange topaz with clean straight facets. Style: bold cartoon game icon, thick sapphire-blue rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 404,
+    "key": "mine:raw_emerald",
+    "file": "mine__raw_emerald.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single rough uncut gemstone with jagged natural facets, deep forest-green emerald. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 405,
+    "key": "mine:raw_ruby",
+    "file": "mine__raw_ruby.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single rough uncut gemstone with jagged natural facets, blazing ember-red ruby with a faint inner glow. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 406,
+    "key": "mine:obsidian_chip",
+    "file": "mine__obsidian_chip.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single razor-sharp chip of glossy black volcanic obsidian glass with curved conchoidal fracture ridges. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 407,
+    "key": "mine:platinum_dust",
+    "file": "mine__platinum_dust.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a small conical heap of fine glittering powder, pale white-silver platinum dust with a cool dull gleam. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 408,
+    "key": "mine:raw_diamond",
+    "file": "mine__raw_diamond.png",
+    "rarity": "Epic",
+    "rim": "amethyst-purple",
+    "rimHex": "#9B59B6",
+    "prompt": "Game item icon: a single rough uncut gemstone with jagged natural facets, icy clear-white diamond scattering tiny sparkles. Style: bold cartoon game icon, thick amethyst-purple rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 409,
+    "key": "mine:crystal_sliver",
+    "file": "mine__crystal_sliver.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a single thin jagged sliver of near-black dark crystal with a deep violet edge glow, seeming to swallow the light around it. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 410,
+    "key": "mine:mythril_dust",
+    "file": "mine__mythril_dust.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a small conical heap of fine glittering powder, shimmering pale mint-silver mythril dust with a soft magical glow. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 411,
+    "key": "mine:zenith_essence",
+    "file": "mine__zenith_essence.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a small corked glass vial of glowing liquid starlight, pale gold and white, with a tiny star sparkle inside. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 412,
+    "key": "mine:primordial_ash",
+    "file": "mine__primordial_ash.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a small smouldering heap of dark grey volcanic ash with glowing molten-orange embers and a wisp of heat shimmer. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 413,
+    "key": "mine:stardust",
+    "file": "mine__stardust.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a small swirl of glittering cosmic stardust in deep blue and gold, sprinkled with tiny four-pointed stars. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
+  },
+  {
+    "index": 414,
+    "key": "mine:void_essence",
+    "file": "mine__void_essence.png",
+    "rarity": "Legendary",
+    "rim": "radiant-gold",
+    "rimHex": "#FFD700",
+    "prompt": "Game item icon: a small floating orb of swirling void energy, inky black at the core with a violet rim and tiny drifting specks. Style: bold cartoon game icon, thick radiant-gold rarity rim, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, single object centered with generous padding, no text, transparent background. Readable at small emoji size."
   }
 ]
