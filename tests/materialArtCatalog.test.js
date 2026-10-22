@@ -156,3 +156,23 @@ describe('the icon manifest covers the hunting materials (#1171)', () => {
         }
     });
 });
+
+describe('the icon manifest covers the exploration materials (#1172)', () => {
+    const exploreMaterialKeys = MATERIAL_ITEMS.explore.map(item => item.id);
+    const entries = manifest.filter(m => exploreMaterialKeys.includes(m.key));
+
+    test('exactly one entry per exploration material', () => {
+        expect(exploreMaterialKeys).toHaveLength(11);
+        expect(entries.map(m => m.key).sort()).toEqual([...exploreMaterialKeys].sort());
+    });
+
+    test('each takes its rim from the material\'s tier', () => {
+        for (const m of entries) {
+            const id = m.key.slice('explore:'.length);
+            expect([m.key, m.rarity]).toEqual([m.key, TIER_RARITY[MATERIAL_RARITY[id].tier - 1]]);
+            expect(m.prompt).toMatch(/^Game item icon: /);
+            expect(m.prompt).toContain('rarity rim,');
+            expect(m.file).toBe(`${m.key.replace(/:/g, '__')}.png`);
+        }
+    });
+});

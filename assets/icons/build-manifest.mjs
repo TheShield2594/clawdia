@@ -545,7 +545,7 @@ Object.entries(ACHIEVEMENT_SUBJECT).forEach(([id, subject]) => {
 // way the inventory cards ask for them (src/data/activityItems.js). Single
 // objects like the gear and relic icons, rarity from the material's own tier in
 // src/data/materialRarity.js. Filled in one game at a time; fishing first
-// (#1169), then mining (#1170), then hunting (#1171).
+// (#1169), then mining (#1170), hunting (#1171) and exploration (#1172).
 const { MATERIAL_RARITY } = require('../../src/data/materialRarity.js');
 const MATERIAL_TIER_RARITY = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
 
@@ -689,6 +689,29 @@ Object.entries(HUNT_MATERIAL_SUBJECT).forEach(([id, subject]) => {
     const def = MATERIAL_RARITY[id];
     if (!def || def.source !== 'hunt') throw new Error(`no hunting material ${id}`);
     add(`hunt:${id}`, MATERIAL_TIER_RARITY[def.tier - 1], subject);
+});
+
+// Exploration (#1172). Fieldcraft kept from the trail: a surveyor's kit, in the
+// parchment, brass and ink of the region and relic art. Each is a single
+// object; the seal has no ribbon and the ink no cork so neither reads as the
+// final_decree relic or a fishing/mining vial.
+const EXPLORE_MATERIAL_SUBJECT = {
+    survey_chalk:      'a single short squared stick of white surveyor\'s chalk, worn down at one end, with a small dusting of chalk powder.',
+    pressed_fern:      'a single flat pressed fern frond, dried soft sage green with a slightly faded tip, its leaflets laid out neatly.',
+    frayed_map_corner: 'a single torn triangular corner of an old tan parchment map with frayed edges, a dotted red trail line and a tiny compass mark.',
+    waypoint_flint:    'a single knapped dark grey flint stone with a pale arrow chipped into its face, pointing the way.',
+    compass_shard:     'a single broken wedge-shaped shard of a brass compass face showing part of the dial markings and a red needle tip.',
+    charted_vellum:    'a single sheet of cream vellum half unrolled, a neatly inked coastline map in blue and brown across it.',
+    surveyors_lens:    'a single round brass-rimmed magnifying lens with a short wooden handle, the glass pale blue with a faint glint.',
+    lantern_glass:     'a single curved pane of amber lantern glass framed in thin brass, a warm candle glow trapped inside it.',
+    trailwardens_knot: 'a single intricate looping trail knot of braided green and brown rope, its ends bound with gold thread.',
+    wayfarers_seal:    'a single round deep-crimson wax seal pressed with a gold compass-rose crest, glowing gold around its edge, its scalloped wax edge kept well inside the rim.',
+    cartographers_ink: 'a small squat glass inkwell of deep blue-black ink swirling with tiny stars, a golden quill pen dipped in it.',
+};
+Object.entries(EXPLORE_MATERIAL_SUBJECT).forEach(([id, subject]) => {
+    const def = MATERIAL_RARITY[id];
+    if (!def || def.source !== 'explore') throw new Error(`no exploration material ${id}`);
+    add(`explore:${id}`, MATERIAL_TIER_RARITY[def.tier - 1], subject);
 });
 
 // --- validate against the game registries -----------------------------------
