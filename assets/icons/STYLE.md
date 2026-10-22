@@ -7,11 +7,11 @@ This file and its scripts (`build-manifest.mjs`, `rename-icons.mjs`,
 `cutout.mjs`, `prep-icons.mjs`, `manifest.json`, `icons.map.json`) live in
 `assets/icons/`.
 
-**The catalogue is 393 icons on `gpt_image_2_5`**, look **B3** (see §0),
+**The catalogue is 415 icons on `gpt_image_2_5`**, look **B3** (see §0),
 anchored to `hunt:steel_rifle`: the original 118 shop-browse gear/guild icons,
 the 144 catch/kill/mine results (issue #1081), the 14 pet portraits (issue
-#1082), 10 explore regions + 25 explore relics, 72 achievement badges, and the
-10 fishing materials (issue #1169). Every job id is in
+#1082), 10 explore regions + 25 explore relics, 72 achievement badges, the 10 fishing
+materials (issue #1169) and the 22 mining materials (issue #1170). Every job id is in
 `icons.map.json`; every prompt is in `manifest.json`, built by
 `build-manifest.mjs` from the game data. To reproduce or extend the set, that
 is the source of truth — start there, not from memory.
@@ -345,6 +345,15 @@ Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
 
+- **2026-10-21** — **Mining materials: 22 of 22** (issue #1170). Keyed
+  `mine:<id>` through the shared `MATERIAL_ITEMS` registry; rarity is the
+  material's `tier`. Each one is drawn as a piece of the ore it drops from, in
+  that ore icon's colours; the four dusts share one heap silhouette and the four
+  raw gems one rough-stone silhouette (§4). Same settings as the rest. 2 of 22
+  submissions came back 429 and were resubmitted; `crystal_sliver` came back
+  with an opaque grey square behind it and was regenerated. Job ids + urls in
+  `icons.map.json` (now 415 items), and the PNGs are baked into
+  `src/assets/item-icons/`.
 - **2026-10-06** — **Fishing materials: 10 of 10** (issue #1169, first of the
   material batches in #1168). Materials are keyed `<activity>:<id>` — the key the
   inventory cards already ask for — and registered bundle-only in

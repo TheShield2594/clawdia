@@ -87,3 +87,32 @@ describe('the icon manifest covers the fishing materials (#1169)', () => {
         for (const prompt of scales) expect(prompt).toContain(base);
     });
 });
+
+describe('the icon manifest covers the mining materials (#1170)', () => {
+    const mineMaterialKeys = MATERIAL_ITEMS.mine.map(item => item.id);
+    const entries = manifest.filter(m => mineMaterialKeys.includes(m.key));
+
+    test('exactly one entry per mining material', () => {
+        expect(entries.map(m => m.key).sort()).toEqual([...mineMaterialKeys].sort());
+    });
+
+    test('each takes its rim from the material\'s tier', () => {
+        for (const m of entries) {
+            const id = m.key.slice('mine:'.length);
+            expect([m.key, m.rarity]).toEqual([m.key, TIER_RARITY[MATERIAL_RARITY[id].tier - 1]]);
+            expect(m.prompt).toMatch(/^Game item icon: /);
+            expect(m.prompt).toContain('rarity rim,');
+            expect(m.file).toBe(`${m.key.replace(/:/g, '__')}.png`);
+        }
+    });
+
+    test('the dusts and the raw gems each share one silhouette (STYLE.md §4)', () => {
+        const prompt = key => entries.find(m => m.key === key).prompt;
+        for (const id of ['coal_dust', 'silver_dust', 'platinum_dust', 'mythril_dust']) {
+            expect(prompt(`mine:${id}`)).toContain('a small conical heap of fine glittering powder');
+        }
+        for (const id of ['raw_sapphire', 'raw_emerald', 'raw_ruby', 'raw_diamond']) {
+            expect(prompt(`mine:${id}`)).toContain('a single rough uncut gemstone with jagged natural facets');
+        }
+    });
+});
