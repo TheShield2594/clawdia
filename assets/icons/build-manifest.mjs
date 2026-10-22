@@ -545,7 +545,7 @@ Object.entries(ACHIEVEMENT_SUBJECT).forEach(([id, subject]) => {
 // way the inventory cards ask for them (src/data/activityItems.js). Single
 // objects like the gear and relic icons, rarity from the material's own tier in
 // src/data/materialRarity.js. Filled in one game at a time; fishing first
-// (#1169), then mining (#1170).
+// (#1169), then mining (#1170), then hunting (#1171).
 const { MATERIAL_RARITY } = require('../../src/data/materialRarity.js');
 const MATERIAL_TIER_RARITY = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary'];
 
@@ -603,6 +603,92 @@ Object.entries(MINE_MATERIAL_SUBJECT).forEach(([id, subject]) => {
     const def = MATERIAL_RARITY[id];
     if (!def || def.source !== 'mine') throw new Error(`no mining material ${id}`);
     add(`mine:${id}`, MATERIAL_TIER_RARITY[def.tier - 1], subject);
+});
+
+// Hunting (#1171). Each material is a part of the animal that drops it
+// (`animal:<id>` above), in that animal's colours. Like kinds share a shape:
+// every pelt is the same stretched hide, every feather the same quill, and so
+// on for fangs, claws, antlers, horns, tusks, feet and venom vials.
+const PELT = (detail) => `a single soft animal pelt laid out flat and stretched into a rounded hide shape with four short leg flaps, ${detail}`;
+const FEATHER = (detail) => `a single long feather angled diagonally with a curved quill at the base, ${detail}`;
+const FANG = (detail) => `a single long curved pointed fang standing upright with a thick root, ${detail}`;
+const CLAW = (detail) => `a single large hooked claw curving to a sharp point, ${detail}`;
+const ANTLER = (detail) => `a single branching antler with several pointed tines, ${detail}`;
+const HORN = (detail) => `a single thick ridged horn sweeping back into a curl, ${detail}`;
+const TUSK = (detail) => `a single smooth curved tusk arcing upward to a blunt point, ${detail}`;
+const FOOT = (detail) => `a single furry lucky animal foot charm hanging from a small gold ring, ${detail}`;
+const VENOM = (detail) => `a small corked glass vial of glowing liquid, ${detail}`;
+const HUNT_MATERIAL_SUBJECT = {
+    // Pelts, hides and fur.
+    badger_pelt:       PELT('coarse grey fur with a bold black-and-white striped head flap.'),
+    beaver_pelt:       PELT('glossy dense chestnut-brown fur.'),
+    wolf_pelt:         PELT('thick shaggy grey wolf fur with a paler cream belly.'),
+    spirit_pelt:       PELT('ghostly pale blue-white snow leopard fur with dark rosette spots, a faint spectral glow and wisps of frost drifting off it.'),
+    striped_pelt:      PELT('tiny tawny-orange chipmunk fur with dark and cream stripes down its length.'),
+    opossum_pelt:      PELT('scruffy pale grey-white opossum fur with a bare pink tail flap.'),
+    sand_pelt:         PELT('soft sandy-cream fennec fox fur with a white belly.'),
+    arctic_fox_pelt:   PELT('pristine fluffy snow-white arctic fox fur.'),
+    shadow_pelt:       PELT('sleek jet-black panther fur with a faint purple sheen.'),
+    thick_hide:        'a single heavy folded slab of thick shaggy dark-brown musk ox hide with long coarse fur hanging from its edge.',
+    gator_hide:        'a single folded slab of tough olive-green alligator hide covered in raised bumpy armored scutes.',
+    slick_skin:        'a single small glossy limp strip of bright green frog skin with darker spots and a wet shine.',
+    wolverine_fur:     'a single thick tuft of dark brown wolverine fur with a tan stripe, tied at the base with a twist of cord.',
+    golden_fur:        'a single thick tuft of shimmering golden fox fur tied at the base with a twist of cord, glowing softly with tiny sparkles.',
+    swamp_scale:       'a single large rounded scale, dark murky green with olive spots and a wet gleam.',
+    // Feathers.
+    feather:           FEATHER('plain clean white dove feather.'),
+    down_feather:      'a single small fluffy soft down feather, pale grey-brown and wispy.',
+    crow_feather:      FEATHER('glossy jet-black crow feather with a blue-purple sheen.'),
+    scavenger_feather: FEATHER('dusty dark brown vulture feather with a ragged tip.'),
+    snowy_feather:     FEATHER('soft white snowy owl feather with small black flecks.'),
+    marsh_feather:     FEATHER('pale blue-grey crane feather with a darker grey tip.'),
+    storm_feather:     FEATHER('slate-grey storm hawk feather crackling with small blue lightning sparks along its edge.'),
+    thunderfeather:    FEATHER('huge golden thunderbird feather with electric blue edges and a bolt of lightning running down its spine, glowing brightly.'),
+    // Fangs, teeth and claws.
+    coyote_fang:       FANG('plain ivory white.'),
+    lynx_fang:         FANG('slender and sharp, cream white.'),
+    hyena_fang:        FANG('thick and chipped, yellowed bone colour.'),
+    saber_fang:        FANG('huge and saber-long, ancient ivory with frost crusted at the root.'),
+    dire_wolf_fang:    FANG('large and jagged, bone white with a faint red glow at the root.'),
+    ember_fang:        FANG('ashen grey with glowing molten-orange cracks and a small flame flickering at the tip.'),
+    lion_tooth:        'a single large pointed lion canine tooth, warm ivory with a tawny root wrapped in a band of brown leather.',
+    bear_claw:         CLAW('dark charcoal-grey black bear claw with a lighter slate-grey edge.'),
+    ancient_claw:      CLAW('enormous fossilised prehistoric claw in dark brown stone, cracked and glowing with faint violet runes.'),
+    polar_claw:        CLAW('creamy white polar bear claw tipped with frost.'),
+    primal_claw:       CLAW('battle-scarred dark grey claw with deep notches and a blood-red tip.'),
+    scorpion_claw:     'a single large scorpion pincer claw, glossy amber-orange armored shell with a dark tip.',
+    eagle_talon:       'a single curved golden-yellow eagle foot talon gripping inward, with sharp black claw tips.',
+    spectral_bone:     'a single translucent glowing pale-blue ghostly bone with silver moonlight wisps drifting off it.',
+    // Antlers, horns and tusks.
+    antler_fragment:   'a single short broken piece of tan deer antler with one pointed tine and a jagged snapped end.',
+    elk_antler:        ANTLER('large tan-brown elk antler.'),
+    caribou_antler:    ANTLER('pale tan caribou antler caked in white frost.'),
+    obsidian_antler:   ANTLER('jet-black volcanic obsidian glass antler with sharp glossy facets and a faint molten-red glow in the cracks.'),
+    moose_rack:        'a single wide flat palmate moose antler with a broad paddle and pointed tines along its edge, warm tan-brown.',
+    megaloceros_crown: 'a huge sweeping pair of giant elk antlers forming a crown, ancient bone-white with gold tips and crackling lightning glow.',
+    mountain_horn:     HORN('pale cream-grey mountain goat horn.'),
+    ram_horn:          HORN('massive battle-scarred dark brown ram horn with deep chips.'),
+    tusk_shard:        'a single small broken shard of ivory boar tusk with a jagged snapped end.',
+    hog_tusk:          TUSK('short mud-stained yellowed hog tusk.'),
+    mammoth_tusk:      TUSK('huge long ivory mammoth tusk with a crust of blue ice along its curve.'),
+    // Feet.
+    rabbits_foot:      FOOT('soft white cottontail rabbit fur.'),
+    jackrabbit_foot:   FOOT('long sandy-brown jackrabbit fur.'),
+    // Glands and venom.
+    venom_sac:         'a single small plump translucent sac of glowing yellow-green venom with a fang-shaped tip.',
+    swamp_gland:       'a single small slimy bulbous gland, murky green and toxic purple, oozing a few bubbles.',
+    cottonmouth_venom: VENOM('milky white venom with a dark olive snake coiled around it.'),
+    // Other.
+    acorn_cache:       'a small pile of plump brown acorns with their little caps, a few loose leaves tucked in.',
+    hardwood_chip:     'a single chunky splintered chip of dark oak hardwood with visible grain and a small peck hole.',
+    bandit_mask:       'a small black raccoon bandit eye mask made of grey-and-black striped fur.',
+    spirit_essence:    'a small floating orb of glowing spectral wolf spirit energy, pale white-blue with aurora-green swirls.',
+    ancient_relic:     'a small weathered stone idol carved with worn glowing rune marks, mossy grey stone.',
+};
+Object.entries(HUNT_MATERIAL_SUBJECT).forEach(([id, subject]) => {
+    const def = MATERIAL_RARITY[id];
+    if (!def || def.source !== 'hunt') throw new Error(`no hunting material ${id}`);
+    add(`hunt:${id}`, MATERIAL_TIER_RARITY[def.tier - 1], subject);
 });
 
 // --- validate against the game registries -----------------------------------

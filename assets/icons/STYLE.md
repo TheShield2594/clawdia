@@ -7,11 +7,12 @@ This file and its scripts (`build-manifest.mjs`, `rename-icons.mjs`,
 `cutout.mjs`, `prep-icons.mjs`, `manifest.json`, `icons.map.json`) live in
 `assets/icons/`.
 
-**The catalogue is 415 icons on `gpt_image_2_5`**, look **B3** (see §0),
+**The catalogue is 473 icons on `gpt_image_2_5`**, look **B3** (see §0),
 anchored to `hunt:steel_rifle`: the original 118 shop-browse gear/guild icons,
 the 144 catch/kill/mine results (issue #1081), the 14 pet portraits (issue
 #1082), 10 explore regions + 25 explore relics, 72 achievement badges, the 10 fishing
-materials (issue #1169) and the 22 mining materials (issue #1170). Every job id is in
+materials (issue #1169), the 22 mining materials (issue #1170) and the 58 hunting
+materials (issue #1171). Every job id is in
 `icons.map.json`; every prompt is in `manifest.json`, built by
 `build-manifest.mjs` from the game data. To reproduce or extend the set, that
 is the source of truth — start there, not from memory.
@@ -345,6 +346,19 @@ Price text across every banner is gold `#f1c40f`.
 
 ## Changelog
 
+- **2026-10-22** — **Hunting materials: 58 of 58** (issue #1171). Keyed
+  `hunt:<id>` through the shared `MATERIAL_ITEMS` registry; rarity is the
+  material's `tier`, which for the 32 zone materials is the tier of the animal
+  that drops them. Each one is a part of that animal, in its colours. Like kinds
+  share one silhouette (§4): the nine flat pelts, seven of the feathers, the six
+  fangs, four claws, three antlers, two horns, two tusks and the two lucky feet.
+  Same settings as the rest. The first two batches of 6 had 4 submissions come
+  back 429, which were resubmitted; batches of 4 or fewer went through clean. Three were regenerated
+  after review: `bear_claw` (black on black, lost on the dark tile, now
+  charcoal with a slate edge), `lion_tooth` (its cord ran past the rim over a
+  grey haze, now a leather-wrapped root) and `tusk_shard` (a soft halo outside
+  the rim). Job ids + urls in `icons.map.json` (now 473 items), and the PNGs
+  are baked into `src/assets/item-icons/`.
 - **2026-10-21** — **Mining materials: 22 of 22** (issue #1170). Keyed
   `mine:<id>` through the shared `MATERIAL_ITEMS` registry; rarity is the
   material's `tier`. Each one is drawn as a piece of the ore it drops from, in
