@@ -16,14 +16,7 @@
  */
 
 const fs = require('fs');
-const path = require('path');
 const { registerFont } = require('canvas');
-
-// Faces the repo ships itself (SIL OFL, licences beside them), for the cards
-// that want a look the system fonts cannot give — the Explorer's Map.
-// They live under src/ because the Docker build context ships src/ and drops
-// assets/ (see .dockerignore).
-const BUNDLED = path.join(__dirname, '..', 'fonts');
 
 // Ordered most-likely-first per family, which for this repo means Alpine's
 // layout early: the Dockerfile builds on Alpine and installs `ttf-dejavu`,
@@ -54,22 +47,6 @@ const FONTS = [
         ],
     },
     {
-        family: 'IM Fell English',
-        weight: 'normal',
-        candidates: [path.join(BUNDLED, 'IMFeENrm28P.ttf')],
-    },
-    {
-        family: 'IM Fell English',
-        weight: 'normal',
-        style: 'italic',
-        candidates: [path.join(BUNDLED, 'IMFeENit28P.ttf')],
-    },
-    {
-        family: 'Cinzel',
-        weight: 'normal',
-        candidates: [path.join(BUNDLED, 'Cinzel.ttf')],
-    },
-    {
         family: 'Noto Color Emoji',
         weight: 'normal',
         optional: true,
@@ -97,13 +74,12 @@ let registrationReport = null;
  * the Alpine paths, which is how it came to fail a perfectly good image over a
  * path the bot never needed.
  *
- * @returns {{ family: string, weight: string, style: string, optional: boolean, path: ?string }[]}
+ * @returns {{ family: string, weight: string, optional: boolean, path: ?string }[]}
  */
 function resolveFonts() {
     return FONTS.map(font => ({
         family: font.family,
         weight: font.weight,
-        style: font.style ?? 'normal',
         optional: Boolean(font.optional),
         path: font.candidates.find(p => {
             try { return fs.existsSync(p); } catch { return false; }
@@ -130,7 +106,7 @@ function ensureFontsRegistered() {
     registered = true;
 
     registrationReport = resolveFonts().map(font => {
-        const label = `${font.family}${font.weight === 'bold' ? ' (bold)' : ''}${font.style === 'italic' ? ' (italic)' : ''}`;
+        const label = `${font.family}${font.weight === 'bold' ? ' (bold)' : ''}`;
         const found = font.path;
 
         if (!found) {
@@ -143,7 +119,7 @@ function ensureFontsRegistered() {
         }
 
         try {
-            registerFont(found, { family: font.family, weight: font.weight, style: font.style });
+            registerFont(found, { family: font.family, weight: font.weight });
             return { ...font, registered: true, error: null };
         } catch (err) {
             console.warn(`[FONTS] Failed to register ${font.family} from ${found}: ${err.message}`);

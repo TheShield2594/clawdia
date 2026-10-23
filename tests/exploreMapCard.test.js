@@ -1,12 +1,14 @@
 'use strict';
 
-// The Explorer's Map, drawn (utils/exploreMapCard.js): that it produces a PNG
+// The Explorer's Map, drawn (utils/exploreMapCard.js): that it produces a JPEG
 // of the right size for a fresh explorer, a veteran and the awkward edges, that
-// every region in the data has a place on the map, and that it draws from the
-// same visibility rules as the text map (exploreService.mapRegionStates).
+// the painted world ships where the Docker image will carry it, that every
+// region in the data has a place on the map, and that it draws from the same
+// visibility rules as the text map (exploreService.mapRegionStates).
 
 const { loadImage } = require('canvas');
-const { createExploreMapCard, mapAltText, buildWorld, isWorldReady, CARD_W, CARD_H, LAYOUT, __test__: { plain, placeRegions } } = require('../src/utils/exploreMapCard');
+const fs = require('fs');
+const { createExploreMapCard, mapAltText, buildWorld, CARD_W, CARD_H, LAYOUT, WORLD_ART, __test__: { plain, placeRegions } } = require('../src/utils/exploreMapCard');
 const { mapRegionStates, renderMap } = require('../src/services/exploreService');
 const { REGION_LIST } = require('../src/data/exploreData');
 
@@ -62,23 +64,17 @@ describe('mapRegionStates', () => {
     });
 });
 
-describe('the bundled map lettering', () => {
-    test('ships in src/ (the Docker context drops assets/) and resolves on any host', () => {
-        const { resolveFonts } = require('../src/utils/registerFonts');
-        const bundled = resolveFonts().filter(f => ['IM Fell English', 'Cinzel'].includes(f.family));
-        expect(bundled).toHaveLength(3);
-        for (const font of bundled) {
-            expect([font.family, font.style, font.path]).toEqual([font.family, font.style, expect.stringContaining(`${require('path').sep}src${require('path').sep}fonts${require('path').sep}`)]);
-        }
+describe('the painted world', () => {
+    test('ships under src/ (the Docker context drops assets/) at the card\'s 3:2 shape', async () => {
+        expect(WORLD_ART.split(require('path').sep)).toContain('src');
+        expect(fs.existsSync(WORLD_ART)).toBe(true);
+        const img = await loadImage(WORLD_ART);
+        expect(img.width / img.height).toBeCloseTo(CARD_W / CARD_H, 2);
     });
 });
 
 describe('createExploreMapCard', () => {
-    // The world is generated once per process; every case below shares it.
-    beforeAll(() => buildWorld(), 60000);
-
-    test('the world builds once and is then ready', async () => {
-        expect(isWorldReady()).toBe(true);
+    test('the world is decoded once and shared', async () => {
         expect(await buildWorld()).toBe(await buildWorld());
     });
 
@@ -109,7 +105,7 @@ describe('createExploreMapCard', () => {
         }));
     });
 
-    test('draws identically twice — the wobble is seeded, not random', async () => {
+    test('draws identically twice — the clouds and markers are seeded, not random', async () => {
         const user = explorer([progress('whispering_forest', 0.6)], ['whispering_forest', 'crumbling_ruins']);
         const states = mapRegionStates(user, {});
         const a = await createExploreMapCard({ states, username: 'munge', level: 4 });

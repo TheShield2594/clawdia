@@ -1,0 +1,19 @@
+{
+  "_comment": "The painted world under /explore map (assets/explore-map/STYLE.md). The job id, CDN url and prompt that produced it, and the references it was generated against. src/assets/explore-map/world.jpg is this image downscaled to 1200x800 (JPEG, quality 0.92).",
+  "items": {
+    "world": {
+      "jobId": "6986ef5f-26f4-4873-a834-83e9bd7d0eb8",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3JcSD6XfivEbTOJlf0hQBGONBjd/hf_20261023_193625_6986ef5f-26f4-4873-a834-83e9bd7d0eb8.png",
+      "file": "world.jpg",
+      "width": 1200,
+      "height": 800,
+      "model": "gpt_image_2_5",
+      "settings": { "quality": "high", "resolution": "2k", "aspect_ratio": "3:2", "background": "opaque" },
+      "references": {
+        "layout": "43e9fa80-76a1-4939-b243-184ae7c06f14 (flat layout guide: region ovals at the LAYOUT positions)",
+        "style": "2318f32b-ea5f-4d89-b034-2c0baf082a35 (the birthday banner, the house style's wide scene)"
+      },
+      "prompt": "Game world map: a top-down view of a fantasy continent in a blue sea, laid out exactly like the first reference image, each coloured shape becoming the region described here. Take only the art style from the second reference image, not its subject.\n\nOn the continent (a meadow-green land with a thick ink coastline):\n- West (dark green oval): a moody old-growth pine forest in green half-light, gnarled trunks and drifting mist, with a small round lake inside it.\n- North-center (cream oval): toppled marble ruins, broken columns and a headless statue.\n- Northeast (violet oval): a mountain range of glittering violet crystals, faceted peaks glowing from within.\n- Center (blue circle): a round lake, fed by a river from the crystal mountains and draining by a river to the southeast coast; a second river runs from the ruins to the forest lake and on to the west coast.\n- East (light-blue oval): a half-sunken harbor town, barnacled docks and rooftops rising from calm blue water.\n- South-center (near-black oval): a black-glass desert with meteor craters and small glowing fallen stars.\n\nFive islands in the sea:\n- Upper left (white): a snowbound mountain pass strung with glowing lanterns.\n- Upper right (pale blue): a flat frozen tundra of ice and distant white peaks under a green aurora.\n- Right (pink): a gaslit covered arcade of little shopfronts in warm rose light.\n- Lower right (sand): a sunlit beach of shimmering glass sand with turquoise waves.\n- Lower left (orange): a foggy crooked lane of leaning houses lit by jack-o'-lanterns.\n\nThe regions blend naturally into the surrounding land; no outlined ovals. Style: bold cartoon game art, flat hand-inked shapes with thick dark ink outlines, minimal flat shading with two tones per material, no gloss highlight, vibrant saturated colors, ink #14110d and cream #faf6ef with a warm #d97742 accent, simple flat blue sea with a few inked wave marks. Seen straight from above, no perspective. No text, no letters, no labels, no numbers, no icons, no map pins, no compass, no border, no frame, no legend. Readable when shrunk to phone size."
+    }
+  }
+}
