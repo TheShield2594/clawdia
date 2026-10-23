@@ -935,7 +935,7 @@ services:
     profiles: [browser]
     # Digest-pinned like every other third-party image (#644). The tag is the
     # @playwright/mcp release; bump both together.
-    image: mcr.microsoft.com/playwright/mcp:v0.0.82@sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734
+    image: mcr.microsoft.com/playwright/mcp:v0.0.83@sha256:690763cbb437ee7233f538a953bb5390bf03791eb5c965b471e59d17a6132fcb
     container_name: clawdia-playwright
     restart: unless-stopped
     init: true
