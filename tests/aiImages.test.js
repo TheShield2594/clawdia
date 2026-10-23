@@ -18,6 +18,7 @@ jest.mock('../src/models/KnowledgeBase', () => ({}));
 jest.mock('../src/models/ConversationLog', () => ({}));
 
 const AIUsage = require('../src/models/AIUsage');
+const { spyOnFetch } = require('./helpers/fetchSpy');
 const {
     generateImageTool,
     generateImage,
@@ -398,7 +399,7 @@ const jsonResponse = (status, body, headers = {}) => new Response(JSON.stringify
 
 describe('OpenRouter', () => {
     let fetchMock;
-    beforeEach(() => { fetchMock = jest.spyOn(global, 'fetch'); });
+    beforeEach(() => { fetchMock = spyOnFetch(); });
 
     test('posts to its image endpoint and records the cost it reports', async () => {
         fetchMock.mockResolvedValue(jsonResponse(200, {
@@ -450,7 +451,7 @@ describe('OpenRouter', () => {
 
 describe('Higgsfield', () => {
     let fetchMock;
-    beforeEach(() => { fetchMock = jest.spyOn(global, 'fetch'); });
+    beforeEach(() => { fetchMock = spyOnFetch(); });
 
     const ID = 'd7e6c0f3-6699-4f6c-bb45-2ad7fd9158ff';
     const generator = (ai = {}) => higgsfieldGenerator({ higgsfieldKey: 'kid:ksecret', ...ai }, null, { pollMs: 1 });

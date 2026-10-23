@@ -18,6 +18,7 @@ jest.mock('../src/utils/outboundGuard', () => ({
 const GUARDED_DISPATCHER = { guarded: true };
 
 const { response } = require('./helpers/fetchResponse');
+const { spyOnFetch } = require('./helpers/fetchSpy');
 
 const vision = require('../src/services/ai/vision');
 const { collectImages, loadImages, visionNotice, MAX_IMAGES, MAX_IMAGE_BYTES } = vision;
@@ -48,7 +49,7 @@ function messageWith(...attachments) {
 let mockFetch;
 beforeEach(() => {
     jest.clearAllMocks();
-    mockFetch = jest.spyOn(globalThis, 'fetch');
+    mockFetch = spyOnFetch();
     mockFetch.mockImplementation(async () => response(Buffer.from('PNGBYTES')));
 });
 afterEach(() => mockFetch.mockRestore());
