@@ -123,5 +123,8 @@ describe('mapAltText', () => {
         expect(alt).toContain('an uncharted region (Explorer Lv 5)');
         expect(alt).not.toContain('Crumbling Ruins');
         expect(plain('🐸 *hi*')).toBe('hi');
+        // Discord usernames may carry underscores; they are not formatting here.
+        expect(plain('snake_case_user')).toBe('snake_case_user');
+        expect(mapAltText([], 'snake_case_user')).toContain('snake_case_user');
     });
 });

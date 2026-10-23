@@ -85,6 +85,7 @@ const SEA_SAMPLE = { x: 600, y: 760 };
 
 // ─── Seeded randomness ───────────────────────────────────────────────────────
 
+/** A 32-bit FNV-1a hash of a string: the seed for a region's randomness. */
 function hashSeed(str) {
     let h = 2166136261;
     for (const ch of String(str)) {
@@ -94,6 +95,7 @@ function hashSeed(str) {
     return h >>> 0;
 }
 
+/** A seeded PRNG (mulberry32), so every wobble draws the same way twice. */
 function rng(seed) {
     let a = typeof seed === 'number' ? seed : hashSeed(seed);
     return () => {
@@ -106,15 +108,20 @@ function rng(seed) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Strips emoji, the joiners around them and Discord formatting, which a canvas cannot draw. */
+/**
+ * Strips emoji and the joiners around them, which a canvas draws as boxes,
+ * and Markdown emphasis marks. Underscores stay: Discord usernames may
+ * contain them, and a canvas never renders Markdown anyway.
+ */
 function plain(str) {
     return String(str ?? '')
         .replace(/\p{Extended_Pictographic}|\u{FE0F}|\u{200D}|\u{20E3}/gu, '')
-        .replace(/[*_~`|]/g, '')
+        .replace(/[*~`|]/g, '')
         .replace(/\s{2,}/g, ' ')
         .trim();
 }
 
+/** Traces a rounded rectangle as the current path. */
 function roundRect(ctx, x, y, w, h, r) {
     r = Math.min(r, h / 2, w / 2);
     ctx.beginPath();
@@ -133,6 +140,7 @@ function fitText(ctx, str, max) {
     return `${str.trimEnd()}…`;
 }
 
+/** A place's vertical radius: its radius flattened by its squash. */
 const ry = place => place.r * (place.squash ?? 0.82);
 
 /**
@@ -172,6 +180,7 @@ function buildWorld() {
     return worldPromise;
 }
 
+/** Decodes the painting and builds its sepia twin and sea colour; buildWorld's one call. */
 async function loadWorld() {
     const img = await loadImage(WORLD_ART);
     const art = createCanvas(CARD_W, CARD_H);
@@ -281,6 +290,7 @@ function cloudBank(ctx, place, seed) {
 
 // ─── Markers ─────────────────────────────────────────────────────────────────
 
+/** A marker's base: a filled disc with an ink outline and a hard offset shadow. */
 function disc(ctx, x, y, r, fill) {
     ctx.beginPath();
     ctx.arc(x + 2, y + 3, r, 0, Math.PI * 2);
@@ -325,6 +335,7 @@ function unknownMarker(ctx, x, y) {
     ctx.restore();
 }
 
+/** Traces a star (or, with many points and a fat inner radius, a rosette) as the current path. */
 function starPath(ctx, x, y, r, points = 5, inner = 0.45) {
     ctx.beginPath();
     for (let i = 0; i < points * 2; i++) {
@@ -422,6 +433,7 @@ function markerSpots(place, count, seed, from = 0.45, to = 0.8) {
     return spots;
 }
 
+/** A charted region's markers: every landmark, found or still to find, and each secret found. */
 function drawMarkers(ctx, state, place) {
     const [found, total] = state.landmarks;
     const [secrets] = state.secrets;
@@ -505,6 +517,7 @@ function drawLabel(ctx, state, place) {
     if (state.surveyed) surveySeal(ctx, x + w - 4, y + 4, compact ? 13 : 16);
 }
 
+/** The road between core regions: a dashed track where walked, a dotted line where not. */
 function drawRoads(ctx, legs) {
     for (const { from, to, walked } of legs) {
         const rand = rng(`${from.x},${from.y}:${to.x},${to.y}`);
@@ -533,6 +546,7 @@ function drawRoads(ctx, legs) {
     }
 }
 
+/** The title sticker: the map's name, and whose it is. */
 function drawTitle(ctx, username, level) {
     const title = "THE EXPLORER'S MAP";
     const who = username || 'an explorer';
@@ -561,6 +575,7 @@ function drawTitle(ctx, username, level) {
     ctx.restore();
 }
 
+/** The legend sticker along the bottom: one sample of each marker. */
 function drawLegend(ctx) {
     const items = [
         [landmarkMarker, 'landmark'],
