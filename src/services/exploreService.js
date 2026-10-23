@@ -1060,56 +1060,95 @@ function chartBar(pct, width = 10) {
 }
 
 /**
- * Render the Explorer's Map as embed-ready text sections.
- * Undiscovered regions appear as redacted entries; seasonal regions only
- * appear if visited at least once or currently in season.
+ * What the Explorer's Map shows for each region, in map order.
+ *
+ * The one place the map's visibility rules live, so the text map (renderMap)
+ * and the drawn one (utils/exploreMapCard.js) cannot disagree about what a
+ * player is allowed to see. Regions an admin switched off are left out, and so
+ * is a seasonal region the player has never set foot in while it is out of
+ * season.
+ *
+ * Each entry's `status` is one of:
+ *   - 'charted'  — entered at least once; the counts are real
+ *   - 'known'    — route open (or in season) but never entered; name shown
+ *   - 'locked'   — not yet reachable; name withheld
+ *
+ * @returns {Array<{ region: object, status: 'charted'|'known'|'locked', pct: number,
+ *   landmarks: [number, number], lore: [number, number], secrets: [number, number],
+ *   foundLandmarkIds: string[], surveyed: boolean, seasonal: boolean, inSeason: boolean,
+ *   active: boolean }>}
  */
-function renderMap(user, guildSettings) {
+function mapRegionStates(user, guildSettings) {
     const e = user.exploration;
-    const lines = [];
+    const states = [];
 
     for (const region of REGION_LIST) {
         if (!isRegionEnabled(region, guildSettings)) continue;
         const progress = e.regions.find(r => r.regionId === region.id) ?? null;
         const inSeason = isRegionInSeason(region, guildSettings);
+        const seasonal = Boolean(region.seasonalEventId);
 
         // Seasonal regions the player has never seen and that aren't running: hidden entirely
-        if (region.seasonalEventId && !progress && !inSeason) continue;
+        if (seasonal && !progress && !inSeason) continue;
 
-        if (!progress) {
-            // A region whose route you have already paid to open is not a
-            // mystery — you know its name, you just haven't walked it. Redacting
-            // it turned every unentered region into the same anonymous "???" row.
-            const known = region.seasonalEventId ? inSeason : e.unlockedRegions.includes(region.id);
-            const gate = region.seasonalEventId
-                ? 'in season now — go look'
-                : known
-                    ? 'route open — never entered'
-                    : `locked · Explorer Lv ${region.unlockLevel}`;
-            const head = known
-                ? `${region.emoji} **${region.name}** — uncharted`
-                : '🌫️ **??? — uncharted**';
-            lines.push(`${head}\n> \`▒▒▒▒▒▒▒▒▒▒\` *${gate}*`);
-            continue;
-        }
+        // A region whose route you have already paid to open is not a mystery —
+        // you know its name, you just haven't walked it.
+        const known = seasonal ? inSeason : e.unlockedRegions.includes(region.id);
+        const status = progress ? 'charted' : known ? 'known' : 'locked';
 
-        const pct = regionCompletion(region, progress);
-        const seasonalTag = region.seasonalEventId
-            ? (inSeason ? ' · *in season*' : ' · *out of season*')
-            : '';
-        const surveyTag = isRegionFullyCharted(region, progress)
-            ? ` · 🏅 *fully surveyed (+${Math.round(LIMITS.SURVEY_BONUS * 100)}% haul)*`
-            : '';
-        lines.push(
-            `${region.emoji} **${region.name}** — ${pct}% charted${seasonalTag}${surveyTag}\n` +
-            `> \`${chartBar(pct)}\` ` +
-            `🗿 ${progress.landmarksFound.length}/${region.landmarks.length} · ` +
-            `📜 ${progress.loreFound.length}/${region.lore.length} · ` +
-            `✨ ${progress.secretsFound.length}/${region.secrets.length}`
-        );
+        states.push({
+            region,
+            status,
+            pct: regionCompletion(region, progress),
+            landmarks: [progress?.landmarksFound.length ?? 0, region.landmarks.length],
+            lore:      [progress?.loreFound.length ?? 0, region.lore.length],
+            secrets:   [progress?.secretsFound.length ?? 0, region.secrets.length],
+            foundLandmarkIds: progress ? [...progress.landmarksFound] : [],
+            surveyed: isRegionFullyCharted(region, progress),
+            seasonal,
+            inSeason,
+            active: e.activeRegion === region.id,
+        });
     }
 
-    return lines;
+    return states;
+}
+
+/**
+ * Render the Explorer's Map as embed-ready text sections.
+ * Undiscovered regions appear as redacted entries; seasonal regions only
+ * appear if visited at least once or currently in season.
+ */
+function renderMap(user, guildSettings) {
+    return mapRegionStates(user, guildSettings).map(s => {
+        const { region } = s;
+
+        if (s.status !== 'charted') {
+            const gate = s.seasonal
+                ? 'in season now — go look'
+                : s.status === 'known'
+                    ? 'route open — never entered'
+                    : `locked · Explorer Lv ${region.unlockLevel}`;
+            const head = s.status === 'known'
+                ? `${region.emoji} **${region.name}** — uncharted`
+                : '🌫️ **??? — uncharted**';
+            return `${head}\n> \`▒▒▒▒▒▒▒▒▒▒\` *${gate}*`;
+        }
+
+        const seasonalTag = s.seasonal
+            ? (s.inSeason ? ' · *in season*' : ' · *out of season*')
+            : '';
+        const surveyTag = s.surveyed
+            ? ` · 🏅 *fully surveyed (+${Math.round(LIMITS.SURVEY_BONUS * 100)}% haul)*`
+            : '';
+        return (
+            `${region.emoji} **${region.name}** — ${s.pct}% charted${seasonalTag}${surveyTag}\n` +
+            `> \`${chartBar(s.pct)}\` ` +
+            `🗿 ${s.landmarks[0]}/${s.landmarks[1]} · ` +
+            `📜 ${s.lore[0]}/${s.lore[1]} · ` +
+            `✨ ${s.secrets[0]}/${s.secrets[1]}`
+        );
+    });
 }
 
 // ─── MISC ────────────────────────────────────────────────────────────────────
@@ -1188,6 +1227,7 @@ module.exports = {
     EXPLORE_MATERIALS_BY_TIER,
     regionCompletion,
     renderMap,
+    mapRegionStates,
     formatMs,
     REGIONS,
 };
